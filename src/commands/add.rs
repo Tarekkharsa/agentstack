@@ -149,6 +149,31 @@ fn write_manifest(
     Ok(())
 }
 
+/// Resolve a provider id and write it into the manifest at `dir` (no dry-run).
+/// Shared by the dashboard and MCP server. Returns the added capability name.
+pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Result<String> {
+    use crate::manifest::load::MANIFEST_FILE;
+    let candidate = provider::resolve(id)
+        .with_context(|| format!("no capability '{id}' in the catalog or registry"))?;
+    let manifest_path = dir.join(MANIFEST_FILE);
+    let original = std::fs::read_to_string(&manifest_path).with_context(|| {
+        format!(
+            "no manifest at {} (run `agentstack init`)",
+            manifest_path.display()
+        )
+    })?;
+    let parsed: crate::manifest::Manifest =
+        toml::from_str(&original).context("parsing manifest")?;
+    if parsed.servers.contains_key(&candidate.name) {
+        anyhow::bail!("server '{}' already exists", candidate.name);
+    }
+    let body = serde_json::to_value(candidate.to_server())?;
+    let new_text = build_manifest_with(&original, "servers", &candidate.name, &body, profile)?;
+    std::fs::write(&manifest_path, &new_text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    Ok(candidate.name)
+}
+
 /// Build updated manifest text with `name` (a server or skill) inserted under
 /// `location`, optionally enrolled in `profile`. Shared by the CLI and the MCP
 /// server; preserves comments via the TOML merger.

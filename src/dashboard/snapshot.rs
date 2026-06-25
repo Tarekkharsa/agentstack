@@ -262,6 +262,32 @@ fn health_checks(
     out
 }
 
+/// Provider search results for the Discover pane: normalized candidates with
+/// trust signals and whether each is already in the manifest.
+pub fn search(manifest_dir: Option<&Path>, query: &str) -> Result<Value> {
+    let installed: Vec<String> = crate::commands::load(manifest_dir)
+        .ok()
+        .map(|ctx| ctx.loaded.manifest.servers.keys().cloned().collect())
+        .unwrap_or_default();
+
+    let results: Vec<Value> = crate::provider::search_all(query, 25)
+        .into_iter()
+        .map(|c| {
+            let t = c.trust();
+            json!({
+                "id": c.id,
+                "name": c.name,
+                "description": c.description,
+                "source": c.source,
+                "addId": if c.source == "catalog" { c.name.clone() } else { c.id.clone() },
+                "installed": installed.contains(&c.name),
+                "trust": { "namespaced": t.namespaced, "runsCode": t.runs_code, "needsSecret": t.needs_secret },
+            })
+        })
+        .collect();
+    Ok(json!({ "query": query, "results": results }))
+}
+
 /// Per-target rendering diffs for a scope (for the "preview before apply" flow).
 pub fn diffs(manifest_dir: Option<&Path>, scope: Scope) -> Result<Value> {
     let ctx = crate::commands::load(manifest_dir)?;

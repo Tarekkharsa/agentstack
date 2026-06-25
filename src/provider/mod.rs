@@ -40,7 +40,41 @@ pub struct Candidate {
     pub install: Install,
 }
 
+/// Source-agnostic trust signals for a candidate (PLAN §9h). Not a verdict —
+/// inputs a human (or `[policy]`) weighs before installing executable intent.
+#[derive(Debug, Clone)]
+pub struct Trust {
+    /// Reverse-DNS namespace (registry rule: owner is verified for that name).
+    pub namespaced: bool,
+    /// stdio install runs a local command (e.g. `npx`) — higher risk than a
+    /// remote HTTP endpoint.
+    pub runs_code: bool,
+    /// Requires a secret on this machine.
+    pub needs_secret: bool,
+}
+
 impl Candidate {
+    /// Compute trust signals from the candidate's id and install shape.
+    pub fn trust(&self) -> Trust {
+        let namespaced = self
+            .id
+            .split_once('/')
+            .map(|(ns, _)| ns.contains('.'))
+            .unwrap_or(false);
+        match &self.install {
+            Install::Http { secret_headers, .. } => Trust {
+                namespaced,
+                runs_code: false,
+                needs_secret: !secret_headers.is_empty(),
+            },
+            Install::Stdio { secret_env, .. } => Trust {
+                namespaced,
+                runs_code: true,
+                needs_secret: !secret_env.is_empty(),
+            },
+        }
+    }
+
     /// Build a manifest [`Server`], lifting required secrets to `${REF}`s.
     pub fn to_server(&self) -> Server {
         match &self.install {

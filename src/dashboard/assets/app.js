@@ -8,6 +8,7 @@ let OPEN_SERVER = null;
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
+  { id: "discover", label: "Discover" },
   { id: "servers", label: "Servers", count: (d) => d.servers.length },
   { id: "skills", label: "Skills", count: (d) => d.skills.length },
   { id: "instructions", label: "Instructions", count: (d) => d.instructions.length },
@@ -68,7 +69,92 @@ function show(id) {
   renderNav();
   const c = document.getElementById("content");
   c.innerHTML = "";
-  ({ overview, servers, skills, instructions, secrets, health }[id] || overview)(c);
+  ({ overview, discover, servers, skills, instructions, secrets, health }[id] || overview)(c);
+}
+
+/* ---------- discover (browse providers → add) ---------- */
+const DISCOVER = { q: "", results: null, loading: false };
+
+function doDiscoverSearch(query) {
+  DISCOVER.q = query;
+  DISCOVER.loading = true;
+  if (SECTION === "discover") show("discover");
+  return fetch(q("/api/search") + "&q=" + encodeURIComponent(query))
+    .then((r) => r.json())
+    .then((d) => {
+      DISCOVER.loading = false;
+      DISCOVER.results = d.results || [];
+      if (SECTION === "discover") show("discover");
+    })
+    .catch((e) => {
+      DISCOVER.loading = false;
+      toast("Search failed: " + e.message, false);
+    });
+}
+
+function addFrom(id) {
+  return fetch(q("/api/add_from"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  })
+    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || d.error) throw new Error(d.error || "add failed");
+      toast("Added ✓ — review secrets, then apply", true);
+      return load().then(() => doDiscoverSearch(DISCOVER.q));
+    })
+    .catch((e) => toast("Add: " + e.message, false));
+}
+
+function trustBadges(t) {
+  const out = [];
+  if (t.namespaced) out.push(badge("verified namespace", "green"));
+  if (t.runsCode) out.push(badge("runs code", "amber"));
+  if (t.needsSecret) out.push(badge("needs secret", ""));
+  return out;
+}
+
+function discover(c) {
+  c.appendChild(pageHead("Discover", "Search the catalog + official MCP Registry, then add — it renders to all your CLIs on apply."));
+
+  const input = el("input", { class: "inp", placeholder: "search capabilities…", style: "width:280px", value: DISCOVER.q });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") doDiscoverSearch(input.value.trim()); });
+  c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:16px" }, [
+    input,
+    btn("Search", () => doDiscoverSearch(input.value.trim()), "primary"),
+  ]));
+
+  // Left: results. Right: your stack.
+  const left = el("div", { class: "card" }, [el("div", { class: "hd" }, ["Results"]), el("div", { class: "bd" }, [resultsBody()])]);
+  const stackRows = DATA.servers.map((s) =>
+    el("div", { class: "list-row" }, [el("span", { class: "name" }, [s.name]), badge(s.type, "solid")])
+  );
+  if (!stackRows.length) stackRows.push(el("div", { class: "empty" }, ["Nothing added yet."]));
+  const right = el("div", { class: "card" }, [el("div", { class: "hd" }, ["Your stack", el("small", null, [`${DATA.servers.length} server(s)`])]), el("div", { class: "bd" }, stackRows)]);
+
+  c.appendChild(el("div", { class: "grid", style: "grid-template-columns: 1.5fr 1fr; align-items:start" }, [left, right]));
+}
+
+function resultsBody() {
+  if (DISCOVER.loading) return el("div", { class: "empty" }, ["Searching…"]);
+  if (DISCOVER.results == null) return el("div", { class: "empty" }, ["Type a query and search the catalog + official MCP Registry."]);
+  if (!DISCOVER.results.length) return el("div", { class: "empty" }, [`No matches for "${DISCOVER.q}".`]);
+  const wrap = el("div");
+  DISCOVER.results.forEach((r) => {
+    const head = el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" }, [
+      el("span", null, [el("span", { class: "name" }, [r.name]), el("span", { class: "k" }, [r.source])]),
+      r.installed
+        ? badge("in stack", "green")
+        : READONLY
+        ? null
+        : btn("add ›", () => addFrom(r.addId), "primary"),
+    ]);
+    const meta = el("div", { class: "muted", style: "font-size:12px;margin:2px 0 6px" }, [r.description || r.id]);
+    const trust = el("div", { class: "row-actions", style: "margin-bottom:6px" }, trustBadges(r.trust));
+    wrap.appendChild(el("div", { style: "padding:10px 0;border-top:1px solid hsl(var(--border))" }, [head, meta, trust]));
+  });
+  return wrap;
 }
 
 function pageHead(title, sub) {

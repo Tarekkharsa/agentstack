@@ -98,6 +98,26 @@ fn route(
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
         }
+        (Method::Get, "/api/search") => {
+            if !authed {
+                return unauthorized();
+            }
+            let q = query_param(query, "q").unwrap_or_default();
+            match crate::dashboard::snapshot::search(dir, &q) {
+                Ok(v) => json(&serde_json::to_string(&v).unwrap_or_default()),
+                Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
+            }
+        }
+        (Method::Post, "/api/add_from") => mutation(authed, read_only, || {
+            let v = parse(body);
+            let id = field(&v, "id")?;
+            let profile = v.get("profile").and_then(Value::as_str);
+            let mdir = match dir {
+                Some(d) => d.to_path_buf(),
+                None => std::env::current_dir()?,
+            };
+            crate::commands::add::write_from_provider(&mdir, &id, profile).map(|_| ())
+        }),
         (Method::Post, "/api/secret") => mutation(authed, read_only, || {
             let v = parse(body);
             let name = field(&v, "name")?;
@@ -163,6 +183,38 @@ fn scope_of(body: &str) -> Scope {
         Some("project") => Scope::Project,
         _ => Scope::Global,
     }
+}
+
+/// Extract a query-string parameter, URL-decoding `+` and `%XX`.
+fn query_param(query: &str, key: &str) -> Option<String> {
+    query
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .find(|(k, _)| *k == key)
+        .map(|(_, v)| urldecode(v))
+}
+
+fn urldecode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => out.push(b' '),
+            b'%' if i + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
+                if let Ok(b) = u8::from_str_radix(hex, 16) {
+                    out.push(b);
+                    i += 2;
+                } else {
+                    out.push(bytes[i]);
+                }
+            }
+            b => out.push(b),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn scope_of_query(query: &str) -> Scope {

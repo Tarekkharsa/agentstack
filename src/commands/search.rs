@@ -55,6 +55,20 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
         if c.id != c.name {
             println!("  {}", c.id.dimmed());
         }
+        let t = c.trust();
+        let mut signals = Vec::new();
+        if t.namespaced {
+            signals.push("✓ verified namespace".green().to_string());
+        }
+        if t.runs_code {
+            signals.push("⚠ runs code (npx)".yellow().to_string());
+        }
+        if t.needs_secret {
+            signals.push("needs secret".dimmed().to_string());
+        }
+        if !signals.is_empty() {
+            println!("  trust: {}", signals.join(" · "));
+        }
         if !added {
             let cmd = match c.source {
                 "catalog" => format!("agentstack add from {}", c.name),
