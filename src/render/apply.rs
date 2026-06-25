@@ -51,11 +51,7 @@ impl TargetPlan {
 
     /// Write the proposed config to disk, creating parent dirs as needed.
     pub fn write(&self) -> Result<()> {
-        if let Some(parent) = self.config_path.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-        }
-        fs::write(&self.config_path, &self.proposed)
-            .with_context(|| format!("writing {}", self.config_path.display()))
+        crate::util::atomic::write(&self.config_path, &self.proposed)
     }
 }
 

@@ -16,8 +16,12 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-/// `~/.agentstack` — where state and user adapters live.
+/// `~/.agentstack` — where state, backups, and user adapters live. Honors the
+/// `AGENTSTACK_HOME` env var (handy for tests, CI, and relocating state).
 pub fn agentstack_home() -> PathBuf {
+    if let Some(dir) = std::env::var_os("AGENTSTACK_HOME") {
+        return PathBuf::from(dir);
+    }
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".agentstack")
@@ -26,6 +30,11 @@ pub fn agentstack_home() -> PathBuf {
 /// `~/.agentstack/adapters` — user-supplied descriptor overrides/additions.
 pub fn user_adapters_dir() -> PathBuf {
     agentstack_home().join("adapters")
+}
+
+/// `~/.agentstack/backups` — pre-write copies of configs we modify.
+pub fn backups_dir() -> PathBuf {
+    agentstack_home().join("backups")
 }
 
 #[cfg(test)]

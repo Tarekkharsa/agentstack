@@ -92,7 +92,7 @@ pub fn run_import(args: &ImportArgs, manifest_dir: Option<&Path>) -> Result<()> 
     let bundle: Bundle =
         toml::from_str(&String::from_utf8_lossy(&plaintext)).context("parsing bundle")?;
 
-    std::fs::write(&manifest_path, &bundle.manifest)
+    crate::util::atomic::write(&manifest_path, &bundle.manifest)
         .with_context(|| format!("writing {}", manifest_path.display()))?;
     let mut wrote = vec![MANIFEST_FILE.to_string()];
     if let Some(lock) = &bundle.lock {

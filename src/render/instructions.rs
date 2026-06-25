@@ -34,11 +34,7 @@ impl InstrPlan {
     }
 
     pub fn write(&self) -> Result<()> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&self.path, &self.proposed)?;
-        Ok(())
+        crate::util::atomic::write(&self.path, &self.proposed)
     }
 }
 

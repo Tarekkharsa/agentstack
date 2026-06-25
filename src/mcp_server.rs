@@ -225,7 +225,7 @@ fn add_from(args: &Value, dir: Option<&Path>) -> Result<String> {
         &body,
         profile,
     )?;
-    std::fs::write(&manifest_path, &new_text)
+    crate::util::atomic::write(&manifest_path, &new_text)
         .with_context(|| format!("writing {}", manifest_path.display()))?;
 
     Ok(format!(
@@ -293,7 +293,7 @@ fn add_server(args: &Value, dir: Option<&Path>) -> Result<String> {
     let profile = args.get("profile").and_then(Value::as_str);
     let new_text =
         crate::commands::add::build_manifest_with(&original, "servers", name, &body, profile)?;
-    std::fs::write(&manifest_path, &new_text)
+    crate::util::atomic::write(&manifest_path, &new_text)
         .with_context(|| format!("writing {}", manifest_path.display()))?;
 
     let secret_hint = if !server.headers.is_empty() || !server.env.is_empty() {

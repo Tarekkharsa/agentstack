@@ -102,7 +102,7 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
                     .with_context(|| format!("storing '{}' in keychain", l.reference))?;
             }
         }
-        fs::write(&ctx.loaded.manifest_path, &new_text)
+        crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
         println!("\n{} adopted {} server(s).", "✓".green(), collected.len());
     } else {

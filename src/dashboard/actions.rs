@@ -116,7 +116,7 @@ pub fn add_server(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
     let body = serde_json::to_value(&server)?;
     let new_text =
         crate::commands::add::build_manifest_with(&original, "servers", name, &body, None)?;
-    std::fs::write(&manifest_path, &new_text)
+    crate::util::atomic::write(&manifest_path, &new_text)
         .with_context(|| format!("writing {}", manifest_path.display()))?;
     Ok(name.to_string())
 }

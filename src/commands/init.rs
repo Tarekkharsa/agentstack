@@ -116,7 +116,7 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
 
-    std::fs::write(&manifest_path, &toml_text)
+    crate::util::atomic::write(&manifest_path, &toml_text)
         .with_context(|| format!("writing {}", manifest_path.display()))?;
 
     println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());

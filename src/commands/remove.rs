@@ -45,7 +45,7 @@ pub fn run(args: &RemoveArgs, manifest_dir: Option<&Path>) -> Result<()> {
     );
 
     if args.write {
-        fs::write(&ctx.loaded.manifest_path, &new_text)
+        crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
         if is_skill {
             let mut lock = Lock::load(&ctx.dir)?;

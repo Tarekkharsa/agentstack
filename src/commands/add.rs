@@ -137,7 +137,7 @@ fn write_manifest(
     );
 
     if write {
-        fs::write(&ctx.loaded.manifest_path, &new_text)
+        crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
         println!("{} added '{name}'.", "✓".green());
     } else {
@@ -169,7 +169,7 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
     }
     let body = serde_json::to_value(candidate.to_server())?;
     let new_text = build_manifest_with(&original, "servers", &candidate.name, &body, profile)?;
-    std::fs::write(&manifest_path, &new_text)
+    crate::util::atomic::write(&manifest_path, &new_text)
         .with_context(|| format!("writing {}", manifest_path.display()))?;
     Ok(candidate.name)
 }
