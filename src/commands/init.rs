@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use owo_colors::OwoColorize;
 
-use crate::adapter::{extract_servers, Registry};
+use crate::adapter::{extract_servers, extract_settings, Registry};
 use crate::cli::InitArgs;
 use crate::discover::{lift_secrets, merge_servers};
 use crate::manifest::load::MANIFEST_FILE;
@@ -31,6 +31,7 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
     let registry = Registry::load()?;
     let mut detected: Vec<String> = Vec::new();
     let mut servers: IndexMap<String, Server> = IndexMap::new();
+    let mut settings: IndexMap<String, serde_json::Value> = IndexMap::new();
     for desc in registry.iter() {
         if !desc.detected() {
             continue;
@@ -38,6 +39,12 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
         detected.push(desc.id.clone());
         if let Some(value) = desc.read_config_value()? {
             merge_servers(&mut servers, extract_servers(desc, &value));
+        }
+        if let Some(value) = desc.read_settings_value(&dir)? {
+            let imported = extract_settings(desc, &value);
+            if !imported.is_empty() {
+                settings.insert(desc.id.clone(), serde_json::Value::Object(imported));
+            }
         }
     }
     if detected.is_empty() {
@@ -49,6 +56,7 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
         let _ = keychain::set(&l.reference, &l.value); // best effort
     }
 
+    let settings_count = settings.len();
     let manifest = Manifest {
         version: 1,
         meta: Meta { name: None },
@@ -56,7 +64,7 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
         skills: IndexMap::new(),
         profiles: IndexMap::new(),
         instructions: IndexMap::new(),
-        settings: IndexMap::new(),
+        settings,
         targets: Targets {
             default: detected.clone(),
         },
@@ -66,9 +74,10 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
     crate::util::atomic::write(&manifest_path, &toml_text)?;
 
     Ok(format!(
-        "Imported {} server(s) from {} CLI(s); lifted {} secret(s).",
+        "Imported {} server(s) from {} CLI(s) ({} with settings); lifted {} secret(s).",
         manifest.servers.len(),
         detected.len(),
+        settings_count,
         lifted.len()
     ))
 }
@@ -91,6 +100,7 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // Discover + import.
     let mut detected: Vec<String> = Vec::new();
     let mut servers: IndexMap<String, Server> = IndexMap::new();
+    let mut settings: IndexMap<String, serde_json::Value> = IndexMap::new();
     let mut display_names: Vec<String> = Vec::new();
 
     for desc in registry.iter() {
@@ -100,16 +110,22 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
         detected.push(desc.id.clone());
         display_names.push(desc.display.clone());
 
-        let Some(value) = desc.read_config_value()? else {
-            continue;
-        };
-        let imported = extract_servers(desc, &value);
-        let conflicts = merge_servers(&mut servers, imported);
-        for c in conflicts {
-            println!(
-                "{} server '{c}' differs between CLIs — kept the first definition",
-                "⚠".yellow()
-            );
+        if let Some(value) = desc.read_config_value()? {
+            let imported = extract_servers(desc, &value);
+            let conflicts = merge_servers(&mut servers, imported);
+            for c in conflicts {
+                println!(
+                    "{} server '{c}' differs between CLIs — kept the first definition",
+                    "⚠".yellow()
+                );
+            }
+        }
+        // Import this CLI's existing native settings (catalog keys only).
+        if let Some(value) = desc.read_settings_value(&dir)? {
+            let imported = extract_settings(desc, &value);
+            if !imported.is_empty() {
+                settings.insert(desc.id.clone(), serde_json::Value::Object(imported));
+            }
         }
     }
 
@@ -129,6 +145,13 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
         "📥".dimmed(),
         servers.len()
     );
+    if !settings.is_empty() {
+        println!(
+            "{}  Imported settings from {} CLI(s)",
+            "⚙".dimmed(),
+            settings.len()
+        );
+    }
 
     // Lift inline secrets.
     let lifted = lift_secrets(&mut servers);
@@ -150,7 +173,7 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
         skills: IndexMap::new(),
         profiles: IndexMap::new(),
         instructions: IndexMap::new(),
-        settings: IndexMap::new(),
+        settings,
         targets: Targets {
             default: detected.clone(),
         },

@@ -518,8 +518,9 @@ function settingsCard(a) {
   if (!READONLY) {
     body.push(el("div", { class: "toolbar", style: "margin-top:10px" }, [
       btn("Save", () => post("/api/set_settings", { target: a.id, settings: draft }, a.display + " settings"), "primary"),
+      btn("Import current", () => post("/api/import_settings", { target: a.id }, "Import " + a.display + " settings")),
       btn("Reset", () => show("settings")),
-      el("span", { class: "muted", style: "font-size:12px" }, ["then Apply (Overview) to write it into the CLI"]),
+      el("span", { class: "muted", style: "font-size:12px" }, ["Import reads the CLI's existing settings file · Save then Apply to write"]),
     ]));
   }
 

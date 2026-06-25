@@ -9,6 +9,30 @@ use serde_json::Value;
 use super::descriptor::AdapterDescriptor;
 use crate::manifest::{Server, ServerType};
 
+/// Extract the settings worth importing from a CLI's parsed settings file:
+/// every top-level key that has at least one catalog field. Whole top-level
+/// values are taken (so e.g. `permissions` keeps its `allow`/`deny` alongside
+/// the catalogued `defaultMode`) — this matches the top-level ownership model so
+/// re-applying never drops sibling keys.
+pub fn extract_settings(desc: &AdapterDescriptor, root: &Value) -> serde_json::Map<String, Value> {
+    let Some(spec) = desc.settings.as_ref() else {
+        return Default::default();
+    };
+    let catalog: std::collections::HashSet<&str> = spec
+        .fields
+        .iter()
+        .map(|f| f.key.split('.').next().unwrap_or(&f.key))
+        .collect();
+    root.as_object()
+        .map(|o| {
+            o.iter()
+                .filter(|(k, _)| catalog.contains(k.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Extract `(name, Server)` pairs from a target config's value tree, in file
 /// order. Entries that don't look like MCP servers are skipped.
 pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, Server)> {
@@ -141,6 +165,32 @@ mod tests {
         let tldraw = &servers.iter().find(|(n, _)| n == "tldraw").unwrap().1;
         assert_eq!(tldraw.server_type, ServerType::Stdio);
         assert_eq!(tldraw.args, vec!["a.js".to_string()]);
+    }
+
+    #[test]
+    fn extract_settings_takes_catalog_keys_whole_and_skips_unknown() {
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("claude-code").unwrap();
+        let file = json!({
+            "$schema": "https://x",            // not in catalog → skip
+            "model": "opusplan",               // catalog → keep
+            "hooks": { "PreToolUse": [] },      // not in catalog → skip
+            "permissions": {                    // catalog (permissions.*) → keep WHOLE object
+                "defaultMode": "auto",
+                "allow": ["Bash(git:*)"],
+                "deny": ["Read(./.env)"]
+            }
+        });
+        let out = extract_settings(desc, &file);
+        assert!(out.contains_key("model"));
+        assert!(out.contains_key("permissions"));
+        assert!(!out.contains_key("$schema"));
+        assert!(!out.contains_key("hooks"));
+        // The whole permissions object comes along (so apply won't drop siblings).
+        let perms = out["permissions"].as_object().unwrap();
+        assert!(perms.contains_key("defaultMode"));
+        assert!(perms.contains_key("allow"));
+        assert!(perms.contains_key("deny"));
     }
 
     #[test]

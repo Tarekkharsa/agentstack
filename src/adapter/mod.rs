@@ -7,7 +7,7 @@ pub mod registry;
 pub mod render;
 
 pub use descriptor::{AdapterDescriptor, Format};
-pub use import::extract_servers;
+pub use import::{extract_servers, extract_settings};
 pub use registry::Registry;
 pub use render::{render_server, Rendered};
 
@@ -44,6 +44,37 @@ impl AdapterDescriptor {
             return Ok(None);
         }
         let value = match self.config.format {
+            Format::Json => serde_json::from_str(&text)
+                .with_context(|| format!("parsing {}", path.display()))?,
+            Format::Toml => {
+                let tv: toml::Value =
+                    toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+                serde_json::to_value(tv).context("converting TOML to value tree")?
+            }
+        };
+        Ok(Some(value))
+    }
+
+    /// Read and parse this CLI's native settings file (global scope) into a
+    /// JSON-shaped value tree, or `None` if the CLI has no settings file or it
+    /// is absent/empty.
+    pub fn read_settings_value(
+        &self,
+        project_dir: &std::path::Path,
+    ) -> Result<Option<serde_json::Value>> {
+        let Some((path, format)) = self.settings_for(crate::scope::Scope::Global, project_dir)
+        else {
+            return Ok(None);
+        };
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+        };
+        if text.trim().is_empty() {
+            return Ok(None);
+        }
+        let value = match format {
             Format::Json => serde_json::from_str(&text)
                 .with_context(|| format!("parsing {}", path.display()))?,
             Format::Toml => {

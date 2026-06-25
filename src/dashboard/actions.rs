@@ -120,6 +120,48 @@ pub fn toggle_skill(
     Ok(())
 }
 
+/// Import a CLI's existing native settings file into the manifest's
+/// `[settings.<target>]` block (catalog keys only). Returns the number of
+/// top-level keys imported. Lets a user adopt settings they already have rather
+/// than re-entering them.
+pub fn import_settings(manifest_dir: Option<&Path>, target: &str) -> Result<usize> {
+    let ctx = crate::commands::load(manifest_dir)?;
+    let desc = ctx
+        .registry
+        .get(target)
+        .with_context(|| format!("unknown target '{target}'"))?;
+    if desc.settings.is_none() {
+        anyhow::bail!("{} has no native settings file", desc.display);
+    }
+    let value = desc
+        .read_settings_value(&ctx.dir)?
+        .with_context(|| format!("{} has no settings file to import yet", desc.display))?;
+    let imported = crate::adapter::extract_settings(desc, &value);
+    if imported.is_empty() {
+        anyhow::bail!(
+            "no recognized settings found in {}'s settings file",
+            desc.display
+        );
+    }
+    let count = imported.len();
+    let body = Value::Object(imported);
+
+    let manifest_path = ctx.loaded.manifest_path.clone();
+    let original = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let new_text = crate::render::merge_toml::merge(
+        &original,
+        "settings",
+        &[(target.to_string(), body)],
+        true,
+    )?;
+    toml::from_str::<crate::manifest::Manifest>(&new_text)
+        .context("resulting manifest would be invalid")?;
+    crate::util::atomic::write(&manifest_path, &new_text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    Ok(count)
+}
+
 /// Set (replace) the `[settings.<target>]` block in the manifest from a JSON
 /// object supplied by the dashboard. Comments + other settings blocks survive.
 pub fn set_settings(manifest_dir: Option<&Path>, args: &Value) -> Result<()> {
