@@ -302,6 +302,25 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         })
         .collect();
 
+    // Claude Code plugins already installed on this machine (read-only view).
+    let (plugin_list, marketplace_list) = crate::plugins::claude_plugins();
+    let plugins: Vec<Value> = plugin_list
+        .iter()
+        .map(|p| {
+            json!({
+                "name": p.name,
+                "marketplace": p.marketplace,
+                "scope": p.scope,
+                "projects": p.projects,
+                "version": p.version,
+            })
+        })
+        .collect();
+    let marketplaces: Vec<Value> = marketplace_list
+        .iter()
+        .map(|m| json!({ "name": m.name, "source": m.source }))
+        .collect();
+
     let health = health_checks(&ctx, manifest, &state);
 
     Ok(json!({
@@ -319,6 +338,8 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "settingsAdapters": settings_adapters,
         "hooks": hooks,
         "hookAdapters": hook_adapters,
+        "plugins": plugins,
+        "marketplaces": marketplaces,
         "instructions": instructions,
         "secrets": secrets,
         "profiles": profiles,

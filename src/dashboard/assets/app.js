@@ -16,6 +16,7 @@ const SECTIONS = [
   { id: "skills", label: "Skills", count: (d) => d.skills.length },
   { id: "settings", label: "Settings", count: (d) => (d.settingsAdapters || []).length },
   { id: "hooks", label: "Hooks", count: (d) => (d.hooks || []).length },
+  { id: "plugins", label: "Plugins", count: (d) => (d.plugins || []).length },
   { id: "instructions", label: "Instructions", count: (d) => d.instructions.length },
   { id: "secrets", label: "Secrets", count: (d) => d.secrets.length },
   { id: "health", label: "Health" },
@@ -74,7 +75,7 @@ function show(id) {
   renderNav();
   const c = document.getElementById("content");
   c.innerHTML = "";
-  ({ overview, discover, servers, skills, settings, hooks, instructions, secrets, health }[id] || overview)(c);
+  ({ overview, discover, servers, skills, settings, hooks, plugins, instructions, secrets, health }[id] || overview)(c);
 }
 
 /* ---------- discover (browse providers → add) ---------- */
@@ -668,6 +669,43 @@ function hooks(c) {
   ]));
   if (!rows.length) rows.push(el("div", { class: "empty" }, ["No hooks yet. Add one, or [hooks.*] in the manifest."]));
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, rows)]));
+}
+
+/* ---------- plugins ---------- */
+function plugins(c) {
+  c.appendChild(pageHead("Plugins", "Claude Code plugins installed on this machine. Read-only for now — agentstack can see them but doesn't manage them yet."));
+  const list = DATA.plugins || [];
+  const markets = DATA.marketplaces || [];
+
+  const prows = list.map((p) => el("div", { class: "list-row" }, [
+    el("span", null, [
+      el("span", { class: "name" }, [p.name]),
+      el("div", { class: "muted mono", style: "font-size:12px" }, [p.marketplace + (p.version ? " @ " + p.version : "")]),
+    ]),
+    el("span", { class: "row-actions" }, [
+      ...(p.projects || []).map((pr) => badge(pr, "solid")),
+      badge(p.scope || "local", ""),
+    ]),
+  ]));
+  if (!prows.length) prows.push(el("div", { class: "empty" }, ["No Claude Code plugins installed."]));
+  c.appendChild(el("div", { class: "card" }, [
+    el("div", { class: "hd" }, ["Installed", el("small", null, [`${list.length} plugin(s)`])]),
+    el("div", { class: "bd" }, prows),
+  ]));
+
+  const mrows = markets.map((m) => el("div", { class: "list-row" }, [
+    el("span", { class: "name" }, [m.name]),
+    el("span", { class: "muted mono", style: "font-size:12px" }, [m.source]),
+  ]));
+  if (!mrows.length) mrows.push(el("div", { class: "empty" }, ["No marketplaces."]));
+  c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
+    el("div", { class: "hd" }, ["Marketplaces", el("small", null, [`${markets.length}`])]),
+    el("div", { class: "bd" }, mrows),
+  ]));
+
+  c.appendChild(el("div", { class: "muted", style: "font-size:12px;margin-top:12px" }, [
+    "Coming next: declare plugins in the manifest so they reproduce on a new machine. OAuth-login MCP servers are handled by the CLI itself, not agentstack.",
+  ]));
 }
 
 /* ---------- instructions ---------- */
