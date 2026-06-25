@@ -5,6 +5,7 @@ pub mod add;
 pub mod adopt;
 pub mod apply;
 pub mod bundle;
+pub mod consolidate;
 pub mod diff;
 pub mod doctor;
 pub mod hook;

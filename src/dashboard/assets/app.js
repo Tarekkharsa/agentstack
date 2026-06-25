@@ -429,8 +429,13 @@ function skills(c) {
   // Skills already on disk in your CLIs but not yet in the manifest.
   const found = (DATA.discoveredSkills || []).filter((d) => !d.inManifest);
   if (found.length) {
-    const hd = ["Detected on disk", el("small", null, [`${found.length} skill(s) already in your CLIs, not yet managed`])];
-    if (!READONLY) hd.push(el("span", { style: "margin-left:auto" }, [btn("Adopt all", () => post("/api/adopt_all_skills", {}, "Adopt skills"), "primary")]));
+    const hd = ["Detected on disk", el("small", null, [`${found.length} skill(s) scattered across your CLIs, not yet managed`])];
+    if (!READONLY) hd.push(el("span", { style: "margin-left:auto;display:flex;gap:8px" }, [
+      btn("Move all into agentstack", () => {
+        if (confirm("Move " + found.length + " skill folder(s) into ~/.agentstack/skills/ and replace the originals with symlinks? Your agents keep working in place; a backup is kept.")) post("/api/consolidate_skills", {}, "Consolidate skills");
+      }, "primary"),
+      btn("Adopt all in place", () => post("/api/adopt_all_skills", {}, "Adopt skills")),
+    ]));
     const rows = found.map((d) => {
       const where = (d.presentIn || []).map((t) => badge(t, "solid"));
       return el("div", { class: "list-row" }, [
@@ -440,6 +445,7 @@ function skills(c) {
         ]),
         el("span", { class: "row-actions" }, [
           ...where,
+          READONLY ? null : btn("Move", () => post("/api/consolidate_skills", { names: [d.name] }, "Consolidate " + d.name)),
           READONLY ? null : btn("Adopt", () => post("/api/adopt_skill", { name: d.name }, "Adopt " + d.name)),
         ]),
       ]);
@@ -447,7 +453,7 @@ function skills(c) {
     c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
       el("div", { class: "hd", style: "display:flex;align-items:center" }, hd),
       el("div", { class: "bd" }, [
-        el("div", { class: "muted", style: "font-size:12px;margin-bottom:8px" }, ["Adopting adds them to the manifest as path skills (your files aren't moved). Then Install + toggle them per CLI."]),
+        el("div", { class: "muted", style: "font-size:12px;margin-bottom:8px" }, ["“Move into agentstack” relocates the skill files to one managed home (~/.agentstack/skills/) and symlinks the originals back — agents keep working, you control them from here. “Adopt in place” just registers them where they are."]),
         ...rows,
       ]),
     ]));

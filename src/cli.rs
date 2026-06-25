@@ -61,6 +61,10 @@ pub enum Command {
     /// Pull hand-added servers from a target config back into the manifest.
     Adopt(AdoptArgs),
 
+    /// Gather scattered skills from every CLI's skills dir into one managed
+    /// home (`~/.agentstack/skills/`), symlinking the originals back.
+    Consolidate(ConsolidateArgs),
+
     /// Restore a CLI config from its pre-write backup (undo an apply).
     Restore(RestoreArgs),
 
@@ -297,6 +301,17 @@ pub struct AdoptArgs {
     /// Don't store lifted secrets in the keychain (just reference them).
     #[arg(long)]
     pub no_keychain: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ConsolidateArgs {
+    /// Specific skill names to consolidate (default: all discovered).
+    #[arg(value_name = "SKILL")]
+    pub names: Vec<String>,
+
+    /// Just list the skills found on disk; don't move anything.
+    #[arg(long)]
+    pub list: bool,
 }
 
 #[derive(Args, Debug)]

@@ -10,6 +10,7 @@ pub mod adapter;
 pub mod catalog;
 pub mod cli;
 pub mod commands;
+pub mod consolidate;
 pub mod dashboard;
 pub mod discover;
 pub mod lock;

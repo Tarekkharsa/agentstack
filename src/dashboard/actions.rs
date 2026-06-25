@@ -204,6 +204,16 @@ pub fn set_settings(manifest_dir: Option<&Path>, args: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Consolidate discovered skills into the managed home (`~/.agentstack/skills/`),
+/// symlinking the originals back. `names` empty = all. Returns the count moved.
+pub fn consolidate_skills(manifest_dir: Option<&Path>, names: &[String]) -> Result<usize> {
+    let ctx = crate::commands::load(manifest_dir)?;
+    let only = if names.is_empty() { None } else { Some(names) };
+    let report =
+        crate::consolidate::consolidate(&ctx.registry, &ctx.loaded.manifest_path, &ctx.dir, only)?;
+    Ok(report.len())
+}
+
 /// Adopt a skill already present on disk (discovered in a CLI's skills dir) into
 /// the manifest as a `path` skill pointing at its real source. Manifest-only —
 /// never moves or deletes the skill's files.

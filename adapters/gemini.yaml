@@ -23,3 +23,8 @@ mcp:
     args: args
     env: env
   secret_mode: literal
+# Gemini CLI reads skills from ~/.gemini/skills (global) and <repo>/.gemini/skills.
+skills:
+  dir: ~/.gemini/skills
+  project_dir: .gemini/skills
+  strategy: symlink

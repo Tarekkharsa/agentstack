@@ -137,6 +137,19 @@ fn route(
         (Method::Post, "/api/adopt_all_skills") => mutation(authed, read_only, || {
             crate::dashboard::actions::adopt_all_skills(dir).map(|_| ())
         }),
+        (Method::Post, "/api/consolidate_skills") => mutation(authed, read_only, || {
+            let v = parse(body);
+            let names: Vec<String> = v
+                .get("names")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            crate::dashboard::actions::consolidate_skills(dir, &names).map(|_| ())
+        }),
         (Method::Post, "/api/set_settings") => mutation(authed, read_only, || {
             crate::dashboard::actions::set_settings(dir, &parse(body))
         }),

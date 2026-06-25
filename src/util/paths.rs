@@ -48,6 +48,12 @@ pub fn backups_dir() -> PathBuf {
     agentstack_home().join("backups")
 }
 
+/// `~/.agentstack/skills` — the single managed home that consolidated skills are
+/// moved into (the CLIs then symlink back to here).
+pub fn skills_home() -> PathBuf {
+    agentstack_home().join("skills")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
