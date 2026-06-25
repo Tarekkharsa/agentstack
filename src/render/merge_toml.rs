@@ -64,6 +64,36 @@ pub fn merge_with_removals(
     Ok(doc.to_string())
 }
 
+/// Upsert `entries` as *top-level* keys (and remove `removals`), preserving
+/// comments and untouched tables. Used for settings files (Codex `config.toml`)
+/// where we own a set of root keys rather than entries under one section.
+pub fn merge_top_level(
+    existing: &str,
+    entries: &[(String, Value)],
+    removals: &[String],
+) -> Result<String> {
+    let mut doc: DocumentMut = if existing.trim().is_empty() {
+        DocumentMut::new()
+    } else {
+        existing
+            .parse()
+            .context("existing settings is not valid TOML")?
+    };
+    for name in removals {
+        doc.remove(name);
+    }
+    for (name, body) in entries {
+        // Objects become standalone tables; scalars/arrays become values.
+        let item = if body.is_object() {
+            Item::Table(value_to_table(body, true)?)
+        } else {
+            value_to_item(body, true)?
+        };
+        doc.insert(name, item);
+    }
+    Ok(doc.to_string())
+}
+
 /// Convert a JSON object (one server body) into a `toml_edit` Table.
 fn value_to_table(value: &Value, nested_as_subtable: bool) -> Result<Table> {
     let obj = value.as_object().context("server body is not an object")?;
@@ -170,5 +200,36 @@ url = "https://mcp.figma.com/mcp"
         let out = merge(existing, "mcp_servers", &entries, true).unwrap();
         assert!(out.contains("https://new"));
         assert!(!out.contains("https://old"));
+    }
+
+    #[test]
+    fn top_level_merge_keeps_mcp_servers_and_comments() {
+        let existing = r#"# my codex config
+model = "gpt-5.5"
+
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+"#;
+        // Own `approval_policy` (scalar) without disturbing the MCP table.
+        let entries = vec![("approval_policy".to_string(), json!("on-request"))];
+        let out = merge_top_level(existing, &entries, &[]).unwrap();
+        assert!(out.contains("# my codex config"));
+        assert!(out.contains("[mcp_servers.figma]"));
+        assert!(out.contains("approval_policy = \"on-request\""));
+        // Re-parses as valid TOML.
+        let _: toml::Value = toml::from_str(&out).unwrap();
+    }
+
+    #[test]
+    fn top_level_merge_object_becomes_table_and_removal_prunes() {
+        let existing = "model = \"x\"\n";
+        let entries = vec![("sandbox".to_string(), json!({ "network": false }))];
+        let out = merge_top_level(existing, &entries, &[]).unwrap();
+        assert!(out.contains("[sandbox]"));
+        assert!(out.contains("network = false"));
+        // Prune it back out; model stays.
+        let pruned = merge_top_level(&out, &[], &["sandbox".into()]).unwrap();
+        assert!(!pruned.contains("[sandbox]"));
+        assert!(pruned.contains("model = \"x\""));
     }
 }

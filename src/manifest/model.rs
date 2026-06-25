@@ -33,6 +33,12 @@ pub struct Manifest {
     #[serde(default)]
     pub instructions: IndexMap<String, Instruction>,
 
+    /// Native per-CLI settings (permissions, feature flags). Keyed by adapter
+    /// id (e.g. `claude-code`); each value is an object merged non-destructively
+    /// into that CLI's settings file.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub settings: IndexMap<String, serde_json::Value>,
+
     /// Where `apply` writes by default and which adapters are in play.
     #[serde(default)]
     pub targets: Targets,

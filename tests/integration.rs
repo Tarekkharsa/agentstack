@@ -220,6 +220,7 @@ fn init_pipeline_roundtrips_through_valid_toml() {
         skills: IndexMap::new(),
         profiles: IndexMap::new(),
         instructions: IndexMap::new(),
+        settings: IndexMap::new(),
         targets: Targets {
             default: vec!["claude-code".into()],
         },
@@ -380,4 +381,106 @@ fn adopt_inserts_new_server_into_manifest_with_lifted_secret() {
     assert!(!new_text.contains("lin_api_SECRETVALUE")); // secret lifted out
     let parsed: Manifest = toml::from_str(&new_text).unwrap();
     assert!(parsed.servers.contains_key("linear"));
+}
+
+/// Build a JSON adapter descriptor with a settings file at `settings_path`.
+fn settings_descriptor(settings_path: &str) -> AdapterDescriptor {
+    let yaml = format!(
+        r#"
+id: test-json
+display: Test JSON
+config:
+  path: /nonexistent/config.json
+  format: json
+mcp:
+  location: mcpServers
+  fields: {{ url: url }}
+  secret_mode: literal
+settings:
+  format: json
+  global: {settings_path}
+"#
+    );
+    serde_yaml::from_str(&yaml).unwrap()
+}
+
+#[test]
+fn settings_merge_is_non_destructive_resolves_secrets_and_prunes() {
+    use agentstack::render::plan_settings;
+
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let sj = tmp.child("settings.json");
+    // Hand-managed file with a key agentstack must never touch.
+    sj.write_str("{\n  \"theme\": \"dark\"\n}\n").unwrap();
+
+    let manifest: Manifest = toml::from_str(
+        r#"
+        version = 1
+        [settings.test-json]
+        model = "opus"
+        [settings.test-json.env]
+        TOKEN = "${API_TOKEN}"
+        "#,
+    )
+    .unwrap();
+    let desc = settings_descriptor(sj.path().to_str().unwrap());
+    let resolver = MapResolver::from([("API_TOKEN", "sekret")]);
+
+    // First apply: managed keys added, secret resolved, unmanaged key kept.
+    let plan = plan_settings(
+        &manifest,
+        &desc,
+        &resolver,
+        &[],
+        Scope::Global,
+        Path::new("/"),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(plan.changed());
+    plan.write().unwrap();
+    let after = fs::read_to_string(sj.path()).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&after).unwrap();
+    assert_eq!(v["theme"], "dark"); // unmanaged key preserved
+    assert_eq!(v["model"], "opus");
+    assert_eq!(v["env"]["TOKEN"], "sekret"); // ${REF} resolved per machine
+
+    // Re-apply is idempotent.
+    let plan2 = plan_settings(
+        &manifest,
+        &desc,
+        &resolver,
+        &plan.managed,
+        Scope::Global,
+        Path::new("/"),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(
+        !plan2.changed(),
+        "re-apply should be a no-op:\n{}",
+        plan2.diff()
+    );
+
+    // Drop `model` from the manifest → it is pruned, `env` + `theme` stay.
+    let smaller: Manifest =
+        toml::from_str("version = 1\n[settings.test-json.env]\nTOKEN = \"${API_TOKEN}\"\n")
+            .unwrap();
+    let plan3 = plan_settings(
+        &smaller,
+        &desc,
+        &resolver,
+        &plan.managed,
+        Scope::Global,
+        Path::new("/"),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(plan3.removed, vec!["model".to_string()]);
+    plan3.write().unwrap();
+    let pruned: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(sj.path()).unwrap()).unwrap();
+    assert!(pruned.get("model").is_none());
+    assert_eq!(pruned["theme"], "dark");
+    assert_eq!(pruned["env"]["TOKEN"], "sekret");
 }

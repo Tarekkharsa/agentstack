@@ -36,3 +36,10 @@ skills:
 instructions:
   global: ~/.claude/CLAUDE.md
   project: CLAUDE.md
+# Native settings file: permissions, hooks, feature flags. Separate from the
+# MCP config (~/.claude.json); agentstack owns only the top-level keys you
+# declare under [settings.claude-code] and leaves the rest untouched.
+settings:
+  format: json
+  global: ~/.claude/settings.json
+  project: .claude/settings.json

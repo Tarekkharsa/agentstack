@@ -8,7 +8,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::ApplyArgs;
 use crate::manifest::validate;
-use crate::render::{plan_target, resolve_targets, Selection};
+use crate::render::{plan_settings, plan_target, resolve_targets, Selection};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 
@@ -89,6 +89,47 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 state.record(&key, plan.managed.clone(), &plan.proposed);
             }
             println!("  {} up to date", "✓".green());
+        }
+
+        // Native settings file (permissions, feature flags) — a separate file
+        // from the MCP config, merged at the top level.
+        let prev_settings = state.managed_settings(&key);
+        if let Some(sp) = plan_settings(
+            manifest,
+            desc,
+            &ctx.resolver,
+            &prev_settings,
+            scope,
+            &ctx.dir,
+        )? {
+            for u in &sp.unresolved {
+                println!("  {} unresolved secret {} (settings)", "✗".red(), u);
+                error_count += 1;
+            }
+            for r in &sp.removed {
+                println!(
+                    "  {} pruning setting '{r}' (no longer in manifest)",
+                    "−".yellow()
+                );
+            }
+            if sp.changed() {
+                changed_count += 1;
+                println!(
+                    "  {} settings → {}",
+                    "·".dimmed(),
+                    sp.settings_path.display()
+                );
+                print!("{}", indent(&sp.diff()));
+                if will_write {
+                    sp.write()?;
+                    state.record_settings(&key, sp.managed.clone());
+                    println!("  {} wrote {} setting(s)", "✓".green(), sp.managed.len());
+                } else {
+                    println!("  {} {} setting(s) to apply", "→".cyan(), sp.managed.len());
+                }
+            } else if will_write {
+                state.record_settings(&key, sp.managed.clone());
+            }
         }
     }
 

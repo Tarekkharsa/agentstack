@@ -33,6 +33,9 @@ pub struct TargetState {
     pub managed_servers: Vec<String>,
     #[serde(default)]
     pub managed_skills: Vec<String>,
+    /// Top-level keys we own in this target's native settings file.
+    #[serde(default)]
+    pub managed_settings: Vec<String>,
     /// Hash of the file content we last wrote, as hex. Lets us tell "unchanged"
     /// from "edited on disk since our last write".
     #[serde(default)]
@@ -105,6 +108,20 @@ impl State {
     pub fn record_skills(&mut self, key: &str, managed_skills: Vec<String>) {
         let entry = self.targets.entry(key.to_string()).or_default();
         entry.managed_skills = managed_skills;
+    }
+
+    /// Settings keys we previously owned in `key`'s native settings file.
+    pub fn managed_settings(&self, key: &str) -> Vec<String> {
+        self.targets
+            .get(key)
+            .map(|t| t.managed_settings.clone())
+            .unwrap_or_default()
+    }
+
+    /// Record the set of settings keys we own for `key`.
+    pub fn record_settings(&mut self, key: &str, managed_settings: Vec<String>) {
+        let entry = self.targets.entry(key.to_string()).or_default();
+        entry.managed_settings = managed_settings;
     }
 }
 

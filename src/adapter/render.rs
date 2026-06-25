@@ -92,7 +92,7 @@ pub fn render_server(
 /// Replace every `${NAME}` token in `s`. In passthrough mode the token is left
 /// verbatim. Otherwise it is resolved; unresolved tokens are recorded and left
 /// in place (never silently blanked).
-fn substitute(
+pub(crate) fn substitute(
     s: &str,
     resolver: &dyn Resolver,
     passthrough: bool,

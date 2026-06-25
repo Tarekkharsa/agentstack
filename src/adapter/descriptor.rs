@@ -27,6 +27,9 @@ pub struct AdapterDescriptor {
     /// Instruction file locations (CLAUDE.md / AGENTS.md).
     #[serde(default)]
     pub instructions: Option<InstructionsSpec>,
+    /// Native settings file (e.g. Claude Code `~/.claude/settings.json`).
+    #[serde(default)]
+    pub settings: Option<SettingsSpec>,
 }
 
 impl AdapterDescriptor {
@@ -44,6 +47,20 @@ impl AdapterDescriptor {
                 let fmt = p.format.unwrap_or(self.config.format);
                 Some((project_dir.join(&p.config), fmt))
             }
+        }
+    }
+
+    /// The native settings file path + format for a given scope, if the CLI has
+    /// one. `None` for `Project` when the CLI has no project settings file.
+    pub fn settings_for(
+        &self,
+        scope: Scope,
+        project_dir: &std::path::Path,
+    ) -> Option<(PathBuf, Format)> {
+        let s = self.settings.as_ref()?;
+        match scope {
+            Scope::Global => Some((paths::expand_tilde(&s.global), s.format)),
+            Scope::Project => s.project.as_ref().map(|p| (project_dir.join(p), s.format)),
         }
     }
 
@@ -190,6 +207,19 @@ impl InstructionsSpec {
             Scope::Project => self.project.as_ref().map(|p| project_dir.join(p)),
         }
     }
+}
+
+/// Native settings-file locations for a CLI (permissions, feature flags, etc.).
+/// Distinct from the MCP config file; merged non-destructively at the top level.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SettingsSpec {
+    /// File format (json for Claude `settings.json`, toml for Codex `config.toml`).
+    pub format: Format,
+    /// Global settings file (e.g. `~/.claude/settings.json`).
+    pub global: String,
+    /// Project settings file relative to the repo (e.g. `.claude/settings.json`).
+    #[serde(default)]
+    pub project: Option<String>,
 }
 
 /// Project-scope config location for a CLI that supports project files.

@@ -87,6 +87,79 @@ pub fn merge_with_removals(
     Ok(out)
 }
 
+/// Upsert `entries` as *top-level* keys (and remove `removals`), preserving the
+/// rest of the file verbatim. Used for settings files where we own a set of
+/// root keys (e.g. `permissions`, `env`) rather than entries under one section.
+pub fn merge_top_level(
+    existing: &str,
+    entries: &[(String, Value)],
+    removals: &[String],
+) -> Result<String> {
+    let mut text = if existing.trim().is_empty() {
+        "{}\n".to_string()
+    } else {
+        // Validate up front so we fail loudly rather than splicing garbage.
+        serde_json::from_str::<Value>(existing).context("existing settings is not valid JSON")?;
+        existing.to_string()
+    };
+    for name in removals {
+        text = splice_top_level(&text, name, None)?;
+    }
+    for (name, body) in entries {
+        text = splice_top_level(&text, name, Some(body))?;
+    }
+    Ok(text)
+}
+
+/// Set (or, with `body: None`, remove) a single top-level key, leaving every
+/// other byte untouched.
+fn splice_top_level(text: &str, key: &str, body: Option<&Value>) -> Result<String> {
+    match (find_top_level_value_span(text, key), body) {
+        // Replace an existing key's value in place.
+        (Some((start, _)), Some(body)) => {
+            let end = find_top_level_value_span(text, key).unwrap().1;
+            let base_indent = line_indent(text, start);
+            let pretty = serde_json::to_string_pretty(body)?;
+            let reindented = reindent(&pretty, &base_indent);
+            let mut out = String::with_capacity(text.len() + reindented.len());
+            out.push_str(&text[..start]);
+            out.push_str(&reindented);
+            out.push_str(&text[end..]);
+            Ok(out)
+        }
+        // Remove an existing key (and its surrounding separator) cleanly by
+        // reserializing the root object — only used on prune, where a tidy
+        // result matters more than byte-preservation of the dropped key.
+        (Some(_), None) => {
+            let mut root: Value =
+                serde_json::from_str(text).context("settings is not valid JSON")?;
+            if let Some(obj) = root.as_object_mut() {
+                obj.shift_remove(key);
+            }
+            let mut out = serde_json::to_string_pretty(&root)?;
+            out.push('\n');
+            Ok(out)
+        }
+        // Nothing to remove.
+        (None, None) => Ok(text.to_string()),
+        // Insert a new key after the opening brace.
+        (None, Some(body)) => {
+            let brace = text.find('{').context("settings has no top-level object")?;
+            let pretty = serde_json::to_string_pretty(body)?;
+            let reindented = reindent(&pretty, "  ");
+            // If the object is empty (`{}`), don't emit a trailing comma.
+            let after = text[brace + 1..].trim_start();
+            let sep = if after.starts_with('}') { "" } else { "," };
+            let insertion = format!("\n  {}: {}{}", serde_json::to_string(key)?, reindented, sep);
+            let mut out = String::with_capacity(text.len() + insertion.len());
+            out.push_str(&text[..=brace]);
+            out.push_str(&insertion);
+            out.push_str(&text[brace + 1..]);
+            Ok(out)
+        }
+    }
+}
+
 /// Prefix every line after the first with `indent` (the serializer emits an
 /// object whose continuation lines start at column 0).
 fn reindent(pretty: &str, indent: &str) -> String {
@@ -280,5 +353,56 @@ mod tests {
         let out = merge("", "mcpServers", &[("x".into(), json!({"url":"u"}))]).unwrap();
         assert!(out.contains("\"mcpServers\""));
         serde_json::from_str::<Value>(&out).unwrap();
+    }
+
+    #[test]
+    fn top_level_upserts_and_preserves_unmanaged_keys() {
+        let existing =
+            "{\n  \"theme\": \"dark\",\n  \"permissions\": {\n    \"deny\": [\"x\"]\n  }\n}\n";
+        let entries = vec![(
+            "permissions".to_string(),
+            json!({ "allow": ["Bash(git:*)"] }),
+        )];
+        let out = merge_top_level(existing, &entries, &[]).unwrap();
+        // Hand-set sibling key survives.
+        assert!(out.contains("\"theme\": \"dark\""));
+        // Managed key replaced wholesale (top-level ownership).
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["permissions"]["allow"][0], "Bash(git:*)");
+        assert!(v["permissions"].get("deny").is_none());
+    }
+
+    #[test]
+    fn top_level_inserts_into_empty_and_into_existing() {
+        let out = merge_top_level("", &[("model".into(), json!("opus"))], &[]).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&out).unwrap()["model"],
+            "opus"
+        );
+        let out2 = merge_top_level(
+            "{\n  \"a\": 1\n}\n",
+            &[("model".into(), json!("opus"))],
+            &[],
+        )
+        .unwrap();
+        let v: Value = serde_json::from_str(&out2).unwrap();
+        assert_eq!(v["a"], 1);
+        assert_eq!(v["model"], "opus");
+    }
+
+    #[test]
+    fn top_level_removal_prunes_key() {
+        let existing = "{\n  \"keep\": 1,\n  \"model\": \"opus\"\n}\n";
+        let out = merge_top_level(existing, &[], &["model".into()]).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["keep"], 1);
+        assert!(v.get("model").is_none());
+    }
+
+    #[test]
+    fn top_level_preserves_float_in_unmanaged_key() {
+        let existing = "{\n  \"avg\": 0.9402052562189797,\n  \"model\": \"x\"\n}\n";
+        let out = merge_top_level(existing, &[("model".into(), json!("opus"))], &[]).unwrap();
+        assert!(out.contains("0.9402052562189797"));
     }
 }
