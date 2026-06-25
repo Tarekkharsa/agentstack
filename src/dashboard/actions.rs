@@ -169,6 +169,63 @@ pub fn import_settings(manifest_dir: Option<&Path>, target: &str) -> Result<usiz
     Ok(count)
 }
 
+/// Add a lifecycle hook to the manifest from dashboard form fields.
+pub fn add_hook(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
+    let name = args
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("hook name is required")?;
+    let event = args
+        .get("event")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("hook event is required")?;
+    let command = args
+        .get("command")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("hook command is required")?;
+
+    let mut body = serde_json::Map::new();
+    body.insert("event".into(), Value::String(event.to_string()));
+    body.insert("command".into(), Value::String(command.to_string()));
+    if let Some(m) = str_field(args, "matcher") {
+        body.insert("matcher".into(), Value::String(m));
+    }
+    if let Some(t) = args.get("targets").and_then(Value::as_array) {
+        let targets: Vec<Value> = t.iter().filter(|v| v.is_string()).cloned().collect();
+        if !targets.is_empty() {
+            body.insert("targets".into(), Value::Array(targets));
+        }
+    }
+
+    let dir = match manifest_dir {
+        Some(d) => d.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    let manifest_path = dir.join(crate::manifest::load::MANIFEST_FILE);
+    let original = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let parsed: crate::manifest::Manifest =
+        toml::from_str(&original).context("parsing manifest")?;
+    if parsed.hooks.contains_key(name) {
+        anyhow::bail!("hook '{name}' already exists");
+    }
+    let new_text = crate::commands::add::build_manifest_with(
+        &original,
+        "hooks",
+        name,
+        &Value::Object(body),
+        None,
+    )?;
+    toml::from_str::<crate::manifest::Manifest>(&new_text)
+        .context("resulting manifest would be invalid")?;
+    crate::util::atomic::write(&manifest_path, &new_text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    Ok(name.to_string())
+}
+
 /// Set (replace) the `[settings.<target>]` block in the manifest from a JSON
 /// object supplied by the dashboard. Comments + other settings blocks survive.
 pub fn set_settings(manifest_dir: Option<&Path>, args: &Value) -> Result<()> {

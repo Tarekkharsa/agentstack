@@ -36,6 +36,9 @@ pub struct TargetState {
     /// Top-level keys we own in this target's native settings file.
     #[serde(default)]
     pub managed_settings: Vec<String>,
+    /// Hook names we compiled into this target's native hooks config.
+    #[serde(default)]
+    pub managed_hooks: Vec<String>,
     /// Hash of the file content we last wrote, as hex. Lets us tell "unchanged"
     /// from "edited on disk since our last write".
     #[serde(default)]
@@ -122,6 +125,20 @@ impl State {
     pub fn record_settings(&mut self, key: &str, managed_settings: Vec<String>) {
         let entry = self.targets.entry(key.to_string()).or_default();
         entry.managed_settings = managed_settings;
+    }
+
+    /// Hook names we compiled into `key`'s native hooks config.
+    pub fn managed_hooks(&self, key: &str) -> Vec<String> {
+        self.targets
+            .get(key)
+            .map(|t| t.managed_hooks.clone())
+            .unwrap_or_default()
+    }
+
+    /// Record the set of hook names we own for `key`.
+    pub fn record_hooks(&mut self, key: &str, managed_hooks: Vec<String>) {
+        let entry = self.targets.entry(key.to_string()).or_default();
+        entry.managed_hooks = managed_hooks;
     }
 }
 

@@ -39,6 +39,10 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub settings: IndexMap<String, serde_json::Value>,
 
+    /// Lifecycle hooks compiled into each hook-capable harness's native config.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub hooks: IndexMap<String, Hook>,
+
     /// Where `apply` writes by default and which adapters are in play.
     #[serde(default)]
     pub targets: Targets,
@@ -110,6 +114,28 @@ pub struct Instruction {
 
 fn all_targets() -> Vec<String> {
     vec!["*".to_string()]
+}
+
+/// One lifecycle hook: run `command` on a harness `event` (optionally filtered
+/// by `matcher`). Compiled into each hook-capable harness's native hooks config.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct Hook {
+    /// Lifecycle event, e.g. `PreToolUse`, `PostToolUse`, `SessionStart`.
+    pub event: String,
+    /// Tool/agent/notification filter for events that support it (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matcher: Option<String>,
+    /// Command to run.
+    pub command: String,
+    /// Extra command arguments (optional).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    /// Timeout in seconds (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
+    /// Adapter ids this hook applies to; `["*"]` (the default) = all hook-capable.
+    #[serde(default = "all_targets")]
+    pub targets: Vec<String>,
 }
 
 impl Instruction {

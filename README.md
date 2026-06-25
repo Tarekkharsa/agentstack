@@ -106,6 +106,10 @@ Implemented and tested:
   one `[settings.<cli>]` block. `apply` merges only the keys you declare into the
   real file (top-level ownership), resolves `${REF}`s, preserves hand-set keys,
   and prunes keys that leave the manifest. Editable from the dashboard.
+- **Lifecycle hooks** — declare `[hooks.*]` once (event + optional matcher +
+  command) and `apply` compiles them into each harness's native hooks config
+  (Claude Code's `hooks` in settings.json), resolving secrets and pruning hooks
+  that leave the manifest. Add/list from the dashboard Hooks pane.
 - **`adopt`** — the reverse of `apply`: pull a hand-added server from a target
   config back into the manifest, lifting its inline secret, preserving comments.
 - **`add`** — flag-driven (scriptable / agent-operable) add of a server or skill

@@ -153,6 +153,9 @@ fn route(
         (Method::Post, "/api/set_settings") => mutation(authed, read_only, || {
             crate::dashboard::actions::set_settings(dir, &parse(body))
         }),
+        (Method::Post, "/api/add_hook") => mutation(authed, read_only, || {
+            crate::dashboard::actions::add_hook(dir, &parse(body)).map(|_| ())
+        }),
         (Method::Post, "/api/import_settings") => mutation(authed, read_only, || {
             let target = field(&parse(body), "target")?;
             crate::dashboard::actions::import_settings(dir, &target).map(|_| ())

@@ -8,7 +8,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::ApplyArgs;
 use crate::manifest::validate;
-use crate::render::{plan_settings, plan_target, resolve_targets, Selection};
+use crate::render::{plan_hooks, plan_settings, plan_target, resolve_targets, Selection};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 
@@ -152,6 +152,32 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 }
             } else if will_write && !sblocked {
                 state.record_settings(&key, sp.managed.clone());
+            }
+        }
+
+        // Lifecycle hooks (compiled into the harness's native hooks config).
+        let prev_hooks = !state.managed_hooks(&key).is_empty();
+        if let Some(hp) = plan_hooks(manifest, desc, &ctx.resolver, prev_hooks, scope, &ctx.dir)? {
+            for u in &hp.unresolved {
+                println!("  {} unresolved secret {} (hook)", "✗".red(), u);
+                error_count += 1;
+            }
+            let hblocked = !hp.unresolved.is_empty() && !args.allow_unresolved;
+            if hp.changed() {
+                changed_count += 1;
+                println!("  {} hooks → {}", "·".dimmed(), hp.path.display());
+                print!("{}", indent(&hp.diff()));
+                if will_write && hblocked {
+                    println!("  {} hooks not written — unresolved secret(s)", "✗".red());
+                } else if will_write {
+                    hp.write()?;
+                    state.record_hooks(&key, hp.managed.clone());
+                    println!("  {} wrote {} hook(s)", "✓".green(), hp.managed.len());
+                } else {
+                    println!("  {} {} hook(s) to apply", "→".cyan(), hp.managed.len());
+                }
+            } else if will_write && !hblocked {
+                state.record_hooks(&key, hp.managed.clone());
             }
         }
     }

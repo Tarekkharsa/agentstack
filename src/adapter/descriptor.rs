@@ -30,6 +30,9 @@ pub struct AdapterDescriptor {
     /// Native settings file (e.g. Claude Code `~/.claude/settings.json`).
     #[serde(default)]
     pub settings: Option<SettingsSpec>,
+    /// Lifecycle-hook destination, if the CLI supports hooks.
+    #[serde(default)]
+    pub hooks: Option<HooksSpec>,
 }
 
 impl AdapterDescriptor {
@@ -61,6 +64,19 @@ impl AdapterDescriptor {
         match scope {
             Scope::Global => Some((paths::expand_tilde(&s.global), s.format)),
             Scope::Project => s.project.as_ref().map(|p| (project_dir.join(p), s.format)),
+        }
+    }
+
+    /// The hooks destination file + format for a scope, if the CLI has one.
+    pub fn hooks_for(
+        &self,
+        scope: Scope,
+        project_dir: &std::path::Path,
+    ) -> Option<(PathBuf, Format)> {
+        let h = self.hooks.as_ref()?;
+        match scope {
+            Scope::Global => Some((paths::expand_tilde(&h.global), h.format)),
+            Scope::Project => h.project.as_ref().map(|p| (project_dir.join(p), h.format)),
         }
     }
 
@@ -256,6 +272,31 @@ pub enum SettingKind {
     String,
     Number,
     Enum,
+}
+
+/// Lifecycle-hook destination for a CLI. Claude Code keeps hooks under the
+/// `hooks` key of its settings.json; other harnesses may differ.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HooksSpec {
+    pub format: Format,
+    /// Global hooks file (e.g. `~/.claude/settings.json`).
+    pub global: String,
+    /// Project hooks file relative to the repo.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// Top-level key the hooks object lives under (e.g. `hooks`).
+    pub key: String,
+    /// How to shape the hooks object. Only `claude` is supported today.
+    #[serde(default)]
+    pub shape: HookShape,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HookShape {
+    /// Claude form: event → [{matcher?, hooks: [{type, command, …}]}].
+    #[default]
+    Claude,
 }
 
 /// Project-scope config location for a CLI that supports project files.

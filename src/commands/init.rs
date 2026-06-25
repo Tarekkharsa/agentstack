@@ -65,6 +65,7 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
         profiles: IndexMap::new(),
         instructions: IndexMap::new(),
         settings,
+        hooks: IndexMap::new(),
         targets: Targets {
             default: detected.clone(),
         },
@@ -174,6 +175,7 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
         profiles: IndexMap::new(),
         instructions: IndexMap::new(),
         settings,
+        hooks: IndexMap::new(),
         targets: Targets {
             default: detected.clone(),
         },

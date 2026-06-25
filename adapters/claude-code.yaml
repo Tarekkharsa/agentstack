@@ -39,6 +39,14 @@ instructions:
 # Native settings file: permissions, hooks, feature flags. Separate from the
 # MCP config (~/.claude.json); agentstack owns only the top-level keys you
 # declare under [settings.claude-code] and leaves the rest untouched.
+# Lifecycle hooks live under the "hooks" key of settings.json. agentstack owns
+# that whole key when you declare any [hooks.*]; declare none and it's left/pruned.
+hooks:
+  format: json
+  global: ~/.claude/settings.json
+  project: .claude/settings.json
+  key: hooks
+  shape: claude
 settings:
   format: json
   global: ~/.claude/settings.json

@@ -7,6 +7,7 @@ let READONLY = false;
 let OPEN_SERVER = null;
 let ADD_FORM = false;
 let SKILL_FORM = false;
+let HOOK_FORM = false;
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -14,6 +15,7 @@ const SECTIONS = [
   { id: "servers", label: "Servers", count: (d) => d.servers.length },
   { id: "skills", label: "Skills", count: (d) => d.skills.length },
   { id: "settings", label: "Settings", count: (d) => (d.settingsAdapters || []).length },
+  { id: "hooks", label: "Hooks", count: (d) => (d.hooks || []).length },
   { id: "instructions", label: "Instructions", count: (d) => d.instructions.length },
   { id: "secrets", label: "Secrets", count: (d) => d.secrets.length },
   { id: "health", label: "Health" },
@@ -72,7 +74,7 @@ function show(id) {
   renderNav();
   const c = document.getElementById("content");
   c.innerHTML = "";
-  ({ overview, discover, servers, skills, settings, instructions, secrets, health }[id] || overview)(c);
+  ({ overview, discover, servers, skills, settings, hooks, instructions, secrets, health }[id] || overview)(c);
 }
 
 /* ---------- discover (browse providers → add) ---------- */
@@ -616,6 +618,56 @@ function settingRow(adapterId, f, draft, refresh) {
     control,
     f.help ? el("span", { class: "muted", style: "font-size:11px;flex:1" }, [f.help]) : null,
   ]);
+}
+
+/* ---------- hooks ---------- */
+const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "UserPromptSubmit", "SessionStart", "SessionEnd", "Stop", "SubagentStop", "PreCompact", "Notification"];
+function saveHook() {
+  const g = (id) => (document.getElementById(id) || {}).value || "";
+  const body = { name: g("hk-name").trim(), event: g("hk-event"), command: g("hk-command").trim() };
+  const m = g("hk-matcher").trim();
+  if (m) body.matcher = m;
+  if (!body.name) return toast("Name is required", false);
+  if (!body.command) return toast("Command is required", false);
+  fetch(q("/api/add_hook"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => { if (!ok || d.error) throw new Error(d.error || "failed"); HOOK_FORM = false; toast("Hook added — Apply to write it", true); load(); })
+    .catch((e) => toast("Add hook: " + e.message, false));
+}
+function addHookCard() {
+  const row = (label, node) => el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:8px" }, [
+    el("label", { class: "muted", style: "width:90px;font-size:12px" }, [label]), node,
+  ]);
+  const ev = el("select", { id: "hk-event", style: "height:32px" }, HOOK_EVENTS.map((e) => el("option", { value: e }, [e])));
+  return el("div", { class: "card", style: "margin-bottom:16px" }, [
+    el("div", { class: "hd" }, ["Add hook", el("small", null, ["compiled into each harness's native hooks config on Apply"])]),
+    el("div", { class: "bd" }, [
+      row("name", el("input", { id: "hk-name", class: "inp", placeholder: "e.g. format-on-edit", style: "width:240px" })),
+      row("event", ev),
+      row("matcher", el("input", { id: "hk-matcher", class: "inp", placeholder: "(optional) e.g. Edit|Write", style: "width:240px" })),
+      row("command", el("input", { id: "hk-command", class: "inp", placeholder: "prettier --write", style: "width:340px" })),
+      el("div", { class: "toolbar", style: "margin-top:6px" }, [btn("Save", saveHook, "primary"), btn("Cancel", () => { HOOK_FORM = false; show("hooks"); })]),
+    ]),
+  ]);
+}
+function hooks(c) {
+  c.appendChild(pageHead("Hooks", "Run commands at lifecycle events (PreToolUse, SessionStart, …). Declared once here; compiled into each harness's native hooks config on Apply."));
+  const list = DATA.hooks || [];
+  if (!READONLY) {
+    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
+      btn(HOOK_FORM ? "Close" : "+ Add hook", () => { HOOK_FORM = !HOOK_FORM; show("hooks"); }, "primary"),
+    ]));
+    if (HOOK_FORM) c.appendChild(addHookCard());
+  }
+  const rows = list.map((h) => el("div", { class: "list-row" }, [
+    el("span", null, [
+      el("span", { class: "name" }, [h.name]),
+      el("div", { class: "muted mono", style: "font-size:12px" }, [h.event + (h.matcher ? " · " + h.matcher : "") + " → " + h.command]),
+    ]),
+    el("span", { class: "row-actions" }, (h.targets || ["*"]).map((t) => badge(t, "solid"))),
+  ]));
+  if (!rows.length) rows.push(el("div", { class: "empty" }, ["No hooks yet. Add one, or [hooks.*] in the manifest."]));
+  c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, rows)]));
 }
 
 /* ---------- instructions ---------- */

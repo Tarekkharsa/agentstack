@@ -163,6 +163,30 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         })
         .collect();
 
+    // Lifecycle hooks.
+    let hooks: Vec<Value> = manifest
+        .hooks
+        .iter()
+        .map(|(name, h)| {
+            json!({
+                "name": name,
+                "event": h.event,
+                "matcher": h.matcher,
+                "command": h.command,
+                "args": h.args,
+                "timeout": h.timeout,
+                "targets": h.targets,
+            })
+        })
+        .collect();
+    // Which adapters can run hooks (the targets a hook can be aimed at).
+    let hook_adapters: Vec<Value> = ctx
+        .registry
+        .iter()
+        .filter(|d| d.hooks.is_some())
+        .map(|d| json!({"id": d.id, "display": d.display}))
+        .collect();
+
     // Instruction fragments.
     let instructions: Vec<Value> = manifest
         .instructions
@@ -293,6 +317,8 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "skillAdapters": skill_adapters,
         "discoveredSkills": discovered_skills,
         "settingsAdapters": settings_adapters,
+        "hooks": hooks,
+        "hookAdapters": hook_adapters,
         "instructions": instructions,
         "secrets": secrets,
         "profiles": profiles,

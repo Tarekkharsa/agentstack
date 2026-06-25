@@ -221,6 +221,7 @@ fn init_pipeline_roundtrips_through_valid_toml() {
         profiles: IndexMap::new(),
         instructions: IndexMap::new(),
         settings: IndexMap::new(),
+        hooks: IndexMap::new(),
         targets: Targets {
             default: vec!["claude-code".into()],
         },

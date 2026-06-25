@@ -6,6 +6,7 @@ pub mod validate;
 
 pub use load::{load_from_dir, LoadedManifest};
 pub use model::{
-    glob_match, Instruction, Manifest, Policy, Profile, Server, ServerType, Skill, SkillSource,
+    glob_match, Hook, Instruction, Manifest, Policy, Profile, Server, ServerType, Skill,
+    SkillSource,
 };
 pub use validate::{validate, Issue, IssueKind};
