@@ -118,6 +118,13 @@ fn route(
             let enable = v.get("enable").and_then(Value::as_bool).unwrap_or(true);
             crate::dashboard::actions::toggle(dir, &server, &target, scope_of(body), enable)
         }),
+        (Method::Post, "/api/toggle_skill") => mutation(authed, read_only, || {
+            let v = parse(body);
+            let skill = field(&v, "skill")?;
+            let target = field(&v, "target")?;
+            let enable = v.get("enable").and_then(Value::as_bool).unwrap_or(true);
+            crate::dashboard::actions::toggle_skill(dir, &skill, &target, scope_of(body), enable)
+        }),
         (Method::Post, "/api/add_server") => mutation(authed, read_only, || {
             crate::dashboard::actions::add_server(dir, &parse(body)).map(|_| ())
         }),

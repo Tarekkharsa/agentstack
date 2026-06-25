@@ -109,7 +109,28 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         })
         .collect();
 
-    // Skills: source + lock detail + installed status.
+    // Which adapters have a skills directory (the columns of the skills matrix).
+    let skill_adapters: Vec<Value> = ctx
+        .registry
+        .iter()
+        .filter(|d| {
+            d.skills_dir_for(Scope::Global, &ctx.dir).is_some()
+                || d.skills_dir_for(Scope::Project, &ctx.dir).is_some()
+        })
+        .map(|d| {
+            json!({
+                "id": d.id,
+                "display": d.display,
+                "supportsProject": d.skills_dir_for(Scope::Project, &ctx.dir).is_some(),
+            })
+        })
+        .collect();
+    let skill_adapter_ids: Vec<String> = skill_adapters
+        .iter()
+        .map(|a| a["id"].as_str().unwrap_or("").to_string())
+        .collect();
+
+    // Skills: source + lock detail + installed + per-CLI active cells.
     let skills: Vec<Value> = manifest
         .skills
         .iter()
@@ -120,6 +141,16 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 Err(_) => ("invalid", Value::Null),
             };
             let locked = lock.get(name);
+            let cells: Vec<Value> = skill_adapter_ids
+                .iter()
+                .map(|id| {
+                    json!({
+                        "adapter": id,
+                        "global": state.managed_skills(&target_key(id, Scope::Global)).contains(name),
+                        "project": state.managed_skills(&target_key(id, Scope::Project)).contains(name),
+                    })
+                })
+                .collect();
             json!({
                 "name": name,
                 "source": kind,
@@ -127,6 +158,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 "installed": local_source_dir(&store, sk, &ctx.dir).is_some(),
                 "lockedRev": locked.and_then(|l| l.rev.clone()),
                 "checksum": locked.map(|l| l.checksum.clone()),
+                "cells": cells,
             })
         })
         .collect();
@@ -200,6 +232,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "adapters": adapters,
         "servers": servers,
         "skills": skills,
+        "skillAdapters": skill_adapters,
         "instructions": instructions,
         "secrets": secrets,
         "profiles": profiles,

@@ -333,23 +333,53 @@ function serverDetail(s, span) {
 }
 
 /* ---------- skills ---------- */
+function toggleSkillCell(skillName, target, currentlyOn) {
+  return post("/api/toggle_skill", { skill: skillName, target, scope: "global", enable: !currentlyOn },
+    (currentlyOn ? "Disabled " : "Enabled ") + skillName);
+}
+
 function skills(c) {
-  c.appendChild(pageHead("Skills", "Sources, versions, and whether each is installed in the store."));
-  const rows = DATA.skills.map((s) => {
+  c.appendChild(pageHead("Skills", "Toggle a skill into each CLI's skills directory. A skill must be installed (in the store) before it can be enabled."));
+  const adapters = DATA.skillAdapters || [];
+
+  if (!READONLY && DATA.skills.some((s) => !s.installed)) {
+    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
+      btn("Install missing", () => post("/api/install", {}, "Install"), "primary"),
+    ]));
+  }
+
+  const head = el("tr", null, [el("th", null, ["skill"])]);
+  adapters.forEach((a) => head.appendChild(el("th", { class: "cell" }, [a.display])));
+  head.appendChild(el("th", null, ["status"]));
+
+  const body = el("tbody");
+  if (!DATA.skills.length) body.appendChild(el("tr", null, [el("td", { colspan: adapters.length + 2 }, [el("span", { class: "empty" }, ["No skills in the manifest. Add [skills.*] or install from a source."])])]));
+  DATA.skills.forEach((s) => {
     const detail = s.source === "git"
       ? `git · ${(s.src.git || "")}${s.lockedRev ? " @ " + s.lockedRev.slice(0, 8) : ""}`
       : `path · ${s.src.path || ""}`;
-    return el("div", { class: "list-row" }, [
-      el("span", null, [el("span", { class: "name" }, [s.name]), el("div", { class: "muted mono", style: "font-size:12px" }, [detail])]),
-      s.installed ? badge("installed", "green") : badge("not installed", "amber"),
+    const tr = el("tr", null, [
+      el("td", null, [el("span", { class: "name" }, [s.name]), el("div", { class: "muted mono", style: "font-size:12px" }, [detail])]),
     ]);
+    adapters.forEach((a) => {
+      const cell = (s.cells || []).find((x) => x.adapter === a.id) || {};
+      const tag = cell.global && cell.project ? "both" : cell.global ? "global" : cell.project ? "project" : "";
+      const on = cell.global || cell.project;
+      const inner = [el("div", { class: on ? "on" : "off" }, [on ? "✓" : "–"]), tag ? el("div", { class: "sc" }, [tag]) : null];
+      const td = el("td", { class: "cell" }, inner);
+      if (!READONLY && s.installed) {
+        td.style.cursor = "pointer";
+        td.title = `${cell.global ? "disable" : "enable"} ${s.name} for ${a.display} (global)`;
+        td.addEventListener("click", (e) => { e.stopPropagation(); toggleSkillCell(s.name, a.id, !!cell.global); });
+      } else if (!READONLY) {
+        td.title = "install the skill first to enable it";
+      }
+      tr.appendChild(td);
+    });
+    tr.appendChild(el("td", null, [s.installed ? badge("installed", "green") : badge("not installed", "amber")]));
+    body.appendChild(tr);
   });
-  if (!rows.length) rows.push(el("div", { class: "empty" }, ["No skills in the manifest."]));
-  const body = [el("div", null, rows)];
-  if (!READONLY && DATA.skills.some((s) => !s.installed)) {
-    body.push(el("div", { style: "margin-top:14px" }, [btn("Install missing", () => post("/api/install", {}, "Install"), "primary")]));
-  }
-  c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, body)]));
+  c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("table", null, [el("thead", null, [head]), body])])]));
 }
 
 /* ---------- instructions ---------- */

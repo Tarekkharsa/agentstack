@@ -1,16 +1,17 @@
 //! Dashboard write actions that don't map 1:1 to a CLI command: per-CLI
 //! enable/disable of a server, and adding a custom server to the manifest.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use serde_json::Value;
 
 use crate::manifest::{Server, ServerType};
-use crate::render::{plan_target, Selection};
+use crate::render::{plan_target, skills, Selection};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
+use crate::store::{local_source_dir, Store};
 
 /// Enable or disable one server for one target CLI in a scope. Writes that CLI's
 /// config (rendering its full enabled set) and updates state.
@@ -59,6 +60,63 @@ pub fn toggle(
     state.record(&key, plan.managed.clone(), &plan.proposed);
     state.save()?;
     crate::usage::bump(&[server.to_string()]);
+    Ok(())
+}
+
+/// Enable or disable one skill for one target CLI in a scope by materializing
+/// (symlink/copy) or pruning it in that CLI's skills directory.
+pub fn toggle_skill(
+    manifest_dir: Option<&Path>,
+    skill: &str,
+    target: &str,
+    scope: Scope,
+    enable: bool,
+) -> Result<()> {
+    let ctx = crate::commands::load(manifest_dir)?;
+    let manifest = &ctx.loaded.manifest;
+    if !manifest.skills.contains_key(skill) {
+        anyhow::bail!("no skill '{skill}' in the manifest");
+    }
+    let desc = ctx
+        .registry
+        .get(target)
+        .with_context(|| format!("unknown target '{target}'"))?;
+    let skills_dir = desc
+        .skills_dir_for(scope, &ctx.dir)
+        .with_context(|| format!("{} has no {scope} skills directory", desc.display))?;
+    let strategy = desc.skills.as_ref().map(|s| s.strategy).unwrap_or_default();
+    let store = Store::default_store();
+
+    let key = target_key(target, scope);
+    let mut state = State::load()?;
+    let previously = state.managed_skills(&key);
+
+    let mut wanted = previously.clone();
+    if enable {
+        if local_source_dir(&store, &manifest.skills[skill], &ctx.dir).is_none() {
+            anyhow::bail!("skill '{skill}' is not installed — run Install first");
+        }
+        if !wanted.iter().any(|s| s == skill) {
+            wanted.push(skill.to_string());
+        }
+    } else {
+        wanted.retain(|s| s != skill);
+    }
+
+    // Resolve the wanted skills to their local source dirs (installed only).
+    let active: Vec<(String, PathBuf)> = wanted
+        .iter()
+        .filter_map(|n| {
+            let sk = manifest.skills.get(n)?;
+            local_source_dir(&store, sk, &ctx.dir).map(|p| (n.clone(), p))
+        })
+        .collect();
+
+    let plan = skills::plan(skills_dir, strategy, active, &previously);
+    skills::materialize(&plan)?;
+    state.record_skills(&key, plan.managed_names());
+    state.save()?;
+    crate::usage::bump(&[skill.to_string()]);
     Ok(())
 }
 
