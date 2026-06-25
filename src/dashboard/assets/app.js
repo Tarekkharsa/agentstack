@@ -13,6 +13,7 @@ const SECTIONS = [
   { id: "discover", label: "Discover" },
   { id: "servers", label: "Servers", count: (d) => d.servers.length },
   { id: "skills", label: "Skills", count: (d) => d.skills.length },
+  { id: "settings", label: "Settings", count: (d) => (d.settingsAdapters || []).length },
   { id: "instructions", label: "Instructions", count: (d) => d.instructions.length },
   { id: "secrets", label: "Secrets", count: (d) => d.secrets.length },
   { id: "health", label: "Health" },
@@ -71,7 +72,7 @@ function show(id) {
   renderNav();
   const c = document.getElementById("content");
   c.innerHTML = "";
-  ({ overview, discover, servers, skills, instructions, secrets, health }[id] || overview)(c);
+  ({ overview, discover, servers, skills, settings, instructions, secrets, health }[id] || overview)(c);
 }
 
 /* ---------- discover (browse providers → add) ---------- */
@@ -424,6 +425,48 @@ function skills(c) {
     body.appendChild(tr);
   });
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("table", null, [el("thead", null, [head]), body])])]));
+}
+
+/* ---------- settings ---------- */
+function saveSettings(target, textareaId) {
+  const raw = (document.getElementById(textareaId) || {}).value || "";
+  let parsed;
+  try {
+    parsed = raw.trim() === "" ? {} : JSON.parse(raw);
+  } catch (e) {
+    return toast("Invalid JSON: " + e.message, false);
+  }
+  if (typeof parsed !== "object" || Array.isArray(parsed)) return toast("Settings must be a JSON object", false);
+  post("/api/set_settings", { target, settings: parsed }, "Settings for " + target);
+}
+
+function settings(c) {
+  c.appendChild(pageHead("Settings", "Each CLI's native settings file (permissions, feature flags). Declared once here; written into every CLI's settings file on Apply. agentstack owns only the keys you set and preserves the rest."));
+  const adapters = DATA.settingsAdapters || [];
+  if (!adapters.length) {
+    c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, ["No CLIs with a managed settings file yet."])])]));
+    return;
+  }
+  adapters.forEach((a, i) => {
+    const taId = "settings-ta-" + i;
+    const pretty = JSON.stringify(a.current || {}, null, 2);
+    const ta = el("textarea", { id: taId, class: "inp mono", style: "width:100%;min-height:150px;resize:vertical;white-space:pre" });
+    ta.value = pretty === "{}" ? "" : pretty;
+    const body = [
+      el("div", { class: "muted mono", style: "font-size:12px;margin-bottom:8px" }, [a.path]),
+      ta,
+    ];
+    if (!READONLY) {
+      body.push(el("div", { class: "toolbar", style: "margin-top:8px" }, [
+        btn("Save", () => saveSettings(a.id, taId), "primary"),
+        el("span", { class: "muted", style: "font-size:12px" }, ["then Apply (Overview) to write it into the CLI"]),
+      ]));
+    }
+    c.appendChild(el("div", { class: "card", style: "margin-bottom:16px" }, [
+      el("div", { class: "hd" }, [a.display, el("small", null, ["settings.json"])]),
+      el("div", { class: "bd" }, body),
+    ]));
+  });
 }
 
 /* ---------- instructions ---------- */

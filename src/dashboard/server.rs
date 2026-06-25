@@ -131,6 +131,9 @@ fn route(
         (Method::Post, "/api/add_skill") => mutation(authed, read_only, || {
             crate::dashboard::actions::add_skill(dir, &parse(body)).map(|_| ())
         }),
+        (Method::Post, "/api/set_settings") => mutation(authed, read_only, || {
+            crate::dashboard::actions::set_settings(dir, &parse(body))
+        }),
         (Method::Post, "/api/add_from") => mutation(authed, read_only, || {
             let v = parse(body);
             let id = field(&v, "id")?;

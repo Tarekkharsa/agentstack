@@ -120,6 +120,48 @@ pub fn toggle_skill(
     Ok(())
 }
 
+/// Set (replace) the `[settings.<target>]` block in the manifest from a JSON
+/// object supplied by the dashboard. Comments + other settings blocks survive.
+pub fn set_settings(manifest_dir: Option<&Path>, args: &Value) -> Result<()> {
+    let target = args
+        .get("target")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("target is required")?;
+    let body = args
+        .get("settings")
+        .cloned()
+        .filter(|v| v.is_object())
+        .context("settings must be a JSON object")?;
+
+    // The target must be a real adapter id that actually has a settings file.
+    let ctx = crate::commands::load(manifest_dir)?;
+    let desc = ctx
+        .registry
+        .get(target)
+        .with_context(|| format!("unknown target '{target}'"))?;
+    if desc.settings.is_none() {
+        anyhow::bail!("{} has no native settings file to manage", desc.display);
+    }
+
+    let manifest_path = ctx.loaded.manifest_path.clone();
+    let original = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    // Upsert `[settings.<target>]` as a table; nested objects → subtables.
+    let new_text = crate::render::merge_toml::merge(
+        &original,
+        "settings",
+        &[(target.to_string(), body)],
+        true,
+    )?;
+    // Guard: the result must still parse as a manifest.
+    toml::from_str::<crate::manifest::Manifest>(&new_text)
+        .context("resulting manifest would be invalid")?;
+    crate::util::atomic::write(&manifest_path, &new_text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    Ok(())
+}
+
 /// Add a skill to the manifest from dashboard form fields (git URL or local
 /// path). Mirrors `add_server` — writes the manifest only; the user then clicks
 /// Install to fetch it and toggles it into a CLI.

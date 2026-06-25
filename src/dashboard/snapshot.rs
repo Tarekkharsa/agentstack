@@ -220,6 +220,31 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
             .collect()
     };
 
+    // Settings: one card per CLI that has a native settings file, prefilled with
+    // the manifest's current [settings.<id>] block (or empty).
+    let settings_adapters: Vec<Value> = ctx
+        .registry
+        .iter()
+        .filter(|d| d.settings.is_some())
+        .map(|d| {
+            let current = manifest
+                .settings
+                .get(&d.id)
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let path = d
+                .settings_for(Scope::Global, &ctx.dir)
+                .map(|(p, _)| p.display().to_string())
+                .unwrap_or_default();
+            json!({
+                "id": d.id,
+                "display": d.display,
+                "path": path,
+                "current": current,
+            })
+        })
+        .collect();
+
     let health = health_checks(&ctx, manifest, &state);
 
     Ok(json!({
@@ -233,6 +258,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "servers": servers,
         "skills": skills,
         "skillAdapters": skill_adapters,
+        "settingsAdapters": settings_adapters,
         "instructions": instructions,
         "secrets": secrets,
         "profiles": profiles,
