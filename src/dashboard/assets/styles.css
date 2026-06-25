@@ -104,3 +104,25 @@ tbody tr:hover { background: hsl(var(--muted) / 0.5); }
 .foot { margin-top: 36px; font-size: 12px; color: hsl(var(--muted-foreground)); text-align: center; }
 .error { color: hsl(var(--red)); padding: 16px; }
 .ro-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
+
+/* Interactive controls (shadcn buttons / inputs) */
+.btn { font-size: 12px; font-weight: 500; height: 32px; padding: 0 12px; border-radius: calc(var(--radius) - 2px);
+  border: 1px solid hsl(var(--border)); background: hsl(var(--card)); color: hsl(var(--foreground));
+  cursor: pointer; transition: background .12s ease; }
+.btn:hover { background: hsl(var(--muted)); }
+.btn:active { transform: translateY(0.5px); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring)); }
+.toolbar { display: flex; gap: 8px; margin: 16px 0 4px; flex-wrap: wrap; }
+.toolbar .btn:first-child { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); border-color: transparent; }
+.toolbar .btn:first-child:hover { opacity: 0.9; }
+.inp { height: 30px; padding: 0 10px; font-size: 13px; border-radius: calc(var(--radius) - 2px);
+  border: 1px solid hsl(var(--input)); background: hsl(var(--background)); color: hsl(var(--foreground)); width: 140px; }
+.inp:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--ring)); }
+.setter { display: inline-flex; gap: 6px; align-items: center; }
+.setter .btn { height: 30px; }
+.row-actions { display: inline-flex; gap: 10px; align-items: center; }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 50;
+  font-size: 13px; padding: 10px 16px; border-radius: var(--radius); border: 1px solid hsl(var(--border));
+  background: hsl(var(--card)); box-shadow: 0 4px 14px hsl(var(--foreground) / 0.12); }
+.toast.ok { border-color: hsl(var(--green) / 0.4); }
+.toast.err { border-color: hsl(var(--red) / 0.4); color: hsl(var(--red)); }

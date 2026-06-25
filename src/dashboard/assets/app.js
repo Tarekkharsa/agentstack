@@ -14,6 +14,36 @@ function el(tag, attrs, children) {
 }
 const badge = (text, kind) => el("span", { class: "badge " + (kind || "") }, [text]);
 
+let READONLY = false;
+
+function toast(msg, ok) {
+  const t = el("div", { class: "toast " + (ok ? "ok" : "err") }, [msg]);
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3200);
+}
+
+// POST a mutation, then refresh the snapshot.
+function post(path, bodyObj, label) {
+  return fetch(path + "?token=" + encodeURIComponent(token), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(bodyObj || {}),
+  })
+    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || d.error) throw new Error(d.error || "request failed");
+      toast((label || "Done") + " ✓", true);
+      load();
+    })
+    .catch((e) => toast((label || "Action") + ": " + e.message, false));
+}
+
+function btn(label, onClick) {
+  const b = el("button", { class: "btn" }, [label]);
+  b.addEventListener("click", onClick);
+  return b;
+}
+
 function card(title, subtitle, bodyNodes) {
   const hd = el("div", { class: "hd" }, [el("h2", null, [title])]);
   if (subtitle) hd.appendChild(el("p", null, [subtitle]));
@@ -58,13 +88,23 @@ function matrix(data) {
   return el("table", null, [thead, el("tbody", null, rows)]);
 }
 
+function secretSetter(name) {
+  const input = el("input", { type: "password", placeholder: "value", class: "inp" });
+  const b = btn("Set", () => {
+    if (input.value) post("/api/secret", { name, value: input.value }, "Set " + name);
+  });
+  return el("span", { class: "setter" }, [input, b]);
+}
+
 function secretsPanel(data) {
-  const rows = data.secrets.map((s) =>
-    el("div", { class: "list-row" }, [
-      el("span", { class: "mono" }, [s.name]),
-      s.resolved ? badge("resolved", "green") : badge("missing", "red"),
-    ])
-  );
+  const rows = data.secrets.map((s) => {
+    const right = s.resolved
+      ? badge("resolved", "green")
+      : READONLY
+      ? badge("missing", "red")
+      : secretSetter(s.name);
+    return el("div", { class: "list-row" }, [el("span", { class: "mono" }, [s.name]), right]);
+  });
   if (rows.length === 0) rows.push(el("div", { class: "muted" }, ["no secrets referenced"]));
   const resolved = data.secrets.filter((s) => s.resolved).length;
   return card("Secrets", `${resolved}/${data.secrets.length} resolved on this machine`, rows);
@@ -95,19 +135,37 @@ function statsPanel(data) {
 }
 
 function profilesPanel(data) {
-  const rows = data.profiles.map((p) =>
-    el("div", { class: "list-row" }, [
-      el("span", { class: "name" }, [p.name]),
-      el("span", { class: "muted" }, [`${p.servers.length} server(s) · ${p.skills.length} skill(s)`]),
-    ])
-  );
+  const rows = data.profiles.map((p) => {
+    const meta = el("span", { class: "muted" }, [
+      `${p.servers.length} server(s) · ${p.skills.length} skill(s)`,
+    ]);
+    const right = READONLY
+      ? meta
+      : el("span", { class: "row-actions" }, [
+          meta,
+          btn("activate ›", () =>
+            post("/api/use", { profile: p.name, scope: "global" }, "Activate " + p.name)
+          ),
+        ]);
+    return el("div", { class: "list-row" }, [el("span", { class: "name" }, [p.name]), right]);
+  });
   if (rows.length === 0) rows.push(el("div", { class: "muted" }, ["no profiles"]));
   return card("Profiles", null, rows);
 }
 
+function toolbar() {
+  return el("div", { class: "toolbar" }, [
+    btn("Apply → global", () => post("/api/apply", { scope: "global" }, "Apply (global)")),
+    btn("Apply → project", () => post("/api/apply", { scope: "project" }, "Apply (project)")),
+    btn("Install", () => post("/api/install", {}, "Install")),
+  ]);
+}
+
 function render(data) {
+  READONLY = !!data.readOnly;
   document.getElementById("dir").textContent = data.meta.dir;
   document.getElementById("ver").textContent = "v" + data.meta.version;
+  document.getElementById("mode").textContent = READONLY ? "read-only" : "read-write";
   const app = document.getElementById("app");
   app.innerHTML = "";
 
@@ -120,6 +178,8 @@ function render(data) {
     statCard("Secrets", `${secretsOk}/${data.secrets.length}`, "resolved"),
   ]));
 
+  if (!READONLY) app.appendChild(toolbar());
+
   app.appendChild(el("div", { class: "section-title" }, ["Cross-harness matrix"]));
   app.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [matrix(data)])]));
 
@@ -128,13 +188,19 @@ function render(data) {
   app.appendChild(el("div", { class: "grid cols-2", style: "margin-top:16px" }, [profilesPanel(data), statsPanel(data)]));
 }
 
-fetch("/api/state?token=" + encodeURIComponent(token))
-  .then((r) => r.json())
-  .then((data) => {
-    if (data.error) throw new Error(data.error);
-    render(data);
-  })
-  .catch((e) => {
-    document.getElementById("app").innerHTML = "";
-    document.getElementById("app").appendChild(el("div", { class: "error" }, ["Failed to load: " + e.message]));
-  });
+function load() {
+  return fetch("/api/state?token=" + encodeURIComponent(token))
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.error) throw new Error(data.error);
+      render(data);
+    })
+    .catch((e) => {
+      document.getElementById("app").innerHTML = "";
+      document
+        .getElementById("app")
+        .appendChild(el("div", { class: "error" }, ["Failed to load: " + e.message]));
+    });
+}
+
+load();

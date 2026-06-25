@@ -28,12 +28,13 @@ binary, extensible to any CLI via data descriptors.
 
 ## Status — CLI complete + local dashboard (Phases 0–4)
 
-The full command-line tool plus a read-only local web **dashboard** are built and
-tested. The dashboard is an embedded localhost server + a self-contained UI
-(shadcn aesthetic, hand-written CSS — no Node, no framework, still one
-`cargo build`): `agentstack dashboard` opens a cross-harness matrix with secrets,
-skills, profiles, and usage panels. Bound to 127.0.0.1, token-gated, and it never
-exposes secret values.
+The full command-line tool plus a local web **dashboard** are built and tested.
+The dashboard is an embedded localhost server + a self-contained UI (shadcn
+aesthetic, hand-written CSS — no Node, no framework, still one `cargo build`):
+`agentstack dashboard` opens a cross-harness matrix with secrets, skills,
+profiles, and usage panels, and can **set secrets, apply, activate a profile, and
+install** right from the UI (`--read-only` disables writes). Bound to 127.0.0.1,
+token-gated, and it never exposes secret values.
 
 Implemented and tested:
 
