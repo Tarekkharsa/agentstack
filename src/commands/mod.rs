@@ -12,6 +12,7 @@ pub mod init;
 pub mod install;
 pub mod instructions;
 pub mod remove;
+pub mod restore;
 pub mod search;
 pub mod secret;
 pub mod stats;

@@ -115,7 +115,7 @@ Implemented and tested:
   secrets) for moving a setup to a new machine; passphrase-protected.
 - Commands: `init`, `add`, `install` (`--locked`), `update`, `remove`,
   `apply` (`--scope`, `--write`), `diff`, `use <profile>`, `instructions`,
-  `adopt`, `doctor` (`--ci`, `--live`, `--fix`), `search`, `stats`,
+  `adopt`, `restore`, `doctor` (`--ci`, `--live`, `--fix`), `search`, `stats`,
   `secret set|get|rm|list`, `export`/`import`, `adapters`, `dashboard`, `mcp`,
   `hook`.
 

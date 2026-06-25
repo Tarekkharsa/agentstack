@@ -61,6 +61,9 @@ pub enum Command {
     /// Pull hand-added servers from a target config back into the manifest.
     Adopt(AdoptArgs),
 
+    /// Restore a CLI config from its pre-write backup (undo an apply).
+    Restore(RestoreArgs),
+
     /// Verify everything is wired up: adapters, secrets, drift, quirks, skills.
     Doctor(DoctorArgs),
 
@@ -262,6 +265,19 @@ pub struct UseArgs {
     pub scope: Option<Scope>,
 
     /// Actually write configs and materialize skills (else dry-run).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct RestoreArgs {
+    /// Adapter id to restore (omit to list available backups).
+    pub adapter: Option<String>,
+
+    #[arg(long, value_enum)]
+    pub scope: Option<Scope>,
+
+    /// Actually restore (else show what would change).
     #[arg(long)]
     pub write: bool,
 }

@@ -25,6 +25,7 @@ fn run() -> Result<()> {
         Command::Use(args) => commands::use_profile::run(args, dir),
         Command::Instructions(args) => commands::instructions::run(args, dir),
         Command::Adopt(args) => commands::adopt::run(args, dir),
+        Command::Restore(args) => commands::restore::run(args, dir),
         Command::Doctor(args) => commands::doctor::run(args, dir),
         Command::Search(args) => commands::search::run(args, dir),
         Command::Stats => commands::stats::run(dir),
