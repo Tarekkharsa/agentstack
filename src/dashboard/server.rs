@@ -108,6 +108,16 @@ fn route(
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
         }
+        (Method::Post, "/api/toggle") => mutation(authed, read_only, || {
+            let v = parse(body);
+            let server = field(&v, "server")?;
+            let target = field(&v, "target")?;
+            let enable = v.get("enable").and_then(Value::as_bool).unwrap_or(true);
+            crate::dashboard::actions::toggle(dir, &server, &target, scope_of(body), enable)
+        }),
+        (Method::Post, "/api/add_server") => mutation(authed, read_only, || {
+            crate::dashboard::actions::add_server(dir, &parse(body)).map(|_| ())
+        }),
         (Method::Post, "/api/add_from") => mutation(authed, read_only, || {
             let v = parse(body);
             let id = field(&v, "id")?;

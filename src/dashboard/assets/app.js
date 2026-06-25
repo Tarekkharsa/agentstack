@@ -5,6 +5,7 @@ let DATA = null;
 let SECTION = "overview";
 let READONLY = false;
 let OPEN_SERVER = null;
+let ADD_FORM = false;
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -227,24 +228,90 @@ function usageCard() {
 }
 
 /* ---------- servers (matrix + detail) ---------- */
+function toggleCell(serverName, target, currentlyOn) {
+  return post("/api/toggle", { server: serverName, target, scope: "global", enable: !currentlyOn },
+    (currentlyOn ? "Disabled " : "Enabled ") + serverName);
+}
+
+function saveServer() {
+  const g = (id) => (document.getElementById(id) || {}).value || "";
+  const transport = g("f-transport");
+  const body = { name: g("f-name").trim(), transport };
+  if (!body.name) return toast("Name is required", false);
+  if (transport === "http") body.url = g("f-url").trim();
+  else { body.command = g("f-command").trim(); body.args = g("f-args").trim().split(/\s+/).filter(Boolean); }
+  const hdr = g("f-header").trim();
+  if (hdr.includes("=")) { const [k, ...v] = hdr.split("="); body.headers = { [k.trim()]: v.join("=") }; }
+  const env = g("f-env").trim();
+  if (env.includes("=")) { const [k, ...v] = env.split("="); body.env = { [k.trim()]: v.join("=") }; }
+  fetch(q("/api/add_server"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || d.error) throw new Error(d.error || "failed");
+      ADD_FORM = false;
+      toast("Server added — enable it per CLI below", true);
+      load();
+    })
+    .catch((e) => toast("Add server: " + e.message, false));
+}
+
+function addServerCard() {
+  const row = (label, node) => el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:8px" }, [
+    el("label", { class: "muted", style: "width:90px;font-size:12px" }, [label]), node,
+  ]);
+  const transport = el("select", { id: "f-transport", style: "height:32px", onchange: () => {
+    document.getElementById("row-url").style.display = transport.value === "http" ? "" : "none";
+    document.getElementById("row-cmd").style.display = transport.value === "stdio" ? "" : "none";
+    document.getElementById("row-args").style.display = transport.value === "stdio" ? "" : "none";
+  } }, [el("option", { value: "http" }, ["http"]), el("option", { value: "stdio" }, ["stdio"])]);
+  return el("div", { class: "card", style: "margin-bottom:16px" }, [
+    el("div", { class: "hd" }, ["Add MCP server", el("small", null, ["added to the manifest; enable it per CLI in the matrix"])]),
+    el("div", { class: "bd" }, [
+      row("name", el("input", { id: "f-name", class: "inp", placeholder: "e.g. kibana", style: "width:220px" })),
+      row("transport", transport),
+      el("div", { id: "row-url" }, [row("url", el("input", { id: "f-url", class: "inp", placeholder: "https://…/mcp", style: "width:300px" }))]),
+      el("div", { id: "row-cmd", style: "display:none" }, [row("command", el("input", { id: "f-command", class: "inp", placeholder: "npx", style: "width:300px" }))]),
+      el("div", { id: "row-args", style: "display:none" }, [row("args", el("input", { id: "f-args", class: "inp", placeholder: "-y @scope/server", style: "width:300px" }))]),
+      row("header", el("input", { id: "f-header", class: "inp", placeholder: "Authorization=Bearer ${TOKEN}", style: "width:300px" })),
+      row("env", el("input", { id: "f-env", class: "inp", placeholder: "API_KEY=${API_KEY}", style: "width:300px" })),
+      el("div", { class: "toolbar", style: "margin-top:6px" }, [btn("Save", saveServer, "primary"), btn("Cancel", () => { ADD_FORM = false; show("servers"); })]),
+    ]),
+  ]);
+}
+
 function servers(c) {
   const d = DATA;
-  c.appendChild(pageHead("Servers", "Which MCP server is active in which harness, and in which scope. Click a row for its config."));
+  c.appendChild(pageHead("Servers", "Click a cell to enable/disable a server for that CLI (global scope). Click a row name for its config."));
+  if (!READONLY) {
+    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
+      btn(ADD_FORM ? "Close" : "+ Add MCP server", () => { ADD_FORM = !ADD_FORM; show("servers"); }, "primary"),
+    ]));
+    if (ADD_FORM) c.appendChild(addServerCard());
+  }
+
   const head = el("tr", null, [el("th", null, ["capability"])]);
   d.adapters.forEach((a) => head.appendChild(el("th", { class: "cell" }, [a.display])));
   head.appendChild(el("th", null, ["type"]));
 
   const body = el("tbody");
-  if (!d.servers.length) body.appendChild(el("tr", null, [el("td", { colspan: d.adapters.length + 2 }, [el("span", { class: "empty" }, ["No servers in the manifest."])])]));
+  if (!d.servers.length) body.appendChild(el("tr", null, [el("td", { colspan: d.adapters.length + 2 }, [el("span", { class: "empty" }, ["No servers yet. Use “+ Add MCP server” or the Discover tab."])])]));
   d.servers.forEach((s) => {
-    const tr = el("tr", { class: "clickable", onclick: () => { OPEN_SERVER = OPEN_SERVER === s.name ? null : s.name; show("servers"); } }, [
-      el("td", null, [el("span", { class: "name" }, [s.name]), el("span", { class: "k" }, ["mcp"])]),
+    const tr = el("tr", { class: "clickable" }, [
+      el("td", { onclick: () => { OPEN_SERVER = OPEN_SERVER === s.name ? null : s.name; show("servers"); } },
+        [el("span", { class: "name" }, [s.name]), el("span", { class: "k" }, ["mcp"])]),
     ]);
     d.adapters.forEach((a) => {
       const cell = s.cells.find((x) => x.adapter === a.id) || {};
       const tag = cell.global && cell.project ? "both" : cell.global ? "global" : cell.project ? "project" : "";
       const on = cell.global || cell.project;
-      tr.appendChild(el("td", { class: "cell" }, [el("div", { class: on ? "on" : "off" }, [on ? "✓" : "–"]), tag ? el("div", { class: "sc" }, [tag]) : null]));
+      const inner = [el("div", { class: on ? "on" : "off" }, [on ? "✓" : "–"]), tag ? el("div", { class: "sc" }, [tag]) : null];
+      const td = el("td", { class: "cell" }, inner);
+      if (!READONLY) {
+        td.style.cursor = "pointer";
+        td.title = `${cell.global ? "disable" : "enable"} ${s.name} for ${a.display} (global)`;
+        td.addEventListener("click", (e) => { e.stopPropagation(); toggleCell(s.name, a.id, !!cell.global); });
+      }
+      tr.appendChild(td);
     });
     tr.appendChild(el("td", null, [badge(s.type, "solid")]));
     body.appendChild(tr);

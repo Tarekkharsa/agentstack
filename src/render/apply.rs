@@ -65,6 +65,8 @@ pub enum Selection {
     All,
     /// A named profile's server list.
     Profile(String),
+    /// An explicit set of server names (e.g. one CLI's enabled set).
+    Explicit(Vec<String>),
 }
 
 /// Build the plan for one target id in a given scope. `previously_managed` are
@@ -151,6 +153,11 @@ fn selected_servers(manifest: &Manifest, selection: &Selection) -> Result<Vec<St
                 .cloned()
                 .collect())
         }
+        Selection::Explicit(names) => Ok(names
+            .iter()
+            .filter(|s| manifest.servers.contains_key(*s))
+            .cloned()
+            .collect()),
     }
 }
 
