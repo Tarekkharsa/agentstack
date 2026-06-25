@@ -1,0 +1,26 @@
+---
+source: tests/golden.rs
+expression: out
+---
+{
+  "servers": {
+    "kibana": {
+      "type": "http",
+      "url": "https://kibana-mcp.ghaloyalty.com/mcp",
+      "headers": {
+        "Authorization": "Bearer kib-secret"
+      }
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "ghp-secret"
+      }
+    }
+  }
+}

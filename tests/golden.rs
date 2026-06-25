@@ -85,3 +85,13 @@ fn gemini_render() {
     assert!(out.contains("\"httpUrl\""));
     insta::assert_snapshot!("gemini_render", out);
 }
+
+#[test]
+fn vscode_render() {
+    let out = merge_json::merge("{}", "servers", &entries("vscode")).unwrap();
+    // VS Code quirks: top-level "servers" key, transport "type" tag.
+    assert!(out.contains("\"servers\""));
+    assert!(out.contains("\"type\": \"http\""));
+    assert!(out.contains("\"type\": \"stdio\""));
+    insta::assert_snapshot!("vscode_render", out);
+}

@@ -1,0 +1,30 @@
+# VS Code (Copilot agent / MCP) adapter descriptor
+# Global config is per-OS under the user profile; `{config}` expands to
+# ~/Library/Application Support (macOS), ~/.config (Linux), %APPDATA% (Windows).
+# Project config: <repo>/.vscode/mcp.json.
+# Quirks: the top-level key is "servers" (not "mcpServers"), and remote servers
+# are tagged "type":"http" with "url".
+id: vscode
+display: VS Code
+detect:
+  bin: code
+  config: "{config}/Code/User/mcp.json"
+config:
+  path: "{config}/Code/User/mcp.json"
+  format: json
+project:
+  config: .vscode/mcp.json
+  format: json
+mcp:
+  location: servers
+  fields:
+    url: url
+    headers: headers
+    command: command
+    args: args
+    env: env
+  transport:
+    key: type
+    http_value: http
+    stdio_value: stdio
+  secret_mode: literal

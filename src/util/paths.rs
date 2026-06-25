@@ -2,9 +2,20 @@
 
 use std::path::PathBuf;
 
-/// Expand a leading `~` (and `~/`) to the user's home directory. Other paths
-/// are returned unchanged.
+/// Expand a config path: the per-OS placeholders `{config}` (e.g.
+/// `~/Library/Application Support` on macOS, `~/.config` on Linux, `%APPDATA%`
+/// on Windows) and `{data}`, plus a leading `~`. Other paths are unchanged.
 pub fn expand_tilde(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("{config}/") {
+        if let Some(base) = dirs::config_dir() {
+            return base.join(rest);
+        }
+    }
+    if let Some(rest) = path.strip_prefix("{data}/") {
+        if let Some(base) = dirs::data_dir() {
+            return base.join(rest);
+        }
+    }
     if path == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
     }
