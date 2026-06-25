@@ -16,6 +16,7 @@ pub mod lock;
 pub mod manifest;
 pub mod mcp;
 pub mod mcp_server;
+pub mod provider;
 pub mod render;
 pub mod scope;
 pub mod secret;

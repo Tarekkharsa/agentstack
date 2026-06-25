@@ -11,16 +11,50 @@ use owo_colors::OwoColorize;
 use serde_json::Value;
 use toml_edit::{Array, DocumentMut};
 
-use crate::cli::{AddArgs, AddKind, AddServerArgs, AddSkillArgs};
+use crate::cli::{AddArgs, AddFromArgs, AddKind, AddServerArgs, AddSkillArgs};
 use crate::manifest::{Server, ServerType, Skill};
+use crate::provider;
 use crate::render::merge_toml;
 use crate::util::diff;
 
 pub fn run(args: &AddArgs, manifest_dir: Option<&Path>) -> Result<()> {
     match &args.kind {
+        AddKind::From(a) => add_from(a, manifest_dir),
         AddKind::Server(a) => add_server(a, manifest_dir),
         AddKind::Skill(a) => add_skill(a, manifest_dir),
     }
+}
+
+fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let ctx = super::load(manifest_dir)?;
+    let candidate = provider::resolve(&a.id)
+        .with_context(|| format!("no capability '{}' in the catalog or registry", a.id))?;
+    if ctx.loaded.manifest.servers.contains_key(&candidate.name) {
+        anyhow::bail!("server '{}' already exists in the manifest", candidate.name);
+    }
+    println!(
+        "{} {} ({}) — {}",
+        "found".green(),
+        candidate.name.bold(),
+        candidate.source,
+        candidate.id
+    );
+    let server = candidate.to_server();
+    write_manifest(
+        &ctx,
+        "servers",
+        &serde_json::to_value(&server)?,
+        a.profile.as_deref(),
+        &candidate.name,
+        a.write,
+    )?;
+    if a.write {
+        println!(
+            "{} review secrets with `agentstack secret list`, then `agentstack apply`.",
+            "↳".cyan()
+        );
+    }
+    Ok(())
 }
 
 fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {

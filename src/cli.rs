@@ -136,10 +136,24 @@ pub struct AddArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum AddKind {
+    /// Add a capability from a provider (catalog or official MCP Registry).
+    From(AddFromArgs),
     /// Add an MCP server.
     Server(AddServerArgs),
     /// Add a skill (a SKILL.md directory).
     Skill(AddSkillArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct AddFromArgs {
+    /// Catalog name or registry id (e.g. `github`, `io.github.x/server`).
+    pub id: String,
+    /// Also add to this profile's server list.
+    #[arg(long)]
+    pub profile: Option<String>,
+    /// Write the change (else dry-run).
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[derive(Args, Debug)]

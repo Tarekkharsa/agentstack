@@ -12,7 +12,6 @@ use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use crate::catalog;
 use crate::manifest::load::MANIFEST_FILE;
 use crate::manifest::{Server, ServerType};
 use crate::secret::Resolver;
@@ -105,8 +104,20 @@ fn tool_defs() -> Value {
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
+            "name": "agentstack_add_from",
+            "description": "Add a capability discovered via agentstack_search (catalog name or official MCP Registry id) to the manifest, commit-safe. Does NOT apply; a human runs `agentstack apply`.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": { "type": "string", "description": "Catalog name or registry id from search" },
+                    "profile": { "type": "string" }
+                }
+            }
+        },
+        {
             "name": "agentstack_add_server",
-            "description": "Add an MCP server to the manifest (commit-safe — secrets stay as ${REF}). Does NOT apply; a human runs `agentstack apply` to render it.",
+            "description": "Add an MCP server to the manifest by hand (commit-safe — secrets stay as ${REF}). Does NOT apply; a human runs `agentstack apply` to render it.",
             "inputSchema": {
                 "type": "object",
                 "required": ["name"],
@@ -135,25 +146,27 @@ fn run_tool(name: &str, args: &Value, dir: Option<&Path>) -> Result<String> {
             Ok(serde_json::to_string_pretty(&v)?)
         }
         "agentstack_doctor" => doctor_summary(dir),
+        "agentstack_add_from" => add_from(args, dir),
         "agentstack_add_server" => add_server(args, dir),
         other => anyhow::bail!("unknown tool '{other}'"),
     }
 }
 
 fn search_text(query: &str) -> String {
-    let results = catalog::search(query);
+    let results = crate::provider::search_all(query, 20);
     if results.is_empty() {
-        return format!("No catalog matches for '{query}'.");
+        return format!("No matches for '{query}' (catalog or official MCP Registry).");
     }
     let mut out = format!("{} match(es):\n", results.len());
-    for e in results {
+    for c in results {
+        let add_id = if c.source == "catalog" {
+            &c.name
+        } else {
+            &c.id
+        };
         out.push_str(&format!(
-            "\n- {} [{}]: {}\n  tags: {}\n  add: {}\n",
-            e.name,
-            e.kind,
-            e.description,
-            e.tags.join(", "),
-            e.add_command()
+            "\n- {} [{}]: {}\n  add: agentstack add from {}\n",
+            c.name, c.source, c.description, add_id
         ));
     }
     out
@@ -174,6 +187,50 @@ fn doctor_summary(dir: Option<&Path>) -> Result<String> {
         m.servers.len(),
         m.skills.len(),
         refs.len()
+    ))
+}
+
+fn add_from(args: &Value, dir: Option<&Path>) -> Result<String> {
+    let id = args
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("`id` is required")?;
+    let candidate = crate::provider::resolve(id)
+        .with_context(|| format!("no capability '{id}' in the catalog or registry"))?;
+
+    let mdir = match dir {
+        Some(d) => d.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    let manifest_path = mdir.join(MANIFEST_FILE);
+    let original = std::fs::read_to_string(&manifest_path).with_context(|| {
+        format!(
+            "no manifest at {} (run `agentstack init`)",
+            manifest_path.display()
+        )
+    })?;
+    let parsed: crate::manifest::Manifest =
+        toml::from_str(&original).context("parsing manifest")?;
+    if parsed.servers.contains_key(&candidate.name) {
+        anyhow::bail!("server '{}' already exists", candidate.name);
+    }
+
+    let body = serde_json::to_value(candidate.to_server())?;
+    let profile = args.get("profile").and_then(Value::as_str);
+    let new_text = crate::commands::add::build_manifest_with(
+        &original,
+        "servers",
+        &candidate.name,
+        &body,
+        profile,
+    )?;
+    std::fs::write(&manifest_path, &new_text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+
+    Ok(format!(
+        "Added '{}' (from {}) to the manifest (not yet applied). A human should review secrets and run `agentstack apply`.",
+        candidate.name, candidate.source
     ))
 }
 

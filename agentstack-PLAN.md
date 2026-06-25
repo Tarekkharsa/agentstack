@@ -706,6 +706,42 @@ Anything the CLI can do, the dashboard can do.
 
 ---
 
+## 9h. Industry landscape & the meta-layer thesis  *(added — 2026 reframe)*
+
+The ecosystem moved while we built. The strategic update:
+
+- **Official MCP Registry** (`registry.modelcontextprotocol.io`, launched Sep 2025; Anthropic +
+  GitHub + Microsoft + PulseMCP). REST API, reverse-DNS namespaces (`io.github.user/server`). A
+  *canonical* source for MCP servers now exists.
+- **Plugins/skills exploded.** Claude Code plugins (stable Oct 2025) bundle skills + agents + hooks
+  + MCP servers, distributed via git **marketplaces**. ~21k skills, ~2.5k marketplaces; a competing
+  CLI package manager already exists (`ccpi`). Org governance is appearing (LiteLLM gateway as a
+  Claude-only governed registry).
+- **Fragmentation is multiplying, not converging.** Each CLI ships its own marketplace/plugin/skill
+  system. The official registry unifies *MCP servers only* — not skills, plugins, instructions, or
+  cross-CLI install.
+
+**Thesis: don't build a marketplace — be the cross-CLI meta-layer.** A universal *client* that
+**consumes** the official registry + existing marketplaces and **compiles** a chosen set into every
+CLI's native format, adding what the vendors won't (cross-tool, selective loading, secrets, scope,
+reproducibility, governance). Like `mise`/`asdf`/Homebrew above many sources — not a source.
+
+### Providers abstraction (supersedes "build our own registry")
+A `Provider` trait with pluggable backends, queried together by `search` / `add` / the Discover UI:
+- `registry` → the **official MCP Registry API** (`/v0/servers`), namespace-aware.
+- `marketplace` → git-based skill/plugin marketplaces (Claude's marketplace format + community).
+- `catalog` → our embedded starter set (built).
+- `git` / `path` → direct sources (built).
+Results are normalized to a common shape and `add` renders to **all** target CLIs at once.
+
+### Dashboard "Discover" (two-pane curation — user idea)
+A two-pane browser: **left = catalog** (all providers, searchable, categorized) · **right = your
+stack** (manifest / active-per-CLI). Check items on the left, choose which CLIs + profile, apply →
+they move right. Selective loading becomes a checklist, not config editing. This is the "choose
+across Claude plugins + Codex plugins + skill sites in one place, the easy way" experience.
+
+---
+
 ## 10. Per-directory auto-activation
 `direnv`-style: entering a repo activates its **project manifest** (`<repo>/agentstack.toml`)
 across all CLIs — no explicit command. A shell hook (zsh/bash/fish) runs `agentstack use --scope
@@ -777,7 +813,7 @@ payoff of project scoping above. The "tweet-worthy" feature; phase 3+.
 | D10 | Scope representation | per-entry `scope=` field · separate global vs project manifests | **separate manifests** (scope = which file the entry lives in; project overrides global) |
 | D11 | Project config locations | confirm per CLI | Claude Code: `.mcp.json` (servers) + `.claude/skills/` (skills); Codex: **global-only initially** (no per-dir config file) |
 | D12 | Reproducibility | manifest only · manifest + lockfile + store | **lockfile + content-addressed store** (`agentstack.lock`, `~/.agentstack/store/`) — reproducible, checksum-verified |
-| D13 | Registry model | hosted now · git-index → hosted · sources only | **git/path sources (v1) → git-index (v2) → hosted (v3)**; earn the service |
+| D13 | Registry model | build our own (git-index/hosted) · **consume the official MCP Registry + aggregate marketplaces** | **CONSUME, don't build** (§9h): a Provider trait over the official MCP Registry API + git marketplaces + our catalog + git/path. Our value is cross-CLI compile, not being a registry. *(Updated 2026 — supersedes the earlier "earn the service" plan.)* |
 | D14 | Instruction-file ownership | own whole file · managed marker region | **managed marker region** (`<!-- agentstack:start/end -->`) — prose is hand-edited; explicit exception to D4 |
 | D15 | Instructions model | one source w/ conditional blocks · named fragments tagged by target | **named fragments + `targets`** (data-driven; composes shared + harness-specific cleanly) |
 | D16 | Capability trust | trust-on-fetch · checksums + signing/provenance | **checksums in lock now; signing/provenance before any registry** (skills/plugins are executable-intent) |

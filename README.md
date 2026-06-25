@@ -74,9 +74,11 @@ Implemented and tested:
   `install` fetches them into `~/.agentstack/store/` and writes a checksum-pinned
   `agentstack.lock`; `install --locked` is reproducible (CI-safe); `update`
   re-resolves git skills; `remove` drops a capability from manifest + lock.
-- **`search`** — find capabilities in an embedded starter catalog (registry v0),
-  printing copy-pasteable `add` commands; the discovery surface the agent uses
-  to provision itself.
+- **`search` across providers** — the embedded catalog **and the official MCP
+  Registry** (`registry.modelcontextprotocol.io`). `agentstack add from <id>`
+  resolves a registry/catalog server, lifts its secrets to `${REF}`s, and (on
+  `apply`) renders it to **all your CLIs at once**. agentstack is the cross-CLI
+  *client* over the registry + marketplaces, not another registry.
 - **`stats`** — local usage analytics: activation counts + per-capability
   footprint (which target/scope slots it's live in).
 - **`export`/`import`** — age-encrypted bundle (manifest + lock + optionally
