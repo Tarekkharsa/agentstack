@@ -33,5 +33,6 @@ fn run() -> Result<()> {
         Command::Export(args) => commands::bundle::run_export(args, dir),
         Command::Import(args) => commands::bundle::run_import(args, dir),
         Command::Dashboard(args) => agentstack::dashboard::serve(args, dir),
+        Command::Mcp => agentstack::mcp_server::serve(dir),
     }
 }

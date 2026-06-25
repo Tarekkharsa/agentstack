@@ -84,6 +84,9 @@ pub enum Command {
 
     /// Open the local web dashboard.
     Dashboard(DashboardArgs),
+
+    /// Run agentstack as an MCP server over stdio (for an agent to call).
+    Mcp,
 }
 
 #[derive(Args, Debug)]

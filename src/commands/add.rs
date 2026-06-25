@@ -47,13 +47,11 @@ fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
         _ => {}
     }
 
-    let entries = vec![(a.name.clone(), serde_json::to_value(&server)?)];
     write_manifest(
         &ctx,
         "servers",
-        &entries,
+        &serde_json::to_value(&server)?,
         a.profile.as_deref(),
-        "servers",
         &a.name,
         a.write,
     )
@@ -69,34 +67,27 @@ fn add_skill(a: &AddSkillArgs, manifest_dir: Option<&Path>) -> Result<()> {
         git: None,
         rev: None,
     };
-    let entries = vec![(a.name.clone(), serde_json::to_value(&skill)?)];
     write_manifest(
         &ctx,
         "skills",
-        &entries,
+        &serde_json::to_value(&skill)?,
         a.profile.as_deref(),
-        "skills",
         &a.name,
         a.write,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn write_manifest(
     ctx: &super::Context,
     location: &str,
-    entries: &[(String, Value)],
+    body: &Value,
     profile: Option<&str>,
-    profile_field: &str,
     name: &str,
     write: bool,
 ) -> Result<()> {
     let original = fs::read_to_string(&ctx.loaded.manifest_path)
         .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
-    let mut new_text = merge_toml::merge(&original, location, entries, true)?;
-    if let Some(p) = profile {
-        new_text = add_to_profile(&new_text, p, profile_field, name)?;
-    }
+    let new_text = build_manifest_with(&original, location, name, body, profile)?;
 
     println!(
         "{} add '{name}' to {}",
@@ -124,10 +115,47 @@ fn write_manifest(
     Ok(())
 }
 
+/// Build updated manifest text with `name` (a server or skill) inserted under
+/// `location`, optionally enrolled in `profile`. Shared by the CLI and the MCP
+/// server; preserves comments via the TOML merger.
+pub fn build_manifest_with(
+    original: &str,
+    location: &str,
+    name: &str,
+    body: &Value,
+    profile: Option<&str>,
+) -> Result<String> {
+    let entries = vec![(name.to_string(), body.clone())];
+    let mut new_text = merge_toml::merge(original, location, &entries, true)?;
+    if let Some(p) = profile {
+        new_text = add_to_profile(&new_text, p, location, name)?;
+    }
+    Ok(new_text)
+}
+
 /// Append `name` to `profiles.<profile>.<field>` (creating the array if needed).
 fn add_to_profile(text: &str, profile: &str, field: &str, name: &str) -> Result<String> {
+    use toml_edit::{Item, Table};
     let mut doc: DocumentMut = text.parse().context("parsing manifest as TOML")?;
-    let slot = &mut doc["profiles"][profile][field];
+
+    // Ensure `[profiles]` and `[profiles.<profile>]` exist as standalone tables
+    // (not inline) so freshly-created profiles render cleanly.
+    if doc.get("profiles").is_none() {
+        let mut t = Table::new();
+        t.set_implicit(true);
+        doc.insert("profiles", Item::Table(t));
+    }
+    let profiles = doc["profiles"]
+        .as_table_mut()
+        .context("`profiles` is not a table")?;
+    if profiles.get(profile).is_none() {
+        profiles.insert(profile, Item::Table(Table::new()));
+    }
+    let ptable = profiles[profile]
+        .as_table_mut()
+        .with_context(|| format!("profiles.{profile} is not a table"))?;
+
+    let slot = &mut ptable[field];
     if slot.is_none() {
         *slot = toml_edit::value(Array::new());
     }

@@ -81,7 +81,20 @@ Implemented and tested:
 - Commands: `init`, `add`, `install` (`--locked`), `update`, `remove`,
   `apply` (`--scope`, `--write`), `diff`, `use <profile>`, `instructions`,
   `adopt`, `doctor` (`--ci`, `--live`), `search`, `stats`,
-  `secret set|get|rm|list`, `export`/`import`, `adapters`, `dashboard`.
+  `secret set|get|rm|list`, `export`/`import`, `adapters`, `dashboard`, `mcp`.
+
+### Agent-operable (`agentstack mcp`)
+
+agentstack can run as an MCP server over stdio, so the agent itself can discover
+and propose capabilities — tools: `agentstack_search`, `agentstack_list`,
+`agentstack_doctor`, `agentstack_add_server`. Writes go to the **manifest only**
+(commit-safe `${REF}`s, nothing executed): the agent proposes, a human reviews
+and runs `apply` (the §9g/D20 trust gate). Register it like any stdio MCP server,
+e.g. Claude Code:
+
+```json
+{ "mcpServers": { "agentstack": { "type": "stdio", "command": "agentstack", "args": ["mcp"] } } }
+```
 
 `apply`/`use`/`instructions` **never write** without an explicit `--write`.
 
