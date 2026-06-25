@@ -1,34 +1,60 @@
 # agentstack
 
-> One portable manifest, every agent CLI.
+> **Dotfiles for your AI agents.** One portable, version-controlled setup —
+> MCP servers, skills, and instructions — that follows you across every coding
+> agent, machine, and teammate.
 
-`agentstack` is a single-binary CLI that manages MCP servers (and, soon, skills)
-across multiple AI coding agents — Claude Code, Codex, and any CLI you can
-describe with a small YAML adapter — from **one** commit-safe source of truth.
+You configure MCP servers, skills, and house rules once in a commit-safe
+`agentstack.toml`. agentstack **compiles** that into each agent CLI's native
+config — Claude Code, Codex, Cursor, Windsurf, Gemini CLI, VS Code — resolving
+secrets per machine, so the *same* setup works everywhere without copy-pasting
+JSON or leaking tokens into git.
 
-Describe your agent capabilities once in `agentstack.toml`; agentstack compiles
-that manifest into each CLI's native config (JSON for Claude Code, TOML for
-Codex, …), resolves secrets per-machine, scopes capabilities per profile, and
-proves the result with `diff`.
+```sh
+agentstack init      # reverse-engineer a manifest from configs you already have
+agentstack apply     # render it to every CLI you have installed
+agentstack doctor    # prove everything is wired (secrets, drift, connectivity)
+```
 
-## Why
+## Install
 
-Configuring AI agents today tangles three pains together:
+```sh
+curl -fsSL https://raw.githubusercontent.com/tarekkh/agentstack/main/install.sh | sh
+# or: brew install tarekkh/tap/agentstack   ·   cargo install agentstack
+```
 
-1. **Format fragmentation** — same MCP server, different syntax per CLI
-   (Codex `[mcp_servers.x]` TOML, Claude Code `mcpServers` JSON with
-   `"type":"http"`, headers named `http_headers` vs `headers`, …).
-2. **Selective loading** — sometimes all capabilities, sometimes a curated few.
-3. **Secrets & per-machine drift** — real tokens differ per machine and must
-   never be committed.
+Single static binary, zero runtime dependencies. (Releases are wired up in CI —
+see [RELEASING.md](RELEASING.md).)
 
-agentstack's wedge: MCP **+** profiles **+** selective loading **+**
-secrets-by-reference **+** cross-machine migration **+** a trust layer, in one
-binary, extensible to any CLI via data descriptors.
+## Why it exists
 
-## Status — CLI complete + local dashboard (Phases 0–4)
+Managing AI-agent setup today is three tangled pains:
 
-The full command-line tool plus a local web **dashboard** are built and tested.
+1. **Format fragmentation** — the *same* MCP server is spelled differently per
+   CLI (Codex TOML `[mcp_servers.x]`, Cursor `url`, Windsurf `serverUrl`, Gemini
+   `httpUrl`, VS Code's `servers` key, Claude's `type:"http"`).
+2. **Reproducibility & drift** — a new laptop, a teammate, a fresh devcontainer:
+   everyone re-does setup by hand, and configs drift apart.
+3. **Secrets** — real tokens differ per machine and must never land in git.
+
+The durable value isn't the format translation (the ecosystem is slowly
+converging on `mcp.json`) — it's the **layers that survive convergence**:
+**secrets-by-reference, profiles/selective-loading, reproducible lockfile,
+cross-source discovery (the official MCP Registry), and a trust/governance gate**
+— in one auditable binary, across every CLI.
+
+## What works today
+
+- **6 agent CLIs** — Claude Code, Codex, Cursor, Windsurf, Gemini CLI, VS Code
+  (each a data descriptor; add more without touching core code).
+- **Cross-source discovery** — `search` and `add from` pull from the embedded
+  catalog **and the official MCP Registry**, rendering to every CLI at once.
+- **Crash-safe** — config writes are atomic with pre-write backups; never
+  corrupts your real `~/.claude.json`.
+- **Trust gate** — `[policy]` (require/forbid/`allowed_sources`) enforced by
+  `doctor --ci`, plus provenance hints at the point of choosing.
+- Full CLI + an optional local **dashboard** (below).
+
 The dashboard is an embedded localhost server + a self-contained UI (shadcn
 aesthetic, hand-written CSS — no Node, no framework, still one `cargo build`):
 `agentstack dashboard` opens a cross-harness matrix with secrets, skills,
@@ -205,14 +231,19 @@ cargo fmt --check
 
 ## Roadmap
 
-- **Phase 1 (done)** — `init` (discover + import + lift secrets), state-tracked
-  writes, OS-keychain + varlock `secret set`, static `doctor`.
-- **Phase 2** — `doctor --live` (MCP handshake) / `--fix`, interactive `add`,
-  profiles + skill symlinking, `adopt`.
-- **Phase 3** — encrypted `export`/`import`, `init --from <git>`, more adapters,
-  per-directory auto-activation.
+**Done:** 6 adapters · `init`/`add`/`apply`/`diff`/`use`/`instructions`/`adopt` ·
+package manager (`install`/`update`/`remove` + lockfile) · secrets (keychain +
+varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`) ·
+official MCP Registry provider + `search`/`add from` · `[policy]` trust gate ·
+atomic writes + backups · `export`/`import` · `hook` · agent-operable `mcp`
+server · local dashboard (matrix, Discover, per-CLI toggle).
 
-See [`agentstack-PLAN.md`](agentstack-PLAN.md) for the full spec.
+**Next:** publish releases + a real demo · dogfood on a team · marketplace
+providers (skills.sh-style) + optional audit enrichment · reconsider a JSON /
+`mcp.json`-aligned manifest · plugins as a managed capability.
+
+See [`agentstack-PLAN.md`](agentstack-PLAN.md) for the full spec and design
+decisions (D1–D22).
 
 ## License
 
