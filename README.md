@@ -94,6 +94,11 @@ Implemented and tested:
 - **Instruction files** — compile shared + harness-specific fragments into each
   CLI's `CLAUDE.md` / `AGENTS.md`, inside a managed `<!-- agentstack -->` region
   that preserves all surrounding hand-written prose.
+- **Native settings** — manage each CLI's own settings file (Claude Code
+  `~/.claude/settings.json` permissions/feature flags, Codex `config.toml`) from
+  one `[settings.<cli>]` block. `apply` merges only the keys you declare into the
+  real file (top-level ownership), resolves `${REF}`s, preserves hand-set keys,
+  and prunes keys that leave the manifest. Editable from the dashboard.
 - **`adopt`** — the reverse of `apply`: pull a hand-added server from a target
   config back into the manifest, lifting its inline secret, preserving comments.
 - **`add`** — flag-driven (scriptable / agent-operable) add of a server or skill
@@ -211,6 +216,13 @@ env = { GITHUB_TOKEN = "${GH_PAT}" }
 [profiles.backend]
 servers = ["kibana_mcp", "github"]
 
+# Each CLI's native settings file, managed from here. agentstack owns only
+# the keys you declare and leaves the rest of settings.json untouched.
+[settings.claude-code]
+enableAllProjectMcpServers = true
+[settings.claude-code.permissions]
+allow = ["Bash(git diff:*)", "Bash(git log:*)"]
+
 [targets]
 default = ["claude-code", "codex"]
 ```
@@ -235,8 +247,9 @@ cargo fmt --check
 package manager (`install`/`update`/`remove` + lockfile) · secrets (keychain +
 varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`) ·
 official MCP Registry provider + `search`/`add from` · `[policy]` trust gate ·
-atomic writes + backups · `export`/`import` · `hook` · agent-operable `mcp`
-server · local dashboard (matrix, Discover, per-CLI toggle).
+native per-CLI settings (`[settings.*]` → settings.json) · atomic writes +
+backups · `export`/`import` · `hook` · agent-operable `mcp` server · local
+dashboard (server/skill matrices, Discover, add-skill, settings editor).
 
 **Next:** publish releases + a real demo · dogfood on a team · marketplace
 providers (skills.sh-style) + optional audit enrichment · reconsider a JSON /
