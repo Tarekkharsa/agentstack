@@ -180,6 +180,7 @@ fn route(
                 dry_run: false,
                 write: true,
                 scope: Some(scope_of(body)),
+                allow_unresolved: false,
             };
             crate::commands::apply::run(&args, dir)
         }),
@@ -194,6 +195,7 @@ fn route(
                 targets: vec![],
                 scope: Some(scope_of(body)),
                 write: true,
+                allow_unresolved: false,
             };
             crate::commands::use_profile::run(&args, dir)
         }),

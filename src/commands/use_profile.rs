@@ -62,8 +62,14 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 for u in &plan.unresolved {
                     println!("  {} unresolved secret {}", "✗".red(), u);
                 }
+                let blocked = !plan.unresolved.is_empty() && !args.allow_unresolved;
                 if plan.changed() {
-                    if args.write {
+                    if args.write && blocked {
+                        println!(
+                            "  {} not written — unresolved secret(s); set them or pass --allow-unresolved",
+                            "✗".red()
+                        );
+                    } else if args.write {
                         plan.write()?;
                         state.record(&key, plan.managed.clone(), &plan.proposed);
                         crate::usage::bump(&plan.managed);

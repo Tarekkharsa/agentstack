@@ -32,6 +32,7 @@ There are also adjacent projects with important runtime ideas:
 - [`openclaw/mcporter`](https://github.com/openclaw/mcporter)
 - [`docker/mcp-gateway`](https://github.com/docker/mcp-gateway)
 - [`mksglu/context-mode`](https://github.com/mksglu/context-mode)
+- [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent)
 - [`gs-init/ai-apparatus`](https://github.com/gs-init/ai-apparatus)
 - [`jritsema/mcp-cli`](https://github.com/jritsema/mcp-cli)
 
@@ -60,6 +61,7 @@ agentstack should compete on:
 | [`openclaw/mcporter`](https://github.com/openclaw/mcporter) | 4697 | MCP runtime, discovery, typed calls, OAuth, record/replay, bridge mode | Do not rebuild full runtime first. Integrate/probe/call through compatible runtime ideas. |
 | [`lastmile-ai/mcp-agent`](https://github.com/lastmile-ai/mcp-agent) | 8384 | Agent framework using MCP config + secrets split | Mostly adjacent; reinforces config/secrets split. |
 | [`docker/mcp-gateway`](https://github.com/docker/mcp-gateway) | 1468 | Containerized MCP gateway, catalog, OAuth, secrets, profiles, tool allowlists | Strong signal that gateway + isolation + catalogs matter. |
+| [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent) | 202917 | Self-improving agent, MCP client/server, toolsets, filtering, OAuth, skills, memory | Mine ideas around dynamic tool lifecycle, first-use approval, skill curation, and project-scoped visibility. |
 | [`tylergraydev/claude-code-tool-manager`](https://github.com/tylergraydev/claude-code-tool-manager) | 345 | GUI for Claude Code MCP management, multi-editor sync | Dashboard UX and installed-editor detection matter. |
 | [`mcpware/cross-code-organizer`](https://github.com/mcpware/cross-code-organizer) | 341 | Cross-harness dashboard, skills, memory, sessions, security scanning, backups | agentstack should own trust/policy/health if it wants to beat dashboards. |
 | [`raintree-technology/agent-starter`](https://github.com/raintree-technology/agent-starter) | 81 | Project-local agent.json, skills, stack profiles, curated skill pack | Copy stack-profile and high-quality recipes idea. |
@@ -370,7 +372,61 @@ Priority:
 
 Medium-high. Hooks are likely the next layer after MCP/skills/settings.
 
-### 9. `ai-apparatus`
+### 9. `hermes-agent`
+
+Repository: <https://github.com/NousResearch/hermes-agent>
+
+Why it matters:
+
+Hermes Agent is not a direct config manager competitor. It is a full agent runtime with a self-improving learning loop, skills, memory, scheduled automations, messaging gateways, MCP client support, and MCP server mode. The useful ideas for agentstack are around runtime capability lifecycle, not static file rendering.
+
+Notable features and ideas:
+
+- Built-in learning loop that creates skills from experience, improves skills during use, nudges persistence, and searches past conversations.
+- Curated MCP catalog where reviewed entries can be installed with `hermes mcp add`.
+- MCP presets so users do not need to remember stdio commands for common servers.
+- API key install flow that writes credentials locally and then probes the server.
+- OAuth 2.1 / PKCE flow for hosted MCP servers, including dynamic client registration and cached tokens.
+- Mutual TLS support for HTTP MCP servers.
+- Per-server `enabled: false` to keep definitions without loading them.
+- Per-server tool allowlists and blocklists.
+- Separate toggles for MCP resources and prompts.
+- Dynamic tool discovery via `notifications/tools/list_changed`.
+- Runtime toolsets named by server, for example `mcp-github`.
+- Utility wrappers around MCP resources and prompts where supported.
+- Stdio environment filtering so MCP servers do not inherit the full shell environment blindly.
+- Optional parallel tool execution per server through `supports_parallel_tool_calls`.
+- MCP sampling controls, rate limits, allowed model lists, and per-server metrics.
+- Hermes can also run as an MCP server, exposing its own messaging/conversation bridge to other MCP clients.
+- Built-in tools are grouped into toolsets; availability depends on platform, credentials, and enabled toolsets.
+- Kanban task workers expose different tools than orchestrator profiles, showing role/task-scoped tool visibility.
+- Open feature request for first-invoke approval of MCP tools after discovery.
+- Open feature request for project-scoped MCP servers because global tool visibility creates noise and risk.
+
+What agentstack should copy or beat:
+
+- Add first-invoke approval metadata for MCP tools, at least as policy output even if enforcement is done by a harness.
+- Add per-server tool include/exclude in `agentstack.toml`.
+- Add resources/prompts toggles in the manifest and adapters where clients support them.
+- Add `enabled = false` as a first-class manifest field for installed-but-inactive capabilities.
+- Add server presets/recipes that fill command/url/env/header details.
+- Add OAuth lifecycle fields and token-state checks.
+- Add dynamic refresh awareness: `doctor --live` should report when a server supports tool/resource/prompt list-change notifications.
+- Add per-server parallelism hints and risk warnings.
+- Add environment filtering policy for stdio servers.
+- Add project-scoped visibility as a top product feature, not an afterthought.
+- Add "toolset" language to profiles: profiles should select server-level and tool-level toolsets, not only entire MCP servers.
+- Add skill curation/pruning concepts: unused skills, duplicate skills, and stale skills should be visible in `doctor` or dashboard.
+
+Product insight:
+
+Hermes reinforces that the next layer after "install MCP server" is "control the exact tool surface." Users do not just need to know whether GitHub MCP is installed. They need to know whether `create_issue`, `delete_branch`, `list_resources`, or `sampling` are exposed, approved, scoped, and safe.
+
+Priority:
+
+High for feature inspiration. Do not copy the full agent runtime, but copy the capability lifecycle model.
+
+### 10. `ai-apparatus`
 
 Repository: <https://github.com/gs-init/ai-apparatus>
 
@@ -401,7 +457,7 @@ Priority:
 
 Medium.
 
-### 10. `mcp-cli`
+### 11. `mcp-cli`
 
 Repository: <https://github.com/jritsema/mcp-cli>
 
@@ -443,6 +499,9 @@ These should be implemented or clearly planned because competitors already set u
 - Runtime MCP probe/test beyond initialize handshake.
 - More adapters: Claude Desktop, Copilot CLI, Copilot VS Code, OpenCode, Kiro, Qwen, Kimi, Amp, Cline, Antigravity, Junie.
 - Tool-level allow/block lists.
+- Resources/prompts toggles per MCP server.
+- `enabled = false` installed-but-inactive capability state.
+- First-invoke approval/risk metadata for newly discovered MCP tools.
 - OAuth-aware server states.
 
 ### Should Have
@@ -461,6 +520,10 @@ These are not table stakes yet, but they would make agentstack better:
 - Hook management in adapter descriptors.
 - Gateway target/export for Docker MCP Gateway and/or mcporter.
 - On-demand activation for heavy MCP servers.
+- Dynamic tool discovery/list-change awareness.
+- Per-server parallel execution hints.
+- Stdio environment filtering policy.
+- Role/task-scoped toolset visibility.
 
 ### Nice To Have
 
@@ -580,6 +643,7 @@ The CLI must stay excellent for CI, automation, SSH, and agents.
 4. Add recipes.
 5. Add private catalogs.
 6. Add adapter descriptor docs and conformance suite.
+7. Add tool-surface controls: include/exclude tools, resources/prompts toggles, disabled-but-installed capabilities.
 
 ### Phase 4: Runtime/Gateway Integration
 
@@ -588,6 +652,7 @@ The CLI must stay excellent for CI, automation, SSH, and agents.
 3. Add OAuth lifecycle metadata.
 4. Add on-demand activation for heavy MCP servers.
 5. Add record/replay support bundles if users need debugging.
+6. Add dynamic tool-discovery awareness and first-invoke approval metadata.
 
 ## Strongest Product Wedge After Research
 
@@ -621,6 +686,6 @@ The direct competitors prove the need exists. agentstack can win if it is more t
 - `docker/mcp-gateway`: <https://github.com/docker/mcp-gateway>
 - `gs-init/ai-apparatus`: <https://github.com/gs-init/ai-apparatus>
 - `mksglu/context-mode`: <https://github.com/mksglu/context-mode>
+- `NousResearch/hermes-agent`: <https://github.com/NousResearch/hermes-agent>
 - `lastmile-ai/mcp-agent`: <https://github.com/lastmile-ai/mcp-agent>
 - `jellydn/my-ai-tools`: <https://github.com/jellydn/my-ai-tools>
-

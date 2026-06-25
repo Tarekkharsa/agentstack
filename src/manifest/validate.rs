@@ -19,6 +19,21 @@ pub enum IssueKind {
     UnknownTargetServer,
 }
 
+impl IssueKind {
+    /// Structural errors that would render broken/partial config — these block
+    /// `--write`. (All current kinds are errors; kept as a method so future
+    /// warning-only kinds can return `false`.)
+    pub fn is_error(&self) -> bool {
+        matches!(
+            self,
+            IssueKind::UnknownServerRef
+                | IssueKind::UnknownSkillRef
+                | IssueKind::MissingTransportFields
+                | IssueKind::UnknownTargetServer
+        )
+    }
+}
+
 impl Issue {
     fn new(kind: IssueKind, message: impl Into<String>) -> Self {
         Issue {

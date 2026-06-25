@@ -238,10 +238,15 @@ pub struct ApplyArgs {
     #[arg(long)]
     pub write: bool,
 
-    /// Which scope to write: global (~) or project (repo). Defaults to project
-    /// when a manifest is in the working dir, else global.
+    /// Which scope to write: global (~) or project (repo). Defaults to global;
+    /// pass `--scope project` to write repo-local config.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
+
+    /// Allow writing even when a `${REF}` did not resolve on this machine. By
+    /// default unresolved secrets block the write for that target.
+    #[arg(long)]
+    pub allow_unresolved: bool,
 }
 
 #[derive(Args, Debug)]
@@ -271,6 +276,10 @@ pub struct UseArgs {
     /// Actually write configs and materialize skills (else dry-run).
     #[arg(long)]
     pub write: bool,
+
+    /// Allow writing even when a `${REF}` did not resolve (off by default).
+    #[arg(long)]
+    pub allow_unresolved: bool,
 }
 
 #[derive(Args, Debug)]
@@ -352,7 +361,9 @@ pub struct DashboardArgs {
     #[arg(long)]
     pub no_open: bool,
 
-    /// Read-only mode (reserved; the dashboard is read-only in this phase).
+    /// Disable all writes: the dashboard can browse state and preview diffs but
+    /// every mutation endpoint (apply, toggle, secrets, settings, install…) is
+    /// refused. Without this flag the dashboard can write to disk.
     #[arg(long)]
     pub read_only: bool,
 }

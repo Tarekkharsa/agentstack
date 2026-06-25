@@ -2,6 +2,29 @@
 
 Date: 2026-06-25
 
+## Fixes Applied (2026-06-25)
+
+The high/medium **trust** findings from this review have been addressed:
+
+- **Finding 1 (High) — unresolved secrets block writes.** `apply`, `use`, and
+  the dashboard apply/toggle now refuse to write a target whose `${REF}`s don't
+  resolve (the `${TOKEN}` placeholder never reaches live config). New
+  `--allow-unresolved` escape hatch. Covered by `tests/unresolved_block.rs`.
+- **Finding 2 (Medium) — validation errors block writes.** `IssueKind::is_error`
+  splits structural errors from warnings; `apply --write` aborts on errors.
+- **Finding 3 (Medium) — dashboard mutability wording.** `--read-only` help now
+  states the dashboard writes by default and the flag disables all mutations;
+  README dashboard section rewritten to match.
+- **Finding 5 (Medium) — scope default.** Implementation keeps **global** as the
+  default; README and `--scope` help corrected to say so.
+
+Still open (lower priority / larger): Finding 4 (plan-token confirm flow),
+Finding 6 (richer registry import), Finding 7 (SHA-256 lockfile), Finding 8
+(first-run funnel polish) and the feature ideas below.
+
+---
+
+
 ## Executive Verdict
 
 agentstack is useful for real developers, especially developers who regularly use more than one AI coding harness, move between machines, or work in teams where MCP servers, skills, instructions, and permissions need to be reproducible. The idea is not just "sync config files." The stronger framing is:

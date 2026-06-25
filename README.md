@@ -58,9 +58,11 @@ cross-source discovery (the official MCP Registry), and a trust/governance gate*
 The dashboard is an embedded localhost server + a self-contained UI (shadcn
 aesthetic, hand-written CSS — no Node, no framework, still one `cargo build`):
 `agentstack dashboard` opens a cross-harness matrix with secrets, skills,
-profiles, and usage panels, and can **set secrets, apply, activate a profile, and
-install** right from the UI (`--read-only` disables writes). Bound to 127.0.0.1,
-token-gated, and it never exposes secret values.
+settings, profiles, and usage panels. By default it **can write to disk** — set
+secrets, apply to live configs, toggle servers/skills per CLI, edit settings,
+consolidate skills, and install. Pass **`--read-only`** to refuse every mutation
+(browse + preview diffs only). Bound to 127.0.0.1, token-gated, it never exposes
+secret values, and the same unresolved-secret blocking applies to its writes.
 
 Implemented and tested:
 
@@ -85,9 +87,14 @@ Implemented and tested:
 - **Governance (`[policy]`)** — `require`/`forbid` capabilities and an
   `allowed_sources` glob allowlist (e.g. `git:github.com/acme/*`), enforced by
   `doctor --ci`. Cross-source trust gating for executable-intent skills/MCPs.
-- **Global vs project scope** (`--scope`): write to each CLI's global locations
-  (`~/.claude.json`, `~/.claude/skills`) or its project locations (`.mcp.json`,
-  `.claude/skills/`) so any agent opening the repo inherits the setup.
+- **Global vs project scope** (`--scope`): writes default to **global** (each
+  CLI's `~/.claude.json`, `~/.claude/skills`); pass `--scope project` to write a
+  repo's project locations (`.mcp.json`, `.claude/skills/`) so any agent opening
+  the repo inherits the setup.
+- **Unresolved secrets block writes** — if a `${REF}` doesn't resolve on this
+  machine, `apply`/`use`/dashboard writes are refused for that target (never a
+  `${TOKEN}` placeholder in live config); override with `--allow-unresolved`.
+  Structural manifest validation errors block `--write` too.
 - **Selective skills** via profiles — `use <profile>` materializes only that
   profile's skills (symlink, with copy fallback), pruning the rest it owns and
   never clobbering hand-made skill dirs.

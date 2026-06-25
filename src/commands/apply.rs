@@ -17,13 +17,23 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
     let scope = args.scope.unwrap_or(Scope::Global);
 
-    print_validation(manifest);
+    let has_errors = print_validation(manifest);
 
     let selection = match &args.profile {
         Some(p) => Selection::Profile(p.clone()),
         None => Selection::All,
     };
-    let will_write = args.write && !args.dry_run;
+    let mut will_write = args.write && !args.dry_run;
+
+    // Structural validation errors would produce broken/partial config — never
+    // write on them.
+    if will_write && has_errors {
+        println!(
+            "\n{} manifest has validation errors — not writing. Fix them first.",
+            "✗".red()
+        );
+        will_write = false;
+    }
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     if target_ids.is_empty() {
@@ -71,11 +81,18 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
             println!("  {} unresolved secret {}", "✗".red(), u);
             error_count += 1;
         }
+        // Unresolved `${REF}`s must never reach a live config file.
+        let blocked = !plan.unresolved.is_empty() && !args.allow_unresolved;
 
         if plan.changed() {
             changed_count += 1;
             print!("{}", indent(&plan.diff()));
-            if will_write {
+            if will_write && blocked {
+                println!(
+                    "  {} not written — unresolved secret(s); set them or pass --allow-unresolved",
+                    "✗".red()
+                );
+            } else if will_write {
                 plan.write()?;
                 state.record(&key, plan.managed.clone(), &plan.proposed);
                 crate::usage::bump(&plan.managed);
@@ -106,6 +123,7 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 println!("  {} unresolved secret {} (settings)", "✗".red(), u);
                 error_count += 1;
             }
+            let sblocked = !sp.unresolved.is_empty() && !args.allow_unresolved;
             for r in &sp.removed {
                 println!(
                     "  {} pruning setting '{r}' (no longer in manifest)",
@@ -120,14 +138,19 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
                     sp.settings_path.display()
                 );
                 print!("{}", indent(&sp.diff()));
-                if will_write {
+                if will_write && sblocked {
+                    println!(
+                        "  {} settings not written — unresolved secret(s)",
+                        "✗".red()
+                    );
+                } else if will_write {
                     sp.write()?;
                     state.record_settings(&key, sp.managed.clone());
                     println!("  {} wrote {} setting(s)", "✓".green(), sp.managed.len());
                 } else {
                     println!("  {} {} setting(s) to apply", "→".cyan(), sp.managed.len());
                 }
-            } else if will_write {
+            } else if will_write && !sblocked {
                 state.record_settings(&key, sp.managed.clone());
             }
         }
@@ -153,11 +176,19 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-fn print_validation(manifest: &crate::manifest::Manifest) {
+/// Print validation issues; return true if any are structural errors.
+fn print_validation(manifest: &crate::manifest::Manifest) -> bool {
     let issues = validate(manifest);
+    let mut has_error = false;
     for issue in &issues {
-        println!("{} {}", "⚠".yellow(), issue.message);
+        if issue.kind.is_error() {
+            has_error = true;
+            println!("{} {}", "✗".red(), issue.message);
+        } else {
+            println!("{} {}", "⚠".yellow(), issue.message);
+        }
     }
+    has_error
 }
 
 fn indent(s: &str) -> String {

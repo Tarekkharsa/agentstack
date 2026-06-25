@@ -56,6 +56,13 @@ pub fn toggle(
     )?
     .with_context(|| format!("{} does not support {scope} scope", desc.display))?;
 
+    // Never write an unresolved `${REF}` into a live config.
+    if !plan.unresolved.is_empty() {
+        anyhow::bail!(
+            "unresolved secret(s): {} — set them under Secrets first",
+            plan.unresolved.join(", ")
+        );
+    }
     plan.write()?;
     state.record(&key, plan.managed.clone(), &plan.proposed);
     state.save()?;
