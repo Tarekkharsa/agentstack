@@ -79,7 +79,7 @@ fn route(
             if !authed {
                 return unauthorized();
             }
-            match crate::dashboard::snapshot::build(dir) {
+            match crate::dashboard::snapshot::state(dir) {
                 Ok(mut v) => {
                     if let Some(o) = v.as_object_mut() {
                         o.insert("readOnly".into(), Value::Bool(read_only));
@@ -89,6 +89,9 @@ fn route(
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
         }
+        (Method::Post, "/api/init") => mutation(authed, read_only, || {
+            crate::commands::init::dashboard_init(dir).map(|_| ())
+        }),
         (Method::Get, "/api/diff") => {
             if !authed {
                 return unauthorized();

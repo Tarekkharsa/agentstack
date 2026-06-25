@@ -15,6 +15,63 @@ use crate::manifest::load::MANIFEST_FILE;
 use crate::manifest::model::{Manifest, Meta, Server, Targets};
 use crate::secret::keychain;
 
+/// Non-interactive init for the dashboard: detect CLIs, import their servers,
+/// lift secrets (best-effort to keychain), write the manifest. Returns a
+/// summary. Errors if a manifest already exists or no CLIs are detected.
+pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
+    let dir = match manifest_dir {
+        Some(d) => d.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    let manifest_path = dir.join(MANIFEST_FILE);
+    if manifest_path.exists() {
+        anyhow::bail!("already initialized ({} exists)", manifest_path.display());
+    }
+
+    let registry = Registry::load()?;
+    let mut detected: Vec<String> = Vec::new();
+    let mut servers: IndexMap<String, Server> = IndexMap::new();
+    for desc in registry.iter() {
+        if !desc.detected() {
+            continue;
+        }
+        detected.push(desc.id.clone());
+        if let Some(value) = desc.read_config_value()? {
+            merge_servers(&mut servers, extract_servers(desc, &value));
+        }
+    }
+    if detected.is_empty() {
+        anyhow::bail!("no supported CLIs detected on this machine");
+    }
+
+    let lifted = lift_secrets(&mut servers);
+    for l in &lifted {
+        let _ = keychain::set(&l.reference, &l.value); // best effort
+    }
+
+    let manifest = Manifest {
+        version: 1,
+        meta: Meta { name: None },
+        servers,
+        skills: IndexMap::new(),
+        profiles: IndexMap::new(),
+        instructions: IndexMap::new(),
+        targets: Targets {
+            default: detected.clone(),
+        },
+        policy: Default::default(),
+    };
+    let toml_text = toml::to_string_pretty(&manifest).context("serializing manifest")?;
+    crate::util::atomic::write(&manifest_path, &toml_text)?;
+
+    Ok(format!(
+        "Imported {} server(s) from {} CLI(s); lifted {} secret(s).",
+        manifest.servers.len(),
+        detected.len(),
+        lifted.len()
+    ))
+}
+
 pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let dir = match manifest_dir {
         Some(d) => d.to_path_buf(),

@@ -446,6 +446,12 @@ function load() {
       DATA = data;
       READONLY = !!data.readOnly;
       document.getElementById("dir").textContent = data.meta.dir;
+      if (data.needsInit) {
+        document.getElementById("mode").textContent = "setup";
+        document.getElementById("nav").innerHTML = "";
+        renderWelcome(data);
+        return;
+      }
       document.getElementById("mode").textContent = READONLY ? "read-only" : "read-write";
       renderNav();
       show(SECTION);
@@ -460,5 +466,36 @@ function load() {
       ]));
     });
 }
+function renderWelcome(data) {
+  const c = document.getElementById("content");
+  c.innerHTML = "";
+  c.appendChild(pageHead("Welcome to agentstack", "No manifest yet in " + data.meta.dir));
+
+  const detected = data.adapters.filter((a) => a.installed || a.configPresent);
+  const rows = (detected.length ? detected : data.adapters).map((a) =>
+    el("div", { class: "list-row" }, [
+      el("span", { class: "name" }, [a.display]),
+      a.installed ? badge("installed", "green") : a.configPresent ? badge("config found", "amber") : badge("not detected", ""),
+    ])
+  );
+  c.appendChild(el("div", { class: "card" }, [
+    el("div", { class: "hd" }, ["Detected agent CLIs", el("small", null, ["Initialize imports their MCP servers into one manifest and lifts secrets to your keychain."])]),
+    el("div", { class: "bd" }, rows),
+  ]));
+
+  if (READONLY) {
+    c.appendChild(el("div", { class: "muted", style: "margin-top:14px" }, ["Dashboard is read-only — run `agentstack init` in your terminal, or relaunch without --read-only."]));
+    return;
+  }
+  if (!detected.length) {
+    c.appendChild(el("div", { class: "muted", style: "margin-top:14px" }, ["No supported CLIs detected on this machine."]));
+    return;
+  }
+  c.appendChild(el("div", { style: "margin-top:16px" }, [
+    btn("Scan my CLIs & initialize ›", () =>
+      post("/api/init", {}, "Initialized — review your servers, then Apply"), "primary"),
+  ]));
+}
+
 document.getElementById("refresh").addEventListener("click", () => load());
 load();

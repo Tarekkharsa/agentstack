@@ -15,6 +15,44 @@ use crate::state::{target_key, State};
 use crate::store::{local_source_dir, Store};
 use crate::usage::Usage;
 
+/// The state the dashboard loads: a full snapshot, or a "needs init" welcome
+/// payload when no manifest exists yet (so a brand-new user can start here).
+pub fn state(manifest_dir: Option<&Path>) -> Result<Value> {
+    let dir = match manifest_dir {
+        Some(d) => d.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    if !dir.join(crate::manifest::load::MANIFEST_FILE).exists() {
+        return welcome(&dir);
+    }
+    let mut v = build(manifest_dir)?;
+    if let Some(o) = v.as_object_mut() {
+        o.insert("needsInit".into(), Value::Bool(false));
+    }
+    Ok(v)
+}
+
+/// Pre-manifest welcome: which CLIs we detected, ready to import.
+fn welcome(dir: &Path) -> Result<Value> {
+    let reg = crate::adapter::Registry::load()?;
+    let adapters: Vec<Value> = reg
+        .iter()
+        .map(|d| {
+            json!({
+                "id": d.id,
+                "display": d.display,
+                "installed": d.is_installed(),
+                "configPresent": d.config_present(),
+            })
+        })
+        .collect();
+    Ok(json!({
+        "needsInit": true,
+        "meta": { "dir": dir.display().to_string(), "version": env!("CARGO_PKG_VERSION") },
+        "adapters": adapters,
+    }))
+}
+
 pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
     let ctx = crate::commands::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
