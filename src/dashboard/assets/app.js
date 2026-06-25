@@ -6,6 +6,7 @@ let SECTION = "overview";
 let READONLY = false;
 let OPEN_SERVER = null;
 let ADD_FORM = false;
+let SKILL_FORM = false;
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -338,14 +339,57 @@ function toggleSkillCell(skillName, target, currentlyOn) {
     (currentlyOn ? "Disabled " : "Enabled ") + skillName);
 }
 
+function saveSkill() {
+  const g = (id) => (document.getElementById(id) || {}).value || "";
+  const source = g("sk-source");
+  const body = { name: g("sk-name").trim(), source };
+  if (!body.name) return toast("Name is required", false);
+  if (source === "git") { body.git = g("sk-git").trim(); body.rev = g("sk-rev").trim(); }
+  else body.path = g("sk-path").trim();
+  fetch(q("/api/add_skill"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || d.error) throw new Error(d.error || "failed");
+      SKILL_FORM = false;
+      toast("Skill added — click Install, then enable it per CLI", true);
+      load();
+    })
+    .catch((e) => toast("Add skill: " + e.message, false));
+}
+
+function addSkillCard() {
+  const row = (label, node, id) => el("div", { id, style: "display:flex;align-items:center;gap:10px;margin-bottom:8px" }, [
+    el("label", { class: "muted", style: "width:90px;font-size:12px" }, [label]), node,
+  ]);
+  const source = el("select", { id: "sk-source", style: "height:32px", onchange: () => {
+    document.getElementById("row-git").style.display = source.value === "git" ? "" : "none";
+    document.getElementById("row-rev").style.display = source.value === "git" ? "" : "none";
+    document.getElementById("row-path").style.display = source.value === "path" ? "" : "none";
+  } }, [el("option", { value: "git" }, ["git"]), el("option", { value: "path" }, ["path"])]);
+  return el("div", { class: "card", style: "margin-bottom:16px" }, [
+    el("div", { class: "hd" }, ["Add skill", el("small", null, ["added to the manifest; then Install + enable per CLI"])]),
+    el("div", { class: "bd" }, [
+      row("name", el("input", { id: "sk-name", class: "inp", placeholder: "e.g. code-review", style: "width:220px" })),
+      row("source", source),
+      row("git URL", el("input", { id: "sk-git", class: "inp", placeholder: "https://github.com/acme/skills.git", style: "width:340px" }), "row-git"),
+      row("rev", el("input", { id: "sk-rev", class: "inp", placeholder: "(optional) tag / branch / sha", style: "width:340px" }), "row-rev"),
+      row("path", el("input", { id: "sk-path", class: "inp", placeholder: "./skills/code-review", style: "width:340px" }), "row-path"),
+      el("div", { class: "toolbar", style: "margin-top:6px" }, [btn("Save", saveSkill, "primary"), btn("Cancel", () => { SKILL_FORM = false; show("skills"); })]),
+    ]),
+  ]);
+}
+
 function skills(c) {
   c.appendChild(pageHead("Skills", "Toggle a skill into each CLI's skills directory. A skill must be installed (in the store) before it can be enabled."));
   const adapters = DATA.skillAdapters || [];
 
-  if (!READONLY && DATA.skills.some((s) => !s.installed)) {
-    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
-      btn("Install missing", () => post("/api/install", {}, "Install"), "primary"),
-    ]));
+  if (!READONLY) {
+    const tools = [btn(SKILL_FORM ? "Close" : "+ Add skill", () => { SKILL_FORM = !SKILL_FORM; show("skills"); }, "primary")];
+    if (DATA.skills.some((s) => !s.installed)) tools.push(btn("Install missing", () => post("/api/install", {}, "Install")));
+    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, tools));
+    if (SKILL_FORM) c.appendChild(addSkillCard());
+    // path source is hidden by default (git is the first option)
+    if (SKILL_FORM) setTimeout(() => { const p = document.getElementById("row-path"); if (p) p.style.display = "none"; }, 0);
   }
 
   const head = el("tr", null, [el("th", null, ["skill"])]);

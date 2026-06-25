@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use crate::manifest::{Server, ServerType};
+use crate::manifest::{Server, ServerType, Skill};
 use crate::render::{plan_target, skills, Selection};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
@@ -118,6 +118,55 @@ pub fn toggle_skill(
     state.save()?;
     crate::usage::bump(&[skill.to_string()]);
     Ok(())
+}
+
+/// Add a skill to the manifest from dashboard form fields (git URL or local
+/// path). Mirrors `add_server` — writes the manifest only; the user then clicks
+/// Install to fetch it and toggles it into a CLI.
+pub fn add_skill(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
+    let name = args
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("skill name is required")?;
+    let source = args.get("source").and_then(Value::as_str).unwrap_or("git");
+    let skill = if source == "path" {
+        Skill {
+            path: str_field(args, "path"),
+            git: None,
+            rev: None,
+        }
+    } else {
+        Skill {
+            path: None,
+            git: str_field(args, "git"),
+            rev: str_field(args, "rev"),
+        }
+    };
+    match source {
+        "path" if skill.path.is_none() => anyhow::bail!("a path-sourced skill needs a path"),
+        "git" if skill.git.is_none() => anyhow::bail!("a git-sourced skill needs a git URL"),
+        _ => {}
+    }
+
+    let dir = match manifest_dir {
+        Some(d) => d.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    let manifest_path = dir.join(crate::manifest::load::MANIFEST_FILE);
+    let original = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let parsed: crate::manifest::Manifest =
+        toml::from_str(&original).context("parsing manifest")?;
+    if parsed.skills.contains_key(name) {
+        anyhow::bail!("skill '{name}' already exists");
+    }
+    let body = serde_json::to_value(&skill)?;
+    let new_text =
+        crate::commands::add::build_manifest_with(&original, "skills", name, &body, None)?;
+    crate::util::atomic::write(&manifest_path, &new_text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    Ok(name.to_string())
 }
 
 /// Add a custom MCP server to the manifest from dashboard form fields.
