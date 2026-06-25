@@ -87,6 +87,23 @@ pub enum Command {
 
     /// Run agentstack as an MCP server over stdio (for an agent to call).
     Mcp,
+
+    /// Print a shell hook for per-directory profile auto-activation.
+    Hook(HookArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct HookArgs {
+    /// Which shell to emit the hook for.
+    #[arg(value_enum)]
+    pub shell: Shell,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum Shell {
+    Zsh,
+    Bash,
+    Fish,
 }
 
 #[derive(Args, Debug)]
@@ -274,6 +291,10 @@ pub struct DoctorArgs {
     /// Also perform live MCP handshakes against HTTP servers.
     #[arg(long)]
     pub live: bool,
+
+    /// Repair safe issues (re-apply drifted target configs).
+    #[arg(long)]
+    pub fix: bool,
 }
 
 #[derive(Args, Debug)]

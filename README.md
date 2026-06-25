@@ -80,8 +80,9 @@ Implemented and tested:
   secrets) for moving a setup to a new machine; passphrase-protected.
 - Commands: `init`, `add`, `install` (`--locked`), `update`, `remove`,
   `apply` (`--scope`, `--write`), `diff`, `use <profile>`, `instructions`,
-  `adopt`, `doctor` (`--ci`, `--live`), `search`, `stats`,
-  `secret set|get|rm|list`, `export`/`import`, `adapters`, `dashboard`, `mcp`.
+  `adopt`, `doctor` (`--ci`, `--live`, `--fix`), `search`, `stats`,
+  `secret set|get|rm|list`, `export`/`import`, `adapters`, `dashboard`, `mcp`,
+  `hook`.
 
 ### Agent-operable (`agentstack mcp`)
 
@@ -94,6 +95,17 @@ e.g. Claude Code:
 
 ```json
 { "mcpServers": { "agentstack": { "type": "stdio", "command": "agentstack", "args": ["mcp"] } } }
+```
+
+### Per-directory auto-activation (`agentstack hook`)
+
+direnv-style: drop a `.agentstack` file (first line = profile name) in a repo,
+add the hook to your shell rc, and entering the repo activates that profile at
+project scope across your CLIs:
+
+```bash
+eval "$(agentstack hook zsh)"   # or bash / fish
+echo backend > .agentstack       # in a project
 ```
 
 `apply`/`use`/`instructions` **never write** without an explicit `--write`.

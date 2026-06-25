@@ -7,6 +7,7 @@ pub mod apply;
 pub mod bundle;
 pub mod diff;
 pub mod doctor;
+pub mod hook;
 pub mod init;
 pub mod install;
 pub mod instructions;

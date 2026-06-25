@@ -1,8 +1,8 @@
 //! `agentstack doctor` — the trust layer. Static, offline checks across five
 //! categories: adapters/CLIs, secrets, drift, quirks, and skills. `--ci` exits
-//! nonzero on any error so teams can gate on it.
-//!
-//! Live MCP connectivity (`--live`) is Phase 2.
+//! nonzero on any error (team gate); `--live` adds MCP `initialize` handshakes;
+//! `--fix` re-applies drifted target configs (safe class). Drift/fix operate on
+//! global scope.
 
 use std::path::Path;
 
@@ -64,7 +64,8 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &[]);
-    let state = State::load()?;
+    let mut state = State::load()?;
+    let mut fixed = 0;
 
     println!("{}", "Adapters & CLIs".bold());
     for id in &target_ids {
@@ -147,16 +148,33 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
         // Pending manifest changes?
         if plan.changed() {
-            any_drift = true;
-            report.line(
-                Level::Warn,
-                format!(
-                    "{:<14} {} change(s) pending ↳ agentstack apply --write",
-                    desc.display,
-                    plan.managed.len().max(plan.removed.len())
-                ),
-            );
+            if args.fix {
+                plan.write()?;
+                state.record(&key, plan.managed.clone(), &plan.proposed);
+                fixed += 1;
+                report.line(
+                    Level::Ok,
+                    format!(
+                        "{:<14} re-applied {} change(s)",
+                        desc.display,
+                        plan.managed.len()
+                    ),
+                );
+            } else {
+                any_drift = true;
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<14} {} change(s) pending ↳ agentstack apply --write",
+                        desc.display,
+                        plan.managed.len().max(plan.removed.len())
+                    ),
+                );
+            }
         }
+    }
+    if fixed > 0 {
+        state.save()?;
     }
     if !any_drift {
         report.line(Level::Ok, "all targets in sync");
@@ -219,6 +237,9 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     println!();
+    if fixed > 0 {
+        println!("{} re-applied {fixed} drifted target(s).", "✓".green());
+    }
     println!(
         "{} error(s), {} warning(s).",
         report.errors, report.warnings
