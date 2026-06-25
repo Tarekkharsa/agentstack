@@ -1,0 +1,38 @@
+# Claude Code adapter descriptor
+# Config: ~/.claude.json — top-level "mcpServers" object, JSON.
+# HTTP servers require "type":"http"; headers live in a "headers" object.
+id: claude-code
+display: Claude Code
+detect:
+  bin: claude
+  config: ~/.claude.json
+config:
+  path: ~/.claude.json
+  format: json
+# Project scope: Claude Code reads project MCP servers from .mcp.json and
+# project skills from .claude/skills/ at the repo root.
+project:
+  config: .mcp.json
+  format: json
+mcp:
+  location: mcpServers
+  fields:
+    url: url
+    headers: headers
+    command: command
+    args: args
+    env: env
+  # Claude tags every server with a transport "type": "http" or "stdio".
+  transport:
+    key: type
+    http_value: http
+    stdio_value: stdio
+  headers_as_subtable: false
+  secret_mode: literal
+skills:
+  dir: ~/.claude/skills
+  project_dir: .claude/skills
+  strategy: symlink
+instructions:
+  global: ~/.claude/CLAUDE.md
+  project: CLAUDE.md

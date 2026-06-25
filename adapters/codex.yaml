@@ -1,0 +1,32 @@
+# Codex CLI adapter descriptor
+# Config: ~/.codex/config.toml — [mcp_servers.<name>] tables, TOML.
+# Headers go in a nested [mcp_servers.<name>.http_headers] table (not inline).
+# Codex has no ${VAR:-default} expansion, so secrets are written resolved (literal).
+id: codex
+display: Codex CLI
+detect:
+  bin: codex
+  config: ~/.codex/config.toml
+config:
+  path: ~/.codex/config.toml
+  format: toml
+mcp:
+  location: mcp_servers
+  fields:
+    url: url
+    command: command
+    args: args
+    headers: http_headers
+    env: env
+  # Codex does not tag transport with a type key; presence of url vs command implies it.
+  transport: null
+  headers_as_subtable: true
+  secret_mode: literal
+# Codex has no per-directory project config file today, so it is global-only
+# (no `project:` block). Skills live under the global Codex skills dir.
+skills:
+  dir: ~/.codex/skills
+  strategy: symlink
+instructions:
+  global: ~/.codex/AGENTS.md
+  project: AGENTS.md

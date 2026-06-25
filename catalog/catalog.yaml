@@ -1,0 +1,70 @@
+# Starter capability catalog (registry v0 — embedded in the binary).
+# A curated set of well-known MCP servers. Grows into the git-index registry
+# (PLAN §9d). `agentstack search <query>` matches name/description/tags.
+- name: github
+  kind: server
+  description: GitHub — issues, pull requests, repositories
+  tags: [git, github, vcs, code]
+  transport: stdio
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-github"]
+  env: [GITHUB_TOKEN]
+
+- name: gitlab
+  kind: server
+  description: GitLab — projects, merge requests, issues
+  tags: [git, gitlab, vcs, code]
+  transport: stdio
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-gitlab"]
+  env: [GITLAB_TOKEN]
+
+- name: filesystem
+  kind: server
+  description: Local filesystem — read and write files in allowed dirs
+  tags: [files, fs, local]
+  transport: stdio
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-filesystem"]
+
+- name: postgres
+  kind: server
+  description: PostgreSQL — query and inspect a database (read-only)
+  tags: [db, sql, postgres, database]
+  transport: stdio
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-postgres"]
+  env: [POSTGRES_URL]
+
+- name: slack
+  kind: server
+  description: Slack — read channels, post messages
+  tags: [chat, slack, messaging]
+  transport: stdio
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-slack"]
+  env: [SLACK_BOT_TOKEN]
+
+- name: brave-search
+  kind: server
+  description: Brave Search — web search results
+  tags: [search, web, brave]
+  transport: stdio
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-brave-search"]
+  env: [BRAVE_API_KEY]
+
+- name: linear
+  kind: server
+  description: Linear — issues, projects, cycles
+  tags: [issues, linear, project-management]
+  transport: http
+  url: https://mcp.linear.app/mcp
+  headers: [Authorization]
+
+- name: figma
+  kind: server
+  description: Figma — read designs and design context
+  tags: [design, figma, ui]
+  transport: http
+  url: https://mcp.figma.com/mcp

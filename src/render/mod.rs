@@ -1,0 +1,11 @@
+//! Rendering targets: per-format non-destructive mergers and the apply
+//! orchestration that produces a read-only plan.
+
+pub mod apply;
+pub mod instructions;
+pub mod merge_json;
+pub mod merge_md;
+pub mod merge_toml;
+pub mod skills;
+
+pub use apply::{plan_target, resolve_targets, Selection, TargetPlan};

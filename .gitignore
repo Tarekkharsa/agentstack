@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# machine-local overlay — never committed
+agentstack.local.toml
+
+# encrypted bundles
+*.age

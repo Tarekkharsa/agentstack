@@ -1,0 +1,44 @@
+//! Path helpers: `~` expansion and well-known agentstack locations.
+
+use std::path::PathBuf;
+
+/// Expand a leading `~` (and `~/`) to the user's home directory. Other paths
+/// are returned unchanged.
+pub fn expand_tilde(path: &str) -> PathBuf {
+    if path == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+    }
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(path)
+}
+
+/// `~/.agentstack` — where state and user adapters live.
+pub fn agentstack_home() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".agentstack")
+}
+
+/// `~/.agentstack/adapters` — user-supplied descriptor overrides/additions.
+pub fn user_adapters_dir() -> PathBuf {
+    agentstack_home().join("adapters")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expands_tilde() {
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(
+            expand_tilde("~/.codex/config.toml"),
+            home.join(".codex/config.toml")
+        );
+        assert_eq!(expand_tilde("/abs/path"), PathBuf::from("/abs/path"));
+    }
+}

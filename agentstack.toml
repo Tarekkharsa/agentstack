@@ -1,0 +1,29 @@
+version = 1
+
+[meta]
+name = "tarek-agent-setup"
+
+# ---- MCP servers ----
+# Secrets are references (${NAME}), resolved per-machine. This file is commit-safe.
+
+[servers.kibana_mcp]
+type = "http"
+url = "https://kibana-mcp.ghaloyalty.com/mcp"
+headers = { Authorization = "Bearer ${KIBANA_TOKEN}" }
+
+[servers.figma]
+type = "http"
+url = "https://mcp.figma.com/mcp"
+
+# ---- Profiles = named bundles (selective loading) ----
+[profiles.backend]
+servers = ["kibana_mcp"]
+skills = []
+
+[profiles.design]
+servers = ["figma", "kibana_mcp"]
+skills = []
+
+# ---- Targets ----
+[targets]
+default = ["claude-code", "codex"]
