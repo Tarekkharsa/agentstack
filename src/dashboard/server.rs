@@ -240,7 +240,10 @@ fn scope_of_query(query: &str) -> Scope {
 }
 
 fn unauthorized() -> Resp {
-    Response::from_string("unauthorized").with_status_code(401)
+    // JSON body so the client can parse + show a clear message (a stale token in
+    // the URL is the usual cause).
+    json("{\"error\":\"unauthorized — open the dashboard URL printed in your terminal (the token must match this server)\"}")
+        .with_status_code(401)
 }
 
 type Resp = Response<std::io::Cursor<Vec<u8>>>;

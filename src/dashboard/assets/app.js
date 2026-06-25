@@ -438,8 +438,10 @@ function openPreview(scope) {
 /* ---------- load ---------- */
 function load() {
   return fetch(q("/api/state"))
-    .then((r) => r.json())
-    .then((data) => {
+    .then((r) => r.text().then((t) => ({ status: r.status, t })))
+    .then(({ status, t }) => {
+      let data;
+      try { data = JSON.parse(t); } catch (_) { throw new Error(t || "HTTP " + status); }
       if (data.error) throw new Error(data.error);
       DATA = data;
       READONLY = !!data.readOnly;
@@ -449,8 +451,13 @@ function load() {
       show(SECTION);
     })
     .catch((e) => {
-      document.getElementById("content").innerHTML = "";
-      document.getElementById("content").appendChild(el("div", { class: "error" }, ["Failed to load: " + e.message]));
+      document.getElementById("dir").textContent = "—";
+      const c = document.getElementById("content");
+      c.innerHTML = "";
+      c.appendChild(el("div", { class: "error" }, [e.message]));
+      c.appendChild(el("div", { class: "muted", style: "padding:0 16px" }, [
+        "Tip: open the exact URL agentstack printed in your terminal — the token in the address bar must match the running server.",
+      ]));
     });
 }
 document.getElementById("refresh").addEventListener("click", () => load());
