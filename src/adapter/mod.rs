@@ -87,6 +87,59 @@ impl AdapterDescriptor {
     }
 }
 
+/// A skill found already present in a CLI's skills directory.
+#[derive(Debug, Clone)]
+pub struct DiscoveredSkill {
+    /// Directory name in the skills dir (the skill's name).
+    pub name: String,
+    /// The real source on disk (symlinks resolved to their target).
+    pub source: std::path::PathBuf,
+    /// True if the entry in the skills dir is a symlink (agentstack-style) vs a
+    /// real directory living in the CLI's own folder.
+    pub is_symlink: bool,
+}
+
+impl AdapterDescriptor {
+    /// Scan this CLI's skills directory (for a scope) for skills already on
+    /// disk: subdirectories containing a `SKILL.md`. Symlinks are resolved to
+    /// their real source. Hidden entries (`.system`, …) are skipped.
+    pub fn discover_skills(
+        &self,
+        scope: crate::scope::Scope,
+        project_dir: &std::path::Path,
+    ) -> Vec<DiscoveredSkill> {
+        let Some(dir) = self.skills_dir_for(scope, project_dir) else {
+            return Vec::new();
+        };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            let path = entry.path();
+            let is_symlink = std::fs::symlink_metadata(&path)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false);
+            // Resolve through symlinks to the real directory.
+            let source = std::fs::canonicalize(&path).unwrap_or(path);
+            if !source.is_dir() || !source.join("SKILL.md").is_file() {
+                continue;
+            }
+            out.push(DiscoveredSkill {
+                name,
+                source,
+                is_symlink,
+            });
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
+    }
+}
+
 /// Whether `bin` is found in any `$PATH` entry.
 pub fn bin_on_path(bin: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {

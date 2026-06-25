@@ -251,6 +251,33 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         })
         .collect();
 
+    // Skills already present on disk in each CLI's skills dir but not yet in the
+    // manifest — so the user can see and adopt what they already have.
+    let mut disc: std::collections::BTreeMap<String, (String, bool, Vec<String>)> =
+        std::collections::BTreeMap::new();
+    for d in ctx.registry.iter() {
+        for sk in d.discover_skills(Scope::Global, &ctx.dir) {
+            let e = disc
+                .entry(sk.name.clone())
+                .or_insert_with(|| (sk.source.display().to_string(), sk.is_symlink, Vec::new()));
+            if !e.2.contains(&d.id) {
+                e.2.push(d.id.clone());
+            }
+        }
+    }
+    let discovered_skills: Vec<Value> = disc
+        .into_iter()
+        .map(|(name, (source, is_symlink, present_in))| {
+            json!({
+                "name": name,
+                "source": source,
+                "isSymlink": is_symlink,
+                "presentIn": present_in,
+                "inManifest": manifest.skills.contains_key(&name),
+            })
+        })
+        .collect();
+
     let health = health_checks(&ctx, manifest, &state);
 
     Ok(json!({
@@ -264,6 +291,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "servers": servers,
         "skills": skills,
         "skillAdapters": skill_adapters,
+        "discoveredSkills": discovered_skills,
         "settingsAdapters": settings_adapters,
         "instructions": instructions,
         "secrets": secrets,

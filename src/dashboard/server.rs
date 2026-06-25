@@ -131,6 +131,12 @@ fn route(
         (Method::Post, "/api/add_skill") => mutation(authed, read_only, || {
             crate::dashboard::actions::add_skill(dir, &parse(body)).map(|_| ())
         }),
+        (Method::Post, "/api/adopt_skill") => mutation(authed, read_only, || {
+            crate::dashboard::actions::adopt_skill(dir, &field(&parse(body), "name")?)
+        }),
+        (Method::Post, "/api/adopt_all_skills") => mutation(authed, read_only, || {
+            crate::dashboard::actions::adopt_all_skills(dir).map(|_| ())
+        }),
         (Method::Post, "/api/set_settings") => mutation(authed, read_only, || {
             crate::dashboard::actions::set_settings(dir, &parse(body))
         }),

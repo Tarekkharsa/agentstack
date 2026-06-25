@@ -425,6 +425,33 @@ function skills(c) {
     body.appendChild(tr);
   });
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("table", null, [el("thead", null, [head]), body])])]));
+
+  // Skills already on disk in your CLIs but not yet in the manifest.
+  const found = (DATA.discoveredSkills || []).filter((d) => !d.inManifest);
+  if (found.length) {
+    const hd = ["Detected on disk", el("small", null, [`${found.length} skill(s) already in your CLIs, not yet managed`])];
+    if (!READONLY) hd.push(el("span", { style: "margin-left:auto" }, [btn("Adopt all", () => post("/api/adopt_all_skills", {}, "Adopt skills"), "primary")]));
+    const rows = found.map((d) => {
+      const where = (d.presentIn || []).map((t) => badge(t, "solid"));
+      return el("div", { class: "list-row" }, [
+        el("span", null, [
+          el("span", { class: "name" }, [d.name]),
+          el("div", { class: "muted mono", style: "font-size:12px" }, [(d.isSymlink ? "symlink · " : "") + d.source]),
+        ]),
+        el("span", { class: "row-actions" }, [
+          ...where,
+          READONLY ? null : btn("Adopt", () => post("/api/adopt_skill", { name: d.name }, "Adopt " + d.name)),
+        ]),
+      ]);
+    });
+    c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
+      el("div", { class: "hd", style: "display:flex;align-items:center" }, hd),
+      el("div", { class: "bd" }, [
+        el("div", { class: "muted", style: "font-size:12px;margin-bottom:8px" }, ["Adopting adds them to the manifest as path skills (your files aren't moved). Then Install + toggle them per CLI."]),
+        ...rows,
+      ]),
+    ]));
+  }
 }
 
 /* ---------- settings ---------- */

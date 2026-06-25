@@ -204,6 +204,74 @@ pub fn set_settings(manifest_dir: Option<&Path>, args: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Adopt a skill already present on disk (discovered in a CLI's skills dir) into
+/// the manifest as a `path` skill pointing at its real source. Manifest-only —
+/// never moves or deletes the skill's files.
+pub fn adopt_skill(manifest_dir: Option<&Path>, name: &str) -> Result<()> {
+    let ctx = crate::commands::load(manifest_dir)?;
+    if ctx.loaded.manifest.skills.contains_key(name) {
+        anyhow::bail!("skill '{name}' is already in the manifest");
+    }
+    // Find the discovered skill's real source across all CLIs.
+    let source = ctx
+        .registry
+        .iter()
+        .flat_map(|d| d.discover_skills(Scope::Global, &ctx.dir))
+        .find(|s| s.name == name)
+        .map(|s| s.source)
+        .with_context(|| format!("no skill named '{name}' found on disk"))?;
+
+    let skill = Skill {
+        path: Some(source.display().to_string()),
+        git: None,
+        rev: None,
+    };
+    let manifest_path = ctx.loaded.manifest_path.clone();
+    let original = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let body = serde_json::to_value(&skill)?;
+    let new_text =
+        crate::commands::add::build_manifest_with(&original, "skills", name, &body, None)?;
+    crate::util::atomic::write(&manifest_path, &new_text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    Ok(())
+}
+
+/// Adopt every discovered-on-disk skill that isn't already in the manifest.
+/// Returns the number adopted.
+pub fn adopt_all_skills(manifest_dir: Option<&Path>) -> Result<usize> {
+    let ctx = crate::commands::load(manifest_dir)?;
+    // Unique discovered skills not already in the manifest, by name.
+    let mut seen: std::collections::BTreeMap<String, std::path::PathBuf> =
+        std::collections::BTreeMap::new();
+    for d in ctx.registry.iter() {
+        for s in d.discover_skills(Scope::Global, &ctx.dir) {
+            if !ctx.loaded.manifest.skills.contains_key(&s.name) {
+                seen.entry(s.name).or_insert(s.source);
+            }
+        }
+    }
+    if seen.is_empty() {
+        anyhow::bail!("no new skills found on disk to adopt");
+    }
+    let manifest_path = ctx.loaded.manifest_path.clone();
+    let mut text = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let count = seen.len();
+    for (name, source) in seen {
+        let skill = Skill {
+            path: Some(source.display().to_string()),
+            git: None,
+            rev: None,
+        };
+        let body = serde_json::to_value(&skill)?;
+        text = crate::commands::add::build_manifest_with(&text, "skills", &name, &body, None)?;
+    }
+    crate::util::atomic::write(&manifest_path, &text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    Ok(count)
+}
+
 /// Add a skill to the manifest from dashboard form fields (git URL or local
 /// path). Mirrors `add_server` — writes the manifest only; the user then clicks
 /// Install to fetch it and toggles it into a CLI.
