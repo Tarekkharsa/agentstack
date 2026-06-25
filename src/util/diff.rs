@@ -12,8 +12,18 @@ pub fn differs(before: &str, after: &str) -> bool {
     before.trim_end_matches('\n') != after.trim_end_matches('\n')
 }
 
-/// Render a colored unified-ish diff. Returns an empty string when equal.
+/// Render a colored unified-ish diff (for the terminal). Empty when equal.
 pub fn render(before: &str, after: &str) -> String {
+    build(before, after, true)
+}
+
+/// Render a plain (uncolored) diff with `+`/`-`/` ` line prefixes — for the
+/// web dashboard, which colorizes by prefix in CSS.
+pub fn render_plain(before: &str, after: &str) -> String {
+    build(before, after, false)
+}
+
+fn build(before: &str, after: &str, color: bool) -> String {
     if !differs(before, after) {
         return String::new();
     }
@@ -40,10 +50,18 @@ pub fn render(before: &str, after: &str) -> String {
         out.push_str(&format!("  {line}\n"));
     }
     for line in &before[start..end_b] {
-        out.push_str(&format!("{}\n", format!("- {line}").red()));
+        let l = format!("- {line}");
+        out.push_str(&format!(
+            "{}\n",
+            if color { l.red().to_string() } else { l }
+        ));
     }
     for line in &after[start..end_a] {
-        out.push_str(&format!("{}\n", format!("+ {line}").green()));
+        let l = format!("+ {line}");
+        out.push_str(&format!(
+            "{}\n",
+            if color { l.green().to_string() } else { l }
+        ));
     }
     let ctx_end = (end_b + context).min(before.len());
     for line in &before[end_b..ctx_end] {

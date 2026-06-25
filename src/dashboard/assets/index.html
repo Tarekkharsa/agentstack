@@ -7,20 +7,24 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="wrap">
-    <header class="top">
-      <div class="brand">
-        <div class="logo">as</div>
-        <div>
-          <h1>agentstack</h1>
-          <div class="dir" id="dir">loading…</div>
-        </div>
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">as</div>
+      <div>
+        <div class="title">agentstack</div>
+        <div class="dir" id="dir">loading…</div>
       </div>
+    </div>
+    <div class="top-right">
       <span class="ro-badge" id="mode">…</span>
-    </header>
-    <div id="app"><p class="muted">Loading snapshot…</p></div>
-    <div class="foot">agentstack dashboard · localhost · <span id="ver"></span></div>
+      <button class="btn icon" id="refresh" title="Refresh"><span>⟳</span></button>
+    </div>
   </div>
+  <div class="layout">
+    <nav class="sidebar" id="nav"></nav>
+    <main class="content" id="content"><p class="muted">Loading snapshot…</p></main>
+  </div>
+  <div id="modal"></div>
   <script src="/app.js"></script>
 </body>
 </html>

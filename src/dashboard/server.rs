@@ -57,13 +57,15 @@ fn handle(mut request: Request, token: &str, read_only: bool, dir: Option<&Path>
         String::new()
     };
 
-    let response = route(&method, path, authed, read_only, &body, dir);
+    let response = route(&method, path, query, authed, read_only, &body, dir);
     let _ = request.respond(response);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn route(
     method: &Method,
     path: &str,
+    query: &str,
     authed: bool,
     read_only: bool,
     body: &str,
@@ -84,6 +86,15 @@ fn route(
                     }
                     json(&serde_json::to_string(&v).unwrap_or_default())
                 }
+                Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
+            }
+        }
+        (Method::Get, "/api/diff") => {
+            if !authed {
+                return unauthorized();
+            }
+            match crate::dashboard::snapshot::diffs(dir, scope_of_query(query)) {
+                Ok(v) => json(&serde_json::to_string(&v).unwrap_or_default()),
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
         }
@@ -149,6 +160,18 @@ fn field(v: &Value, key: &str) -> Result<String> {
 
 fn scope_of(body: &str) -> Scope {
     match parse(body).get("scope").and_then(Value::as_str) {
+        Some("project") => Scope::Project,
+        _ => Scope::Global,
+    }
+}
+
+fn scope_of_query(query: &str) -> Scope {
+    let v = query
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .find(|(k, _)| *k == "scope")
+        .map(|(_, v)| v);
+    match v {
         Some("project") => Scope::Project,
         _ => Scope::Global,
     }
