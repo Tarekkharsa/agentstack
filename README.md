@@ -40,8 +40,11 @@ Implemented and tested:
 
 - **Manifest model** with layered load (`agentstack.toml` + a gitignored
   `agentstack.local.toml` overlay) and static validation.
-- **Data-driven adapters** (`adapters/claude-code.yaml`, `adapters/codex.yaml`,
-  embedded in the binary; user overrides from `~/.agentstack/adapters/`).
+- **Data-driven adapters** — Claude Code, Codex, **Cursor, Windsurf, Gemini CLI**
+  (one YAML descriptor each, embedded in the binary; user overrides/additions
+  from `~/.agentstack/adapters/`). Each CLI's quirks are encoded in data, not
+  code: Claude's `type:"http"`, Codex's `http_headers` subtable, Windsurf's
+  `serverUrl`, Gemini's `httpUrl`.
 - **Generic renderer** that applies field renames, transport tags, header
   nesting, and secret substitution — and its **inverse** (`init` imports
   existing configs back into a manifest).

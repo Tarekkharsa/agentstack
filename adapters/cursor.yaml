@@ -1,0 +1,24 @@
+# Cursor adapter descriptor
+# Config: ~/.cursor/mcp.json (global) + <repo>/.cursor/mcp.json (project), JSON.
+# Same shape as Claude Desktop: top-level "mcpServers". Transport is inferred
+# from url-vs-command (no explicit type key). HTTP servers use "url" + "headers".
+id: cursor
+display: Cursor
+detect:
+  bin: cursor
+  config: ~/.cursor/mcp.json
+config:
+  path: ~/.cursor/mcp.json
+  format: json
+project:
+  config: .cursor/mcp.json
+  format: json
+mcp:
+  location: mcpServers
+  fields:
+    url: url
+    headers: headers
+    command: command
+    args: args
+    env: env
+  secret_mode: literal

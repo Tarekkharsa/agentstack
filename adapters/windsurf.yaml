@@ -1,0 +1,21 @@
+# Windsurf (Codeium Cascade) adapter descriptor
+# Config: ~/.codeium/windsurf/mcp_config.json, JSON, top-level "mcpServers".
+# Quirk: remote HTTP servers use "serverUrl" (not "url"). Global only — Windsurf
+# has no per-project MCP config file.
+id: windsurf
+display: Windsurf
+detect:
+  bin: windsurf
+  config: ~/.codeium/windsurf/mcp_config.json
+config:
+  path: ~/.codeium/windsurf/mcp_config.json
+  format: json
+mcp:
+  location: mcpServers
+  fields:
+    url: serverUrl
+    headers: headers
+    command: command
+    args: args
+    env: env
+  secret_mode: literal

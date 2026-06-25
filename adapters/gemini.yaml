@@ -1,0 +1,25 @@
+# Gemini CLI adapter descriptor
+# Config: ~/.gemini/settings.json (global) + <repo>/.gemini/settings.json
+# (project), JSON. MCP servers live under top-level "mcpServers" alongside other
+# settings (the non-destructive JSON merge only touches that key).
+# Quirk: remote HTTP servers use "httpUrl" (not "url").
+id: gemini
+display: Gemini CLI
+detect:
+  bin: gemini
+  config: ~/.gemini/settings.json
+config:
+  path: ~/.gemini/settings.json
+  format: json
+project:
+  config: .gemini/settings.json
+  format: json
+mcp:
+  location: mcpServers
+  fields:
+    url: httpUrl
+    headers: headers
+    command: command
+    args: args
+    env: env
+  secret_mode: literal

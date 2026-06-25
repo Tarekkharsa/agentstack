@@ -59,3 +59,29 @@ fn codex_render() {
     let out = merge_toml::merge("", "mcp_servers", &entries("codex"), true).unwrap();
     insta::assert_snapshot!("codex_render", out);
 }
+
+#[test]
+fn cursor_render() {
+    let out = merge_json::merge("{}", "mcpServers", &entries("cursor")).unwrap();
+    // Cursor infers transport (no `type` tag) and uses plain `url`.
+    assert!(!out.contains("\"type\""));
+    assert!(out.contains("\"url\""));
+    insta::assert_snapshot!("cursor_render", out);
+}
+
+#[test]
+fn windsurf_render() {
+    let out = merge_json::merge("{}", "mcpServers", &entries("windsurf")).unwrap();
+    // Windsurf quirk: HTTP url is written as `serverUrl`.
+    assert!(out.contains("\"serverUrl\""));
+    assert!(!out.contains("\"url\""));
+    insta::assert_snapshot!("windsurf_render", out);
+}
+
+#[test]
+fn gemini_render() {
+    let out = merge_json::merge("{}", "mcpServers", &entries("gemini")).unwrap();
+    // Gemini quirk: HTTP url is written as `httpUrl`.
+    assert!(out.contains("\"httpUrl\""));
+    insta::assert_snapshot!("gemini_render", out);
+}
