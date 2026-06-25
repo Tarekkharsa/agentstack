@@ -95,6 +95,7 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
         targets: Targets {
             default: detected.clone(),
         },
+        policy: Default::default(),
     };
     let toml_text = toml::to_string_pretty(&manifest).context("serializing manifest to TOML")?;
 

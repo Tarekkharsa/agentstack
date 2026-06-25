@@ -55,6 +55,9 @@ Implemented and tested:
   project `.env`. Unresolved `${REF}`s are reported, never silently blanked.
 - **State tracking** (`~/.agentstack/state.json`) so `apply` prunes entries we
   own that left the manifest, and `doctor`/`diff` detect hand-edits.
+- **Governance (`[policy]`)** — `require`/`forbid` capabilities and an
+  `allowed_sources` glob allowlist (e.g. `git:github.com/acme/*`), enforced by
+  `doctor --ci`. Cross-source trust gating for executable-intent skills/MCPs.
 - **Global vs project scope** (`--scope`): write to each CLI's global locations
   (`~/.claude.json`, `~/.claude/skills`) or its project locations (`.mcp.json`,
   `.claude/skills/`) so any agent opening the repo inherits the setup.

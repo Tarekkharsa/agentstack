@@ -734,6 +734,21 @@ A `Provider` trait with pluggable backends, queried together by `search` / `add`
 - `git` / `path` → direct sources (built).
 Results are normalized to a common shape and `add` renders to **all** target CLIs at once.
 
+### Trust & security layer (source-agnostic) — the real lesson from skills.sh
+skills.sh (Vercel Labs) runs per-skill security audits (Socket, Snyk, Gen Agent Trust Hub,
+Runlayer, ZeroLeaks → `pass|warn|fail` + `riskLevel`) — pointing at the #1 risk: installing a
+skill/MCP is **running executable intent** (D16). But its API is **Vercel-OIDC-auth-gated** (401
+anonymously), and skills.sh skills are just GitHub `owner/repo` — which agentstack already installs
+via its **git source**. So: don't depend on skills.sh's audits; build a **neutral trust layer** from
+signals we can always get, with skills.sh audits as *optional* token-gated enrichment:
+- **MCP registry**: namespace verification (reverse-DNS = owner-verified) + `status`.
+- **install-risk heuristics**: runs arbitrary `npx`/`uvx`? pinned in the lock? demands secrets?
+- **governance**: the **`[policy]` block (require / forbid / `allowed_sources`)** enforced by
+  `doctor --ci` — *built*. allowed_sources matches a capability's source label
+  (`git:host/owner/repo`, `path:…`, `registry:…`) against globs.
+- positioning: **cross-source trust gating** — skills.sh audits Vercel-only, LiteLLM governs
+  Claude-only; agentstack gates *every* source across *every* CLI. (D16/D18)
+
 ### Dashboard "Discover" (two-pane curation — user idea)
 A two-pane browser: **left = catalog** (all providers, searchable, categorized) · **right = your
 stack** (manifest / active-per-CLI). Check items on the left, choose which CLIs + profile, apply →

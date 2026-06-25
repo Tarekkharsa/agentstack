@@ -208,6 +208,11 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
 
+    if !manifest.policy.is_empty() {
+        println!("{}", "Policy".bold());
+        check_policy(manifest, &mut report);
+    }
+
     if args.live {
         println!("{}", "MCP connectivity (--live)".bold());
         let http: Vec<_> = manifest
@@ -272,6 +277,68 @@ fn resolve_headers(
         .iter()
         .map(|(k, v)| (k.clone(), resolve_str(v, resolver)))
         .collect()
+}
+
+/// Enforce the `[policy]` block: required/forbidden capabilities + source
+/// allowlist. Violations are errors (so `doctor --ci` fails).
+fn check_policy(manifest: &Manifest, report: &mut Report) {
+    let known =
+        |name: &String| manifest.servers.contains_key(name) || manifest.skills.contains_key(name);
+
+    for name in &manifest.policy.require {
+        if known(name) {
+            report.line(Level::Ok, format!("require '{name}' — present"));
+        } else {
+            report.line(Level::Error, format!("require '{name}' — MISSING"));
+        }
+    }
+    for name in &manifest.policy.forbid {
+        if known(name) {
+            report.line(
+                Level::Error,
+                format!("forbid '{name}' — present (not allowed)"),
+            );
+        } else {
+            report.line(Level::Ok, format!("forbid '{name}' — absent"));
+        }
+    }
+    if !manifest.policy.allowed_sources.is_empty() {
+        let mut bad = 0;
+        for (name, skill) in &manifest.skills {
+            let source = skill_source_label(skill);
+            if !manifest.policy.source_allowed(&source) {
+                bad += 1;
+                report.line(
+                    Level::Error,
+                    format!("skill '{name}' source '{source}' not in allowed_sources"),
+                );
+            }
+        }
+        if bad == 0 {
+            report.line(Level::Ok, "all skill sources within allowlist");
+        }
+    }
+}
+
+/// A policy-matchable source label for a skill, e.g. `git:github.com/acme/repo`
+/// or `path:./skills/x`.
+fn skill_source_label(skill: &crate::manifest::Skill) -> String {
+    match skill.source() {
+        Ok(crate::manifest::SkillSource::Git { url, .. }) => format!("git:{}", git_host_path(&url)),
+        Ok(crate::manifest::SkillSource::Path(p)) => format!("path:{p}"),
+        Err(_) => "invalid".into(),
+    }
+}
+
+/// Normalize a git URL to `host/owner/repo` for allowlist matching.
+fn git_host_path(url: &str) -> String {
+    let u = url.trim().trim_end_matches(".git");
+    let u = u.splitn(2, "://").last().unwrap_or(u);
+    // scp-style: git@github.com:owner/repo
+    if let Some(rest) = u.strip_prefix("git@") {
+        return rest.replacen(':', "/", 1);
+    }
+    u.to_string()
 }
 
 /// Detect per-target syntax a CLI can't handle, before it breaks at runtime.

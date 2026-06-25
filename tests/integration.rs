@@ -223,6 +223,7 @@ fn init_pipeline_roundtrips_through_valid_toml() {
         targets: Targets {
             default: vec!["claude-code".into()],
         },
+        policy: Default::default(),
     };
 
     let toml_text = toml::to_string_pretty(&manifest).unwrap();

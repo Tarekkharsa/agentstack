@@ -36,6 +36,61 @@ pub struct Manifest {
     /// Where `apply` writes by default and which adapters are in play.
     #[serde(default)]
     pub targets: Targets,
+
+    /// Optional governance: required/forbidden capabilities + source allowlist.
+    #[serde(default, skip_serializing_if = "Policy::is_empty")]
+    pub policy: Policy,
+}
+
+/// Team/org governance (PLAN §9e, D18). Off by default; enforced by `doctor`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct Policy {
+    /// Capability names that must be present in the manifest.
+    #[serde(default)]
+    pub require: Vec<String>,
+    /// Capability names that must NOT be present.
+    #[serde(default)]
+    pub forbid: Vec<String>,
+    /// Glob patterns a capability's source must match (e.g.
+    /// `git:github.com/acme/*`, `registry:*`, `path:*`). Empty = allow any.
+    #[serde(default)]
+    pub allowed_sources: Vec<String>,
+}
+
+impl Policy {
+    pub fn is_empty(&self) -> bool {
+        self.require.is_empty() && self.forbid.is_empty() && self.allowed_sources.is_empty()
+    }
+
+    /// Whether `source` is allowed (any source allowed when the list is empty).
+    pub fn source_allowed(&self, source: &str) -> bool {
+        self.allowed_sources.is_empty()
+            || self.allowed_sources.iter().any(|p| glob_match(p, source))
+    }
+}
+
+/// Minimal glob: `*` matches any run of characters (including empty). No `?`.
+pub fn glob_match(pattern: &str, text: &str) -> bool {
+    let parts: Vec<&str> = pattern.split('*').collect();
+    if parts.len() == 1 {
+        return pattern == text;
+    }
+    let mut pos = 0;
+    // First segment must be a prefix.
+    if !text[pos..].starts_with(parts[0]) {
+        return false;
+    }
+    pos += parts[0].len();
+    // Middle segments must appear in order.
+    for seg in &parts[1..parts.len() - 1] {
+        match text[pos..].find(seg) {
+            Some(i) => pos += i + seg.len(),
+            None => return false,
+        }
+    }
+    // Last segment must be a suffix of the remainder.
+    let last = parts[parts.len() - 1];
+    text[pos..].len() >= last.len() && text.ends_with(last)
 }
 
 /// One instruction fragment: a markdown file applied to some/all harnesses.
@@ -191,5 +246,40 @@ impl Manifest {
         }
         refs.sort();
         refs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glob_matches_wildcards() {
+        assert!(glob_match("registry:*", "registry:io.github.x/y"));
+        assert!(glob_match(
+            "git:github.com/acme/*",
+            "git:github.com/acme/repo"
+        ));
+        assert!(!glob_match(
+            "git:github.com/acme/*",
+            "git:github.com/other/repo"
+        ));
+        assert!(glob_match("path:*", "path:./skills/x"));
+        assert!(glob_match("exact", "exact"));
+        assert!(!glob_match("exact", "other"));
+        assert!(glob_match("*github*", "git:github.com/x"));
+    }
+
+    #[test]
+    fn policy_source_allowed() {
+        let p = Policy {
+            allowed_sources: vec!["git:github.com/acme/*".into(), "registry:*".into()],
+            ..Default::default()
+        };
+        assert!(p.source_allowed("git:github.com/acme/skill"));
+        assert!(p.source_allowed("registry:io.github.x/y"));
+        assert!(!p.source_allowed("git:github.com/evil/x"));
+        // Empty policy allows anything.
+        assert!(Policy::default().source_allowed("anything"));
     }
 }
