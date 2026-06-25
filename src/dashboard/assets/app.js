@@ -428,45 +428,160 @@ function skills(c) {
 }
 
 /* ---------- settings ---------- */
-function saveSettings(target, textareaId) {
-  const raw = (document.getElementById(textareaId) || {}).value || "";
-  let parsed;
-  try {
-    parsed = raw.trim() === "" ? {} : JSON.parse(raw);
-  } catch (e) {
-    return toast("Invalid JSON: " + e.message, false);
+// Working copies of each CLI's settings object, keyed by adapter id. Typed
+// controls mutate these; Save sends the whole object (so keys we don't have a
+// control for are preserved).
+let SETTINGS_DRAFT = {};
+
+function getPath(obj, dotted) {
+  return dotted.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
+}
+function setPath(obj, dotted, val) {
+  const ks = dotted.split(".");
+  let o = obj;
+  for (let i = 0; i < ks.length - 1; i++) {
+    if (typeof o[ks[i]] !== "object" || o[ks[i]] == null || Array.isArray(o[ks[i]])) o[ks[i]] = {};
+    o = o[ks[i]];
   }
-  if (typeof parsed !== "object" || Array.isArray(parsed)) return toast("Settings must be a JSON object", false);
-  post("/api/set_settings", { target, settings: parsed }, "Settings for " + target);
+  o[ks[ks.length - 1]] = val;
+}
+function delPath(obj, dotted) {
+  const ks = dotted.split(".");
+  const stack = [obj];
+  let o = obj;
+  for (let i = 0; i < ks.length - 1; i++) {
+    if (o[ks[i]] == null) return;
+    o = o[ks[i]];
+    stack.push(o);
+  }
+  delete o[ks[ks.length - 1]];
+  // Prune now-empty ancestor objects (e.g. permissions: {}).
+  for (let i = ks.length - 2; i >= 0; i--) {
+    const parent = stack[i];
+    if (parent[ks[i]] && typeof parent[ks[i]] === "object" && Object.keys(parent[ks[i]]).length === 0) delete parent[ks[i]];
+  }
+}
+function initialFor(f) {
+  if (f.default !== undefined && f.default !== null) return f.default;
+  if (f.type === "bool") return true;
+  if (f.type === "enum") return f.options[0];
+  if (f.type === "number") return 0;
+  return "";
 }
 
 function settings(c) {
-  c.appendChild(pageHead("Settings", "Each CLI's native settings file (permissions, feature flags). Declared once here; written into every CLI's settings file on Apply. agentstack owns only the keys you set and preserves the rest."));
+  c.appendChild(pageHead("Settings", "Each CLI's own settings (permissions, feature flags, model). Flip what you want on; Save writes it to the manifest, then Apply renders it into the CLI's real settings file. Keys you don't manage here are left untouched."));
   const adapters = DATA.settingsAdapters || [];
   if (!adapters.length) {
     c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, ["No CLIs with a managed settings file yet."])])]));
     return;
   }
-  adapters.forEach((a, i) => {
-    const taId = "settings-ta-" + i;
-    const pretty = JSON.stringify(a.current || {}, null, 2);
-    const ta = el("textarea", { id: taId, class: "inp mono", style: "width:100%;min-height:150px;resize:vertical;white-space:pre" });
-    ta.value = pretty === "{}" ? "" : pretty;
-    const body = [
-      el("div", { class: "muted mono", style: "font-size:12px;margin-bottom:8px" }, [a.path]),
-      ta,
-    ];
-    if (!READONLY) {
-      body.push(el("div", { class: "toolbar", style: "margin-top:8px" }, [
-        btn("Save", () => saveSettings(a.id, taId), "primary"),
-        el("span", { class: "muted", style: "font-size:12px" }, ["then Apply (Overview) to write it into the CLI"]),
-      ]));
-    }
-    c.appendChild(el("div", { class: "card", style: "margin-bottom:16px" }, [
-      el("div", { class: "hd" }, [a.display, el("small", null, ["settings.json"])]),
-      el("div", { class: "bd" }, body),
-    ]));
+  adapters.forEach((a) => c.appendChild(settingsCard(a)));
+}
+
+function settingsCard(a) {
+  // Fresh working copy each render of the pane.
+  const draft = JSON.parse(JSON.stringify(a.current || {}));
+  SETTINGS_DRAFT[a.id] = draft;
+  const fields = a.fields || [];
+  const previewId = "settings-prev-" + a.id;
+  const refreshPreview = () => {
+    const p = document.getElementById(previewId);
+    if (p) p.textContent = Object.keys(draft).length ? JSON.stringify(draft, null, 2) : "(nothing set)";
+  };
+
+  // Group fields by their `group`.
+  const groups = {};
+  fields.forEach((f) => { (groups[f.group || "Other"] = groups[f.group || "Other"] || []).push(f); });
+
+  const body = [el("div", { class: "muted mono", style: "font-size:12px;margin-bottom:10px" }, [a.path])];
+
+  Object.keys(groups).forEach((g) => {
+    body.push(el("div", { class: "section-title", style: "margin:14px 0 6px" }, [g]));
+    groups[g].forEach((f) => body.push(settingRow(a.id, f, draft, refreshPreview)));
   });
+
+  // Keys present in the file but not in our catalog — preserved, shown read-only.
+  const known = new Set(fields.map((f) => f.key.split(".")[0]));
+  const extras = Object.keys(draft).filter((k) => !known.has(k));
+  if (extras.length) {
+    body.push(el("div", { class: "muted", style: "margin-top:12px;font-size:12px" }, [
+      "Preserved (no control yet): " + extras.join(", "),
+    ]));
+  }
+
+  body.push(el("div", { class: "section-title", style: "margin:14px 0 6px" }, ["Resulting settings"]));
+  const pre = el("pre", { id: previewId, class: "mono", style: "background:hsl(var(--muted));padding:10px;border-radius:8px;font-size:12px;overflow:auto;max-height:220px" });
+  pre.textContent = Object.keys(draft).length ? JSON.stringify(draft, null, 2) : "(nothing set)";
+  body.push(pre);
+
+  if (!READONLY) {
+    body.push(el("div", { class: "toolbar", style: "margin-top:10px" }, [
+      btn("Save", () => post("/api/set_settings", { target: a.id, settings: draft }, a.display + " settings"), "primary"),
+      btn("Reset", () => show("settings")),
+      el("span", { class: "muted", style: "font-size:12px" }, ["then Apply (Overview) to write it into the CLI"]),
+    ]));
+  }
+
+  return el("div", { class: "card", style: "margin-bottom:16px" }, [
+    el("div", { class: "hd" }, [a.display, el("small", null, [a.id === "codex" ? "config.toml" : "settings.json"])]),
+    el("div", { class: "bd" }, body),
+  ]);
+}
+
+function settingRow(adapterId, f, draft, refresh) {
+  const managed = getPath(draft, f.key) !== undefined;
+  const label = f.label || f.key;
+
+  // The value control for this field type.
+  let control;
+  const sync = () => refresh();
+  if (f.type === "bool") {
+    control = el("input", { type: "checkbox" });
+    control.checked = managed ? !!getPath(draft, f.key) : (f.default === true);
+    control.addEventListener("change", () => { if (getPath(draft, f.key) !== undefined) { setPath(draft, f.key, control.checked); sync(); } });
+  } else if (f.type === "enum") {
+    control = el("select", { style: "height:30px" }, f.options.map((o) => el("option", { value: o }, [o])));
+    control.value = managed ? String(getPath(draft, f.key)) : f.options[0];
+    control.addEventListener("change", () => { if (getPath(draft, f.key) !== undefined) { setPath(draft, f.key, control.value); sync(); } });
+  } else {
+    control = el("input", { class: "inp", type: f.type === "number" ? "number" : "text", style: "width:240px;height:30px" });
+    if (managed) control.value = getPath(draft, f.key);
+    if (f.default != null) control.placeholder = "default: " + f.default;
+    control.addEventListener("input", () => {
+      if (getPath(draft, f.key) === undefined) return;
+      setPath(draft, f.key, f.type === "number" ? Number(control.value) : control.value);
+      sync();
+    });
+  }
+  control.disabled = !managed || READONLY;
+
+  // The "manage this setting" toggle.
+  const manage = el("input", { type: "checkbox" });
+  manage.checked = managed;
+  manage.disabled = READONLY;
+  manage.addEventListener("change", () => {
+    if (manage.checked) {
+      const init = f.type === "bool" ? (control.checked) :
+        f.type === "enum" ? control.value :
+        (control.value !== "" ? (f.type === "number" ? Number(control.value) : control.value) : initialFor(f));
+      setPath(draft, f.key, init);
+      control.disabled = READONLY;
+    } else {
+      delPath(draft, f.key);
+      control.disabled = true;
+    }
+    refresh();
+  });
+
+  return el("div", { style: "display:flex;align-items:center;gap:12px;padding:5px 0;border-bottom:1px solid hsl(var(--border))" }, [
+    el("label", { style: "display:flex;align-items:center;gap:7px;width:300px;cursor:pointer" }, [
+      manage,
+      el("span", null, [el("span", { class: "name" }, [label]), el("div", { class: "muted mono", style: "font-size:11px" }, [f.key])]),
+    ]),
+    control,
+    f.help ? el("span", { class: "muted", style: "font-size:11px;flex:1" }, [f.help]) : null,
+  ]);
 }
 
 /* ---------- instructions ---------- */

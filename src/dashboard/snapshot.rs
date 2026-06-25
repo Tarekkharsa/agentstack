@@ -236,11 +236,17 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 .settings_for(Scope::Global, &ctx.dir)
                 .map(|(p, _)| p.display().to_string())
                 .unwrap_or_default();
+            let fields = d
+                .settings
+                .as_ref()
+                .map(|s| s.fields.clone())
+                .unwrap_or_default();
             json!({
                 "id": d.id,
                 "display": d.display,
                 "path": path,
                 "current": current,
+                "fields": fields,
             })
         })
         .collect();

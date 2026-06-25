@@ -43,3 +43,33 @@ settings:
   format: json
   global: ~/.claude/settings.json
   project: .claude/settings.json
+  # Curated catalog of common, user-facing settings (verified against the
+  # official settings.json reference). Enterprise "managed only" keys and
+  # complex object settings (hooks, statusLine) are intentionally omitted; any
+  # key not listed here is still preserved and can be hand-edited.
+  fields:
+    - { key: model, type: string, group: General, label: Model, help: "Override the default model (alias or id)." }
+    - { key: language, type: string, group: General, label: Language, help: "Preferred response language code." }
+    - { key: outputStyle, type: string, group: General, label: Output style, help: "Output style that adjusts the system prompt." }
+    - { key: editorMode, type: enum, options: [normal, vim], group: General, label: Editor mode }
+    - { key: tui, type: enum, options: [auto, classic, fancy], group: General, label: Terminal UI }
+    - { key: effortLevel, type: enum, options: [low, medium, high, xhigh], group: General, label: Effort level, help: "Persist reasoning effort across sessions." }
+    - { key: alwaysThinkingEnabled, type: bool, group: General, label: Always extended thinking }
+    - { key: autoCompactEnabled, type: bool, default: true, group: General, label: Auto-compact context }
+    - { key: spinnerTipsEnabled, type: bool, default: true, group: General, label: Spinner tips }
+    - { key: telemetryEnabled, type: bool, default: true, group: General, label: Send usage telemetry }
+    - { key: "permissions.defaultMode", type: enum, options: [ask, auto, limited], group: Permissions, label: Default permission mode }
+    - { key: "permissions.disableBypassPermissionsMode", type: bool, group: Permissions, label: Lock out of limited mode }
+    - { key: includeCoAuthoredBy, type: bool, default: true, group: Git, label: Co-authored-by in commits }
+    - { key: includeGitInstructions, type: bool, default: true, group: Git, label: Built-in git instructions }
+    - { key: enableAllProjectMcpServers, type: bool, group: MCP, label: Auto-approve project MCP servers }
+    - { key: disableClaudeAiConnectors, type: bool, group: MCP, label: Disable claude.ai connectors }
+    - { key: autoMemoryEnabled, type: bool, default: true, group: Memory & files, label: Auto memory }
+    - { key: fileCheckpointingEnabled, type: bool, default: true, group: Memory & files, label: File checkpointing (/rewind) }
+    - { key: respectGitignore, type: bool, default: true, group: Memory & files, label: "@-picker respects .gitignore" }
+    - { key: cleanupPeriodDays, type: number, default: 30, group: Memory & files, label: Session cleanup period (days) }
+    - { key: autoUpdatesChannel, type: enum, options: [stable, latest], group: Updates, label: Update channel }
+    - { key: disableBundledSkills, type: bool, group: Skills, label: Disable bundled skills }
+    - { key: disableWorkflows, type: bool, default: false, group: Skills, label: Disable workflows }
+    - { key: prefersReducedMotion, type: bool, group: Accessibility, label: Reduce motion }
+    - { key: axScreenReader, type: bool, group: Accessibility, label: Screen-reader output }

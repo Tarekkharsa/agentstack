@@ -36,3 +36,14 @@ instructions:
 settings:
   format: toml
   global: ~/.codex/config.toml
+  fields:
+    - { key: model, type: string, group: General, label: Model, help: "Default model (e.g. gpt-5.5)." }
+    - { key: approval_policy, type: enum, options: [untrusted, on-request, never], group: General, label: Approval policy, help: "When Codex pauses before running commands." }
+    - { key: sandbox_mode, type: enum, options: [read-only, workspace-write, danger-full-access], group: General, label: Sandbox mode }
+    - { key: model_reasoning_effort, type: enum, options: [minimal, low, medium, high], group: General, label: Reasoning effort }
+    - { key: web_search, type: enum, options: [cached, live, disabled], group: General, label: Web search }
+    - { key: personality, type: enum, options: [friendly, pragmatic, none], group: General, label: Personality }
+    - { key: disable_response_storage, type: bool, group: Privacy, label: Disable response storage }
+    - { key: hide_agent_reasoning, type: bool, group: Display, label: Hide agent reasoning }
+    - { key: file_opener, type: string, group: Display, label: File opener }
+    - { key: log_dir, type: string, group: Advanced, label: Log directory }

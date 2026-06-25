@@ -220,6 +220,42 @@ pub struct SettingsSpec {
     /// Project settings file relative to the repo (e.g. `.claude/settings.json`).
     #[serde(default)]
     pub project: Option<String>,
+    /// Curated catalog of this CLI's known settings, so the dashboard can render
+    /// typed controls (toggles / dropdowns) instead of a raw JSON box. Keys not
+    /// listed here are still honored — they're just edited by hand.
+    #[serde(default)]
+    pub fields: Vec<SettingField>,
+}
+
+/// One known setting in a CLI's settings file. `key` is a dotted path
+/// (`permissions.defaultMode`) into the settings object.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct SettingField {
+    pub key: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: SettingKind,
+    /// Allowed values for `enum` settings.
+    #[serde(default)]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub help: Option<String>,
+    /// Section heading in the dashboard (e.g. "Permissions", "Git").
+    #[serde(default)]
+    pub group: Option<String>,
+    /// The CLI's own default, shown as a hint (not written unless chosen).
+    #[serde(default)]
+    pub default: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SettingKind {
+    Bool,
+    String,
+    Number,
+    Enum,
 }
 
 /// Project-scope config location for a CLI that supports project files.
