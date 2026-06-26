@@ -1004,9 +1004,9 @@ function plugins(c) {
   const erows = exts.map((e) => el("div", { class: "list-row" }, [
     el("span", null, [
       el("span", { class: "name", style: e.broken ? "opacity:.7" : "" }, [e.name]),
-      el("div", { class: "muted mono", style: "font-size:12px" }, [e.harness + " · " + e.kind + (e.isSymlink ? " · symlink" : "")]),
+      el("div", { class: "muted mono", style: "font-size:12px" }, [e.harness + " · " + e.kind + " · " + (e.scope || "global") + (e.isSymlink ? " · symlink" : "")]),
     ]),
-    el("span", { class: "row-actions" }, [e.broken ? badge("broken link", "red") : badge(e.kind, "")]),
+    el("span", { class: "row-actions" }, [e.broken ? badge("broken link", "red") : badge(e.scope || "global", "solid"), badge(e.kind, "")]),
   ]));
   if (!erows.length) erows.push(el("div", { class: "empty" }, ["No extensions installed (e.g. Pi's ~/.pi/agent/extensions is empty)."]));
   c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [

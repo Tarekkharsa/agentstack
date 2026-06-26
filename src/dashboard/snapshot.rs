@@ -333,24 +333,27 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         })
         .collect();
 
-    // Native extensions/add-ons installed in each CLI's extensions dir (read-only).
-    let extensions: Vec<Value> = ctx
-        .registry
-        .iter()
-        .flat_map(|d| {
-            d.discover_extensions(Scope::Global, &ctx.dir)
-                .into_iter()
-                .map(move |e| {
-                    json!({
-                        "harness": d.id,
-                        "name": e.name,
-                        "kind": e.kind,
-                        "isSymlink": e.is_symlink,
-                        "broken": e.broken,
-                    })
-                })
-        })
-        .collect();
+    // Native extensions/add-ons in each CLI's extensions dir — both the global
+    // dir (~/.pi/agent/extensions) and the project dir (.pi/extensions).
+    let mut extensions: Vec<Value> = Vec::new();
+    for d in ctx.registry.iter() {
+        for scope in [Scope::Global, Scope::Project] {
+            let label = match scope {
+                Scope::Global => "global",
+                Scope::Project => "project",
+            };
+            for e in d.discover_extensions(scope, &ctx.dir) {
+                extensions.push(json!({
+                    "harness": d.id,
+                    "name": e.name,
+                    "kind": e.kind,
+                    "isSymlink": e.is_symlink,
+                    "broken": e.broken,
+                    "scope": label,
+                }));
+            }
+        }
+    }
 
     // Native harness plugins already installed on this machine (read-only view).
     let (plugin_list, marketplace_list) = crate::plugins::all_plugins();
