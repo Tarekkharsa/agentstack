@@ -52,6 +52,10 @@ pub enum Command {
     /// Show drift between the manifest and the on-disk configs.
     Diff(DiffArgs),
 
+    /// Explain a server or skill: where it came from, what secrets it needs,
+    /// which tools get it and what files get written, and its safety signals.
+    Explain(ExplainArgs),
+
     /// Activate a profile: render its servers + materialize its skills.
     Use(UseArgs),
 
@@ -287,6 +291,12 @@ pub struct UseArgs {
     /// Allow writing even when a `${REF}` did not resolve (off by default).
     #[arg(long)]
     pub allow_unresolved: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ExplainArgs {
+    /// Name of a server or skill in the manifest.
+    pub name: String,
 }
 
 #[derive(Args, Debug)]

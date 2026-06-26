@@ -22,6 +22,7 @@ fn run() -> Result<()> {
         Command::Remove(args) => commands::remove::run(args, dir),
         Command::Apply(args) => commands::apply::run(args, dir),
         Command::Diff(args) => commands::diff::run(args, dir),
+        Command::Explain(args) => commands::explain::run(args, dir),
         Command::Use(args) => commands::use_profile::run(args, dir),
         Command::Session(args) => commands::session::run(args, dir),
         Command::Instructions(args) => commands::instructions::run(args, dir),

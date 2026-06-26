@@ -1,0 +1,324 @@
+//! `agentstack explain <capability>` — the trust lens. For a server or skill in
+//! the manifest: where it came from, what secrets it needs (and whether they
+//! resolve here), which tools get it and the files that get written, and the
+//! safety signals (runs code? network egress? needs a secret?). Read-only.
+
+use std::path::Path;
+
+use anyhow::Result;
+
+use crate::cli::ExplainArgs;
+use crate::manifest::{ServerType, SkillSource};
+use crate::scope::Scope;
+use crate::secret::{refs_in, Resolver};
+use crate::state::{target_key, State};
+use crate::store::{local_source_dir, Store};
+
+pub fn run(args: &ExplainArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    print!("{}", explain_text(&args.name, manifest_dir)?);
+    Ok(())
+}
+
+/// Render the explanation as plain text (shared by the CLI and the MCP tool).
+pub fn explain_text(name: &str, manifest_dir: Option<&Path>) -> Result<String> {
+    let ctx = crate::commands::load(manifest_dir)?;
+    let manifest = &ctx.loaded.manifest;
+    if manifest.servers.contains_key(name) {
+        Ok(explain_server(name, &ctx))
+    } else if manifest.skills.contains_key(name) {
+        Ok(explain_skill(name, &ctx))
+    } else {
+        anyhow::bail!(
+            "no server or skill '{name}' in the manifest. Try `agentstack search {name}` to find one to add."
+        )
+    }
+}
+
+fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
+    let manifest = &ctx.loaded.manifest;
+    let server = &manifest.servers[name];
+    let mut o = String::new();
+    let transport = match server.server_type {
+        ServerType::Http => "http",
+        ServerType::Stdio => "stdio",
+    };
+    line(&mut o, &format!("{name}  (MCP server · {transport})\n"));
+
+    // Provenance.
+    match crate::provider::resolve(name) {
+        Some(c) => kv(
+            &mut o,
+            "Source",
+            &format!("known capability \"{}\" ({})", c.name, c.source),
+        ),
+        None => kv(
+            &mut o,
+            "Source",
+            "custom — added by hand (not in the catalog)",
+        ),
+    }
+
+    // Endpoint or command.
+    match server.server_type {
+        ServerType::Http => {
+            if let Some(url) = &server.url {
+                kv(&mut o, "Endpoint", &format!("{url}   → {}", host_of(url)));
+            }
+        }
+        ServerType::Stdio => {
+            let cmd = server.command.clone().unwrap_or_default();
+            let args = server.args.join(" ");
+            kv(&mut o, "Runs", format!("{cmd} {args}").trim());
+        }
+    }
+
+    // Secrets it references and whether they resolve on this machine.
+    let mut refs: Vec<String> = Vec::new();
+    if let Some(u) = &server.url {
+        refs.extend(refs_in(u));
+    }
+    for v in server.headers.values().chain(server.env.values()) {
+        refs.extend(refs_in(v));
+    }
+    refs.sort();
+    refs.dedup();
+    if refs.is_empty() {
+        kv(&mut o, "Secrets", "none");
+    } else {
+        kv(&mut o, "Secrets", &format!("{} referenced", refs.len()));
+        for r in &refs {
+            let status = if ctx.resolver.resolve(r).is_some() {
+                "✓ resolves on this machine".to_string()
+            } else {
+                "✗ not set — run `agentstack secret set ".to_string() + r + "`"
+            };
+            o.push_str(&format!("                ${{{r}}}  {status}\n"));
+        }
+    }
+
+    // Where it writes + which tools get it.
+    let state = State::load().unwrap_or_default();
+    let default: Vec<&str> = manifest
+        .targets
+        .default
+        .iter()
+        .map(String::as_str)
+        .collect();
+    o.push_str("  Writes to     the MCP config of each tool it's enabled for:\n");
+    let mut enabled_summary: Vec<String> = Vec::new();
+    for d in ctx.registry.iter() {
+        if d.mcp.is_none() {
+            continue;
+        }
+        let g_on = state
+            .managed_servers(&target_key(&d.id, Scope::Global))
+            .iter()
+            .any(|s| s == name);
+        let p_on = state
+            .managed_servers(&target_key(&d.id, Scope::Project))
+            .iter()
+            .any(|s| s == name);
+        let default_for = default.iter().any(|t| *t == d.id);
+        if let Some(cfg) = &d.config {
+            let scope = if g_on {
+                " (enabled, global)"
+            } else if default_for {
+                " (default target)"
+            } else {
+                ""
+            };
+            o.push_str(&format!(
+                "                {:<14} {}{}\n",
+                d.display, cfg.path, scope
+            ));
+        }
+        if let Some(proj) = &d.project {
+            let scope = if p_on { " (enabled, project)" } else { "" };
+            o.push_str(&format!(
+                "                {:<14} <repo>/{}{}\n",
+                "", proj.config, scope
+            ));
+        }
+        if g_on {
+            enabled_summary.push(format!("{} (global)", d.id));
+        }
+        if p_on {
+            enabled_summary.push(format!("{} (project)", d.id));
+        }
+    }
+    if enabled_summary.is_empty() {
+        kv(
+            &mut o,
+            "Enabled for",
+            &format!(
+                "not applied yet — would apply to default targets: {}",
+                if default.is_empty() {
+                    "(none set)".into()
+                } else {
+                    default.join(", ")
+                }
+            ),
+        );
+    } else {
+        kv(&mut o, "Enabled for", &enabled_summary.join(", "));
+    }
+
+    // Safety signals.
+    o.push_str("  Safety\n");
+    match server.server_type {
+        ServerType::Stdio => bullet(
+            &mut o,
+            "⚠ runs a local process on your machine — review the command/package",
+        ),
+        ServerType::Http => bullet(
+            &mut o,
+            &format!(
+                "connects out to {} (network egress)",
+                host_of(server.url.as_deref().unwrap_or(""))
+            ),
+        ),
+    }
+    if refs.is_empty() {
+        bullet(&mut o, "needs no secrets");
+    } else {
+        let resolved = refs
+            .iter()
+            .filter(|r| ctx.resolver.resolve(r).is_some())
+            .count();
+        bullet(&mut o, &format!("needs {} secret(s) ({resolved} resolve here) — kept as ${{REF}}, never written as plaintext", refs.len()));
+    }
+    if crate::provider::resolve(name)
+        .map(|c| c.trust().namespaced)
+        .unwrap_or(false)
+    {
+        bullet(&mut o, "from a verified, namespaced catalog entry");
+    }
+    o
+}
+
+fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
+    let manifest = &ctx.loaded.manifest;
+    let skill = &manifest.skills[name];
+    let mut o = String::new();
+    let source = skill.source().ok();
+    let kind = match &source {
+        Some(SkillSource::Git { .. }) => "git",
+        Some(SkillSource::Path(_)) => "path",
+        None => "?",
+    };
+    line(&mut o, &format!("{name}  (skill · {kind})\n"));
+
+    match &source {
+        Some(SkillSource::Git { url, rev }) => kv(
+            &mut o,
+            "Source",
+            &format!(
+                "git {url}{}",
+                rev.as_ref().map(|r| format!(" @ {r}")).unwrap_or_default()
+            ),
+        ),
+        Some(SkillSource::Path(p)) => kv(&mut o, "Source", &format!("local path {p}")),
+        None => kv(&mut o, "Source", "unknown"),
+    }
+
+    let store = Store::default_store();
+    let local = local_source_dir(&store, skill, &ctx.dir);
+    if let Some(dir) = &local {
+        if let Some(desc) = skill_description(dir) {
+            kv(&mut o, "Description", &desc);
+        }
+        kv(&mut o, "Installed", "yes — available locally");
+    } else {
+        kv(&mut o, "Installed", "no — run `agentstack install`");
+    }
+
+    let state = State::load().unwrap_or_default();
+    o.push_str("  Writes to     each tool's skills dir when enabled:\n");
+    let mut enabled_summary: Vec<String> = Vec::new();
+    for d in ctx.registry.iter() {
+        let Some(sk) = &d.skills else { continue };
+        let g_on = state
+            .managed_skills(&target_key(&d.id, Scope::Global))
+            .iter()
+            .any(|s| s == name);
+        let p_on = state
+            .managed_skills(&target_key(&d.id, Scope::Project))
+            .iter()
+            .any(|s| s == name);
+        let strat = format!("{:?}", sk.strategy).to_lowercase();
+        o.push_str(&format!(
+            "                {:<14} {}/{}  ({strat}{})\n",
+            d.display,
+            sk.dir,
+            name,
+            if g_on { ", enabled global" } else { "" }
+        ));
+        if let Some(pd) = &sk.project_dir {
+            o.push_str(&format!(
+                "                {:<14} <repo>/{}/{}{}\n",
+                "",
+                pd,
+                name,
+                if p_on { "  (enabled, project)" } else { "" }
+            ));
+        }
+        if g_on {
+            enabled_summary.push(format!("{} (global)", d.id));
+        }
+        if p_on {
+            enabled_summary.push(format!("{} (project)", d.id));
+        }
+    }
+    if !enabled_summary.is_empty() {
+        kv(&mut o, "Enabled for", &enabled_summary.join(", "));
+    }
+
+    o.push_str("  Safety\n");
+    bullet(
+        &mut o,
+        "instructions only — a skill is text, it runs no code and makes no network calls",
+    );
+    match &source {
+        Some(SkillSource::Git { url, .. }) => bullet(
+            &mut o,
+            &format!("comes from git {url} — review the source you trust it from"),
+        ),
+        Some(SkillSource::Path(p)) => bullet(
+            &mut o,
+            &format!("comes from a local path ({p}) in this repo"),
+        ),
+        None => {}
+    }
+    o
+}
+
+/* ---------- helpers ---------- */
+
+fn line(o: &mut String, s: &str) {
+    o.push('\n');
+    o.push_str(s);
+    o.push('\n');
+}
+fn kv(o: &mut String, k: &str, v: &str) {
+    o.push_str(&format!("  {:<12}  {v}\n", k));
+}
+fn bullet(o: &mut String, s: &str) {
+    o.push_str(&format!("                • {s}\n"));
+}
+
+/// Host portion of a URL, for a glanceable "where does this connect" signal.
+fn host_of(url: &str) -> String {
+    let after = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    after.split(['/', '?']).next().unwrap_or(after).to_string()
+}
+
+/// The `description:` from a skill's `SKILL.md` frontmatter, if present.
+fn skill_description(source: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(source.join("SKILL.md")).ok()?;
+    let rest = text.trim_start().strip_prefix("---")?;
+    let end = rest.find("\n---")?;
+    rest[..end]
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("description:"))
+        .map(|v| v.trim().trim_matches('"').trim_matches('\'').to_string())
+}

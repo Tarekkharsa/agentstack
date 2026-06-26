@@ -177,6 +177,15 @@ fn tool_defs() -> Value {
             }
         },
         {
+            "name": "agentstack_explain",
+            "description": "Explain a server or skill in the manifest: where it came from, what secrets it needs (and whether they resolve here), which tools get it and what files get written, and its safety signals (runs code? network egress?). Use before trusting a capability.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": { "name": { "type": "string", "description": "server or skill name" } }
+            }
+        },
+        {
             "name": "agentstack_diff",
             "description": "Show what would change if the manifest were applied — the pending diff between the manifest and each tool's live config, for a scope. Read-only.",
             "inputSchema": {
@@ -278,6 +287,14 @@ fn run_tool(name: &str, args: &Value, dir: Option<&Path>) -> Result<String> {
         "agentstack_add_server" => add_server(args, dir),
         "agentstack_list_loadable" => list_loadable(dir),
         "agentstack_load" => load_capability(args, dir),
+        "agentstack_explain" => {
+            let name = args
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .context("`name` is required")?;
+            crate::commands::explain::explain_text(name, dir)
+        }
         "agentstack_diff" => diff_summary(args, dir),
         "agentstack_add_skill" => {
             let name = crate::dashboard::actions::add_skill(dir, args)?;
