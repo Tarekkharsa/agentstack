@@ -7,3 +7,6 @@ agentstack.local.toml
 
 # encrypted bundles
 *.age
+
+# macOS
+.DS_Store
