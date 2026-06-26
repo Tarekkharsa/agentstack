@@ -719,6 +719,10 @@ fn run_native_command(command: &[String]) -> Result<()> {
     if command.is_empty() {
         return Ok(());
     }
+    if let Some(message) = unsupported_codex_plugin_command(command) {
+        println!("{} {message}", "⚠".yellow());
+        return Ok(());
+    }
     println!("$ {}", shell_display(command));
     let status = ProcessCommand::new(&command[0])
         .args(&command[1..])
@@ -731,6 +735,37 @@ fn run_native_command(command: &[String]) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn unsupported_codex_plugin_command(command: &[String]) -> Option<String> {
+    if command.first().map(String::as_str) != Some("codex")
+        || command.get(1).map(String::as_str) != Some("plugin")
+    {
+        return None;
+    }
+    let probe = codex_plugin_probe_args(command)?;
+    let supported = ProcessCommand::new("codex")
+        .args(&probe)
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false);
+    (!supported).then(|| {
+        format!(
+            "Skipping unsupported Codex plugin command: {}. This Codex version does not expose the required plugin CLI; the package is synced at plugins/agentstack and can be installed manually when your Codex build supports plugins.",
+            shell_display(command)
+        )
+    })
+}
+
+fn codex_plugin_probe_args(command: &[String]) -> Option<Vec<&'static str>> {
+    match command.get(2).map(String::as_str)? {
+        "add" => Some(vec!["plugin", "add", "--help"]),
+        "remove" => Some(vec!["plugin", "remove", "--help"]),
+        "marketplace" if command.get(3).map(String::as_str) == Some("add") => {
+            Some(vec!["plugin", "marketplace", "add", "--help"])
+        }
+        _ => Some(vec!["plugin", "--help"]),
+    }
 }
 
 fn shell_display(command: &[String]) -> String {
@@ -1257,6 +1292,41 @@ mod tests {
                 "--scope".into(),
                 "local".into(),
             ]]
+        );
+    }
+
+    #[test]
+    fn codex_probe_args_match_native_command_shape() {
+        assert_eq!(
+            codex_plugin_probe_args(&[
+                "codex".into(),
+                "plugin".into(),
+                "marketplace".into(),
+                "add".into(),
+                "/repo".into(),
+                "--json".into(),
+            ]),
+            Some(vec!["plugin", "marketplace", "add", "--help"])
+        );
+        assert_eq!(
+            codex_plugin_probe_args(&[
+                "codex".into(),
+                "plugin".into(),
+                "add".into(),
+                "play@agentstack".into(),
+                "--json".into(),
+            ]),
+            Some(vec!["plugin", "add", "--help"])
+        );
+        assert_eq!(
+            codex_plugin_probe_args(&[
+                "codex".into(),
+                "plugin".into(),
+                "remove".into(),
+                "play@agentstack".into(),
+                "--json".into(),
+            ]),
+            Some(vec!["plugin", "remove", "--help"])
         );
     }
 
