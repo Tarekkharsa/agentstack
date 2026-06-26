@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
+use sha2::{Digest, Sha256};
 
 use crate::manifest::{Skill, SkillSource};
 use crate::util::paths;
@@ -159,26 +160,22 @@ fn sanitize(url: &str) -> String {
         .collect()
 }
 
-/// FNV-1a digest of a directory's contents (relative paths + file bytes,
-/// sorted; `.git` excluded). Integrity check, not security.
+/// SHA-256 digest of a directory's contents (relative paths + file bytes,
+/// sorted; `.git` excluded).
 pub fn dir_digest(root: &Path) -> Result<String> {
     let mut files: Vec<PathBuf> = Vec::new();
     collect_files(root, root, &mut files)?;
     files.sort();
-    let mut h: u64 = 0xcbf29ce484222325;
-    let feed = |bytes: &[u8], h: &mut u64| {
-        for b in bytes {
-            *h ^= *b as u64;
-            *h = h.wrapping_mul(0x100000001b3);
-        }
-    };
+    let mut hasher = Sha256::new();
     for rel in &files {
-        feed(rel.to_string_lossy().as_bytes(), &mut h);
+        hasher.update(rel.to_string_lossy().as_bytes());
+        hasher.update([0]);
         let bytes = fs::read(root.join(rel))
             .with_context(|| format!("reading {}", root.join(rel).display()))?;
-        feed(&bytes, &mut h);
+        hasher.update(bytes);
+        hasher.update([0]);
     }
-    Ok(format!("{h:016x}"))
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
@@ -210,6 +207,7 @@ mod tests {
         let d1 = dir_digest(tmp.path()).unwrap();
         let d2 = dir_digest(tmp.path()).unwrap();
         assert_eq!(d1, d2);
+        assert_eq!(d1.len(), 64);
         tmp.child("a.txt").write_str("changed").unwrap();
         assert_ne!(d1, dir_digest(tmp.path()).unwrap());
     }

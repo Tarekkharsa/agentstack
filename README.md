@@ -12,6 +12,7 @@ JSON or leaking tokens into git.
 
 ```sh
 agentstack init      # reverse-engineer a manifest from configs you already have
+agentstack bootstrap # guided preflight: skills, secrets, diff, next action
 agentstack apply     # render it to every CLI you have installed
 agentstack doctor    # prove everything is wired (secrets, drift, connectivity)
 ```
@@ -123,7 +124,7 @@ Implemented and tested:
 - **`doctor --live`** — real MCP `initialize` handshake over HTTP; reports
   server name + tool count, or classifies the error (auth / http / connect).
 - **Package manager** — skills declare a source (`path` or `git`);
-  `install` fetches them into `~/.agentstack/store/` and writes a checksum-pinned
+  `install` fetches them into `~/.agentstack/store/` and writes a SHA-256
   `agentstack.lock`; `install --locked` is reproducible (CI-safe); `update`
   re-resolves git skills; `remove` drops a capability from manifest + lock.
 - **`search` across providers** — the embedded catalog **and the official MCP
@@ -136,10 +137,10 @@ Implemented and tested:
 - **`export`/`import`** — age-encrypted bundle (manifest + lock + optionally
   secrets) for moving a setup to a new machine; passphrase-protected.
 - Commands: `init`, `add`, `install` (`--locked`), `update`, `remove`,
-  `apply` (`--scope`, `--write`), `diff`, `use <profile>`, `instructions`,
-  `adopt`, `restore`, `doctor` (`--ci`, `--live`, `--fix`), `search`, `stats`,
-  `secret set|get|rm|list`, `export`/`import`, `adapters`, `plugins`,
-  `dashboard`, `mcp`, `hook`.
+  `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
+  `use <profile>`, `instructions`, `adopt`, `restore`, `doctor` (`--ci`,
+  `--live`, `--fix`), `search`, `stats`, `secret set|get|rm|list`,
+  `export`/`import`, `adapters`, `plugins`, `dashboard`, `mcp`, `hook`.
 
 ### Agent-operable (`agentstack mcp`)
 
@@ -193,6 +194,10 @@ agentstack secret list                 # which refs resolve, and from where
 
 # Verify everything is wired up
 agentstack doctor             # add --ci to exit nonzero on error
+
+# First-run/team setup funnel: read-only preflight + diff by default.
+agentstack bootstrap
+agentstack bootstrap --write  # install skills, apply configs, then doctor
 
 # See what would change in your real configs (read-only)
 agentstack diff

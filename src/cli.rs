@@ -43,6 +43,9 @@ pub enum Command {
     /// Remove a server or skill from the manifest (and lockfile).
     Remove(RemoveArgs),
 
+    /// Guided setup: install skills, check secrets, preview/apply, then doctor.
+    Bootstrap(BootstrapArgs),
+
     /// Render the manifest into each target's native config.
     ///
     /// Read-only by default: shows the diff and writes nothing. Pass `--write`
@@ -142,6 +145,30 @@ pub struct RemoveArgs {
     /// Name of the server or skill to remove.
     pub name: String,
     /// Write the change (else dry-run).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct BootstrapArgs {
+    /// Only act on these target ids (repeatable). Defaults to [targets].default.
+    #[arg(long = "target", value_name = "ID")]
+    pub targets: Vec<String>,
+
+    /// Bootstrap only the servers in this profile.
+    #[arg(long, value_name = "NAME")]
+    pub profile: Option<String>,
+
+    /// Which scope to write: global (~) or project (repo). Defaults to global.
+    #[arg(long, value_enum)]
+    pub scope: Option<Scope>,
+
+    /// Check the lockfile without updating it during the install step.
+    #[arg(long)]
+    pub locked: bool,
+
+    /// Actually install/apply. Without this flag, bootstrap is a read-only
+    /// preflight plus diff preview.
     #[arg(long)]
     pub write: bool,
 }

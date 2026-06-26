@@ -4,6 +4,7 @@ pub mod adapters;
 pub mod add;
 pub mod adopt;
 pub mod apply;
+pub mod bootstrap;
 pub mod bundle;
 pub mod consolidate;
 pub mod diff;

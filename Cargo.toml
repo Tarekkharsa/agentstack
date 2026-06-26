@@ -20,6 +20,7 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
 toml = { version = "0.8", features = ["preserve_order"] }
 toml_edit = "0.22"
 serde_yaml = "0.9"
