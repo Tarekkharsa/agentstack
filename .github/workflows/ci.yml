@@ -7,6 +7,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Resilience against flaky crates.io fetches (e.g. "HTTP2 framing layer"
+  # errors on the runner): retry hard, and don't multiplex over HTTP/2.
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_MULTIPLEXING: "false"
 
 jobs:
   test:

@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+env:
+  # Resilience against flaky crates.io fetches on the runners.
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_MULTIPLEXING: "false"
+
 jobs:
   build:
     name: ${{ matrix.target }}
