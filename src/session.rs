@@ -26,6 +26,15 @@ pub struct SkillAdd {
     pub names: Vec<String>,
 }
 
+/// One on-demand capability load the agent performed during a session — the
+/// replay trail (what was pulled, and the reason it gave).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadEntry {
+    pub name: String,
+    pub reason: String,
+    pub ts: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub dir: String,
@@ -36,6 +45,38 @@ pub struct Session {
     pub history_id: Option<String>,
     pub skill_adds: Vec<SkillAdd>,
     pub plugin: Option<String>,
+    /// On-demand loads the agent made within this session (progressive
+    /// disclosure). Sticky within the session, gone at exit.
+    #[serde(default)]
+    pub loads: Vec<LoadEntry>,
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Record an on-demand load against the active session for `dir`. Idempotent
+/// (sticky): a second load of the same name is a no-op. Returns whether it was
+/// newly recorded. Errors if no session is active here.
+pub fn record_load(dir: &Path, name: &str, reason: &str) -> Result<bool> {
+    let key = dir_key(dir);
+    let mut map = load_all();
+    let sess = map
+        .get_mut(&key)
+        .context("no active session in this directory")?;
+    if sess.loads.iter().any(|l| l.name == name) {
+        return Ok(false);
+    }
+    sess.loads.push(LoadEntry {
+        name: name.to_string(),
+        reason: reason.to_string(),
+        ts: now_secs(),
+    });
+    save_all(&map)?;
+    Ok(true)
 }
 
 fn pointer_path() -> PathBuf {
@@ -180,10 +221,6 @@ pub fn start(
             .with_context(|| format!("installing plugin '{pl}' for the session"))?;
     }
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
     let mut map = load_all();
     map.insert(
         key_dir.clone(),
@@ -191,10 +228,11 @@ pub fn start(
             dir: key_dir,
             profile: profile.to_string(),
             scope: scope.as_str().to_string(),
-            started_unix: now,
+            started_unix: now_secs(),
             history_id,
             skill_adds,
             plugin: plugin.map(String::from),
+            loads: Vec::new(),
         },
     );
     save_all(&map)

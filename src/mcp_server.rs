@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use crate::manifest::load::MANIFEST_FILE;
 use crate::manifest::{Server, ServerType};
 use crate::secret::Resolver;
+use crate::store::{local_source_dir, Store};
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
@@ -116,6 +117,23 @@ fn tool_defs() -> Value {
             }
         },
         {
+            "name": "agentstack_list_loadable",
+            "description": "List the skills you're allowed to load right now, each with a one-line description (the cheap catalog — not the full instructions). When a session is active the list is fenced to that session's profile. Call this first, read the descriptions, then load only what the task needs.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "agentstack_load",
+            "description": "Load one skill by name for the rest of this session and return its full instructions. Only names from agentstack_list_loadable are allowed. Loads are sticky within a session and logged with your reason.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["name", "reason"],
+                "properties": {
+                    "name": { "type": "string", "description": "Skill name from agentstack_list_loadable" },
+                    "reason": { "type": "string", "description": "Why this task needs it (recorded for replay)" }
+                }
+            }
+        },
+        {
             "name": "agentstack_add_server",
             "description": "Add an MCP server to the manifest by hand (commit-safe — secrets stay as ${REF}). Does NOT apply; a human runs `agentstack apply` to render it.",
             "inputSchema": {
@@ -148,6 +166,8 @@ fn run_tool(name: &str, args: &Value, dir: Option<&Path>) -> Result<String> {
         "agentstack_doctor" => doctor_summary(dir),
         "agentstack_add_from" => add_from(args, dir),
         "agentstack_add_server" => add_server(args, dir),
+        "agentstack_list_loadable" => list_loadable(dir),
+        "agentstack_load" => load_capability(args, dir),
         other => anyhow::bail!("unknown tool '{other}'"),
     }
 }
@@ -306,6 +326,132 @@ fn add_server(args: &Value, dir: Option<&Path>) -> Result<String> {
     ))
 }
 
+/// The skills loadable right now: fenced to the active session's profile, or —
+/// when no session is active — the whole manifest (dev-open). This is the
+/// progressive-disclosure catalog: names + one-line descriptions, not payloads.
+fn loadable_skill_names(
+    manifest: &crate::manifest::Manifest,
+    session: Option<&crate::session::Session>,
+) -> Vec<String> {
+    match session.and_then(|s| manifest.profiles.get(&s.profile)) {
+        Some(p) if p.loads_all_skills() => manifest.skills.keys().cloned().collect(),
+        Some(p) => p
+            .skills
+            .iter()
+            .filter(|n| manifest.skills.contains_key(*n))
+            .cloned()
+            .collect(),
+        None => manifest.skills.keys().cloned().collect(),
+    }
+}
+
+/// Read a skill's `SKILL.md` once; return (description, full body).
+fn read_skill_md(source: &Path) -> (Option<String>, Option<String>) {
+    let Ok(text) = std::fs::read_to_string(source.join("SKILL.md")) else {
+        return (None, None);
+    };
+    let desc = parse_frontmatter_description(&text);
+    (desc, Some(text))
+}
+
+fn parse_frontmatter_description(md: &str) -> Option<String> {
+    let rest = md.trim_start().strip_prefix("---")?;
+    let end = rest.find("\n---")?;
+    for line in rest[..end].lines() {
+        if let Some(v) = line.trim().strip_prefix("description:") {
+            return Some(v.trim().trim_matches('"').trim_matches('\'').to_string());
+        }
+    }
+    None
+}
+
+fn list_loadable(dir: Option<&Path>) -> Result<String> {
+    let ctx = crate::commands::load(dir)?;
+    let m = &ctx.loaded.manifest;
+    let session = crate::session::active(&ctx.dir);
+    let loaded: std::collections::HashSet<String> = session
+        .as_ref()
+        .map(|s| s.loads.iter().map(|l| l.name.clone()).collect())
+        .unwrap_or_default();
+    let store = Store::default_store();
+
+    let mut entries = Vec::new();
+    for name in loadable_skill_names(m, session.as_ref()) {
+        let Some(skill) = m.skills.get(&name) else {
+            continue;
+        };
+        let desc = local_source_dir(&store, skill, &ctx.dir)
+            .and_then(|d| read_skill_md(&d).0)
+            .unwrap_or_default();
+        entries.push(json!({
+            "name": name,
+            "description": desc,
+            "kind": "skill",
+            "loaded": loaded.contains(&name),
+        }));
+    }
+    Ok(serde_json::to_string_pretty(&json!({
+        "loadable": entries,
+        "fenced": session.is_some(),
+        "session": session.as_ref().map(|s| s.profile.clone()),
+        "note": if session.is_some() {
+            "Fenced to this session's profile. Load only what the task needs."
+        } else {
+            "No active session — all manifest skills are loadable (dev-open). Start a session to fence + log loads."
+        },
+    }))?)
+}
+
+fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
+    let name = args
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("`name` is required")?;
+    let reason = args
+        .get("reason")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("`reason` is required — say why this task needs the skill")?;
+
+    let ctx = crate::commands::load(dir)?;
+    let m = &ctx.loaded.manifest;
+    let skill = m
+        .skills
+        .get(name)
+        .with_context(|| format!("no skill '{name}' in the manifest"))?;
+
+    let session = crate::session::active(&ctx.dir);
+    // Fence: inside a session, only the profile's skills are loadable.
+    if let Some(s) = &session {
+        if !loadable_skill_names(m, Some(s)).iter().any(|n| n == name) {
+            anyhow::bail!(
+                "'{name}' is not loadable in session '{}' — add it to the profile to allow it",
+                s.profile
+            );
+        }
+    }
+
+    let source = local_source_dir(&Store::default_store(), skill, &ctx.dir)
+        .with_context(|| format!("skill '{name}' is not available locally — run `agentstack install`"))?;
+    let (_, body) = read_skill_md(&source);
+    let instructions = body.with_context(|| format!("skill '{name}' has no SKILL.md"))?;
+
+    let newly = if session.is_some() {
+        crate::session::record_load(&ctx.dir, name, reason)?
+    } else {
+        false
+    };
+
+    Ok(serde_json::to_string_pretty(&json!({
+        "loaded": name,
+        "instructions": instructions,
+        "sticky": session.is_some(),
+        "newly_loaded": newly,
+        "fenced": session.is_some(),
+    }))?)
+}
+
 fn str_field(v: &Value, key: &str) -> Option<String> {
     v.get(key).and_then(Value::as_str).map(String::from)
 }
@@ -344,6 +490,18 @@ mod tests {
             .collect();
         assert!(names.contains(&"agentstack_search"));
         assert!(names.contains(&"agentstack_add_server"));
+        assert!(names.contains(&"agentstack_list_loadable"));
+        assert!(names.contains(&"agentstack_load"));
+    }
+
+    #[test]
+    fn frontmatter_description_parses() {
+        let md = "---\nname: pdf\ndescription: Fill and merge PDFs.\n---\nbody";
+        assert_eq!(
+            parse_frontmatter_description(md).as_deref(),
+            Some("Fill and merge PDFs.")
+        );
+        assert_eq!(parse_frontmatter_description("no frontmatter"), None);
     }
 
     #[test]
