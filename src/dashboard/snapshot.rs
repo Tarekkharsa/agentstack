@@ -366,7 +366,17 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
             })
             .collect();
 
-    let health = health_checks(&ctx, manifest, &state);
+    let global_drift =
+        render_drift_targets(&ctx, manifest, &state, Scope::Global, DriftSet::Selected)?;
+    let global_non_selected_drift = render_drift_targets(
+        &ctx,
+        manifest,
+        &state,
+        Scope::Global,
+        DriftSet::InstalledNonSelected,
+    )?;
+    let health = health_checks(&ctx, manifest, &global_drift, &global_non_selected_drift);
+    let next_actions = next_actions(&secrets, &skills, &plugin_recipes, &global_drift, &health);
 
     Ok(json!({
         "meta": {
@@ -391,18 +401,133 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "profiles": profiles,
         "stats": stats,
         "health": health,
+        "nextActions": next_actions,
     }))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DriftSet {
+    Selected,
+    InstalledNonSelected,
+}
+
+#[derive(Debug, Clone)]
+struct DriftTarget {
+    id: String,
+    display: String,
+    config_path: String,
+    selected_by_manifest: bool,
+    installed: bool,
+    config_present: bool,
+    changed: bool,
+    diff: String,
+    reason_skipped: Option<String>,
+}
+
+impl DriftTarget {
+    fn to_json(&self) -> Value {
+        json!({
+            "id": self.id,
+            "display": self.display,
+            "path": self.config_path,
+            "selectedByManifest": self.selected_by_manifest,
+            "installed": self.installed,
+            "configPresent": self.config_present,
+            "changed": self.changed,
+            "diff": self.diff,
+            "reasonSkipped": self.reason_skipped,
+        })
+    }
+}
+
+/// Shared drift planner for Health, Preview, and Next actions. `Selected` is
+/// intentionally the same target set `/api/diff` previews and `/api/apply`
+/// writes by default.
+fn render_drift_targets(
+    ctx: &crate::commands::Context,
+    manifest: &crate::manifest::Manifest,
+    state: &State,
+    scope: Scope,
+    set: DriftSet,
+) -> Result<Vec<DriftTarget>> {
+    let selected = crate::render::resolve_targets(manifest, &ctx.registry, &[]);
+    let ids: Vec<String> = match set {
+        DriftSet::Selected => selected.clone(),
+        DriftSet::InstalledNonSelected => ctx
+            .registry
+            .iter()
+            .filter(|d| !selected.iter().any(|id| id == &d.id))
+            .filter(|d| d.is_installed() || d.config_present())
+            .map(|d| d.id.clone())
+            .collect(),
+    };
+
+    let mut out = Vec::new();
+    for id in ids {
+        let selected_by_manifest = selected.iter().any(|t| t == &id);
+        let Some(d) = ctx.registry.get(&id) else {
+            out.push(DriftTarget {
+                id: id.clone(),
+                display: id,
+                config_path: String::new(),
+                selected_by_manifest,
+                installed: false,
+                config_present: false,
+                changed: false,
+                diff: String::new(),
+                reason_skipped: Some("target is not registered".into()),
+            });
+            continue;
+        };
+        let installed = d.is_installed();
+        let config_present = d.config_present();
+        let prev = state.managed_servers(&target_key(&id, scope));
+        match crate::render::plan_target(
+            manifest,
+            d,
+            &ctx.resolver,
+            &crate::render::Selection::All,
+            &prev,
+            scope,
+            &ctx.dir,
+        )? {
+            Some(plan) => out.push(DriftTarget {
+                id,
+                display: d.display.clone(),
+                config_path: plan.config_path.display().to_string(),
+                selected_by_manifest,
+                installed,
+                config_present,
+                changed: plan.changed(),
+                diff: crate::util::diff::render_plain(&plan.existing, &plan.proposed),
+                reason_skipped: None,
+            }),
+            None => out.push(DriftTarget {
+                id,
+                display: d.display.clone(),
+                config_path: String::new(),
+                selected_by_manifest,
+                installed,
+                config_present,
+                changed: false,
+                diff: String::new(),
+                reason_skipped: Some(format!("{} does not support {scope} scope", d.display)),
+            }),
+        }
+    }
+    Ok(out)
 }
 
 /// A compact doctor-style health summary for the dashboard.
 fn health_checks(
     ctx: &crate::commands::Context,
     manifest: &crate::manifest::Manifest,
-    state: &State,
+    selected_global_drift: &[DriftTarget],
+    non_selected_global_drift: &[DriftTarget],
 ) -> Vec<Value> {
     let mut out = Vec::new();
-    let push = |out: &mut Vec<Value>, level: &str, msg: String| {
-        out.push(json!({ "level": level, "message": msg }));
+    let push = |out: &mut Vec<Value>, level: &str, msg: String, action: Option<Value>| {
+        out.push(json!({ "level": level, "message": msg, "action": action }));
     };
 
     for d in ctx.registry.iter() {
@@ -412,11 +537,13 @@ fn health_checks(
                     &mut out,
                     "ok",
                     format!("{}: installed, config parses", d.display),
+                    None,
                 ),
                 Err(_) => push(
                     &mut out,
                     "error",
                     format!("{}: config does not parse", d.display),
+                    Some(json!({ "type": "section", "section": "settings" })),
                 ),
             }
         } else if d.config_present() {
@@ -424,9 +551,15 @@ fn health_checks(
                 &mut out,
                 "warn",
                 format!("{}: config present, binary not on PATH", d.display),
+                None,
             );
         } else {
-            push(&mut out, "warn", format!("{}: not detected", d.display));
+            push(
+                &mut out,
+                "warn",
+                format!("{}: not detected", d.display),
+                None,
+            );
         }
     }
 
@@ -436,7 +569,12 @@ fn health_checks(
         .filter(|n| ctx.resolver.resolve(n).is_none())
         .collect();
     if unresolved.is_empty() {
-        push(&mut out, "ok", format!("{} secret(s) resolve", refs.len()));
+        push(
+            &mut out,
+            "ok",
+            format!("{} secret(s) resolve", refs.len()),
+            None,
+        );
     } else {
         push(
             &mut out,
@@ -450,40 +588,264 @@ fn health_checks(
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
+            Some(json!({ "type": "section", "section": "secrets" })),
         );
     }
 
-    // Drift (global scope).
-    let mut drift = 0;
-    for id in ctx.registry.ids() {
-        if let Some(d) = ctx.registry.get(id) {
-            let prev = state.managed_servers(&target_key(id, Scope::Global));
-            if let Ok(Some(plan)) = crate::render::plan_target(
-                manifest,
-                d,
-                &ctx.resolver,
-                &crate::render::Selection::All,
-                &prev,
-                Scope::Global,
-                &ctx.dir,
-            ) {
-                if plan.changed() {
-                    drift += 1;
-                }
-            }
-        }
-    }
-    if drift == 0 {
-        push(&mut out, "ok", "global configs in sync".into());
-    } else {
-        push(
-            &mut out,
-            "warn",
-            format!("{drift} target(s) drifted (global) — Apply to reconcile"),
-        );
-    }
+    push_drift_health(&mut out, selected_global_drift, non_selected_global_drift);
 
     out
+}
+
+fn push_drift_health(
+    out: &mut Vec<Value>,
+    selected_global_drift: &[DriftTarget],
+    non_selected_global_drift: &[DriftTarget],
+) {
+    let push = |out: &mut Vec<Value>, level: &str, msg: String, action: Option<Value>| {
+        out.push(json!({ "level": level, "message": msg, "action": action }));
+    };
+
+    // Drift (global scope), using the exact selected target set Preview shows.
+    let drift = selected_global_drift.iter().filter(|t| t.changed).count();
+    if drift == 0 {
+        push(out, "ok", "selected global configs in sync".into(), None);
+    } else {
+        push(
+            out,
+            "warn",
+            format!("{drift} selected target(s) drifted (global) — Preview to reconcile"),
+            Some(json!({ "type": "preview", "scope": "global" })),
+        );
+    }
+
+    let extra_drift = non_selected_global_drift
+        .iter()
+        .filter(|t| t.changed)
+        .count();
+    if extra_drift > 0 {
+        push(
+            out,
+            "warn",
+            format!(
+                "{extra_drift} installed non-default target(s) have renderable drift — preview all to reconcile"
+            ),
+            Some(json!({ "type": "preview", "scope": "global", "all": true })),
+        );
+    }
+}
+
+fn next_actions(
+    secrets: &[Value],
+    skills: &[Value],
+    recipes: &[Value],
+    selected_global_drift: &[DriftTarget],
+    health: &[Value],
+) -> Vec<Value> {
+    let mut out = Vec::new();
+
+    for secret in secrets
+        .iter()
+        .filter(|s| !s.get("resolved").and_then(Value::as_bool).unwrap_or(false))
+    {
+        let Some(name) = secret.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        out.push(command_action(
+            format!("missing-secret:{name}"),
+            "error",
+            format!("{name} is missing"),
+            "A manifest reference cannot resolve on this machine.",
+            "secrets",
+            "Set secret",
+            json!({ "type": "section", "section": "secrets" }),
+        ));
+    }
+
+    let drift = selected_global_drift.iter().filter(|t| t.changed).count();
+    if drift > 0 {
+        out.push(command_action(
+            "drift:global".into(),
+            "warn",
+            "Selected targets have drift".into(),
+            format!("{drift} global target(s) differ from the manifest render."),
+            "health",
+            "Preview changes",
+            json!({ "type": "preview", "scope": "global" }),
+        ));
+    }
+
+    let missing_skills: Vec<&str> = skills
+        .iter()
+        .filter(|s| !s.get("installed").and_then(Value::as_bool).unwrap_or(false))
+        .filter_map(|s| s.get("name").and_then(Value::as_str))
+        .collect();
+    if !missing_skills.is_empty() {
+        out.push(command_action(
+            "skills:missing".into(),
+            "warn",
+            "Skill sources are not installed".into(),
+            format!("{} skill source(s) need install.", missing_skills.len()),
+            "skills",
+            "Install skills",
+            json!({ "type": "post", "path": "/api/install", "label": "Install" }),
+        ));
+    }
+
+    for recipe in recipes {
+        let Some(name) = recipe.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let conflict = recipe.get("conflict").and_then(Value::as_str);
+        let missing = recipe
+            .get("missingSkills")
+            .and_then(Value::as_array)
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let generated = recipe
+            .get("generated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let stale = recipe
+            .get("stale")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let marketplace_needs_sync = recipe
+            .get("marketplaces")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items.iter().any(|m| {
+                    !m.get("present").and_then(Value::as_bool).unwrap_or(false)
+                        || m.get("stale").and_then(Value::as_bool).unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+        let marketplace_hidden = recipe
+            .get("marketplaces")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items.iter().any(|m| {
+                    !m.get("nativeVisible")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+        let install_missing = recipe
+            .get("installs")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .any(|i| !i.get("installed").and_then(Value::as_bool).unwrap_or(false))
+            })
+            .unwrap_or(false);
+
+        if let Some(conflict) = conflict {
+            out.push(command_action(
+                format!("plugin:{name}:conflict"),
+                "error",
+                format!("{name} plugin package is blocked"),
+                format!("Resolve package conflict: {conflict}"),
+                "plugins",
+                "Open Plugins",
+                json!({ "type": "section", "section": "plugins" }),
+            ));
+        } else if missing > 0 {
+            out.push(command_action(
+                format!("plugin:{name}:missing-skills"),
+                "warn",
+                format!("{name} recipe needs skill sources"),
+                format!("{missing} skill source(s) must be installed before sync."),
+                "plugins",
+                "Install skills",
+                json!({ "type": "post", "path": "/api/install", "label": "Install" }),
+            ));
+        } else if !generated || stale || marketplace_needs_sync {
+            out.push(command_action(
+                format!("plugin:{name}:sync"),
+                "warn",
+                format!("{name} recipe needs sync"),
+                "Generated package or marketplace entry is missing or stale.",
+                "plugins",
+                "Sync recipes",
+                json!({ "type": "post", "path": "/api/plugins_sync", "label": "Plugin recipe sync" }),
+            ));
+        } else if marketplace_hidden {
+            out.push(command_action(
+                format!("plugin:{name}:marketplace"),
+                "warn",
+                format!("{name} marketplace is not visible natively"),
+                "The repo marketplace exists but the native harness has not picked it up.",
+                "plugins",
+                "Open Plugins",
+                json!({ "type": "section", "section": "plugins" }),
+            ));
+        } else if install_missing {
+            out.push(command_action(
+                format!("plugin:{name}:install"),
+                "warn",
+                format!("{name} is not installed natively"),
+                "Install the recipe from the native harness marketplace.",
+                "plugins",
+                "Open Plugins",
+                json!({ "type": "section", "section": "plugins" }),
+            ));
+        }
+    }
+
+    for row in health {
+        let msg = row
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if row.get("level").and_then(Value::as_str) == Some("error")
+            && msg.contains("config does not parse")
+        {
+            out.push(command_action(
+                format!("adapter-config:{msg}"),
+                "error",
+                msg.to_string(),
+                "Inspect or import the native settings before applying changes.",
+                "health",
+                "Open Health",
+                json!({ "type": "section", "section": "health" }),
+            ));
+        }
+    }
+
+    out.sort_by_key(|a| match a.get("level").and_then(Value::as_str) {
+        Some("error") => 0,
+        Some("warn") => 1,
+        _ => 2,
+    });
+    out
+}
+
+fn command_action(
+    id: String,
+    level: &str,
+    title: String,
+    detail: impl Into<String>,
+    section: &str,
+    label: &str,
+    action: Value,
+) -> Value {
+    json!({
+        "id": id,
+        "level": level,
+        "title": title,
+        "detail": detail.into(),
+        "section": section,
+        "primary": {
+            "label": label,
+            "action": action,
+        },
+        "secondary": {
+            "label": "Open section",
+            "action": { "type": "section", "section": section },
+        }
+    })
 }
 
 /// Provider search results for the Discover pane: normalized candidates with
@@ -513,34 +875,81 @@ pub fn search(manifest_dir: Option<&Path>, query: &str) -> Result<Value> {
 }
 
 /// Per-target rendering diffs for a scope (for the "preview before apply" flow).
-pub fn diffs(manifest_dir: Option<&Path>, scope: Scope) -> Result<Value> {
+pub fn diffs(manifest_dir: Option<&Path>, scope: Scope, all: bool) -> Result<Value> {
     let ctx = crate::commands::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
     let state = State::load().unwrap_or_default();
-    let targets = crate::render::resolve_targets(manifest, &ctx.registry, &[]);
-
-    let mut out = Vec::new();
-    for id in &targets {
-        let Some(d) = ctx.registry.get(id) else {
-            continue;
-        };
-        let prev = state.managed_servers(&target_key(id, scope));
-        if let Some(plan) = crate::render::plan_target(
+    let mut targets = render_drift_targets(&ctx, manifest, &state, scope, DriftSet::Selected)?;
+    if all {
+        // Also preview installed CLIs the manifest doesn't target by default.
+        targets.extend(render_drift_targets(
+            &ctx,
             manifest,
-            d,
-            &ctx.resolver,
-            &crate::render::Selection::All,
-            &prev,
+            &state,
             scope,
-            &ctx.dir,
-        )? {
-            out.push(json!({
-                "display": d.display,
-                "path": plan.config_path.display().to_string(),
-                "changed": plan.changed(),
-                "diff": crate::util::diff::render_plain(&plan.existing, &plan.proposed),
-            }));
+            DriftSet::InstalledNonSelected,
+        )?);
+    }
+    let out: Vec<Value> = targets.into_iter().map(|t| t.to_json()).collect();
+    Ok(json!({ "scope": scope.as_str(), "all": all, "targets": out }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn drift(id: &str, selected: bool, changed: bool) -> DriftTarget {
+        DriftTarget {
+            id: id.into(),
+            display: id.into(),
+            config_path: format!("/tmp/{id}.json"),
+            selected_by_manifest: selected,
+            installed: true,
+            config_present: true,
+            changed,
+            diff: String::new(),
+            reason_skipped: None,
         }
     }
-    Ok(json!({ "scope": scope.as_str(), "targets": out }))
+
+    #[test]
+    fn health_drift_counts_selected_targets_separately_from_installed_extras() {
+        let selected = vec![drift("codex", true, false)];
+        let extras = vec![
+            drift("claude-code", false, true),
+            drift("cursor", false, true),
+        ];
+        let mut rows = Vec::new();
+        push_drift_health(&mut rows, &selected, &extras);
+
+        let messages: Vec<&str> = rows
+            .iter()
+            .filter_map(|row| row.get("message").and_then(Value::as_str))
+            .collect();
+        assert!(messages.contains(&"selected global configs in sync"));
+        assert!(messages
+            .iter()
+            .any(|msg| msg.contains("2 installed non-default target(s)")));
+        assert!(!messages
+            .iter()
+            .any(|msg| msg.contains("2 selected target(s) drifted")));
+    }
+
+    #[test]
+    fn next_actions_include_missing_secret_and_selected_drift() {
+        let secrets = vec![json!({ "name": "KIBANA_TOKEN", "resolved": false })];
+        let skills = Vec::new();
+        let recipes = Vec::new();
+        let selected = vec![drift("codex", true, true)];
+        let health = Vec::new();
+
+        let actions = next_actions(&secrets, &skills, &recipes, &selected, &health);
+        let ids: Vec<&str> = actions
+            .iter()
+            .filter_map(|a| a.get("id").and_then(Value::as_str))
+            .collect();
+
+        assert!(ids.contains(&"missing-secret:KIBANA_TOKEN"));
+        assert!(ids.contains(&"drift:global"));
+    }
 }

@@ -56,6 +56,24 @@ function post(path, body, label) {
     .catch((e) => toast((label || "Action") + ": " + e.message, false));
 }
 
+function runAction(action, fallbackSection) {
+  if (!action) return fallbackSection ? show(fallbackSection) : null;
+  if (action.type === "section") return show(action.section || fallbackSection || "overview");
+  if (action.type === "preview") return openPreview(action.scope || "global", !!action.all);
+  if (action.type === "post") {
+    if (READONLY) return toast("Dashboard is read-only", false);
+    return post(action.path, {}, action.label || "Action");
+  }
+  return fallbackSection ? show(fallbackSection) : null;
+}
+
+function actionButton(model, cls) {
+  if (!model) return null;
+  const action = model.action || model;
+  if (READONLY && action.type === "post") return null;
+  return btn(model.label || "Open", () => runAction(action), cls);
+}
+
 /* ---------- shell ---------- */
 function renderNav() {
   const nav = document.getElementById("nav");
@@ -187,17 +205,13 @@ function overview(c) {
     statCard("Harnesses", installed, `${d.adapters.length} known`),
     statCard("Servers", d.servers.length, "MCP"),
     statCard("Skills", d.skills.length, `${d.skills.filter((s) => s.installed).length} installed`),
-    statCard("Secrets", `${secretsOk}/${d.secrets.length}`, "resolved"),
+    statCard("Health", errs ? `${errs} error` : warns ? `${warns} warning` : "Ready", `${secretsOk}/${d.secrets.length} secret(s) resolved`),
   ]));
 
-  if (!READONLY) {
-    c.appendChild(el("div", { class: "section-title" }, ["Actions"]));
-    c.appendChild(el("div", { class: "toolbar" }, [
-      btn("Preview & apply → global", () => openPreview("global"), "primary"),
-      btn("Preview & apply → project", () => openPreview("project")),
-      btn("Install skills", () => post("/api/install", {}, "Install")),
-    ]));
-  }
+  c.appendChild(el("div", { class: "overview-grid" }, [
+    nextActionsCard(),
+    stackSummaryCard(installed),
+  ]));
 
   c.appendChild(el("div", { class: "section-title" }, ["Health"]));
   const hsum = errs ? badge(`${errs} error(s)`, "red") : warns ? badge(`${warns} warning(s)`, "amber") : badge("all good", "green");
@@ -207,6 +221,67 @@ function overview(c) {
   ])]));
 
   c.appendChild(el("div", { class: "grid cols-2", style: "margin-top:18px" }, [profilesCard(), usageCard()]));
+}
+
+function nextActionsCard() {
+  const actions = DATA.nextActions || [];
+  const body = [];
+  if (!actions.length) {
+    body.push(el("div", { class: "empty compact" }, ["Stack is ready. Preview before applying any manual changes."]));
+  } else {
+    actions.slice(0, 6).forEach((a) => body.push(nextActionRow(a)));
+  }
+  if (!READONLY) {
+    body.push(el("div", { class: "toolbar tight", style: "margin-top:12px" }, [
+      btn("Preview global", () => openPreview("global"), "primary"),
+      btn("Preview all targets", () => openPreview("global", true)),
+      btn("Preview project", () => openPreview("project")),
+    ]));
+  }
+  return el("div", { class: "card" }, [
+    el("div", { class: "hd" }, ["Next actions", el("small", null, [actions.length ? `${actions.length} open item(s)` : "No blocking work detected"])]),
+    el("div", { class: "bd" }, body),
+  ]);
+}
+
+function nextActionRow(a) {
+  const kind = a.level === "error" ? "red" : a.level === "warn" ? "amber" : "green";
+  return el("div", { class: "next-action" }, [
+    el("div", { class: "next-main" }, [
+      badge(a.level || "info", kind),
+      el("div", null, [
+        el("div", { class: "name" }, [a.title || "Action needed"]),
+        el("div", { class: "muted", style: "font-size:12px" }, [a.detail || ""]),
+      ]),
+    ]),
+    el("div", { class: "row-actions" }, [
+      actionButton(a.primary, "primary"),
+      actionButton(a.secondary),
+    ]),
+  ]);
+}
+
+function stackSummaryCard(installed) {
+  const targets = (DATA.meta.defaultTargets || []).length ? DATA.meta.defaultTargets.join(", ") : "all registered";
+  const plugins = DATA.pluginRecipes || [];
+  const readyPlugins = plugins.filter((r) => recipeReady(r)).length;
+  return el("div", { class: "card" }, [
+    el("div", { class: "hd" }, ["Stack summary", el("small", null, [`${installed} detected harness(es)`])]),
+    el("div", { class: "bd" }, [
+      summaryLine("Default targets", targets),
+      summaryLine("Plugin recipes", `${readyPlugins}/${plugins.length} ready`),
+      summaryLine("Instructions", `${DATA.instructions.length} fragment(s)`),
+      summaryLine("Hooks", `${(DATA.hooks || []).length} hook(s)`),
+      summaryLine("Mode", READONLY ? "read-only" : "read-write"),
+    ]),
+  ]);
+}
+
+function summaryLine(label, value) {
+  return el("div", { class: "summary-line" }, [
+    el("span", { class: "muted" }, [label]),
+    el("span", { class: "mono" }, [String(value)]),
+  ]);
 }
 
 function profilesCard() {
@@ -781,17 +856,81 @@ function recipeHasInstalled(r) {
 function recipeHasInstallableTarget(r) {
   return (r.installs || []).some((i) => !i.installed);
 }
-function recipeNativeConfirm(r, action) {
+function recipeReady(r) {
+  if (r.conflict || (r.missingSkills || []).length || !r.generated || r.stale) return false;
+  if ((r.marketplaces || []).some((m) => !m.present || m.stale || !m.nativeVisible)) return false;
+  return (r.installs || []).length > 0 && (r.installs || []).every((i) => i.installed && i.enabled !== false);
+}
+function recipeCard(r) {
+  const targets = r.targets || [];
+  const alerts = [];
+  if (r.conflict) alerts.push(el("div", { class: "callout red" }, [r.conflict]));
+  if ((r.missingSkills || []).length) alerts.push(el("div", { class: "callout amber" }, ["Missing skills: " + r.missingSkills.join(", ")]));
+  const actions = [
+    ...(!READONLY && recipeHasInstallableTarget(r) ? [btn("Install", () => recipeNativeAction(r, "install"), "primary")] : []),
+    ...(!READONLY && recipeHasInstalled(r) ? [btn("Remove", () => recipeNativeAction(r, "remove"))] : []),
+  ];
+  return el("div", { class: "recipe-card" }, [
+    el("div", { class: "recipe-head" }, [
+      el("div", null, [
+        el("div", null, [el("span", { class: "name" }, [r.display || r.name]), el("span", { class: "k" }, [r.name + " @ " + r.version])]),
+        el("div", { class: "muted", style: "font-size:12px" }, [r.description || ""]),
+      ]),
+      el("div", { class: "row-actions" }, [
+        ...actions,
+        recipeReady(r) ? badge("ready", "green") : recipeStateBadge(r),
+      ]),
+    ]),
+    el("div", { class: "recipe-meta" }, [
+      badge("servers " + ((r.servers || []).length), "solid"),
+      badge("skills " + ((r.skills || []).length), "solid"),
+      badge("hooks " + ((r.hooks || []).length), "solid"),
+      ...(targets.length ? targets.map((t) => badge(t, "")) : [badge("no targets", "amber")]),
+    ]),
+    ...alerts,
+    el("div", { class: "target-steppers" }, targets.map((target) => targetStepper(r, target))),
+    el("details", { class: "recipe-details" }, [
+      el("summary", null, ["Paths and native guidance"]),
+      el("div", { class: "muted mono", style: "font-size:11px;margin-top:8px" }, [r.packagePath || ""]),
+      ...recipeGuidance(r),
+    ]),
+  ]);
+}
+function targetStepper(r, target) {
+  const m = (r.marketplaces || []).find((x) => x.target === target) || {};
+  const i = (r.installs || []).find((x) => x.target === target) || {};
+  const steps = [
+    stepModel("Recipe", r.conflict ? "blocked" : (r.missingSkills || []).length ? "warn" : "done", r.conflict ? "conflict" : (r.missingSkills || []).length ? "skills missing" : "valid"),
+    stepModel("Package", !r.generated ? "pending" : r.stale ? "warn" : "done", !r.generated ? "missing" : r.stale ? "stale" : "generated"),
+    stepModel("Entry", !m.present ? "pending" : m.stale ? "warn" : "done", !m.present ? "missing" : m.stale ? "stale" : "written"),
+    stepModel("Native", m.nativeVisible ? "done" : "pending", m.nativeVisible ? "visible" : "hidden"),
+    stepModel("Install", i.installed ? (i.enabled === false ? "warn" : "done") : "pending", i.installed ? (i.enabled === false ? "disabled" : "installed") : "not installed"),
+  ];
+  return el("div", { class: "target-stepper" }, [
+    el("div", { class: "target-label" }, [target]),
+    el("div", { class: "steps" }, steps.map((s) => el("div", { class: "step " + s.state, title: s.detail }, [
+      el("span", { class: "step-dot" }, []),
+      el("span", null, [s.label]),
+    ]))),
+  ]);
+}
+function stepModel(label, state, detail) {
+  return { label, state, detail };
+}
+function recipeNativePlan(r, action) {
   const lines = (r.guidance || []).map((g) => g.target + ": " + (g.nextAction || "Check native plugin UI/CLI."));
-  return window.confirm(
-    action + " native plugin commands for " + r.name + "?\n\n" +
-    (lines.length ? lines.join("\n") : "AgentStack will run the native harness command plan.")
-  );
+  return lines.length ? lines : ["AgentStack will run the native harness command plan for selected recipe targets."];
 }
 function recipeNativeAction(r, action) {
-  if (!recipeNativeConfirm(r, action === "install" ? "Install" : "Remove")) return;
   const path = action === "install" ? "/api/plugins_install" : "/api/plugins_remove";
-  post(path, { name: r.name }, "Plugin " + action);
+  const title = (action === "install" ? "Install" : "Remove") + " native plugin";
+  openOperationConfirm({
+    title,
+    detail: r.name + " @ " + r.version,
+    items: recipeNativePlan(r, action),
+    confirm: action === "install" ? "Install" : "Remove",
+    run: () => post(path, { name: r.name }, "Plugin " + action),
+  });
 }
 
 function plugins(c) {
@@ -808,29 +947,7 @@ function plugins(c) {
     if (PLUGIN_FORM) c.appendChild(addPluginRecipeCard());
   }
 
-  const rrows = recipes.map((r) => el("div", { class: "list-row" }, [
-    el("span", null, [
-      el("span", { class: "name" }, [r.display || r.name]),
-      el("div", { class: "muted mono", style: "font-size:12px" }, [
-        r.name + " @ " + r.version + " · " + (r.targets || []).join(", "),
-      ]),
-      el("div", { class: "muted", style: "font-size:12px" }, [r.description || ""]),
-      el("div", { class: "muted mono", style: "font-size:11px" }, [r.packagePath || ""]),
-      (r.conflict || (r.missingSkills || []).length)
-        ? el("div", { class: "muted", style: "font-size:12px;color:hsl(var(--amber))" }, [r.conflict || ("Missing skills: " + (r.missingSkills || []).join(", "))])
-        : null,
-      ...recipeGuidance(r),
-    ]),
-    el("span", { class: "row-actions" }, [
-      ...(!READONLY && recipeHasInstallableTarget(r) ? [btn("Install", () => recipeNativeAction(r, "install"), "primary")] : []),
-      ...(!READONLY && recipeHasInstalled(r) ? [btn("Remove", () => recipeNativeAction(r, "remove"))] : []),
-      badge("servers " + ((r.servers || []).length), "solid"),
-      badge("skills " + ((r.skills || []).length), "solid"),
-      badge("hooks " + ((r.hooks || []).length), "solid"),
-      recipeStateBadge(r),
-      ...recipeInstallBadges(r),
-    ]),
-  ]));
+  const rrows = recipes.map(recipeCard);
   if (!rrows.length) rrows.push(el("div", { class: "empty" }, ["No managed recipes. Add [plugins.*] to agentstack.toml."]));
   c.appendChild(el("div", { class: "card" }, [
     el("div", { class: "hd" }, ["Managed recipes", el("small", null, [`${recipes.length} recipe(s)`])]),
@@ -908,7 +1025,12 @@ function secrets(c) {
 function healthRow(h) {
   const cls = h.level === "error" ? "dot-err" : h.level === "warn" ? "dot-warn" : "dot-ok";
   const mark = h.level === "error" ? "✗" : h.level === "warn" ? "⚠" : "✓";
-  return el("div", { class: "health-row" }, [el("span", { class: cls }, [mark]), el("span", null, [h.message])]);
+  const row = el("div", { class: "health-row" }, [
+    el("span", { class: cls }, [mark]),
+    el("span", null, [h.message]),
+    h.action ? el("span", { class: "health-action" }, [btn(h.action.type === "preview" ? "Preview" : "Open", () => runAction(h.action))]) : null,
+  ]);
+  return row;
 }
 function health(c) {
   c.appendChild(pageHead("Health", "Adapters, secrets, and drift — the trust layer."));
@@ -930,23 +1052,44 @@ function colorizeDiff(text) {
   return wrap;
 }
 function closeModal() { document.getElementById("modal").innerHTML = ""; }
-function openPreview(scope) {
-  fetch(q("/api/diff") + "&scope=" + scope)
+function openOperationConfirm(plan) {
+  const body = el("div", { class: "mbd" }, [
+    el("div", { class: "muted", style: "font-size:13px;margin-bottom:10px" }, [plan.detail || ""]),
+    el("div", { class: "op-list" }, (plan.items || []).map((item) => el("div", { class: "op-item mono" }, [item]))),
+  ]);
+  const footer = el("div", { class: "mft" }, [
+    btn("Cancel", closeModal),
+    btn(plan.confirm || "Continue", () => { closeModal(); plan.run && plan.run(); }, "primary"),
+  ]);
+  const modal = el("div", { class: "modal" }, [
+    el("div", { class: "mhd" }, [el("span", null, [plan.title || "Confirm operation"]), btn("✕", closeModal, "icon")]),
+    body, footer,
+  ]);
+  document.getElementById("modal").appendChild(el("div", { class: "overlay", onclick: (e) => e.target.classList.contains("overlay") && closeModal() }, [modal]));
+}
+function openPreview(scope, all) {
+  fetch(q("/api/diff") + "&scope=" + scope + (all ? "&all=1" : ""))
     .then((r) => r.json())
     .then((data) => {
       const body = el("div", { class: "mbd" });
       const changed = (data.targets || []).filter((t) => t.changed);
       if (!changed.length) body.appendChild(el("div", { class: "empty" }, ["No changes — everything is already in sync."]));
       changed.forEach((t) => {
-        body.appendChild(el("div", { class: "diff-target" }, [`${t.display} · ${t.path}`]));
+        const tag = all && !t.selectedByManifest ? el("span", { class: "badge amber", style: "margin-left:8px" }, ["non-default"]) : null;
+        body.appendChild(el("div", { class: "diff-target" }, [`${t.display} · ${t.path}`, tag]));
         body.appendChild(colorizeDiff(t.diff));
       });
+      // In "all" mode, apply exactly the drifted targets (incl. non-default);
+      // otherwise apply the manifest's default set for this scope.
+      const applyBody = all ? { scope, targets: changed.map((t) => t.id) } : { scope };
+      const label = all ? "Apply all (" + changed.length + ")" : "Apply " + scope;
       const footer = el("div", { class: "mft" }, [
         btn("Cancel", closeModal),
-        changed.length ? btn("Apply " + scope, () => { closeModal(); post("/api/apply", { scope }, "Apply (" + scope + ")"); }, "primary") : null,
+        changed.length ? btn(label, () => { closeModal(); post("/api/apply", applyBody, label); }, "primary") : null,
       ]);
+      const title = all ? `Preview · all installed targets · ${scope}` : `Preview · ${scope} scope`;
       const modal = el("div", { class: "modal" }, [
-        el("div", { class: "mhd" }, [el("span", null, [`Preview · ${scope} scope`]), btn("✕", closeModal, "icon")]),
+        el("div", { class: "mhd" }, [el("span", null, [title]), btn("✕", closeModal, "icon")]),
         body, footer,
       ]);
       document.getElementById("modal").appendChild(el("div", { class: "overlay", onclick: (e) => e.target.classList.contains("overlay") && closeModal() }, [modal]));

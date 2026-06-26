@@ -96,7 +96,8 @@ fn route(
             if !authed {
                 return unauthorized();
             }
-            match crate::dashboard::snapshot::diffs(dir, scope_of_query(query)) {
+            let all = query_param(query, "all").as_deref() == Some("1");
+            match crate::dashboard::snapshot::diffs(dir, scope_of_query(query), all) {
                 Ok(v) => json(&serde_json::to_string(&v).unwrap_or_default()),
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
@@ -180,8 +181,19 @@ fn route(
             crate::secret::keychain::set(&name, &value)
         }),
         (Method::Post, "/api/apply") => mutation(authed, read_only, || {
+            // Optional explicit target list (e.g. "preview all" reconciling
+            // installed non-default CLIs); empty = the manifest's defaults.
+            let targets: Vec<String> = parse(body)
+                .get("targets")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
             let args = crate::cli::ApplyArgs {
-                targets: vec![],
+                targets,
                 profile: None,
                 dry_run: false,
                 write: true,
