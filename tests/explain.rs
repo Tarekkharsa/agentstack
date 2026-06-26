@@ -19,15 +19,22 @@ fn explain_server_reports_secret_and_safety() {
         proj.join("agentstack.toml"),
         "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
          [servers.kibana]\ntype = \"http\"\nurl = \"https://kibana.example/mcp\"\n\
-         headers = { Authorization = \"Bearer ${ZZ_UNSET_TOKEN}\" }\n",
+         headers = { Authorization = \"Bearer ${ZZ_UNSET_TOKEN}\", Org = \"${ZZ_ENV_ORG}\" }\n",
     )
     .unwrap();
+    std::env::set_var("ZZ_ENV_ORG", "acme");
 
     let out = explain_text("kibana", Some(&proj)).unwrap();
     assert!(out.contains("MCP server · http"));
     assert!(out.contains("kibana.example"), "shows the endpoint host");
     assert!(out.contains("${ZZ_UNSET_TOKEN}") && out.contains("not set"));
+    // The resolved one names its source layer.
+    assert!(
+        out.contains("${ZZ_ENV_ORG}") && out.contains("from env"),
+        "names the layer a resolved secret comes from"
+    );
     assert!(out.contains("network egress"));
+    std::env::remove_var("ZZ_ENV_ORG");
 
     // Unknown capability → a helpful error, not a panic.
     assert!(explain_text("nope-not-here", Some(&proj)).is_err());

@@ -10,7 +10,7 @@ use anyhow::Result;
 use crate::cli::ExplainArgs;
 use crate::manifest::{ServerType, SkillSource};
 use crate::scope::Scope;
-use crate::secret::{refs_in, Resolver};
+use crate::secret::refs_in;
 use crate::state::{target_key, State};
 use crate::store::{local_source_dir, Store};
 
@@ -82,15 +82,15 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
     }
     refs.sort();
     refs.dedup();
+    let sources = crate::secret::SecretSources::detect(&ctx.dir);
     if refs.is_empty() {
         kv(&mut o, "Secrets", "none");
     } else {
         kv(&mut o, "Secrets", &format!("{} referenced", refs.len()));
         for r in &refs {
-            let status = if ctx.resolver.resolve(r).is_some() {
-                "✓ resolves on this machine".to_string()
-            } else {
-                "✗ not set — run `agentstack secret set ".to_string() + r + "`"
+            let status = match sources.source_of(r) {
+                Some(src) => format!("✓ resolves here (from {src})"),
+                None => format!("✗ not set — run `agentstack secret set {r}`"),
             };
             o.push_str(&format!("                ${{{r}}}  {status}\n"));
         }
@@ -183,7 +183,7 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
     } else {
         let resolved = refs
             .iter()
-            .filter(|r| ctx.resolver.resolve(r).is_some())
+            .filter(|r| sources.source_of(r).is_some())
             .count();
         bullet(&mut o, &format!("needs {} secret(s) ({resolved} resolve here) — kept as ${{REF}}, never written as plaintext", refs.len()));
     }

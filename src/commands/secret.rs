@@ -7,9 +7,7 @@ use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
 
 use crate::cli::{SecretArgs, SecretCommand};
-use crate::secret::{
-    keychain, DotEnvResolver, EnvResolver, KeychainResolver, Resolver, VarlockResolver,
-};
+use crate::secret::keychain;
 
 pub fn run(args: &SecretArgs, manifest_dir: Option<&Path>) -> Result<()> {
     match &args.command {
@@ -65,27 +63,13 @@ fn list(manifest_dir: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
-    // Build per-source resolvers so we can report *where* each ref resolves.
-    let env = EnvResolver;
-    let varlock = VarlockResolver::detect(&ctx.dir);
-    let keychain = KeychainResolver;
-    let dotenv = DotEnvResolver::from_dir(&ctx.dir);
+    // Report *where* each ref resolves (shared with `explain` + the dashboard).
+    let sources = crate::secret::SecretSources::detect(&ctx.dir);
 
     println!("Secrets referenced by the manifest:\n");
     let mut missing = 0;
     for name in &refs {
-        let source = if env.resolve(name).is_some() {
-            Some("env")
-        } else if varlock.as_ref().and_then(|v| v.resolve(name)).is_some() {
-            Some("varlock")
-        } else if keychain.resolve(name).is_some() {
-            Some("keychain")
-        } else if dotenv.as_ref().and_then(|d| d.resolve(name)).is_some() {
-            Some(".env")
-        } else {
-            None
-        };
-        match source {
+        match sources.source_of(name) {
             Some(src) => println!("  {} {name:<20} resolved ({src})", "✓".green()),
             None => {
                 println!(

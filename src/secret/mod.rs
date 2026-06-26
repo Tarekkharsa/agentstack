@@ -57,6 +57,47 @@ impl Resolver for Chain {
     }
 }
 
+/// Like [`Chain::default_for_dir`], but keeps each layer separate so it can
+/// report *where* a `${REF}` resolves — shared by `secret list`, `explain`, and
+/// the dashboard. Priority matches the chain: env → varlock → keychain → `.env`.
+pub struct SecretSources {
+    env: EnvResolver,
+    varlock: Option<VarlockResolver>,
+    keychain: KeychainResolver,
+    dotenv: Option<DotEnvResolver>,
+}
+
+impl SecretSources {
+    pub fn detect(dir: &Path) -> Self {
+        SecretSources {
+            env: EnvResolver,
+            varlock: VarlockResolver::detect(dir),
+            keychain: KeychainResolver,
+            dotenv: DotEnvResolver::from_dir(dir),
+        }
+    }
+
+    /// The layer a reference resolves from, or `None` if it doesn't resolve here.
+    pub fn source_of(&self, name: &str) -> Option<&'static str> {
+        if self.env.resolve(name).is_some() {
+            Some("env")
+        } else if self
+            .varlock
+            .as_ref()
+            .and_then(|v| v.resolve(name))
+            .is_some()
+        {
+            Some("varlock")
+        } else if self.keychain.resolve(name).is_some() {
+            Some("keychain")
+        } else if self.dotenv.as_ref().and_then(|d| d.resolve(name)).is_some() {
+            Some(".env")
+        } else {
+            None
+        }
+    }
+}
+
 /// Extract the `${NAME}` reference names from a string, in order of appearance.
 pub fn refs_in(s: &str) -> Vec<String> {
     let mut out = Vec::new();
