@@ -683,6 +683,20 @@ function addServerCard() {
   ]);
 }
 
+// A key for the matrix scope tags + the global/project mental model.
+function scopeLegend() {
+  const item = (tag, desc) => el("span", { class: "legend-item" }, [
+    el("span", { class: "sc sc-" + tag, style: "position:static" }, [tag]),
+    el("span", { class: "muted", style: "font-size:11px" }, [desc]),
+  ]);
+  return el("div", { class: "scope-legend" }, [
+    item("global", "every project"),
+    item("project", "this repo only"),
+    item("both", "global + here"),
+    el("span", { class: "muted", style: "font-size:11px;flex:1" }, ["Project adds to Global — a server that's on globally is already active here."]),
+  ]);
+}
+
 // One matrix cell shared by the servers & skills tables. When `onToggle` is
 // given it's a real keyboard-operable toggle (role=button, aria-pressed);
 // otherwise it carries an aria-label so the ✓/– glyph isn't the only signal.
@@ -690,7 +704,7 @@ function statusCell(cell, opts) {
   const tag = cell.global && cell.project ? "both" : cell.global ? "global" : cell.project ? "project" : "";
   const on = cell.global || cell.project;
   const stateText = on ? (tag ? "enabled · " + tag : "enabled") : "disabled";
-  const inner = [el("div", { class: on ? "on" : "off" }, [on ? "✓" : "–"]), tag ? el("div", { class: "sc" }, [tag]) : null];
+  const inner = [el("div", { class: on ? "on" : "off" }, [on ? "✓" : "–"]), tag ? el("div", { class: "sc sc-" + tag }, [tag]) : null];
   const td = el("td", { class: "cell" }, inner);
   if (opts.onToggle) {
     const here = SCOPE === "project" ? cell.project : cell.global;
@@ -745,6 +759,7 @@ function servers(c) {
     body.appendChild(tr);
     if (OPEN_SERVER === s.name) body.appendChild(serverDetail(s, cols.length + 2));
   });
+  c.appendChild(scopeLegend());
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])])])]));
 }
 
@@ -843,6 +858,7 @@ function skills(c) {
     tr.appendChild(el("td", null, [s.installed ? badge("installed", "green") : badge("not installed", "amber")]));
     body.appendChild(tr);
   });
+  c.appendChild(scopeLegend());
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])])])]));
 
   // Skills present on disk in your CLIs but not yet in the manifest. Every entry
