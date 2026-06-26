@@ -285,28 +285,49 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         })
         .collect();
 
-    // Skills already present on disk in each CLI's skills dir but not yet in the
-    // manifest — so the user can see and adopt what they already have.
-    let mut disc: std::collections::BTreeMap<String, (String, bool, Vec<String>)> =
-        std::collections::BTreeMap::new();
+    // Skills present on disk in each CLI's skills dir. Every entry is surfaced —
+    // including broken links / non-skill dirs — with a status, so nothing is
+    // silently hidden; only `valid` ones can be adopted/consolidated.
+    struct Disc {
+        source: String,
+        is_symlink: bool,
+        valid: bool,
+        broken: bool,
+        present_in: Vec<String>,
+    }
+    let mut disc: std::collections::BTreeMap<String, Disc> = std::collections::BTreeMap::new();
     for d in ctx.registry.iter() {
         for sk in d.discover_skills(Scope::Global, &ctx.dir) {
-            let e = disc
-                .entry(sk.name.clone())
-                .or_insert_with(|| (sk.source.display().to_string(), sk.is_symlink, Vec::new()));
-            if !e.2.contains(&d.id) {
-                e.2.push(d.id.clone());
+            let e = disc.entry(sk.name.clone()).or_insert_with(|| Disc {
+                source: sk.source.display().to_string(),
+                is_symlink: sk.is_symlink,
+                valid: sk.valid,
+                broken: sk.broken,
+                present_in: Vec::new(),
+            });
+            if !e.present_in.contains(&d.id) {
+                e.present_in.push(d.id.clone());
             }
         }
     }
     let discovered_skills: Vec<Value> = disc
         .into_iter()
-        .map(|(name, (source, is_symlink, present_in))| {
+        .map(|(name, e)| {
+            let status = if e.broken {
+                "broken link"
+            } else if !e.valid {
+                "no SKILL.md"
+            } else {
+                "ok"
+            };
             json!({
                 "name": name,
-                "source": source,
-                "isSymlink": is_symlink,
-                "presentIn": present_in,
+                "source": e.source,
+                "isSymlink": e.is_symlink,
+                "valid": e.valid,
+                "broken": e.broken,
+                "status": status,
+                "presentIn": e.present_in,
                 "inManifest": manifest.skills.contains_key(&name),
             })
         })

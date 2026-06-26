@@ -103,6 +103,10 @@ pub struct DiscoveredSkill {
     /// True if the entry in the skills dir is a symlink (agentstack-style) vs a
     /// real directory living in the CLI's own folder.
     pub is_symlink: bool,
+    /// True if it's a real directory containing a `SKILL.md` (a manageable skill).
+    pub valid: bool,
+    /// True if it's a symlink whose target no longer exists (a dead link).
+    pub broken: bool,
 }
 
 impl AdapterDescriptor {
@@ -130,15 +134,19 @@ impl AdapterDescriptor {
             let is_symlink = std::fs::symlink_metadata(&path)
                 .map(|m| m.file_type().is_symlink())
                 .unwrap_or(false);
-            // Resolve through symlinks to the real directory.
-            let source = std::fs::canonicalize(&path).unwrap_or(path);
-            if !source.is_dir() || !source.join("SKILL.md").is_file() {
-                continue;
-            }
+            // Resolve through symlinks; a broken link can't be canonicalized.
+            let resolved = std::fs::canonicalize(&path);
+            let broken = is_symlink && resolved.is_err();
+            let source = resolved.unwrap_or_else(|_| path.clone());
+            let valid = source.is_dir() && source.join("SKILL.md").is_file();
+            // Surface every entry (even broken/non-skill) so nothing is silently
+            // hidden; consumers act only on `valid` ones.
             out.push(DiscoveredSkill {
                 name,
                 source,
                 is_symlink,
+                valid,
+                broken,
             });
         }
         out.sort_by(|a, b| a.name.cmp(&b.name));

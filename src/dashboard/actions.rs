@@ -347,6 +347,7 @@ pub fn adopt_skill(manifest_dir: Option<&Path>, name: &str) -> Result<()> {
         .registry
         .iter()
         .flat_map(|d| d.discover_skills(Scope::Global, &ctx.dir))
+        .filter(|s| s.valid)
         .find(|s| s.name == name)
         .map(|s| s.source)
         .with_context(|| format!("no skill named '{name}' found on disk"))?;
@@ -375,7 +376,11 @@ pub fn adopt_all_skills(manifest_dir: Option<&Path>) -> Result<usize> {
     let mut seen: std::collections::BTreeMap<String, std::path::PathBuf> =
         std::collections::BTreeMap::new();
     for d in ctx.registry.iter() {
-        for s in d.discover_skills(Scope::Global, &ctx.dir) {
+        for s in d
+            .discover_skills(Scope::Global, &ctx.dir)
+            .into_iter()
+            .filter(|s| s.valid)
+        {
             if !ctx.loaded.manifest.skills.contains_key(&s.name) {
                 seen.entry(s.name).or_insert(s.source);
             }

@@ -49,7 +49,11 @@ pub fn consolidate(
         let Some(dir) = desc.skills_dir_for(Scope::Global, project_dir) else {
             continue;
         };
-        for sk in desc.discover_skills(Scope::Global, project_dir) {
+        for sk in desc
+            .discover_skills(Scope::Global, project_dir)
+            .into_iter()
+            .filter(|s| s.valid)
+        {
             let entry = dir.join(&sk.name);
             found
                 .entry(sk.name.clone())

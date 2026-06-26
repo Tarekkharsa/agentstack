@@ -507,27 +507,32 @@ function skills(c) {
   });
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("table", null, [el("thead", null, [head]), body])])]));
 
-  // Skills already on disk in your CLIs but not yet in the manifest.
+  // Skills present on disk in your CLIs but not yet in the manifest. Every entry
+  // is shown — valid ones are adoptable; broken/non-skill ones show a status.
   const found = (DATA.discoveredSkills || []).filter((d) => !d.inManifest);
   if (found.length) {
-    const hd = ["Detected on disk", el("small", null, [`${found.length} skill(s) scattered across your CLIs, not yet managed`])];
-    if (!READONLY) hd.push(el("span", { style: "margin-left:auto;display:flex;gap:8px" }, [
+    const adoptable = found.filter((d) => d.valid !== false);
+    const hd = ["Detected on disk", el("small", null, [`${found.length} found · ${adoptable.length} manageable`])];
+    if (!READONLY && adoptable.length) hd.push(el("span", { style: "margin-left:auto;display:flex;gap:8px" }, [
       btn("Move all into agentstack", () => {
-        if (confirm("Move " + found.length + " skill folder(s) into ~/.agentstack/skills/ and replace the originals with symlinks? Your agents keep working in place; a backup is kept.")) post("/api/consolidate_skills", {}, "Consolidate skills");
+        if (confirm("Move " + adoptable.length + " skill folder(s) into ~/.agentstack/skills/ and replace the originals with symlinks? Your agents keep working in place; a backup is kept.")) post("/api/consolidate_skills", {}, "Consolidate skills");
       }, "primary"),
       btn("Adopt all in place", () => post("/api/adopt_all_skills", {}, "Adopt skills")),
     ]));
     const rows = found.map((d) => {
       const where = (d.presentIn || []).map((t) => badge(t, "solid"));
+      const ok = d.valid !== false;
+      const statusBadge = d.broken ? badge("broken link", "red") : !ok ? badge("no SKILL.md", "amber") : null;
       return el("div", { class: "list-row" }, [
         el("span", null, [
-          el("span", { class: "name" }, [d.name]),
+          el("span", { class: "name", style: ok ? "" : "opacity:.7" }, [d.name]),
           el("div", { class: "muted mono", style: "font-size:12px" }, [(d.isSymlink ? "symlink · " : "") + d.source]),
         ]),
         el("span", { class: "row-actions" }, [
           ...where,
-          READONLY ? null : btn("Move", () => post("/api/consolidate_skills", { names: [d.name] }, "Consolidate " + d.name)),
-          READONLY ? null : btn("Adopt", () => post("/api/adopt_skill", { name: d.name }, "Adopt " + d.name)),
+          statusBadge,
+          READONLY || !ok ? null : btn("Move", () => post("/api/consolidate_skills", { names: [d.name] }, "Consolidate " + d.name)),
+          READONLY || !ok ? null : btn("Adopt", () => post("/api/adopt_skill", { name: d.name }, "Adopt " + d.name)),
         ]),
       ]);
     });
