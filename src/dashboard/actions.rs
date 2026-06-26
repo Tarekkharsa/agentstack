@@ -169,6 +169,30 @@ pub fn import_settings(manifest_dir: Option<&Path>, target: &str) -> Result<usiz
     Ok(count)
 }
 
+/// Install a Pi package from the marketplace by running `pi install npm:<name>`.
+/// Best-effort: surfaces a clear message if the local `pi` can't run it (the
+/// search/copy command path still works).
+pub fn pi_install(name: &str) -> Result<()> {
+    if name.is_empty() || name.contains(char::is_whitespace) {
+        anyhow::bail!("invalid package name");
+    }
+    let spec = format!("npm:{name}");
+    match std::process::Command::new("pi")
+        .args(["install", &spec])
+        .output()
+    {
+        Ok(o) if o.status.success() => Ok(()),
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr);
+            let tail = err.lines().last().unwrap_or("").trim();
+            anyhow::bail!("`pi install {spec}` failed: {tail}. Run it in your terminal to install.")
+        }
+        Err(_) => anyhow::bail!(
+            "`pi` is not runnable here — run `pi install {spec}` in your terminal to install."
+        ),
+    }
+}
+
 /// Add a lifecycle hook to the manifest from dashboard form fields.
 pub fn add_hook(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
     let name = args

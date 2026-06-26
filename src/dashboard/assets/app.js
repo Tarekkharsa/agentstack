@@ -1013,6 +1013,45 @@ function plugins(c) {
     el("div", { class: "hd" }, ["Extensions", el("small", null, [`${exts.length} · Pi TypeScript add-ons`])]),
     el("div", { class: "bd" }, erows),
   ]));
+
+  // Pi package marketplace (pi.dev/packages, via npm) — search + install.
+  const input = el("input", { class: "inp", placeholder: "search Pi packages…", style: "width:280px", value: PI_MARKET.q });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") doPiSearch(input.value.trim()); });
+  const results = el("div", null, [piMarketBody()]);
+  c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
+    el("div", { class: "hd" }, ["Pi marketplace", el("small", null, ["pi.dev/packages · npm keyword pi-package"])]),
+    el("div", { class: "bd" }, [
+      el("div", { class: "toolbar", style: "margin-bottom:10px" }, [input, btn("Search", () => doPiSearch(input.value.trim()), "primary"), btn("Browse popular", () => doPiSearch(""))]),
+      results,
+    ]),
+  ]));
+}
+
+const PI_MARKET = { q: "", results: null, loading: false };
+function doPiSearch(query) {
+  PI_MARKET.q = query;
+  PI_MARKET.loading = true;
+  if (SECTION === "plugins") show("plugins");
+  return fetch(q("/api/pi_search") + "&q=" + encodeURIComponent(query))
+    .then((r) => r.json())
+    .then((d) => { PI_MARKET.loading = false; PI_MARKET.results = d.results || []; if (SECTION === "plugins") show("plugins"); })
+    .catch((e) => { PI_MARKET.loading = false; toast("Pi search failed: " + e.message, false); });
+}
+function piMarketBody() {
+  if (PI_MARKET.loading) return el("div", { class: "empty" }, ["Searching npm…"]);
+  if (PI_MARKET.results == null) return el("div", { class: "empty" }, ["Search the Pi package marketplace, or “Browse popular”."]);
+  if (!PI_MARKET.results.length) return el("div", { class: "empty" }, [`No Pi packages for "${PI_MARKET.q}".`]);
+  const wrap = el("div");
+  PI_MARKET.results.forEach((p) => {
+    const head = el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" }, [
+      el("span", null, [el("span", { class: "name" }, [p.name]), el("span", { class: "k" }, [p.kind]), el("span", { class: "muted mono", style: "font-size:11px;margin-left:6px" }, [p.version])]),
+      READONLY ? null : btn("Install", () => post("/api/pi_install", { name: p.name }, "Install " + p.name), "primary"),
+    ]);
+    const desc = el("div", { class: "muted", style: "font-size:12px;margin:2px 0 4px" }, [p.description || ""]);
+    const cmd = el("div", { class: "muted mono", style: "font-size:11px" }, ["$ " + p.install + (p.repoUrl ? "   ·   " + p.repoUrl : "")]);
+    wrap.appendChild(el("div", { style: "padding:9px 0;border-top:1px solid hsl(var(--border))" }, [head, desc, cmd]));
+  });
+  return wrap;
 }
 
 /* ---------- instructions ---------- */

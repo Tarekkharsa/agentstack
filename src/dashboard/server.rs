@@ -112,6 +112,35 @@ fn route(
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
         }
+        (Method::Get, "/api/pi_search") => {
+            if !authed {
+                return unauthorized();
+            }
+            let q = query_param(query, "q").unwrap_or_default();
+            match crate::pi_packages::search(&q, 30) {
+                Ok(pkgs) => {
+                    let arr: Vec<Value> = pkgs
+                        .iter()
+                        .map(|p| {
+                            serde_json::json!({
+                                "name": p.name, "version": p.version,
+                                "description": p.description, "kind": p.kind,
+                                "npmUrl": p.npm_url, "repoUrl": p.repo_url,
+                                "install": p.install,
+                            })
+                        })
+                        .collect();
+                    json(
+                        &serde_json::to_string(&serde_json::json!({ "results": arr }))
+                            .unwrap_or_default(),
+                    )
+                }
+                Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
+            }
+        }
+        (Method::Post, "/api/pi_install") => mutation(authed, read_only, || {
+            crate::dashboard::actions::pi_install(&field(&parse(body), "name")?)
+        }),
         (Method::Post, "/api/toggle") => mutation(authed, read_only, || {
             let v = parse(body);
             let server = field(&v, "server")?;

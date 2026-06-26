@@ -17,6 +17,7 @@ pub mod lock;
 pub mod manifest;
 pub mod mcp;
 pub mod mcp_server;
+pub mod pi_packages;
 pub mod plugin_recipes;
 pub mod plugins;
 pub mod provider;
