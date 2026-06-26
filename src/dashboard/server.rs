@@ -102,6 +102,19 @@ fn route(
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
         }
+        (Method::Get, "/api/explain") => {
+            if !authed {
+                return unauthorized();
+            }
+            let name = query_param(query, "name").unwrap_or_default();
+            match crate::commands::explain::explain_text(&name, dir) {
+                Ok(text) => json(
+                    &serde_json::to_string(&serde_json::json!({ "text": text }))
+                        .unwrap_or_default(),
+                ),
+                Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
+            }
+        }
         (Method::Get, "/api/history") => {
             if !authed {
                 return unauthorized();

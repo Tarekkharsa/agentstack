@@ -240,6 +240,11 @@ details.acc[open] > summary { border-bottom: 1px solid hsl(var(--border)); }
 .pchip .pdel { color: hsl(var(--red)); font-weight: 600; }
 @media (max-width: 720px) { .pending-bar .pchips { display: none; } }
 
+/* Explain (trust lens) */
+.explain-text { white-space: pre; font-size: 12px; line-height: 1.55; margin: 0;
+  background: hsl(var(--muted) / 0.4); border: 1px solid hsl(var(--border));
+  border-radius: var(--radius); padding: 12px 14px; overflow-x: auto; }
+
 /* Command palette */
 .overlay.top { align-items: flex-start; padding-top: 12vh; }
 .modal.cmd { width: min(560px, 100%); }

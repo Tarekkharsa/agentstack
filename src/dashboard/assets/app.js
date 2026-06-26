@@ -794,7 +794,10 @@ function serverDetail(s, span) {
   if (s.args && s.args.length) add("args", s.args.join(" "));
   (s.headers || []).forEach((h) => add("header." + h.key, h.value));
   (s.env || []).forEach((e) => add("env." + e.key, e.value));
-  return el("tr", { class: "detail" }, [el("td", { colspan: span }, [el("div", { class: "bd" }, [el("div", { class: "kv" }, kv)])])]);
+  return el("tr", { class: "detail" }, [el("td", { colspan: span }, [el("div", { class: "bd" }, [
+    el("div", { class: "kv" }, kv),
+    el("div", { class: "toolbar", style: "margin-top:10px" }, [btn("Explain trust ⓘ", () => explainModal(s.name))]),
+  ])])]);
 }
 
 /* ---------- skills ---------- */
@@ -877,7 +880,10 @@ function skills(c) {
         disabledTitle: !READONLY && !s.installed ? "install the skill first to enable it" : null,
       }));
     });
-    tr.appendChild(el("td", null, [s.installed ? badge("installed", "green") : badge("not installed", "amber")]));
+    tr.appendChild(el("td", null, [el("span", { class: "row-actions" }, [
+      s.installed ? badge("installed", "green") : badge("not installed", "amber"),
+      btn("ⓘ", () => explainModal(s.name), "icon"),
+    ])]));
     body.appendChild(tr);
   });
   c.appendChild(scopeLegend());
@@ -1500,6 +1506,22 @@ function colorizeDiff(text) {
   return wrap;
 }
 function closeModal() { document.getElementById("modal").innerHTML = ""; }
+
+// The trust lens — where a server/skill came from, secrets it needs, what gets
+// written, and safety signals. Mirrors `agentstack explain` on the CLI.
+function explainModal(name) {
+  fetch(q("/api/explain") + "&name=" + encodeURIComponent(name))
+    .then((r) => r.json())
+    .then((d) => {
+      if (d.error) return toast("Explain: " + d.error, false);
+      const modal = el("div", { class: "modal" }, [
+        el("div", { class: "mhd" }, [el("span", null, ["Explain · " + name]), btn("✕", closeModal, "icon")]),
+        el("div", { class: "mbd" }, [el("pre", { class: "mono explain-text" }, [d.text.trim()])]),
+      ]);
+      document.getElementById("modal").appendChild(el("div", { class: "overlay", onclick: (e) => e.target.classList.contains("overlay") && closeModal() }, [modal]));
+    })
+    .catch((e) => toast("Explain: " + e.message, false));
+}
 function openOperationConfirm(plan) {
   const body = el("div", { class: "mbd" }, [
     el("div", { class: "muted", style: "font-size:13px;margin-bottom:10px" }, [plan.detail || ""]),
