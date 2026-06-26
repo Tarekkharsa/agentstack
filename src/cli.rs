@@ -80,6 +80,9 @@ pub enum Command {
     /// Inspect the available CLI adapters.
     Adapters(AdaptersArgs),
 
+    /// Manage AgentStack plugin recipes and generated native marketplaces.
+    Plugins(PluginsArgs),
+
     /// Manage secrets in the OS keychain.
     Secret(SecretArgs),
 
@@ -422,6 +425,115 @@ pub enum AdaptersCommand {
         /// Adapter id, e.g. `claude-code`.
         id: String,
     },
+}
+
+#[derive(Args, Debug)]
+pub struct PluginsArgs {
+    #[command(subcommand)]
+    pub command: PluginsCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PluginsCommand {
+    /// List AgentStack-managed plugin recipes in the manifest.
+    List,
+    /// Show generated/native install status and next actions for recipes.
+    Status(PluginsStatusArgs),
+    /// Create a plugin recipe from existing manifest servers, skills, and hooks.
+    Create(Box<PluginsCreateArgs>),
+    /// Adopt an installed native Claude Code or Codex plugin into the manifest.
+    Adopt(PluginsAdoptArgs),
+    /// Generate repo-local native plugin packages and marketplaces.
+    Sync(PluginsSyncArgs),
+    /// Add this repo marketplace to native harnesses and install a recipe.
+    Install(PluginsNativeArgs),
+    /// Remove a recipe from native harness plugin installs.
+    Remove(PluginsNativeArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct PluginsCreateArgs {
+    /// Recipe/native plugin id, e.g. `play`.
+    pub name: String,
+    /// Plugin version.
+    #[arg(long, default_value = "0.1.0")]
+    pub version: String,
+    /// Human description shown in native plugin UIs.
+    #[arg(long)]
+    pub description: String,
+    #[arg(long)]
+    pub display: Option<String>,
+    #[arg(long)]
+    pub category: Option<String>,
+    #[arg(long = "target", value_name = "ID")]
+    pub targets: Vec<String>,
+    #[arg(long = "server", value_name = "NAME")]
+    pub servers: Vec<String>,
+    #[arg(long = "skill", value_name = "NAME")]
+    pub skills: Vec<String>,
+    #[arg(long = "hook", value_name = "NAME")]
+    pub hooks: Vec<String>,
+    #[arg(long)]
+    pub homepage: Option<String>,
+    #[arg(long)]
+    pub repository: Option<String>,
+    #[arg(long)]
+    pub license: Option<String>,
+    #[arg(long)]
+    pub author: Option<String>,
+    /// Set plugin defaultEnabled=true in generated native manifests.
+    #[arg(long)]
+    pub default_enabled: bool,
+    /// Actually update agentstack.toml (else dry-run).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct PluginsStatusArgs {
+    /// Optional recipe name to inspect.
+    pub name: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct PluginsAdoptArgs {
+    /// Native plugin name to adopt.
+    pub name: String,
+    /// Restrict adoption to one native harness.
+    #[arg(long)]
+    pub harness: Option<String>,
+    /// Restrict adoption to one marketplace.
+    #[arg(long)]
+    pub marketplace: Option<String>,
+    /// Override the AgentStack recipe name.
+    #[arg(long)]
+    pub as_name: Option<String>,
+    /// Actually update agentstack.toml (else dry-run).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct PluginsSyncArgs {
+    /// Only sync these target ids (repeatable). Defaults to Codex + Claude Code
+    /// when their adapters exist.
+    #[arg(long = "target", value_name = "ID")]
+    pub targets: Vec<String>,
+    /// Actually write generated files (else dry-run).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct PluginsNativeArgs {
+    /// Plugin recipe name.
+    pub name: String,
+    /// Only act on these target ids (repeatable). Defaults to the recipe's targets.
+    #[arg(long = "target", value_name = "ID")]
+    pub targets: Vec<String>,
+    /// Actually run native harness commands (else dry-run).
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[derive(Args, Debug)]

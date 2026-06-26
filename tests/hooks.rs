@@ -3,6 +3,7 @@
 //! Own test file so the HOME override runs isolated.
 
 use std::fs;
+use std::sync::{Mutex, OnceLock};
 
 use agentstack::adapter::Registry;
 use agentstack::manifest::Manifest;
@@ -14,8 +15,18 @@ fn claude(reg: &Registry) -> &agentstack::adapter::AdapterDescriptor {
     reg.get("claude-code").unwrap()
 }
 
+fn codex(reg: &Registry) -> &agentstack::adapter::AdapterDescriptor {
+    reg.get("codex").unwrap()
+}
+
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+}
+
 #[test]
 fn hooks_render_prune_and_preserve() {
+    let _guard = env_lock();
     let tmp = assert_fs::TempDir::new().unwrap();
     let home = tmp.path().join("home");
     fs::create_dir_all(home.join(".claude")).unwrap();
@@ -90,4 +101,67 @@ fn hooks_render_prune_and_preserve() {
             .unwrap();
     assert!(v2.get("hooks").is_none());
     assert_eq!(v2["model"], "opus");
+}
+
+#[test]
+fn codex_hooks_render_to_config_toml_and_preserve_mcp() {
+    let _guard = env_lock();
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join(".codex")).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+    fs::write(
+        home.join(".codex/config.toml"),
+        "model = \"gpt-5.5\"\n\n[mcp_servers.figma]\nurl = \"https://mcp.figma.com/mcp\"\n",
+    )
+    .unwrap();
+
+    let reg = Registry::load().unwrap();
+    let resolver = MapResolver::from([("TOK", "sekret")]);
+    let proj = tmp.path();
+
+    let manifest: Manifest = toml::from_str(
+        r#"
+        version = 1
+        [hooks.fmt]
+        event = "PostToolUse"
+        matcher = "Edit|Write"
+        command = "prettier --write ${TOK}"
+        timeout = 5
+        targets = ["codex"]
+        "#,
+    )
+    .unwrap();
+
+    let plan = plan_hooks(
+        &manifest,
+        codex(&reg),
+        &resolver,
+        false,
+        Scope::Global,
+        proj,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(plan.unresolved.is_empty());
+    plan.write().unwrap();
+
+    let text = fs::read_to_string(home.join(".codex/config.toml")).unwrap();
+    assert!(text.contains("model = \"gpt-5.5\""));
+    assert!(text.contains("[mcp_servers.figma]"));
+    assert!(text.contains("[hooks]"));
+    assert!(text.contains("PostToolUse = [{ matcher = \"Edit|Write\""));
+    assert!(text.contains("prettier --write sekret"));
+    let parsed: toml::Value = toml::from_str(&text).unwrap();
+    assert!(parsed.get("hooks").is_some());
+
+    let empty: Manifest = toml::from_str("version = 1\n").unwrap();
+    let prune = plan_hooks(&empty, codex(&reg), &resolver, true, Scope::Global, proj)
+        .unwrap()
+        .unwrap();
+    prune.write().unwrap();
+    let pruned = fs::read_to_string(home.join(".codex/config.toml")).unwrap();
+    assert!(!pruned.contains("[hooks]"));
+    assert!(pruned.contains("[mcp_servers.figma]"));
 }

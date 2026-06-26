@@ -302,24 +302,69 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         })
         .collect();
 
-    // Claude Code plugins already installed on this machine (read-only view).
-    let (plugin_list, marketplace_list) = crate::plugins::claude_plugins();
+    // Native harness plugins already installed on this machine (read-only view).
+    let (plugin_list, marketplace_list) = crate::plugins::all_plugins();
     let plugins: Vec<Value> = plugin_list
         .iter()
         .map(|p| {
             json!({
+                "harness": p.harness,
                 "name": p.name,
                 "marketplace": p.marketplace,
                 "scope": p.scope,
                 "projects": p.projects,
                 "version": p.version,
+                "enabled": p.enabled,
+                "status": p.status,
+                "source": p.source,
             })
         })
         .collect();
     let marketplaces: Vec<Value> = marketplace_list
         .iter()
-        .map(|m| json!({ "name": m.name, "source": m.source }))
+        .map(|m| json!({ "harness": m.harness, "name": m.name, "source": m.source }))
         .collect();
+    let plugin_recipes: Vec<Value> =
+        crate::plugin_recipes::statuses(manifest, &ctx.registry, &ctx.dir)
+            .iter()
+            .map(|r| {
+                json!({
+                        "name": r.name,
+                        "display": r.display,
+                        "version": r.version,
+                        "description": r.description,
+                        "category": r.category,
+                        "targets": r.targets,
+                        "servers": r.servers,
+                        "skills": r.skills,
+                        "hooks": r.hooks,
+                    "packagePath": r.package_path.display().to_string(),
+                    "generated": r.generated,
+                    "stale": r.stale,
+                    "conflict": r.conflict,
+                    "missingSkills": r.missing_skills,
+                    "marketplaces": r.marketplaces.iter().map(|m| json!({
+                        "target": m.target,
+                        "path": m.path.display().to_string(),
+                        "present": m.present,
+                        "stale": m.stale,
+                        "nativeVisible": m.native_visible,
+                        "nativeSource": m.native_source,
+                    })).collect::<Vec<_>>(),
+                    "installs": r.installs.iter().map(|i| json!({
+                        "target": i.target,
+                        "installed": i.installed,
+                        "enabled": i.enabled,
+                        "status": i.status,
+                    })).collect::<Vec<_>>(),
+                    "guidance": r.guidance.iter().map(|g| json!({
+                        "target": g.target,
+                        "nextAction": g.next_action,
+                    })).collect::<Vec<_>>(),
+                    "requiredSecrets": r.required_secrets,
+                })
+            })
+            .collect();
 
     let health = health_checks(&ctx, manifest, &state);
 
@@ -338,6 +383,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "settingsAdapters": settings_adapters,
         "hooks": hooks,
         "hookAdapters": hook_adapters,
+        "pluginRecipes": plugin_recipes,
         "plugins": plugins,
         "marketplaces": marketplaces,
         "instructions": instructions,

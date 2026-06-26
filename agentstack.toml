@@ -15,6 +15,30 @@ headers = { Authorization = "Bearer ${KIBANA_TOKEN}" }
 type = "http"
 url = "https://mcp.figma.com/mcp"
 
+# ---- Skills ----
+[skills.figma_repo_handoff]
+path = "./skills/figma-repo-handoff"
+
+# ---- Hooks ----
+[hooks.repo_context_check]
+event = "SessionStart"
+command = "git rev-parse --is-inside-work-tree >/dev/null 2>&1 || true"
+timeout = 5
+targets = ["claude-code", "codex"]
+
+# ---- AgentStack managed plugin recipes ----
+[plugins.figma-repo-handoff]
+version = "0.1.0"
+description = "Small design-to-code handoff workflow with Figma MCP context and a repo-safe session check."
+display = "Figma Repo Handoff"
+category = "Developer Tools"
+targets = ["codex", "claude-code"]
+default_enabled = false
+servers = ["figma"]
+skills = ["figma_repo_handoff"]
+hooks = ["repo_context_check"]
+author = "AgentStack"
+
 # ---- Profiles = named bundles (selective loading) ----
 [profiles.backend]
 servers = ["kibana_mcp"]

@@ -30,6 +30,14 @@ skills:
 instructions:
   global: ~/.codex/AGENTS.md
   project: AGENTS.md
+# Codex supports lifecycle hooks from config.toml. The schema matches the
+# Claude-style hooks object: event → [{matcher?, hooks:[{type, command, …}]}].
+# Hooks are trust-gated by Codex itself; agentstack only renders the config.
+hooks:
+  format: toml
+  global: ~/.codex/config.toml
+  key: hooks
+  shape: claude
 # Codex keeps settings (model, approval_policy, …) in the same config.toml as
 # MCP servers. agentstack owns only the top-level keys you declare under
 # [settings.codex]; the [mcp_servers.*] tables and everything else are left as-is.

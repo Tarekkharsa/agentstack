@@ -120,18 +120,7 @@ fn value_to_item(value: &Value, nested_as_subtable: bool) -> Result<Item> {
         Value::Array(arr) => {
             let mut a = Array::new();
             for el in arr {
-                match el {
-                    Value::String(s) => a.push(s.as_str()),
-                    Value::Bool(b) => a.push(*b),
-                    Value::Number(n) => {
-                        if let Some(i) = n.as_i64() {
-                            a.push(i);
-                        } else if let Some(f) = n.as_f64() {
-                            a.push(f);
-                        }
-                    }
-                    other => anyhow::bail!("unsupported array element in TOML render: {other}"),
-                }
+                a.push(value_to_toml_value(el)?);
             }
             Item::Value(toml_edit::Value::Array(a))
         }
@@ -146,16 +135,36 @@ fn value_to_item(value: &Value, nested_as_subtable: bool) -> Result<Item> {
     })
 }
 
+fn value_to_toml_value(value: &Value) -> Result<toml_edit::Value> {
+    Ok(match value {
+        Value::String(s) => toml_edit::Value::from(s.as_str()),
+        Value::Bool(b) => toml_edit::Value::from(*b),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                toml_edit::Value::from(i)
+            } else if let Some(f) = n.as_f64() {
+                toml_edit::Value::from(f)
+            } else {
+                toml_edit::Value::from(n.to_string())
+            }
+        }
+        Value::Object(_) => toml_edit::Value::InlineTable(value_to_inline(value)?),
+        Value::Array(arr) => {
+            let mut a = Array::new();
+            for el in arr {
+                a.push(value_to_toml_value(el)?);
+            }
+            toml_edit::Value::Array(a)
+        }
+        Value::Null => anyhow::bail!("null is not representable in TOML"),
+    })
+}
+
 fn value_to_inline(value: &Value) -> Result<InlineTable> {
     let obj = value.as_object().context("expected object")?;
     let mut it = InlineTable::new();
     for (k, v) in obj {
-        let item = value_to_item(v, false)?;
-        if let Item::Value(val) = item {
-            it.insert(k, val);
-        } else {
-            anyhow::bail!("nested subtable cannot be inlined");
-        }
+        it.insert(k, value_to_toml_value(v)?);
     }
     Ok(it)
 }
@@ -231,5 +240,23 @@ url = "https://mcp.figma.com/mcp"
         let pruned = merge_top_level(&out, &[], &["sandbox".into()]).unwrap();
         assert!(!pruned.contains("[sandbox]"));
         assert!(pruned.contains("model = \"x\""));
+    }
+
+    #[test]
+    fn top_level_merge_supports_nested_inline_arrays_for_hooks() {
+        let body = json!({
+            "PostToolUse": [
+                {
+                    "matcher": "Edit|Write",
+                    "hooks": [
+                        { "type": "command", "command": "prettier --write", "timeout": 5 }
+                    ]
+                }
+            ]
+        });
+        let out = merge_top_level("model = \"x\"\n", &[("hooks".into(), body)], &[]).unwrap();
+        assert!(out.contains("[hooks]"));
+        assert!(out.contains("PostToolUse = [{ matcher = \"Edit|Write\""));
+        let _: toml::Value = toml::from_str(&out).unwrap();
     }
 }

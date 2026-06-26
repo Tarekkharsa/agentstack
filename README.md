@@ -108,8 +108,14 @@ Implemented and tested:
   and prunes keys that leave the manifest. Editable from the dashboard.
 - **Lifecycle hooks** — declare `[hooks.*]` once (event + optional matcher +
   command) and `apply` compiles them into each harness's native hooks config
-  (Claude Code's `hooks` in settings.json), resolving secrets and pruning hooks
-  that leave the manifest. Add/list from the dashboard Hooks pane.
+  (Claude Code `settings.json`, Codex `config.toml`), resolving secrets and
+  pruning hooks that leave the manifest. Add/list from the dashboard Hooks pane.
+- **Managed plugin recipes** — declare `[plugins.*]` once and `agentstack
+  plugins sync --write` generates repo-local Claude Code + Codex plugin packages
+  and marketplaces (`plugins/agentstack/*`, `.agents/plugins/marketplace.json`,
+  `.claude-plugin/marketplace.json`). Native installed plugins remain visible in
+  the dashboard as a separate read-only inventory; managed recipes can be
+  composed from existing servers, skills, and hooks in the Plugins pane.
 - **`adopt`** — the reverse of `apply`: pull a hand-added server from a target
   config back into the manifest, lifting its inline secret, preserving comments.
 - **`add`** — flag-driven (scriptable / agent-operable) add of a server or skill
@@ -132,8 +138,8 @@ Implemented and tested:
 - Commands: `init`, `add`, `install` (`--locked`), `update`, `remove`,
   `apply` (`--scope`, `--write`), `diff`, `use <profile>`, `instructions`,
   `adopt`, `restore`, `doctor` (`--ci`, `--live`, `--fix`), `search`, `stats`,
-  `secret set|get|rm|list`, `export`/`import`, `adapters`, `dashboard`, `mcp`,
-  `hook`.
+  `secret set|get|rm|list`, `export`/`import`, `adapters`, `plugins`,
+  `dashboard`, `mcp`, `hook`.
 
 ### Agent-operable (`agentstack mcp`)
 
@@ -234,8 +240,43 @@ enableAllProjectMcpServers = true
 [settings.claude-code.permissions]
 allow = ["Bash(git diff:*)", "Bash(git log:*)"]
 
+[hooks.notify]
+event = "Stop"
+command = "echo done"
+
+[plugins.play]
+version = "1.0.0"
+description = "Shared play workflow for Claude Code and Codex."
+targets = ["claude-code", "codex"]
+servers = ["github"]
+hooks = ["notify"]
+
 [targets]
 default = ["claude-code", "codex"]
+```
+
+Create or adopt recipes without hand-editing TOML:
+
+```bash
+agentstack plugins create play \
+  --description "Shared play workflow" \
+  --target claude-code --target codex \
+  --server github --hook notify \
+  --write
+
+# Lift an installed native plugin into [plugins.*] plus any bundled MCP/skills/hooks.
+agentstack plugins adopt playwright --harness claude-code --write
+
+# Generate repo-local native plugin packages + marketplaces.
+agentstack plugins sync --write
+
+# Check generated/native marketplace state and exact next install handoff.
+agentstack plugins status play
+
+# Run the native handoff only after reviewing the dry-run command plan.
+agentstack plugins install play --target codex
+agentstack plugins install play --target codex --write
+agentstack plugins remove play --target codex --write
 ```
 
 ## Adding a CLI
@@ -258,13 +299,15 @@ cargo fmt --check
 package manager (`install`/`update`/`remove` + lockfile) · secrets (keychain +
 varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`) ·
 official MCP Registry provider + `search`/`add from` · `[policy]` trust gate ·
-native per-CLI settings (`[settings.*]` → settings.json) · atomic writes +
-backups · `export`/`import` · `hook` · agent-operable `mcp` server · local
-dashboard (server/skill matrices, Discover, add-skill, settings editor).
+native per-CLI settings (`[settings.*]` → settings.json) · managed plugin
+recipes (`[plugins.*]` → native Claude Code/Codex packages + marketplaces) ·
+atomic writes + backups · `export`/`import` · `hook` · agent-operable `mcp`
+server · local dashboard (server/skill matrices, Discover, add-skill, settings
+editor).
 
 **Next:** publish releases + a real demo · dogfood on a team · marketplace
 providers (skills.sh-style) + optional audit enrichment · reconsider a JSON /
-`mcp.json`-aligned manifest · plugins as a managed capability.
+`mcp.json`-aligned manifest · install/remove flows for native plugin runtimes.
 
 See [`agentstack-PLAN.md`](agentstack-PLAN.md) for the full spec and design
 decisions (D1–D22).

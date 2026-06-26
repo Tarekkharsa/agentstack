@@ -1,0 +1,22 @@
+{
+  "name": "figma-repo-handoff",
+  "version": "0.1.0",
+  "description": "Small design-to-code handoff workflow with Figma MCP context and a repo-safe session check.",
+  "defaultEnabled": false,
+  "author": {
+    "name": "AgentStack"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Figma Repo Handoff",
+    "shortDescription": "Small design-to-code handoff workflow with Figma MCP context and a repo-safe session check.",
+    "longDescription": "Small design-to-code handoff workflow with Figma MCP context and a repo-safe session check.",
+    "developerName": "AgentStack",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive"
+    ]
+  }
+}

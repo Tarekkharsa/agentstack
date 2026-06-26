@@ -43,6 +43,11 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub hooks: IndexMap<String, Hook>,
 
+    /// Shareable plugin recipes compiled into native Claude Code / Codex plugin
+    /// packages and repo marketplaces.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub plugins: IndexMap<String, PluginRecipe>,
+
     /// Where `apply` writes by default and which adapters are in play.
     #[serde(default)]
     pub targets: Targets,
@@ -136,6 +141,39 @@ pub struct Hook {
     /// Adapter ids this hook applies to; `["*"]` (the default) = all hook-capable.
     #[serde(default = "all_targets")]
     pub targets: Vec<String>,
+}
+
+/// One AgentStack-managed plugin recipe. This is the portable source of truth;
+/// `agentstack plugins sync` renders it into each harness's native plugin
+/// package/marketplace shape.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct PluginRecipe {
+    pub version: String,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Adapter ids this recipe should render for; `["*"]` = every supported
+    /// plugin-capable adapter.
+    #[serde(default = "all_targets")]
+    pub targets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub servers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hooks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homepage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
 }
 
 impl Instruction {
@@ -274,6 +312,12 @@ impl Manifest {
             }
             for v in server.env.values() {
                 push(v);
+            }
+        }
+        for hook in self.hooks.values() {
+            push(&hook.command);
+            for a in &hook.args {
+                push(a);
             }
         }
         refs.sort();

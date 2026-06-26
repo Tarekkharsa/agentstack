@@ -10,7 +10,7 @@ use anyhow::Result;
 use owo_colors::OwoColorize;
 
 use crate::cli::DoctorArgs;
-use crate::manifest::{validate, Manifest, ServerType};
+use crate::manifest::{validate_with_targets, Manifest, ServerType};
 use crate::render::{plan_target, resolve_targets, Selection};
 use crate::scope::Scope;
 use crate::secret::Resolver;
@@ -59,7 +59,8 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let mut report = Report::new();
 
     // Manifest-level validation first.
-    for issue in validate(manifest) {
+    let validation_targets: Vec<&str> = ctx.registry.ids().collect();
+    for issue in validate_with_targets(manifest, validation_targets) {
         report.line(Level::Warn, issue.message);
     }
 
@@ -205,6 +206,88 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 format!("{name:<20} no SKILL.md in {}", dir.display()),
             ),
             Some(_) => report.line(Level::Ok, format!("{name:<20} present · SKILL.md ok")),
+        }
+    }
+
+    println!("{}", "Plugin recipes".bold());
+    let recipe_statuses = crate::plugin_recipes::statuses(manifest, &ctx.registry, &ctx.dir);
+    if recipe_statuses.is_empty() {
+        report.line(Level::Ok, "no plugin recipes defined");
+    }
+    for recipe in recipe_statuses {
+        if let Some(conflict) = &recipe.conflict {
+            report.line(Level::Error, format!("{:<20} {conflict}", recipe.name));
+            continue;
+        }
+        if !recipe.missing_skills.is_empty() {
+            report.line(
+                Level::Warn,
+                format!(
+                    "{:<20} missing skill source(s): {}",
+                    recipe.name,
+                    recipe.missing_skills.join(", ")
+                ),
+            );
+            continue;
+        }
+        if !recipe.generated {
+            report.line(
+                Level::Warn,
+                format!(
+                    "{:<20} not generated ↳ agentstack plugins sync --write",
+                    recipe.name
+                ),
+            );
+        } else if recipe.stale {
+            report.line(
+                Level::Warn,
+                format!(
+                    "{:<20} generated package stale ↳ agentstack plugins sync --write",
+                    recipe.name
+                ),
+            );
+        } else {
+            report.line(Level::Ok, format!("{:<20} package generated", recipe.name));
+        }
+        for market in &recipe.marketplaces {
+            if !market.present {
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<20} {} marketplace missing ↳ agentstack plugins sync --write",
+                        recipe.name, market.target
+                    ),
+                );
+            } else if market.stale {
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<20} {} marketplace stale ↳ agentstack plugins sync --write",
+                        recipe.name, market.target
+                    ),
+                );
+            }
+        }
+        for install in &recipe.installs {
+            if !install.installed {
+                report.line(
+                    Level::Warn,
+                    format!("{:<20} not installed in {}", recipe.name, install.target),
+                );
+            } else {
+                let enabled = match install.enabled {
+                    Some(true) => "enabled",
+                    Some(false) => "disabled",
+                    None => install.status.as_deref().unwrap_or("installed"),
+                };
+                report.line(
+                    Level::Ok,
+                    format!(
+                        "{:<20} installed in {} ({enabled})",
+                        recipe.name, install.target
+                    ),
+                );
+            }
         }
     }
 

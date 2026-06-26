@@ -105,7 +105,7 @@ pub fn plan_hooks(
 }
 
 /// Claude form: `{ Event: [ { matcher?, hooks: [ {type:"command", command, …} ] } ] }`.
-fn build_claude_hooks(
+pub(crate) fn build_claude_hooks(
     selected: &[(&String, &Hook)],
     resolver: &dyn Resolver,
     unresolved: &mut Vec<String>,

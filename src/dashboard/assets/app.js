@@ -8,6 +8,7 @@ let OPEN_SERVER = null;
 let ADD_FORM = false;
 let SKILL_FORM = false;
 let HOOK_FORM = false;
+let PLUGIN_FORM = false;
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -16,7 +17,7 @@ const SECTIONS = [
   { id: "skills", label: "Skills", count: (d) => d.skills.length },
   { id: "settings", label: "Settings", count: (d) => (d.settingsAdapters || []).length },
   { id: "hooks", label: "Hooks", count: (d) => (d.hooks || []).length },
-  { id: "plugins", label: "Plugins", count: (d) => (d.plugins || []).length },
+  { id: "plugins", label: "Plugins", count: (d) => (d.pluginRecipes || []).length + (d.plugins || []).length },
   { id: "instructions", label: "Instructions", count: (d) => d.instructions.length },
   { id: "secrets", label: "Secrets", count: (d) => d.secrets.length },
   { id: "health", label: "Health" },
@@ -672,39 +673,201 @@ function hooks(c) {
 }
 
 /* ---------- plugins ---------- */
+function savePluginRecipe() {
+  const g = (id) => (document.getElementById(id) || {}).value || "";
+  const checked = (name) => Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map((x) => x.value);
+  const body = {
+    name: g("pl-name").trim(),
+    version: g("pl-version").trim() || "0.1.0",
+    description: g("pl-description").trim(),
+    display: g("pl-display").trim(),
+    category: g("pl-category").trim(),
+    targets: checked("pl-target"),
+    servers: checked("pl-server"),
+    skills: checked("pl-skill"),
+    hooks: checked("pl-hook"),
+    defaultEnabled: !!(document.getElementById("pl-default-enabled") || {}).checked,
+  };
+  if (!body.name) return toast("Name is required", false);
+  if (!body.description) return toast("Description is required", false);
+  fetch(q("/api/add_plugin_recipe"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || d.error) throw new Error(d.error || "failed");
+      PLUGIN_FORM = false;
+      toast("Plugin recipe added", true);
+      load();
+    })
+    .catch((e) => toast("Add plugin recipe: " + e.message, false));
+}
+
+function checkboxList(name, items, empty) {
+  if (!items.length) return [el("div", { class: "empty", style: "padding:8px 0" }, [empty])];
+  return items.map((item) => el("label", { style: "display:flex;align-items:center;gap:7px;padding:4px 0" }, [
+    el("input", { type: "checkbox", name, value: item.name || item.id }),
+    el("span", null, [item.display || item.name || item.id]),
+  ]));
+}
+
+function addPluginRecipeCard() {
+  const row = (label, node) => el("div", { style: "display:flex;align-items:flex-start;gap:10px;margin-bottom:8px" }, [
+    el("label", { class: "muted", style: "width:92px;font-size:12px;padding-top:7px" }, [label]), node,
+  ]);
+  const pluginTargets = (DATA.adapters || []).filter((a) => ["codex", "claude-code"].includes(a.id));
+  const targetChecks = checkboxList("pl-target", pluginTargets, "No plugin-capable targets detected.");
+  targetChecks.forEach((node) => {
+    const input = node.querySelector && node.querySelector("input");
+    if (input) input.checked = true;
+  });
+  return el("div", { class: "card", style: "margin-bottom:16px" }, [
+    el("div", { class: "hd" }, ["Create managed recipe", el("small", null, ["compose one shareable plugin from existing capabilities"])]),
+    el("div", { class: "bd" }, [
+      row("name", el("input", { id: "pl-name", class: "inp", placeholder: "e.g. play", style: "width:220px" })),
+      row("version", el("input", { id: "pl-version", class: "inp", value: "0.1.0", style: "width:120px" })),
+      row("display", el("input", { id: "pl-display", class: "inp", placeholder: "(optional) Play", style: "width:260px" })),
+      row("category", el("input", { id: "pl-category", class: "inp", placeholder: "Developer Tools", style: "width:220px" })),
+      row("description", el("textarea", { id: "pl-description", class: "inp", placeholder: "What this plugin helps developers do", style: "width:420px;min-height:62px" })),
+      row("targets", el("div", null, targetChecks)),
+      row("servers", el("div", null, checkboxList("pl-server", DATA.servers || [], "No servers in the manifest."))),
+      row("skills", el("div", null, checkboxList("pl-skill", DATA.skills || [], "No skills in the manifest."))),
+      row("hooks", el("div", null, checkboxList("pl-hook", DATA.hooks || [], "No hooks in the manifest."))),
+      row("", el("label", { style: "display:flex;align-items:center;gap:7px" }, [
+        el("input", { id: "pl-default-enabled", type: "checkbox" }),
+        el("span", null, ["default enabled in generated manifests"]),
+      ])),
+      el("div", { class: "toolbar", style: "margin-top:6px" }, [
+        btn("Save recipe", savePluginRecipe, "primary"),
+        btn("Cancel", () => { PLUGIN_FORM = false; show("plugins"); }),
+      ]),
+    ]),
+  ]);
+}
+
+function recipeStateBadge(r) {
+  if (r.conflict) return badge("conflict", "red");
+  if ((r.missingSkills || []).length) return badge("skill missing", "amber");
+  if (!r.generated) return badge("not generated", "amber");
+  if (r.stale) return badge("stale", "amber");
+  return badge("generated", "green");
+}
+
+function recipeInstallBadges(r) {
+  const out = [];
+  (r.marketplaces || []).forEach((m) => {
+    out.push(badge(m.target + (m.present ? (m.stale ? " marketplace stale" : " marketplace") : " marketplace missing"), m.present && !m.stale ? "green" : "amber"));
+    out.push(badge(m.target + (m.nativeVisible ? " native visible" : " native hidden"), m.nativeVisible ? "green" : "amber"));
+  });
+  (r.installs || []).forEach((i) => {
+    const label = i.installed
+      ? i.target + " " + (i.enabled === false ? "disabled" : "installed")
+      : i.target + " not installed";
+    out.push(badge(label, i.installed && i.enabled !== false ? "green" : "amber"));
+  });
+  return out;
+}
+
+function recipeGuidance(r) {
+  return (r.guidance || []).map((g) =>
+    el("div", { class: "muted", style: "font-size:12px;margin-top:3px" }, [
+      el("span", { class: "mono" }, [g.target + " next: "]),
+      g.nextAction || "Check native plugin UI/CLI.",
+    ])
+  );
+}
+
+function recipeHasInstalled(r) {
+  return (r.installs || []).some((i) => i.installed);
+}
+function recipeHasInstallableTarget(r) {
+  return (r.installs || []).some((i) => !i.installed);
+}
+function recipeNativeConfirm(r, action) {
+  const lines = (r.guidance || []).map((g) => g.target + ": " + (g.nextAction || "Check native plugin UI/CLI."));
+  return window.confirm(
+    action + " native plugin commands for " + r.name + "?\n\n" +
+    (lines.length ? lines.join("\n") : "AgentStack will run the native harness command plan.")
+  );
+}
+function recipeNativeAction(r, action) {
+  if (!recipeNativeConfirm(r, action === "install" ? "Install" : "Remove")) return;
+  const path = action === "install" ? "/api/plugins_install" : "/api/plugins_remove";
+  post(path, { name: r.name }, "Plugin " + action);
+}
+
 function plugins(c) {
-  c.appendChild(pageHead("Plugins", "Claude Code plugins installed on this machine. Read-only for now — agentstack can see them but doesn't manage them yet."));
+  c.appendChild(pageHead("Plugins", "AgentStack recipes generate repo-local Claude Code and Codex plugin packages. Native installed plugins remain visible below."));
+  const recipes = DATA.pluginRecipes || [];
   const list = DATA.plugins || [];
   const markets = DATA.marketplaces || [];
+
+  if (!READONLY) {
+    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
+      btn(PLUGIN_FORM ? "Close" : "+ Create recipe", () => { PLUGIN_FORM = !PLUGIN_FORM; show("plugins"); }, "primary"),
+      btn("Sync recipes", () => post("/api/plugins_sync", {}, "Plugin recipe sync"), "primary"),
+    ]));
+    if (PLUGIN_FORM) c.appendChild(addPluginRecipeCard());
+  }
+
+  const rrows = recipes.map((r) => el("div", { class: "list-row" }, [
+    el("span", null, [
+      el("span", { class: "name" }, [r.display || r.name]),
+      el("div", { class: "muted mono", style: "font-size:12px" }, [
+        r.name + " @ " + r.version + " · " + (r.targets || []).join(", "),
+      ]),
+      el("div", { class: "muted", style: "font-size:12px" }, [r.description || ""]),
+      el("div", { class: "muted mono", style: "font-size:11px" }, [r.packagePath || ""]),
+      (r.conflict || (r.missingSkills || []).length)
+        ? el("div", { class: "muted", style: "font-size:12px;color:hsl(var(--amber))" }, [r.conflict || ("Missing skills: " + (r.missingSkills || []).join(", "))])
+        : null,
+      ...recipeGuidance(r),
+    ]),
+    el("span", { class: "row-actions" }, [
+      ...(!READONLY && recipeHasInstallableTarget(r) ? [btn("Install", () => recipeNativeAction(r, "install"), "primary")] : []),
+      ...(!READONLY && recipeHasInstalled(r) ? [btn("Remove", () => recipeNativeAction(r, "remove"))] : []),
+      badge("servers " + ((r.servers || []).length), "solid"),
+      badge("skills " + ((r.skills || []).length), "solid"),
+      badge("hooks " + ((r.hooks || []).length), "solid"),
+      recipeStateBadge(r),
+      ...recipeInstallBadges(r),
+    ]),
+  ]));
+  if (!rrows.length) rrows.push(el("div", { class: "empty" }, ["No managed recipes. Add [plugins.*] to agentstack.toml."]));
+  c.appendChild(el("div", { class: "card" }, [
+    el("div", { class: "hd" }, ["Managed recipes", el("small", null, [`${recipes.length} recipe(s)`])]),
+    el("div", { class: "bd" }, rrows),
+  ]));
+  c.appendChild(el("div", { class: "muted", style: "font-size:12px;margin:10px 0 4px" }, [
+    "Sync writes repo-local marketplaces and plugin packages. Install/trust still happens inside Codex or Claude Code, so the badges show both generated and native install state.",
+  ]));
 
   const prows = list.map((p) => el("div", { class: "list-row" }, [
     el("span", null, [
       el("span", { class: "name" }, [p.name]),
-      el("div", { class: "muted mono", style: "font-size:12px" }, [p.marketplace + (p.version ? " @ " + p.version : "")]),
+      el("div", { class: "muted mono", style: "font-size:12px" }, [
+        (p.harness || "unknown") + " · " + p.marketplace + (p.version ? " @ " + p.version : ""),
+      ]),
+      ...(p.source ? [el("div", { class: "muted mono", style: "font-size:11px" }, [p.source])] : []),
     ]),
     el("span", { class: "row-actions" }, [
       ...(p.projects || []).map((pr) => badge(pr, "solid")),
+      badge(p.status || (p.enabled === false ? "disabled" : "installed"), p.enabled === false ? "" : "solid"),
       badge(p.scope || "local", ""),
     ]),
   ]));
-  if (!prows.length) prows.push(el("div", { class: "empty" }, ["No Claude Code plugins installed."]));
-  c.appendChild(el("div", { class: "card" }, [
+  if (!prows.length) prows.push(el("div", { class: "empty" }, ["No native plugins found."]));
+  c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
     el("div", { class: "hd" }, ["Installed", el("small", null, [`${list.length} plugin(s)`])]),
     el("div", { class: "bd" }, prows),
   ]));
 
   const mrows = markets.map((m) => el("div", { class: "list-row" }, [
-    el("span", { class: "name" }, [m.name]),
+    el("span", { class: "name" }, [(m.harness || "unknown") + " · " + m.name]),
     el("span", { class: "muted mono", style: "font-size:12px" }, [m.source]),
   ]));
   if (!mrows.length) mrows.push(el("div", { class: "empty" }, ["No marketplaces."]));
   c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
     el("div", { class: "hd" }, ["Marketplaces", el("small", null, [`${markets.length}`])]),
     el("div", { class: "bd" }, mrows),
-  ]));
-
-  c.appendChild(el("div", { class: "muted", style: "font-size:12px;margin-top:12px" }, [
-    "Coming next: declare plugins in the manifest so they reproduce on a new machine. OAuth-login MCP servers are handled by the CLI itself, not agentstack.",
   ]));
 }
 

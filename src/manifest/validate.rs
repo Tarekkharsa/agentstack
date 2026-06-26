@@ -15,8 +15,11 @@ pub struct Issue {
 pub enum IssueKind {
     UnknownServerRef,
     UnknownSkillRef,
+    UnknownHookRef,
     MissingTransportFields,
     UnknownTargetServer,
+    UnknownPluginTarget,
+    InvalidPluginName,
 }
 
 impl IssueKind {
@@ -28,8 +31,11 @@ impl IssueKind {
             self,
             IssueKind::UnknownServerRef
                 | IssueKind::UnknownSkillRef
+                | IssueKind::UnknownHookRef
                 | IssueKind::MissingTransportFields
                 | IssueKind::UnknownTargetServer
+                | IssueKind::UnknownPluginTarget
+                | IssueKind::InvalidPluginName
         )
     }
 }
@@ -45,7 +51,19 @@ impl Issue {
 
 /// Validate a manifest, returning every issue found (does not short-circuit).
 pub fn validate(manifest: &Manifest) -> Vec<Issue> {
+    validate_with_targets(manifest, std::iter::empty::<&str>())
+}
+
+/// Validate a manifest with a known adapter id set. Passing no target ids keeps
+/// validation independent of the local adapter registry and skips target-id
+/// checks.
+pub fn validate_with_targets<'a>(
+    manifest: &Manifest,
+    targets: impl IntoIterator<Item = &'a str>,
+) -> Vec<Issue> {
     let mut issues = Vec::new();
+    let targets: std::collections::BTreeSet<String> =
+        targets.into_iter().map(str::to_string).collect();
 
     // Server transport consistency.
     for (name, server) in &manifest.servers {
@@ -92,7 +110,62 @@ pub fn validate(manifest: &Manifest) -> Vec<Issue> {
         }
     }
 
+    for (plugin_name, plugin) in &manifest.plugins {
+        if !is_native_plugin_id(plugin_name) {
+            issues.push(Issue::new(
+                IssueKind::InvalidPluginName,
+                format!("plugin recipe '{plugin_name}' must use kebab-case native id characters"),
+            ));
+        }
+        for sref in &plugin.servers {
+            if !manifest.servers.contains_key(sref) {
+                issues.push(Issue::new(
+                    IssueKind::UnknownServerRef,
+                    format!("plugin recipe '{plugin_name}' references unknown server '{sref}'"),
+                ));
+            }
+        }
+        for kref in &plugin.skills {
+            if !manifest.skills.contains_key(kref) {
+                issues.push(Issue::new(
+                    IssueKind::UnknownSkillRef,
+                    format!("plugin recipe '{plugin_name}' references unknown skill '{kref}'"),
+                ));
+            }
+        }
+        for href in &plugin.hooks {
+            if !manifest.hooks.contains_key(href) {
+                issues.push(Issue::new(
+                    IssueKind::UnknownHookRef,
+                    format!("plugin recipe '{plugin_name}' references unknown hook '{href}'"),
+                ));
+            }
+        }
+        if !targets.is_empty() {
+            for target in &plugin.targets {
+                if target != "*" && !targets.contains(target) {
+                    issues.push(Issue::new(
+                        IssueKind::UnknownPluginTarget,
+                        format!(
+                            "plugin recipe '{plugin_name}' references unknown target '{target}'"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
     issues
+}
+
+fn is_native_plugin_id(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && !name.contains("--")
 }
 
 #[cfg(test)]
@@ -148,5 +221,56 @@ mod tests {
             "#,
         );
         assert!(validate(&m).is_empty());
+    }
+
+    #[test]
+    fn parses_and_validates_plugin_recipe() {
+        let m = parse(
+            r#"
+            version = 1
+            [servers.play]
+            type = "stdio"
+            command = "play"
+            [skills.play]
+            path = "./skills/play"
+            [hooks.notify]
+            event = "Stop"
+            command = "say done"
+            [plugins.play]
+            version = "1.0.0"
+            description = "Play workflow"
+            targets = ["codex", "claude-code"]
+            servers = ["play"]
+            skills = ["play"]
+            hooks = ["notify"]
+            "#,
+        );
+        assert!(validate_with_targets(&m, ["codex", "claude-code"]).is_empty());
+    }
+
+    #[test]
+    fn flags_invalid_plugin_recipe_refs_and_targets() {
+        let m = parse(
+            r#"
+            version = 1
+            [plugins.Bad_Name]
+            version = "1.0.0"
+            description = "Bad"
+            targets = ["ghost"]
+            servers = ["missing-server"]
+            skills = ["missing-skill"]
+            hooks = ["missing-hook"]
+            "#,
+        );
+        let issues = validate_with_targets(&m, ["codex"]);
+        assert!(issues
+            .iter()
+            .any(|i| i.kind == IssueKind::InvalidPluginName));
+        assert!(issues.iter().any(|i| i.kind == IssueKind::UnknownServerRef));
+        assert!(issues.iter().any(|i| i.kind == IssueKind::UnknownSkillRef));
+        assert!(issues.iter().any(|i| i.kind == IssueKind::UnknownHookRef));
+        assert!(issues
+            .iter()
+            .any(|i| i.kind == IssueKind::UnknownPluginTarget));
     }
 }

@@ -31,6 +31,7 @@ fn run() -> Result<()> {
         Command::Search(args) => commands::search::run(args, dir),
         Command::Stats => commands::stats::run(dir),
         Command::Adapters(args) => commands::adapters::run(args),
+        Command::Plugins(args) => commands::plugins::run(args, dir),
         Command::Secret(args) => commands::secret::run(args, dir),
         Command::Export(args) => commands::bundle::run_export(args, dir),
         Command::Import(args) => commands::bundle::run_import(args, dir),
