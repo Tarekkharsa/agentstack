@@ -26,11 +26,19 @@ pub fn render_server(
     let mut body: Map<String, Value> = Map::new();
     let mut unresolved: Vec<String> = Vec::new();
 
-    let passthrough = desc.mcp.secret_mode == SecretMode::Passthrough;
+    // CLIs with no MCP support render nothing.
+    let Some(mcp) = desc.mcp.as_ref() else {
+        return Rendered {
+            value: Value::Object(body),
+            unresolved,
+        };
+    };
+
+    let passthrough = mcp.secret_mode == SecretMode::Passthrough;
     let mut sub = |s: &str| substitute(s, resolver, passthrough, &mut unresolved);
 
     // 1. Transport tag (e.g. Claude's "type": "http").
-    if let Some(t) = &desc.mcp.transport {
+    if let Some(t) = &mcp.transport {
         let tag = match server.server_type {
             ServerType::Http => Some(t.http_value.clone()),
             ServerType::Stdio => t.stdio_value.clone(),
@@ -41,17 +49,17 @@ pub fn render_server(
     }
 
     // 2. url
-    if let (Some(field), Some(url)) = (&desc.mcp.fields.url, &server.url) {
+    if let (Some(field), Some(url)) = (&mcp.fields.url, &server.url) {
         body.insert(field.clone(), Value::String(sub(url)));
     }
 
     // 3. command
-    if let (Some(field), Some(cmd)) = (&desc.mcp.fields.command, &server.command) {
+    if let (Some(field), Some(cmd)) = (&mcp.fields.command, &server.command) {
         body.insert(field.clone(), Value::String(sub(cmd)));
     }
 
     // 4. args
-    if let Some(field) = &desc.mcp.fields.args {
+    if let Some(field) = &mcp.fields.args {
         if !server.args.is_empty() {
             let arr = server.args.iter().map(|a| Value::String(sub(a))).collect();
             body.insert(field.clone(), Value::Array(arr));
@@ -59,7 +67,7 @@ pub fn render_server(
     }
 
     // 5. headers (nested object)
-    if let Some(field) = &desc.mcp.fields.headers {
+    if let Some(field) = &mcp.fields.headers {
         if !server.headers.is_empty() {
             let mut h = Map::new();
             for (k, v) in &server.headers {
@@ -70,7 +78,7 @@ pub fn render_server(
     }
 
     // 6. env (nested object)
-    if let Some(field) = &desc.mcp.fields.env {
+    if let Some(field) = &mcp.fields.env {
         if !server.env.is_empty() {
             let mut e = Map::new();
             for (k, v) in &server.env {

@@ -36,7 +36,10 @@ pub fn extract_settings(desc: &AdapterDescriptor, root: &Value) -> serde_json::M
 /// Extract `(name, Server)` pairs from a target config's value tree, in file
 /// order. Entries that don't look like MCP servers are skipped.
 pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, Server)> {
-    let Some(section) = navigate(root, &desc.mcp.location).and_then(Value::as_object) else {
+    let Some(mcp) = desc.mcp.as_ref() else {
+        return Vec::new();
+    };
+    let Some(section) = navigate(root, &mcp.location).and_then(Value::as_object) else {
         return Vec::new();
     };
 
@@ -66,10 +69,9 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
                 .unwrap_or_default()
         };
 
-        let url = get_str(&desc.mcp.fields.url);
-        let command = get_str(&desc.mcp.fields.command);
-        let args = desc
-            .mcp
+        let url = get_str(&mcp.fields.url);
+        let command = get_str(&mcp.fields.command);
+        let args = mcp
             .fields
             .args
             .as_ref()
@@ -81,10 +83,10 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
                     .collect()
             })
             .unwrap_or_default();
-        let headers = get_map(&desc.mcp.fields.headers);
-        let env = get_map(&desc.mcp.fields.env);
+        let headers = get_map(&mcp.fields.headers);
+        let env = get_map(&mcp.fields.env);
 
-        let server_type = infer_type(desc, obj, &url, &command);
+        let server_type = infer_type(mcp, obj, &url, &command);
 
         // Skip entries that are neither http nor stdio shaped.
         if url.is_none() && command.is_none() {
@@ -109,12 +111,12 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
 /// Determine transport: prefer an explicit tag (Claude's `type`), else infer
 /// from which fields are present.
 fn infer_type(
-    desc: &AdapterDescriptor,
+    mcp: &super::descriptor::McpSpec,
     obj: &serde_json::Map<String, Value>,
     url: &Option<String>,
     command: &Option<String>,
 ) -> ServerType {
-    if let Some(t) = &desc.mcp.transport {
+    if let Some(t) = &mcp.transport {
         if let Some(tag) = obj.get(&t.key).and_then(Value::as_str) {
             if tag == t.http_value {
                 return ServerType::Http;

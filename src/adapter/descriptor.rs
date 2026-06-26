@@ -16,12 +16,16 @@ pub struct AdapterDescriptor {
     pub display: String,
     #[serde(default)]
     pub detect: Detect,
-    /// Global config location (and the canonical format).
-    pub config: ConfigSpec,
+    /// Global MCP config location (and the canonical format). Absent for CLIs
+    /// that have no MCP support (e.g. Pi manages only skills/settings).
+    #[serde(default)]
+    pub config: Option<ConfigSpec>,
     /// Project-scope config location, if the CLI supports project files.
     #[serde(default)]
     pub project: Option<ProjectSpec>,
-    pub mcp: McpSpec,
+    /// How to render MCP servers. Absent for CLIs with no MCP support.
+    #[serde(default)]
+    pub mcp: Option<McpSpec>,
     #[serde(default)]
     pub skills: Option<SkillsSpec>,
     /// Instruction file locations (CLAUDE.md / AGENTS.md).
@@ -43,11 +47,12 @@ impl AdapterDescriptor {
         scope: Scope,
         project_dir: &std::path::Path,
     ) -> Option<(PathBuf, Format)> {
+        let config = self.config.as_ref()?;
         match scope {
-            Scope::Global => Some((paths::expand_tilde(&self.config.path), self.config.format)),
+            Scope::Global => Some((paths::expand_tilde(&config.path), config.format)),
             Scope::Project => {
                 let p = self.project.as_ref()?;
-                let fmt = p.format.unwrap_or(self.config.format);
+                let fmt = p.format.unwrap_or(config.format);
                 Some((project_dir.join(&p.config), fmt))
             }
         }

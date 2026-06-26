@@ -33,9 +33,14 @@ fn show(registry: &Registry, id: &str) -> Result<()> {
         .with_context(|| format!("no adapter '{id}' (try `agentstack adapters list`)"))?;
     println!("id:      {}", desc.id);
     println!("display: {}", desc.display);
-    println!("config:  {} ({:?})", desc.config.path, desc.config.format);
-    println!("mcp:     location='{}'", desc.mcp.location);
-    println!("         secret_mode={:?}", desc.mcp.secret_mode);
+    match &desc.config {
+        Some(c) => println!("config:  {} ({:?})", c.path, c.format),
+        None => println!("config:  (none — no MCP support)"),
+    }
+    if let Some(mcp) = &desc.mcp {
+        println!("mcp:     location='{}'", mcp.location);
+        println!("         secret_mode={:?}", mcp.secret_mode);
+    }
     if let Some(s) = &desc.skills {
         println!("skills:  {}", s.dir);
     }

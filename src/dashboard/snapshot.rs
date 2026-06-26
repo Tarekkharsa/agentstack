@@ -74,7 +74,8 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 "installed": d.is_installed(),
                 "configPresent": d.config_present(),
                 "supportsProject": d.supports_scope(Scope::Project),
-                "configPath": d.config.path,
+                "mcp": d.mcp.is_some(),
+                "configPath": d.config.as_ref().map(|c| c.path.clone()),
                 "projectConfig": d.project.as_ref().map(|p| p.config.clone()),
                 "skillsDir": d.skills.as_ref().map(|s| s.dir.clone()),
             })

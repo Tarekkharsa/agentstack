@@ -362,6 +362,8 @@ function addServerCard() {
 
 function servers(c) {
   const d = DATA;
+  // Only CLIs that actually support MCP get a column (Pi, etc. have none).
+  const cols = d.adapters.filter((a) => a.mcp !== false);
   c.appendChild(pageHead("Servers", "Click a cell to enable/disable a server for that CLI (global scope). Click a row name for its config."));
   if (!READONLY) {
     c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
@@ -371,17 +373,17 @@ function servers(c) {
   }
 
   const head = el("tr", null, [el("th", null, ["capability"])]);
-  d.adapters.forEach((a) => head.appendChild(el("th", { class: "cell" }, [a.display])));
+  cols.forEach((a) => head.appendChild(el("th", { class: "cell" }, [a.display])));
   head.appendChild(el("th", null, ["type"]));
 
   const body = el("tbody");
-  if (!d.servers.length) body.appendChild(el("tr", null, [el("td", { colspan: d.adapters.length + 2 }, [el("span", { class: "empty" }, ["No servers yet. Use “+ Add MCP server” or the Discover tab."])])]));
+  if (!d.servers.length) body.appendChild(el("tr", null, [el("td", { colspan: cols.length + 2 }, [el("span", { class: "empty" }, ["No servers yet. Use “+ Add MCP server” or the Discover tab."])])]));
   d.servers.forEach((s) => {
     const tr = el("tr", { class: "clickable" }, [
       el("td", { onclick: () => { OPEN_SERVER = OPEN_SERVER === s.name ? null : s.name; show("servers"); } },
         [el("span", { class: "name" }, [s.name]), el("span", { class: "k" }, ["mcp"])]),
     ]);
-    d.adapters.forEach((a) => {
+    cols.forEach((a) => {
       const cell = s.cells.find((x) => x.adapter === a.id) || {};
       const tag = cell.global && cell.project ? "both" : cell.global ? "global" : cell.project ? "project" : "";
       const on = cell.global || cell.project;
@@ -396,7 +398,7 @@ function servers(c) {
     });
     tr.appendChild(el("td", null, [badge(s.type, "solid")]));
     body.appendChild(tr);
-    if (OPEN_SERVER === s.name) body.appendChild(serverDetail(s, d.adapters.length + 2));
+    if (OPEN_SERVER === s.name) body.appendChild(serverDetail(s, cols.length + 2));
   });
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("table", null, [el("thead", null, [head]), body])])]));
 }

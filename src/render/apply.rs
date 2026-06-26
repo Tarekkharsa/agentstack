@@ -81,6 +81,9 @@ pub fn plan_target(
     let Some((config_path, format)) = desc.config_for(scope, project_dir) else {
         return Ok(None);
     };
+    let Some(mcp) = desc.mcp.as_ref() else {
+        return Ok(None);
+    };
 
     let names = selected_servers(manifest, selection)?;
 
@@ -108,14 +111,14 @@ pub fn plan_target(
 
     let proposed = match format {
         Format::Json => {
-            merge_json::merge_with_removals(&existing, &desc.mcp.location, &entries, &removed)?
+            merge_json::merge_with_removals(&existing, &mcp.location, &entries, &removed)?
         }
         Format::Toml => merge_toml::merge_with_removals(
             &existing,
-            &desc.mcp.location,
+            &mcp.location,
             &entries,
             &removed,
-            desc.mcp.headers_as_subtable,
+            mcp.headers_as_subtable,
         )?,
     };
 

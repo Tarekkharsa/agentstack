@@ -23,7 +23,10 @@ impl AdapterDescriptor {
 
     /// Whether this CLI's config file exists.
     pub fn config_present(&self) -> bool {
-        paths::expand_tilde(&self.config.path).exists()
+        self.config
+            .as_ref()
+            .map(|c| paths::expand_tilde(&c.path).exists())
+            .unwrap_or(false)
     }
 
     /// Detected = installed or already configured on this machine.
@@ -34,7 +37,10 @@ impl AdapterDescriptor {
     /// Read and parse this CLI's config into a JSON-shaped value tree (TOML is
     /// converted to the same shape), or `None` if absent/empty.
     pub fn read_config_value(&self) -> Result<Option<serde_json::Value>> {
-        let path = paths::expand_tilde(&self.config.path);
+        let Some(config) = self.config.as_ref() else {
+            return Ok(None);
+        };
+        let path = paths::expand_tilde(&config.path);
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -43,7 +49,7 @@ impl AdapterDescriptor {
         if text.trim().is_empty() {
             return Ok(None);
         }
-        let value = match self.config.format {
+        let value = match config.format {
             Format::Json => serde_json::from_str(&text)
                 .with_context(|| format!("parsing {}", path.display()))?,
             Format::Toml => {

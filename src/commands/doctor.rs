@@ -73,12 +73,16 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         match ctx.registry.get(id) {
             None => report.line(Level::Error, format!("{id}: unknown adapter")),
             Some(desc) => {
-                let path = paths::expand_tilde(&desc.config.path);
+                let path_label = desc
+                    .config
+                    .as_ref()
+                    .map(|c| paths::expand_tilde(&c.path).display().to_string())
+                    .unwrap_or_else(|| "no MCP config".to_string());
                 if desc.is_installed() {
                     match desc.read_config_value() {
                         Ok(_) => report.line(
                             Level::Ok,
-                            format!("{:<14} installed · {} parses", desc.display, path.display()),
+                            format!("{:<14} installed · {} parses", desc.display, path_label),
                         ),
                         Err(e) => report.line(
                             Level::Error,

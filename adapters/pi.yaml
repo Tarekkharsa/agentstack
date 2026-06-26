@@ -1,0 +1,27 @@
+# Pi coding agent (@mariozechner/pi-coding-agent) adapter descriptor.
+# Pi has NO MCP support by design (it uses skills/CLI-tools instead), so this
+# adapter declares no `config`/`mcp` — only skills, settings, and instructions.
+# Config dir: ~/.pi/agent/
+id: pi
+display: Pi
+detect:
+  bin: pi
+# Skills: global ~/.pi/agent/skills, project .pi/skills (same SKILL.md format).
+skills:
+  dir: ~/.pi/agent/skills
+  project_dir: .pi/skills
+  strategy: symlink
+# Settings file (JSON): provider/model/theme/thinking defaults.
+settings:
+  format: json
+  global: ~/.pi/agent/settings.json
+  fields:
+    - { key: defaultProvider, type: string, group: General, label: Default provider, help: "e.g. openrouter, anthropic, openai." }
+    - { key: defaultModel, type: string, group: General, label: Default model }
+    - { key: theme, type: string, group: General, label: Theme }
+    - { key: defaultThinkingLevel, type: enum, options: [off, low, medium, high], group: General, label: Thinking level }
+    - { key: hideThinkingBlock, type: bool, group: Display, label: Hide thinking block }
+# Pi loads AGENTS.md (or CLAUDE.md): global ~/.pi/agent/AGENTS.md, project AGENTS.md.
+instructions:
+  global: ~/.pi/agent/AGENTS.md
+  project: AGENTS.md
