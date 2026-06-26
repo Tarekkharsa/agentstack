@@ -116,6 +116,7 @@ tbody tr.clickable:hover { background: hsl(var(--muted) / 0.5); }
 .cell[role="button"]:hover { background: hsl(var(--muted) / 0.6); }
 .cell[role="button"]:focus-visible { outline: none; box-shadow: inset 0 0 0 2px hsl(var(--ring)); }
 .on { color: hsl(var(--green)); font-weight: 700; }
+.inherited { color: hsl(var(--green) / 0.45); font-weight: 700; }
 .off { color: hsl(var(--muted-foreground) / 0.45); }
 .sc { font-size: 10px; font-weight: 500; color: hsl(var(--muted-foreground)); }
 .sc-global { color: hsl(var(--muted-foreground)); }

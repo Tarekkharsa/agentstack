@@ -689,32 +689,54 @@ function scopeLegend() {
     el("span", { class: "sc sc-" + tag, style: "position:static" }, [tag]),
     el("span", { class: "muted", style: "font-size:11px" }, [desc]),
   ]);
-  return el("div", { class: "scope-legend" }, [
+  const legend = [
     item("global", "every project"),
     item("project", "this repo only"),
     item("both", "global + here"),
-    el("span", { class: "muted", style: "font-size:11px;flex:1" }, ["Project adds to Global — a server that's on globally is already active here."]),
-  ]);
+  ];
+  if (SCOPE === "project") {
+    legend.push(el("span", { class: "legend-item" }, [
+      el("span", { class: "inherited" }, ["✓"]),
+      el("span", { class: "muted", style: "font-size:11px" }, ["inherited from global"]),
+    ]));
+  }
+  legend.push(el("span", { class: "muted", style: "font-size:11px;flex:1" }, [
+    SCOPE === "project"
+      ? "Showing project scope — ✓ marks what's set in this repo; faded ✓ is active here via global."
+      : "Showing global scope — what's on for every project. Project scope adds to this.",
+  ]));
+  return el("div", { class: "scope-legend" }, legend);
 }
 
 // One matrix cell shared by the servers & skills tables. When `onToggle` is
 // given it's a real keyboard-operable toggle (role=button, aria-pressed);
 // otherwise it carries an aria-label so the ✓/– glyph isn't the only signal.
 function statusCell(cell, opts) {
-  const tag = cell.global && cell.project ? "both" : cell.global ? "global" : cell.project ? "project" : "";
-  const on = cell.global || cell.project;
-  const stateText = on ? (tag ? "enabled · " + tag : "enabled") : "disabled";
-  const inner = [el("div", { class: on ? "on" : "off" }, [on ? "✓" : "–"]), tag ? el("div", { class: "sc sc-" + tag }, [tag]) : null];
+  // The visible state follows the ACTIVE scope, so flipping the switch actually
+  // changes the matrix. In project view, a server that's only on globally shows
+  // a faded ✓ ("inherited") — it's active here, just not set at the project level.
+  const here = SCOPE === "project" ? !!cell.project : !!cell.global;
+  const other = SCOPE === "project" ? !!cell.global : !!cell.project;
+  const inherited = SCOPE === "project" && !here && other;
+
+  let mark, markClass, stateText;
+  if (here) { mark = "✓"; markClass = "on"; stateText = "on in " + SCOPE; }
+  else if (inherited) { mark = "✓"; markClass = "inherited"; stateText = "on here via global"; }
+  else { mark = "–"; markClass = "off"; stateText = "off in " + SCOPE; }
+
+  // Tag shows where it's set: both, the active scope, or the other scope.
+  const tag = here && other ? "both" : here ? SCOPE : other ? (SCOPE === "project" ? "global" : "project") : "";
+
+  const inner = [el("div", { class: markClass }, [mark]), tag ? el("div", { class: "sc sc-" + tag }, [tag]) : null];
   const td = el("td", { class: "cell" }, inner);
   if (opts.onToggle) {
-    const here = SCOPE === "project" ? cell.project : cell.global;
     const verb = here ? "Disable " : "Enable ";
     td.setAttribute("role", "button");
     td.tabIndex = 0;
-    td.setAttribute("aria-pressed", String(!!here));
+    td.setAttribute("aria-pressed", String(here));
     td.setAttribute("aria-label", verb + opts.label + " (" + SCOPE + " scope)");
     td.style.cursor = "pointer";
-    td.title = verb.toLowerCase() + opts.label + " (" + SCOPE + ")";
+    td.title = (inherited ? "on here via global · " : "") + verb.toLowerCase() + opts.label + " (" + SCOPE + ")";
     const fire = (e) => { e.stopPropagation(); e.preventDefault(); opts.onToggle(); };
     td.addEventListener("click", fire);
     td.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") fire(e); });
