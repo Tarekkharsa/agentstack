@@ -13,6 +13,7 @@ pub mod commands;
 pub mod consolidate;
 pub mod dashboard;
 pub mod discover;
+pub mod gateway;
 pub mod history;
 pub mod lock;
 pub mod manifest;

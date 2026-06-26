@@ -27,6 +27,12 @@ pub fn serve(manifest_dir: Option<&Path>) -> Result<()> {
     // so reserve the real stdout for responses and redirect fd 1 to stderr.
     let mut out = protocol_writer();
 
+    // Build the runtime gateway once for this launch (one project per process).
+    let gateway = crate::gateway::Gateway::from_manifest(dir.as_deref());
+    if !gateway.is_empty() {
+        eprintln!("agentstack mcp: gateway active — proxying this project's HTTP MCP servers");
+    }
+
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -35,7 +41,7 @@ pub fn serve(manifest_dir: Option<&Path>) -> Result<()> {
         let Ok(req) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
-        if let Some(resp) = handle(&req, dir.as_deref()) {
+        if let Some(resp) = handle(&req, dir.as_deref(), &gateway) {
             writeln!(out, "{}", serde_json::to_string(&resp)?)?;
             out.flush()?;
         }
@@ -62,7 +68,7 @@ fn protocol_writer() -> Box<dyn Write> {
     Box::new(std::io::stdout())
 }
 
-fn handle(req: &Value, dir: Option<&Path>) -> Option<Value> {
+fn handle(req: &Value, dir: Option<&Path>, gateway: &crate::gateway::Gateway) -> Option<Value> {
     let id = req.get("id").cloned();
     let method = req.get("method")?.as_str()?;
     match method {
@@ -75,7 +81,12 @@ fn handle(req: &Value, dir: Option<&Path>) -> Option<Value> {
             }),
         )),
         "notifications/initialized" | "notifications/cancelled" => None,
-        "tools/list" => Some(result(id, json!({ "tools": tool_defs() }))),
+        "tools/list" => {
+            // agentstack's own tools + the current project's proxied servers.
+            let mut tools = tool_defs().as_array().cloned().unwrap_or_default();
+            tools.extend(gateway.namespaced_tools());
+            Some(result(id, json!({ "tools": tools })))
+        }
         "tools/call" => {
             let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
@@ -83,6 +94,17 @@ fn handle(req: &Value, dir: Option<&Path>) -> Option<Value> {
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
+            // A namespaced call (server__tool) is forwarded to that upstream;
+            // its MCP result is returned verbatim. Otherwise it's our own tool.
+            if let Some(forwarded) = gateway.try_call(name, &args) {
+                return Some(match forwarded {
+                    Ok(v) => result(id, v),
+                    Err(e) => result(
+                        id,
+                        json!({ "content": [{ "type": "text", "text": format!("Error: {e}") }], "isError": true }),
+                    ),
+                });
+            }
             let (text, is_error) = match run_tool(name, &args, dir) {
                 Ok(t) => (t, false),
                 Err(e) => (format!("Error: {e}"), true),
@@ -640,7 +662,8 @@ mod tests {
     #[test]
     fn initialize_returns_server_info() {
         let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" });
-        let resp = handle(&req, None).unwrap();
+        let gw = crate::gateway::Gateway::empty();
+        let resp = handle(&req, None, &gw).unwrap();
         assert_eq!(resp["result"]["serverInfo"]["name"], "agentstack");
         assert_eq!(resp["id"], 1);
     }
@@ -648,7 +671,8 @@ mod tests {
     #[test]
     fn tools_list_includes_search_and_add() {
         let req = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" });
-        let resp = handle(&req, None).unwrap();
+        let gw = crate::gateway::Gateway::empty();
+        let resp = handle(&req, None, &gw).unwrap();
         let names: Vec<&str> = resp["result"]["tools"]
             .as_array()
             .unwrap()
@@ -679,7 +703,8 @@ mod tests {
     #[test]
     fn notifications_get_no_response() {
         let req = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
-        assert!(handle(&req, None).is_none());
+        let gw = crate::gateway::Gateway::empty();
+        assert!(handle(&req, None, &gw).is_none());
     }
 
     #[test]
@@ -688,7 +713,8 @@ mod tests {
             "jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": { "name": "agentstack_search", "arguments": { "query": "github" } }
         });
-        let resp = handle(&req, None).unwrap();
+        let gw = crate::gateway::Gateway::empty();
+        let resp = handle(&req, None, &gw).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("github"));
         assert_eq!(resp["result"]["isError"], false);
