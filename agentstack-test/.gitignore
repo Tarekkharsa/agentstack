@@ -1,0 +1,6 @@
+# Mutable runtime: simulated machine state + per-project generated configs.
+runtime/
+projects/*/.mcp.json
+projects/*/.claude/
+projects/*/AGENTS.md
+*.log

@@ -1,0 +1,16 @@
+# data-pipeline — analytics. Warehouse tool + SQL review. Claude Code only.
+version = 1
+
+[servers.snowflake]
+type = "http"
+url = "https://mcp.snowflake.example/mcp"
+
+[skills.sql-review]
+path = "./skills/sql-review"
+
+[profiles.analytics]
+servers = ["snowflake"]
+skills = ["sql-review"]
+
+[targets]
+default = ["claude-code"]

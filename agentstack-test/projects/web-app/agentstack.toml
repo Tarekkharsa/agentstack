@@ -1,0 +1,24 @@
+# web-app — a frontend project. Needs design + repo tools and review skills.
+version = 1
+
+[servers.figma]
+type = "http"
+url = "https://mcp.figma.com/mcp"
+
+[servers.github]            # also available globally — shows inheritance
+type = "http"
+url = "https://api.githubcopilot.com/mcp"
+
+[skills.frontend-review]
+path = "./skills/frontend-review"
+
+[skills.pixel-perfect]
+path = "./skills/pixel-perfect"
+
+# A bundle you can load as a session, then revert.
+[profiles.review]
+servers = ["figma"]
+skills = ["frontend-review", "pixel-perfect"]
+
+[targets]
+default = ["claude-code", "codex"]

@@ -1,0 +1,24 @@
+# api-service — a backend project. Database + tracker tools, API skills.
+version = 1
+
+[servers.postgres]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-postgres"]
+
+[servers.github]
+type = "http"
+url = "https://api.githubcopilot.com/mcp"
+
+[skills.api-design]
+path = "./skills/api-design"
+
+[skills.openapi-lint]
+path = "./skills/openapi-lint"
+
+[profiles.backend]
+servers = ["postgres"]
+skills = ["api-design", "openapi-lint"]
+
+[targets]
+default = ["claude-code", "codex"]
