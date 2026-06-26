@@ -22,8 +22,10 @@ const PROTOCOL_VERSION: &str = "2025-06-18";
 pub fn serve(manifest_dir: Option<&Path>) -> Result<()> {
     let dir = manifest_dir.map(Path::to_path_buf);
     let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
+    // On stdio, stdout must carry only JSON-RPC. Library code (apply, profiles,
+    // plugins…) prints human progress to stdout, which would corrupt the stream,
+    // so reserve the real stdout for responses and redirect fd 1 to stderr.
+    let mut out = protocol_writer();
 
     for line in stdin.lock().lines() {
         let line = line?;
@@ -39,6 +41,25 @@ pub fn serve(manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The channel JSON-RPC responses are written to. On Unix, duplicate the real
+/// stdout and point fd 1 at stderr so stray `println!` from command code lands
+/// on stderr instead of poisoning the protocol. Falls back to plain stdout.
+#[cfg(unix)]
+fn protocol_writer() -> Box<dyn Write> {
+    use std::os::unix::io::FromRawFd;
+    let saved = unsafe { libc::dup(libc::STDOUT_FILENO) };
+    if saved < 0 {
+        return Box::new(std::io::stdout());
+    }
+    unsafe { libc::dup2(libc::STDERR_FILENO, libc::STDOUT_FILENO) };
+    Box::new(unsafe { std::fs::File::from_raw_fd(saved) })
+}
+
+#[cfg(not(unix))]
+fn protocol_writer() -> Box<dyn Write> {
+    Box::new(std::io::stdout())
 }
 
 fn handle(req: &Value, dir: Option<&Path>) -> Option<Value> {
@@ -134,6 +155,73 @@ fn tool_defs() -> Value {
             }
         },
         {
+            "name": "agentstack_diff",
+            "description": "Show what would change if the manifest were applied — the pending diff between the manifest and each tool's live config, for a scope. Read-only.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "scope": { "type": "string", "enum": ["global", "project"], "default": "project" } }
+            }
+        },
+        {
+            "name": "agentstack_add_skill",
+            "description": "Add a skill to the manifest (commit-safe — nothing executed, not applied). A human runs `agentstack install` then `apply`.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": { "type": "string" },
+                    "source": { "type": "string", "enum": ["git", "path"], "default": "git" },
+                    "git": { "type": "string", "description": "git URL (source=git)" },
+                    "rev": { "type": "string", "description": "optional tag/branch/sha" },
+                    "path": { "type": "string", "description": "local path (source=path)" }
+                }
+            }
+        },
+        {
+            "name": "agentstack_create_profile",
+            "description": "Create a profile — a named bundle of servers + skills you can later load as a session. Commit-safe (manifest only).",
+            "inputSchema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": { "type": "string" },
+                    "servers": { "type": "array", "items": { "type": "string" } },
+                    "skills": { "type": "array", "items": { "type": "string" } }
+                }
+            }
+        },
+        {
+            "name": "agentstack_session_start",
+            "description": "Start an ephemeral session: load a profile (and an optional plugin) for now. Reversible — end the session to revert it. Defaults to project scope (contained to this repo).",
+            "inputSchema": {
+                "type": "object",
+                "required": ["profile"],
+                "properties": {
+                    "profile": { "type": "string" },
+                    "scope": { "type": "string", "enum": ["global", "project"], "default": "project" },
+                    "plugin": { "type": "string", "description": "optional plugin recipe to install for the session" }
+                }
+            }
+        },
+        {
+            "name": "agentstack_session_end",
+            "description": "End the active session in this directory, reverting everything it loaded (servers, skills, plugin) to how it was before.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "agentstack_session_list",
+            "description": "List active sessions on this machine, with the profile, scope, and what each has loaded.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "agentstack_session_freeze",
+            "description": "Freeze the active session's resolved set (profile servers + the skills actually loaded) into a new profile, so it can be replayed deterministically. Commit-safe.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "name": { "type": "string", "description": "name for the frozen profile (default <profile>-frozen)" } }
+            }
+        },
+        {
             "name": "agentstack_add_server",
             "description": "Add an MCP server to the manifest by hand (commit-safe — secrets stay as ${REF}). Does NOT apply; a human runs `agentstack apply` to render it.",
             "inputSchema": {
@@ -168,6 +256,56 @@ fn run_tool(name: &str, args: &Value, dir: Option<&Path>) -> Result<String> {
         "agentstack_add_server" => add_server(args, dir),
         "agentstack_list_loadable" => list_loadable(dir),
         "agentstack_load" => load_capability(args, dir),
+        "agentstack_diff" => diff_summary(args, dir),
+        "agentstack_add_skill" => {
+            let name = crate::dashboard::actions::add_skill(dir, args)?;
+            Ok(format!(
+                "Added skill '{name}' to the manifest (not installed or applied). A human runs `agentstack install` then `agentstack apply`."
+            ))
+        }
+        "agentstack_create_profile" => {
+            let name = crate::dashboard::actions::add_profile(dir, args)?;
+            Ok(format!(
+                "Created profile '{name}'. Load it for a session with agentstack_session_start."
+            ))
+        }
+        "agentstack_session_start" => {
+            let profile = args
+                .get("profile")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .context("`profile` is required")?;
+            let plugin = args.get("plugin").and_then(Value::as_str).filter(|s| !s.is_empty());
+            crate::session::start(dir, profile, scope_arg(args), plugin)?;
+            Ok(format!(
+                "Session started on profile '{profile}' ({} scope). End it with agentstack_session_end to revert.",
+                scope_arg(args)
+            ))
+        }
+        "agentstack_session_end" => {
+            crate::session::end(dir)?;
+            Ok("Session ended — everything it loaded has been reverted.".into())
+        }
+        "agentstack_session_list" => {
+            let arr: Vec<Value> = crate::session::list_all()
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "dir": s.dir, "profile": s.profile, "scope": s.scope,
+                        "plugin": s.plugin,
+                        "loaded": s.loads.iter().map(|l| l.name.clone()).collect::<Vec<_>>(),
+                    })
+                })
+                .collect();
+            Ok(serde_json::to_string_pretty(&serde_json::json!({ "sessions": arr }))?)
+        }
+        "agentstack_session_freeze" => {
+            let name = args.get("name").and_then(Value::as_str).filter(|s| !s.is_empty());
+            let created = crate::session::freeze(dir, name)?;
+            Ok(format!(
+                "Froze the session into profile '{created}'. Replay it with agentstack_session_start profile={created}."
+            ))
+        }
         other => anyhow::bail!("unknown tool '{other}'"),
     }
 }
@@ -365,6 +503,35 @@ fn parse_frontmatter_description(md: &str) -> Option<String> {
     None
 }
 
+fn scope_arg(args: &Value) -> crate::scope::Scope {
+    match args.get("scope").and_then(Value::as_str) {
+        Some("global") => crate::scope::Scope::Global,
+        _ => crate::scope::Scope::Project,
+    }
+}
+
+fn diff_summary(args: &Value, dir: Option<&Path>) -> Result<String> {
+    let scope = scope_arg(args);
+    let v = crate::dashboard::snapshot::diffs(dir, scope, false)?;
+    let targets = v.get("targets").and_then(Value::as_array).cloned().unwrap_or_default();
+    let changed: Vec<&Value> = targets
+        .iter()
+        .filter(|t| t.get("changed").and_then(Value::as_bool).unwrap_or(false))
+        .collect();
+    if changed.is_empty() {
+        return Ok(format!("No pending changes in {scope} scope — the manifest and your tools are in sync."));
+    }
+    let mut out = format!("{} tool(s) would change on apply ({scope} scope):\n", changed.len());
+    for t in changed {
+        let display = t.get("display").and_then(Value::as_str).unwrap_or("?");
+        let path = t.get("path").and_then(Value::as_str).unwrap_or("");
+        out.push_str(&format!("\n## {display} · {path}\n"));
+        out.push_str(t.get("diff").and_then(Value::as_str).unwrap_or(""));
+    }
+    out.push_str("\nApply is human-gated: a person runs `agentstack apply`.");
+    Ok(out)
+}
+
 fn list_loadable(dir: Option<&Path>) -> Result<String> {
     let ctx = crate::commands::load(dir)?;
     let m = &ctx.loaded.manifest;
@@ -492,6 +659,11 @@ mod tests {
         assert!(names.contains(&"agentstack_add_server"));
         assert!(names.contains(&"agentstack_list_loadable"));
         assert!(names.contains(&"agentstack_load"));
+        for t in ["agentstack_diff", "agentstack_add_skill", "agentstack_create_profile",
+                  "agentstack_session_start", "agentstack_session_end",
+                  "agentstack_session_list", "agentstack_session_freeze"] {
+            assert!(names.contains(&t), "missing tool {t}");
+        }
     }
 
     #[test]

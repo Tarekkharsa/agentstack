@@ -35,6 +35,9 @@ anyhow = "1"
 thiserror = "1"
 owo-colors = "4"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
 assert_fs = "1"

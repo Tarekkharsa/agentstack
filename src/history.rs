@@ -148,14 +148,11 @@ fn prune(max: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    // These tests both mutate the process-global AGENTSTACK_HOME; serialize them.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use crate::util::TEST_ENV_LOCK;
 
     #[test]
     fn capture_record_and_undo_roundtrip() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = assert_fs::TempDir::new().unwrap();
         std::env::set_var("AGENTSTACK_HOME", home.path());
         let work = assert_fs::TempDir::new().unwrap();
@@ -179,7 +176,7 @@ mod tests {
 
     #[test]
     fn undo_deletes_a_file_that_did_not_exist() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = assert_fs::TempDir::new().unwrap();
         std::env::set_var("AGENTSTACK_HOME", home.path());
         let work = assert_fs::TempDir::new().unwrap();

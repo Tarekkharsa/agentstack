@@ -79,6 +79,7 @@ dependencies = [
  "indexmap",
  "insta",
  "keyring",
+ "libc",
  "owo-colors",
  "reqwest",
  "rpassword",
