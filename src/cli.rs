@@ -315,6 +315,13 @@ pub enum SessionCmd {
     },
     /// List active sessions.
     List,
+    /// Freeze the active session's resolved set (profile servers + the skills
+    /// actually loaded) into a new profile, so CI can replay it deterministically.
+    Freeze {
+        /// Name for the frozen profile (default: <profile>-frozen).
+        #[arg(long)]
+        name: Option<String>,
+    },
 }
 
 #[derive(Args, Debug)]

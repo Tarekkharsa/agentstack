@@ -496,6 +496,9 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
             "scope": s.scope,
             "startedUnix": s.started_unix,
             "plugin": s.plugin,
+            "loads": s.loads.iter().map(|l| json!({
+                "name": l.name, "reason": l.reason, "ts": l.ts,
+            })).collect::<Vec<_>>(),
         })),
     }))
 }

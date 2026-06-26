@@ -117,6 +117,37 @@ pub fn list_all() -> Vec<Session> {
     load_all().into_values().collect()
 }
 
+/// Freeze the active session's *resolved* set into a new profile for replay:
+/// the original profile's servers + exactly the skills the agent loaded (or the
+/// profile's skills if it loaded none). Returns the new profile name.
+pub fn freeze(manifest_dir: Option<&Path>, name: Option<&str>) -> Result<String> {
+    let ctx = crate::commands::load(manifest_dir)?;
+    let sess = active(&ctx.dir).context("no active session in this directory to freeze")?;
+    let profile = ctx
+        .loaded
+        .manifest
+        .profiles
+        .get(&sess.profile)
+        .with_context(|| format!("profile '{}' is gone from the manifest", sess.profile))?;
+
+    let servers = profile.servers.clone();
+    // The resolved set is what was actually pulled; fall back to the full
+    // profile if the agent loaded nothing on demand.
+    let skills: Vec<String> = if sess.loads.is_empty() {
+        profile.skills.clone()
+    } else {
+        sess.loads.iter().map(|l| l.name.clone()).collect()
+    };
+    let new_name = name
+        .map(String::from)
+        .unwrap_or_else(|| format!("{}-frozen", sess.profile));
+
+    crate::dashboard::actions::add_profile(
+        manifest_dir,
+        &serde_json::json!({ "name": new_name, "servers": servers, "skills": skills }),
+    )
+}
+
 /// End every active session, reverting each. Returns how many were ended.
 pub fn end_all() -> Result<usize> {
     let mut n = 0;

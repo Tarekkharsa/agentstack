@@ -179,15 +179,21 @@ function renderPending() {
   // An active session takes over the bar — end it to revert.
   if (DATA.session) {
     const s = DATA.session;
+    const loads = s.loads || [];
+    const sub = s.scope + " scope" + (s.plugin ? " · plugin " + s.plugin : "") +
+      (loads.length ? " · " + plural(loads.length, "skill") + " pulled" : "") + " · reverts when you end it";
     host.appendChild(el("div", { class: "pending-bar session" }, [
       el("div", { class: "pleft" }, [
         el("span", { class: "pdot session" }, []),
         el("div", { style: "min-width:0" }, [
           el("div", { class: "ptitle" }, ["Session active · " + s.profile]),
-          el("div", { class: "muted", style: "font-size:12px" }, [s.scope + " scope" + (s.plugin ? " · plugin " + s.plugin : "") + " · reverts when you end it"]),
+          el("div", { class: "muted", style: "font-size:12px" }, [sub]),
         ]),
       ]),
-      el("div", { class: "row-actions" }, [btn("End session", endSession, "primary")]),
+      el("div", { class: "row-actions" }, [
+        loads.length ? btn("Activity", () => show("activity")) : null,
+        btn("End session", endSession, "primary"),
+      ]),
     ]));
     return;
   }
@@ -291,6 +297,26 @@ document.addEventListener("keydown", (e) => {
 /* ---------- activity (apply history + undo) ---------- */
 function activity(c) {
   c.appendChild(pageHead("Activity", "Every apply is backed up here — restore your tools to how they were before any change."));
+
+  // Live session: the skills the agent pulled on demand, with its reasons.
+  if (DATA.session) {
+    const s = DATA.session;
+    const loads = s.loads || [];
+    const rows = loads.length
+      ? loads.map((l) => el("div", { class: "list-row" }, [
+          el("span", null, [el("span", { class: "name" }, [l.name]), el("div", { class: "muted", style: "font-size:12px" }, [l.reason || ""])]),
+          el("span", { class: "muted", style: "font-size:12px" }, [relTime(l.ts)]),
+        ]))
+      : [el("div", { class: "empty" }, ["Nothing pulled yet — the agent loads skills on demand from this session's profile."])];
+    c.appendChild(el("div", { class: "card", style: "margin-bottom:16px" }, [
+      el("div", { class: "hd", style: "display:flex;align-items:center" }, [
+        "Session · " + s.profile,
+        el("small", null, [s.scope + " scope · " + plural(loads.length, "skill") + " pulled"]),
+        READONLY ? null : el("span", { style: "margin-left:auto" }, [btn("End session", endSession)]),
+      ]),
+      el("div", { class: "bd" }, rows),
+    ]));
+  }
   if (!HISTORY.length) {
     c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, ["No applies yet. When you apply changes they show up here, each with an undo."])])]));
     if (!HISTORY_LOADED) refreshHistory();

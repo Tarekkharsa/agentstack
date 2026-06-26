@@ -36,6 +36,15 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
                 println!("{} session ended — your tools are back to before", "✓".green());
             }
         }
+        SessionCmd::Freeze { name } => {
+            let created = crate::session::freeze(dir, name.as_deref())?;
+            println!(
+                "{} froze the session into profile '{}' — replay it deterministically with `agentstack session start {}`",
+                "✓".green(),
+                created.bold(),
+                created
+            );
+        }
         SessionCmd::List => {
             let list = crate::session::list_all();
             if list.is_empty() {
