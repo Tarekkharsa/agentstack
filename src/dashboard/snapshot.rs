@@ -265,11 +265,20 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 .as_ref()
                 .map(|s| s.fields.clone())
                 .unwrap_or_default();
+            // The catalog keys actually present in the CLI's settings file right
+            // now, so the dashboard reflects reality by default (no manual import).
+            let live = d
+                .read_settings_value(&ctx.dir)
+                .ok()
+                .flatten()
+                .map(|v| Value::Object(crate::adapter::extract_settings(d, &v)))
+                .unwrap_or_else(|| json!({}));
             json!({
                 "id": d.id,
                 "display": d.display,
                 "path": path,
                 "current": current,
+                "live": live,
                 "fields": fields,
             })
         })

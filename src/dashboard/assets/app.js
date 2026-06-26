@@ -582,7 +582,7 @@ function initialFor(f) {
 }
 
 function settings(c) {
-  c.appendChild(pageHead("Settings", "Each CLI's own settings (permissions, feature flags, model). Flip what you want on; Save writes it to the manifest, then Apply renders it into the CLI's real settings file. Keys you don't manage here are left untouched."));
+  c.appendChild(pageHead("Settings", "Shows each CLI's current settings by default (read from its real settings file). Adjust what you want, then Save to let agentstack manage it — Apply renders it back. Keys you don't manage are left untouched."));
   const adapters = DATA.settingsAdapters || [];
   if (!adapters.length) {
     c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, ["No CLIs with a managed settings file yet."])])]));
@@ -592,8 +592,11 @@ function settings(c) {
 }
 
 function settingsCard(a) {
-  // Fresh working copy each render of the pane.
-  const draft = JSON.parse(JSON.stringify(a.current || {}));
+  // Default to the CLI's live settings file, with manifest-managed keys
+  // overriding (top-level ownership) — so the panel reflects reality without a
+  // manual import. Save persists the draft to the manifest.
+  const draft = JSON.parse(JSON.stringify(a.live || {}));
+  Object.entries(a.current || {}).forEach(([k, v]) => { draft[k] = JSON.parse(JSON.stringify(v)); });
   SETTINGS_DRAFT[a.id] = draft;
   const fields = a.fields || [];
   const previewId = "settings-prev-" + a.id;
@@ -628,11 +631,13 @@ function settingsCard(a) {
   body.push(pre);
 
   if (!READONLY) {
+    const managed = Object.keys(a.current || {}).length > 0;
     body.push(el("div", { class: "toolbar", style: "margin-top:10px" }, [
       btn("Save", () => post("/api/set_settings", { target: a.id, settings: draft }, a.display + " settings"), "primary"),
-      btn("Import current", () => post("/api/import_settings", { target: a.id }, "Import " + a.display + " settings")),
       btn("Reset", () => show("settings")),
-      el("span", { class: "muted", style: "font-size:12px" }, ["Import reads the CLI's existing settings file · Save then Apply to write"]),
+      el("span", { class: "muted", style: "font-size:12px" }, [
+        managed ? "Showing live values with your managed keys applied · Save then Apply to write" : "Showing this CLI's current settings · Save to start managing them",
+      ]),
     ]));
   }
 
