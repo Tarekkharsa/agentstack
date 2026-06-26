@@ -177,10 +177,16 @@ pub fn pi_install(name: &str) -> Result<()> {
         anyhow::bail!("invalid package name");
     }
     let spec = format!("npm:{name}");
-    match std::process::Command::new("pi")
-        .args(["install", &spec])
-        .output()
-    {
+    let mut cmd = std::process::Command::new("pi");
+    cmd.args(["install", &spec]);
+    // Pi's `#!/usr/bin/env node` launcher uses whatever node is first on PATH,
+    // which may be too old (Pi needs Node 20+). Prepend Pi's own bin dir so its
+    // sibling `node` (the version Pi was installed under) is used.
+    if let Some(dir) = pi_bin_dir() {
+        let path = std::env::var("PATH").unwrap_or_default();
+        cmd.env("PATH", format!("{}:{}", dir.display(), path));
+    }
+    match cmd.output() {
         Ok(o) if o.status.success() => Ok(()),
         Ok(o) => {
             let err = String::from_utf8_lossy(&o.stderr);
@@ -191,6 +197,16 @@ pub fn pi_install(name: &str) -> Result<()> {
             "`pi` is not runnable here — run `pi install {spec}` in your terminal to install."
         ),
     }
+}
+
+/// Directory containing the `pi` binary on PATH (its sibling `node` is the
+/// version Pi was installed under).
+fn pi_bin_dir() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|d| d.join("pi"))
+        .find(|p| p.is_file())
+        .and_then(|p| p.parent().map(Path::to_path_buf))
 }
 
 /// Add a lifecycle hook to the manifest from dashboard form fields.
