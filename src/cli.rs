@@ -55,6 +55,10 @@ pub enum Command {
     /// Activate a profile: render its servers + materialize its skills.
     Use(UseArgs),
 
+    /// Manage ephemeral sessions: load a profile (+ optional plugin) for now,
+    /// then revert it. A safety hatch for the dashboard's session feature.
+    Session(SessionArgs),
+
     /// Compile instruction fragments into each harness's CLAUDE.md / AGENTS.md.
     Instructions(InstructionsArgs),
 
@@ -283,6 +287,34 @@ pub struct UseArgs {
     /// Allow writing even when a `${REF}` did not resolve (off by default).
     #[arg(long)]
     pub allow_unresolved: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct SessionArgs {
+    #[command(subcommand)]
+    pub cmd: SessionCmd,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SessionCmd {
+    /// Start a session: load a profile (+ optional plugin) for now.
+    Start {
+        /// Profile to load.
+        profile: String,
+        #[arg(long, value_enum, default_value_t = Scope::Project)]
+        scope: Scope,
+        /// Also install this plugin recipe for the session.
+        #[arg(long)]
+        plugin: Option<String>,
+    },
+    /// End the active session here (or everywhere with --all), reverting it.
+    End {
+        /// End every active session on this machine, not just this directory's.
+        #[arg(long)]
+        all: bool,
+    },
+    /// List active sessions.
+    List,
 }
 
 #[derive(Args, Debug)]

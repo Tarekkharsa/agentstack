@@ -17,6 +17,7 @@ pub mod remove;
 pub mod restore;
 pub mod search;
 pub mod secret;
+pub mod session;
 pub mod stats;
 pub mod use_profile;
 

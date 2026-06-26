@@ -46,6 +46,10 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let mut state = State::load()?;
     let mut changed_count = 0;
     let mut error_count = 0;
+    // Pre-write snapshots of every file we touch, grouped into one undoable
+    // history entry for this apply.
+    let mut backups: Vec<crate::history::FileChange> = Vec::new();
+    let mut touched_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -94,6 +98,11 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
                     "✗".red()
                 );
             } else if will_write {
+                backups.push(crate::history::capture(
+                    &plan.config_path,
+                    format!("{} · servers", desc.display),
+                ));
+                touched_targets.insert(desc.display.clone());
                 plan.write()?;
                 state.record(&key, plan.managed.clone(), &plan.proposed);
                 crate::usage::bump(&plan.managed);
@@ -145,6 +154,11 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
                         "✗".red()
                     );
                 } else if will_write {
+                    backups.push(crate::history::capture(
+                        &sp.settings_path,
+                        format!("{} · settings", desc.display),
+                    ));
+                    touched_targets.insert(desc.display.clone());
                     sp.write()?;
                     state.record_settings(&key, sp.managed.clone());
                     println!("  {} wrote {} setting(s)", "✓".green(), sp.managed.len());
@@ -171,6 +185,11 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 if will_write && hblocked {
                     println!("  {} hooks not written — unresolved secret(s)", "✗".red());
                 } else if will_write {
+                    backups.push(crate::history::capture(
+                        &hp.path,
+                        format!("{} · hooks", desc.display),
+                    ));
+                    touched_targets.insert(desc.display.clone());
                     hp.write()?;
                     state.record_hooks(&key, hp.managed.clone());
                     println!("  {} wrote {} hook(s)", "✓".green(), hp.managed.len());
@@ -185,6 +204,13 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     if will_write {
         state.save()?;
+        // Record one undoable history entry for everything this apply wrote.
+        // Best-effort: never fail an otherwise-successful apply over history.
+        let _ = crate::history::record(
+            scope.as_str(),
+            touched_targets.into_iter().collect(),
+            backups,
+        );
     }
 
     println!();

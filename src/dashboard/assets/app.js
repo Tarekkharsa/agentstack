@@ -2,8 +2,12 @@
 // read-only snapshot (/api/state), with editing actions and diff-before-apply.
 const token = new URLSearchParams(location.search).get("token") || "";
 let DATA = null;
-let SECTION = "overview";
+let SECTION = location.hash.slice(1) || "overview";
 let READONLY = false;
+let SCOPE = "global"; // active scope for toggles, preview, and the pending bar
+let PENDING = null; // { scope, targets } from /api/diff, drives the pending bar
+let HISTORY = []; // recent apply events from /api/history
+let HISTORY_LOADED = false;
 let OPEN_SERVER = null;
 let ADD_FORM = false;
 let SKILL_FORM = false;
@@ -20,6 +24,7 @@ const SECTIONS = [
   { id: "plugins", label: "Plugins", count: (d) => (d.pluginRecipes || []).length + (d.plugins || []).length },
   { id: "instructions", label: "Instructions", count: (d) => d.instructions.length },
   { id: "secrets", label: "Secrets", count: (d) => d.secrets.length },
+  { id: "activity", label: "Activity" },
   { id: "health", label: "Health" },
 ];
 
@@ -39,11 +44,18 @@ function btn(label, onClick, cls) {
   return el("button", { class: "btn " + (cls || ""), onclick: onClick }, [label]);
 }
 function toast(msg, ok) {
-  const t = el("div", { class: "toast " + (ok ? "ok" : "err") }, [msg]);
+  const t = el("div", { class: "toast " + (ok ? "ok" : "err") }, [el("span", null, [msg])]);
+  if (ok) {
+    setTimeout(() => t.remove(), 3400);
+  } else {
+    // Errors persist with a manual dismiss — they're easy to miss in a few seconds.
+    t.appendChild(el("button", { class: "toast-close", "aria-label": "Dismiss", onclick: () => t.remove() }, ["✕"]));
+  }
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 3400);
 }
 const q = (p) => p + "?token=" + encodeURIComponent(token);
+// "1 server" / "2 servers" — pass an explicit plural for irregulars ("harness", "harnesses").
+const plural = (n, w, p) => `${n} ${n === 1 ? w : p || w + "s"}`;
 
 function post(path, body, label) {
   return fetch(q(path), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
@@ -88,13 +100,217 @@ function renderNav() {
     );
   });
 }
+const VIEWS = { overview, discover, servers, skills, settings, hooks, plugins, instructions, secrets, activity, health };
 function show(id) {
+  if (!VIEWS[id]) id = "overview";
   SECTION = id;
   OPEN_SERVER = null;
+  // Keep the URL in sync so sections are deep-linkable and survive a refresh.
+  // The token lives in the query string, so we only touch the hash.
+  if (location.hash.slice(1) !== id) {
+    const url = location.pathname + location.search + "#" + id;
+    history.replaceState(null, "", url);
+  }
   renderNav();
   const c = document.getElementById("content");
   c.innerHTML = "";
-  ({ overview, discover, servers, skills, settings, hooks, plugins, instructions, secrets, health }[id] || overview)(c);
+  VIEWS[id](c);
+}
+// Back/forward and manual hash edits navigate without a full reload.
+window.addEventListener("hashchange", () => {
+  const id = location.hash.slice(1);
+  if (VIEWS[id] && id !== SECTION && DATA) show(id);
+});
+
+/* ---------- scope switch ---------- */
+function renderScopeSwitch() {
+  const host = document.getElementById("scope-switch");
+  if (!host) return;
+  host.innerHTML = "";
+  if (READONLY || !DATA || DATA.needsInit) return;
+  const seg = el("div", { class: "seg", role: "group", "aria-label": "Scope" });
+  [["global", "Global"], ["project", "Project"]].forEach(([id, label]) => {
+    seg.appendChild(el("button", {
+      class: "seg-btn" + (SCOPE === id ? " active" : ""),
+      title: id === "project" ? "Changes for this project directory only" : "Changes for your whole machine",
+      "aria-pressed": String(SCOPE === id),
+      onclick: () => { if (SCOPE !== id) { SCOPE = id; renderScopeSwitch(); show(SECTION); refreshPending(); } },
+    }, [label]));
+  });
+  host.appendChild(seg);
+}
+
+/* ---------- pending changes bar ---------- */
+function relTime(unixSec) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - unixSec));
+  if (s < 45) return "just now";
+  if (s < 3600) return Math.max(1, Math.round(s / 60)) + " min ago";
+  if (s < 86400) return Math.round(s / 3600) + " h ago";
+  return Math.round(s / 86400) + " d ago";
+}
+function diffCounts(text) {
+  let add = 0, del = 0;
+  (text || "").split("\n").forEach((l) => {
+    if (l.startsWith("+") && !l.startsWith("+++")) add++;
+    else if (l.startsWith("-") && !l.startsWith("---")) del++;
+  });
+  return { add, del };
+}
+function refreshPending() {
+  if (!DATA || DATA.needsInit || READONLY) { PENDING = null; renderPending(); return Promise.resolve(); }
+  return fetch(q("/api/diff") + "&scope=" + SCOPE)
+    .then((r) => r.json())
+    .then((d) => { PENDING = d; renderPending(); })
+    .catch(() => { PENDING = null; renderPending(); });
+}
+function refreshHistory() {
+  return fetch(q("/api/history"))
+    .then((r) => r.json())
+    .then((d) => { HISTORY = d.entries || []; HISTORY_LOADED = true; renderPending(); if (SECTION === "activity") show("activity"); })
+    .catch(() => {});
+}
+function lastApply() { return HISTORY.find((h) => !h.undone) || null; }
+
+function renderPending() {
+  const host = document.getElementById("pending");
+  if (!host) return;
+  host.innerHTML = "";
+  if (!DATA || DATA.needsInit || READONLY) return;
+  // An active session takes over the bar — end it to revert.
+  if (DATA.session) {
+    const s = DATA.session;
+    host.appendChild(el("div", { class: "pending-bar session" }, [
+      el("div", { class: "pleft" }, [
+        el("span", { class: "pdot session" }, []),
+        el("div", { style: "min-width:0" }, [
+          el("div", { class: "ptitle" }, ["Session active · " + s.profile]),
+          el("div", { class: "muted", style: "font-size:12px" }, [s.scope + " scope" + (s.plugin ? " · plugin " + s.plugin : "") + " · reverts when you end it"]),
+        ]),
+      ]),
+      el("div", { class: "row-actions" }, [btn("End session", endSession, "primary")]),
+    ]));
+    return;
+  }
+  const changed = ((PENDING && PENDING.targets) || []).filter((t) => t.changed);
+  if (changed.length) {
+    const chips = changed.slice(0, 6).map((t) => {
+      const c = diffCounts(t.diff);
+      return el("span", { class: "pchip" }, [
+        el("span", { class: "name" }, [t.display]),
+        c.add ? el("span", { class: "padd" }, ["+" + c.add]) : null,
+        c.del ? el("span", { class: "pdel" }, ["−" + c.del]) : null,
+      ]);
+    });
+    const extra = changed.length - chips.length;
+    if (extra > 0) chips.push(el("span", { class: "pchip muted" }, ["+" + extra + " more"]));
+    host.appendChild(el("div", { class: "pending-bar" }, [
+      el("div", { class: "pleft" }, [
+        el("span", { class: "pdot warn" }, []),
+        el("div", { style: "min-width:0" }, [
+          el("div", { class: "ptitle" }, [plural(changed.length, "pending change")]),
+          el("div", { class: "muted", style: "font-size:12px" }, ["Not yet written to your tools · " + SCOPE + " scope"]),
+        ]),
+      ]),
+      el("div", { class: "pchips" }, chips),
+      el("div", { class: "row-actions" }, [
+        btn("Review & apply →", () => openPreview(SCOPE), "primary"),
+      ]),
+    ]));
+    return;
+  }
+  const last = lastApply();
+  if (last) {
+    host.appendChild(el("div", { class: "pending-bar quiet" }, [
+      el("div", { class: "pleft" }, [
+        el("span", { class: "pdot ok" }, []),
+        el("div", { style: "min-width:0" }, [
+          el("div", { class: "ptitle" }, ["Applied " + relTime(last.timeUnix)]),
+          el("div", { class: "muted", style: "font-size:12px" }, [last.summary]),
+        ]),
+      ]),
+      el("div", { class: "row-actions" }, [
+        btn("Undo", () => undoApply(last.id)),
+        btn("Activity", () => show("activity")),
+      ]),
+    ]));
+  }
+}
+function undoApply(id) {
+  if (!confirm("Undo this apply? Your tools' config files are restored to before it. Your saved stack is unchanged, so the changes will show as pending again.")) return;
+  return fetch(q("/api/undo"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) })
+    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || d.error) throw new Error(d.error || "undo failed");
+      toast("Reverted ✓", true);
+      return load().then(refreshHistory);
+    })
+    .catch((e) => toast("Undo: " + e.message, false));
+}
+
+/* ---------- command palette (⌘K) ---------- */
+function openPalette() {
+  if (!DATA || DATA.needsInit) return;
+  const items = [];
+  SECTIONS.forEach((s) => items.push({ label: s.label, hint: "go to", run: () => show(s.id) }));
+  (DATA.servers || []).forEach((s) => items.push({ label: s.name, hint: "server", run: () => { OPEN_SERVER = s.name; show("servers"); } }));
+  (DATA.skills || []).forEach((s) => items.push({ label: s.name, hint: "skill", run: () => show("skills") }));
+  (DATA.settingsAdapters || []).forEach((a) => items.push({ label: a.display + " settings", hint: "settings", run: () => show("settings") }));
+
+  const input = el("input", { class: "inp", placeholder: "Jump to a section, server, skill…", style: "width:100%;height:40px" });
+  const list = el("div", { class: "cmd-list" });
+  let active = 0;
+  function draw() {
+    const term = input.value.trim().toLowerCase();
+    const matches = items.filter((it) => it.label.toLowerCase().includes(term)).slice(0, 40);
+    active = Math.max(0, Math.min(active, matches.length - 1));
+    list.innerHTML = "";
+    matches.forEach((it, i) => list.appendChild(el("div", {
+      class: "cmd-item" + (i === active ? " active" : ""),
+      onclick: () => { closeModal(); it.run(); },
+    }, [el("span", null, [it.label]), el("span", { class: "k" }, [it.hint])])));
+    if (!matches.length) list.appendChild(el("div", { class: "empty", style: "padding:12px" }, ["No matches."]));
+    list._matches = matches;
+  }
+  input.addEventListener("input", draw);
+  input.addEventListener("keydown", (e) => {
+    const m = list._matches || [];
+    if (e.key === "ArrowDown") { active = Math.min(active + 1, m.length - 1); draw(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { active = Math.max(active - 1, 0); draw(); e.preventDefault(); }
+    else if (e.key === "Enter") { if (m[active]) { closeModal(); m[active].run(); } }
+    else if (e.key === "Escape") closeModal();
+  });
+  const modal = el("div", { class: "modal cmd" }, [el("div", { class: "mbd" }, [input, list])]);
+  document.getElementById("modal").appendChild(el("div", { class: "overlay top", onclick: (e) => e.target.classList.contains("overlay") && closeModal() }, [modal]));
+  draw();
+  setTimeout(() => input.focus(), 0);
+}
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); openPalette(); }
+});
+
+/* ---------- activity (apply history + undo) ---------- */
+function activity(c) {
+  c.appendChild(pageHead("Activity", "Every apply is backed up here — restore your tools to how they were before any change."));
+  if (!HISTORY.length) {
+    c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, ["No applies yet. When you apply changes they show up here, each with an undo."])])]));
+    if (!HISTORY_LOADED) refreshHistory();
+    return;
+  }
+  const rows = HISTORY.map((h) => el("div", { class: "list-row", style: "align-items:flex-start" }, [
+    el("span", { style: "min-width:0" }, [
+      el("span", { class: "name" }, ["Applied " + relTime(h.timeUnix)]),
+      el("span", { class: "k" }, [h.scope + " scope"]),
+      el("div", { class: "muted", style: "font-size:12px;margin-top:2px" }, [h.summary]),
+      el("details", { style: "margin-top:4px" }, [
+        el("summary", { class: "muted", style: "font-size:12px;cursor:pointer" }, [plural(h.files.length, "file") + " changed"]),
+        el("div", { class: "muted mono", style: "font-size:11px;margin-top:6px" }, h.files.map((f) => el("div", null, [f.label + " · " + f.path]))),
+      ]),
+    ]),
+    el("span", { class: "row-actions" }, [
+      h.undone ? badge("undone", "") : READONLY ? null : btn("Undo", () => undoApply(h.id)),
+    ]),
+  ]));
+  c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, rows)]));
 }
 
 /* ---------- discover (browse providers → add) ---------- */
@@ -117,6 +333,12 @@ function doDiscoverSearch(query) {
     });
 }
 
+function addToStack(r) {
+  const targets = DATA.meta.defaultTargets || [];
+  const where = targets.length ? targets.join(", ") : "your default tools";
+  if (!confirm(`Add "${r.name}" to your stack?\n\nIt'll be enabled for: ${where}.\nNothing is written to your tools until you review and apply.`)) return;
+  return addFrom(r.addId);
+}
 function addFrom(id) {
   return fetch(q("/api/add_from"), {
     method: "POST",
@@ -126,7 +348,7 @@ function addFrom(id) {
     .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
     .then(({ ok, d }) => {
       if (!ok || d.error) throw new Error(d.error || "add failed");
-      toast("Added ✓ — review secrets, then apply", true);
+      toast("Added ✓ — review it in the pending changes bar, then apply", true);
       return load().then(() => doDiscoverSearch(DISCOVER.q));
     })
     .catch((e) => toast("Add: " + e.message, false));
@@ -141,7 +363,7 @@ function trustBadges(t) {
 }
 
 function discover(c) {
-  c.appendChild(pageHead("Discover", "Search the catalog + official MCP Registry, then add — it renders to all your CLIs on apply."));
+  c.appendChild(pageHead("Discover", "Find a capability and add it to your stack in one step. It's enabled for your default tools and shows up as a pending change to review before anything is written."));
 
   const input = el("input", { class: "inp", placeholder: "search capabilities…", style: "width:280px", value: DISCOVER.q });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") doDiscoverSearch(input.value.trim()); });
@@ -156,7 +378,7 @@ function discover(c) {
     el("div", { class: "list-row" }, [el("span", { class: "name" }, [s.name]), badge(s.type, "solid")])
   );
   if (!stackRows.length) stackRows.push(el("div", { class: "empty" }, ["Nothing added yet."]));
-  const right = el("div", { class: "card" }, [el("div", { class: "hd" }, ["Your stack", el("small", null, [`${DATA.servers.length} server(s)`])]), el("div", { class: "bd" }, stackRows)]);
+  const right = el("div", { class: "card" }, [el("div", { class: "hd" }, ["Your stack", el("small", null, [plural(DATA.servers.length, "server")])]), el("div", { class: "bd" }, stackRows)]);
 
   c.appendChild(el("div", { class: "grid", style: "grid-template-columns: 1.5fr 1fr; align-items:start" }, [left, right]));
 }
@@ -173,7 +395,7 @@ function resultsBody() {
         ? badge("in stack", "green")
         : READONLY
         ? null
-        : btn("add ›", () => addFrom(r.addId), "primary"),
+        : btn("Add to stack", () => addToStack(r), "primary"),
     ]);
     const meta = el("div", { class: "muted", style: "font-size:12px;margin:2px 0 6px" }, [r.description || r.id]);
     const trust = el("div", { class: "row-actions", style: "margin-bottom:6px" }, trustBadges(r.trust));
@@ -185,12 +407,16 @@ function resultsBody() {
 function pageHead(title, sub) {
   return el("div", null, [el("h1", { class: "page-title" }, [title]), sub ? el("p", { class: "page-sub" }, [sub]) : null]);
 }
-function statCard(label, value, sub) {
-  return el("div", { class: "card stat" }, [
+function statCard(label, value, sub, section) {
+  const attrs = { class: "card stat" + (section ? " clickable" : "") };
+  if (section) { attrs.role = "button"; attrs.tabIndex = 0; attrs.onclick = () => show(section); }
+  const card = el("div", attrs, [
     el("div", { class: "label" }, [label]),
     el("div", { class: "value" }, [String(value)]),
     el("div", { class: "sub" }, [sub || " "]),
   ]);
+  if (section) card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); show(section); } });
+  return card;
 }
 
 /* ---------- overview ---------- */
@@ -202,10 +428,10 @@ function overview(c) {
   const warns = d.health.filter((h) => h.level === "warn").length;
   c.appendChild(pageHead("Overview", d.meta.dir));
   c.appendChild(el("div", { class: "grid cols-4" }, [
-    statCard("Harnesses", installed, `${d.adapters.length} known`),
-    statCard("Servers", d.servers.length, "MCP"),
-    statCard("Skills", d.skills.length, `${d.skills.filter((s) => s.installed).length} installed`),
-    statCard("Health", errs ? `${errs} error` : warns ? `${warns} warning` : "Ready", `${secretsOk}/${d.secrets.length} secret(s) resolved`),
+    statCard("Tools", installed, `${d.adapters.length} known`, "health"),
+    statCard("Servers", d.servers.length, "MCP", "servers"),
+    statCard("Skills", d.skills.length, `${d.skills.filter((s) => s.installed).length} installed`, "skills"),
+    statCard("Health", errs ? `${errs} error` : warns ? `${warns} warning` : "Ready", `${secretsOk}/${d.secrets.length} secrets resolved`, "health"),
   ]));
 
   c.appendChild(el("div", { class: "overview-grid" }, [
@@ -214,7 +440,7 @@ function overview(c) {
   ]));
 
   c.appendChild(el("div", { class: "section-title" }, ["Health"]));
-  const hsum = errs ? badge(`${errs} error(s)`, "red") : warns ? badge(`${warns} warning(s)`, "amber") : badge("all good", "green");
+  const hsum = errs ? badge(plural(errs, "error"), "red") : warns ? badge(plural(warns, "warning"), "amber") : badge("all good", "green");
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [
     el("div", { style: "margin-bottom:8px" }, [hsum]),
     ...d.health.slice(0, 5).map(healthRow),
@@ -233,13 +459,12 @@ function nextActionsCard() {
   }
   if (!READONLY) {
     body.push(el("div", { class: "toolbar tight", style: "margin-top:12px" }, [
-      btn("Preview global", () => openPreview("global"), "primary"),
-      btn("Preview all targets", () => openPreview("global", true)),
-      btn("Preview project", () => openPreview("project")),
+      btn("Review & apply →", () => openPreview(SCOPE), "primary"),
+      btn("Review all tools", () => openPreview(SCOPE, true)),
     ]));
   }
   return el("div", { class: "card" }, [
-    el("div", { class: "hd" }, ["Next actions", el("small", null, [actions.length ? `${actions.length} open item(s)` : "No blocking work detected"])]),
+    el("div", { class: "hd" }, ["Next actions", el("small", null, [actions.length ? plural(actions.length, "open item") : "No blocking work detected"])]),
     el("div", { class: "bd" }, body),
   ]);
 }
@@ -266,12 +491,12 @@ function stackSummaryCard(installed) {
   const plugins = DATA.pluginRecipes || [];
   const readyPlugins = plugins.filter((r) => recipeReady(r)).length;
   return el("div", { class: "card" }, [
-    el("div", { class: "hd" }, ["Stack summary", el("small", null, [`${installed} detected harness(es)`])]),
+    el("div", { class: "hd" }, ["Stack summary", el("small", null, [plural(installed, "detected harness", "detected harnesses")])]),
     el("div", { class: "bd" }, [
       summaryLine("Default targets", targets),
       summaryLine("Plugin recipes", `${readyPlugins}/${plugins.length} ready`),
-      summaryLine("Instructions", `${DATA.instructions.length} fragment(s)`),
-      summaryLine("Hooks", `${(DATA.hooks || []).length} hook(s)`),
+      summaryLine("Instructions", plural(DATA.instructions.length, "fragment")),
+      summaryLine("Hooks", plural((DATA.hooks || []).length, "hook")),
       summaryLine("Mode", READONLY ? "read-only" : "read-write"),
     ]),
   ]);
@@ -286,14 +511,86 @@ function summaryLine(label, value) {
 
 function profilesCard() {
   const rows = DATA.profiles.map((p) => {
-    const meta = el("span", { class: "muted" }, [`${p.servers.length} server(s) · ${p.skills.length} skill(s)`]);
-    return el("div", { class: "list-row" }, [
-      el("span", { class: "name" }, [p.name]),
-      READONLY ? meta : el("span", { class: "row-actions" }, [meta, btn("activate ›", () => post("/api/use", { profile: p.name, scope: "global" }, "Activate " + p.name))]),
-    ]);
+    const meta = el("span", { class: "muted", style: "font-size:12px" }, [`${plural(p.servers.length, "server")} · ${plural(p.skills.length, "skill")}`]);
+    const actions = READONLY
+      ? [meta]
+      : [
+          meta,
+          btn("Start session", () => openSessionModal(p.name)),
+          btn(`Activate (${SCOPE})`, () => post("/api/use", { profile: p.name, scope: SCOPE }, "Activate " + p.name)),
+        ];
+    return el("div", { class: "list-row" }, [el("span", { class: "name" }, [p.name]), el("span", { class: "row-actions" }, actions)]);
   });
-  if (!rows.length) rows.push(el("div", { class: "empty" }, ["No profiles defined."]));
-  return el("div", { class: "card" }, [el("div", { class: "hd" }, ["Profiles"]), el("div", { class: "bd" }, rows)]);
+  if (!rows.length) rows.push(el("div", { class: "empty" }, ["No profiles yet. Create one to load a set of skills and servers together."]));
+  const hd = ["Profiles"];
+  if (!READONLY) {
+    hd.push(el("span", { style: "margin-left:auto;display:flex;gap:8px" }, [
+      btn("+ New profile", openProfileForm),
+      DATA.profiles.length ? btn("Start session", () => openSessionModal(null), "primary") : null,
+    ]));
+  }
+  return el("div", { class: "card" }, [el("div", { class: "hd", style: "display:flex;align-items:center" }, hd), el("div", { class: "bd" }, rows)]);
+}
+
+/* ---------- sessions ---------- */
+function endSession() {
+  if (!confirm("End the session? This reverts the loaded skills, servers, and plugin to how they were when you started it.")) return;
+  return post("/api/session_end", {}, "Session ended");
+}
+function openSessionModal(preselect) {
+  const profiles = DATA.profiles || [];
+  if (!profiles.length) { toast("Create a profile first", false); return openProfileForm(); }
+  const profSel = el("select", { class: "inp", style: "height:32px;width:100%" }, profiles.map((p) => el("option", { value: p.name }, [p.name])));
+  if (preselect) profSel.value = preselect;
+  const scopeSel = el("select", { class: "inp", style: "height:32px;width:100%" }, [
+    el("option", { value: "project" }, ["project — this repo only"]),
+    el("option", { value: "global" }, ["global — everywhere"]),
+  ]);
+  const recipes = DATA.pluginRecipes || [];
+  const plugSel = el("select", { class: "inp", style: "height:32px;width:100%" }, [
+    el("option", { value: "" }, ["(no plugin)"]),
+    ...recipes.map((r) => el("option", { value: r.name }, [r.display || r.name])),
+  ]);
+  const row = (label, node) => el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:10px" }, [el("label", { class: "muted", style: "width:64px;font-size:12px" }, [label]), node]);
+  const body = el("div", { class: "mbd" }, [
+    el("div", { class: "muted", style: "font-size:12px;margin-bottom:12px" }, ["Loads the profile (and an optional plugin) now. Ending the session reverts everything to how it is right now."]),
+    row("Profile", profSel), row("Scope", scopeSel), row("Plugin", plugSel),
+  ]);
+  const footer = el("div", { class: "mft" }, [
+    btn("Cancel", closeModal),
+    btn("Start session", () => {
+      const b = { profile: profSel.value, scope: scopeSel.value };
+      if (plugSel.value) b.plugin = plugSel.value;
+      closeModal();
+      post("/api/session_start", b, "Session started");
+    }, "primary"),
+  ]);
+  const modal = el("div", { class: "modal" }, [el("div", { class: "mhd" }, [el("span", null, ["Start a session"]), btn("✕", closeModal, "icon")]), body, footer]);
+  document.getElementById("modal").appendChild(el("div", { class: "overlay", onclick: (e) => e.target.classList.contains("overlay") && closeModal() }, [modal]));
+}
+function openProfileForm() {
+  const nameInp = el("input", { class: "inp", placeholder: "e.g. review-mode", style: "width:100%" });
+  const skillChecks = checkboxList("pf-skill", DATA.skills || [], "No skills in your stack yet.");
+  const serverChecks = checkboxList("pf-server", DATA.servers || [], "No servers in your stack yet.");
+  const body = el("div", { class: "mbd" }, [
+    el("div", { style: "margin-bottom:6px" }, [el("label", { class: "muted", style: "font-size:12px" }, ["Name"]), nameInp]),
+    el("div", { class: "section-title", style: "margin:14px 0 6px" }, ["Skills"]),
+    el("div", null, skillChecks),
+    el("div", { class: "section-title", style: "margin:14px 0 6px" }, ["Servers"]),
+    el("div", null, serverChecks),
+  ]);
+  const footer = el("div", { class: "mft" }, [
+    btn("Cancel", closeModal),
+    btn("Create profile", () => {
+      const name = nameInp.value.trim();
+      if (!name) return toast("Name is required", false);
+      const checked = (n) => Array.from(document.querySelectorAll(`input[name="${n}"]:checked`)).map((x) => x.value);
+      closeModal();
+      post("/api/add_profile", { name, skills: checked("pf-skill"), servers: checked("pf-server") }, "Profile created");
+    }, "primary"),
+  ]);
+  const modal = el("div", { class: "modal" }, [el("div", { class: "mhd" }, [el("span", null, ["New profile"]), btn("✕", closeModal, "icon")]), body, footer]);
+  document.getElementById("modal").appendChild(el("div", { class: "overlay", onclick: (e) => e.target.classList.contains("overlay") && closeModal() }, [modal]));
 }
 function usageCard() {
   const max = Math.max(1, ...DATA.stats.map((s) => s.activations));
@@ -310,7 +607,7 @@ function usageCard() {
 
 /* ---------- servers (matrix + detail) ---------- */
 function toggleCell(serverName, target, currentlyOn) {
-  return post("/api/toggle", { server: serverName, target, scope: "global", enable: !currentlyOn },
+  return post("/api/toggle", { server: serverName, target, scope: SCOPE, enable: !currentlyOn },
     (currentlyOn ? "Disabled " : "Enabled ") + serverName);
 }
 
@@ -360,11 +657,39 @@ function addServerCard() {
   ]);
 }
 
+// One matrix cell shared by the servers & skills tables. When `onToggle` is
+// given it's a real keyboard-operable toggle (role=button, aria-pressed);
+// otherwise it carries an aria-label so the ✓/– glyph isn't the only signal.
+function statusCell(cell, opts) {
+  const tag = cell.global && cell.project ? "both" : cell.global ? "global" : cell.project ? "project" : "";
+  const on = cell.global || cell.project;
+  const stateText = on ? (tag ? "enabled · " + tag : "enabled") : "disabled";
+  const inner = [el("div", { class: on ? "on" : "off" }, [on ? "✓" : "–"]), tag ? el("div", { class: "sc" }, [tag]) : null];
+  const td = el("td", { class: "cell" }, inner);
+  if (opts.onToggle) {
+    const here = SCOPE === "project" ? cell.project : cell.global;
+    const verb = here ? "Disable " : "Enable ";
+    td.setAttribute("role", "button");
+    td.tabIndex = 0;
+    td.setAttribute("aria-pressed", String(!!here));
+    td.setAttribute("aria-label", verb + opts.label + " (" + SCOPE + " scope)");
+    td.style.cursor = "pointer";
+    td.title = verb.toLowerCase() + opts.label + " (" + SCOPE + ")";
+    const fire = (e) => { e.stopPropagation(); e.preventDefault(); opts.onToggle(); };
+    td.addEventListener("click", fire);
+    td.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") fire(e); });
+  } else {
+    td.setAttribute("aria-label", opts.label + ": " + stateText);
+    if (opts.disabledTitle) td.title = opts.disabledTitle;
+  }
+  return td;
+}
+
 function servers(c) {
   const d = DATA;
   // Only CLIs that actually support MCP get a column (Pi, etc. have none).
   const cols = d.adapters.filter((a) => a.mcp !== false);
-  c.appendChild(pageHead("Servers", "Click a cell to enable/disable a server for that CLI (global scope). Click a row name for its config."));
+  c.appendChild(pageHead("Servers", "Turn a server on or off for each tool. Click a name to see its config. Changes apply to the scope selected up top."));
   if (!READONLY) {
     c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
       btn(ADD_FORM ? "Close" : "+ Add MCP server", () => { ADD_FORM = !ADD_FORM; show("servers"); }, "primary"),
@@ -385,22 +710,16 @@ function servers(c) {
     ]);
     cols.forEach((a) => {
       const cell = s.cells.find((x) => x.adapter === a.id) || {};
-      const tag = cell.global && cell.project ? "both" : cell.global ? "global" : cell.project ? "project" : "";
-      const on = cell.global || cell.project;
-      const inner = [el("div", { class: on ? "on" : "off" }, [on ? "✓" : "–"]), tag ? el("div", { class: "sc" }, [tag]) : null];
-      const td = el("td", { class: "cell" }, inner);
-      if (!READONLY) {
-        td.style.cursor = "pointer";
-        td.title = `${cell.global ? "disable" : "enable"} ${s.name} for ${a.display} (global)`;
-        td.addEventListener("click", (e) => { e.stopPropagation(); toggleCell(s.name, a.id, !!cell.global); });
-      }
-      tr.appendChild(td);
+      tr.appendChild(statusCell(cell, {
+        label: `${s.name} for ${a.display}`,
+        onToggle: READONLY ? null : () => toggleCell(s.name, a.id, SCOPE === "project" ? !!cell.project : !!cell.global),
+      }));
     });
     tr.appendChild(el("td", null, [badge(s.type, "solid")]));
     body.appendChild(tr);
     if (OPEN_SERVER === s.name) body.appendChild(serverDetail(s, cols.length + 2));
   });
-  c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("table", null, [el("thead", null, [head]), body])])]));
+  c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])])])]));
 }
 
 function serverDetail(s, span) {
@@ -417,7 +736,7 @@ function serverDetail(s, span) {
 
 /* ---------- skills ---------- */
 function toggleSkillCell(skillName, target, currentlyOn) {
-  return post("/api/toggle_skill", { skill: skillName, target, scope: "global", enable: !currentlyOn },
+  return post("/api/toggle_skill", { skill: skillName, target, scope: SCOPE, enable: !currentlyOn },
     (currentlyOn ? "Disabled " : "Enabled ") + skillName);
 }
 
@@ -462,7 +781,7 @@ function addSkillCard() {
 }
 
 function skills(c) {
-  c.appendChild(pageHead("Skills", "Toggle a skill into each CLI's skills directory. A skill must be installed (in the store) before it can be enabled."));
+  c.appendChild(pageHead("Skills", "Turn a skill on or off for each tool. A skill must be installed before you can enable it."));
   const adapters = DATA.skillAdapters || [];
 
   if (!READONLY) {
@@ -489,23 +808,16 @@ function skills(c) {
     ]);
     adapters.forEach((a) => {
       const cell = (s.cells || []).find((x) => x.adapter === a.id) || {};
-      const tag = cell.global && cell.project ? "both" : cell.global ? "global" : cell.project ? "project" : "";
-      const on = cell.global || cell.project;
-      const inner = [el("div", { class: on ? "on" : "off" }, [on ? "✓" : "–"]), tag ? el("div", { class: "sc" }, [tag]) : null];
-      const td = el("td", { class: "cell" }, inner);
-      if (!READONLY && s.installed) {
-        td.style.cursor = "pointer";
-        td.title = `${cell.global ? "disable" : "enable"} ${s.name} for ${a.display} (global)`;
-        td.addEventListener("click", (e) => { e.stopPropagation(); toggleSkillCell(s.name, a.id, !!cell.global); });
-      } else if (!READONLY) {
-        td.title = "install the skill first to enable it";
-      }
-      tr.appendChild(td);
+      tr.appendChild(statusCell(cell, {
+        label: `${s.name} for ${a.display}`,
+        onToggle: !READONLY && s.installed ? () => toggleSkillCell(s.name, a.id, SCOPE === "project" ? !!cell.project : !!cell.global) : null,
+        disabledTitle: !READONLY && !s.installed ? "install the skill first to enable it" : null,
+      }));
     });
     tr.appendChild(el("td", null, [s.installed ? badge("installed", "green") : badge("not installed", "amber")]));
     body.appendChild(tr);
   });
-  c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("table", null, [el("thead", null, [head]), body])])]));
+  c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])])])]));
 
   // Skills present on disk in your CLIs but not yet in the manifest. Every entry
   // is shown — valid ones are adoptable; broken/non-skill ones show a status.
@@ -515,7 +827,7 @@ function skills(c) {
     const hd = ["Detected on disk", el("small", null, [`${found.length} found · ${adoptable.length} manageable`])];
     if (!READONLY && adoptable.length) hd.push(el("span", { style: "margin-left:auto;display:flex;gap:8px" }, [
       btn("Move all into agentstack", () => {
-        if (confirm("Move " + adoptable.length + " skill folder(s) into ~/.agentstack/skills/ and replace the originals with symlinks? Your agents keep working in place; a backup is kept.")) post("/api/consolidate_skills", {}, "Consolidate skills");
+        if (confirm("Move " + plural(adoptable.length, "skill folder") + " into ~/.agentstack/skills/ and replace the originals with symlinks? Your agents keep working in place; a backup is kept.")) post("/api/consolidate_skills", {}, "Consolidate skills");
       }, "primary"),
       btn("Adopt all in place", () => post("/api/adopt_all_skills", {}, "Adopt skills")),
     ]));
@@ -589,16 +901,16 @@ function initialFor(f) {
 }
 
 function settings(c) {
-  c.appendChild(pageHead("Settings", "Shows each CLI's current settings by default (read from its real settings file). Adjust what you want, then Save to let agentstack manage it — Apply renders it back. Keys you don't manage are left untouched."));
+  c.appendChild(pageHead("Settings", "Shows each tool's current settings, read from its real config file. Adjust what you want, then Save to let agentstack manage it — Apply writes it back to your tools. Keys you don't manage are left untouched."));
   const adapters = DATA.settingsAdapters || [];
   if (!adapters.length) {
     c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, ["No CLIs with a managed settings file yet."])])]));
     return;
   }
-  adapters.forEach((a) => c.appendChild(settingsCard(a)));
+  adapters.forEach((a, i) => c.appendChild(settingsCard(a, i === 0)));
 }
 
-function settingsCard(a) {
+function settingsCard(a, open) {
   // Default to the CLI's live settings file, with manifest-managed keys
   // overriding (top-level ownership) — so the panel reflects reality without a
   // manual import. Save persists the draft to the manifest.
@@ -648,8 +960,14 @@ function settingsCard(a) {
     ]));
   }
 
-  return el("div", { class: "card", style: "margin-bottom:16px" }, [
-    el("div", { class: "hd" }, [a.display, el("small", null, [a.id === "codex" ? "config.toml" : "settings.json"])]),
+  const managedCount = Object.keys(a.current || {}).length;
+  const attrs = { class: "card acc", style: "margin-bottom:12px" };
+  if (open) attrs.open = "";
+  return el("details", attrs, [
+    el("summary", { class: "hd acc-sum" }, [
+      el("span", null, [a.display, el("small", { style: "display:inline;margin-left:8px" }, [a.id === "codex" ? "config.toml" : "settings.json"])]),
+      managedCount ? badge(plural(managedCount, "managed key"), "solid") : el("span", { class: "muted", style: "font-size:12px" }, ["not managed yet"]),
+    ]),
     el("div", { class: "bd" }, body),
   ]);
 }
@@ -962,7 +1280,7 @@ function plugins(c) {
   const rrows = recipes.map(recipeCard);
   if (!rrows.length) rrows.push(el("div", { class: "empty" }, ["No managed recipes. Add [plugins.*] to agentstack.toml."]));
   c.appendChild(el("div", { class: "card" }, [
-    el("div", { class: "hd" }, ["Managed recipes", el("small", null, [`${recipes.length} recipe(s)`])]),
+    el("div", { class: "hd" }, ["Managed recipes", el("small", null, [plural(recipes.length, "recipe")])]),
     el("div", { class: "bd" }, rrows),
   ]));
   c.appendChild(el("div", { class: "muted", style: "font-size:12px;margin:10px 0 4px" }, [
@@ -984,8 +1302,8 @@ function plugins(c) {
     ]),
   ]));
   if (!prows.length) prows.push(el("div", { class: "empty" }, ["No native plugins found."]));
-  c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
-    el("div", { class: "hd" }, ["Installed", el("small", null, [`${list.length} plugin(s)`])]),
+  c.appendChild(el("details", { class: "card acc", style: "margin-top:16px" }, [
+    el("summary", { class: "hd acc-sum" }, ["Installed", el("small", { style: "display:inline" }, [plural(list.length, "plugin")])]),
     el("div", { class: "bd" }, prows),
   ]));
 
@@ -994,8 +1312,8 @@ function plugins(c) {
     el("span", { class: "muted mono", style: "font-size:12px" }, [m.source]),
   ]));
   if (!mrows.length) mrows.push(el("div", { class: "empty" }, ["No marketplaces."]));
-  c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
-    el("div", { class: "hd" }, ["Marketplaces", el("small", null, [`${markets.length}`])]),
+  c.appendChild(el("details", { class: "card acc", style: "margin-top:16px" }, [
+    el("summary", { class: "hd acc-sum" }, ["Marketplaces", el("small", { style: "display:inline" }, [`${markets.length}`])]),
     el("div", { class: "bd" }, mrows),
   ]));
 
@@ -1009,8 +1327,8 @@ function plugins(c) {
     el("span", { class: "row-actions" }, [e.broken ? badge("broken link", "red") : badge(e.scope || "global", "solid"), badge(e.kind, "")]),
   ]));
   if (!erows.length) erows.push(el("div", { class: "empty" }, ["No extensions installed (e.g. Pi's ~/.pi/agent/extensions is empty)."]));
-  c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
-    el("div", { class: "hd" }, ["Extensions", el("small", null, [`${exts.length} · Pi TypeScript add-ons`])]),
+  c.appendChild(el("details", { class: "card acc", style: "margin-top:16px" }, [
+    el("summary", { class: "hd acc-sum" }, ["Extensions", el("small", { style: "display:inline" }, [`${exts.length} · Pi TypeScript add-ons`])]),
     el("div", { class: "bd" }, erows),
   ]));
 
@@ -1018,8 +1336,8 @@ function plugins(c) {
   const input = el("input", { class: "inp", placeholder: "search Pi packages…", style: "width:280px", value: PI_MARKET.q });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") doPiSearch(input.value.trim()); });
   const results = el("div", null, [piMarketBody()]);
-  c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
-    el("div", { class: "hd" }, ["Pi marketplace", el("small", null, ["pi.dev/packages · npm keyword pi-package"])]),
+  c.appendChild(el("details", { class: "card acc", style: "margin-top:16px" }, [
+    el("summary", { class: "hd acc-sum" }, ["Pi marketplace", el("small", { style: "display:inline" }, ["pi.dev/packages · npm keyword pi-package"])]),
     el("div", { class: "bd" }, [
       el("div", { class: "toolbar", style: "margin-bottom:10px" }, [input, btn("Search", () => doPiSearch(input.value.trim()), "primary"), btn("Browse popular", () => doPiSearch(""))]),
       results,
@@ -1099,7 +1417,7 @@ function healthRow(h) {
   return row;
 }
 function health(c) {
-  c.appendChild(pageHead("Health", "Adapters, secrets, and drift — the trust layer."));
+  c.appendChild(pageHead("Health", "Your tools, secrets, and what's out of sync."));
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, DATA.health.map(healthRow))]));
   if (!READONLY) {
     c.appendChild(el("div", { style: "margin-top:16px" }, [
@@ -1177,12 +1495,17 @@ function load() {
       if (data.needsInit) {
         document.getElementById("mode").textContent = "setup";
         document.getElementById("nav").innerHTML = "";
+        renderScopeSwitch();
+        renderPending();
         renderWelcome(data);
         return;
       }
       document.getElementById("mode").textContent = READONLY ? "read-only" : "read-write";
       renderNav();
+      renderScopeSwitch();
       show(SECTION);
+      refreshPending();
+      refreshHistory();
     })
     .catch((e) => {
       document.getElementById("dir").textContent = "—";
@@ -1211,6 +1534,40 @@ function renderWelcome(data) {
     el("div", { class: "bd" }, rows),
   ]));
 
+  // Where the tools disagree today — the reason to unify.
+  const mcpDetected = data.adapters.filter((a) => a.detected && a.mcp);
+  const union = data.serverUnion || [];
+  if (union.length && mcpDetected.length) {
+    const disagree = union.filter((name) => {
+      const have = mcpDetected.filter((a) => (a.servers || []).includes(name)).length;
+      return have > 0 && have < mcpDetected.length;
+    });
+    const head = el("tr", null, [el("th", null, ["server"])]);
+    mcpDetected.forEach((a) => head.appendChild(el("th", { class: "cell" }, [a.display])));
+    const body = el("tbody");
+    union.forEach((name) => {
+      const tr = el("tr", null, [el("td", null, [el("span", { class: "name" }, [name])])]);
+      mcpDetected.forEach((a) => {
+        const on = (a.servers || []).includes(name);
+        tr.appendChild(el("td", { class: "cell" }, [el("div", { class: on ? "on" : "off" }, [on ? "✓" : "–"])]));
+      });
+      body.appendChild(tr);
+    });
+    const note = disagree.length
+      ? badge(plural(disagree.length, "server") + " not in every tool", "amber")
+      : badge("your tools already agree", "green");
+    c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
+      el("div", { class: "hd", style: "display:flex;align-items:center;gap:10px" }, [
+        "What your tools have today",
+        el("small", null, [disagree.length ? "Initialize makes this one source of truth" : "Initialize brings them under one manifest"]),
+      ]),
+      el("div", { class: "bd" }, [
+        el("div", { style: "margin-bottom:10px" }, [note]),
+        el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])]),
+      ]),
+    ]));
+  }
+
   if (READONLY) {
     c.appendChild(el("div", { class: "muted", style: "margin-top:14px" }, ["Dashboard is read-only — run `agentstack init` in your terminal, or relaunch without --read-only."]));
     return;
@@ -1226,4 +1583,5 @@ function renderWelcome(data) {
 }
 
 document.getElementById("refresh").addEventListener("click", () => load());
+document.getElementById("palette-btn").addEventListener("click", () => openPalette());
 load();

@@ -102,6 +102,32 @@ fn route(
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
         }
+        (Method::Get, "/api/history") => {
+            if !authed {
+                return unauthorized();
+            }
+            // Metadata only — the captured file contents stay on disk, not on the wire.
+            let arr: Vec<Value> = crate::history::list()
+                .iter()
+                .map(|e| {
+                    serde_json::json!({
+                        "id": e.id,
+                        "timeUnix": e.time_unix,
+                        "scope": e.scope,
+                        "summary": e.summary,
+                        "targets": e.targets,
+                        "undone": e.undone,
+                        "files": e.files.iter().map(|f| serde_json::json!({
+                            "path": f.path, "label": f.label, "existed": f.before.is_some(),
+                        })).collect::<Vec<_>>(),
+                    })
+                })
+                .collect();
+            json(&serde_json::to_string(&serde_json::json!({ "entries": arr })).unwrap_or_default())
+        }
+        (Method::Post, "/api/undo") => mutation(authed, read_only, || {
+            crate::history::undo(&field(&parse(body), "id")?)
+        }),
         (Method::Get, "/api/search") => {
             if !authed {
                 return unauthorized();
@@ -188,6 +214,18 @@ fn route(
         }),
         (Method::Post, "/api/add_plugin_recipe") => mutation(authed, read_only, || {
             crate::dashboard::actions::add_plugin_recipe(dir, &parse(body)).map(|_| ())
+        }),
+        (Method::Post, "/api/add_profile") => mutation(authed, read_only, || {
+            crate::dashboard::actions::add_profile(dir, &parse(body)).map(|_| ())
+        }),
+        (Method::Post, "/api/session_start") => mutation(authed, read_only, || {
+            let v = parse(body);
+            let profile = field(&v, "profile")?;
+            let plugin = v.get("plugin").and_then(Value::as_str).filter(|s| !s.is_empty());
+            crate::session::start(dir, &profile, scope_of(body), plugin)
+        }),
+        (Method::Post, "/api/session_end") => mutation(authed, read_only, || {
+            crate::session::end(dir)
         }),
         (Method::Post, "/api/import_settings") => mutation(authed, read_only, || {
             let target = field(&parse(body), "target")?;

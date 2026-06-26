@@ -15,6 +15,16 @@ use crate::state::{target_key, State};
 use crate::store::{local_source_dir, Store};
 use crate::usage::Usage;
 
+/// Plural suffix: `""` for one, `"s"` otherwise. Keeps count strings
+/// grammatical (`1 target` / `2 targets`) without per-call branching.
+fn s(n: usize) -> &'static str {
+    if n == 1 {
+        ""
+    } else {
+        "s"
+    }
+}
+
 /// The state the dashboard loads: a full snapshot, or a "needs init" welcome
 /// payload when no manifest exists yet (so a brand-new user can start here).
 pub fn state(manifest_dir: Option<&Path>) -> Result<Value> {
@@ -32,17 +42,41 @@ pub fn state(manifest_dir: Option<&Path>) -> Result<Value> {
     Ok(v)
 }
 
-/// Pre-manifest welcome: which CLIs we detected, ready to import.
+/// Pre-manifest welcome: which CLIs we detected and, for each, the MCP servers
+/// it already has — so the UI can show where the CLIs disagree before unifying.
 fn welcome(dir: &Path) -> Result<Value> {
     let reg = crate::adapter::Registry::load()?;
+    let mut union: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let adapters: Vec<Value> = reg
         .iter()
         .map(|d| {
+            let detected = d.detected();
+            // Read each detected CLI's existing MCP servers (names only).
+            let servers: Vec<String> = if detected {
+                d.read_config_value()
+                    .ok()
+                    .flatten()
+                    .map(|v| {
+                        crate::adapter::extract_servers(d, &v)
+                            .into_iter()
+                            .map(|(name, _)| name)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            for s in &servers {
+                union.insert(s.clone());
+            }
             json!({
                 "id": d.id,
                 "display": d.display,
                 "installed": d.is_installed(),
                 "configPresent": d.config_present(),
+                "detected": detected,
+                "mcp": d.mcp.is_some(),
+                "servers": servers,
             })
         })
         .collect();
@@ -50,6 +84,7 @@ fn welcome(dir: &Path) -> Result<Value> {
         "needsInit": true,
         "meta": { "dir": dir.display().to_string(), "version": env!("CARGO_PKG_VERSION") },
         "adapters": adapters,
+        "serverUnion": union.into_iter().collect::<Vec<_>>(),
     }))
 }
 
@@ -456,6 +491,12 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "stats": stats,
         "health": health,
         "nextActions": next_actions,
+        "session": crate::session::active(&ctx.dir).map(|s| json!({
+            "profile": s.profile,
+            "scope": s.scope,
+            "startedUnix": s.started_unix,
+            "plugin": s.plugin,
+        })),
     }))
 }
 
@@ -626,7 +667,7 @@ fn health_checks(
         push(
             &mut out,
             "ok",
-            format!("{} secret(s) resolve", refs.len()),
+            format!("{} secret{} resolved", refs.len(), s(refs.len())),
             None,
         );
     } else {
@@ -634,8 +675,9 @@ fn health_checks(
             &mut out,
             "error",
             format!(
-                "{} secret(s) unresolved: {}",
+                "{} secret{} unresolved: {}",
                 unresolved.len(),
+                s(unresolved.len()),
                 unresolved
                     .iter()
                     .map(|s| s.as_str())
@@ -663,12 +705,12 @@ fn push_drift_health(
     // Drift (global scope), using the exact selected target set Preview shows.
     let drift = selected_global_drift.iter().filter(|t| t.changed).count();
     if drift == 0 {
-        push(out, "ok", "selected global configs in sync".into(), None);
+        push(out, "ok", "your tools are in sync".into(), None);
     } else {
         push(
             out,
             "warn",
-            format!("{drift} selected target(s) drifted (global) — Preview to reconcile"),
+            format!("{drift} selected target{} drifted (global) — Preview to reconcile", s(drift)),
             Some(json!({ "type": "preview", "scope": "global" })),
         );
     }
@@ -682,7 +724,8 @@ fn push_drift_health(
             out,
             "warn",
             format!(
-                "{extra_drift} installed non-default target(s) have renderable drift — preview all to reconcile"
+                "{extra_drift} installed non-default target{} with renderable drift — preview all to reconcile",
+                s(extra_drift)
             ),
             Some(json!({ "type": "preview", "scope": "global", "all": true })),
         );
@@ -721,8 +764,8 @@ fn next_actions(
         out.push(command_action(
             "drift:global".into(),
             "warn",
-            "Selected targets have drift".into(),
-            format!("{drift} global target(s) differ from the manifest render."),
+            "Your tools are out of sync".into(),
+            format!("{drift} tool{} out of sync with your saved stack — review and apply.", s(drift)),
             "health",
             "Preview changes",
             json!({ "type": "preview", "scope": "global" }),
@@ -739,7 +782,7 @@ fn next_actions(
             "skills:missing".into(),
             "warn",
             "Skill sources are not installed".into(),
-            format!("{} skill source(s) need install.", missing_skills.len()),
+            format!("{} skill source{} not installed.", missing_skills.len(), s(missing_skills.len())),
             "skills",
             "Install skills",
             json!({ "type": "post", "path": "/api/install", "label": "Install" }),
@@ -810,7 +853,7 @@ fn next_actions(
                 format!("plugin:{name}:missing-skills"),
                 "warn",
                 format!("{name} recipe needs skill sources"),
-                format!("{missing} skill source(s) must be installed before sync."),
+                format!("{missing} skill source{} must be installed before sync.", s(missing)),
                 "plugins",
                 "Install skills",
                 json!({ "type": "post", "path": "/api/install", "label": "Install" }),
@@ -980,13 +1023,13 @@ mod tests {
             .iter()
             .filter_map(|row| row.get("message").and_then(Value::as_str))
             .collect();
-        assert!(messages.contains(&"selected global configs in sync"));
+        assert!(messages.contains(&"your tools are in sync"));
         assert!(messages
             .iter()
-            .any(|msg| msg.contains("2 installed non-default target(s)")));
+            .any(|msg| msg.contains("2 installed non-default targets")));
         assert!(!messages
             .iter()
-            .any(|msg| msg.contains("2 selected target(s) drifted")));
+            .any(|msg| msg.contains("2 selected targets drifted")));
     }
 
     #[test]

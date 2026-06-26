@@ -16,14 +16,17 @@
       </div>
     </div>
     <div class="top-right">
+      <span id="scope-switch"></span>
+      <button class="btn icon" id="palette-btn" title="Search (⌘K)" aria-label="Search">⌘K</button>
       <span class="ro-badge" id="mode">…</span>
       <button class="btn icon" id="refresh" title="Refresh"><span>⟳</span></button>
     </div>
   </div>
   <div class="layout">
     <nav class="sidebar" id="nav"></nav>
-    <main class="content" id="content"><p class="muted">Loading snapshot…</p></main>
+    <main class="content" id="content"><p class="muted">Loading…</p></main>
   </div>
+  <div id="pending"></div>
   <div id="modal"></div>
   <script src="/app.js"></script>
 </body>

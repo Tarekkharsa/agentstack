@@ -193,7 +193,7 @@ pub fn build_manifest_with(
 }
 
 /// Append `name` to `profiles.<profile>.<field>` (creating the array if needed).
-fn add_to_profile(text: &str, profile: &str, field: &str, name: &str) -> Result<String> {
+pub fn add_to_profile(text: &str, profile: &str, field: &str, name: &str) -> Result<String> {
     use toml_edit::{Item, Table};
     let mut doc: DocumentMut = text.parse().context("parsing manifest as TOML")?;
 

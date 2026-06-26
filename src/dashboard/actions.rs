@@ -58,8 +58,9 @@ pub fn toggle(
 
     // Never write an unresolved `${REF}` into a live config.
     if !plan.unresolved.is_empty() {
+        let suffix = if plan.unresolved.len() == 1 { "" } else { "s" };
         anyhow::bail!(
-            "unresolved secret(s): {} — set them under Secrets first",
+            "unresolved secret{suffix}: {} — set them under Secrets first",
             plan.unresolved.join(", ")
         );
     }
@@ -262,6 +263,54 @@ pub fn add_hook(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
     toml::from_str::<crate::manifest::Manifest>(&new_text)
         .context("resulting manifest would be invalid")?;
     crate::util::atomic::write(&manifest_path, &new_text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    Ok(name.to_string())
+}
+
+/// Create a profile (a named bundle of servers + skills) in the manifest.
+pub fn add_profile(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
+    let name = args
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("profile name is required")?;
+    let names = |key: &str| -> Vec<String> {
+        args.get(key)
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
+    let servers = names("servers");
+    let skills = names("skills");
+    if servers.is_empty() && skills.is_empty() {
+        anyhow::bail!("pick at least one skill or server for the profile");
+    }
+
+    let dir = match manifest_dir {
+        Some(d) => d.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    let manifest_path = dir.join(crate::manifest::load::MANIFEST_FILE);
+    let original = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let parsed: crate::manifest::Manifest =
+        toml::from_str(&original).context("parsing manifest")?;
+    if parsed.profiles.contains_key(name) {
+        anyhow::bail!("profile '{name}' already exists");
+    }
+
+    // Build the profile table by appending each member; the first append
+    // creates [profiles.<name>] and its arrays.
+    let mut text = original;
+    for s in &servers {
+        text = crate::commands::add::add_to_profile(&text, name, "servers", s)?;
+    }
+    for s in &skills {
+        text = crate::commands::add::add_to_profile(&text, name, "skills", s)?;
+    }
+    toml::from_str::<crate::manifest::Manifest>(&text)
+        .context("resulting manifest would be invalid")?;
+    crate::util::atomic::write(&manifest_path, &text)
         .with_context(|| format!("writing {}", manifest_path.display()))?;
     Ok(name.to_string())
 }
