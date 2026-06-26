@@ -998,6 +998,21 @@ function plugins(c) {
     el("div", { class: "hd" }, ["Marketplaces", el("small", null, [`${markets.length}`])]),
     el("div", { class: "bd" }, mrows),
   ]));
+
+  // Native extensions/add-ons (e.g. Pi extensions) — read-only.
+  const exts = DATA.extensions || [];
+  const erows = exts.map((e) => el("div", { class: "list-row" }, [
+    el("span", null, [
+      el("span", { class: "name", style: e.broken ? "opacity:.7" : "" }, [e.name]),
+      el("div", { class: "muted mono", style: "font-size:12px" }, [e.harness + " · " + e.kind + (e.isSymlink ? " · symlink" : "")]),
+    ]),
+    el("span", { class: "row-actions" }, [e.broken ? badge("broken link", "red") : badge(e.kind, "")]),
+  ]));
+  if (!erows.length) erows.push(el("div", { class: "empty" }, ["No extensions installed (e.g. Pi's ~/.pi/agent/extensions is empty)."]));
+  c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
+    el("div", { class: "hd" }, ["Extensions", el("small", null, [`${exts.length} · Pi TypeScript add-ons`])]),
+    el("div", { class: "bd" }, erows),
+  ]));
 }
 
 /* ---------- instructions ---------- */

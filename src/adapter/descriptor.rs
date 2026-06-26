@@ -37,6 +37,10 @@ pub struct AdapterDescriptor {
     /// Lifecycle-hook destination, if the CLI supports hooks.
     #[serde(default)]
     pub hooks: Option<HooksSpec>,
+    /// Native extension/add-on directory, if the CLI supports it (e.g. Pi's
+    /// `~/.pi/agent/extensions`). Discovered read-only.
+    #[serde(default)]
+    pub extensions: Option<ExtensionsSpec>,
 }
 
 impl AdapterDescriptor {
@@ -82,6 +86,19 @@ impl AdapterDescriptor {
         match scope {
             Scope::Global => Some((paths::expand_tilde(&h.global), h.format)),
             Scope::Project => h.project.as_ref().map(|p| (project_dir.join(p), h.format)),
+        }
+    }
+
+    /// The native extensions directory for a scope, if the CLI has one.
+    pub fn extensions_dir_for(
+        &self,
+        scope: Scope,
+        project_dir: &std::path::Path,
+    ) -> Option<PathBuf> {
+        let e = self.extensions.as_ref()?;
+        match scope {
+            Scope::Global => Some(paths::expand_tilde(&e.dir)),
+            Scope::Project => e.project_dir.as_ref().map(|d| project_dir.join(d)),
         }
     }
 
@@ -228,6 +245,17 @@ impl InstructionsSpec {
             Scope::Project => self.project.as_ref().map(|p| project_dir.join(p)),
         }
     }
+}
+
+/// Native extension/add-on directory for a CLI (code modules placed in a dir,
+/// e.g. Pi extensions). Each entry is a file or a directory.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExtensionsSpec {
+    /// Global extensions directory (e.g. `~/.pi/agent/extensions`).
+    pub dir: String,
+    /// Project extensions directory relative to the repo (e.g. `.pi/extensions`).
+    #[serde(default)]
+    pub project_dir: Option<String>,
 }
 
 /// Native settings-file locations for a CLI (permissions, feature flags, etc.).

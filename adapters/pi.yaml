@@ -11,6 +11,11 @@ skills:
   dir: ~/.pi/agent/skills
   project_dir: .pi/skills
   strategy: symlink
+# Pi extensions: TypeScript add-ons (a .ts file or a directory) loaded from
+# ~/.pi/agent/extensions or .pi/extensions. Discovered read-only.
+extensions:
+  dir: ~/.pi/agent/extensions
+  project_dir: .pi/extensions
 # Settings file (JSON): provider/model/theme/thinking defaults.
 settings:
   format: json

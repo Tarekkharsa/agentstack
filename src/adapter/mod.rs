@@ -154,6 +154,61 @@ impl AdapterDescriptor {
     }
 }
 
+/// A native extension/add-on found in a CLI's extensions directory.
+#[derive(Debug, Clone)]
+pub struct DiscoveredExtension {
+    pub name: String,
+    /// `file` (a single `.ts`/`.js` module) or `dir` (a multi-file extension).
+    pub kind: String,
+    pub is_symlink: bool,
+    /// True if it's a symlink whose target no longer exists.
+    pub broken: bool,
+}
+
+impl AdapterDescriptor {
+    /// Scan this CLI's extensions directory (for a scope) for installed
+    /// extensions: each top-level file or directory (hidden entries skipped).
+    pub fn discover_extensions(
+        &self,
+        scope: crate::scope::Scope,
+        project_dir: &std::path::Path,
+    ) -> Vec<DiscoveredExtension> {
+        let Some(dir) = self.extensions_dir_for(scope, project_dir) else {
+            return Vec::new();
+        };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || name.eq_ignore_ascii_case("README.md") {
+                continue;
+            }
+            let path = entry.path();
+            let is_symlink = std::fs::symlink_metadata(&path)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false);
+            let resolved = std::fs::canonicalize(&path);
+            let broken = is_symlink && resolved.is_err();
+            let kind = match resolved {
+                Ok(p) if p.is_dir() => "dir",
+                Ok(_) => "file",
+                Err(_) => "broken",
+            }
+            .to_string();
+            out.push(DiscoveredExtension {
+                name,
+                kind,
+                is_symlink,
+                broken,
+            });
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
+    }
+}
+
 /// Whether `bin` is found in any `$PATH` entry.
 pub fn bin_on_path(bin: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
