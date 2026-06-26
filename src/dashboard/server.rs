@@ -221,12 +221,15 @@ fn route(
         (Method::Post, "/api/session_start") => mutation(authed, read_only, || {
             let v = parse(body);
             let profile = field(&v, "profile")?;
-            let plugin = v.get("plugin").and_then(Value::as_str).filter(|s| !s.is_empty());
+            let plugin = v
+                .get("plugin")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
             crate::session::start(dir, &profile, scope_of(body), plugin)
         }),
-        (Method::Post, "/api/session_end") => mutation(authed, read_only, || {
-            crate::session::end(dir)
-        }),
+        (Method::Post, "/api/session_end") => {
+            mutation(authed, read_only, || crate::session::end(dir))
+        }
         (Method::Post, "/api/import_settings") => mutation(authed, read_only, || {
             let target = field(&parse(body), "target")?;
             crate::dashboard::actions::import_settings(dir, &target).map(|_| ())

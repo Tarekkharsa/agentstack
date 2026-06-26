@@ -83,7 +83,9 @@ mod tests {
 
     #[test]
     fn backup_captures_previous_content() {
-        let _guard = crate::util::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let home = assert_fs::TempDir::new().unwrap();
         std::env::set_var("AGENTSTACK_HOME", home.path());
         let tmp = assert_fs::TempDir::new().unwrap();

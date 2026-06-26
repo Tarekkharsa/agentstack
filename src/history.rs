@@ -111,8 +111,7 @@ pub fn list() -> Vec<Entry> {
 /// Restore the files captured by entry `id` to their pre-apply content.
 pub fn undo(id: &str) -> Result<()> {
     let path = dir().join(format!("{id}.json"));
-    let text =
-        fs::read_to_string(&path).with_context(|| format!("reading history entry {id}"))?;
+    let text = fs::read_to_string(&path).with_context(|| format!("reading history entry {id}"))?;
     let mut entry: Entry = serde_json::from_str(&text)?;
     if entry.undone {
         anyhow::bail!("this change was already undone");

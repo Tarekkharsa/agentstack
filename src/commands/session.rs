@@ -33,7 +33,10 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
                 println!("{} ended {n} session(s) — reverted", "✓".green());
             } else {
                 crate::session::end(dir)?;
-                println!("{} session ended — your tools are back to before", "✓".green());
+                println!(
+                    "{} session ended — your tools are back to before",
+                    "✓".green()
+                );
             }
         }
         SessionCmd::Freeze { name } => {

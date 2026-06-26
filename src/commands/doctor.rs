@@ -153,7 +153,19 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
         // Pending manifest changes?
         if plan.changed() {
-            if args.fix {
+            // An unresolved `${REF}` must never reach a live config — same gate
+            // as `apply`/`toggle`. `doctor --fix` has no override, so we refuse.
+            if args.fix && !plan.unresolved.is_empty() {
+                any_drift = true;
+                report.line(
+                    Level::Error,
+                    format!(
+                        "{:<14} not fixed — unresolved secret(s): {}",
+                        desc.display,
+                        plan.unresolved.join(", ")
+                    ),
+                );
+            } else if args.fix {
                 plan.write()?;
                 state.record(&key, plan.managed.clone(), &plan.proposed);
                 fixed += 1;

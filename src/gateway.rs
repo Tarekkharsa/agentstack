@@ -104,7 +104,10 @@ impl Upstream {
             .post(&body)?
             .ok_or_else(|| anyhow!("{}: empty response to {method}", self.name))?;
         if let Some(err) = resp.get("error") {
-            let msg = err.get("message").and_then(Value::as_str).unwrap_or("error");
+            let msg = err
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("error");
             anyhow::bail!("{}: {msg}", self.name);
         }
         Ok(resp.get("result").cloned().unwrap_or(Value::Null))
@@ -180,7 +183,9 @@ impl Gateway {
                 }
             }
             if skipped_stdio > 0 {
-                eprintln!("gateway: {skipped_stdio} stdio server(s) not yet proxied (v1 is HTTP-only)");
+                eprintln!(
+                    "gateway: {skipped_stdio} stdio server(s) not yet proxied (v1 is HTTP-only)"
+                );
             }
         }
         Gateway {
@@ -235,7 +240,9 @@ fn namespace_tool(server: &str, tool: &Value) -> Value {
     let bare = tool.get("name").and_then(Value::as_str).unwrap_or("tool");
     let mut desc = format!(
         "[via {server}] {}",
-        tool.get("description").and_then(Value::as_str).unwrap_or("")
+        tool.get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
     );
     if desc.len() > DESC_CAP {
         desc.truncate(DESC_CAP);
@@ -268,13 +275,17 @@ mod tests {
         let t = json!({ "name": "get_file", "description": "x".repeat(900), "inputSchema": { "type": "object" } });
         let n = namespace_tool("figma", &t);
         assert_eq!(n["name"], "figma__get_file");
-        assert!(n["description"].as_str().unwrap().starts_with("[via figma] "));
+        assert!(n["description"]
+            .as_str()
+            .unwrap()
+            .starts_with("[via figma] "));
         assert!(n["description"].as_str().unwrap().chars().count() <= DESC_CAP + 13);
     }
 
     #[test]
     fn parses_sse_payload() {
-        let body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n\n";
+        let body =
+            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n\n";
         assert_eq!(parse_sse(body).unwrap()["result"]["ok"], true);
     }
 }

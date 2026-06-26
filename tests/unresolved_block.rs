@@ -3,10 +3,25 @@
 //! when `--allow-unresolved` is passed.
 
 use std::fs;
+use std::sync::Mutex;
 
-use agentstack::cli::ApplyArgs;
-use agentstack::commands::apply;
+use agentstack::cli::{ApplyArgs, DoctorArgs};
+use agentstack::commands::{apply, doctor};
 use agentstack::scope::Scope;
+
+// Both tests mutate the process-global HOME; serialize them.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// A manifest with one server whose header needs a secret that does not resolve.
+fn write_unresolved_manifest(proj: &std::path::Path) {
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.kibana]\ntype = \"http\"\nurl = \"https://k/mcp\"\n\
+         headers = { Authorization = \"Bearer ${NOPE_TOKEN}\" }\n",
+    )
+    .unwrap();
+}
 
 fn args(write: bool, allow_unresolved: bool) -> ApplyArgs {
     ApplyArgs {
@@ -21,6 +36,7 @@ fn args(write: bool, allow_unresolved: bool) -> ApplyArgs {
 
 #[test]
 fn unresolved_secret_blocks_write_unless_allowed() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
     let home = tmp.path().join("home");
     fs::create_dir_all(&home).unwrap();
@@ -29,14 +45,7 @@ fn unresolved_secret_blocks_write_unless_allowed() {
 
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
-    // A server whose header needs a secret that does NOT resolve on this machine.
-    fs::write(
-        proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
-         [servers.kibana]\ntype = \"http\"\nurl = \"https://k/mcp\"\n\
-         headers = { Authorization = \"Bearer ${NOPE_TOKEN}\" }\n",
-    )
-    .unwrap();
+    write_unresolved_manifest(&proj);
 
     let claude_cfg = home.join(".claude.json");
 
@@ -55,5 +64,34 @@ fn unresolved_secret_blocks_write_unless_allowed() {
     assert!(
         written.contains("${NOPE_TOKEN}"),
         "the ref is left verbatim, never blanked"
+    );
+}
+
+/// `doctor --fix` has no `--allow-unresolved`, so it must refuse to write a
+/// drifted target whose secret doesn't resolve — never leak a `${REF}`.
+#[test]
+fn doctor_fix_refuses_unresolved_secret() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    write_unresolved_manifest(&proj);
+
+    let claude_cfg = home.join(".claude.json");
+    let dargs = DoctorArgs {
+        ci: false,
+        live: false,
+        fix: true,
+    };
+    doctor::run(&dargs, Some(&proj)).unwrap();
+    assert!(
+        !claude_cfg.exists(),
+        "doctor --fix must not write an unresolved secret — but {} was written",
+        claude_cfg.display()
     );
 }

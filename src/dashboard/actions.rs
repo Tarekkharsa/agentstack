@@ -277,7 +277,11 @@ pub fn add_profile(manifest_dir: Option<&Path>, args: &Value) -> Result<String> 
     let names = |key: &str| -> Vec<String> {
         args.get(key)
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default()
     };
     let servers = names("servers");

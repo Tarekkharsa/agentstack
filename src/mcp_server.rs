@@ -297,7 +297,10 @@ fn run_tool(name: &str, args: &Value, dir: Option<&Path>) -> Result<String> {
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
                 .context("`profile` is required")?;
-            let plugin = args.get("plugin").and_then(Value::as_str).filter(|s| !s.is_empty());
+            let plugin = args
+                .get("plugin")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
             crate::session::start(dir, profile, scope_arg(args), plugin)?;
             Ok(format!(
                 "Session started on profile '{profile}' ({} scope). End it with agentstack_session_end to revert.",
@@ -319,10 +322,15 @@ fn run_tool(name: &str, args: &Value, dir: Option<&Path>) -> Result<String> {
                     })
                 })
                 .collect();
-            Ok(serde_json::to_string_pretty(&serde_json::json!({ "sessions": arr }))?)
+            Ok(serde_json::to_string_pretty(
+                &serde_json::json!({ "sessions": arr }),
+            )?)
         }
         "agentstack_session_freeze" => {
-            let name = args.get("name").and_then(Value::as_str).filter(|s| !s.is_empty());
+            let name = args
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
             let created = crate::session::freeze(dir, name)?;
             Ok(format!(
                 "Froze the session into profile '{created}'. Replay it with agentstack_session_start profile={created}."
@@ -535,15 +543,24 @@ fn scope_arg(args: &Value) -> crate::scope::Scope {
 fn diff_summary(args: &Value, dir: Option<&Path>) -> Result<String> {
     let scope = scope_arg(args);
     let v = crate::dashboard::snapshot::diffs(dir, scope, false)?;
-    let targets = v.get("targets").and_then(Value::as_array).cloned().unwrap_or_default();
+    let targets = v
+        .get("targets")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let changed: Vec<&Value> = targets
         .iter()
         .filter(|t| t.get("changed").and_then(Value::as_bool).unwrap_or(false))
         .collect();
     if changed.is_empty() {
-        return Ok(format!("No pending changes in {scope} scope — the manifest and your tools are in sync."));
+        return Ok(format!(
+            "No pending changes in {scope} scope — the manifest and your tools are in sync."
+        ));
     }
-    let mut out = format!("{} tool(s) would change on apply ({scope} scope):\n", changed.len());
+    let mut out = format!(
+        "{} tool(s) would change on apply ({scope} scope):\n",
+        changed.len()
+    );
     for t in changed {
         let display = t.get("display").and_then(Value::as_str).unwrap_or("?");
         let path = t.get("path").and_then(Value::as_str).unwrap_or("");
@@ -621,8 +638,9 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
         }
     }
 
-    let source = local_source_dir(&Store::default_store(), skill, &ctx.dir)
-        .with_context(|| format!("skill '{name}' is not available locally — run `agentstack install`"))?;
+    let source = local_source_dir(&Store::default_store(), skill, &ctx.dir).with_context(|| {
+        format!("skill '{name}' is not available locally — run `agentstack install`")
+    })?;
     let (_, body) = read_skill_md(&source);
     let instructions = body.with_context(|| format!("skill '{name}' has no SKILL.md"))?;
 
@@ -683,9 +701,15 @@ mod tests {
         assert!(names.contains(&"agentstack_add_server"));
         assert!(names.contains(&"agentstack_list_loadable"));
         assert!(names.contains(&"agentstack_load"));
-        for t in ["agentstack_diff", "agentstack_add_skill", "agentstack_create_profile",
-                  "agentstack_session_start", "agentstack_session_end",
-                  "agentstack_session_list", "agentstack_session_freeze"] {
+        for t in [
+            "agentstack_diff",
+            "agentstack_add_skill",
+            "agentstack_create_profile",
+            "agentstack_session_start",
+            "agentstack_session_end",
+            "agentstack_session_list",
+            "agentstack_session_freeze",
+        ] {
             assert!(names.contains(&t), "missing tool {t}");
         }
     }

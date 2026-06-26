@@ -713,7 +713,10 @@ fn push_drift_health(
         push(
             out,
             "warn",
-            format!("{drift} selected target{} drifted (global) — Preview to reconcile", s(drift)),
+            format!(
+                "{drift} selected target{} drifted (global) — Preview to reconcile",
+                s(drift)
+            ),
             Some(json!({ "type": "preview", "scope": "global" })),
         );
     }
@@ -768,7 +771,10 @@ fn next_actions(
             "drift:global".into(),
             "warn",
             "Your tools are out of sync".into(),
-            format!("{drift} tool{} out of sync with your saved stack — review and apply.", s(drift)),
+            format!(
+                "{drift} tool{} out of sync with your saved stack — review and apply.",
+                s(drift)
+            ),
             "health",
             "Preview changes",
             json!({ "type": "preview", "scope": "global" }),
@@ -785,7 +791,11 @@ fn next_actions(
             "skills:missing".into(),
             "warn",
             "Skill sources are not installed".into(),
-            format!("{} skill source{} not installed.", missing_skills.len(), s(missing_skills.len())),
+            format!(
+                "{} skill source{} not installed.",
+                missing_skills.len(),
+                s(missing_skills.len())
+            ),
             "skills",
             "Install skills",
             json!({ "type": "post", "path": "/api/install", "label": "Install" }),
@@ -856,7 +866,10 @@ fn next_actions(
                 format!("plugin:{name}:missing-skills"),
                 "warn",
                 format!("{name} recipe needs skill sources"),
-                format!("{missing} skill source{} must be installed before sync.", s(missing)),
+                format!(
+                    "{missing} skill source{} must be installed before sync.",
+                    s(missing)
+                ),
                 "plugins",
                 "Install skills",
                 json!({ "type": "post", "path": "/api/install", "label": "Install" }),
