@@ -16,6 +16,7 @@ let PLUGIN_FORM = false;
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
+  { id: "runs", label: "Runs", count: (d) => (d.runs || []).length },
   { id: "discover", label: "Discover" },
   { id: "servers", label: "Servers", count: (d) => d.servers.length },
   { id: "skills", label: "Skills", count: (d) => d.skills.length },
@@ -100,7 +101,7 @@ function renderNav() {
     );
   });
 }
-const VIEWS = { overview, discover, servers, skills, settings, hooks, plugins, instructions, secrets, activity, health };
+const VIEWS = { overview, runs, discover, servers, skills, settings, hooks, plugins, instructions, secrets, activity, health };
 function show(id) {
   if (!VIEWS[id]) id = "overview";
   SECTION = id;
@@ -556,6 +557,56 @@ function profilesCard() {
     ]));
   }
   return el("div", { class: "card" }, [el("div", { class: "hd", style: "display:flex;align-items:center" }, hd), el("div", { class: "bd" }, rows)]);
+}
+
+/* ---------- runs ---------- */
+function fmtUptime(secs) {
+  secs = Math.max(0, secs | 0);
+  if (secs < 60) return secs + "s";
+  if (secs < 3600) return Math.floor(secs / 60) + "m";
+  return Math.floor(secs / 3600) + "h" + String(Math.floor((secs % 3600) / 60)).padStart(2, "0") + "m";
+}
+function killRun(id, label, force) {
+  const msg = force
+    ? "Force-kill " + label + "? Sends SIGKILL immediately — the process can't clean up after itself."
+    : "Kill " + label + "? Stops the process (and anything it spawned) and reverts its profile if it had one.";
+  if (!confirm(msg)) return;
+  return post("/api/run_kill", { id, force: !!force }, force ? "Run force-killed" : "Run killed");
+}
+function runs(c) {
+  const list = DATA.runs || [];
+  c.appendChild(pageHead("Runs", "Live agent processes agentstack launched. Start one from your terminal with `agentstack run <harness>`; stop any of them here — no Activity Monitor needed."));
+  if (!list.length) {
+    c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [
+      el("div", { class: "empty" }, ["No live runs. Launch one from your terminal, e.g."]),
+      el("pre", { class: "mono", style: "margin-top:8px" }, ["agentstack run claude-code --profile design"]),
+    ])]));
+    return;
+  }
+  const head = el("tr", null, ["harness", "pid", "uptime", "profile", "can reach", "directory", ""].map((h) => el("th", null, [h])));
+  const body = el("tbody");
+  list.forEach((r) => {
+    const footprint = [];
+    (r.servers || []).forEach((s) => footprint.push(badge(s, "solid")));
+    (r.skills || []).forEach((s) => footprint.push(badge(s)));
+    if (!footprint.length) footprint.push(el("span", { class: "muted" }, ["—"]));
+    const profCell = r.profile
+      ? el("span", null, [r.profile, r.revertsOnExit ? el("span", { class: "k" }, ["reverts on exit"]) : null])
+      : el("span", { class: "muted" }, ["(current config)"]);
+    body.appendChild(el("tr", null, [
+      el("td", null, [el("span", { class: "name" }, [r.display || r.harness])]),
+      el("td", null, [el("span", { class: "mono" }, [String(r.pid)])]),
+      el("td", null, [fmtUptime(r.uptimeSecs)]),
+      el("td", null, [profCell]),
+      el("td", null, [el("div", { style: "display:flex;flex-wrap:wrap;gap:4px" }, footprint)]),
+      el("td", null, [el("span", { class: "mono muted" }, [r.cwd])]),
+      el("td", null, READONLY ? [] : [el("div", { style: "display:flex;gap:6px" }, [
+        btn("Kill", () => killRun(r.id, r.display || r.harness, false), "danger"),
+        btn("Force", () => killRun(r.id, r.display || r.harness, true), "danger"),
+      ])]),
+    ]));
+  });
+  c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])])])]));
 }
 
 /* ---------- sessions ---------- */

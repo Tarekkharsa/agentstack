@@ -41,5 +41,8 @@ fn run() -> Result<()> {
         Command::Dashboard(args) => agentstack::dashboard::serve(args, dir),
         Command::Mcp => agentstack::mcp_server::serve(dir),
         Command::Hook(args) => commands::hook::run(args),
+        Command::Run(args) => commands::runs::run(args, dir),
+        Command::Runs(args) => commands::runs::list(args),
+        Command::Kill(args) => commands::runs::kill(args),
     }
 }
