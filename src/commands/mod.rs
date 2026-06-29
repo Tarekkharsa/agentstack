@@ -17,6 +17,7 @@ pub mod instructions;
 pub mod plugins;
 pub mod remove;
 pub mod restore;
+pub mod runs;
 pub mod search;
 pub mod secret;
 pub mod session;

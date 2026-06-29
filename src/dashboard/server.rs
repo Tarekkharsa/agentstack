@@ -141,6 +141,27 @@ fn route(
         (Method::Post, "/api/undo") => mutation(authed, read_only, || {
             crate::history::undo(&field(&parse(body), "id")?)
         }),
+        (Method::Get, "/api/runs") => {
+            if !authed {
+                return unauthorized();
+            }
+            let arr: Vec<Value> = crate::runs::list()
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.id, "harness": r.harness, "display": r.display,
+                        "pid": r.pid, "profile": r.profile, "cwd": r.cwd,
+                        "startedUnix": r.started_unix,
+                    })
+                })
+                .collect();
+            json(&serde_json::to_string(&serde_json::json!({ "runs": arr })).unwrap_or_default())
+        }
+        (Method::Post, "/api/run_kill") => mutation(authed, read_only, || {
+            let v = parse(body);
+            let force = v.get("force").and_then(Value::as_bool).unwrap_or(false);
+            crate::runs::kill(&field(&v, "id")?, force)
+        }),
         (Method::Get, "/api/search") => {
             if !authed {
                 return unauthorized();
