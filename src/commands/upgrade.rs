@@ -160,7 +160,8 @@ fn upgrade_pack(
     // Build the post-upgrade manifest text (used for the diff preview and write).
     let original = fs::read_to_string(&ctx.loaded.manifest_path)
         .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
-    let new_text = build_upgraded_manifest(&original, pack, recipe, candidate, spec, want_instructions)?;
+    let new_text =
+        build_upgraded_manifest(&original, pack, recipe, candidate, spec, want_instructions)?;
 
     println!(
         "{} upgrade pack '{}' in {}",
@@ -198,7 +199,15 @@ fn upgrade_pack(
         return Ok(());
     }
 
-    apply_upgrade(ctx, pack, recipe, spec, want_instructions, &original, &new_text)?;
+    apply_upgrade(
+        ctx,
+        pack,
+        recipe,
+        spec,
+        want_instructions,
+        &original,
+        &new_text,
+    )?;
     repin_lock(ctx, manifest_dir, recipe, spec)?;
 
     println!("{} upgraded pack '{}'.", "✓".green(), pack);
@@ -272,7 +281,12 @@ fn diff_pack(
 
 /// Has the embedded asset for `skill` diverged from what's installed on disk?
 fn skill_content_changed(ctx: &super::Context, skill: &str, asset: &str) -> Result<bool> {
-    let on_disk = ctx.loaded.manifest.skills.get(skill).and_then(|s| s.path.as_deref());
+    let on_disk = ctx
+        .loaded
+        .manifest
+        .skills
+        .get(skill)
+        .and_then(|s| s.path.as_deref());
     let Some(on_disk) = on_disk else {
         return Ok(true);
     };
@@ -338,7 +352,13 @@ fn build_upgraded_manifest(
 
     if spec.server.is_some() {
         let server = candidate.to_server();
-        text = add::build_manifest_with(&text, "servers", pack, &serde_json::to_value(&server)?, None)?;
+        text = add::build_manifest_with(
+            &text,
+            "servers",
+            pack,
+            &serde_json::to_value(&server)?,
+            None,
+        )?;
         ledger.servers.push(pack.to_string());
     }
 
@@ -352,8 +372,13 @@ fn build_upgraded_manifest(
             git: None,
             rev: None,
         };
-        text =
-            add::build_manifest_with(&text, "skills", &skill.name, &serde_json::to_value(&entry)?, None)?;
+        text = add::build_manifest_with(
+            &text,
+            "skills",
+            &skill.name,
+            &serde_json::to_value(&entry)?,
+            None,
+        )?;
         ledger.skills.push(skill.name.clone());
     }
 
@@ -374,7 +399,13 @@ fn build_upgraded_manifest(
         }
     }
 
-    text = add::build_manifest_with(&text, "plugins", pack, &serde_json::to_value(&ledger)?, None)?;
+    text = add::build_manifest_with(
+        &text,
+        "plugins",
+        pack,
+        &serde_json::to_value(&ledger)?,
+        None,
+    )?;
     Ok(text)
 }
 
@@ -391,23 +422,15 @@ fn apply_upgrade(
 ) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
 
-    // Old files owned by this pack (manifest paths give the on-disk locations).
-    let old_skill_dirs: Vec<PathBuf> = recipe
-        .skills
-        .iter()
-        .filter_map(|n| manifest.skills.get(n))
-        .filter_map(|s| s.path.as_deref())
-        .map(|p| ctx.dir.join(p.trim_start_matches("./")))
-        .collect();
+    // Old dirs owned by this pack — contained under the manifest dir only, so a
+    // hand-edited/corrupt ledger pointing at an absolute or `../` path can never
+    // make us delete outside the managed tree (mirrors the instruction guard).
+    let old_skill_dirs: Vec<PathBuf> = remove::safe_skill_dirs(manifest, ctx, recipe);
     // Only delete instruction files we wrote (vendor-marker + containment guard).
     let old_instr_files = remove::safe_instruction_files(manifest, ctx, recipe, pack);
 
     // Desired on-disk destinations.
-    let new_skill_assets: Vec<String> = spec
-        .skills
-        .iter()
-        .filter_map(|s| s.path.clone())
-        .collect();
+    let new_skill_assets: Vec<String> = spec.skills.iter().filter_map(|s| s.path.clone()).collect();
     let new_instr: Vec<(PathBuf, String)> = if want_instructions {
         spec.instructions
             .iter()
@@ -421,9 +444,12 @@ fn apply_upgrade(
     };
 
     // Back up the manifest + every old pack file so a mid-apply failure reverts.
-    let backup_root = ctx.dir.join(format!(".agentstack-upgrade-{}.bak", sanitize(pack)));
+    let backup_root = ctx
+        .dir
+        .join(format!(".agentstack-upgrade-{}.bak", sanitize(pack)));
     let _ = fs::remove_dir_all(&backup_root);
-    fs::create_dir_all(&backup_root).with_context(|| format!("creating {}", backup_root.display()))?;
+    fs::create_dir_all(&backup_root)
+        .with_context(|| format!("creating {}", backup_root.display()))?;
     let cleanup = |root: &Path| {
         let _ = fs::remove_dir_all(root);
     };
@@ -468,7 +494,8 @@ fn apply_upgrade(
         }
         for (out, body) in &new_instr {
             if let Some(parent) = out.parent() {
-                fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
             }
             fs::write(out, body).with_context(|| format!("writing {}", out.display()))?;
         }

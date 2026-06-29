@@ -76,11 +76,19 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
         println!("\n{} ({})", plan.display.bold(), plan.config_path.display());
 
-        if plan.managed.is_empty() && plan.removed.is_empty() {
+        if plan.managed.is_empty() && plan.removed.is_empty() && plan.skipped.is_empty() {
             println!("  no servers selected");
         }
         for r in &plan.removed {
             println!("  {} pruning '{r}' (no longer in manifest)", "−".yellow());
+        }
+        for s in &plan.skipped {
+            println!(
+                "  {} skipping '{s}' — {} can't represent this server's transport \
+                 (add it via the harness's own UI/connector)",
+                "↳".cyan(),
+                plan.display
+            );
         }
         for u in &plan.unresolved {
             println!("  {} unresolved secret {}", "✗".red(), u);

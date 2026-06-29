@@ -19,10 +19,12 @@ use crate::secret::keychain;
 /// lift secrets (best-effort to keychain), write the manifest. Returns a
 /// summary. Errors if a manifest already exists or no CLIs are detected.
 pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
-    let dir = match manifest_dir {
+    let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
     };
+    // Create new manifests in `.agentstack/`; keep updating a legacy root one.
+    let dir = crate::manifest::new_manifest_dir(&base);
     let manifest_path = dir.join(MANIFEST_FILE);
     if manifest_path.exists() {
         anyhow::bail!("already initialized ({} exists)", manifest_path.display());
@@ -85,10 +87,12 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
 }
 
 pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    let dir = match manifest_dir {
+    let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
     };
+    // Create new manifests in `.agentstack/`; keep updating a legacy root one.
+    let dir = crate::manifest::new_manifest_dir(&base);
     let manifest_path = dir.join(MANIFEST_FILE);
     if manifest_path.exists() && !args.force && !args.dry_run {
         anyhow::bail!(

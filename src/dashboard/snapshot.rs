@@ -28,10 +28,11 @@ fn s(n: usize) -> &'static str {
 /// The state the dashboard loads: a full snapshot, or a "needs init" welcome
 /// payload when no manifest exists yet (so a brand-new user can start here).
 pub fn state(manifest_dir: Option<&Path>) -> Result<Value> {
-    let dir = match manifest_dir {
+    let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
     };
+    let dir = crate::manifest::resolve_manifest_dir(&base);
     if !dir.join(crate::manifest::load::MANIFEST_FILE).exists() {
         return welcome(&dir);
     }

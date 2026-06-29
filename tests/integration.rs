@@ -182,6 +182,92 @@ fn prunes_servers_that_left_the_selection() {
     assert!(plan.proposed.contains("kibana_mcp"));
 }
 
+/// A stdio-only descriptor (no `url` field, like Claude Desktop) maps an HTTP
+/// server to nothing: `plan_target` must SKIP it — never write an empty `{}`
+/// entry — and surface it in `plan.skipped`, leaving the config untouched.
+fn stdio_only_descriptor(config_path: &str) -> AdapterDescriptor {
+    let yaml = format!(
+        r#"
+id: stdio-only
+display: Stdio Only
+config:
+  path: {config_path}
+  format: json
+mcp:
+  location: mcpServers
+  fields:
+    command: command
+    args: args
+    env: env
+  secret_mode: literal
+"#
+    );
+    serde_yaml::from_str(&yaml).unwrap()
+}
+
+#[test]
+fn discovers_dot_agentstack_layout_and_falls_back_to_legacy_root() {
+    // New `.agentstack/` layout: a command pointed at the project base discovers
+    // the nested manifest, and all managed files live alongside it.
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let base = tmp.path();
+    let nested = base.join(".agentstack");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(
+        nested.join("agentstack.toml"),
+        "version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x\"\n",
+    )
+    .unwrap();
+
+    let ctx = agentstack::commands::load(Some(base)).unwrap();
+    assert_eq!(ctx.dir, nested, "manifest dir resolves to .agentstack/");
+    assert!(ctx.loaded.manifest.servers.contains_key("x"));
+
+    // Legacy root layout still works when there is no `.agentstack/` manifest.
+    let tmp2 = assert_fs::TempDir::new().unwrap();
+    let base2 = tmp2.path();
+    fs::write(
+        base2.join("agentstack.toml"),
+        "version = 1\n[servers.y]\ntype = \"http\"\nurl = \"https://y\"\n",
+    )
+    .unwrap();
+    let ctx2 = agentstack::commands::load(Some(base2)).unwrap();
+    assert_eq!(ctx2.dir, base2, "legacy root layout still discovered");
+    assert!(ctx2.loaded.manifest.servers.contains_key("y"));
+}
+
+#[test]
+fn unrepresentable_http_server_is_skipped_not_emptied() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let cfg = tmp.child("c.json");
+    cfg.write_str("{\n  \"mcpServers\": {}\n}\n").unwrap();
+
+    // Manifest's only server is HTTP; the stdio-only adapter can't represent it.
+    let m = manifest();
+    let desc = stdio_only_descriptor(cfg.path().to_str().unwrap());
+    let resolver = MapResolver::from([("KIBANA_TOKEN", "tok")]);
+
+    let plan = plan_target(
+        &m,
+        &desc,
+        &resolver,
+        &Selection::All,
+        &[],
+        Scope::Global,
+        Path::new("/"),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(plan.skipped, vec!["kibana_mcp".to_string()]);
+    assert!(plan.managed.is_empty(), "nothing managed for this target");
+    assert!(
+        !plan.proposed.contains("kibana_mcp"),
+        "no empty entry written for the unrepresentable server"
+    );
+    assert!(!plan.changed(), "config left untouched");
+}
+
 #[test]
 fn init_pipeline_roundtrips_through_valid_toml() {
     // Import from a Claude-shaped config, lift secrets, build a manifest,

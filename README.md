@@ -1,20 +1,24 @@
 # agentstack
 
-> **Dotfiles for your AI agents.** One portable, version-controlled setup —
-> MCP servers, skills, and instructions — that follows you across every coding
-> agent, machine, and teammate.
+> **Portable agent runtime config.** One reviewed, version-controlled setup for
+> MCP servers, skills, instructions, settings, hooks, and profiles — runnable
+> across coding agents, repos, machines, and teammates.
 
-You configure MCP servers, skills, and house rules once in a commit-safe
-`agentstack.toml`. agentstack **compiles** that into each agent CLI's native
-config — Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS
-Code, GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro, and Pi — resolving
-secrets per machine, so the *same* setup works everywhere without copy-pasting
-JSON or leaking tokens into git.
+agentstack turns AI-agent setup into a reproducible repo artifact. You declare
+capabilities once in a commit-safe `agentstack.toml`; agentstack **compiles**
+that intent into each agent CLI's native config — Claude Code, Claude Desktop,
+Codex, Cursor, Windsurf, Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode,
+Antigravity, Junie, Kiro, and Pi — resolving secrets locally on each machine.
+
+The goal is not just config sync. agentstack is the control layer for portable
+agent environments: bootstrap a new laptop, share a team setup through git,
+launch an agent with a known profile, audit what it can access, and remove or
+upgrade capabilities without hand-editing every harness.
 
 ```sh
 agentstack init      # reverse-engineer a manifest from configs you already have
 agentstack bootstrap # guided preflight: skills, secrets, diff, next action
-agentstack apply     # render it to every CLI you have installed
+agentstack apply     # preview the render for every CLI you have installed
 agentstack doctor    # prove everything is wired (secrets, drift, connectivity)
 ```
 
@@ -39,11 +43,42 @@ Managing AI-agent setup today is three tangled pains:
    everyone re-does setup by hand, and configs drift apart.
 3. **Secrets** — real tokens differ per machine and must never land in git.
 
-The durable value isn't the format translation (the ecosystem is slowly
-converging on `mcp.json`) — it's the **layers that survive convergence**:
-**secrets-by-reference, profiles/selective-loading, reproducible lockfile,
-cross-source discovery (the official MCP Registry), and a trust/governance gate**
-— in one auditable binary, across every CLI.
+The durable value is not only format translation (the ecosystem is slowly
+converging on `mcp.json`). The value is the layer above it:
+**secrets-by-reference, profiles/selective loading, reproducible lockfiles,
+cross-source discovery, runtime launch control, and trust/governance gates** in
+one auditable binary across the CLIs your team actually uses.
+
+## Portable team workflow
+
+Commit the shared intent — agentstack keeps it in a single `.agentstack/` folder
+at the repo root:
+
+```text
+.agentstack/agentstack.toml
+.agentstack/agentstack.lock
+.agentstack/skills/
+.agentstack/instructions/
+```
+
+`agentstack init` creates this `.agentstack/` layout. Repos that still keep
+`agentstack.toml` at the root are discovered automatically (legacy layout), so
+existing setups keep working without migration.
+
+Then a new teammate or a new computer follows the same path:
+
+```bash
+git clone <repo>
+agentstack bootstrap          # preflight: installed CLIs, skills, secrets, diff
+agentstack secret set GH_PAT  # local only; never committed
+agentstack doctor --live
+agentstack apply --write
+agentstack run codex --profile backend
+```
+
+`agentstack.toml` is portable. Secrets are not. They resolve per machine from
+env, varlock, OS keychain, or `.env`, and unresolved secrets block writes by
+default so placeholders do not leak into live harness config.
 
 ## For vendors: ship your MCP + skills + docs
 
@@ -54,10 +89,10 @@ that steer the agent as a single **pack**, and the user installs the whole unit
 into their *own* agent:
 
 ```sh
-agentstack add linear-pack                      # server + skills, rendered to every CLI
-agentstack add linear-pack --with-instructions  # also merge the vendor's house rules
-agentstack apply --write                         # render to your real configs
-agentstack upgrade linear-pack --write          # re-resolve the pack + re-pin the lock
+agentstack add from linear-pack --write                      # server + skills, rendered to every CLI
+agentstack add from linear-pack --with-instructions --write  # also merge the vendor's house rules
+agentstack apply --write                                     # render to your real configs
+agentstack upgrade linear-pack --write                       # re-resolve the pack + re-pin the lock
 ```
 
 Starter packs today: **`linear-pack`**, **`cloudflare-pack`**, **`posthog-pack`**
@@ -74,6 +109,9 @@ Vendor prose is merged with visible provenance, never silently folded into house
 rules — `--with-instructions` is opt-in and previewed before it lands. Bundled
 starter skills are **agentstack-authored and unofficial**: they are honest
 examples of driving a vendor's surface, not endorsed vendor content.
+
+For the broader product direction, see
+[`plan/portable-agent-runtime-vision.md`](plan/portable-agent-runtime-vision.md).
 
 ## What works today
 
@@ -203,11 +241,11 @@ agentstack kill <id> --force   # SIGKILL immediately
 ```
 
 Launching is a terminal act (the harnesses are interactive TUIs); the dashboard's
-**Runs** panel is for observing and killing — each row shows the run's *trust
-footprint* (the exact servers + skills that live process can reach). The registry
-is self-healing: a run whose wrapper died is pruned on the next `runs`. A
+**Runs** panel is for observing and killing tracked runs. The registry is
+self-healing: a run whose wrapper died is pruned on the next `runs`. A
 profile-bound run uses the session engine, so one is allowed per directory at a
-time. Unix only for now.
+time. Unix only for now. Showing the full per-run trust footprint in the
+dashboard is part of the portable-runtime roadmap.
 
 ### Agent-operable (`agentstack mcp`)
 
@@ -382,13 +420,17 @@ atomic writes + backups · `export`/`import` · `hook` · agent-operable `mcp`
 server · local dashboard (server/skill matrices, Discover, add-skill, settings
 editor) · live runs (`run`/`runs`/`kill` + dashboard Runs panel).
 
-**Next:** publish releases + a real demo · dogfood on a team · marketplace
-providers (skills.sh-style) + optional audit enrichment · reconsider a JSON /
-`mcp.json`-aligned manifest · install/remove flows for native plugin runtimes ·
-runs phase 2: discover stray (unmanaged) agent processes as an advisory view.
+**Next:** harden pack remove/upgrade ownership · add golden coverage for every
+adapter · polish the new-machine/team bootstrap path · publish releases + a real
+demo · dogfood on a team · dashboard trust-footprint views for live runs ·
+marketplace providers (skills.sh-style) + optional audit enrichment · reconsider
+a JSON / `mcp.json`-aligned manifest · install/remove flows for native plugin
+runtimes · discover stray unmanaged agent processes as an advisory view.
 
 See [`agentstack-PLAN.md`](agentstack-PLAN.md) for the full spec and design
-decisions (D1–D22).
+decisions (D1–D22), and
+[`plan/portable-agent-runtime-vision.md`](plan/portable-agent-runtime-vision.md)
+for the current product vision.
 
 ## License
 

@@ -45,10 +45,12 @@ pub struct Context {
 /// Resolve the manifest directory (explicit `--manifest-dir` or cwd) and load
 /// everything a command needs.
 pub fn load(manifest_dir: Option<&Path>) -> Result<Context> {
-    let dir = match manifest_dir {
+    let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
     };
+    // Prefer the `.agentstack/` layout, falling back to a legacy root manifest.
+    let dir = manifest::resolve_manifest_dir(&base);
     let loaded = manifest::load_from_dir(&dir)?;
     let registry = Registry::load()?;
     let resolver = Chain::default_for_dir(&dir);

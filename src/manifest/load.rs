@@ -14,6 +14,35 @@ use super::model::Manifest;
 
 pub const MANIFEST_FILE: &str = "agentstack.toml";
 pub const LOCAL_FILE: &str = "agentstack.local.toml";
+/// Preferred subdirectory holding the manifest and all agentstack-managed files
+/// (lock, `skills/`, `instructions/`, `.env`). A repo opts in by placing its
+/// manifest here; the legacy root layout is still discovered for back-compat.
+pub const MANIFEST_SUBDIR: &str = ".agentstack";
+
+/// Resolve the directory that holds an *existing* manifest, given a project/base
+/// dir. Prefers `<base>/.agentstack/` (the new layout) when it actually contains
+/// a manifest, otherwise falls back to the legacy root `<base>/`. When neither
+/// has a manifest, returns the legacy root so callers' "no manifest" errors point
+/// at the conventional path.
+pub fn resolve_manifest_dir(base: &Path) -> PathBuf {
+    let nested = base.join(MANIFEST_SUBDIR);
+    if nested.join(MANIFEST_FILE).exists() {
+        nested
+    } else {
+        base.to_path_buf()
+    }
+}
+
+/// Resolve the directory where a *new* manifest should be created. Keeps using a
+/// legacy root manifest if one already exists there; otherwise prefers the new
+/// `<base>/.agentstack/` layout.
+pub fn new_manifest_dir(base: &Path) -> PathBuf {
+    if base.join(MANIFEST_FILE).exists() {
+        base.to_path_buf()
+    } else {
+        base.join(MANIFEST_SUBDIR)
+    }
+}
 
 /// Result of a layered load, keeping the resolved manifest plus provenance.
 pub struct LoadedManifest {
@@ -81,6 +110,31 @@ fn merge_value(base: &mut toml::Value, overlay: toml::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_prefers_nested_then_falls_back_to_root() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let base = tmp.path();
+
+        // Nothing yet → legacy root (so "no manifest" errors point at the root).
+        assert_eq!(resolve_manifest_dir(base), base.to_path_buf());
+        // New manifests are created under `.agentstack/`.
+        assert_eq!(new_manifest_dir(base), base.join(MANIFEST_SUBDIR));
+
+        // Legacy root manifest present → both resolve to root.
+        fs::write(base.join(MANIFEST_FILE), "version = 1\n").unwrap();
+        assert_eq!(resolve_manifest_dir(base), base.to_path_buf());
+        assert_eq!(new_manifest_dir(base), base.to_path_buf());
+
+        // `.agentstack/` manifest present → preferred over a missing root one.
+        let tmp2 = assert_fs::TempDir::new().unwrap();
+        let base2 = tmp2.path();
+        let nested = base2.join(MANIFEST_SUBDIR);
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join(MANIFEST_FILE), "version = 1\n").unwrap();
+        assert_eq!(resolve_manifest_dir(base2), nested);
+        assert_eq!(new_manifest_dir(base2), nested);
+    }
 
     #[test]
     fn overlay_adds_and_overrides() {

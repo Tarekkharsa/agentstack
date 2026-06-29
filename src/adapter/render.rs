@@ -15,6 +15,12 @@ pub struct Rendered {
     /// The server body, keyed by the server name.
     pub value: Value,
     pub unresolved: Vec<String>,
+    /// Whether this adapter's config format can represent this server's
+    /// transport at all. `false` means the descriptor maps no field for the
+    /// server's defining attribute (e.g. an HTTP server for the stdio-only
+    /// Claude Desktop config) — callers must skip it rather than write an empty
+    /// `{}` entry into a real config file.
+    pub representable: bool,
 }
 
 /// Render one named server for one adapter.
@@ -31,7 +37,16 @@ pub fn render_server(
         return Rendered {
             value: Value::Object(body),
             unresolved,
+            representable: false,
         };
+    };
+
+    // Can this adapter's config format express this server's transport? The
+    // defining field is `url` for HTTP and `command` for stdio; if the descriptor
+    // maps neither, the entry would render empty and must be skipped by callers.
+    let representable = match server.server_type {
+        ServerType::Http => mcp.fields.url.is_some(),
+        ServerType::Stdio => mcp.fields.command.is_some(),
     };
 
     let passthrough = mcp.secret_mode == SecretMode::Passthrough;
@@ -102,6 +117,7 @@ pub fn render_server(
     Rendered {
         value: Value::Object(body),
         unresolved,
+        representable,
     }
 }
 
@@ -210,6 +226,24 @@ mod tests {
         );
         assert!(r.value.get("args").is_none());
         assert_eq!(r.value["environment"]["TOKEN"], "v");
+    }
+
+    #[test]
+    fn claude_desktop_cannot_represent_http_server() {
+        // The stdio-only Claude Desktop config maps no url field: an http server
+        // is not representable (callers must skip it, not write an empty entry),
+        // while a stdio server renders fine.
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("claude-desktop").unwrap();
+        let resolver = MapResolver::default();
+
+        let http = server("type = \"http\"\nurl = \"https://x/mcp\"\n");
+        let r = render_server(desc, &http, &resolver);
+        assert!(!r.representable, "http server is unrepresentable here");
+
+        let stdio = server("type = \"stdio\"\ncommand = \"npx\"\n");
+        let r = render_server(desc, &stdio, &resolver);
+        assert!(r.representable, "stdio server is representable");
     }
 
     #[test]

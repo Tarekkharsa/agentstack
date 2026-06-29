@@ -33,6 +33,11 @@ pub struct TargetPlan {
     pub removed: Vec<String>,
     /// `${REF}`s that did not resolve on this machine.
     pub unresolved: Vec<String>,
+    /// Selected servers this target's config format can't represent (e.g. an
+    /// HTTP server for the stdio-only Claude Desktop config). Skipped from the
+    /// render rather than written as an empty entry; surfaced so the user knows
+    /// to wire them up by the harness's other mechanism (e.g. in-app Connectors).
+    pub skipped: Vec<String>,
 }
 
 impl TargetPlan {
@@ -90,9 +95,16 @@ pub fn plan_target(
     let mut entries: Vec<(String, Value)> = Vec::new();
     let mut unresolved: Vec<String> = Vec::new();
     let mut managed: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
     for name in &names {
         let server = &manifest.servers[name];
         let rendered = render_server(desc, server, resolver);
+        // The adapter's format can't express this transport — skip it rather
+        // than emit an empty `{}` entry into a real config file.
+        if !rendered.representable {
+            skipped.push(name.clone());
+            continue;
+        }
         for u in rendered.unresolved {
             unresolved.push(format!("{u} (server '{name}')"));
         }
@@ -132,6 +144,7 @@ pub fn plan_target(
         managed,
         removed,
         unresolved,
+        skipped,
     }))
 }
 

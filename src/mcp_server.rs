@@ -404,10 +404,11 @@ fn add_from(args: &Value, dir: Option<&Path>) -> Result<String> {
     let candidate = crate::provider::resolve(id)
         .with_context(|| format!("no capability '{id}' in the catalog or registry"))?;
 
-    let mdir = match dir {
+    let base = match dir {
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
     };
+    let mdir = crate::manifest::resolve_manifest_dir(&base);
     let manifest_path = mdir.join(MANIFEST_FILE);
     let original = std::fs::read_to_string(&manifest_path).with_context(|| {
         format!(
@@ -477,10 +478,11 @@ fn add_server(args: &Value, dir: Option<&Path>) -> Result<String> {
         _ => {}
     }
 
-    let mdir = match dir {
+    let base = match dir {
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
     };
+    let mdir = crate::manifest::resolve_manifest_dir(&base);
     let manifest_path = mdir.join(MANIFEST_FILE);
     let original = std::fs::read_to_string(&manifest_path).with_context(|| {
         format!(

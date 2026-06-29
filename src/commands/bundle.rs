@@ -73,10 +73,12 @@ pub fn run_export(args: &ExportArgs, manifest_dir: Option<&Path>) -> Result<()> 
 }
 
 pub fn run_import(args: &ImportArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    let dir = match manifest_dir {
+    let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
     };
+    // Restore into `.agentstack/`; keep updating a legacy root manifest.
+    let dir = crate::manifest::new_manifest_dir(&base);
     let manifest_path = dir.join(MANIFEST_FILE);
     if manifest_path.exists() && !args.force {
         bail!(

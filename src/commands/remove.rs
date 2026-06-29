@@ -103,6 +103,8 @@ fn remove_pack(ctx: &super::Context, name: &str, recipe: &PluginRecipe, write: b
 
     // Instruction files we wrote and may delete (carry the vendor marker).
     let safe_instr_files = safe_instruction_files(&ctx.loaded.manifest, ctx, recipe, name);
+    // Pack-owned skill dirs to delete (contained under the manifest dir).
+    let skill_dirs = safe_skill_dirs(&ctx.loaded.manifest, ctx, recipe);
 
     println!(
         "{} remove pack '{}' from {}",
@@ -117,6 +119,11 @@ fn remove_pack(ctx: &super::Context, name: &str, recipe: &PluginRecipe, write: b
             .map(|l| format!("  {l}\n"))
             .collect::<String>()
     );
+    for path in &skill_dirs {
+        if path.exists() {
+            println!("  {} delete {}/", "−".yellow(), path.display());
+        }
+    }
     for path in &safe_instr_files {
         println!("  {} delete {}", "−".yellow(), path.display());
     }
@@ -124,6 +131,9 @@ fn remove_pack(ctx: &super::Context, name: &str, recipe: &PluginRecipe, write: b
     if write {
         crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
+        for dir in &skill_dirs {
+            remove_skill_dir(dir, &ctx.dir);
+        }
         for path in &safe_instr_files {
             let _ = fs::remove_file(path);
         }
@@ -145,6 +155,75 @@ fn remove_pack(ctx: &super::Context, name: &str, recipe: &PluginRecipe, write: b
         );
     }
     Ok(())
+}
+
+/// Resolve which of the ledger's skill directories are safe to delete. Pack
+/// ownership is established by the ledger listing the skill; [`contained_skill_dir`]
+/// then caps the blast radius so a hand-edited or corrupt ledger can never make us
+/// delete the project root, a top-level dir, or the shared `skills/` tree itself.
+pub(crate) fn safe_skill_dirs(
+    manifest: &Manifest,
+    ctx: &super::Context,
+    recipe: &PluginRecipe,
+) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for name in &recipe.skills {
+        let Some(path) = manifest.skills.get(name).and_then(|s| s.path.as_deref()) else {
+            continue;
+        };
+        if let Some(dir) = contained_skill_dir(&ctx.dir, path) {
+            out.push(dir);
+        }
+    }
+    out
+}
+
+/// Validate a ledger skill `path` and resolve it to an absolute dir that is safe
+/// to `remove_dir_all`. The path must:
+/// - be relative and made only of *normal* components — any `.`, `..`, root, or
+///   drive-prefix component is rejected (blocks `"."`, `"./"`, `"../x"`, `"/x"`);
+/// - live under the conventional `skills/` asset area (where every pack skill is
+///   extracted); and
+/// - be nested at least one level deep, so we never target `"."`, a bare
+///   top-level dir, or `skills/` itself.
+///
+/// Anything failing these rules yields `None` and is left on disk untouched.
+fn contained_skill_dir(root: &Path, path: &str) -> Option<PathBuf> {
+    let rel = Path::new(path.trim_start_matches("./"));
+    let mut comps = Vec::new();
+    for c in rel.components() {
+        match c {
+            std::path::Component::Normal(s) => comps.push(s),
+            // CurDir / ParentDir / RootDir / Prefix are all unsafe here.
+            _ => return None,
+        }
+    }
+    // Must be `skills/<something>[/...]` — never `.`, a top-level dir, or a bare
+    // `skills`.
+    if comps.len() < 2 || comps[0] != "skills" {
+        return None;
+    }
+    Some(root.join(rel))
+}
+
+/// Best-effort: remove `dir`, then walk empty parents upward, stopping before
+/// `root`. Keeps the managed tree tidy after a skill dir is deleted without ever
+/// touching anything outside `root`.
+pub(crate) fn remove_skill_dir(dir: &Path, root: &Path) {
+    if fs::remove_dir_all(dir).is_err() {
+        return;
+    }
+    let mut parent = dir.parent();
+    while let Some(p) = parent {
+        if p == root || !p.starts_with(root) {
+            break;
+        }
+        // `remove_dir` only succeeds on an empty directory — exactly what we want.
+        if fs::remove_dir(p).is_err() {
+            break;
+        }
+        parent = p.parent();
+    }
 }
 
 /// Resolve which of the ledger's instruction files are safe to delete: they
@@ -226,6 +305,40 @@ mod tests {
         assert!(pack_ledger(&m, "linear-pack").is_some());
         assert!(pack_ledger(&m, "play").is_none());
         assert!(pack_ledger(&m, "missing").is_none());
+    }
+
+    #[test]
+    fn contained_skill_dir_only_accepts_nested_paths_under_skills() {
+        let root = Path::new("/repo");
+        // Legitimate pack skill asset paths resolve under the root.
+        assert_eq!(
+            contained_skill_dir(root, "./skills/pr-triage"),
+            Some(root.join("skills/pr-triage"))
+        );
+        assert_eq!(
+            contained_skill_dir(root, "skills/linear/breakdown"),
+            Some(root.join("skills/linear/breakdown"))
+        );
+        // Dangerous / malformed paths are all rejected — never delete root, a
+        // top-level dir, the shared skills/ tree, or anything outside it.
+        for bad in [
+            ".",
+            "./",
+            "",
+            "skills",
+            "skills/",
+            "instructions/x",
+            "../escape",
+            "skills/../..",
+            "/abs/skills/x",
+            "./../skills/x",
+        ] {
+            assert_eq!(
+                contained_skill_dir(root, bad),
+                None,
+                "path {bad:?} must be rejected"
+            );
+        }
     }
 
     #[test]

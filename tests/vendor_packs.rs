@@ -224,7 +224,9 @@ fn remove_pack_fully_reverses_install_and_spares_user_files() {
 
     // Sanity: everything is present before removal.
     let pack_instr = dir.join("instructions/linear_rules.md");
+    let pack_skill = dir.join("skills/linear/breakdown");
     assert!(pack_instr.exists());
+    assert!(pack_skill.join("SKILL.md").exists());
 
     let remove = RemoveArgs {
         name: "linear-pack".into(),
@@ -243,9 +245,123 @@ fn remove_pack_fully_reverses_install_and_spares_user_files() {
     assert!(user_instr.exists(), "user-authored file untouched");
     assert_eq!(fs::read_to_string(&user_instr).unwrap(), "# my own rules\n");
 
+    // Pack-owned skill assets are deleted too, and the now-empty parent is pruned.
+    assert!(!pack_skill.exists(), "pack skill dir deleted");
+    assert!(
+        !dir.join("skills/linear").exists(),
+        "emptied parent dir pruned"
+    );
+
     // The remaining manifest still parses.
     let _: Manifest = toml::from_str(&fs::read_to_string(&path).unwrap())
         .expect("manifest still parses after removal");
+}
+
+#[test]
+fn remove_pack_never_deletes_root_or_the_shared_skills_tree() {
+    // A hand-edited ledger that points a pack skill at "." (the project root) or
+    // at the bare "skills" tree must delete NOTHING — only nested skills/<x>/...
+    // paths are ever removed.
+    for evil_path in [".", "skills"] {
+        let (tmp, _path) = seed(&format!(
+            r#"
+            version = 1
+
+            [skills.evil]
+            path = "{evil_path}"
+
+            [plugins.linear-pack]
+            kind = "pack"
+            version = "0.1.0"
+            description = "Linear pack"
+            skills = ["evil"]
+            "#
+        ));
+        let dir = tmp.path();
+
+        // A user file at the root and a sibling skill that must both survive.
+        fs::write(dir.join("important.txt"), "keep me\n").unwrap();
+        let other_skill = dir.join("skills/unrelated");
+        fs::create_dir_all(&other_skill).unwrap();
+        fs::write(other_skill.join("SKILL.md"), "# unrelated\n").unwrap();
+
+        let remove = RemoveArgs {
+            name: "linear-pack".into(),
+            write: true,
+        };
+        agentstack::commands::remove::run(&remove, Some(dir)).unwrap();
+
+        assert!(
+            dir.join("important.txt").exists(),
+            "path {evil_path:?}: project root must be untouched"
+        );
+        assert!(
+            other_skill.join("SKILL.md").exists(),
+            "path {evil_path:?}: shared skills/ tree must be untouched"
+        );
+    }
+}
+
+#[test]
+fn remove_then_reinstall_round_trips_cleanly() {
+    // Regression: remove must clear pack-owned skill dirs so a subsequent install
+    // doesn't trip the "destination already exists" collision guard.
+    let (tmp, _path) = seed("version = 1\n");
+    let dir = tmp.path();
+
+    agentstack::commands::add::run(&add_args("linear-pack", true, true), Some(dir)).unwrap();
+    assert!(dir.join("skills/linear/breakdown/SKILL.md").exists());
+
+    let remove = RemoveArgs {
+        name: "linear-pack".into(),
+        write: true,
+    };
+    agentstack::commands::remove::run(&remove, Some(dir)).unwrap();
+
+    // Reinstall succeeds (would error with "already exists" if the dir lingered).
+    agentstack::commands::add::run(&add_args("linear-pack", true, true), Some(dir))
+        .expect("reinstall after remove must succeed");
+    let m = load(dir);
+    assert!(m.skills.contains_key("linear_breakdown"));
+    assert!(dir.join("skills/linear/breakdown/SKILL.md").exists());
+}
+
+#[test]
+fn remove_pack_spares_skill_dirs_pointed_outside_the_manifest_dir() {
+    // A hand-edited ledger that points a pack skill at an absolute path outside the
+    // managed tree must NOT be deleted: containment guards the blast radius.
+    let outside = assert_fs::TempDir::new().unwrap();
+    let victim = outside.path().join("precious");
+    fs::create_dir_all(&victim).unwrap();
+    fs::write(victim.join("keep.txt"), "do not delete\n").unwrap();
+
+    let (tmp, _path) = seed(&format!(
+        r#"
+        version = 1
+
+        [skills.evil]
+        path = "{}"
+
+        [plugins.linear-pack]
+        kind = "pack"
+        version = "0.1.0"
+        description = "Linear pack"
+        skills = ["evil"]
+        "#,
+        victim.display()
+    ));
+    let dir = tmp.path();
+
+    let remove = RemoveArgs {
+        name: "linear-pack".into(),
+        write: true,
+    };
+    agentstack::commands::remove::run(&remove, Some(dir)).unwrap();
+
+    assert!(
+        victim.join("keep.txt").exists(),
+        "absolute out-of-tree skill path must never be deleted"
+    );
 }
 
 #[test]
@@ -374,7 +490,10 @@ fn upgrade_gates_instruction_body_change_until_accepted() {
         .unwrap();
     let restored = fs::read_to_string(&instr).unwrap();
     assert!(restored.starts_with("<!-- agentstack:vendor linear-pack (unofficial) -->"));
-    assert!(!restored.contains("TAMPERED"), "accepted upgrade re-stamps the body");
+    assert!(
+        !restored.contains("TAMPERED"),
+        "accepted upgrade re-stamps the body"
+    );
 }
 
 #[test]
@@ -400,6 +519,45 @@ fn upgrade_repins_lock_for_pack_skills() {
 }
 
 #[test]
+fn upgrade_never_deletes_skill_dirs_outside_the_manifest_dir() {
+    // Regression: a corrupt/hand-edited ledger that points a pack skill at an
+    // absolute path outside the managed tree must not be deleted during the
+    // upgrade's old-asset cleanup. Containment caps the blast radius.
+    let outside = assert_fs::TempDir::new().unwrap();
+    let victim = outside.path().join("precious");
+    fs::create_dir_all(&victim).unwrap();
+    fs::write(victim.join("keep.txt"), "do not delete\n").unwrap();
+
+    let (tmp, _path) = seed(&format!(
+        r#"
+        version = 1
+
+        [skills.linear_breakdown]
+        path = "{}"
+
+        [plugins.linear-pack]
+        kind = "pack"
+        version = "0.1.0"
+        source = "catalog:linear-pack"
+        description = "Linear pack"
+        skills = ["linear_breakdown"]
+        "#,
+        victim.display()
+    ));
+    let dir = tmp.path();
+
+    agentstack::commands::upgrade::run(&upgrade_args("linear-pack", false, false, true), Some(dir))
+        .unwrap();
+
+    assert!(
+        victim.join("keep.txt").exists(),
+        "absolute out-of-tree skill path must never be deleted by upgrade"
+    );
+    // And the canonical, contained destination is what actually gets the asset.
+    assert!(dir.join("skills/linear/breakdown/SKILL.md").exists());
+}
+
+#[test]
 fn upgrade_rejects_non_pack_and_missing_ledger() {
     // A plain server recipe (not kind = "pack") and an unknown name both bail.
     let (tmp, _path) = seed(
@@ -412,12 +570,14 @@ fn upgrade_rejects_non_pack_and_missing_ledger() {
     );
     let dir = tmp.path();
 
-    let err = agentstack::commands::upgrade::run(&upgrade_args("play", false, false, true), Some(dir))
-        .unwrap_err();
+    let err =
+        agentstack::commands::upgrade::run(&upgrade_args("play", false, false, true), Some(dir))
+            .unwrap_err();
     assert!(err.to_string().contains("not an installed vendor pack"));
 
-    let err = agentstack::commands::upgrade::run(&upgrade_args("ghost", false, false, true), Some(dir))
-        .unwrap_err();
+    let err =
+        agentstack::commands::upgrade::run(&upgrade_args("ghost", false, false, true), Some(dir))
+            .unwrap_err();
     assert!(err.to_string().contains("not an installed vendor pack"));
 }
 
@@ -436,8 +596,11 @@ fn upgrade_refuses_when_resolved_member_now_forbidden() {
     fs::write(&path, &with_policy).unwrap();
     let before = fs::read_to_string(&path).unwrap();
 
-    let err = agentstack::commands::upgrade::run(&upgrade_args("linear-pack", false, false, true), Some(dir))
-        .unwrap_err();
+    let err = agentstack::commands::upgrade::run(
+        &upgrade_args("linear-pack", false, false, true),
+        Some(dir),
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("linear_breakdown"), "names the member: {msg}");
     assert!(msg.contains("forbid"), "names the rule: {msg}");
