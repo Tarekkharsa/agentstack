@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use super::{clean_name, Candidate, Install, Provider};
+use super::{clean_name, Candidate, CandidateKind, Install, Provider};
 
 const DEFAULT_BASE: &str = "https://registry.modelcontextprotocol.io";
 
@@ -79,10 +79,10 @@ fn to_candidate(entry: ApiEntry) -> Option<Candidate> {
             name,
             description,
             source: "registry",
-            install: Install::Http {
+            kind: CandidateKind::Server(Install::Http {
                 url: remote.url,
                 secret_headers,
-            },
+            }),
         });
     }
 
@@ -110,11 +110,11 @@ fn to_candidate(entry: ApiEntry) -> Option<Candidate> {
         name,
         description,
         source: "registry",
-        install: Install::Stdio {
+        kind: CandidateKind::Server(Install::Stdio {
             command,
             args,
             secret_env,
-        },
+        }),
     })
 }
 
@@ -197,11 +197,11 @@ mod tests {
 
         let remote = &cands[0];
         assert_eq!(remote.name, "remote-srv");
-        match &remote.install {
-            Install::Http {
+        match &remote.kind {
+            CandidateKind::Server(Install::Http {
                 url,
                 secret_headers,
-            } => {
+            }) => {
                 assert_eq!(url, "https://x/mcp");
                 assert_eq!(secret_headers, &vec!["Authorization".to_string()]);
             }
@@ -209,12 +209,12 @@ mod tests {
         }
 
         let npm = &cands[1];
-        match &npm.install {
-            Install::Stdio {
+        match &npm.kind {
+            CandidateKind::Server(Install::Stdio {
                 command,
                 args,
                 secret_env,
-            } => {
+            }) => {
                 assert_eq!(command, "npx");
                 assert_eq!(args, &vec!["-y".to_string(), "@a/b@1.2.3".to_string()]);
                 assert_eq!(secret_env, &vec!["API_KEY".to_string()]);

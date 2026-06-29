@@ -27,6 +27,47 @@ pub enum Install {
     },
 }
 
+/// A bundled-skill reference inside a candidate (a pack member, or a standalone
+/// `kind: skill`). `path` is an embedded asset path under `catalog/` (or a local
+/// path for user skills); `git`/`rev` describe a remote source.
+#[derive(Debug, Clone)]
+pub struct SkillRef {
+    pub name: String,
+    pub path: Option<String>,
+    pub git: Option<String>,
+    pub rev: Option<String>,
+}
+
+/// An instruction-fragment reference inside a pack. `path` is an embedded asset
+/// path under `catalog/`.
+#[derive(Debug, Clone)]
+pub struct InstrRef {
+    pub name: String,
+    pub path: String,
+}
+
+/// A vendor pack: an install-time composition of an MCP server + skill(s) +
+/// house-rule instructions. After `add` each member lives in its normal
+/// manifest section; this is NOT a runtime concept.
+#[derive(Debug, Clone)]
+pub struct PackSpec {
+    pub server: Option<Install>,
+    pub skills: Vec<SkillRef>,
+    pub instructions: Vec<InstrRef>,
+    pub targets: Vec<String>,
+}
+
+/// What kind of capability a candidate installs.
+#[derive(Debug, Clone)]
+pub enum CandidateKind {
+    /// A single MCP server.
+    Server(Install),
+    /// A standalone skill (a `SKILL.md` directory).
+    Skill(SkillRef),
+    /// A vendor pack (server + skills + instructions installed as one unit).
+    Pack(PackSpec),
+}
+
 /// A normalized search result from any provider.
 #[derive(Debug, Clone)]
 pub struct Candidate {
@@ -37,7 +78,7 @@ pub struct Candidate {
     pub description: String,
     /// Which provider surfaced it (`catalog`, `registry`, …).
     pub source: &'static str,
-    pub install: Install,
+    pub kind: CandidateKind,
 }
 
 /// Source-agnostic trust signals for a candidate (PLAN §9h). Not a verdict —
@@ -53,15 +94,11 @@ pub struct Trust {
     pub needs_secret: bool,
 }
 
-impl Candidate {
-    /// Compute trust signals from the candidate's id and install shape.
-    pub fn trust(&self) -> Trust {
-        let namespaced = self
-            .id
-            .split_once('/')
-            .map(|(ns, _)| ns.contains('.'))
-            .unwrap_or(false);
-        match &self.install {
+impl Install {
+    /// Trust signals for a single install shape, given a precomputed
+    /// `namespaced` flag.
+    fn trust(&self, namespaced: bool) -> Trust {
+        match self {
             Install::Http { secret_headers, .. } => Trust {
                 namespaced,
                 runs_code: false,
@@ -74,17 +111,64 @@ impl Candidate {
             },
         }
     }
+}
 
-    /// Build a manifest [`Server`], lifting required secrets to `${REF}`s.
+impl Candidate {
+    /// Compute trust signals from the candidate's id and shape. A pack
+    /// aggregates its members: it runs code if any member would, and needs a
+    /// secret if its server does.
+    pub fn trust(&self) -> Trust {
+        let namespaced = self
+            .id
+            .split_once('/')
+            .map(|(ns, _)| ns.contains('.'))
+            .unwrap_or(false);
+        match &self.kind {
+            CandidateKind::Server(install) => install.trust(namespaced),
+            CandidateKind::Skill(_) => Trust {
+                namespaced,
+                // Skills carry no executable transport; they steer the agent.
+                runs_code: false,
+                needs_secret: false,
+            },
+            CandidateKind::Pack(spec) => {
+                let server = spec.server.as_ref().map(|i| i.trust(namespaced));
+                Trust {
+                    namespaced,
+                    runs_code: server.as_ref().map(|t| t.runs_code).unwrap_or(false),
+                    needs_secret: server.as_ref().map(|t| t.needs_secret).unwrap_or(false),
+                }
+            }
+        }
+    }
+
+    /// Build a manifest [`Server`], lifting required secrets to `${REF}`s. Only
+    /// valid for server candidates and packs that carry a server.
     pub fn to_server(&self) -> Server {
-        match &self.install {
+        let install = match &self.kind {
+            CandidateKind::Server(install) => install,
+            CandidateKind::Pack(spec) => spec
+                .server
+                .as_ref()
+                .expect("to_server called on a pack with no server"),
+            CandidateKind::Skill(_) => panic!("to_server called on a skill candidate"),
+        };
+        install.to_server_named(&self.name)
+    }
+}
+
+impl Install {
+    /// Build a manifest [`Server`] for this install, lifting required secrets to
+    /// `${REF}`s keyed off `name`.
+    fn to_server_named(&self, name: &str) -> Server {
+        match self {
             Install::Http {
                 url,
                 secret_headers,
             } => {
                 let mut headers = IndexMap::new();
                 for h in secret_headers {
-                    let reference = format!("{}_TOKEN", sanitize(&self.name));
+                    let reference = format!("{}_TOKEN", sanitize(name));
                     let value = if h.eq_ignore_ascii_case("authorization") {
                         format!("Bearer ${{{reference}}}")
                     } else {
@@ -139,29 +223,92 @@ impl Provider for CatalogProvider {
     fn search(&self, query: &str, _limit: usize) -> Vec<Candidate> {
         catalog::search(query)
             .into_iter()
-            .filter(|e| e.kind == "server")
-            .map(|e| {
-                let install = if e.transport.as_deref() == Some("http") {
-                    Install::Http {
-                        url: e.url.clone().unwrap_or_default(),
-                        secret_headers: e.headers.clone(),
-                    }
-                } else {
-                    Install::Stdio {
-                        command: e.command.clone().unwrap_or_else(|| "npx".into()),
-                        args: e.args.clone(),
-                        secret_env: e.env.clone(),
-                    }
+            .filter_map(|e| {
+                let kind = match e.kind.as_str() {
+                    "server" => CandidateKind::Server(server_install(
+                        e.transport.as_deref(),
+                        e.url.as_deref(),
+                        e.command.as_deref(),
+                        &e.args,
+                        &e.env,
+                        &e.headers,
+                    )),
+                    "skill" => CandidateKind::Skill(SkillRef {
+                        name: e.name.clone(),
+                        path: e.path.clone(),
+                        git: None,
+                        rev: None,
+                    }),
+                    "pack" => CandidateKind::Pack(PackSpec {
+                        server: e.server.as_ref().map(|s| {
+                            server_install(
+                                s.transport.as_deref(),
+                                s.url.as_deref(),
+                                s.command.as_deref(),
+                                &s.args,
+                                &s.env,
+                                &s.headers,
+                            )
+                        }),
+                        skills: e
+                            .skills
+                            .iter()
+                            .map(|s| SkillRef {
+                                name: s.name.clone(),
+                                path: s.path.clone(),
+                                git: s.git.clone(),
+                                rev: s.rev.clone(),
+                            })
+                            .collect(),
+                        instructions: e
+                            .instructions
+                            .iter()
+                            .map(|i| InstrRef {
+                                name: i.name.clone(),
+                                path: i.path.clone(),
+                            })
+                            .collect(),
+                        targets: if e.targets.is_empty() {
+                            vec!["*".to_string()]
+                        } else {
+                            e.targets.clone()
+                        },
+                    }),
+                    _ => return None,
                 };
-                Candidate {
+                Some(Candidate {
                     id: e.name.clone(),
                     name: e.name.clone(),
                     description: e.description.clone(),
                     source: "catalog",
-                    install,
-                }
+                    kind,
+                })
             })
             .collect()
+    }
+}
+
+/// Build an [`Install`] from flat catalog server fields (shared by `kind:
+/// server` entries and the nested `server:` of a pack).
+fn server_install(
+    transport: Option<&str>,
+    url: Option<&str>,
+    command: Option<&str>,
+    args: &[String],
+    env: &[String],
+    headers: &[String],
+) -> Install {
+    if transport == Some("http") {
+        Install::Http {
+            url: url.unwrap_or_default().to_string(),
+            secret_headers: headers.to_vec(),
+        }
+    } else {
+        Install::Stdio {
+            command: command.unwrap_or("npx").to_string(),
+            args: args.to_vec(),
+            secret_env: env.to_vec(),
+        }
     }
 }
 
@@ -247,12 +394,41 @@ mod tests {
             name: "kibana".into(),
             description: "".into(),
             source: "catalog",
-            install: Install::Http {
+            kind: CandidateKind::Server(Install::Http {
                 url: "https://x".into(),
                 secret_headers: vec!["Authorization".into()],
-            },
+            }),
         };
         let s = c.to_server();
         assert_eq!(s.headers["Authorization"], "Bearer ${KIBANA_TOKEN}");
+    }
+
+    #[test]
+    fn catalog_provider_surfaces_pack_and_skill() {
+        let pack = CatalogProvider
+            .search("linear", 10)
+            .into_iter()
+            .find(|c| c.name == "linear-pack")
+            .unwrap();
+        match &pack.kind {
+            CandidateKind::Pack(spec) => {
+                assert!(spec.server.is_some());
+                assert_eq!(spec.skills.len(), 1);
+                assert_eq!(spec.instructions.len(), 1);
+            }
+            _ => panic!("expected a pack"),
+        }
+        // A pack with an http server that needs Authorization: needs a secret,
+        // runs no code.
+        let t = pack.trust();
+        assert!(t.needs_secret);
+        assert!(!t.runs_code);
+
+        let skill = CatalogProvider
+            .search("triage", 10)
+            .into_iter()
+            .find(|c| c.name == "pr-triage")
+            .unwrap();
+        assert!(matches!(skill.kind, CandidateKind::Skill(_)));
     }
 }

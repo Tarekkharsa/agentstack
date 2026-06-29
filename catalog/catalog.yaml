@@ -68,3 +68,31 @@
   tags: [design, figma, ui]
   transport: http
   url: https://mcp.figma.com/mcp
+
+# --- Packs (vendor MCP + skill(s) + house rules, installed as one unit) ---
+- kind: pack
+  name: linear-pack
+  display: Linear
+  description: "Linear MCP + ticket-breakdown skill + house rules (unofficial, agentstack-authored)"
+  homepage: https://linear.app
+  tags: [issues, linear, project-management, pack]
+  server:
+    transport: http
+    url: https://mcp.linear.app/mcp
+    headers: [Authorization]
+  skills:
+    - name: linear_breakdown
+      path: skills/linear/breakdown
+  instructions:
+    - name: linear_rules
+      path: instructions/linear/rules.md
+  targets: ["*"]
+
+# --- Standalone skills (agentstack-authored, bundled) ---
+- kind: skill
+  name: pr-triage
+  display: PR Triage
+  description: "Triage a stack of open pull requests into review/merge/close buckets (unofficial, agentstack-authored)"
+  homepage: https://github.com
+  tags: [pr, review, github, triage]
+  path: skills/pr-triage

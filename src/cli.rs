@@ -249,6 +249,10 @@ pub struct AddFromArgs {
     /// Also add to this profile's server list.
     #[arg(long)]
     pub profile: Option<String>,
+    /// For packs: also install the vendor's house-rule instructions (opt-in —
+    /// they steer your daily-driver agent). Off by default.
+    #[arg(long)]
+    pub with_instructions: bool,
     /// Write the change (else dry-run).
     #[arg(long)]
     pub write: bool,

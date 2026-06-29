@@ -44,6 +44,30 @@ converging on `mcp.json`) — it's the **layers that survive convergence**:
 cross-source discovery (the official MCP Registry), and a trust/governance gate**
 — in one auditable binary, across every CLI.
 
+## For vendors: ship your MCP + skills + docs
+
+agentstack is how a vendor ships its **MCP + skills + docs** into any harness —
+one source of truth, instead of trapping expertise behind an in-app chatbot.
+Bundle the server, the skills that know how to drive it, and the house rules
+that steer the agent as a single **pack**, and the user installs the whole unit
+into their *own* agent:
+
+```sh
+agentstack add linear-pack                      # server + skills, rendered to every CLI
+agentstack add linear-pack --with-instructions  # also merge the vendor's house rules
+agentstack apply --write                         # render to your real configs
+```
+
+This is the canonical target for the "continue in your own agent? install the
+MCP + skills" prompt: one command pulls the server, its skills, and (opt-in) its
+docs into every CLI the user has, with secrets kept as `${REF}`s and every member
+passing the same trust gate as any hand-added capability.
+
+Vendor prose is merged with visible provenance, never silently folded into house
+rules — `--with-instructions` is opt-in and previewed before it lands. Bundled
+starter skills are **agentstack-authored and unofficial**: they are honest
+examples of driving a vendor's surface, not endorsed vendor content.
+
 ## What works today
 
 - **6 agent CLIs** — Claude Code, Codex, Cursor, Windsurf, Gemini CLI, VS Code

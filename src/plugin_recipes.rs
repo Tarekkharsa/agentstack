@@ -91,6 +91,8 @@ pub fn statuses(manifest: &Manifest, registry: &Registry, dir: &Path) -> Vec<Rec
     manifest
         .plugins
         .iter()
+        // Pack ledgers are install records, not publishable plugins.
+        .filter(|(_, recipe)| !is_pack_ledger(recipe))
         .map(|(name, recipe)| {
             let recipe_targets = effective_targets(recipe, &targets);
             recipe_status(
@@ -131,6 +133,11 @@ pub fn sync(
     let mut generated = Vec::new();
 
     for (name, recipe) in &manifest.plugins {
+        // Pack ledgers are install records, not publishable plugins — never
+        // render them as native plugin packages/marketplaces.
+        if is_pack_ledger(recipe) {
+            continue;
+        }
         let targets = effective_targets(recipe, &selected_targets);
         let native_plugins = Vec::new();
         let native_marketplaces = Vec::new();
@@ -219,6 +226,13 @@ pub fn sync(
     }
 
     Ok(report)
+}
+
+/// Whether a recipe is a pack install ledger (written by `agentstack add
+/// <pack>`) rather than a publishable plugin. Pack ledgers are invisible to
+/// `plugins sync` and `doctor`'s plugin reporting.
+fn is_pack_ledger(recipe: &PluginRecipe) -> bool {
+    recipe.kind.as_deref() == Some("pack")
 }
 
 fn default_targets(registry: &Registry) -> Vec<String> {
@@ -1178,6 +1192,47 @@ mod tests {
             fs::read_to_string(tmp.path().join("plugins/agentstack/play/README.md")).unwrap(),
             "manual"
         );
+    }
+
+    #[test]
+    fn pack_ledger_is_invisible_to_sync_and_statuses() {
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [servers.linear-pack]
+            type = "http"
+            url = "https://mcp.linear.app/mcp"
+
+            [servers.linear-pack.headers]
+            Authorization = "Bearer ${LINEAR_PACK_TOKEN}"
+
+            [plugins.linear-pack]
+            kind = "pack"
+            version = "0.1.0"
+            description = "Linear pack"
+            source = "catalog:linear-pack"
+            servers = ["linear-pack"]
+            "#,
+        )
+        .unwrap();
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let reg = Registry::load().unwrap();
+        // No recipe statuses are reported for a pack ledger.
+        assert!(statuses(&m, &reg, tmp.path()).is_empty());
+        // Sync renders nothing and writes no package.
+        let report = sync(
+            &m,
+            &reg,
+            tmp.path(),
+            &SyncOptions {
+                targets: vec![],
+                write: true,
+            },
+        )
+        .unwrap();
+        assert!(report.recipes.is_empty());
+        assert!(!tmp.path().join("plugins/agentstack/linear-pack").exists());
     }
 
     #[test]

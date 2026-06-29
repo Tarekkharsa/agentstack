@@ -8,7 +8,7 @@ use anyhow::Result;
 use owo_colors::OwoColorize;
 
 use crate::cli::SearchArgs;
-use crate::provider;
+use crate::provider::{self, CandidateKind};
 
 pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let query = args.query.clone().unwrap_or_default();
@@ -21,13 +21,21 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     let results = provider::search_all(&query, 25);
 
+    // A capability is "installed" if its server is in the manifest, or — for a
+    // pack — if its `[plugins.<name>]` install ledger exists.
     let installed = super::load(manifest_dir)
         .ok()
         .map(|ctx| {
-            ctx.loaded
-                .manifest
-                .servers
+            let m = &ctx.loaded.manifest;
+            m.servers
                 .keys()
+                .chain(m.skills.keys())
+                .chain(
+                    m.plugins
+                        .iter()
+                        .filter(|(_, r)| r.kind.as_deref() == Some("pack"))
+                        .map(|(name, _)| name),
+                )
                 .cloned()
                 .collect::<Vec<_>>()
         })
@@ -41,11 +49,15 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
     println!("{} result(s) for '{query}':\n", results.len());
     for c in &results {
         let added = installed.contains(&c.name);
-        let badge = if added {
-            format!(" {}", "(in manifest)".green())
-        } else {
-            String::new()
-        };
+        let mut badge = String::new();
+        match &c.kind {
+            CandidateKind::Pack(_) => badge.push_str(&format!(" {}", "[pack]".magenta())),
+            CandidateKind::Skill(_) => badge.push_str(&format!(" {}", "[skill]".cyan())),
+            CandidateKind::Server(_) => {}
+        }
+        if added {
+            badge.push_str(&format!(" {}", "(in manifest)".green()));
+        }
         println!(
             "{} {} {}{badge}",
             c.name.bold(),
@@ -54,6 +66,34 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
         );
         if c.id != c.name {
             println!("  {}", c.id.dimmed());
+        }
+        // Composition / source line per kind.
+        match &c.kind {
+            CandidateKind::Pack(spec) => {
+                let mut parts = Vec::new();
+                if spec.server.is_some() {
+                    parts.push("1 server".to_string());
+                }
+                if !spec.skills.is_empty() {
+                    parts.push(format!("{} skill", spec.skills.len()));
+                }
+                if !spec.instructions.is_empty() {
+                    parts.push(format!("{} instruction", spec.instructions.len()));
+                }
+                if !parts.is_empty() {
+                    println!("  {} {}", "contains:".dimmed(), parts.join(" · "));
+                }
+            }
+            CandidateKind::Skill(skill) => {
+                let source = skill
+                    .path
+                    .as_deref()
+                    .map(|p| format!("path:{p}"))
+                    .or_else(|| skill.git.as_deref().map(|g| format!("git:{g}")))
+                    .unwrap_or_else(|| "—".into());
+                println!("  {} {source}", "source:".dimmed());
+            }
+            CandidateKind::Server(_) => {}
         }
         let t = c.trust();
         let mut signals = Vec::new();

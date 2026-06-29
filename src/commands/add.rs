@@ -3,7 +3,7 @@
 //! merger so comments/formatting survive.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
@@ -12,10 +12,17 @@ use serde_json::Value;
 use toml_edit::{Array, DocumentMut};
 
 use crate::cli::{AddArgs, AddFromArgs, AddKind, AddServerArgs, AddSkillArgs};
-use crate::manifest::{Server, ServerType, Skill};
-use crate::provider;
+use crate::manifest::{Manifest, PluginRecipe, Server, ServerType, Skill};
+use crate::provider::{self, Candidate, CandidateKind, InstrRef, PackSpec, SkillRef};
 use crate::render::merge_toml;
 use crate::util::diff;
+
+/// Provenance header prepended to a pack's extracted instruction file so its
+/// origin survives into the merged CLAUDE.md/AGENTS.md region — and so `remove`
+/// can tell a pack-written file from a user-authored one before deleting it.
+fn vendor_marker(pack: &str) -> String {
+    format!("<!-- agentstack:vendor {pack} (unofficial) -->")
+}
 
 pub fn run(args: &AddArgs, manifest_dir: Option<&Path>) -> Result<()> {
     match &args.kind {
@@ -29,9 +36,6 @@ fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
     let candidate = provider::resolve(&a.id)
         .with_context(|| format!("no capability '{}' in the catalog or registry", a.id))?;
-    if ctx.loaded.manifest.servers.contains_key(&candidate.name) {
-        anyhow::bail!("server '{}' already exists in the manifest", candidate.name);
-    }
     println!(
         "{} {} ({}) — {}",
         "found".green(),
@@ -39,9 +43,20 @@ fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
         candidate.source,
         candidate.id
     );
+    match &candidate.kind {
+        CandidateKind::Server(_) => add_from_server(a, &ctx, &candidate),
+        CandidateKind::Skill(skill) => add_from_skill(a, &ctx, &candidate, skill),
+        CandidateKind::Pack(spec) => add_pack(a, &ctx, &candidate, spec),
+    }
+}
+
+fn add_from_server(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate) -> Result<()> {
+    if ctx.loaded.manifest.servers.contains_key(&candidate.name) {
+        anyhow::bail!("server '{}' already exists in the manifest", candidate.name);
+    }
     let server = candidate.to_server();
     write_manifest(
-        &ctx,
+        ctx,
         "servers",
         &serde_json::to_value(&server)?,
         a.profile.as_deref(),
@@ -55,6 +70,463 @@ fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn add_from_skill(
+    a: &AddFromArgs,
+    ctx: &super::Context,
+    candidate: &Candidate,
+    skill: &SkillRef,
+) -> Result<()> {
+    if ctx.loaded.manifest.skills.contains_key(&candidate.name) {
+        anyhow::bail!("skill '{}' already exists in the manifest", candidate.name);
+    }
+    let (entry, asset) = skill_entry(skill)?;
+    if let Some(asset) = &asset {
+        let dest = ctx.dir.join(asset);
+        if dest.exists() {
+            anyhow::bail!(
+                "destination '{}' already exists — remove it first",
+                dest.display()
+            );
+        }
+    }
+
+    let original = fs::read_to_string(&ctx.loaded.manifest_path)
+        .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
+    let new_text = build_manifest_with(
+        &original,
+        "skills",
+        &candidate.name,
+        &serde_json::to_value(&entry)?,
+        a.profile.as_deref(),
+    )?;
+
+    println!(
+        "{} add skill '{}' to {}",
+        "→".cyan(),
+        candidate.name.bold(),
+        ctx.loaded.manifest_path.display()
+    );
+    print!(
+        "{}",
+        diff::render(&original, &new_text)
+            .lines()
+            .map(|l| format!("  {l}\n"))
+            .collect::<String>()
+    );
+
+    if a.write {
+        crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
+            .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
+        if let Some(asset) = &asset {
+            crate::catalog::extract_asset_dir(asset, &ctx.dir.join(asset))
+                .with_context(|| format!("extracting bundled skill '{}'", candidate.name))?;
+        }
+        println!("{} added skill '{}'.", "✓".green(), candidate.name);
+    } else {
+        println!(
+            "\nDry run. Re-run with {} to update the manifest.",
+            "--write".bold()
+        );
+    }
+    Ok(())
+}
+
+/// Translate a provider [`SkillRef`] into the manifest [`Skill`] entry to write
+/// plus the embedded asset path to extract (`None` for git sources). A bundled
+/// (path) skill is stored as a manifest-relative `./<asset>` pointing at the
+/// extracted copy under the manifest dir.
+fn skill_entry(skill: &SkillRef) -> Result<(Skill, Option<String>)> {
+    match (&skill.path, &skill.git) {
+        (Some(asset), _) => Ok((
+            Skill {
+                path: Some(format!("./{asset}")),
+                git: None,
+                rev: None,
+            },
+            Some(asset.clone()),
+        )),
+        (None, Some(_)) => Ok((
+            Skill {
+                path: None,
+                git: skill.git.clone(),
+                rev: skill.rev.clone(),
+            },
+            None,
+        )),
+        (None, None) => anyhow::bail!("skill '{}' has no path or git source", skill.name),
+    }
+}
+
+/// A bundled-asset extraction queued during pack planning, applied only on
+/// `--write` (so a dry run touches no files on disk).
+enum Extraction {
+    /// Copy an embedded skill dir to a destination relative to the manifest.
+    SkillDir { asset: String, dest: String },
+    /// Write an instruction file (already provenance-stamped) to a destination
+    /// relative to the manifest.
+    InstrFile { dest: String, body: String },
+}
+
+/// Install a vendor pack: server + skill(s) + (opt-in) house-rule instructions,
+/// composed into the manifest as one atomic write. Each member lands in its
+/// normal section; a `[plugins.<name>]` ledger records them so `remove` can undo
+/// the install. NOT a runtime concept (PLAN: packs ride existing rails).
+fn add_pack(
+    a: &AddFromArgs,
+    ctx: &super::Context,
+    candidate: &Candidate,
+    spec: &PackSpec,
+) -> Result<()> {
+    let pack = &candidate.name;
+    let manifest = &ctx.loaded.manifest;
+
+    // 0. Policy gate FIRST — before planning any write. Evaluate every member
+    //    name + source against [policy]; bail atomically on the first violation.
+    check_pack_policy(manifest, pack, spec)?;
+
+    // 1. Collision check across every target key + the ledger key. Atomic.
+    if spec.server.is_some() && manifest.servers.contains_key(pack) {
+        anyhow::bail!(
+            "server '{pack}' already exists in the manifest (pack '{pack}' would clash); \
+             remove it first or rename"
+        );
+    }
+    for skill in &spec.skills {
+        if manifest.skills.contains_key(&skill.name) {
+            anyhow::bail!(
+                "skill '{}' already exists in the manifest (from pack '{pack}'); \
+                 remove it first or rename",
+                skill.name
+            );
+        }
+    }
+    let want_instructions = a.with_instructions;
+    if want_instructions {
+        for instr in &spec.instructions {
+            if manifest.instructions.contains_key(&instr.name) {
+                anyhow::bail!(
+                    "instruction '{}' already exists in the manifest (from pack '{pack}')",
+                    instr.name
+                );
+            }
+        }
+    }
+    if manifest.plugins.contains_key(pack) {
+        anyhow::bail!("a plugin recipe '{pack}' already exists in the manifest");
+    }
+
+    // On-disk collision: an extraction must never overwrite files a user already
+    // has at our destinations (the manifest-key checks above don't see disk). A
+    // fresh install's dests should be clear; bail (atomically) if they aren't.
+    for skill in &spec.skills {
+        if let Some(asset) = &skill.path {
+            let dest = ctx.dir.join(asset);
+            if dest.exists() {
+                anyhow::bail!(
+                    "destination '{}' already exists (pack '{pack}' skill '{}') — remove it first",
+                    dest.display(),
+                    skill.name
+                );
+            }
+        }
+    }
+    if want_instructions {
+        for instr in &spec.instructions {
+            let dest = ctx.dir.join(format!("instructions/{}.md", instr.name));
+            if dest.exists() {
+                anyhow::bail!(
+                    "destination '{}' already exists (pack '{pack}' instruction '{}') — remove it first",
+                    dest.display(),
+                    instr.name
+                );
+            }
+        }
+    }
+
+    // Build the new manifest text member-by-member, preserving comments.
+    let original = fs::read_to_string(&ctx.loaded.manifest_path)
+        .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
+    let mut text = original.clone();
+    let mut extractions: Vec<Extraction> = Vec::new();
+    let mut ledger = PluginRecipe {
+        kind: Some("pack".into()),
+        source: Some(format!("catalog:{}", candidate.id)),
+        version: "0.1.0".into(),
+        description: candidate.description.clone(),
+        display: None,
+        category: None,
+        targets: spec.targets.clone(),
+        default_enabled: None,
+        servers: Vec::new(),
+        skills: Vec::new(),
+        hooks: Vec::new(),
+        instructions: Vec::new(),
+        homepage: None,
+        repository: None,
+        license: None,
+        author: None,
+    };
+
+    // 2. Server.
+    if spec.server.is_some() {
+        let server = candidate.to_server();
+        text = build_manifest_with(
+            &text,
+            "servers",
+            pack,
+            &serde_json::to_value(&server)?,
+            a.profile.as_deref(),
+        )?;
+        ledger.servers.push(pack.clone());
+    }
+
+    // 3. Skills — extract each embedded asset dir under the manifest, write the
+    //    `[skills.<name>]` path entry.
+    for skill in &spec.skills {
+        let Some(asset) = &skill.path else {
+            // git/remote skills aren't part of the embedded MVP pack.
+            anyhow::bail!("pack skill '{}' has no bundled path", skill.name);
+        };
+        let dest = format!("./{asset}");
+        let entry = Skill {
+            path: Some(dest.clone()),
+            git: None,
+            rev: None,
+        };
+        text = build_manifest_with(
+            &text,
+            "skills",
+            &skill.name,
+            &serde_json::to_value(&entry)?,
+            None,
+        )?;
+        extractions.push(Extraction::SkillDir {
+            asset: asset.clone(),
+            dest: asset.clone(),
+        });
+        ledger.skills.push(skill.name.clone());
+    }
+
+    // 4. Instructions — opt-in (they steer the user's daily-driver agent). When
+    //    enabled, extract the markdown, prepend a provenance header, write a
+    //    flat `instructions/<name>.md`. When not, skip but tell the user how.
+    if want_instructions {
+        for instr in &spec.instructions {
+            let body = stamped_instruction(pack, instr)?;
+            let dest = format!("instructions/{}.md", instr.name);
+            let entry = crate::manifest::Instruction {
+                path: format!("./{dest}"),
+                targets: vec!["*".into()],
+            };
+            text = build_manifest_with(
+                &text,
+                "instructions",
+                &instr.name,
+                &serde_json::to_value(&entry)?,
+                None,
+            )?;
+            extractions.push(Extraction::InstrFile { dest, body });
+            ledger.instructions.push(instr.name.clone());
+        }
+    }
+
+    // 5. Ledger (kind = "pack").
+    text = build_manifest_with(
+        &text,
+        "plugins",
+        pack,
+        &serde_json::to_value(&ledger)?,
+        None,
+    )?;
+
+    // Show the plan.
+    println!(
+        "{} install pack '{}' into {}",
+        "→".cyan(),
+        pack.bold(),
+        ctx.loaded.manifest_path.display()
+    );
+    print!(
+        "{}",
+        diff::render(&original, &text)
+            .lines()
+            .map(|l| format!("  {l}\n"))
+            .collect::<String>()
+    );
+    print_pack_members(spec, &ledger, want_instructions);
+
+    if !a.write {
+        if !spec.instructions.is_empty() && !want_instructions {
+            println!(
+                "\n{} house rules skipped. Re-run with {} to install them.",
+                "↳".cyan(),
+                "--with-instructions".bold()
+            );
+        }
+        println!(
+            "\nDry run. Re-run with {} to install the pack.",
+            "--write".bold()
+        );
+        return Ok(());
+    }
+
+    // Apply: write the manifest (the ledger that lets `remove` undo us) first,
+    // then extract bundled assets. The on-disk collision check above guarantees
+    // we never clobber a user's files. If an extraction fails partway, roll the
+    // manifest back and remove what we created so the install stays all-or-nothing.
+    crate::util::atomic::write(&ctx.loaded.manifest_path, &text)
+        .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
+    let mut created: Vec<(PathBuf, bool)> = Vec::new(); // (path, is_dir)
+    for ex in &extractions {
+        let result = match ex {
+            Extraction::SkillDir { asset, dest } => {
+                let out = ctx.dir.join(dest);
+                crate::catalog::extract_asset_dir(asset, &out).map(|()| created.push((out, true)))
+            }
+            Extraction::InstrFile { dest, body } => {
+                let out = ctx.dir.join(dest);
+                (|| {
+                    if let Some(parent) = out.parent() {
+                        fs::create_dir_all(parent)
+                            .with_context(|| format!("creating {}", parent.display()))?;
+                    }
+                    fs::write(&out, body).with_context(|| format!("writing {}", out.display()))
+                })()
+                .map(|()| created.push((out, false)))
+            }
+        };
+        if let Err(e) = result {
+            // Roll back: restore the original manifest and drop created files.
+            crate::util::atomic::write(&ctx.loaded.manifest_path, &original).ok();
+            for (path, is_dir) in created.iter().rev() {
+                if *is_dir {
+                    let _ = fs::remove_dir_all(path);
+                } else {
+                    let _ = fs::remove_file(path);
+                }
+            }
+            return Err(e).context("extracting pack assets (install rolled back)");
+        }
+    }
+    println!("{} installed pack '{}'.", "✓".green(), pack);
+    print_pack_next_steps(pack, spec, want_instructions);
+    Ok(())
+}
+
+/// Mirror doctor's policy check across every pack member before writing. Bails
+/// (atomically) on the first violation, naming the member + the offending rule.
+fn check_pack_policy(manifest: &Manifest, pack: &str, spec: &PackSpec) -> Result<()> {
+    let policy = &manifest.policy;
+    if policy.is_empty() {
+        return Ok(());
+    }
+    // Every member name (vendor-prefixed) the install would introduce.
+    let mut names: Vec<&str> = Vec::new();
+    if spec.server.is_some() {
+        names.push(pack);
+    }
+    for s in &spec.skills {
+        names.push(&s.name);
+    }
+    for i in &spec.instructions {
+        names.push(&i.name);
+    }
+    // forbid: no introduced member may be forbidden.
+    for name in &names {
+        if policy.forbid.iter().any(|f| f == name) {
+            anyhow::bail!("policy forbids '{name}' (a member of pack '{pack}') — nothing written");
+        }
+    }
+    // allowed_sources: each skill's source must be allowed. The pack server's
+    // source is the catalog (`catalog:<id>`); skills are extracted to a local
+    // path under the manifest (`path:...`).
+    if !policy.allowed_sources.is_empty() {
+        let pack_source = format!("catalog:{pack}");
+        if spec.server.is_some() && !policy.source_allowed(&pack_source) {
+            anyhow::bail!(
+                "policy allowed_sources rejects pack '{pack}' source '{pack_source}' — nothing written"
+            );
+        }
+        for s in &spec.skills {
+            let source = match &s.path {
+                Some(p) => format!("path:./{p}"),
+                None => match &s.git {
+                    Some(url) => format!("git:{url}"),
+                    None => "invalid".into(),
+                },
+            };
+            if !policy.source_allowed(&source) {
+                anyhow::bail!(
+                    "policy allowed_sources rejects skill '{}' source '{source}' (pack '{pack}') — nothing written",
+                    s.name
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Extract a pack's bundled instruction and stamp it with a provenance header +
+/// a visible heading so the origin survives into the merged CLAUDE.md/AGENTS.md.
+fn stamped_instruction(pack: &str, instr: &InstrRef) -> Result<String> {
+    let raw = crate::catalog::read_asset_file(&instr.path)?;
+    Ok(format!(
+        "{}\n# vendor: {pack} (unofficial)\n\n{}",
+        vendor_marker(pack),
+        raw.trim_start()
+    ))
+}
+
+fn print_pack_members(spec: &PackSpec, ledger: &PluginRecipe, with_instructions: bool) {
+    let servers = ledger.servers.len();
+    let skills = ledger.skills.len();
+    let instrs = if with_instructions {
+        ledger.instructions.len()
+    } else {
+        0
+    };
+    let mut parts = Vec::new();
+    if servers > 0 {
+        parts.push(format!("{servers} server"));
+    }
+    if skills > 0 {
+        parts.push(format!("{skills} skill"));
+    }
+    if instrs > 0 {
+        parts.push(format!("{instrs} instruction"));
+    } else if !spec.instructions.is_empty() {
+        parts.push(format!("{} instruction (skipped)", spec.instructions.len()));
+    }
+    if !parts.is_empty() {
+        println!("  {} {}", "contains:".dimmed(), parts.join(" · "));
+    }
+}
+
+fn print_pack_next_steps(pack: &str, spec: &PackSpec, with_instructions: bool) {
+    if spec.server.is_some() {
+        let reference = format!("{}_TOKEN", sanitize_ref(pack));
+        println!(
+            "{} set the server secret: `agentstack secret set {reference}` (or via varlock), then `agentstack apply`.",
+            "↳".cyan()
+        );
+    }
+    if !spec.instructions.is_empty() && !with_instructions {
+        println!(
+            "{} house rules were skipped — re-run with `--with-instructions` to install them.",
+            "↳".cyan()
+        );
+    }
+}
+
+/// Uppercase, identifier-safe ref base from a name (mirrors the provider's
+/// secret-ref convention so the printed next-step matches the lifted `${REF}`).
+fn sanitize_ref(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect::<String>()
+        .to_ascii_uppercase()
 }
 
 fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
@@ -149,29 +621,87 @@ fn write_manifest(
     Ok(())
 }
 
+/// The manifest members an install added, by section. Shared return shape so the
+/// dashboard/MCP reach server, skill, and pack installs through the same door.
+#[derive(Debug, Clone, Default)]
+pub struct AddedMembers {
+    pub servers: Vec<String>,
+    pub skills: Vec<String>,
+    pub instructions: Vec<String>,
+}
+
 /// Resolve a provider id and write it into the manifest at `dir` (no dry-run).
-/// Shared by the dashboard and MCP server. Returns the added capability name.
-pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Result<String> {
-    use crate::manifest::load::MANIFEST_FILE;
+/// Shared by the dashboard and MCP server. Handles servers, standalone skills,
+/// and vendor packs; returns the members it added.
+///
+/// Instructions are NOT installed here (the daily-driver-steering opt-in lives
+/// behind the CLI's `--with-instructions`); pack instructions are reported as
+/// available but skipped.
+pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Result<AddedMembers> {
     let candidate = provider::resolve(id)
         .with_context(|| format!("no capability '{id}' in the catalog or registry"))?;
-    let manifest_path = dir.join(MANIFEST_FILE);
-    let original = std::fs::read_to_string(&manifest_path).with_context(|| {
-        format!(
-            "no manifest at {} (run `agentstack init`)",
-            manifest_path.display()
-        )
-    })?;
-    let parsed: crate::manifest::Manifest =
-        toml::from_str(&original).context("parsing manifest")?;
-    if parsed.servers.contains_key(&candidate.name) {
-        anyhow::bail!("server '{}' already exists", candidate.name);
+    let ctx = super::load(Some(dir))?;
+    match &candidate.kind {
+        CandidateKind::Server(_) => {
+            let manifest = &ctx.loaded.manifest;
+            if manifest.servers.contains_key(&candidate.name) {
+                anyhow::bail!("server '{}' already exists", candidate.name);
+            }
+            let original = fs::read_to_string(&ctx.loaded.manifest_path)?;
+            let body = serde_json::to_value(candidate.to_server())?;
+            let new_text =
+                build_manifest_with(&original, "servers", &candidate.name, &body, profile)?;
+            crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
+                .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
+            Ok(AddedMembers {
+                servers: vec![candidate.name.clone()],
+                ..Default::default()
+            })
+        }
+        CandidateKind::Skill(skill) => {
+            let manifest = &ctx.loaded.manifest;
+            if manifest.skills.contains_key(&candidate.name) {
+                anyhow::bail!("skill '{}' already exists", candidate.name);
+            }
+            let (entry, asset) = skill_entry(skill)?;
+            if let Some(asset) = &asset {
+                if ctx.dir.join(asset).exists() {
+                    anyhow::bail!(
+                        "destination '{}' already exists",
+                        ctx.dir.join(asset).display()
+                    );
+                }
+            }
+            let original = fs::read_to_string(&ctx.loaded.manifest_path)?;
+            let body = serde_json::to_value(&entry)?;
+            let new_text =
+                build_manifest_with(&original, "skills", &candidate.name, &body, profile)?;
+            crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
+                .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
+            if let Some(asset) = &asset {
+                crate::catalog::extract_asset_dir(asset, &ctx.dir.join(asset))
+                    .with_context(|| format!("extracting bundled skill '{}'", candidate.name))?;
+            }
+            Ok(AddedMembers {
+                skills: vec![candidate.name.clone()],
+                ..Default::default()
+            })
+        }
+        CandidateKind::Pack(spec) => {
+            let args = AddFromArgs {
+                id: candidate.id.clone(),
+                profile: profile.map(str::to_string),
+                with_instructions: false,
+                write: true,
+            };
+            add_pack(&args, &ctx, &candidate, spec)?;
+            Ok(AddedMembers {
+                servers: spec.server.iter().map(|_| candidate.name.clone()).collect(),
+                skills: spec.skills.iter().map(|s| s.name.clone()).collect(),
+                instructions: Vec::new(),
+            })
+        }
     }
-    let body = serde_json::to_value(candidate.to_server())?;
-    let new_text = build_manifest_with(&original, "servers", &candidate.name, &body, profile)?;
-    crate::util::atomic::write(&manifest_path, &new_text)
-        .with_context(|| format!("writing {}", manifest_path.display()))?;
-    Ok(candidate.name)
 }
 
 /// Build updated manifest text with `name` (a server or skill) inserted under
@@ -266,5 +796,62 @@ mod tests {
         let out = add_to_profile("version = 1\n", "new", "skills", "x").unwrap();
         let doc: DocumentMut = out.parse().unwrap();
         assert!(doc["profiles"]["new"]["skills"].is_array());
+    }
+
+    fn linear_pack_spec() -> PackSpec {
+        PackSpec {
+            server: Some(provider::Install::Http {
+                url: "https://mcp.linear.app/mcp".into(),
+                secret_headers: vec!["Authorization".into()],
+            }),
+            skills: vec![SkillRef {
+                name: "linear_breakdown".into(),
+                path: Some("skills/linear/breakdown".into()),
+                git: None,
+                rev: None,
+            }],
+            instructions: vec![InstrRef {
+                name: "linear_rules".into(),
+                path: "instructions/linear/rules.md".into(),
+            }],
+            targets: vec!["*".into()],
+        }
+    }
+
+    #[test]
+    fn pack_policy_forbids_member() {
+        let manifest: Manifest =
+            toml::from_str("version = 1\n[policy]\nforbid = [\"linear_breakdown\"]\n").unwrap();
+        let err = check_pack_policy(&manifest, "linear-pack", &linear_pack_spec()).unwrap_err();
+        assert!(err.to_string().contains("linear_breakdown"));
+        assert!(err.to_string().contains("forbids"));
+    }
+
+    #[test]
+    fn pack_policy_rejects_unallowed_source() {
+        let manifest: Manifest = toml::from_str(
+            "version = 1\n[policy]\nallowed_sources = [\"git:github.com/acme/*\"]\n",
+        )
+        .unwrap();
+        // The pack server source `catalog:linear-pack` isn't in the allowlist.
+        let err = check_pack_policy(&manifest, "linear-pack", &linear_pack_spec()).unwrap_err();
+        assert!(err.to_string().contains("allowed_sources"));
+    }
+
+    #[test]
+    fn pack_policy_allows_when_empty() {
+        let manifest: Manifest = toml::from_str("version = 1\n").unwrap();
+        check_pack_policy(&manifest, "linear-pack", &linear_pack_spec()).unwrap();
+    }
+
+    #[test]
+    fn stamped_instruction_carries_provenance() {
+        let instr = InstrRef {
+            name: "linear_rules".into(),
+            path: "instructions/linear/rules.md".into(),
+        };
+        let out = stamped_instruction("linear-pack", &instr).unwrap();
+        assert!(out.starts_with("<!-- agentstack:vendor linear-pack (unofficial) -->"));
+        assert!(out.contains("# vendor: linear-pack (unofficial)"));
     }
 }

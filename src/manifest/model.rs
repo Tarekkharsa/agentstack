@@ -150,6 +150,12 @@ pub struct Hook {
 pub struct PluginRecipe {
     pub version: String,
     pub description: String,
+    /// Recipe role. `Some("pack")` marks an *install ledger* written by
+    /// `agentstack add <pack>`: it records every member so `remove` can undo the
+    /// install, but it is NOT a publishable plugin and is skipped by
+    /// `plugins sync`/`doctor`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -166,6 +172,13 @@ pub struct PluginRecipe {
     pub skills: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hooks: Vec<String>,
+    /// Instruction-fragment member names (used by pack ledgers).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub instructions: Vec<String>,
+    /// Where this recipe was resolved from (catalog id, or `git+rev`). Reserved
+    /// for upgrade re-resolve; recorded by pack ledgers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homepage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -344,6 +357,39 @@ mod tests {
         assert!(glob_match("exact", "exact"));
         assert!(!glob_match("exact", "other"));
         assert!(glob_match("*github*", "git:github.com/x"));
+    }
+
+    #[test]
+    fn pack_members_are_visible_through_normal_sections() {
+        // A pack rides normal manifest sections, so its server secret + skill are
+        // seen by the same machinery doctor uses — no special-casing.
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [servers.linear-pack]
+            type = "http"
+            url = "https://mcp.linear.app/mcp"
+
+            [servers.linear-pack.headers]
+            Authorization = "Bearer ${LINEAR_PACK_TOKEN}"
+
+            [skills.linear_breakdown]
+            path = "./skills/linear/breakdown"
+
+            [plugins.linear-pack]
+            kind = "pack"
+            version = "0.1.0"
+            description = "Linear pack"
+            servers = ["linear-pack"]
+            skills = ["linear_breakdown"]
+            "#,
+        )
+        .unwrap();
+        assert!(m
+            .referenced_secrets()
+            .contains(&"LINEAR_PACK_TOKEN".to_string()));
+        assert!(m.skills.contains_key("linear_breakdown"));
     }
 
     #[test]
