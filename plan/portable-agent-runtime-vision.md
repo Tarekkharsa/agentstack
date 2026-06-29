@@ -49,7 +49,8 @@ agentstack run claude-code --profile frontend
 The machine-local part is secrets and installed native apps. The committed part
 is the manifest, lockfile, skills, instructions, policies, and adapter intent —
 all kept together under a single `.agentstack/` folder at the repo root (legacy
-root-level `agentstack.toml` is still discovered for back-compat).
+root-level `agentstack.toml`, `agentstack.lock`, `skills/`, and `instructions/`
+are still discovered for back-compat).
 
 ## Target Users
 
@@ -116,13 +117,15 @@ Desired repo files:
 ```text
 .agentstack/agentstack.toml
 .agentstack/agentstack.lock
+.agentstack/agentstack.md
 .agentstack/skills/
 .agentstack/instructions/
 .github/workflows/agentstack-doctor.yml
 ```
 
-(Legacy root-level `agentstack.toml` + `skills/` are still discovered, so existing
-repos keep working until they migrate.)
+(Legacy root-level `agentstack.toml`, `agentstack.lock`, `skills/`, and
+`instructions/` are still discovered, so existing repos keep working until they
+migrate.)
 
 Rules:
 
@@ -313,13 +316,13 @@ Make the "new machine/new teammate" workflow excellent:
   - Dry-run by default; `--write` to apply. Refuse (no-op) if `.agentstack/`
     already holds a manifest.
   - Move `agentstack.toml`, `agentstack.local.toml`, `agentstack.lock`,
-    `skills/`, and `instructions/` from the repo root into `.agentstack/`,
+    `agentstack.md`, `skills/`, and `instructions/` from the repo root into `.agentstack/`,
     preserving relative skill/instruction paths (they stay `./skills/...` and
     just resolve under the new base — no manifest rewrite needed).
   - Use `git mv` when the repo is a git work tree (preserve history), else a
     plain move; atomic/reversible, with a clear preview of every path moved.
   - Leave unrelated root files untouched; never delete anything outside the
-    five managed paths.
+    six managed paths.
   - Tests: legacy→`.agentstack/` round-trip, refusal when already migrated,
     and that `apply`/`doctor` work identically afterward.
 - [ ] Rewrite README around portable agent environments.

@@ -262,7 +262,7 @@ fn remove_pack_never_deletes_root_or_the_shared_skills_tree() {
     // A hand-edited ledger that points a pack skill at "." (the project root) or
     // at the bare "skills" tree must delete NOTHING — only nested skills/<x>/...
     // paths are ever removed.
-    for evil_path in [".", "skills"] {
+    for evil_path in [".", "./", "skills", "skills/"] {
         let (tmp, _path) = seed(&format!(
             r#"
             version = 1
@@ -300,6 +300,46 @@ fn remove_pack_never_deletes_root_or_the_shared_skills_tree() {
             "path {evil_path:?}: shared skills/ tree must be untouched"
         );
     }
+}
+
+#[test]
+fn remove_pack_spares_skill_dirs_pointed_above_the_manifest_dir() {
+    // Regression for corrupt ledgers like "../x": even if that sibling exists,
+    // pack removal must not delete anything outside the manifest-owned area.
+    let (tmp, _path) = seed("");
+    let dir = tmp.path();
+    let sibling_name = format!("{}-escape", dir.file_name().unwrap().to_string_lossy());
+    let escape = dir.with_file_name(&sibling_name);
+    fs::create_dir_all(&escape).unwrap();
+    fs::write(escape.join("keep.txt"), "do not delete\n").unwrap();
+
+    let manifest = format!(
+        r#"
+        version = 1
+
+        [skills.evil]
+        path = "../{sibling_name}"
+
+        [plugins.linear-pack]
+        kind = "pack"
+        version = "0.1.0"
+        description = "Linear pack"
+        skills = ["evil"]
+        "#
+    );
+    fs::write(dir.join("agentstack.toml"), manifest).unwrap();
+
+    let remove = RemoveArgs {
+        name: "linear-pack".into(),
+        write: true,
+    };
+    agentstack::commands::remove::run(&remove, Some(dir)).unwrap();
+
+    assert!(
+        escape.join("keep.txt").exists(),
+        "../ skill path must never be deleted"
+    );
+    fs::remove_dir_all(&escape).unwrap();
 }
 
 #[test]
@@ -555,6 +595,87 @@ fn upgrade_never_deletes_skill_dirs_outside_the_manifest_dir() {
     );
     // And the canonical, contained destination is what actually gets the asset.
     assert!(dir.join("skills/linear/breakdown/SKILL.md").exists());
+}
+
+#[test]
+fn upgrade_never_deletes_broad_or_escaping_skill_dirs() {
+    // Upgrade uses the same ownership guard as remove: broad paths and parent
+    // escapes are ignored during old-asset cleanup, then the canonical pack
+    // asset is installed under skills/linear/breakdown.
+    for evil_path in [".", "./", "skills", "skills/"] {
+        let (tmp, _path) = seed(&format!(
+            r#"
+            version = 1
+
+            [skills.linear_breakdown]
+            path = "{evil_path}"
+
+            [plugins.linear-pack]
+            kind = "pack"
+            version = "0.1.0"
+            source = "catalog:linear-pack"
+            description = "Linear pack"
+            skills = ["linear_breakdown"]
+            "#
+        ));
+        let dir = tmp.path();
+        fs::write(dir.join("important.txt"), "keep me\n").unwrap();
+        let other_skill = dir.join("skills/unrelated");
+        fs::create_dir_all(&other_skill).unwrap();
+        fs::write(other_skill.join("SKILL.md"), "# unrelated\n").unwrap();
+
+        agentstack::commands::upgrade::run(
+            &upgrade_args("linear-pack", false, false, true),
+            Some(dir),
+        )
+        .unwrap();
+
+        assert!(
+            dir.join("important.txt").exists(),
+            "path {evil_path:?}: project root must be untouched"
+        );
+        assert!(
+            other_skill.join("SKILL.md").exists(),
+            "path {evil_path:?}: shared skills/ tree must be untouched"
+        );
+        assert!(dir.join("skills/linear/breakdown/SKILL.md").exists());
+    }
+
+    let (tmp, _path) = seed("");
+    let dir = tmp.path();
+    let sibling_name = format!("{}-escape", dir.file_name().unwrap().to_string_lossy());
+    let escape = dir.with_file_name(&sibling_name);
+    fs::create_dir_all(&escape).unwrap();
+    fs::write(escape.join("keep.txt"), "do not delete\n").unwrap();
+    fs::write(
+        dir.join("agentstack.toml"),
+        format!(
+            r#"
+            version = 1
+
+            [skills.linear_breakdown]
+            path = "../{sibling_name}"
+
+            [plugins.linear-pack]
+            kind = "pack"
+            version = "0.1.0"
+            source = "catalog:linear-pack"
+            description = "Linear pack"
+            skills = ["linear_breakdown"]
+            "#
+        ),
+    )
+    .unwrap();
+
+    agentstack::commands::upgrade::run(&upgrade_args("linear-pack", false, false, true), Some(dir))
+        .unwrap();
+
+    assert!(
+        escape.join("keep.txt").exists(),
+        "../ skill path must never be deleted by upgrade"
+    );
+    assert!(dir.join("skills/linear/breakdown/SKILL.md").exists());
+    fs::remove_dir_all(&escape).unwrap();
 }
 
 #[test]

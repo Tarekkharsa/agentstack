@@ -5,10 +5,11 @@
 > across coding agents, repos, machines, and teammates.
 
 agentstack turns AI-agent setup into a reproducible repo artifact. You declare
-capabilities once in a commit-safe `agentstack.toml`; agentstack **compiles**
-that intent into each agent CLI's native config — Claude Code, Claude Desktop,
-Codex, Cursor, Windsurf, Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode,
-Antigravity, Junie, Kiro, and Pi — resolving secrets locally on each machine.
+capabilities once in a commit-safe `.agentstack/agentstack.toml`; agentstack
+**compiles** that intent into each agent CLI's native config — Claude Code,
+Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS Code, GitHub Copilot CLI,
+OpenCode, Antigravity, Junie, Kiro, and Pi — resolving secrets locally on each
+machine.
 
 The goal is not just config sync. agentstack is the control layer for portable
 agent environments: bootstrap a new laptop, share a team setup through git,
@@ -57,13 +58,15 @@ at the repo root:
 ```text
 .agentstack/agentstack.toml
 .agentstack/agentstack.lock
+.agentstack/agentstack.md
 .agentstack/skills/
 .agentstack/instructions/
 ```
 
 `agentstack init` creates this `.agentstack/` layout. Repos that still keep
-`agentstack.toml` at the root are discovered automatically (legacy layout), so
-existing setups keep working without migration.
+`agentstack.toml`, `agentstack.lock`, `skills/`, and `instructions/` at the root
+are discovered automatically (legacy layout), so existing setups keep working
+without migration.
 
 Then a new teammate or a new computer follows the same path:
 
@@ -140,8 +143,9 @@ secret values, and the same unresolved-secret blocking applies to its writes.
 
 Implemented and tested:
 
-- **Manifest model** with layered load (`agentstack.toml` + a gitignored
-  `agentstack.local.toml` overlay) and static validation.
+- **Manifest model** with layered load (preferred
+  `.agentstack/agentstack.toml` + a gitignored `agentstack.local.toml` overlay;
+  legacy root `agentstack.toml` remains supported) and static validation.
 - **Data-driven adapters** — Claude Code, Claude Desktop, Codex, Cursor,
   Windsurf, Gemini CLI, VS Code, **GitHub Copilot CLI, OpenCode, Antigravity,
   Junie, Kiro**, and Pi (one YAML descriptor each, embedded in the binary; user

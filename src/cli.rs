@@ -14,10 +14,10 @@ use crate::scope::Scope;
     version,
     about = "One portable manifest, every agent CLI.",
     long_about = "Manage MCP servers + skills across Claude Code, Codex, and more, \
-                  from a single portable agentstack.toml."
+                  from a single portable .agentstack/agentstack.toml."
 )]
 pub struct Cli {
-    /// Directory containing agentstack.toml (defaults to the current directory).
+    /// Project or manifest directory (prefers .agentstack/agentstack.toml).
     #[arg(long, global = true, value_name = "DIR")]
     pub manifest_dir: Option<PathBuf>,
 
