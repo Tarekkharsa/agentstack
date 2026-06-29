@@ -71,7 +71,7 @@ pub fn run(args: &RemoveArgs, manifest_dir: Option<&Path>) -> Result<()> {
 }
 
 /// The `[plugins.<name>]` recipe iff it is a pack install ledger.
-fn pack_ledger<'a>(manifest: &'a Manifest, name: &str) -> Option<&'a PluginRecipe> {
+pub(crate) fn pack_ledger<'a>(manifest: &'a Manifest, name: &str) -> Option<&'a PluginRecipe> {
     manifest
         .plugins
         .get(name)
@@ -150,7 +150,7 @@ fn remove_pack(ctx: &super::Context, name: &str, recipe: &PluginRecipe, write: b
 /// Resolve which of the ledger's instruction files are safe to delete: they
 /// must exist, resolve under the manifest dir, and carry the pack's
 /// `agentstack:vendor` provenance marker (never touch user-authored files).
-fn safe_instruction_files(
+pub(crate) fn safe_instruction_files(
     manifest: &Manifest,
     ctx: &super::Context,
     recipe: &PluginRecipe,
@@ -184,7 +184,7 @@ fn safe_instruction_files(
 }
 
 /// Remove `name` from the `kind` table and from every profile's `kind` array.
-fn remove_entry(text: &str, kind: &str, name: &str) -> Result<String> {
+pub(crate) fn remove_entry(text: &str, kind: &str, name: &str) -> Result<String> {
     let mut doc: DocumentMut = text.parse().context("parsing manifest as TOML")?;
 
     if let Some(tbl) = doc.get_mut(kind).and_then(|i| i.as_table_mut()) {

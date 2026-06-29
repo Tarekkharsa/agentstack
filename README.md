@@ -57,7 +57,13 @@ into their *own* agent:
 agentstack add linear-pack                      # server + skills, rendered to every CLI
 agentstack add linear-pack --with-instructions  # also merge the vendor's house rules
 agentstack apply --write                         # render to your real configs
+agentstack upgrade linear-pack --write          # re-resolve the pack + re-pin the lock
 ```
+
+Starter packs today: **`linear-pack`**, **`cloudflare-pack`**, **`posthog-pack`**
+(plus the standalone **`pr-triage`** skill). `upgrade` re-resolves an installed
+pack from its recorded source, diffs the members, gates any house-rule change
+behind `--with-instructions`/`--yes`, and re-pins the lockfile.
 
 This is the canonical target for the "continue in your own agent? install the
 MCP + skills" prompt: one command pulls the server, its skills, and (opt-in) its

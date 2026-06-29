@@ -20,6 +20,7 @@ fn run() -> Result<()> {
         Command::Install(args) => commands::install::run(args, dir),
         Command::Update(args) => commands::install::run_update(args, dir),
         Command::Remove(args) => commands::remove::run(args, dir),
+        Command::Upgrade(args) => commands::upgrade::run(args, dir),
         Command::Bootstrap(args) => commands::bootstrap::run(args, dir),
         Command::Apply(args) => commands::apply::run(args, dir),
         Command::Diff(args) => commands::diff::run(args, dir),

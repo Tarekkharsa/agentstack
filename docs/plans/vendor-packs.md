@@ -8,6 +8,62 @@
 > agentstack is the install target. Today `add`/`search` are server-only; this plan
 > adds the missing unit: the **pack**.
 
+## Implementation status (MVP shipped — commit `63a348f`)
+
+The MVP this plan defines — **Phases 1–5 + one pack, plus 8 (docs) & 9 (tests)** —
+is fully implemented, committed (`63a348f`), and green.
+
+**Shipped:**
+- **Phase 1 — data model & catalog.** `CandidateKind::{Server,Skill,Pack}`;
+  `PluginRecipe` gains `kind`/`instructions`/`source` and reserves the fields
+  upgrade (Phase 6) needs (`source` + `version`), so Phase 6 is not foreclosed.
+  Catalog assets embedded via `include_dir!`, extracted at install.
+- **Phase 2 — `add from <pack>`.** Installs the vendor's MCP server + bundled
+  skill(s) + (opt-in) house-rule instructions as one composition; members ride
+  the existing manifest sections, so render/apply are unchanged.
+- **Phase 3 — trust gate & safe instructions.** Atomic `[policy]` enforcement +
+  on-disk collision check before any write; instructions gated behind
+  `--with-instructions` with a provenance header that survives into
+  CLAUDE.md/AGENTS.md.
+- **Phase 4 — discovery.** `search` shows `[pack]`/`[skill]` badges + aggregated
+  trust.
+- **Phase 5 — clean removal.** `[plugins.<name>]` ledger records exactly what an
+  install wrote so `remove` reverses it; pack ledgers are skipped by
+  `plugins sync`/`doctor` (install record, not a publishable plugin).
+- **Safety property.** Pack install is **atomic with rollback**, and bundled
+  assets **can't clobber user files** — guarded by 2 review-driven regression
+  tests (within the 10 integration tests covering write / policy-refusal /
+  provenance / removal / sync-invisibility).
+- **Phase 8 — docs / positioning.** Supply-side framing in the README.
+- **Phase 9 — tests.** 10 integration tests, green.
+
+**Post-MVP shipped:**
+- **Phase 6 — `upgrade <vendor>`.** New top-level subcommand (`src/commands/upgrade.rs`,
+  not an extension of `update`, which stays the skill re-resolver). Re-resolves an
+  installed pack from `recipe.source` (`catalog:<id>`), computes a member-level
+  diff (server / skills added·removed·content-changed / instruction
+  added·removed·body-changed), gates steering (instruction-body) changes behind
+  `--with-instructions`/`--yes`, applies atomically with full backup+rollback, and
+  re-pins the lockfile. Reuses `check_pack_policy`, `stamped_instruction`,
+  `build_manifest_with`, `remove_entry`, `safe_instruction_files`, `pack_ledger`,
+  `locked_entry` (promoted to `pub(crate)`). Supports `--all` and dry-run.
+  - *Known limitation (by design):* the catalog is embedded with one version per
+    id, so re-resolving yields identical content → upgrade reports "already
+    current". The command is structurally complete for a versioned/remote catalog;
+    today its real value is verifying a pack still matches its source + re-pinning.
+- **Phase 7 — Cloudflare + PostHog packs.** `cloudflare-pack` (stdio MCP via
+  `mcp-remote` + `ship-worker` & `wrangler-cheatsheet` skills + house rules) and
+  `posthog-pack` (http MCP + `query` & `experiment` skills + house rules), both
+  agentstack-authored and clearly labeled unofficial. Bundled under `catalog/`,
+  embedded via `include_dir!`.
+- **Tests.** 7 new integration tests (17 total in `tests/vendor_packs.rs`):
+  upgrade no-op, steering gate, lock re-pin, non-pack/missing-ledger refusal,
+  policy re-gate on upgrade, new-pack search composition, new-pack install/remove.
+
+**Verdict.** Phases 1–9 are now all implemented and green. The remaining open work
+is the competitive-review follow-ups below (transitive deps, content scan,
+publish interop, SBOM) and a versioned/remote catalog so `upgrade` does real work.
+
 ## Goal
 
 `agentstack add linear` installs Linear's MCP server **+** skills **+** house-rule

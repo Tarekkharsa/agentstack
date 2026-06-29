@@ -43,6 +43,10 @@ pub enum Command {
     /// Remove a server or skill from the manifest (and lockfile).
     Remove(RemoveArgs),
 
+    /// Re-resolve an installed vendor pack from its recorded source and apply
+    /// any changes (server, skills, house rules), re-pinning the lockfile.
+    Upgrade(UpgradeArgs),
+
     /// Guided setup: install skills, check secrets, preview/apply, then doctor.
     Bootstrap(BootstrapArgs),
 
@@ -198,6 +202,28 @@ pub struct RemoveArgs {
     /// Name of the server or skill to remove.
     pub name: String,
     /// Write the change (else dry-run).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct UpgradeArgs {
+    /// Vendor pack name (the `[plugins.<vendor>]` ledger key). Optional with
+    /// `--all`.
+    pub name: Option<String>,
+    /// Re-resolve every installed pack instead of one.
+    #[arg(long)]
+    pub all: bool,
+    /// Accept the vendor's house-rule instructions on upgrade (they steer your
+    /// daily-driver agent). Required to apply an instruction-body change to a
+    /// pack that has instructions installed.
+    #[arg(long)]
+    pub with_instructions: bool,
+    /// Accept all changes — including instruction-body changes — without the
+    /// confirmation gate. For CI / scripting.
+    #[arg(long)]
+    pub yes: bool,
+    /// Write the change (else dry-run / diff preview).
     #[arg(long)]
     pub write: bool,
 }

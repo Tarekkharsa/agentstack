@@ -22,6 +22,7 @@ pub mod search;
 pub mod secret;
 pub mod session;
 pub mod stats;
+pub mod upgrade;
 pub mod use_profile;
 
 use std::path::{Path, PathBuf};

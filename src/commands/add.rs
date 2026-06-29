@@ -417,7 +417,7 @@ fn add_pack(
 
 /// Mirror doctor's policy check across every pack member before writing. Bails
 /// (atomically) on the first violation, naming the member + the offending rule.
-fn check_pack_policy(manifest: &Manifest, pack: &str, spec: &PackSpec) -> Result<()> {
+pub(crate) fn check_pack_policy(manifest: &Manifest, pack: &str, spec: &PackSpec) -> Result<()> {
     let policy = &manifest.policy;
     if policy.is_empty() {
         return Ok(());
@@ -470,7 +470,7 @@ fn check_pack_policy(manifest: &Manifest, pack: &str, spec: &PackSpec) -> Result
 
 /// Extract a pack's bundled instruction and stamp it with a provenance header +
 /// a visible heading so the origin survives into the merged CLAUDE.md/AGENTS.md.
-fn stamped_instruction(pack: &str, instr: &InstrRef) -> Result<String> {
+pub(crate) fn stamped_instruction(pack: &str, instr: &InstrRef) -> Result<String> {
     let raw = crate::catalog::read_asset_file(&instr.path)?;
     Ok(format!(
         "{}\n# vendor: {pack} (unofficial)\n\n{}",

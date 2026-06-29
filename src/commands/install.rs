@@ -116,7 +116,7 @@ fn sync(
     Ok(())
 }
 
-fn locked_entry(
+pub(crate) fn locked_entry(
     name: &str,
     skill: &crate::manifest::Skill,
     resolved: &crate::store::Resolved,

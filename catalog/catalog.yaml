@@ -88,6 +88,46 @@
       path: instructions/linear/rules.md
   targets: ["*"]
 
+- kind: pack
+  name: cloudflare-pack
+  display: Cloudflare
+  description: "Cloudflare MCP + Worker-deploy skill + wrangler cheatsheet + house rules (unofficial, agentstack-authored)"
+  homepage: https://developers.cloudflare.com
+  tags: [cloudflare, workers, pages, dns, edge, pack]
+  server:
+    transport: stdio
+    command: npx
+    args: ["-y", "mcp-remote", "https://bindings.mcp.cloudflare.com/sse"]
+  skills:
+    - name: cloudflare_ship_worker
+      path: skills/cloudflare/ship-worker
+    - name: cloudflare_wrangler_cheatsheet
+      path: skills/cloudflare/wrangler-cheatsheet
+  instructions:
+    - name: cloudflare_rules
+      path: instructions/cloudflare/rules.md
+  targets: ["*"]
+
+- kind: pack
+  name: posthog-pack
+  display: PostHog
+  description: "PostHog MCP + analytics-query skill + house rules (unofficial, agentstack-authored)"
+  homepage: https://posthog.com
+  tags: [analytics, posthog, product-analytics, experiments, pack]
+  server:
+    transport: http
+    url: https://mcp.posthog.com/mcp
+    headers: [Authorization]
+  skills:
+    - name: posthog_query
+      path: skills/posthog/query
+    - name: posthog_experiment
+      path: skills/posthog/experiment
+  instructions:
+    - name: posthog_rules
+      path: instructions/posthog/rules.md
+  targets: ["*"]
+
 # --- Standalone skills (agentstack-authored, bundled) ---
 - kind: skill
   name: pr-triage
