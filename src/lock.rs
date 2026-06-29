@@ -1,5 +1,6 @@
 //! `agentstack.lock` — pins each capability's resolved source for reproducible,
-//! checksum-verified installs (PLAN §9d, D12). Lives next to the manifest.
+//! SHA-256 checksum-verified installs (PLAN §9d, D12). Lives next to the
+//! manifest.
 
 use std::fs;
 use std::path::{Path, PathBuf};

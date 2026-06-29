@@ -43,6 +43,9 @@ pub enum Command {
     /// Remove a server or skill from the manifest (and lockfile).
     Remove(RemoveArgs),
 
+    /// Guided setup: install skills, check secrets, preview/apply, then doctor.
+    Bootstrap(BootstrapArgs),
+
     /// Render the manifest into each target's native config.
     ///
     /// Read-only by default: shows the diff and writes nothing. Pass `--write`
@@ -108,6 +111,59 @@ pub enum Command {
 
     /// Print a shell hook for per-directory profile auto-activation.
     Hook(HookArgs),
+
+    /// Launch an agent CLI as a tracked run: optionally apply a profile for its
+    /// lifetime, then observe/kill it here or from the dashboard.
+    Run(RunArgs),
+
+    /// List live tracked runs (harness, pid, profile, uptime).
+    Runs(RunsArgs),
+
+    /// Kill a tracked run by id (and revert its profile if it owned one).
+    Kill(KillArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct RunsArgs {
+    /// Emit machine-readable JSON instead of the text table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct RunArgs {
+    /// Harness/adapter id to launch, e.g. `claude-code` or `codex`.
+    pub harness: String,
+
+    /// Apply this profile's servers + skills for the life of the run.
+    #[arg(long, value_name = "NAME")]
+    pub profile: Option<String>,
+
+    /// Scope to apply the profile in (only meaningful with --profile).
+    #[arg(long, value_enum, default_value_t = Scope::Project)]
+    pub scope: Scope,
+
+    /// Leave the applied profile in place after the run exits (default: revert).
+    #[arg(long)]
+    pub keep: bool,
+
+    /// Extra arguments passed through to the harness (after `--`).
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        value_name = "ARG"
+    )]
+    pub args: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct KillArgs {
+    /// Run id (from `agentstack runs`).
+    pub id: String,
+
+    /// Send SIGKILL immediately instead of SIGTERM-then-escalate.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args, Debug)]
@@ -142,6 +198,30 @@ pub struct RemoveArgs {
     /// Name of the server or skill to remove.
     pub name: String,
     /// Write the change (else dry-run).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct BootstrapArgs {
+    /// Only act on these target ids (repeatable). Defaults to [targets].default.
+    #[arg(long = "target", value_name = "ID")]
+    pub targets: Vec<String>,
+
+    /// Bootstrap only the servers in this profile.
+    #[arg(long, value_name = "NAME")]
+    pub profile: Option<String>,
+
+    /// Which scope to write: global (~) or project (repo). Defaults to global.
+    #[arg(long, value_enum)]
+    pub scope: Option<Scope>,
+
+    /// Check the lockfile without updating it during the install step.
+    #[arg(long)]
+    pub locked: bool,
+
+    /// Actually install/apply. Without this flag, bootstrap is a read-only
+    /// preflight plus diff preview.
     #[arg(long)]
     pub write: bool,
 }

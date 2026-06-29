@@ -12,6 +12,7 @@ JSON or leaking tokens into git.
 
 ```sh
 agentstack init      # reverse-engineer a manifest from configs you already have
+agentstack bootstrap # guided preflight: skills, secrets, diff, next action
 agentstack apply     # render it to every CLI you have installed
 agentstack doctor    # prove everything is wired (secrets, drift, connectivity)
 ```
@@ -53,6 +54,9 @@ cross-source discovery (the official MCP Registry), and a trust/governance gate*
   corrupts your real `~/.claude.json`.
 - **Trust gate** — `[policy]` (require/forbid/`allowed_sources`) enforced by
   `doctor --ci`, plus provenance hints at the point of choosing.
+- **Live runs** — launch any harness as a tracked process (`agentstack run`),
+  optionally with a profile applied just for its lifetime; see and kill every run
+  (and its whole process tree) from the CLI or dashboard — no Activity Monitor.
 - Full CLI + an optional local **dashboard** (below).
 
 The dashboard is an embedded localhost server + a self-contained UI (shadcn
@@ -123,7 +127,7 @@ Implemented and tested:
 - **`doctor --live`** — real MCP `initialize` handshake over HTTP; reports
   server name + tool count, or classifies the error (auth / http / connect).
 - **Package manager** — skills declare a source (`path` or `git`);
-  `install` fetches them into `~/.agentstack/store/` and writes a checksum-pinned
+  `install` fetches them into `~/.agentstack/store/` and writes a SHA-256
   `agentstack.lock`; `install --locked` is reproducible (CI-safe); `update`
   re-resolves git skills; `remove` drops a capability from manifest + lock.
 - **`search` across providers** — the embedded catalog **and the official MCP
@@ -136,10 +140,39 @@ Implemented and tested:
 - **`export`/`import`** — age-encrypted bundle (manifest + lock + optionally
   secrets) for moving a setup to a new machine; passphrase-protected.
 - Commands: `init`, `add`, `install` (`--locked`), `update`, `remove`,
-  `apply` (`--scope`, `--write`), `diff`, `use <profile>`, `instructions`,
-  `adopt`, `restore`, `doctor` (`--ci`, `--live`, `--fix`), `search`, `stats`,
-  `secret set|get|rm|list`, `export`/`import`, `adapters`, `plugins`,
-  `dashboard`, `mcp`, `hook`.
+  `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
+  `use <profile>`, `instructions`, `adopt`, `restore`, `doctor` (`--ci`,
+  `--live`, `--fix`), `search`, `stats`, `secret set|get|rm|list`,
+  `export`/`import`, `adapters`, `plugins`, `dashboard`, `mcp`, `hook`,
+  `run`/`runs`/`kill`.
+
+### Live runs (`agentstack run`)
+
+Launch an agent CLI as a **tracked run** and control it without leaving
+agentstack. A run is a real OS process agentstack owns: it's spawned in its own
+process group (so a kill takes down the whole tree), recorded in
+`~/.agentstack/runs.json`, and visible to any other agentstack process — so the
+dashboard can see and stop runs it didn't start.
+
+```bash
+# Launch a harness, attached to your terminal, with a profile applied for the
+# life of the run (its servers + skills are reverted automatically on exit).
+agentstack run claude-code --profile design
+agentstack run codex --profile backend --scope project
+agentstack run claude-code --keep        # leave the profile applied after exit
+
+# See and stop runs (from here or the dashboard's Runs panel).
+agentstack runs                # table; add --json for scripting
+agentstack kill <id>           # SIGTERM, then SIGKILL if it won't go
+agentstack kill <id> --force   # SIGKILL immediately
+```
+
+Launching is a terminal act (the harnesses are interactive TUIs); the dashboard's
+**Runs** panel is for observing and killing — each row shows the run's *trust
+footprint* (the exact servers + skills that live process can reach). The registry
+is self-healing: a run whose wrapper died is pruned on the next `runs`. A
+profile-bound run uses the session engine, so one is allowed per directory at a
+time. Unix only for now.
 
 ### Agent-operable (`agentstack mcp`)
 
@@ -194,6 +227,10 @@ agentstack secret list                 # which refs resolve, and from where
 # Verify everything is wired up
 agentstack doctor             # add --ci to exit nonzero on error
 
+# First-run/team setup funnel: read-only preflight + diff by default.
+agentstack bootstrap
+agentstack bootstrap --write  # install skills, apply configs, then doctor
+
 # See what would change in your real configs (read-only)
 agentstack diff
 
@@ -212,6 +249,11 @@ agentstack use focus --scope project --write # into .mcp.json + .claude/skills/
 
 # Compile CLAUDE.md / AGENTS.md from shared + per-harness fragments
 agentstack instructions --scope project --write
+
+# Launch a harness as a tracked run with a profile, then see/kill it
+agentstack run claude-code --profile design   # profile reverts on exit
+agentstack runs                               # list live runs (--json to script)
+agentstack kill <id>                          # SIGTERM→SIGKILL; --force for immediate
 ```
 
 ### Manifest example
@@ -303,11 +345,12 @@ native per-CLI settings (`[settings.*]` → settings.json) · managed plugin
 recipes (`[plugins.*]` → native Claude Code/Codex packages + marketplaces) ·
 atomic writes + backups · `export`/`import` · `hook` · agent-operable `mcp`
 server · local dashboard (server/skill matrices, Discover, add-skill, settings
-editor).
+editor) · live runs (`run`/`runs`/`kill` + dashboard Runs panel).
 
 **Next:** publish releases + a real demo · dogfood on a team · marketplace
 providers (skills.sh-style) + optional audit enrichment · reconsider a JSON /
-`mcp.json`-aligned manifest · install/remove flows for native plugin runtimes.
+`mcp.json`-aligned manifest · install/remove flows for native plugin runtimes ·
+runs phase 2: discover stray (unmanaged) agent processes as an advisory view.
 
 See [`agentstack-PLAN.md`](agentstack-PLAN.md) for the full spec and design
 decisions (D1–D22).

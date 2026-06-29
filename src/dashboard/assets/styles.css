@@ -156,6 +156,8 @@ tbody tr.clickable:hover { background: hsl(var(--muted) / 0.5); }
 .btn.primary { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); border-color: transparent; }
 .btn.primary:hover { opacity: 0.9; }
 .btn.icon { width: 32px; padding: 0; display: grid; place-items: center; }
+.btn.danger { color: hsl(0 72% 50%); border-color: hsl(0 72% 50% / 0.4); }
+.btn.danger:hover { background: hsl(0 72% 50% / 0.1); }
 .btn:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring)); }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
 .toolbar.tight { gap: 6px; }

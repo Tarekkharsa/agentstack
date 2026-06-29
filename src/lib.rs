@@ -24,6 +24,7 @@ pub mod plugin_recipes;
 pub mod plugins;
 pub mod provider;
 pub mod render;
+pub mod runs;
 pub mod scope;
 pub mod secret;
 pub mod session;

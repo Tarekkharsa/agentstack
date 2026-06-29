@@ -20,6 +20,7 @@ fn run() -> Result<()> {
         Command::Install(args) => commands::install::run(args, dir),
         Command::Update(args) => commands::install::run_update(args, dir),
         Command::Remove(args) => commands::remove::run(args, dir),
+        Command::Bootstrap(args) => commands::bootstrap::run(args, dir),
         Command::Apply(args) => commands::apply::run(args, dir),
         Command::Diff(args) => commands::diff::run(args, dir),
         Command::Explain(args) => commands::explain::run(args, dir),
@@ -40,5 +41,8 @@ fn run() -> Result<()> {
         Command::Dashboard(args) => agentstack::dashboard::serve(args, dir),
         Command::Mcp => agentstack::mcp_server::serve(dir),
         Command::Hook(args) => commands::hook::run(args),
+        Command::Run(args) => commands::runs::run(args, dir),
+        Command::Runs(args) => commands::runs::list(args),
+        Command::Kill(args) => commands::runs::kill(args),
     }
 }

@@ -466,6 +466,41 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
     let health = health_checks(&ctx, manifest, &global_drift, &global_non_selected_drift);
     let next_actions = next_actions(&secrets, &skills, &plugin_recipes, &global_drift, &health);
 
+    // Live tracked harness runs (separate agentstack processes the dashboard can
+    // observe and kill). For a profile-bound run, surface its trust footprint —
+    // the servers + skills that live process can reach — inline.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let runs: Vec<Value> = crate::runs::list()
+        .into_iter()
+        .map(|r| {
+            let (p_servers, p_skills) = r
+                .profile
+                .as_ref()
+                .and_then(|p| manifest.profiles.get(p))
+                .map(|p| (p.servers.clone(), p.skills.clone()))
+                .unwrap_or_default();
+            json!({
+                "id": r.id,
+                "harness": r.harness,
+                "display": r.display,
+                "pid": r.pid,
+                "command": r.command,
+                "args": r.args,
+                "cwd": r.cwd,
+                "profile": r.profile,
+                "scope": r.scope,
+                "startedUnix": r.started_unix,
+                "uptimeSecs": now.saturating_sub(r.started_unix),
+                "revertsOnExit": r.started_session,
+                "servers": p_servers,
+                "skills": p_skills,
+            })
+        })
+        .collect();
+
     Ok(json!({
         "meta": {
             "name": manifest.meta.name,
@@ -491,6 +526,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "stats": stats,
         "health": health,
         "nextActions": next_actions,
+        "runs": runs,
         "session": crate::session::active(&ctx.dir).map(|s| json!({
             "profile": s.profile,
             "scope": s.scope,
