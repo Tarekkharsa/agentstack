@@ -1,0 +1,30 @@
+# Google Antigravity (agentic IDE, a VS Code fork built on Codeium/Cascade)
+# adapter descriptor.
+# Config: ~/.gemini/antigravity/mcp_config.json, JSON, top-level "mcpServers".
+# Per-project / workspace config: .agents/mcp_config.json (same shape).
+# Quirk: like Windsurf (shared Codeium lineage), remote HTTP servers use
+#   "serverUrl" (NOT "url"). Transport is inferred (command => stdio,
+#   serverUrl => http); there is no "type" key.
+# GUI app with no guaranteed CLI on PATH, so detect by config path only.
+# Source (primary): github/github-mcp-server install-antigravity.md
+#   https://github.com/github/github-mcp-server/blob/main/docs/installation-guides/install-antigravity.md
+# Also: https://antigravity.google/docs/mcp
+id: antigravity
+display: Antigravity
+detect:
+  config: ~/.gemini/antigravity/mcp_config.json
+config:
+  path: ~/.gemini/antigravity/mcp_config.json
+  format: json
+project:
+  config: .agents/mcp_config.json
+  format: json
+mcp:
+  location: mcpServers
+  fields:
+    url: serverUrl
+    headers: headers
+    command: command
+    args: args
+    env: env
+  secret_mode: literal

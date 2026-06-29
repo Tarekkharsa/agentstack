@@ -1,0 +1,39 @@
+# Claude Desktop adapter descriptor
+#
+# Claude Desktop is the Anthropic GUI app (macOS/Windows). There is NO CLI
+# binary, so we detect by the presence of its MCP config file rather than a
+# `bin` on PATH.
+#
+# MCP config file: claude_desktop_config.json
+#   macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json
+#   Windows: %APPDATA%\Claude\claude_desktop_config.json
+# Both map to {config}/Claude/claude_desktop_config.json since {config} expands
+# to the OS user-config dir ("Application Support" on macOS, %APPDATA% on Win).
+#
+# Format: JSON. Servers live under the top-level "mcpServers" object.
+#
+# QUIRK — stdio only in the config file. The documented config schema covers
+# command-based (stdio) servers only: per-server "command", "args" and "env".
+# Remote/HTTP servers are NOT added via this file; they are added in-app as
+# "Custom Connectors" (Settings > Connectors), which Claude Desktop stores in
+# its own internal state, not in claude_desktop_config.json. So this adapter
+# intentionally omits url/headers and a transport "type" tag — there is none.
+#
+# No per-project config and no skills/instructions concept for this app.
+#
+# Primary source: https://modelcontextprotocol.io/docs/develop/connect-local-servers
+# Remote/connectors: https://modelcontextprotocol.io/docs/develop/connect-remote-servers
+id: claude-desktop
+display: Claude Desktop
+detect:
+  config: "{config}/Claude/claude_desktop_config.json"
+config:
+  path: "{config}/Claude/claude_desktop_config.json"
+  format: json
+mcp:
+  location: mcpServers
+  fields:
+    command: command
+    args: args
+    env: env
+  secret_mode: literal

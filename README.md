@@ -6,7 +6,8 @@
 
 You configure MCP servers, skills, and house rules once in a commit-safe
 `agentstack.toml`. agentstack **compiles** that into each agent CLI's native
-config — Claude Code, Codex, Cursor, Windsurf, Gemini CLI, VS Code — resolving
+config — Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS
+Code, GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro, and Pi — resolving
 secrets per machine, so the *same* setup works everywhere without copy-pasting
 JSON or leaking tokens into git.
 
@@ -70,8 +71,9 @@ examples of driving a vendor's surface, not endorsed vendor content.
 
 ## What works today
 
-- **6 agent CLIs** — Claude Code, Codex, Cursor, Windsurf, Gemini CLI, VS Code
-  (each a data descriptor; add more without touching core code).
+- **13 agent CLIs** — Claude Code, Claude Desktop, Codex, Cursor, Windsurf,
+  Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro,
+  and Pi (each a data descriptor; add more without touching core code).
 - **Cross-source discovery** — `search` and `add from` pull from the embedded
   catalog **and the official MCP Registry**, rendering to every CLI at once.
 - **Crash-safe** — config writes are atomic with pre-write backups; never
@@ -96,11 +98,14 @@ Implemented and tested:
 
 - **Manifest model** with layered load (`agentstack.toml` + a gitignored
   `agentstack.local.toml` overlay) and static validation.
-- **Data-driven adapters** — Claude Code, Codex, **Cursor, Windsurf, Gemini CLI,
-  VS Code** (one YAML descriptor each, embedded in the binary; user
+- **Data-driven adapters** — Claude Code, Claude Desktop, Codex, Cursor,
+  Windsurf, Gemini CLI, VS Code, **GitHub Copilot CLI, OpenCode, Antigravity,
+  Junie, Kiro**, and Pi (one YAML descriptor each, embedded in the binary; user
   overrides/additions from `~/.agentstack/adapters/`). Each CLI's quirks are
   encoded in data, not code: Claude's `type:"http"`, Codex's `http_headers`
-  subtable, Windsurf's `serverUrl`, Gemini's `httpUrl`, VS Code's `servers` key.
+  subtable, Windsurf's and Antigravity's `serverUrl`, Gemini's `httpUrl`, VS
+  Code's `servers` key, OpenCode's combined-`command` array and `mcp` key, and
+  Copilot CLI's `type:"local"` stdio tag.
   Per-OS config paths (`{config}/…`) resolve correctly on macOS/Linux/Windows.
 - **Generic renderer** that applies field renames, transport tags, header
   nesting, and secret substitution — and its **inverse** (`init` imports
@@ -361,7 +366,7 @@ cargo fmt --check
 
 ## Roadmap
 
-**Done:** 6 adapters · `init`/`add`/`apply`/`diff`/`use`/`instructions`/`adopt` ·
+**Done:** 13 adapters · `init`/`add`/`apply`/`diff`/`use`/`instructions`/`adopt` ·
 package manager (`install`/`update`/`remove` + lockfile) · secrets (keychain +
 varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`) ·
 official MCP Registry provider + `search`/`add from` · `[policy]` trust gate ·

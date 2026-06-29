@@ -1,0 +1,47 @@
+# GitHub Copilot CLI adapter descriptor (the standalone `copilot` command,
+# NOT the `gh copilot` extension and NOT the VS Code integration).
+#
+# MCP config: ~/.copilot/mcp-config.json (JSON). The config dir defaults to
+# ~/.copilot and can be relocated via the COPILOT_HOME env var. Servers live
+# under the top-level `mcpServers` key (the standard wrapper; a Claude-style
+# flat format is also accepted, but we emit the wrapper form).
+#
+# Transport is tagged with a `type` key: "local" for stdio (command/args/env),
+# "http" for streamable HTTP and "sse" for SSE (url/headers). The GitHub MCP
+# server is built in and needs no entry here.
+#
+# Source: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers
+#         https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference
+id: copilot-cli
+display: GitHub Copilot CLI
+detect:
+  bin: copilot
+  config: ~/.copilot/mcp-config.json
+config:
+  path: ~/.copilot/mcp-config.json
+  format: json
+mcp:
+  location: mcpServers
+  fields:
+    url: url
+    headers: headers
+    command: command
+    args: args
+    env: env
+  # Copilot CLI tags transport with a `type` key. Stdio servers use "local";
+  # remote streamable-HTTP servers use "http" (SSE servers use "sse").
+  transport:
+    key: type
+    http_value: http
+    stdio_value: local
+  secret_mode: literal
+# Skills live under the global Copilot CLI skills dir.
+skills:
+  dir: ~/.copilot/skills
+  strategy: symlink
+# Copilot CLI reads global custom instructions from
+# ~/.copilot/copilot-instructions.md and per-project instructions from an
+# AGENTS.md at the repository root (nested AGENTS.md files are also honored).
+instructions:
+  global: ~/.copilot/copilot-instructions.md
+  project: AGENTS.md

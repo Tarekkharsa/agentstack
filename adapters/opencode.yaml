@@ -1,0 +1,41 @@
+# OpenCode (sst/opencode) adapter descriptor
+# Config: ~/.config/opencode/opencode.json (global) + <repo>/opencode.json
+# (project), JSON (opencode.jsonc with comments also accepted). MCP servers live
+# under the top-level "mcp" key (NOT "mcpServers").
+# Quirks:
+#   - Transport is tagged with "type": "local" (stdio) or "remote" (http).
+#   - Local servers use a single combined "command" ARRAY (e.g.
+#     ["npx","-y","pkg"]) — there is no separate "args" key, so args is omitted.
+#   - env var key is "environment" (not "env"); remote servers use "url" + "headers".
+# Source: https://opencode.ai/docs/mcp-servers/ , https://opencode.ai/docs/config/
+id: opencode
+display: OpenCode
+detect:
+  bin: opencode
+  config: ~/.config/opencode/opencode.json
+config:
+  path: ~/.config/opencode/opencode.json
+  format: json
+project:
+  config: opencode.json
+  format: json
+mcp:
+  location: mcp
+  fields:
+    url: url
+    headers: headers
+    command: command
+    env: environment
+  transport:
+    key: type
+    http_value: remote
+    stdio_value: local
+  # OpenCode local servers use a single combined command array
+  # (["npx","-y","pkg"]) with no separate args key.
+  command_array: true
+  secret_mode: literal
+# OpenCode reads project rules from AGENTS.md in the repo root and global rules
+# from ~/.config/opencode/AGENTS.md. Source: https://opencode.ai/docs/rules/
+instructions:
+  global: ~/.config/opencode/AGENTS.md
+  project: AGENTS.md

@@ -1,0 +1,41 @@
+# Junie (JetBrains) adapter descriptor
+# Junie is the AI coding agent embedded in JetBrains IDEs (GUI; no general CLI on
+# PATH), so detection is by config path rather than a binary.
+#
+# MCP config: JSON file at .junie/mcp/mcp.json.
+#   - User/global scope: ~/.junie/mcp/mcp.json
+#   - Project scope:     <repo>/.junie/mcp/mcp.json
+# Top-level key is "mcpServers" (same shape as Claude Desktop / Cursor).
+# Transport is INFERRED from url-vs-command (no explicit "type" key):
+#   - local/stdio: "command" + "args" + "env"
+#   - remote/http: "url" + "headers"
+#
+# Instructions/guidelines: .junie/AGENTS.md is the current preferred format
+# (legacy .junie/guidelines.md is still supported). Global: ~/.junie/AGENTS.md.
+#
+# Sources:
+#   https://junie.jetbrains.com/docs/junie-cli-mcp-configuration.html
+#   https://junie.jetbrains.com/docs/junie-plugin-mcp-settings.html
+#   https://junie.jetbrains.com/docs/guidelines-and-memory.html
+id: junie
+display: Junie
+detect:
+  config: ~/.junie/mcp/mcp.json
+config:
+  path: ~/.junie/mcp/mcp.json
+  format: json
+project:
+  config: .junie/mcp/mcp.json
+  format: json
+mcp:
+  location: mcpServers
+  fields:
+    url: url
+    headers: headers
+    command: command
+    args: args
+    env: env
+  secret_mode: literal
+instructions:
+  global: ~/.junie/AGENTS.md
+  project: .junie/AGENTS.md

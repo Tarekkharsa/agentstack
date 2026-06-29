@@ -83,4 +83,28 @@ mod tests {
         assert!(reg.get("claude-code").is_some());
         assert!(reg.get("codex").is_some());
     }
+
+    /// Every shipped harness adapter must parse and embed. Guards against a new
+    /// descriptor regressing the schema (parse errors surface in `load`).
+    #[test]
+    fn all_shipped_adapters_present() {
+        let reg = Registry::load().unwrap();
+        for id in [
+            "claude-code",
+            "claude-desktop",
+            "codex",
+            "copilot-cli",
+            "cursor",
+            "gemini",
+            "antigravity",
+            "junie",
+            "kiro",
+            "opencode",
+            "pi",
+            "vscode",
+            "windsurf",
+        ] {
+            assert!(reg.get(id).is_some(), "adapter {id} failed to load");
+        }
+    }
 }

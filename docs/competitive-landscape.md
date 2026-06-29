@@ -49,7 +49,7 @@ package manager). The two that matter most are profiled below.
 ### From amtiYo/agents (smaller, cheaper gaps)
 | Feature | What it is | agentstack |
 |---|---|---|
-| Integration breadth | + Claude Desktop, Copilot VS Code, Copilot CLI, Antigravity, OpenCode, Junie | ⚠️ we have 6 |
+| Integration breadth | + Claude Desktop, Copilot VS Code, Copilot CLI, Antigravity, OpenCode, Junie | ✅ **13** (Claude Code/Desktop, Codex, Cursor, Windsurf, Gemini, VS Code, Copilot CLI, OpenCode, Antigravity, Junie, Kiro, Pi) — leads the field |
 | `watch` auto-sync | Re-syncs on source-file change | ❌ |
 | Secret-arg inference | Auto-detects which CLI args are secrets, auto-splits to local override | ⚠️ we do secrets-by-ref, no auto-infer |
 | Auto-trust | Writes `trust_level = "trusted"` into Codex config to pre-trust the project | ❓ verify |
@@ -68,10 +68,14 @@ package manager). The two that matter most are profiled below.
 
 ## Prioritized roadmap to "full-featured + easiest + most powerful"
 
-1. **Integration breadth (cheapest, highest visible ROI).** Adapters are YAML
-   data descriptors, so adding **Claude Desktop, Copilot (VS Code + CLI),
-   OpenCode, Antigravity, Junie, Kiro** is mostly data, not code. 6 → 12
-   leapfrogs amtiYo and matches APM on coverage. Do first.
+1. ✅ **DONE — Integration breadth (cheapest, highest visible ROI).** Adapters
+   are YAML data descriptors, so adding **Claude Desktop, Copilot CLI, OpenCode,
+   Antigravity, Junie, Kiro** was mostly data, not code (Copilot-in-VS-Code is
+   covered by the existing VS Code adapter). 6 → **13** — now leads both amtiYo
+   (11) and APM (8) on coverage. One small render addition (`command_array`)
+   landed for OpenCode's combined-command form. Open item to verify in the wild:
+   Antigravity's exact global config path, and whether Claude Desktop now accepts
+   in-file HTTP servers (today modeled stdio-only).
 2. **Transitive dependencies + install-from-any-git-host.** APM's core power
    feature; directly upgrades vendor-packs (a pack depends on packs, resolved
    from any git host, pinned in the lockfile). Without it we look like a syncer,

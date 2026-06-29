@@ -53,16 +53,24 @@ pub fn render_server(
         body.insert(field.clone(), Value::String(sub(url)));
     }
 
-    // 3. command
-    if let (Some(field), Some(cmd)) = (&mcp.fields.command, &server.command) {
-        body.insert(field.clone(), Value::String(sub(cmd)));
-    }
-
-    // 4. args
-    if let Some(field) = &mcp.fields.args {
-        if !server.args.is_empty() {
-            let arr = server.args.iter().map(|a| Value::String(sub(a))).collect();
+    // 3. command (+ args). Some CLIs (e.g. OpenCode) want a single combined
+    // array under `command`; others want a command string + separate args array.
+    if mcp.command_array {
+        if let (Some(field), Some(cmd)) = (&mcp.fields.command, &server.command) {
+            let mut arr = vec![Value::String(sub(cmd))];
+            arr.extend(server.args.iter().map(|a| Value::String(sub(a))));
             body.insert(field.clone(), Value::Array(arr));
+        }
+    } else {
+        if let (Some(field), Some(cmd)) = (&mcp.fields.command, &server.command) {
+            body.insert(field.clone(), Value::String(sub(cmd)));
+        }
+        // 4. args
+        if let Some(field) = &mcp.fields.args {
+            if !server.args.is_empty() {
+                let arr = server.args.iter().map(|a| Value::String(sub(a))).collect();
+                body.insert(field.clone(), Value::Array(arr));
+            }
         }
     }
 
@@ -177,6 +185,31 @@ mod tests {
         // Codex has no transport tag and renames headers -> http_headers.
         assert!(r.value.get("type").is_none());
         assert!(r.value.get("http_headers").is_some());
+    }
+
+    #[test]
+    fn opencode_combines_command_and_args_into_one_array() {
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("opencode").unwrap();
+        let s = server(
+            r#"
+            type = "stdio"
+            command = "npx"
+            args = ["-y", "some-mcp"]
+            env = { TOKEN = "${TOK}" }
+            "#,
+        );
+        let resolver = MapResolver::from([("TOK", "v")]);
+        let r = render_server(desc, &s, &resolver);
+        // command_array: command+args collapse into a single "command" array,
+        // there is no separate "args" key, and env renders under "environment".
+        assert_eq!(r.value["type"], "local");
+        assert_eq!(
+            r.value["command"],
+            serde_json::json!(["npx", "-y", "some-mcp"])
+        );
+        assert!(r.value.get("args").is_none());
+        assert_eq!(r.value["environment"]["TOKEN"], "v");
     }
 
     #[test]

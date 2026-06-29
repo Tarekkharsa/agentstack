@@ -164,6 +164,12 @@ pub struct McpSpec {
     /// rather than inline tables.
     #[serde(default)]
     pub headers_as_subtable: bool,
+    /// Render `command` + `args` as a single combined array under the `command`
+    /// field (e.g. OpenCode's `command: ["npx", "-y", "pkg"]`) instead of a
+    /// command string plus a separate `args` array. When set, the `args` field
+    /// mapping is ignored.
+    #[serde(default)]
+    pub command_array: bool,
     #[serde(default)]
     pub secret_mode: SecretMode,
 }

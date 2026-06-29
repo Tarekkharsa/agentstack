@@ -1,0 +1,34 @@
+# AWS Kiro (agentic IDE) adapter descriptor
+# Config: mcp.json, JSON, top-level "mcpServers".
+#   Global:  ~/.kiro/settings/mcp.json
+#   Project: .kiro/settings/mcp.json (workspace overrides global on merge)
+# Transport is INFERRED, not tagged: a server with "command" is stdio,
+# a server with "url" is remote/HTTP. There is no "type"/"transport" key.
+# Remote servers use the standard "url" + "headers" fields (plus optional
+# oauth/oauthScopes); local servers use command/args/env. Kiro also supports
+# "disabled"/"autoApprove"/"disabledTools" per server, but those are not part
+# of the standard MCP fields we manage, so they are omitted here.
+# Kiro additionally supports "steering" files (.kiro/steering/*.md and
+# ~/.kiro/steering/) for instructions — a directory of markdown, not a single
+# AGENTS.md, so it is not mapped to the single-file `instructions` section.
+# Source: https://kiro.dev/docs/mcp/configuration/
+id: kiro
+display: Kiro
+detect:
+  bin: kiro
+  config: ~/.kiro/settings/mcp.json
+config:
+  path: ~/.kiro/settings/mcp.json
+  format: json
+project:
+  config: .kiro/settings/mcp.json
+  format: json
+mcp:
+  location: mcpServers
+  fields:
+    url: url
+    headers: headers
+    command: command
+    args: args
+    env: env
+  secret_mode: literal
