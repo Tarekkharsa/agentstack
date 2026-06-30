@@ -175,8 +175,25 @@ impl Gateway {
     pub fn from_manifest(dir: Option<&std::path::Path>) -> Gateway {
         let mut upstreams = Vec::new();
         if let Ok(ctx) = crate::commands::load(dir) {
+            // When a session is active, fence the proxied surface to that
+            // session's profile servers — the same fence a profile already puts
+            // on skills, extended to runtime tools (PLAN code-mode Phase 3).
+            let session = crate::session::active(&ctx.dir);
+            let fence = server_allowlist(
+                &ctx.loaded.manifest,
+                session.as_ref().map(|s| s.profile.as_str()),
+            );
+            if let Some(allow) = &fence {
+                eprintln!(
+                    "gateway: session active — proxying only this profile's {} server(s)",
+                    allow.len()
+                );
+            }
             let mut skipped_stdio = 0;
             for (name, s) in &ctx.loaded.manifest.servers {
+                if fence.as_ref().is_some_and(|allow| !allow.contains(name)) {
+                    continue;
+                }
                 if s.server_type != ServerType::Http {
                     skipped_stdio += 1;
                     continue;
@@ -401,6 +418,17 @@ fn score_tool(bare: &str, server: &str, desc: &str, tokens: &[&str]) -> i32 {
     score
 }
 
+/// The proxied-server allowlist for the current context. `None` (no active
+/// session, or its profile is gone) means no fence — every manifest server is
+/// proxied. `Some(set)` restricts the proxied surface to that profile's servers.
+fn server_allowlist(
+    manifest: &crate::manifest::Manifest,
+    active_profile: Option<&str>,
+) -> Option<std::collections::HashSet<String>> {
+    let profile = manifest.profiles.get(active_profile?)?;
+    Some(profile.servers.iter().cloned().collect())
+}
+
 fn namespace_tool(server: &str, tool: &Value) -> Value {
     let bare = tool.get("name").and_then(Value::as_str).unwrap_or("tool");
     let mut desc = format!(
@@ -494,6 +522,25 @@ mod tests {
         assert_eq!(all[0].name, "figma__create_frame");
         // no match → no hits
         assert!(gw.search("nonexistent-xyz", 10).is_empty());
+    }
+
+    #[test]
+    fn session_fences_proxied_servers_to_profile() {
+        let manifest: crate::manifest::Manifest = toml::from_str(
+            "version = 1\n\
+             [servers.alpha]\ntype = \"http\"\nurl = \"https://a\"\n\
+             [servers.beta]\ntype = \"http\"\nurl = \"https://b\"\n\
+             [profiles.solo]\nservers = [\"alpha\"]\n",
+        )
+        .unwrap();
+        // No session → no fence (every server proxied).
+        assert!(server_allowlist(&manifest, None).is_none());
+        // Active session on `solo` → only its server is allowed.
+        let allow = server_allowlist(&manifest, Some("solo")).unwrap();
+        assert!(allow.contains("alpha"));
+        assert!(!allow.contains("beta"));
+        // A profile that vanished → no fence rather than fencing to nothing.
+        assert!(server_allowlist(&manifest, Some("ghost")).is_none());
     }
 
     #[test]
