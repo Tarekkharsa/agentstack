@@ -276,15 +276,18 @@ server you add), the proxied surface collapses behind two stable tools:
   schema and a ready-to-run code-mode snippet. Deterministic substring ranking, no
   embeddings. Read-only. (Distinct from `agentstack_search`, which searches the
   *catalog* for servers to install.)
-- **`tools_bindings`** — code mode. Generates a typed, **secret-free** TypeScript
-  client (`codemode.<server>.<tool>(input)`) plus a runtime shim, so the agent
-  writes **one** small program that calls several upstream tools and runs it with
-  its own code/bash tool — one program instead of many tool round-trips.
+- **`tools_bindings`** — code mode via **typed bindings for harness-run code**.
+  Generates a typed, **secret-free** TypeScript client
+  (`codemode.<server>.<tool>(input)`) plus a runtime shim, so the agent writes
+  **one** small program that calls several upstream tools and runs it with its own
+  code/bash tool — one program instead of many tool round-trips.
 
-agentstack is a **generator, not a runtime**: it emits the bindings and brokers
-the real MCP calls (resolving `${REF}`s per call over a loopback, token-gated
-endpoint), but the agent's code runs in the harness's own sandbox — never inside
-agentstack. Materialize the client to `.agentstack/codemode/` with:
+agentstack emits the bindings and brokers the real MCP calls (resolving `${REF}`s
+per call over a loopback, token-gated endpoint); the agent's code runs in the
+**harness's** own sandbox — never inside agentstack, which stays a compiler, not a
+runtime. (A full Code Mode in the [TanStack](https://tanstack.com/ai/latest/docs/code-mode/code-mode)
+sense — a sandboxed `execute_typescript` executor — is reserved for a future
+hosted `tools_execute`.) Materialize the client to `.agentstack/codemode/` with:
 
 ```bash
 agentstack codemode            # dry-run: what would be generated

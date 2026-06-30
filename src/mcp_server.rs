@@ -431,7 +431,7 @@ fn search_text(query: &str) -> String {
 }
 
 /// Route a `tools_search` call. With `entity` set it returns one tool's full
-/// detail (kody's single-tool depth); otherwise it returns a ranked compact list
+/// detail (the single-tool depth); otherwise it returns a ranked compact list
 /// for `query`. Strictly read-only over the gateway's proxied surface.
 fn tools_search_text(gateway: &crate::gateway::Gateway, args: &Value) -> String {
     if let Some(entity) = args
