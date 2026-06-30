@@ -30,6 +30,10 @@ pub struct Upstream {
     pub name: String,
     url: String,
     headers: Vec<(String, String)>,
+    /// `${REF}`s in this server's URL/headers that did not resolve on this
+    /// machine. A call is refused (with a clear message) rather than sent with a
+    /// literal `${REF}` that would fail upstream as a confusing auth error.
+    unresolved: Vec<String>,
     client: reqwest::blocking::Client,
     session: RefCell<Option<String>>,
     initialized: RefCell<bool>,
@@ -37,7 +41,12 @@ pub struct Upstream {
 }
 
 impl Upstream {
-    fn new(name: String, url: String, headers: Vec<(String, String)>) -> Result<Self> {
+    fn new(
+        name: String,
+        url: String,
+        headers: Vec<(String, String)>,
+        unresolved: Vec<String>,
+    ) -> Result<Self> {
         let client = reqwest::blocking::Client::builder()
             .timeout(TIMEOUT)
             .build()?;
@@ -45,6 +54,7 @@ impl Upstream {
             name,
             url,
             headers,
+            unresolved,
             client,
             session: RefCell::new(None),
             initialized: RefCell::new(false),
@@ -140,6 +150,13 @@ impl Upstream {
     }
 
     fn call_tool(&self, tool: &str, args: Value) -> Result<Value> {
+        if !self.unresolved.is_empty() {
+            anyhow::bail!(
+                "{}: cannot call '{tool}' — secret(s) did not resolve on this machine: {}. Set them with `agentstack secret set`.",
+                self.name,
+                self.unresolved.join(", ")
+            );
+        }
         self.ensure_init()?;
         self.rpc("tools/call", json!({ "name": tool, "arguments": args }))
     }
@@ -165,19 +182,30 @@ impl Gateway {
                     continue;
                 }
                 let Some(url) = &s.url else { continue };
-                let mut junk = Vec::new();
-                let url = crate::adapter::render::substitute(url, &ctx.resolver, false, &mut junk);
+                // Collect any `${REF}`s that don't resolve here (across URL +
+                // headers) so a call can fail fast with a clear message instead
+                // of sending a literal `${REF}` upstream.
+                let mut unresolved = Vec::new();
+                let url =
+                    crate::adapter::render::substitute(url, &ctx.resolver, false, &mut unresolved);
                 let headers = s
                     .headers
                     .iter()
                     .map(|(k, v)| {
                         (
                             k.clone(),
-                            crate::adapter::render::substitute(v, &ctx.resolver, false, &mut junk),
+                            crate::adapter::render::substitute(
+                                v,
+                                &ctx.resolver,
+                                false,
+                                &mut unresolved,
+                            ),
                         )
                     })
                     .collect();
-                match Upstream::new(name.clone(), url, headers) {
+                unresolved.sort();
+                unresolved.dedup();
+                match Upstream::new(name.clone(), url, headers, unresolved) {
                     Ok(u) => upstreams.push(u),
                     Err(e) => eprintln!("gateway: skipping '{name}': {e}"),
                 }
@@ -297,6 +325,26 @@ impl Gateway {
                 .cloned()
                 .unwrap_or_else(|| json!({ "type": "object" })),
         })
+    }
+
+    /// The proxied servers and, for each, the `${REF}`s that did not resolve on
+    /// this machine. Drives the `codemode` command's secret-health summary and
+    /// the `explain` view of the runtime surface.
+    pub fn proxied_servers(&self) -> Vec<(String, Vec<String>)> {
+        self.upstreams
+            .iter()
+            .map(|u| (u.name.clone(), u.unresolved.clone()))
+            .collect()
+    }
+
+    /// Generate the code-mode client (typed TS client + runtime shim) for the
+    /// proxied surface. Secret-free: the client only carries tool names; secrets
+    /// are resolved here, per call, when the shim forwards through `try_call`.
+    pub fn generate_bindings(&self) -> crate::codemode::Bindings {
+        crate::codemode::Bindings {
+            client_ts: crate::codemode::render_client(&self.namespaced_tools()),
+            runtime_ts: crate::codemode::runtime_shim().to_string(),
+        }
     }
 
     /// Build a gateway directly from a pre-discovered namespaced tool list,

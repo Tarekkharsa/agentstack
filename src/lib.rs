@@ -9,6 +9,7 @@
 pub mod adapter;
 pub mod catalog;
 pub mod cli;
+pub mod codemode;
 pub mod commands;
 pub mod consolidate;
 pub mod dashboard;

@@ -113,6 +113,11 @@ pub enum Command {
     /// Run agentstack as an MCP server over stdio (for an agent to call).
     Mcp,
 
+    /// Generate a typed code-mode client for this project's proxied MCP servers,
+    /// so an agent can call several upstream tools from one program it runs in
+    /// its own sandbox. Read-only by default; `--write` materializes the files.
+    Codemode(CodemodeArgs),
+
     /// Print a shell hook for per-directory profile auto-activation.
     Hook(HookArgs),
 
@@ -168,6 +173,14 @@ pub struct KillArgs {
     /// Send SIGKILL immediately instead of SIGTERM-then-escalate.
     #[arg(long)]
     pub force: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct CodemodeArgs {
+    /// Write the generated client to `.agentstack/codemode/` (else dry-run: just
+    /// show what would be written).
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[derive(Args, Debug)]

@@ -6,6 +6,7 @@ pub mod adopt;
 pub mod apply;
 pub mod bootstrap;
 pub mod bundle;
+pub mod codemode;
 pub mod consolidate;
 pub mod diff;
 pub mod doctor;

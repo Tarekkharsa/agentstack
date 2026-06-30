@@ -264,6 +264,33 @@ e.g. Claude Code:
 { "mcpServers": { "agentstack": { "type": "stdio", "command": "agentstack", "args": ["mcp"] } } }
 ```
 
+#### Compact proxied surface + code mode
+
+`agentstack mcp` also **proxies** the project's HTTP MCP servers. Instead of
+dumping every upstream tool into `tools/list` (context bloat that grows with each
+server you add), the proxied surface collapses behind two stable tools:
+
+- **`tools_search`** — ranked discovery. `tools_search({ query })` returns compact
+  cards (one line per matching upstream tool, with an entity ref); a second call
+  `tools_search({ entity: "server__tool:tool" })` returns that one tool's input
+  schema and a ready-to-run code-mode snippet. Deterministic substring ranking, no
+  embeddings. Read-only. (Distinct from `agentstack_search`, which searches the
+  *catalog* for servers to install.)
+- **`tools_bindings`** — code mode. Generates a typed, **secret-free** TypeScript
+  client (`codemode.<server>.<tool>(input)`) plus a runtime shim, so the agent
+  writes **one** small program that calls several upstream tools and runs it with
+  its own code/bash tool — one program instead of many tool round-trips.
+
+agentstack is a **generator, not a runtime**: it emits the bindings and brokers
+the real MCP calls (resolving `${REF}`s per call over a loopback, token-gated
+endpoint), but the agent's code runs in the harness's own sandbox — never inside
+agentstack. Materialize the client to `.agentstack/codemode/` with:
+
+```bash
+agentstack codemode            # dry-run: what would be generated
+agentstack codemode --write    # write client.ts + agentstack-runtime.ts (+ .gitignore)
+```
+
 ### Per-directory auto-activation (`agentstack hook`)
 
 direnv-style: drop a `.agentstack` file (first line = profile name) in a repo,

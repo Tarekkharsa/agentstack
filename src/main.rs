@@ -41,6 +41,7 @@ fn run() -> Result<()> {
         Command::Import(args) => commands::bundle::run_import(args, dir),
         Command::Dashboard(args) => agentstack::dashboard::serve(args, dir),
         Command::Mcp => agentstack::mcp_server::serve(dir),
+        Command::Codemode(args) => commands::codemode::run(args, dir),
         Command::Hook(args) => commands::hook::run(args),
         Command::Run(args) => commands::runs::run(args, dir),
         Command::Runs(args) => commands::runs::list(args),

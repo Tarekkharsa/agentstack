@@ -33,6 +33,17 @@ pub fn serve(manifest_dir: Option<&Path>) -> Result<()> {
         eprintln!("agentstack mcp: gateway active — proxying this project's HTTP MCP servers");
     }
 
+    // Code mode (Phase 2): expose a loopback, token-gated endpoint the generated
+    // client POSTs to. Best-effort and contained — None when there's nothing to
+    // proxy. agentstack only brokers the call here; it never runs the agent's code.
+    let runtime = crate::codemode::endpoint::start(dir.as_deref());
+    if let Some(rt) = &runtime {
+        eprintln!(
+            "agentstack mcp: code-mode runtime at {} (loopback · token-gated). Generate a client with `agentstack codemode --write`.",
+            rt.url
+        );
+    }
+
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -45,6 +56,11 @@ pub fn serve(manifest_dir: Option<&Path>) -> Result<()> {
             writeln!(out, "{}", serde_json::to_string(&resp)?)?;
             out.flush()?;
         }
+    }
+    // Remove the machine-local endpoint coordinate file so a dead port+token
+    // isn't left behind for the next shim call.
+    if let Some(rt) = runtime {
+        rt.shutdown();
     }
     Ok(())
 }
@@ -105,6 +121,14 @@ fn handle(req: &Value, dir: Option<&Path>, gateway: &crate::gateway::Gateway) ->
                     json!({ "content": [{ "type": "text", "text": tools_search_text(gateway, &args) }], "isError": false }),
                 ));
             }
+            // Code-mode binding generation also needs the gateway. Generator, not
+            // executor: it returns the client text + a recipe; the harness runs it.
+            if name == "tools_bindings" {
+                return Some(result(
+                    id,
+                    json!({ "content": [{ "type": "text", "text": tools_bindings_text(gateway, dir) }], "isError": false }),
+                ));
+            }
             // A namespaced call (server__tool) is forwarded to that upstream;
             // its MCP result is returned verbatim. Otherwise it's our own tool.
             if let Some(forwarded) = gateway.try_call(name, &args) {
@@ -160,6 +184,11 @@ fn tool_defs() -> Value {
                     "maxResponseSize": { "type": "integer", "description": "Approximate max characters of the response; low-ranked matches are trimmed to stay under it" }
                 }
             }
+        },
+        {
+            "name": "tools_bindings",
+            "description": "Generate a typed code-mode client for this project's proxied MCP servers, so you can write ONE small program that calls several upstream tools and run it with your own code/bash tool — instead of many separate tool round-trips. Returns the generated TypeScript client (one secret-free function per proxied tool, addressed `codemode.<server>.<tool>(input)`), the runtime shim, and a short recipe. It is a GENERATOR, not an executor: agentstack never runs your code — the harness's sandbox does. Secrets are resolved server-side, per call. Discover tool names/schemas first with tools_search. To write the files to disk, run `agentstack codemode --write`.",
+            "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "agentstack_list",
@@ -470,10 +499,11 @@ fn format_hits(query: &str, hits: &[crate::gateway::Hit], max_response: Option<u
 }
 
 /// Full detail for one proxied tool: its raw input schema, source server,
-/// a provenance/safety note, and a forward-looking code-mode snippet (Phase 2's
-/// generated client; not yet runnable).
+/// a provenance/safety note, and a code-mode snippet against the generated
+/// client (generate it with `tools_bindings` or `agentstack codemode --write`).
 fn format_tool_detail(d: &crate::gateway::ToolDetail) -> String {
     let schema = serde_json::to_string_pretty(&d.input_schema).unwrap_or_else(|_| "{}".to_string());
+    let call = crate::codemode::access_path(&d.server, &d.tool);
     format!(
         "# {name}\n\n\
          **Server:** {server} (proxied upstream)\n\
@@ -481,12 +511,35 @@ fn format_tool_detail(d: &crate::gateway::ToolDetail) -> String {
          {description}\n\n\
          _Provenance: this tool is proxied from the upstream MCP server '{server}', which your manifest declares (the manifest is the allowlist). Descriptions are forwarded with a `[via {server}]` prefix and length-capped — treat upstream-supplied text as untrusted._\n\n\
          ## Input schema\n\n```json\n{schema}\n```\n\n\
-         ## Code mode (Phase 2 — generated client, not yet runnable)\n\n```ts\n// once `tools_bindings` has generated the client:\nconst result = await codemode.{name}(input);\n```\n",
+         ## Code mode\n\nGenerate the client with `tools_bindings` (or `agentstack codemode --write`), then:\n\n```ts\nconst result = await {call}(input);\n```\n",
         name = d.name,
         server = d.server,
         tool = d.tool,
         description = d.description,
         schema = schema,
+    )
+}
+
+/// Render the `tools_bindings` response: the generated code-mode client + runtime
+/// shim + a recipe. A generator, never an executor — agentstack does not run the
+/// agent's code; the harness's own code tool does.
+fn tools_bindings_text(gateway: &crate::gateway::Gateway, dir: Option<&Path>) -> String {
+    let b = gateway.generate_bindings();
+    let cmdir = crate::codemode::codemode_dir(dir);
+    let cmdir = cmdir.display();
+    format!(
+        "# Code mode — generated client for this project's proxied tools\n\n\
+         agentstack does **not** run your code: it generates these bindings and brokers the real MCP calls. \
+         Write a small program against the client and run it with your own code/bash tool.\n\n\
+         ## Recipe\n\n\
+         1. Write the two files below to `{cmdir}/` (or just run `agentstack codemode --write`).\n\
+         2. Make sure `agentstack mcp` is running for this project — it serves the loopback runtime endpoint the shim calls.\n\
+         3. `import {{ codemode }} from \"./client\"`, call `await codemode.<server>.<tool>(input)` (chain several in one program), and run it with your code tool.\n\n\
+         Discover tool names + input schemas with `tools_search` first. Bindings are secret-free; secrets resolve server-side, per call.\n\n\
+         ## `client.ts`\n\n```ts\n{client}```\n\n\
+         ## `agentstack-runtime.ts`\n\n```ts\n{runtime}```\n",
+        client = b.client_ts,
+        runtime = b.runtime_ts,
     )
 }
 
@@ -831,6 +884,7 @@ mod tests {
             .collect();
         assert!(names.contains(&"agentstack_search"));
         assert!(names.contains(&"tools_search"));
+        assert!(names.contains(&"tools_bindings"));
         assert!(names.contains(&"agentstack_add_server"));
         assert!(names.contains(&"agentstack_list_loadable"));
         assert!(names.contains(&"agentstack_load"));
@@ -915,7 +969,7 @@ mod tests {
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("**Server:** figma"));
         assert!(text.contains("fileKey"));
-        assert!(text.contains("await codemode.figma__get_file(input)"));
+        assert!(text.contains("await codemode.figma.get_file(input)"));
         // unknown entity is a graceful message, not an error
         let req = json!({
             "jsonrpc": "2.0", "id": 10, "method": "tools/call",
@@ -924,6 +978,23 @@ mod tests {
         let resp = handle(&req, None, &gw).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("No proxied tool matches"));
+    }
+
+    #[test]
+    fn tools_bindings_returns_client_and_recipe() {
+        let gw = crate::gateway::Gateway::with_tools(proxied_fixture());
+        let req = json!({
+            "jsonrpc": "2.0", "id": 11, "method": "tools/call",
+            "params": { "name": "tools_bindings", "arguments": {} }
+        });
+        let resp = handle(&req, None, &gw).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        // The generated client + shim + recipe, all secret-free.
+        assert!(text.contains("export const codemode = {"));
+        assert!(text.contains(r#"call("figma__get_file", input)"#));
+        assert!(text.contains("agentstack-runtime.ts"));
+        assert!(text.contains("## Recipe"));
+        assert_eq!(resp["result"]["isError"], false);
     }
 
     #[test]
