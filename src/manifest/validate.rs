@@ -5,7 +5,9 @@ use std::path::Path;
 
 use super::model::{Manifest, ServerType};
 use crate::library::Library;
-use crate::resolve::{resolve_skill, ResolveError, ResolveMode};
+use crate::resolve::{
+    resolve_server, resolve_skill, ResolveError, ResolveMode, ServerResolveError,
+};
 use crate::store::Store;
 
 /// Context enabling library-aware skill-ref validation. Without it, a profile
@@ -30,6 +32,10 @@ pub struct Issue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IssueKind {
     UnknownServerRef,
+    /// A server ref names a known entry, but resolving its definition failed
+    /// (e.g. a library entry whose `servers/<name>.toml` is missing/malformed).
+    /// Distinct from `UnknownServerRef`, which means the name resolves nowhere.
+    UnresolvableServerRef,
     UnknownSkillRef,
     /// A skill ref names a known entry, but resolving its source failed (e.g. a
     /// library entry with a broken/missing source). Distinct from
@@ -50,6 +56,7 @@ impl IssueKind {
         matches!(
             self,
             IssueKind::UnknownServerRef
+                | IssueKind::UnresolvableServerRef
                 | IssueKind::UnknownSkillRef
                 | IssueKind::UnresolvableSkillRef
                 | IssueKind::UnknownHookRef
@@ -129,11 +136,27 @@ fn run<'a>(
     // Profile references.
     for (pname, profile) in &manifest.profiles {
         for sref in &profile.servers {
-            if !manifest.servers.contains_key(sref) {
-                issues.push(Issue::new(
+            // Inline definitions validate directly; only non-inline names consult
+            // the central library, and only when ctx is given.
+            if manifest.servers.contains_key(sref) {
+                continue;
+            }
+            match ctx {
+                Some(cx) => match resolve_server(manifest, cx.library, cx.lib_home, sref) {
+                    Ok(_) => {}
+                    Err(ServerResolveError::Unresolved { .. }) => issues.push(Issue::new(
+                        IssueKind::UnknownServerRef,
+                        format!("profile '{pname}' references unknown server '{sref}'"),
+                    )),
+                    Err(ServerResolveError::Source(e)) => issues.push(Issue::new(
+                        IssueKind::UnresolvableServerRef,
+                        format!("profile '{pname}' server '{sref}' failed to resolve: {e}"),
+                    )),
+                },
+                None => issues.push(Issue::new(
                     IssueKind::UnknownServerRef,
                     format!("profile '{pname}' references unknown server '{sref}'"),
-                ));
+                )),
             }
         }
         for kref in &profile.skills {
@@ -238,7 +261,7 @@ fn is_native_plugin_id(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::library::LibrarySkill;
+    use crate::library::{LibraryServer, LibrarySkill};
     use assert_fs::prelude::*;
 
     fn parse(s: &str) -> Manifest {
@@ -494,5 +517,159 @@ mod tests {
         // The message names the skill and carries the resolver's reason.
         assert!(issue.message.contains("sql-review"));
         assert!(issue.message.contains("failed to resolve"));
+    }
+
+    // ---------- profile server refs against the central library (Phase 1b) ----------
+
+    // A profile referencing a server only present in the central library.
+    const PROFILE_REFS_SERVER: &str = r#"
+        version = 1
+        [profiles.p]
+        servers = ["kibana"]
+    "#;
+
+    /// A library home with one server definition file plus its index entry.
+    fn library_with_server(lib_home: &assert_fs::TempDir, name: &str) -> Library {
+        lib_home
+            .child(format!("servers/{name}.toml"))
+            .write_str("type = \"http\"\nurl = \"https://central/mcp\"\n")
+            .unwrap();
+        let mut lib = Library::default();
+        lib.upsert_server(LibraryServer {
+            name: name.into(),
+            checksum: None,
+            version: None,
+            provenance: Some("consolidated:codex".into()),
+        });
+        lib
+    }
+
+    #[test]
+    fn library_server_ref_validates_without_inline() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let library = library_with_server(&lib_home, "kibana");
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(PROFILE_REFS_SERVER);
+        // Without context, the library-only ref is unknown (today's behavior).
+        assert!(validate(&m)
+            .iter()
+            .any(|i| i.kind == IssueKind::UnknownServerRef));
+        // With context, it resolves and validation is clean.
+        assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx).is_empty());
+    }
+
+    #[test]
+    fn unresolved_server_ref_still_fails_with_context() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let library = Library::default(); // empty — "kibana" is nowhere
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(PROFILE_REFS_SERVER);
+        assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx)
+            .iter()
+            .any(|i| i.kind == IssueKind::UnknownServerRef));
+    }
+
+    #[test]
+    fn inline_server_ref_still_validates_with_context() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        // Empty library: the ref must validate purely via the inline definition.
+        let library = Library::default();
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(
+            r#"
+            version = 1
+            [servers.kibana]
+            type = "http"
+            url = "https://x"
+            [profiles.p]
+            servers = ["kibana"]
+            "#,
+        );
+        assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx).is_empty());
+    }
+
+    #[test]
+    fn broken_library_server_definition_produces_useful_issue() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        // Indexed by name, but its `servers/kibana.toml` file is missing → the
+        // definition cannot be resolved.
+        let mut library = Library::default();
+        library.upsert_server(LibraryServer {
+            name: "kibana".into(),
+            checksum: None,
+            version: None,
+            provenance: None,
+        });
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(PROFILE_REFS_SERVER);
+        let issues = validate_with_context(&m, std::iter::empty::<&str>(), &ctx);
+        let issue = issues
+            .iter()
+            .find(|i| i.kind == IssueKind::UnresolvableServerRef)
+            .expect("expected an UnresolvableServerRef issue");
+        assert!(issue.message.contains("kibana"));
+        assert!(issue.message.contains("failed to resolve"));
+    }
+
+    #[test]
+    fn plugin_recipe_server_refs_remain_inline_only() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        // The server exists in the library, but plugin recipes do not consult it.
+        let library = library_with_server(&lib_home, "kibana");
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(
+            r#"
+            version = 1
+            [plugins.play]
+            version = "1.0.0"
+            description = "Play"
+            targets = ["codex"]
+            servers = ["kibana"]
+            "#,
+        );
+        // Even with the library available, the plugin ref stays inline-only.
+        assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx)
+            .iter()
+            .any(|i| i.kind == IssueKind::UnknownServerRef));
     }
 }
