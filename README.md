@@ -251,7 +251,7 @@ version = 1
 
 [servers.kibana_mcp]
 type = "http"
-url = "https://kibana-mcp.ghaloyalty.com/mcp"
+url = "https://kibana-mcp.example.com/mcp"
 headers = { Authorization = "Bearer ${KIBANA_TOKEN}" }   # resolved per machine
 
 [servers.github]
