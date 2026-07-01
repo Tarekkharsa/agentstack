@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::render::{plan_target, resolve_targets, Selection};
+use crate::render::{effective_servers, plan_target_with_servers, resolve_targets, Selection};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 use crate::util::paths;
@@ -191,6 +191,10 @@ pub fn start(
     let state = State::load().unwrap_or_default();
     let target_ids = resolve_targets(manifest, &ctx.registry, &[]);
 
+    // Library-aware effective server set (inline-first, then central library).
+    let libctx = ctx.library_ctx();
+    let server_map = effective_servers(manifest, &libctx.library, &libctx.lib_home, &selection)?;
+
     // Snapshot: server config files (for undo) + skills dirs (to detect adds).
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
     let mut touched: BTreeSet<String> = BTreeSet::new();
@@ -200,15 +204,9 @@ pub fn start(
             continue;
         };
         let prev = state.managed_servers(&target_key(id, scope));
-        if let Some(plan) = plan_target(
-            manifest,
-            desc,
-            &ctx.resolver,
-            &selection,
-            &prev,
-            scope,
-            &ctx.dir,
-        )? {
+        if let Some(plan) =
+            plan_target_with_servers(desc, &ctx.resolver, &server_map, &prev, scope, &ctx.dir)?
+        {
             backups.push(crate::history::capture(
                 &plan.config_path,
                 format!("{} · servers", desc.display),

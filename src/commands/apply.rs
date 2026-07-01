@@ -7,8 +7,11 @@ use anyhow::Result;
 use owo_colors::OwoColorize;
 
 use crate::cli::ApplyArgs;
-use crate::manifest::validate_with_targets;
-use crate::render::{plan_hooks, plan_settings, plan_target, resolve_targets, Selection};
+use crate::manifest::{validate_with_context, ValidateCtx};
+use crate::render::{
+    effective_servers, plan_hooks, plan_settings, plan_target_with_servers, resolve_targets,
+    Selection,
+};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 
@@ -17,13 +20,19 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
     let scope = args.scope.unwrap_or(Scope::Global);
 
-    let target_ids_for_validation: Vec<&str> = ctx.registry.ids().collect();
-    let has_errors = print_validation(manifest, target_ids_for_validation);
-
     let selection = match &args.profile {
         Some(p) => Selection::Profile(p.clone()),
         None => Selection::All,
     };
+
+    // Library-aware validation + the effective server set (inline-first, then
+    // central library), shared across targets.
+    let libctx = ctx.library_ctx();
+    let vctx = libctx.validate_ctx(&ctx.dir);
+    let target_ids_for_validation: Vec<&str> = ctx.registry.ids().collect();
+    let has_errors = print_validation(manifest, target_ids_for_validation, &vctx);
+    let server_map = effective_servers(manifest, &libctx.library, &libctx.lib_home, &selection)?;
+
     let mut will_write = args.write && !args.dry_run;
 
     // Structural validation errors would produce broken/partial config — never
@@ -60,11 +69,10 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
         let key = target_key(id, scope);
         let previously = state.managed_servers(&key);
-        let Some(plan) = plan_target(
-            manifest,
+        let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
-            &selection,
+            &server_map,
             &previously,
             scope,
             &ctx.dir,
@@ -238,8 +246,12 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
 }
 
 /// Print validation issues; return true if any are structural errors.
-fn print_validation(manifest: &crate::manifest::Manifest, target_ids: Vec<&str>) -> bool {
-    let issues = validate_with_targets(manifest, target_ids);
+fn print_validation(
+    manifest: &crate::manifest::Manifest,
+    target_ids: Vec<&str>,
+    vctx: &ValidateCtx,
+) -> bool {
+    let issues = validate_with_context(manifest, target_ids, vctx);
     let mut has_error = false;
     for issue in &issues {
         if issue.kind.is_error() {

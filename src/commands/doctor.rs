@@ -10,7 +10,7 @@ use anyhow::Result;
 use owo_colors::OwoColorize;
 
 use crate::cli::DoctorArgs;
-use crate::manifest::{validate_with_targets, Manifest, ServerType};
+use crate::manifest::{validate_with_context, Manifest, ServerType};
 use crate::render::{plan_target, resolve_targets, Selection};
 use crate::scope::Scope;
 use crate::secret::Resolver;
@@ -58,9 +58,12 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
     let mut report = Report::new();
 
-    // Manifest-level validation first.
+    // Manifest-level validation first — library-aware, so a profile ref to a
+    // central-library server/skill is not flagged as unknown.
+    let libctx = ctx.library_ctx();
+    let vctx = libctx.validate_ctx(&ctx.dir);
     let validation_targets: Vec<&str> = ctx.registry.ids().collect();
-    for issue in validate_with_targets(manifest, validation_targets) {
+    for issue in validate_with_context(manifest, validation_targets, &vctx) {
         report.line(Level::Warn, issue.message);
     }
 

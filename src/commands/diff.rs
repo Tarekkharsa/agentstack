@@ -7,7 +7,7 @@ use anyhow::Result;
 use owo_colors::OwoColorize;
 
 use crate::cli::DiffArgs;
-use crate::render::{plan_target, resolve_targets, Selection};
+use crate::render::{effective_servers, plan_target_with_servers, resolve_targets, Selection};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 
@@ -21,6 +21,11 @@ pub fn run(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<()> {
         None => Selection::All,
     };
 
+    // Library-aware effective server set (inline-first, then central library),
+    // shared across targets so diff sees the same servers render/apply will.
+    let libctx = ctx.library_ctx();
+    let server_map = effective_servers(manifest, &libctx.library, &libctx.lib_home, &selection)?;
+
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     let state = State::load()?;
     let mut drift = 0;
@@ -31,11 +36,10 @@ pub fn run(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<()> {
             continue;
         };
         let previously = state.managed_servers(&target_key(id, scope));
-        let Some(plan) = plan_target(
-            manifest,
+        let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
-            &selection,
+            &server_map,
             &previously,
             scope,
             &ctx.dir,

@@ -44,6 +44,39 @@ pub struct Context {
     pub resolver: Chain,
 }
 
+/// The central-library inputs a command needs for library-aware validation and
+/// server resolution: the loaded index, its home dir, and a content store. A
+/// missing/unreadable library yields an empty one (inline-only fallback).
+pub struct LibraryCtx {
+    pub library: crate::library::Library,
+    pub lib_home: PathBuf,
+    pub store: crate::store::Store,
+}
+
+impl Context {
+    /// Load the central-library inputs for this command.
+    pub fn library_ctx(&self) -> LibraryCtx {
+        LibraryCtx {
+            library: crate::library::Library::load_default().unwrap_or_default(),
+            lib_home: crate::util::paths::lib_home(),
+            store: crate::store::Store::default_store(),
+        }
+    }
+}
+
+impl LibraryCtx {
+    /// Borrow these inputs as a [`crate::manifest::ValidateCtx`] for library-aware
+    /// validation, anchored at `manifest_dir`.
+    pub fn validate_ctx<'a>(&'a self, manifest_dir: &'a Path) -> crate::manifest::ValidateCtx<'a> {
+        crate::manifest::ValidateCtx {
+            manifest_dir,
+            library: &self.library,
+            lib_home: &self.lib_home,
+            store: &self.store,
+        }
+    }
+}
+
 /// Resolve the manifest directory (explicit `--manifest-dir` or cwd) and load
 /// everything a command needs.
 pub fn load(manifest_dir: Option<&Path>) -> Result<Context> {
