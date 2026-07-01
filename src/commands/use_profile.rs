@@ -12,7 +12,7 @@ use crate::library::Library;
 use crate::lock::{Lock, LockedSkill};
 use crate::manifest::Manifest;
 use crate::render::skills;
-use crate::render::{plan_target, resolve_targets, Selection};
+use crate::render::{resolve_targets, Selection};
 use crate::resolve::{ResolveMode, ResolvedSkill, SkillOrigin};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
@@ -22,7 +22,8 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
     let scope = args.scope.unwrap_or(Scope::Global);
 
-    let profile = manifest
+    // Early guard: the profile must exist (its servers are resolved below).
+    manifest
         .profiles
         .get(&args.profile)
         .with_context(|| format!("no profile '{}' in manifest", args.profile))?;
@@ -56,11 +57,17 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         .map(|r| (r.name.clone(), r.path.clone()))
         .collect();
 
+    // Resolve the profile's server refs (inline-first, then central library)
+    // into an effective definition map, once for all targets. Fails clearly
+    // before any target write if a ref resolves nowhere. `${REF}`s stay intact;
+    // they are resolved per-target at render time, not here.
+    let server_map = crate::render::effective_servers(manifest, &library, &lib_home, &selection)?;
+
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     println!(
         "Activating profile '{}' (scope: {scope}) — {} server(s), {} skill(s)",
         args.profile.bold(),
-        profile.servers.len(),
+        server_map.len(),
         active_skills.len()
     );
 
@@ -77,11 +84,10 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
         // --- servers ---
         let previously = state.managed_servers(&key);
-        match plan_target(
-            manifest,
+        match crate::render::plan_target_with_servers(
             desc,
             &ctx.resolver,
-            &selection,
+            &server_map,
             &previously,
             scope,
             &ctx.dir,

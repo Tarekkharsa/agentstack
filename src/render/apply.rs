@@ -8,11 +8,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use serde_json::Value;
 
 use crate::adapter::descriptor::Format;
 use crate::adapter::{render_server, AdapterDescriptor, Registry};
-use crate::manifest::Manifest;
+use crate::library::Library;
+use crate::manifest::{Manifest, Server};
+use crate::resolve::resolve_server;
 use crate::scope::Scope;
 use crate::secret::Resolver;
 use crate::util::diff;
@@ -83,6 +86,39 @@ pub fn plan_target(
     scope: Scope,
     project_dir: &Path,
 ) -> Result<Option<TargetPlan>> {
+    // Back-compat, inline-only server map (today's behavior). Callers not yet
+    // wired for the central library keep this path.
+    let names = selected_servers(manifest, selection)?;
+    let servers: IndexMap<String, Server> = names
+        .into_iter()
+        .map(|n| {
+            let s = manifest.servers[&n].clone();
+            (n, s)
+        })
+        .collect();
+    plan_target_with_servers(
+        desc,
+        resolver,
+        &servers,
+        previously_managed,
+        scope,
+        project_dir,
+    )
+}
+
+/// Build the plan for one target from an already-resolved **effective server
+/// map** (`name -> Server`, `${REF}` placeholders intact). This is the core
+/// renderer: secret resolution happens *here*, via `render_server` + `resolver`,
+/// never earlier. Library-aware callers build the map with [`effective_servers`]
+/// and call this directly.
+pub fn plan_target_with_servers(
+    desc: &AdapterDescriptor,
+    resolver: &dyn Resolver,
+    servers: &IndexMap<String, Server>,
+    previously_managed: &[String],
+    scope: Scope,
+    project_dir: &Path,
+) -> Result<Option<TargetPlan>> {
     let Some((config_path, format)) = desc.config_for(scope, project_dir) else {
         return Ok(None);
     };
@@ -90,14 +126,11 @@ pub fn plan_target(
         return Ok(None);
     };
 
-    let names = selected_servers(manifest, selection)?;
-
     let mut entries: Vec<(String, Value)> = Vec::new();
     let mut unresolved: Vec<String> = Vec::new();
     let mut managed: Vec<String> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
-    for name in &names {
-        let server = &manifest.servers[name];
+    for (name, server) in servers {
         let rendered = render_server(desc, server, resolver);
         // The adapter's format can't express this transport — skip it rather
         // than emit an empty `{}` entry into a real config file.
@@ -149,7 +182,7 @@ pub fn plan_target(
 }
 
 /// Resolve a selection into an ordered list of server names that exist in the
-/// manifest.
+/// manifest (inline only — used by the back-compat [`plan_target`]).
 fn selected_servers(manifest: &Manifest, selection: &Selection) -> Result<Vec<String>> {
     match selection {
         Selection::All => Ok(manifest.servers.keys().cloned().collect()),
@@ -173,6 +206,42 @@ fn selected_servers(manifest: &Manifest, selection: &Selection) -> Result<Vec<St
     }
 }
 
+/// The raw (unfiltered) server names a selection asks for — library-only names
+/// are kept so they can be resolved centrally by [`effective_servers`].
+fn selection_names(manifest: &Manifest, selection: &Selection) -> Result<Vec<String>> {
+    match selection {
+        Selection::All => Ok(manifest.servers.keys().cloned().collect()),
+        Selection::Profile(p) => {
+            let profile = manifest
+                .profiles
+                .get(p)
+                .with_context(|| format!("no profile named '{p}' in manifest"))?;
+            Ok(profile.servers.clone())
+        }
+        Selection::Explicit(names) => Ok(names.clone()),
+    }
+}
+
+/// The effective server definitions for a selection: `name -> Server`, with
+/// inline manifest servers winning over central-library servers (via
+/// [`resolve_server`]). `${REF}` placeholders are preserved verbatim — secret
+/// resolution is deferred to [`plan_target_with_servers`] at render time. An
+/// unresolved ref is a hard error, so rendering fails clearly before any write.
+pub fn effective_servers(
+    manifest: &Manifest,
+    library: &Library,
+    lib_home: &Path,
+    selection: &Selection,
+) -> Result<IndexMap<String, Server>> {
+    let mut out = IndexMap::new();
+    for name in selection_names(manifest, selection)? {
+        let resolved = resolve_server(manifest, library, lib_home, &name)
+            .with_context(|| format!("resolving server '{name}' for rendering"))?;
+        out.insert(name, resolved.server);
+    }
+    Ok(out)
+}
+
 /// Decide which target ids to act on: explicit `--target` wins, else the
 /// manifest's `[targets].default`, else every registered adapter.
 pub fn resolve_targets(
@@ -187,4 +256,166 @@ pub fn resolve_targets(
         return manifest.targets.default.clone();
     }
     registry.ids().map(String::from).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::LibraryServer;
+    use crate::secret::MapResolver;
+    use assert_fs::prelude::*;
+
+    /// Write a library server definition and return its index entry.
+    fn write_lib_server(lib_home: &assert_fs::TempDir, name: &str, url: &str, with_ref: bool) {
+        let mut content = format!("type = \"http\"\nurl = \"{url}\"\n");
+        if with_ref {
+            content.push_str("\n[headers]\nAuthorization = \"Bearer ${TOKEN}\"\n");
+        }
+        lib_home
+            .child(format!("servers/{name}.toml"))
+            .write_str(&content)
+            .unwrap();
+    }
+
+    fn server_entry(name: &str) -> LibraryServer {
+        LibraryServer {
+            name: name.into(),
+            checksum: None,
+            version: None,
+            provenance: Some("consolidated".into()),
+        }
+    }
+
+    #[test]
+    fn effective_servers_inline_wins_and_library_resolves() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        write_lib_server(&lib_home, "kibana", "https://central-kibana/mcp", false);
+        write_lib_server(&lib_home, "figma", "https://central-figma/mcp", false);
+        let mut library = Library::default();
+        library.upsert_server(server_entry("kibana"));
+        library.upsert_server(server_entry("figma"));
+
+        // Inline kibana overrides the library; figma is library-only.
+        let manifest: Manifest = toml::from_str(
+            "version = 1\n[servers.kibana]\ntype = \"http\"\nurl = \"https://inline-kibana/mcp\"\n\
+             [profiles.p]\nservers = [\"kibana\", \"figma\"]\n",
+        )
+        .unwrap();
+
+        let map = effective_servers(
+            &manifest,
+            &library,
+            lib_home.path(),
+            &Selection::Profile("p".into()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            map.get("kibana").unwrap().url.as_deref(),
+            Some("https://inline-kibana/mcp")
+        );
+        assert_eq!(
+            map.get("figma").unwrap().url.as_deref(),
+            Some("https://central-figma/mcp")
+        );
+        let keys: Vec<&str> = map.keys().map(String::as_str).collect();
+        assert_eq!(keys, vec!["kibana", "figma"], "selection order preserved");
+    }
+
+    #[test]
+    fn effective_servers_unresolved_ref_fails() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let manifest: Manifest =
+            toml::from_str("version = 1\n[profiles.p]\nservers = [\"ghost\"]\n").unwrap();
+        let err = effective_servers(
+            &manifest,
+            &Library::default(),
+            lib_home.path(),
+            &Selection::Profile("p".into()),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("ghost"));
+    }
+
+    #[test]
+    fn effective_servers_keeps_ref_intact() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        write_lib_server(&lib_home, "kibana", "https://x/mcp", true);
+        let mut library = Library::default();
+        library.upsert_server(server_entry("kibana"));
+        let manifest: Manifest =
+            toml::from_str("version = 1\n[profiles.p]\nservers = [\"kibana\"]\n").unwrap();
+
+        let map = effective_servers(
+            &manifest,
+            &library,
+            lib_home.path(),
+            &Selection::Profile("p".into()),
+        )
+        .unwrap();
+
+        // The resolver never runs here — the ${REF} is returned verbatim.
+        assert_eq!(
+            map.get("kibana")
+                .unwrap()
+                .headers
+                .get("Authorization")
+                .map(String::as_str),
+            Some("Bearer ${TOKEN}")
+        );
+    }
+
+    #[test]
+    fn plan_renders_library_server_and_resolves_ref_at_render() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("AGENTSTACK_HOME", home.child(".agentstack").path());
+
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        write_lib_server(&lib_home, "kibana", "https://x/mcp", true);
+        let mut library = Library::default();
+        library.upsert_server(server_entry("kibana"));
+        let manifest: Manifest =
+            toml::from_str("version = 1\n[profiles.p]\nservers = [\"kibana\"]\n").unwrap();
+        let map = effective_servers(
+            &manifest,
+            &library,
+            lib_home.path(),
+            &Selection::Profile("p".into()),
+        )
+        .unwrap();
+
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("claude-code").unwrap();
+        let proj = assert_fs::TempDir::new().unwrap();
+
+        // Secret present → resolved into the rendered config at render time.
+        let resolver = MapResolver::from([("TOKEN", "secret123")]);
+        let plan = plan_target_with_servers(desc, &resolver, &map, &[], Scope::Global, proj.path())
+            .unwrap()
+            .unwrap();
+        assert!(plan.managed.contains(&"kibana".to_string()));
+        assert!(
+            plan.proposed.contains("secret123"),
+            "ref resolved during render: {}",
+            plan.proposed
+        );
+        assert!(plan.unresolved.is_empty());
+
+        // Secret missing → reported unresolved (the caller blocks the write).
+        let empty = MapResolver::from([]);
+        let plan2 = plan_target_with_servers(desc, &empty, &map, &[], Scope::Global, proj.path())
+            .unwrap()
+            .unwrap();
+        assert!(
+            !plan2.unresolved.is_empty(),
+            "missing ${{REF}} reported as unresolved"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+        std::env::remove_var("HOME");
+    }
 }
