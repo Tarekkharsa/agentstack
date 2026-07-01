@@ -235,6 +235,24 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
 
+    // Supply-chain content scan (same detectors as `agentstack audit`): hidden
+    // Unicode is an error so `--ci` gates it; injection heuristics only warn.
+    println!("{}", "Content scan".bold());
+    let mut flagged = 0usize;
+    for unit in crate::commands::audit::collect(manifest, &ctx.dir, &store) {
+        for f in &unit.findings {
+            flagged += 1;
+            let level = match f.severity {
+                crate::scan::Severity::High => Level::Error,
+                crate::scan::Severity::Warn => Level::Warn,
+            };
+            report.line(level, format!("{:<20} {}", unit.name, f.describe()));
+        }
+    }
+    if flagged == 0 {
+        report.line(Level::Ok, "no hidden-unicode or injection findings");
+    }
+
     // Reproducibility: profile skill refs resolve to the same content their
     // agentstack.lock pins. Central-library (and inline path) skills are checked
     // offline; git-backed refs are skipped (resolution would fetch).

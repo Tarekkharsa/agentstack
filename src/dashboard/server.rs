@@ -307,7 +307,13 @@ fn route(
             crate::commands::apply::run(&args, dir)
         }),
         (Method::Post, "/api/install") => mutation(authed, read_only, || {
-            crate::commands::install::run(&crate::cli::InstallArgs { locked: false }, dir)
+            crate::commands::install::run(
+                &crate::cli::InstallArgs {
+                    locked: false,
+                    allow_flagged: false,
+                },
+                dir,
+            )
         }),
         (Method::Post, "/api/plugins_sync") => mutation(authed, read_only, || {
             let v = parse(body);
