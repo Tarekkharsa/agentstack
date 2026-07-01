@@ -520,13 +520,42 @@ pub struct LibArgs {
 pub enum LibKind {
     /// Add a skill to the central library from a local path or git source.
     Add(LibAddArgs),
-    /// List the skills installed in the central library.
+    /// Add an MCP server definition to the central library from a `.toml` file.
+    AddServer(LibAddServerArgs),
+    /// List the skills and servers installed in the central library.
     List,
     /// Remove a skill from the central library.
     Remove(LibRemoveArgs),
+    /// Remove a server from the central library.
+    RemoveServer(LibRemoveServerArgs),
     /// Migrate skills from the legacy `~/.agentstack/skills/` home into the
     /// central library. Copy-first and reversible: originals are left in place.
     Migrate(LibMigrateArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct LibAddServerArgs {
+    /// The name projects will reference this server by.
+    pub name: String,
+    /// Path to a server definition `.toml` (a `manifest::Server` table, with
+    /// `${REF}` secrets only — never plaintext).
+    #[arg(long)]
+    pub file: String,
+    /// Overwrite an existing library server of the same name.
+    #[arg(long)]
+    pub replace: bool,
+    /// Write the change (else dry-run/preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibRemoveServerArgs {
+    /// The library server name to remove.
+    pub name: String,
+    /// Write the change (else dry-run/preview).
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[derive(Args, Debug)]

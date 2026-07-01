@@ -13,17 +13,22 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use owo_colors::OwoColorize;
 
-use crate::cli::{LibAddArgs, LibArgs, LibKind, LibMigrateArgs, LibRemoveArgs};
-use crate::library::{Library, LibrarySkill};
-use crate::manifest::Skill;
+use crate::cli::{
+    LibAddArgs, LibAddServerArgs, LibArgs, LibKind, LibMigrateArgs, LibRemoveArgs,
+    LibRemoveServerArgs,
+};
+use crate::library::{Library, LibraryServer, LibrarySkill};
+use crate::manifest::{Server, Skill};
 use crate::store::{dir_digest, Store};
 use crate::util::paths;
 
 pub fn run(args: &LibArgs, _manifest_dir: Option<&Path>) -> Result<()> {
     match &args.kind {
         LibKind::Add(a) => add(a),
+        LibKind::AddServer(a) => add_server_cli(a),
         LibKind::List => list(),
         LibKind::Remove(a) => remove(a),
+        LibKind::RemoveServer(a) => remove_server_cli(a),
         LibKind::Migrate(a) => migrate(a),
     }
 }
@@ -197,6 +202,218 @@ fn add(args: &LibAddArgs) -> Result<()> {
     Ok(())
 }
 
+/// The result of a server insertion (or a dry-run preview of one).
+#[derive(Debug)]
+pub struct ServerAddOutcome {
+    pub name: String,
+    /// SHA-256 of the normalized definition written to `lib/servers/<name>.toml`.
+    pub checksum: String,
+    pub dest: PathBuf,
+    pub written: bool,
+    pub replaced: bool,
+    /// Literal values that look like plaintext secrets (should be `${REF}`s).
+    pub warnings: Vec<String>,
+}
+
+/// Insert an MCP server **definition** into the central library at `lib_home`.
+/// The file must parse as a `manifest::Server`; it is normalized (re-serialized)
+/// into `lib/servers/<name>.toml`, digested, and indexed in `library.toml`.
+/// `${REF}` secrets are preserved verbatim and never resolved. Literal
+/// secret-looking values are surfaced as warnings (not scrubbed, not blocked).
+///
+/// A same-named entry is a hard error unless `replace`. When `write` is false,
+/// nothing is mutated.
+pub fn add_server(
+    lib_home: &Path,
+    name: &str,
+    file: &Path,
+    replace: bool,
+    write: bool,
+) -> Result<ServerAddOutcome> {
+    if !valid_lib_name(name) {
+        bail!("invalid library server name '{name}' — must be non-empty and contain no path separators");
+    }
+
+    let mut library = Library::load(lib_home)?;
+    let replacing = library.get_server(name).is_some();
+    if replacing && !replace {
+        bail!("'{name}' is already in the central library — pass --replace to overwrite");
+    }
+
+    let raw =
+        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let server: Server = toml::from_str(&raw)
+        .with_context(|| format!("{} is not a valid MCP server definition", file.display()))?;
+    let warnings = suspicious_secrets(&server);
+    // Normalize: re-serialize so exactly a Server table is stored (drops junk).
+    let normalized = toml::to_string_pretty(&server).context("serializing server definition")?;
+    let checksum = crate::resolve::sha256_hex(normalized.as_bytes());
+    let dest = lib_home.join("servers").join(format!("{name}.toml"));
+
+    if write {
+        std::fs::create_dir_all(dest.parent().unwrap())
+            .with_context(|| format!("creating {}", dest.parent().unwrap().display()))?;
+        std::fs::write(&dest, &normalized)
+            .with_context(|| format!("writing {}", dest.display()))?;
+        library.upsert_server(LibraryServer {
+            name: name.to_string(),
+            checksum: Some(checksum.clone()),
+            version: None,
+            provenance: Some(format!("file:{}", absolutize(file)?.display())),
+        });
+        library.save(lib_home)?;
+    }
+
+    Ok(ServerAddOutcome {
+        name: name.to_string(),
+        checksum,
+        dest,
+        written: write,
+        replaced: replacing,
+        warnings,
+    })
+}
+
+fn add_server_cli(args: &LibAddServerArgs) -> Result<()> {
+    let lib_home = paths::lib_home();
+    let outcome = add_server(
+        &lib_home,
+        &args.name,
+        Path::new(&args.file),
+        args.replace,
+        args.write,
+    )?;
+
+    for w in &outcome.warnings {
+        println!("  {} {w}", "⚠".yellow());
+    }
+    let verb = if outcome.replaced { "replace" } else { "add" };
+    if outcome.written {
+        println!(
+            "{} {verb}d server '{}' in the central library",
+            "✓".green(),
+            outcome.name
+        );
+        println!("  files → {}", outcome.dest.display());
+        println!("  checksum {}", short(&outcome.checksum));
+    } else {
+        println!(
+            "Would {verb} server '{}' into the central library:",
+            outcome.name.bold()
+        );
+        println!("  {} files → {}", "→".cyan(), outcome.dest.display());
+        println!("  {} checksum {}", "→".cyan(), short(&outcome.checksum));
+        println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+    }
+    Ok(())
+}
+
+/// Header/env values that look like literal secrets (not `${REF}`s).
+fn suspicious_secrets(server: &Server) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut scan = |k: &str, v: &str| {
+        if !v.contains("${") && looks_secretish(k, v) {
+            out.push(format!(
+                "'{k}' has a literal value that looks like a secret — use ${{REF}} instead"
+            ));
+        }
+    };
+    for (k, v) in &server.headers {
+        scan(k, v);
+    }
+    for (k, v) in &server.env {
+        scan(k, v);
+    }
+    out
+}
+
+fn looks_secretish(key: &str, val: &str) -> bool {
+    if val.is_empty() {
+        return false;
+    }
+    let k = key.to_lowercase();
+    [
+        "authorization",
+        "token",
+        "secret",
+        "api-key",
+        "apikey",
+        "api_key",
+        "password",
+        "bearer",
+        "key",
+    ]
+    .iter()
+    .any(|s| k.contains(s))
+}
+
+/// The result of a server removal (or a dry-run preview of one).
+#[derive(Debug)]
+pub struct ServerRemoveOutcome {
+    pub name: String,
+    /// The `lib/servers/<name>.toml` file that would be / was deleted (`None` if
+    /// the name is unsafe — then only the index entry is dropped).
+    pub removed_file: Option<PathBuf>,
+    pub written: bool,
+}
+
+/// Remove a server from the central library: drop the `library.toml` entry and
+/// delete its `lib/servers/<name>.toml` definition. The file path derives solely
+/// from the (validated) name, so it can never escape `lib/servers`. A missing
+/// name is a hard error; `write=false` mutates nothing.
+pub fn remove_server(lib_home: &Path, name: &str, write: bool) -> Result<ServerRemoveOutcome> {
+    let mut library = Library::load(lib_home)?;
+    if library.get_server(name).is_none() {
+        bail!("'{name}' is not a server in the central library");
+    }
+    // The definition file is always `lib/servers/<name>.toml`; only compute it
+    // for a safe name so a hand-edited index can never target an outside path.
+    let removed_file =
+        valid_lib_name(name).then(|| lib_home.join("servers").join(format!("{name}.toml")));
+
+    if write {
+        if let Some(f) = &removed_file {
+            if f.exists() {
+                std::fs::remove_file(f).with_context(|| format!("removing {}", f.display()))?;
+            }
+        }
+        library.remove_server(name);
+        library.save(lib_home)?;
+    }
+
+    Ok(ServerRemoveOutcome {
+        name: name.to_string(),
+        removed_file,
+        written: write,
+    })
+}
+
+fn remove_server_cli(args: &LibRemoveServerArgs) -> Result<()> {
+    let lib_home = paths::lib_home();
+    let outcome = remove_server(&lib_home, &args.name, args.write)?;
+    if outcome.written {
+        println!(
+            "{} removed server '{}' from the central library",
+            "✓".green(),
+            outcome.name
+        );
+        if let Some(f) = &outcome.removed_file {
+            println!("  deleted {}", f.display());
+        }
+    } else {
+        println!(
+            "Would remove server '{}' from the central library:",
+            outcome.name.bold()
+        );
+        match &outcome.removed_file {
+            Some(f) => println!("  {} delete {}", "−".yellow(), f.display()),
+            None => println!("  {} index entry only", "−".yellow()),
+        }
+        println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+    }
+    Ok(())
+}
+
 /// `lib list` — a plain read of the index. No resolver, no store, no filesystem
 /// validation: it reports what `library.toml` records, nothing more.
 fn list() -> Result<()> {
@@ -206,25 +423,42 @@ fn list() -> Result<()> {
     Ok(())
 }
 
-/// Render the library index as a plain table (shared with tests). Rows are
-/// sorted by name for stable output regardless of on-disk order.
+/// Render the library index as plain tables grouped by kind (shared with tests).
+/// Rows are sorted by name for stable output regardless of on-disk order.
 fn render_list(library: &Library) -> String {
-    if library.skills.is_empty() {
-        return "No skills installed in the central library.\n".to_string();
+    if library.skills.is_empty() && library.servers.is_empty() {
+        return "No skills or servers installed in the central library.\n".to_string();
     }
     let mut skills = library.skills.clone();
     skills.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut servers = library.servers.clone();
+    servers.sort_by(|a, b| a.name.cmp(&b.name));
+
     let mut o = String::new();
-    o.push_str(&format!(
-        "{:<20} {:<6} {:<16} {}\n",
-        "NAME", "SOURCE", "REV/CHECKSUM", "PROVENANCE"
-    ));
+    o.push_str("Skills\n");
+    if skills.is_empty() {
+        o.push_str("  (none)\n");
+    }
     for s in &skills {
         o.push_str(&format!(
-            "{:<20} {:<6} {:<16} {}\n",
+            "  {:<20} {:<6} {:<16} {}\n",
             s.name,
             s.source,
             locator(s),
+            s.provenance.as_deref().unwrap_or("-")
+        ));
+    }
+
+    o.push_str("\nServers\n");
+    if servers.is_empty() {
+        o.push_str("  (none)\n");
+    }
+    for s in &servers {
+        let sum = s.checksum.as_deref().map(short).unwrap_or("-");
+        o.push_str(&format!(
+            "  {:<20} {:<16} {}\n",
+            s.name,
+            sum,
             s.provenance.as_deref().unwrap_or("-")
         ));
     }
@@ -624,7 +858,7 @@ mod tests {
     #[test]
     fn list_empty_says_none() {
         let out = render_list(&Library::default());
-        assert!(out.contains("No skills installed"));
+        assert!(out.contains("No skills or servers installed"));
     }
 
     #[test]
@@ -928,6 +1162,180 @@ mod tests {
         assert!(Library::load(lib.path())
             .unwrap()
             .get("notaskill")
+            .is_none());
+    }
+
+    // ---------- servers (add / list / remove) ----------
+
+    /// Write a server definition `.toml` (with a `${REF}` header) and return it.
+    fn server_file(dir: &assert_fs::TempDir, name: &str, url: &str) -> PathBuf {
+        let f = dir.child(format!("{name}.toml"));
+        f.write_str(&format!(
+            "type = \"http\"\nurl = \"{url}\"\nheaders = {{ Authorization = \"Bearer ${{TOKEN}}\" }}\n"
+        ))
+        .unwrap();
+        f.path().to_path_buf()
+    }
+
+    #[test]
+    fn add_server_writes_definition_and_index() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        let file = server_file(&work, "kibana", "https://k/mcp");
+
+        let out = add_server(lib.path(), "kibana", &file, false, true).unwrap();
+
+        assert!(out.written);
+        assert_eq!(out.checksum.len(), 64);
+        // Definition file landed under lib/servers/<name>.toml.
+        let dest = lib.child("servers/kibana.toml");
+        assert!(dest.path().exists());
+        // ${REF} preserved verbatim in the stored definition.
+        let stored = std::fs::read_to_string(dest.path()).unwrap();
+        assert!(stored.contains("${TOKEN}"), "ref preserved: {stored}");
+        // Indexed with the checksum + provenance.
+        let library = Library::load(lib.path()).unwrap();
+        let entry = library.get_server("kibana").unwrap();
+        assert_eq!(entry.checksum.as_deref(), Some(out.checksum.as_str()));
+        assert!(entry.provenance.as_deref().unwrap().starts_with("file:"));
+    }
+
+    #[test]
+    fn add_server_dry_run_writes_nothing() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        let file = server_file(&work, "kibana", "https://k/mcp");
+
+        let out = add_server(lib.path(), "kibana", &file, false, false).unwrap();
+        assert!(!out.written);
+        assert_eq!(out.checksum.len(), 64, "preview still digests");
+        assert!(!lib.child("servers/kibana.toml").path().exists());
+        assert!(Library::load(lib.path())
+            .unwrap()
+            .get_server("kibana")
+            .is_none());
+    }
+
+    #[test]
+    fn add_server_collision_and_replace() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        let f1 = server_file(&work, "kibana", "https://one/mcp");
+        add_server(lib.path(), "kibana", &f1, false, true).unwrap();
+
+        let err = add_server(lib.path(), "kibana", &f1, false, true).unwrap_err();
+        assert!(err.to_string().contains("--replace"));
+
+        let work2 = assert_fs::TempDir::new().unwrap();
+        let f2 = server_file(&work2, "kibana", "https://two/mcp");
+        add_server(lib.path(), "kibana", &f2, true, true).unwrap();
+        let stored = std::fs::read_to_string(lib.child("servers/kibana.toml").path()).unwrap();
+        assert!(stored.contains("two/mcp"), "replaced definition");
+    }
+
+    #[test]
+    fn add_server_malformed_file_errors() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        let bad = work.child("bad.toml");
+        bad.write_str("this is = not a { valid server").unwrap();
+        let err = add_server(lib.path(), "kibana", bad.path(), false, true).unwrap_err();
+        assert!(
+            err.to_string().contains("valid MCP server") || err.to_string().contains("kibana"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn add_server_warns_on_literal_secret() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        let f = work.child("kibana.toml");
+        // A literal Authorization value (no ${REF}) is suspicious.
+        f.write_str("type = \"http\"\nurl = \"https://k/mcp\"\nheaders = { Authorization = \"Bearer sk-live-abc123\" }\n")
+            .unwrap();
+        let out = add_server(lib.path(), "kibana", f.path(), false, true).unwrap();
+        assert!(
+            out.warnings.iter().any(|w| w.contains("Authorization")),
+            "warns on literal secret: {:?}",
+            out.warnings
+        );
+        // Warned, but not blocked and not scrubbed.
+        assert!(out.written);
+    }
+
+    #[test]
+    fn add_server_invalid_name_cannot_escape() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        let f = server_file(&work, "x", "https://k/mcp");
+        let err = add_server(lib.path(), "../evil", &f, false, true).unwrap_err();
+        assert!(err.to_string().contains("invalid library server name"));
+    }
+
+    #[test]
+    fn list_shows_servers() {
+        let mut library = Library::default();
+        library.upsert_server(LibraryServer {
+            name: "kibana".into(),
+            checksum: Some("abcdef0123456789".into()),
+            version: None,
+            provenance: Some("file:/x/kibana.toml".into()),
+        });
+        let out = render_list(&library);
+        assert!(out.contains("Servers"));
+        assert!(out.contains("kibana"));
+        assert!(out.contains("abcdef012345"), "short checksum shown");
+    }
+
+    #[test]
+    fn remove_server_deletes_index_and_file() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        let file = server_file(&work, "kibana", "https://k/mcp");
+        add_server(lib.path(), "kibana", &file, false, true).unwrap();
+
+        let out = remove_server(lib.path(), "kibana", true).unwrap();
+        assert!(out.written);
+        assert!(
+            !lib.child("servers/kibana.toml").path().exists(),
+            "file deleted"
+        );
+        assert!(Library::load(lib.path())
+            .unwrap()
+            .get_server("kibana")
+            .is_none());
+    }
+
+    #[test]
+    fn remove_server_missing_errors() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let err = remove_server(lib.path(), "nope", true).unwrap_err();
+        assert!(err.to_string().contains("not a server"));
+    }
+
+    #[test]
+    fn remove_server_unsafe_name_deletes_nothing_outside() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        // A directory outside the library a malicious index name might target.
+        let outside = assert_fs::TempDir::new().unwrap();
+        outside.child("keep.txt").write_str("important\n").unwrap();
+        // Hand-craft an index entry with an unsafe name.
+        let mut library = Library::default();
+        library.upsert_server(LibraryServer {
+            name: "../../../../etc".into(),
+            checksum: None,
+            version: None,
+            provenance: None,
+        });
+        library.save(lib.path()).unwrap();
+
+        let out = remove_server(lib.path(), "../../../../etc", true).unwrap();
+        assert_eq!(out.removed_file, None, "unsafe name → no file targeted");
+        assert!(outside.child("keep.txt").path().exists());
+        assert!(Library::load(lib.path())
+            .unwrap()
+            .get_server("../../../../etc")
             .is_none());
     }
 }
