@@ -81,6 +81,7 @@ dependencies = [
  "keyring",
  "libc",
  "owo-colors",
+ "regex",
  "reqwest",
  "rpassword",
  "serde",

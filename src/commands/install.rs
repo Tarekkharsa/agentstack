@@ -10,10 +10,11 @@ use owo_colors::OwoColorize;
 use crate::cli::{InstallArgs, UpdateArgs};
 use crate::lock::{Lock, LockedSkill};
 use crate::manifest::SkillSource;
+use crate::scan::Severity;
 use crate::store::Store;
 
 pub fn run(args: &InstallArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    sync(manifest_dir, false, None, args.locked)
+    sync(manifest_dir, false, None, args.locked, args.allow_flagged)
 }
 
 pub fn run_update(args: &UpdateArgs, manifest_dir: Option<&Path>) -> Result<()> {
@@ -21,6 +22,7 @@ pub fn run_update(args: &UpdateArgs, manifest_dir: Option<&Path>) -> Result<()> 
         manifest_dir,
         args.name.is_none(),
         args.name.as_deref(),
+        false,
         false,
     )
 }
@@ -32,6 +34,7 @@ fn sync(
     relock_all: bool,
     only: Option<&str>,
     locked: bool,
+    allow_flagged: bool,
 ) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
@@ -62,6 +65,41 @@ fn sync(
                 continue;
             }
         };
+
+        // Supply-chain gate: scan the resolved content before locking it in.
+        // High findings (hidden Unicode) block this skill — same philosophy as
+        // unresolved secrets blocking writes; Warn findings advise, never block.
+        if resolved.path.exists() {
+            let findings = match crate::scan::scan_tree(&resolved.path) {
+                Ok(f) => f,
+                Err(e) => {
+                    println!("  {} {name}: content scan failed: {e}", "✗".red());
+                    errors += 1;
+                    continue;
+                }
+            };
+            let high = findings
+                .iter()
+                .filter(|f| f.severity == Severity::High)
+                .count();
+            for f in &findings {
+                let mark = if f.severity == Severity::High && !allow_flagged {
+                    "✗".red().to_string()
+                } else {
+                    "⚠".yellow().to_string()
+                };
+                println!("  {mark} {name}: {}", f.describe());
+            }
+            if high > 0 && !allow_flagged {
+                println!(
+                    "  {} {name}: {high} high-severity finding(s) — install blocked \
+                     (pass --allow-flagged to install anyway)",
+                    "✗".red()
+                );
+                errors += 1;
+                continue;
+            }
+        }
 
         let entry = locked_entry(name, skill, &resolved)?;
         let fetched_note = if resolved.fetched { " (fetched)" } else { "" };

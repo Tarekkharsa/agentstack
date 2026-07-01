@@ -176,9 +176,14 @@ fn add(args: &LibAddArgs) -> Result<()> {
     let outcome = add_skill(&lib_home, &args.name, source, args.replace, args.write)?;
 
     let verb = if outcome.replaced { "replace" } else { "add" };
+    let past = if outcome.replaced {
+        "replaced"
+    } else {
+        "added"
+    };
     if outcome.written {
         println!(
-            "{} {verb}d '{}' ({}) in the central library",
+            "{} {past} '{}' ({}) in the central library",
             "✓".green(),
             outcome.name,
             outcome.source_kind
@@ -288,9 +293,14 @@ fn add_server_cli(args: &LibAddServerArgs) -> Result<()> {
         println!("  {} {w}", "⚠".yellow());
     }
     let verb = if outcome.replaced { "replace" } else { "add" };
+    let past = if outcome.replaced {
+        "replaced"
+    } else {
+        "added"
+    };
     if outcome.written {
         println!(
-            "{} {verb}d server '{}' in the central library",
+            "{} {past} server '{}' in the central library",
             "✓".green(),
             outcome.name
         );

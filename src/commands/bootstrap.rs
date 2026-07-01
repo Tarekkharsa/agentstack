@@ -48,6 +48,7 @@ pub fn run(args: &BootstrapArgs, manifest_dir: Option<&Path>) -> Result<()> {
         super::install::run(
             &InstallArgs {
                 locked: args.locked,
+                allow_flagged: false,
             },
             manifest_dir,
         )?;

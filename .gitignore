@@ -5,6 +5,18 @@ Cargo.lock.orig
 # machine-local overlay — never committed
 agentstack.local.toml
 
+# This is the product repo, not a consumer of it: the maintainer's personal
+# dogfood manifest and its rendered artifacts stay local. (In YOUR projects,
+# committing .agentstack/ is the whole point.)
+/agentstack.toml
+/agentstack.lock
+/.agentstack/
+/.mcp.json
+/skills/
+/plugins/agentstack/
+/.claude-plugin/
+/.agents/
+
 # encrypted bundles
 *.age
 

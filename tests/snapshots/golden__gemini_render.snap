@@ -5,7 +5,7 @@ expression: out
 {
   "mcpServers": {
     "kibana": {
-      "httpUrl": "https://kibana-mcp.ghaloyalty.com/mcp",
+      "httpUrl": "https://kibana-mcp.example.com/mcp",
       "headers": {
         "Authorization": "Bearer kib-secret"
       }

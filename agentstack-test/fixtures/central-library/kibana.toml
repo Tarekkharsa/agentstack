@@ -1,0 +1,7 @@
+# Source definition for the central-library server `kibana`.
+# Secrets are ${REF}s only — resolved per-machine at render time, never stored.
+type = "http"
+url = "https://kibana.example.com/mcp"
+
+[headers]
+Authorization = "Bearer ${KIBANA_TOKEN}"

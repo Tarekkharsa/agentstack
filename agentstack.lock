@@ -1,7 +1,0 @@
-version = 1
-
-[[skill]]
-name = "figma_repo_handoff"
-source = "path"
-path = "./skills/figma-repo-handoff"
-checksum = "364eee53c9d8ffdfa4dc5d6d8778bdf38f660cfe9759f93280c06bceea347d40"

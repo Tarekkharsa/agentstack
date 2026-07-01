@@ -1,10 +1,12 @@
 #!/bin/sh
 # agentstack installer — downloads the latest release binary for your platform.
-#   curl -fsSL https://raw.githubusercontent.com/tarekkh/agentstack/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Tarek-kharsa/agentstack/main/install.sh | sh
 set -eu
 
-REPO="${AGENTSTACK_REPO:-tarekkh/agentstack}"
+# AGENTSTACK_INSTALL_REPO overrides the GitHub slug (owner/repo) for forks.
+REPO="${AGENTSTACK_INSTALL_REPO:-Tarek-kharsa/agentstack}"
 PREFIX="${AGENTSTACK_PREFIX:-}"
+VERSION="${AGENTSTACK_VERSION:-latest}"   # "latest" or a release tag like v0.1.0
 
 say() { printf '%s\n' "$*"; }
 err() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -37,8 +39,12 @@ have curl || err "curl is required"
 have tar || err "tar is required"
 
 asset="agentstack-${target}.tar.gz"
-url="https://github.com/${REPO}/releases/latest/download/${asset}"
-say "Downloading ${asset} …"
+if [ "$VERSION" = "latest" ]; then
+  url="https://github.com/${REPO}/releases/latest/download/${asset}"
+else
+  url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
+fi
+say "Downloading ${asset} (${VERSION}) …"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 curl -fsSL "$url" -o "$tmp/$asset" || err "download failed: $url"

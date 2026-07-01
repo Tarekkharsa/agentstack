@@ -1,0 +1,93 @@
+//! Bare `agentstack` — orientation instead of a wall of subcommands: what's
+//! detected on this machine, what state this directory's manifest is in, and
+//! the one next command to run.
+
+use std::path::Path;
+
+use anyhow::Result;
+use owo_colors::OwoColorize;
+
+use crate::adapter::Registry;
+use crate::manifest::load::MANIFEST_FILE;
+
+pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
+    println!(
+        "{} {} — one portable manifest, every agent CLI\n",
+        "agentstack".bold(),
+        env!("CARGO_PKG_VERSION")
+    );
+
+    let registry = Registry::load()?;
+    let detected: Vec<&str> = registry
+        .iter()
+        .filter(|d| d.detected())
+        .map(|d| d.display.as_str())
+        .collect();
+    if detected.is_empty() {
+        println!("  {}  none detected on this machine", "CLIs    ".bold());
+    } else {
+        println!(
+            "  {}  {} detected: {}",
+            "CLIs    ".bold(),
+            detected.len(),
+            detected.join(" · ")
+        );
+    }
+
+    let base = match manifest_dir {
+        Some(d) => d.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    let dir = crate::manifest::resolve_manifest_dir(&base);
+    let manifest_path = dir.join(MANIFEST_FILE);
+
+    let next = if !manifest_path.exists() {
+        println!("  {}  none in this directory", "Manifest".bold());
+        (
+            "agentstack init",
+            "import the setup already on this machine",
+        )
+    } else {
+        match super::load(manifest_dir) {
+            Ok(ctx) => {
+                let m = &ctx.loaded.manifest;
+                let mut parts = vec![format!("{} server(s)", m.servers.len())];
+                if !m.skills.is_empty() {
+                    parts.push(format!("{} skill(s)", m.skills.len()));
+                }
+                if !m.profiles.is_empty() {
+                    parts.push(format!("{} profile(s)", m.profiles.len()));
+                }
+                println!(
+                    "  {}  {} — {} → {} target(s)",
+                    "Manifest".bold(),
+                    manifest_path.display(),
+                    parts.join(" · "),
+                    m.targets.default.len()
+                );
+                (
+                    "agentstack bootstrap",
+                    "preflight: skills, secrets, diff, next action",
+                )
+            }
+            Err(err) => {
+                println!(
+                    "  {}  {} — {}",
+                    "Manifest".bold(),
+                    manifest_path.display(),
+                    format!("failed to load: {err:#}").red()
+                );
+                ("agentstack doctor", "diagnose the manifest")
+            }
+        }
+    };
+
+    println!(
+        "\n  {}  {}   {}",
+        "Next:".bold(),
+        next.0.green(),
+        next.1.dimmed()
+    );
+    println!("  {}", "All commands: agentstack --help".dimmed());
+    Ok(())
+}

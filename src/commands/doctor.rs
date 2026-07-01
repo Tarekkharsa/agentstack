@@ -64,7 +64,14 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let vctx = libctx.validate_ctx(&ctx.dir);
     let validation_targets: Vec<&str> = ctx.registry.ids().collect();
     for issue in validate_with_context(manifest, validation_targets, &vctx) {
-        report.line(Level::Warn, issue.message);
+        // Mirror apply/bootstrap: structural issues (is_error) are errors so
+        // `doctor --ci` fails the trust gate; softer issues stay warnings.
+        let level = if issue.kind.is_error() {
+            Level::Error
+        } else {
+            Level::Warn
+        };
+        report.line(level, issue.message);
     }
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &[]);
@@ -228,6 +235,24 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
 
+    // Supply-chain content scan (same detectors as `agentstack audit`): hidden
+    // Unicode is an error so `--ci` gates it; injection heuristics only warn.
+    println!("{}", "Content scan".bold());
+    let mut flagged = 0usize;
+    for unit in crate::commands::audit::collect(manifest, &ctx.dir, &store) {
+        for f in &unit.findings {
+            flagged += 1;
+            let level = match f.severity {
+                crate::scan::Severity::High => Level::Error,
+                crate::scan::Severity::Warn => Level::Warn,
+            };
+            report.line(level, format!("{:<20} {}", unit.name, f.describe()));
+        }
+    }
+    if flagged == 0 {
+        report.line(Level::Ok, "no hidden-unicode or injection findings");
+    }
+
     // Reproducibility: profile skill refs resolve to the same content their
     // agentstack.lock pins. Central-library (and inline path) skills are checked
     // offline; git-backed refs are skipped (resolution would fetch).
@@ -359,8 +384,11 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         report.errors, report.warnings
     );
 
+    // In CI mode any error fails the trust gate. Return an error rather than
+    // exiting inline so `main` owns the single exit point and this path stays
+    // testable.
     if args.ci && report.errors > 0 {
-        std::process::exit(1);
+        anyhow::bail!("doctor found {} error(s) — see report above", report.errors);
     }
     Ok(())
 }

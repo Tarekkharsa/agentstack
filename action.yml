@@ -1,0 +1,47 @@
+# agentstack trust gate — use in any repo that commits .agentstack/:
+#
+#   - uses: Tarek-kharsa/agentstack@v0.1.0
+#
+# Proves the checked-in agent setup is reproducible (skill sources still
+# resolve to the pinned lockfile digests) and policy-clean (no forbidden
+# capabilities, no unresolved required secrets, no lock drift).
+name: agentstack trust gate
+description: >-
+  Verify a repo's committed agent setup: `agentstack install --locked`
+  (lockfile reproducibility) then `agentstack doctor --ci` (structural +
+  policy gate).
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  version:
+    description: agentstack release tag to install (e.g. v0.1.0), or "latest"
+    required: false
+    default: latest
+  working-directory:
+    description: Directory containing .agentstack/ (or a legacy root manifest)
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Install agentstack
+      shell: bash
+      env:
+        AGENTSTACK_VERSION: ${{ inputs.version }}
+        AGENTSTACK_PREFIX: ${{ runner.temp }}/agentstack-bin
+      run: |
+        sh "${GITHUB_ACTION_PATH}/install.sh"
+        echo "${AGENTSTACK_PREFIX}" >> "$GITHUB_PATH"
+
+    - name: agentstack install --locked
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: agentstack install --locked
+
+    - name: agentstack doctor --ci
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: agentstack doctor --ci

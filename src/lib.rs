@@ -28,6 +28,7 @@ pub mod provider;
 pub mod render;
 pub mod resolve;
 pub mod runs;
+pub mod scan;
 pub mod scope;
 pub mod secret;
 pub mod session;

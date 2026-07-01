@@ -140,7 +140,7 @@ name = "tarek-agent-setup"
 # ---- MCP servers ----
 [servers.kibana]
 type = "http"                                   # http | stdio
-url = "https://kibana-mcp.ghaloyalty.com/mcp"
+url = "https://kibana-mcp.example.com/mcp"
 headers = { Authorization = "Bearer ${KIBANA_TOKEN}" }   # ${REF} resolved per machine
 
 [servers.github]
@@ -320,7 +320,7 @@ $ agentstack init
 $ agentstack add
 ? Type            › MCP server
 ? Name            › kibana
-? URL             › https://kibana-mcp.ghaloyalty.com/mcp
+? URL             › https://kibana-mcp.example.com/mcp
 ? Auth            › Bearer ${KIBANA_TOKEN}     (stored in keychain)
 ? Which CLIs?     › ◉ Claude Code  ◉ Codex  ◯ Cursor
 ? Which profile?  › backend
@@ -851,7 +851,7 @@ payoff of project scoping above. The "tweet-worthy" feature; phase 3+.
 > manifest model + layered load, the embedded adapter descriptors for claude-code and codex,
 > the generic renderer, and `apply --dry-run` + `diff` running **read-only** against my real
 > `~/.claude.json` and `~/.codex/config.toml`. Do NOT write to those files until I approve a diff.
-> My real Kibana server (for test fixtures): url `https://kibana-mcp.ghaloyalty.com/mcp`,
+> My real Kibana server (for test fixtures): url `https://kibana-mcp.example.com/mcp`,
 > header `Authorization: Bearer ${KIBANA_TOKEN}`. Confirm decisions D1–D8 (defaults in PLAN.md)
 > then begin.
 

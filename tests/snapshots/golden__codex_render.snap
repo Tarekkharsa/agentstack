@@ -3,7 +3,7 @@ source: tests/golden.rs
 expression: out
 ---
 [mcp_servers.kibana]
-url = "https://kibana-mcp.ghaloyalty.com/mcp"
+url = "https://kibana-mcp.example.com/mcp"
 
 [mcp_servers.kibana.http_headers]
 Authorization = "Bearer kib-secret"

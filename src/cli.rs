@@ -21,8 +21,10 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "DIR")]
     pub manifest_dir: Option<PathBuf>,
 
+    /// Omitted → a short status overview (detected CLIs, manifest state, next
+    /// step) instead of the full help.
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -89,6 +91,10 @@ pub enum Command {
 
     /// Verify everything is wired up: adapters, secrets, drift, quirks, skills.
     Doctor(DoctorArgs),
+
+    /// Scan skill sources and instruction files for hidden Unicode and
+    /// prompt-injection heuristics. Exits nonzero on high-severity findings.
+    Audit(AuditArgs),
 
     /// Search the capability catalog (and mark what's already added).
     Search(SearchArgs),
@@ -206,6 +212,11 @@ pub struct InstallArgs {
     /// Fail if resolving would change the lockfile (CI / reproducible installs).
     #[arg(long)]
     pub locked: bool,
+
+    /// Install a skill even when content scanning finds high-severity issues
+    /// (hidden Unicode). Findings still print as warnings.
+    #[arg(long)]
+    pub allow_flagged: bool,
 }
 
 #[derive(Args, Debug)]
@@ -624,6 +635,13 @@ pub struct DoctorArgs {
     /// Repair safe issues (re-apply drifted target configs).
     #[arg(long)]
     pub fix: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct AuditArgs {
+    /// Emit machine-readable JSON instead of the text report.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]

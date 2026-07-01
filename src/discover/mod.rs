@@ -11,6 +11,8 @@ use crate::manifest::Server;
 pub struct Lifted {
     pub reference: String,
     pub value: String,
+    /// Where the plaintext value was found, e.g. `server 'github' (env GITHUB_TOKEN)`.
+    pub origin: String,
 }
 
 /// Merge `incoming` servers (from one target) into `acc`. First definition of a
@@ -50,7 +52,13 @@ pub fn lift_secrets(servers: &mut IndexMap<String, Server>) -> Vec<Lifted> {
             if secret.is_empty() {
                 continue;
             }
-            let reference = unique_ref(&format!("{}_TOKEN", sanitize(name)), secret, &mut lifted);
+            let origin = format!("server '{name}' (header {key})");
+            let reference = unique_ref(
+                &format!("{}_TOKEN", sanitize(name)),
+                secret,
+                origin,
+                &mut lifted,
+            );
             *val = format!("{prefix}${{{reference}}}");
         }
 
@@ -60,7 +68,8 @@ pub fn lift_secrets(servers: &mut IndexMap<String, Server>) -> Vec<Lifted> {
             if contains_ref(val) || !env_is_secret(key, val) {
                 continue;
             }
-            let reference = unique_ref(key, val, &mut lifted);
+            let origin = format!("server '{name}' (env {key})");
+            let reference = unique_ref(key, val, origin, &mut lifted);
             *val = format!("${{{reference}}}");
         }
     }
@@ -73,8 +82,8 @@ fn contains_ref(s: &str) -> bool {
 }
 
 /// Pick a reference name that doesn't collide with a different value already
-/// lifted. Records the (reference, value) pair.
-fn unique_ref(base: &str, value: &str, lifted: &mut Vec<Lifted>) -> String {
+/// lifted. Records the (reference, value, origin) triple.
+fn unique_ref(base: &str, value: &str, origin: String, lifted: &mut Vec<Lifted>) -> String {
     // Reuse an existing reference if it holds the same value.
     if let Some(l) = lifted.iter().find(|l| l.value == value) {
         return l.reference.clone();
@@ -88,6 +97,7 @@ fn unique_ref(base: &str, value: &str, lifted: &mut Vec<Lifted>) -> String {
     lifted.push(Lifted {
         reference: candidate.clone(),
         value: value.to_string(),
+        origin,
     });
     candidate
 }
@@ -183,7 +193,8 @@ mod tests {
             lifted,
             vec![Lifted {
                 reference: "GITHUB_TOKEN".into(),
-                value: "ghp_secretvalue".into()
+                value: "ghp_secretvalue".into(),
+                origin: "server 'github' (env GITHUB_TOKEN)".into(),
             }]
         );
         assert_eq!(servers["github"].env["GITHUB_TOKEN"], "${GITHUB_TOKEN}");
