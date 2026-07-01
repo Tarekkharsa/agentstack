@@ -3,7 +3,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/Tarek-kharsa/agentstack/main/install.sh | sh
 set -eu
 
-REPO="${AGENTSTACK_REPO:-Tarek-kharsa/agentstack}"
+# AGENTSTACK_INSTALL_REPO overrides the GitHub slug (owner/repo) for forks.
+REPO="${AGENTSTACK_INSTALL_REPO:-Tarek-kharsa/agentstack}"
 PREFIX="${AGENTSTACK_PREFIX:-}"
 VERSION="${AGENTSTACK_VERSION:-latest}"   # "latest" or a release tag like v0.1.0
 

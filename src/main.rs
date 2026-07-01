@@ -14,7 +14,11 @@ fn main() {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let dir = cli.manifest_dir.as_deref();
-    match &cli.command {
+    // Bare `agentstack`: a short orientation, not the 30-command help dump.
+    let Some(command) = &cli.command else {
+        return commands::overview::run(dir);
+    };
+    match command {
         Command::Init(args) => commands::init::run(args, dir),
         Command::Add(args) => commands::add::run(args, dir),
         Command::Install(args) => commands::install::run(args, dir),

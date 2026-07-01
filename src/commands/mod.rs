@@ -17,6 +17,7 @@ pub mod init;
 pub mod install;
 pub mod instructions;
 pub mod lib;
+pub mod overview;
 pub mod plugins;
 pub mod remove;
 pub mod restore;

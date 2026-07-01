@@ -21,8 +21,10 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "DIR")]
     pub manifest_dir: Option<PathBuf>,
 
+    /// Omitted → a short status overview (detected CLIs, manifest state, next
+    /// step) instead of the full help.
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
