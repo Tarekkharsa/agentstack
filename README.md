@@ -26,11 +26,13 @@ agentstack apply      # preview native config changes
 agentstack apply --write
 ```
 
+![agentstack first run: init → bootstrap → doctor --ci → apply --write, fenced](docs/firstrun.gif)
+
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tarekkh/agentstack/main/install.sh | sh
-# or: brew install tarekkh/tap/agentstack   ·   cargo install agentstack
+curl -fsSL https://raw.githubusercontent.com/Tarek-kharsa/agentstack/main/install.sh | sh
+# or: brew install tarek-kharsa/tap/agentstack   ·   cargo install agentstack
 ```
 
 Single static binary, zero runtime dependencies. (Releases are wired up in CI —
@@ -58,12 +60,24 @@ agentstack install --locked
 agentstack doctor --ci
 ```
 
+or, as a one-line GitHub Action:
+
+```yaml
+jobs:
+  agent-setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Tarek-kharsa/agentstack@main   # or pin a release tag
+```
+
 `install --locked` proves checked-in skill sources still resolve to the pinned
 lockfile entries; it fails instead of rewriting the lock. `doctor --ci` then
 fails on structural manifest errors (unknown refs, missing transport fields),
-unresolved required secrets, invalid target configs, lock drift, and policy
-violations. Warnings still print for advisory issues that do not make the setup
-unsafe to render.
+unresolved required secrets, invalid target configs, lock drift, policy
+violations, and high-severity content-scan findings (hidden Unicode in skill or
+instruction content). Warnings still print for advisory issues that do not make
+the setup unsafe to render.
 
 ## Why it exists
 
@@ -216,6 +230,13 @@ Implemented and tested:
   `install` fetches them into `~/.agentstack/store/` and writes a SHA-256
   `agentstack.lock`; `install --locked` is reproducible (CI-safe); `update`
   re-resolves git skills; `remove` drops a capability from manifest + lock.
+- **Content scanning + `audit`** — every `install` scans skill content for
+  hidden Unicode (zero-width characters, bidi overrides, tag characters) and
+  prompt-injection heuristics. Hidden-Unicode findings **block the install**
+  (override with `--allow-flagged`); injection heuristics warn. `agentstack
+  audit` (`--json`) re-scans everything materialized — skills and instruction
+  files — and `doctor --ci` fails on high-severity findings, so a poisoned
+  skill can't slide into CI unnoticed.
 - **Central capability library (`agentstack lib`)** — one managed home
   (`~/.agentstack/lib/`) that projects reference **by name** instead of copying
   files. Skill dirs (`lib/skills/`) and MCP server definitions
@@ -246,7 +267,7 @@ Implemented and tested:
   `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
   `use <profile>`, `instructions`, `adopt`, `consolidate`,
   `lib add|add-server|list|remove|remove-server|migrate`, `restore`,
-  `doctor` (`--ci`, `--live`, `--fix`), `search`, `stats`,
+  `doctor` (`--ci`, `--live`, `--fix`), `audit` (`--json`), `search`, `stats`,
   `secret set|get|rm|list`, `export`/`import`, `adapters`, `plugins`,
   `dashboard`, `mcp`, `hook`, `run`/`runs`/`kill`.
 

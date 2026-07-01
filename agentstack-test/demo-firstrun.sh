@@ -29,7 +29,9 @@ mkdir -p "$home" "$proj"
 
 # agentstack against the fenced machine — never your real HOME.
 as() { env HOME="$home" AGENTSTACK_HOME="$sandbox/ashome" "$bin" "$@"; }
-line() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
+# DEMO_PAUSE=<seconds> holds each section on screen — set it when recording so
+# the GIF is readable; defaults to 0 so tests and CI stay fast.
+line() { sleep "${DEMO_PAUSE:-0}"; printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 
 # Starting point: this dev already runs Claude Code with ONE MCP server, in the
 # canonical shape Claude itself writes (explicit "type"). Keeping it canonical
@@ -101,3 +103,4 @@ if as doctor --ci; then
 fi
 
 printf '\n\033[1mDone.\033[0m Fenced HOME lived under %s — your real configs were never touched.\n' "${sandbox#$here/}"
+sleep "${DEMO_PAUSE:-0}"
