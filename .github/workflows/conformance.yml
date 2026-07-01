@@ -1,0 +1,64 @@
+name: conformance
+
+# Adapter-rot alarm. Nightly (not on PRs): golden snapshots lock what we
+# render; this proves the real CLIs on the other end still accept it. A red
+# run here means a CLI changed its config schema under us — fix the adapter
+# descriptor before users hit it.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_MULTIPLEXING: "false"
+
+jobs:
+  # Re-run the full suite (incl. golden render snapshots for all 13 adapters)
+  # against the latest stable toolchain, independent of push activity.
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test (golden renders + suite)
+        run: cargo test --all
+
+  # Install the real, current CLI from its registry and make it read the
+  # config agentstack rendered (fenced HOME). Matrix covers the CLIs that are
+  # headless-installable; the rest are covered structurally by `render`.
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - adapter: claude-code
+            npm: "@anthropic-ai/claude-code"
+            bin: claude
+            config: .claude.json
+          - adapter: codex
+            npm: "@openai/codex"
+            bin: codex
+            config: .codex/config.toml
+          - adapter: gemini
+            npm: "@google/gemini-cli"
+            bin: gemini
+            config: .gemini/settings.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build agentstack
+        run: cargo build --release
+      - name: Install ${{ matrix.npm }} (latest)
+        run: npm install -g ${{ matrix.npm }}
+      - name: Smoke ${{ matrix.adapter }}
+        env:
+          AGENTSTACK_BIN: ${{ github.workspace }}/target/release/agentstack
+        run: ./agentstack-test/conformance-smoke.sh ${{ matrix.adapter }} ${{ matrix.bin }} ${{ matrix.config }}
