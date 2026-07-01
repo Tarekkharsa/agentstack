@@ -1251,8 +1251,9 @@ mod tests {
         let lib = assert_fs::TempDir::new().unwrap();
         let work = assert_fs::TempDir::new().unwrap();
         let f = work.child("kibana.toml");
-        // A literal Authorization value (no ${REF}) is suspicious.
-        f.write_str("type = \"http\"\nurl = \"https://k/mcp\"\nheaders = { Authorization = \"Bearer sk-live-abc123\" }\n")
+        // A literal Authorization value (no ${REF}) is suspicious. The value is
+        // obviously fake — the warning keys off the *header name*, not a pattern.
+        f.write_str("type = \"http\"\nurl = \"https://k/mcp\"\nheaders = { Authorization = \"Bearer NOT-A-REAL-SECRET-example\" }\n")
             .unwrap();
         let out = add_server(lib.path(), "kibana", f.path(), false, true).unwrap();
         assert!(

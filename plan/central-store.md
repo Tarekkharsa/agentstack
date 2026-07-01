@@ -2,7 +2,7 @@
 
 Date: 2026-07-01
 
-Status: Phase 1 complete; Phase 1b proposed
+Status: Phase 1 complete; Phase 1b central servers complete; hooks remain later
 
 Companion to [`portable-agent-runtime-vision.md`](./portable-agent-runtime-vision.md)
 and [`code-mode.md`](./code-mode.md), and the foundation for
@@ -239,20 +239,35 @@ defined by path:
   Should instead (or additionally) write **name references** so consolidation
   produces the new central-reference form, not a repo-local path.
 
-### Phase 1b: Centralize servers, then hooks (fast-follow)
+### Phase 1b: Centralize servers (complete), then hooks (later)
 
-- [ ] Extend the library and resolver to `lib/servers/*.toml` and
-      `lib/hooks/*.toml`. Servers first — profiles already reference them by name.
-- [ ] Server refs keep `${REF}` secrets in the library, resolved per-machine at
-      call time (unchanged from today).
+**Central servers — complete (2026-07-01).** Servers mirror the skills library
+end to end: `lib/servers/<name>.toml` definitions indexed as `[[server]]` in
+`library.toml`; `resolve_server` (inline-first, then library) returns the
+definition with `${REF}`s intact; profile server refs validate against the
+library; `apply`/`diff`/`use`/`session` render library servers via one effective
+server map (`resolve_active_servers` → `plan_target_with_servers`); the project
+lock pins the **definition digest** only; `doctor`/`explain` report origin,
+provenance, and definition drift; and `agentstack lib add-server/list/remove-server`
+manage them. Secrets resolve only at render/gateway time — never in the resolver
+or lock. Gateway unchanged.
 
-#### Phase 1b Open Design Questions
+- [x] Library + resolver extended to `lib/servers/*.toml` (`[[server]]` index).
+- [x] Server refs keep `${REF}` secrets in the library, resolved per-machine at
+      render/gateway time (unchanged from today).
+- [ ] **Hooks** — the same treatment for `lib/hooks/*.toml`. Not started.
 
-- What is the exact manifest reference shape for a central server?
-- Does an inline `[servers.<name>]` always override the library, matching skills?
-- Where does server secret resolution occur: resolver, render, or gateway?
-- What gets locked: definition digest, resolved render shape, or both?
-- How should `doctor` and `explain` report library server provenance and drift?
+#### Phase 1b design decisions (resolved as built)
+
+- **Reference shape:** name-only ref in `[servers]`/profiles resolves from
+  `lib/servers/<name>.toml`; inline `[servers.<name>]` full table still allowed.
+- **Inline override:** yes — inline always wins over the library (matches skills).
+- **Secret resolution:** render/gateway only; the library stores `${REF}`s and
+  the resolver never resolves them.
+- **What is locked:** the **definition digest** only (not resolved secrets, not a
+  provider-specific render shape). Rendered-shape digest deferred (no model slot).
+- **doctor/explain:** origin (inline/library), provenance, and definition-digest
+  drift, via `server_lock_status` — the server analog of `skill_lock_status`.
 
 ### Phase 2: Per-repo overlay (deferred — the second model)
 

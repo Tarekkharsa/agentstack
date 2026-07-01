@@ -114,33 +114,28 @@ The import/render round-trip already exists in pieces; this feature unifies them
 - **Missing**: no central *server* store under `~/.agentstack` (servers are
   per-project only), and no single orchestrator command.
 
-## Phase 1b prerequisite: central server store
+## Phase 1b prerequisite: central server store — COMPLETE (2026-07-01)
 
-The one command cannot be done cleanly for MCP servers until servers can live
-centrally and be referenced by name — the exact analog of the skills library.
+The prerequisite is **done**. MCP servers now live centrally and resolve by name,
+the exact analog of the skills library — so the orchestrator can be built cleanly.
 
-- `~/.agentstack/lib/servers/<name>.toml` holds a reusable server definition
-  (`${REF}` secrets only), indexed in `library.toml`.
-- The resolver resolves `[servers]` / profile server refs by name from the
-  central store, inline-first (mirrors skill resolution + inline override).
-- Secrets stay per-machine at render/gateway time (see the seam above).
+- ✅ `~/.agentstack/lib/servers/<name>.toml` holds a reusable server definition
+  (`${REF}` secrets only), indexed as `[[server]]` in `library.toml`.
+- ✅ `resolve_server` resolves `[servers]` / profile server refs by name from the
+  central store, inline-first (inline override matches skills).
+- ✅ Secrets stay per-machine at render/gateway time; the resolver never resolves
+  them, and the lock pins the definition digest only.
+- ✅ `apply`/`diff`/`use`/`session` render library servers; `doctor`/`explain`
+  report origin/provenance/drift; `lib add-server/list/remove-server` manage them.
 
-The server-specific open questions are tracked in
-[`central-store.md`](./central-store.md#phase-1b-open-design-questions):
-
-1. Exact manifest reference shape for a central server.
-2. Does inline `[servers.<name>]` always override the library (matching skills)?
-3. Where does server secret resolution occur: resolver, render, or gateway?
-   (Answer per the seam above: render/gateway, never the library — confirm the
-   mechanics.)
-4. What gets locked: definition digest, resolved render shape, or both?
-5. How do `doctor`/`explain` report library server provenance and drift?
+The server-specific open questions (in
+[`central-store.md`](./central-store.md#phase-1b-design-decisions-resolved-as-built))
+are all resolved as built. The **orchestrator (step 3 below) is still proposed.**
 
 ## Build order
 
-1. **Central server store** (Phase 1b). `lib/servers/` + resolver extension +
-   lock/explain, following the skills-library shape. **Prerequisite; build and
-   review first.**
+1. ✅ **Central server store** (Phase 1b). `lib/servers/` + resolver + validation
+   + render + lock/drift + `lib` UX. **Complete and reviewed.**
 2. **Server consolidate + provider-view render.** The `consolidate`-for-servers
    half: import each provider's MCP entries into `lib/servers/`, then render each
    provider's MCP config as a view from the central source, backup-first and
