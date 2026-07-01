@@ -4,6 +4,7 @@
 use std::fs;
 
 use agentstack::commands::explain::explain_text;
+use agentstack::commands::lib::{add_skill, LibSource};
 
 /// These tests mutate the process-global `HOME`/`AGENTSTACK_HOME`; serialize them.
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -77,6 +78,51 @@ fn explain_skill_reports_resolution_and_lock() {
         out.contains("not locked"),
         "explain shows the skill has no lock pin yet"
     );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
+#[test]
+fn explain_library_only_skill() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    // Seed a skill into the central library only (not in any project manifest).
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(
+        src.join("SKILL.md"),
+        "---\ndescription: A central skill\n---\n# body\n",
+    )
+    .unwrap();
+    let lib_home = home.join(".agentstack/lib");
+    add_skill(
+        &lib_home,
+        "central-skill",
+        LibSource::Path(&src),
+        false,
+        true,
+    )
+    .unwrap();
+
+    // A project that does NOT define the skill inline.
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(proj.join("agentstack.toml"), "version = 1\n").unwrap();
+
+    let out = explain_text("central-skill", Some(&proj)).unwrap();
+    assert!(out.contains("skill · path"));
+    assert!(out.contains("central library"), "names its origin: {out}");
+    assert!(out.contains("A central skill"), "shows the description");
+    assert!(out.contains("yes — available locally"), "resolved offline");
+
+    // A name in neither manifest nor library still errors helpfully.
+    assert!(explain_text("ghost-skill", Some(&proj)).is_err());
 
     std::env::remove_var("AGENTSTACK_HOME");
     std::env::remove_var("HOME");

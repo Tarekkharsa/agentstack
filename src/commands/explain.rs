@@ -23,13 +23,16 @@ pub fn run(args: &ExplainArgs, manifest_dir: Option<&Path>) -> Result<()> {
 pub fn explain_text(name: &str, manifest_dir: Option<&Path>) -> Result<String> {
     let ctx = crate::commands::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
+    let in_library = crate::library::Library::load_default()
+        .map(|l| l.get(name).is_some())
+        .unwrap_or(false);
     if manifest.servers.contains_key(name) {
         Ok(explain_server(name, &ctx))
-    } else if manifest.skills.contains_key(name) {
+    } else if manifest.skills.contains_key(name) || in_library {
         Ok(explain_skill(name, &ctx))
     } else {
         anyhow::bail!(
-            "no server or skill '{name}' in the manifest. Try `agentstack search {name}` to find one to add."
+            "no server or skill '{name}' in the manifest or central library. Try `agentstack search {name}` to find one to add."
         )
     }
 }
@@ -198,9 +201,29 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
 
 fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
     let manifest = &ctx.loaded.manifest;
-    let skill = &manifest.skills[name];
+    let store = Store::default_store();
+    let library = crate::library::Library::load_default().unwrap_or_default();
+    let lib_home = crate::util::paths::lib_home();
+
+    // A skill is defined inline in the project manifest, or (failing that) in the
+    // central library. Compute its source + local dir from wherever it lives.
+    let inline = manifest.skills.get(name);
+    let from_library = inline.is_none();
+    let source: Option<SkillSource> = if let Some(skill) = inline {
+        skill.source().ok()
+    } else if let Some(entry) = library.get(name) {
+        crate::manifest::Skill {
+            path: entry.path.clone(),
+            git: entry.git.clone(),
+            rev: entry.rev.clone(),
+        }
+        .source()
+        .ok()
+    } else {
+        None
+    };
+
     let mut o = String::new();
-    let source = skill.source().ok();
     let kind = match &source {
         Some(SkillSource::Git { .. }) => "git",
         Some(SkillSource::Path(_)) => "path",
@@ -208,21 +231,40 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
     };
     line(&mut o, &format!("{name}  (skill · {kind})\n"));
 
-    match &source {
-        Some(SkillSource::Git { url, rev }) => kv(
-            &mut o,
-            "Source",
-            &format!(
-                "git {url}{}",
-                rev.as_ref().map(|r| format!(" @ {r}")).unwrap_or_default()
+    if from_library {
+        kv(&mut o, "Source", "central library (`agentstack lib`)");
+    } else {
+        match &source {
+            Some(SkillSource::Git { url, rev }) => kv(
+                &mut o,
+                "Source",
+                &format!(
+                    "git {url}{}",
+                    rev.as_ref().map(|r| format!(" @ {r}")).unwrap_or_default()
+                ),
             ),
-        ),
-        Some(SkillSource::Path(p)) => kv(&mut o, "Source", &format!("local path {p}")),
-        None => kv(&mut o, "Source", "unknown"),
+            Some(SkillSource::Path(p)) => kv(&mut o, "Source", &format!("local path {p}")),
+            None => kv(&mut o, "Source", "unknown"),
+        }
     }
 
-    let store = Store::default_store();
-    let local = local_source_dir(&store, skill, &ctx.dir);
+    // Resolve the local dir offline (never fetch) for description + installed.
+    let local: Option<std::path::PathBuf> = if let Some(skill) = inline {
+        local_source_dir(&store, skill, &ctx.dir)
+    } else {
+        crate::resolve::resolve_skill(
+            manifest,
+            &ctx.dir,
+            &library,
+            &lib_home,
+            &store,
+            name,
+            crate::resolve::ResolveMode::NoFetch,
+        )
+        .ok()
+        .map(|r| r.path)
+        .filter(|p| p.exists())
+    };
     if let Some(dir) = &local {
         if let Some(desc) = skill_description(dir) {
             kv(&mut o, "Description", &desc);
@@ -283,16 +325,23 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
         &mut o,
         "instructions only — a skill is text, it runs no code and makes no network calls",
     );
-    match &source {
-        Some(SkillSource::Git { url, .. }) => bullet(
+    if from_library {
+        bullet(
             &mut o,
-            &format!("comes from git {url} — review the source you trust it from"),
-        ),
-        Some(SkillSource::Path(p)) => bullet(
-            &mut o,
-            &format!("comes from a local path ({p}) in this repo"),
-        ),
-        None => {}
+            "comes from the central library — inspect it with `agentstack lib list`",
+        );
+    } else {
+        match &source {
+            Some(SkillSource::Git { url, .. }) => bullet(
+                &mut o,
+                &format!("comes from git {url} — review the source you trust it from"),
+            ),
+            Some(SkillSource::Path(p)) => bullet(
+                &mut o,
+                &format!("comes from a local path ({p}) in this repo"),
+            ),
+            None => {}
+        }
     }
     o
 }
