@@ -2,5 +2,8 @@
 runtime/
 projects/*/.mcp.json
 projects/*/.claude/
+projects/*/.codex/
 projects/*/AGENTS.md
+projects/*/agentstack.lock
 *.log
+.DS_Store

@@ -1,0 +1,13 @@
+# central-demo — everything here is referenced BY NAME from the central library
+# (~/.agentstack/lib). Nothing is defined inline: `kibana` resolves to
+# lib/servers/kibana.toml and `sql-review` to lib/skills/sql-review.
+#
+# Run `../../demo-central-library.sh` to seed the library and watch it activate.
+version = 1
+
+[profiles.central]
+servers = ["kibana"]      # → central library server definition
+skills = ["sql-review"]   # → central library skill
+
+[targets]
+default = ["claude-code", "codex"]
