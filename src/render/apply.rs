@@ -154,7 +154,7 @@ pub fn plan_target_with_servers(
 
     let existing = fs::read_to_string(&config_path).unwrap_or_default();
 
-    let proposed = match format {
+    let mut proposed = match format {
         Format::Json => {
             merge_json::merge_with_removals(&existing, &mcp.location, &entries, &removed)?
         }
@@ -166,6 +166,15 @@ pub fn plan_target_with_servers(
             mcp.headers_as_subtable,
         )?,
     };
+
+    // First-run trust rule: selecting no servers for a target that has no config
+    // yet must be a true no-op. Otherwise JSON adapters create empty scaffolds
+    // like `{ "mcpServers": {} }`, which looks like a write blast radius even
+    // though no capability was configured. Prunes still render so previously
+    // managed entries can be removed.
+    if managed.is_empty() && removed.is_empty() && existing.trim().is_empty() {
+        proposed = existing.clone();
+    }
 
     Ok(Some(TargetPlan {
         id: desc.id.clone(),

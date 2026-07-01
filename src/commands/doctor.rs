@@ -64,7 +64,14 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let vctx = libctx.validate_ctx(&ctx.dir);
     let validation_targets: Vec<&str> = ctx.registry.ids().collect();
     for issue in validate_with_context(manifest, validation_targets, &vctx) {
-        report.line(Level::Warn, issue.message);
+        // Mirror apply/bootstrap: structural issues (is_error) are errors so
+        // `doctor --ci` fails the trust gate; softer issues stay warnings.
+        let level = if issue.kind.is_error() {
+            Level::Error
+        } else {
+            Level::Warn
+        };
+        report.line(level, issue.message);
     }
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &[]);
@@ -359,8 +366,11 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         report.errors, report.warnings
     );
 
+    // In CI mode any error fails the trust gate. Return an error rather than
+    // exiting inline so `main` owns the single exit point and this path stays
+    // testable.
     if args.ci && report.errors > 0 {
-        std::process::exit(1);
+        anyhow::bail!("doctor found {} error(s) — see report above", report.errors);
     }
     Ok(())
 }

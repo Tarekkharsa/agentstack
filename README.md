@@ -16,11 +16,14 @@ agent environments: bootstrap a new laptop, share a team setup through git,
 launch an agent with a known profile, audit what it can access, and remove or
 upgrade capabilities without hand-editing every harness.
 
+The core loop is intentionally small:
+
 ```sh
-agentstack init      # reverse-engineer a manifest from configs you already have
-agentstack bootstrap # guided preflight: skills, secrets, diff, next action
-agentstack apply     # preview the render for every CLI you have installed
-agentstack doctor    # prove everything is wired (secrets, drift, connectivity)
+agentstack init       # import the setup you already have
+agentstack bootstrap  # preflight: CLIs, skills, secrets, diff, next action
+agentstack doctor     # prove the manifest is valid and reproducible
+agentstack apply      # preview native config changes
+agentstack apply --write
 ```
 
 ## Install
@@ -32,6 +35,35 @@ curl -fsSL https://raw.githubusercontent.com/tarekkh/agentstack/main/install.sh 
 
 Single static binary, zero runtime dependencies. (Releases are wired up in CI —
 see [RELEASING.md](RELEASING.md).)
+
+## Quick start
+
+Start with the setup already on your machine:
+
+```bash
+agentstack init
+agentstack bootstrap
+agentstack secret set GH_PAT       # only when bootstrap reports a missing ref
+agentstack doctor
+agentstack apply                   # dry-run diff
+agentstack apply --write
+```
+
+For a team repo, commit `.agentstack/agentstack.toml` and
+`.agentstack/agentstack.lock`, but never commit local secrets. In CI, the trust
+gate is:
+
+```bash
+agentstack install --locked
+agentstack doctor --ci
+```
+
+`install --locked` proves checked-in skill sources still resolve to the pinned
+lockfile entries; it fails instead of rewriting the lock. `doctor --ci` then
+fails on structural manifest errors (unknown refs, missing transport fields),
+unresolved required secrets, invalid target configs, lock drift, and policy
+violations. Warnings still print for advisory issues that do not make the setup
+unsafe to render.
 
 ## Why it exists
 
@@ -49,6 +81,16 @@ converging on `mcp.json`). The value is the layer above it:
 **secrets-by-reference, profiles/selective loading, reproducible lockfiles,
 cross-source discovery, runtime launch control, and trust/governance gates** in
 one auditable binary across the CLIs your team actually uses.
+
+## Who it is for
+
+agentstack is most useful when you use more than one agent CLI, share agent
+setup with teammates, switch machines often, or need MCP servers, skills,
+instructions, settings, and secrets to be reviewed in git.
+
+It is probably overkill if you use one agent with one or two hand-managed MCP
+servers and do not care about reproducibility, profiles, drift, or team
+onboarding yet.
 
 ## Portable team workflow
 
@@ -82,39 +124,6 @@ agentstack run codex --profile backend
 `agentstack.toml` is portable. Secrets are not. They resolve per machine from
 env, varlock, OS keychain, or `.env`, and unresolved secrets block writes by
 default so placeholders do not leak into live harness config.
-
-## For vendors: ship your MCP + skills + docs
-
-agentstack is how a vendor ships its **MCP + skills + docs** into any harness —
-one source of truth, instead of trapping expertise behind an in-app chatbot.
-Bundle the server, the skills that know how to drive it, and the house rules
-that steer the agent as a single **pack**, and the user installs the whole unit
-into their *own* agent:
-
-```sh
-agentstack add from linear-pack --write                      # server + skills, rendered to every CLI
-agentstack add from linear-pack --with-instructions --write  # also merge the vendor's house rules
-agentstack apply --write                                     # render to your real configs
-agentstack upgrade linear-pack --write                       # re-resolve the pack + re-pin the lock
-```
-
-Starter packs today: **`linear-pack`**, **`cloudflare-pack`**, **`posthog-pack`**
-(plus the standalone **`pr-triage`** skill). `upgrade` re-resolves an installed
-pack from its recorded source, diffs the members, gates any house-rule change
-behind `--with-instructions`/`--yes`, and re-pins the lockfile.
-
-This is the canonical target for the "continue in your own agent? install the
-MCP + skills" prompt: one command pulls the server, its skills, and (opt-in) its
-docs into every CLI the user has, with secrets kept as `${REF}`s and every member
-passing the same trust gate as any hand-added capability.
-
-Vendor prose is merged with visible provenance, never silently folded into house
-rules — `--with-instructions` is opt-in and previewed before it lands. Bundled
-starter skills are **agentstack-authored and unofficial**: they are honest
-examples of driving a vendor's surface, not endorsed vendor content.
-
-For the broader product direction, see
-[`plan/portable-agent-runtime-vision.md`](plan/portable-agent-runtime-vision.md).
 
 ## What works today
 
@@ -452,6 +461,28 @@ agentstack plugins install play --target codex --write
 agentstack plugins remove play --target codex --write
 ```
 
+## Vendor packs
+
+agentstack can also package a vendor or internal team's **MCP + skills + docs**
+as one installable unit. That gives users one command to pull the server, the
+skills that know how to drive it, and optional house rules into their own agent
+CLIs without committing secrets.
+
+```sh
+agentstack add from linear-pack --write                      # server + skills
+agentstack add from linear-pack --with-instructions --write  # also merge house rules
+agentstack apply --write                                     # render to native configs
+agentstack upgrade linear-pack --write                       # re-resolve and re-pin
+```
+
+Starter packs today: **`linear-pack`**, **`cloudflare-pack`**, **`posthog-pack`**
+(plus the standalone **`pr-triage`** skill). Instruction prose is opt-in,
+previewed, and merged with visible provenance. Bundled starter skills are
+**agentstack-authored and unofficial** examples, not endorsed vendor content.
+
+For the broader product direction, see
+[`plan/portable-agent-runtime-vision.md`](plan/portable-agent-runtime-vision.md).
+
 ## Adding a CLI
 
 Supporting a new CLI is one YAML descriptor — see `adapters/codex.yaml`. Drop
@@ -494,7 +525,9 @@ See [`agentstack-PLAN.md`](agentstack-PLAN.md) for the full spec and design
 decisions (D1–D22),
 [`plan/central-store.md`](plan/central-store.md) +
 [`plan/provider-import.md`](plan/provider-import.md) for the central-library
-design, and
+design, [`docs/central-library-guide.html`](docs/central-library-guide.html) for
+a visual guide covering existing projects, new central-library projects, and
+generated provider views, and
 [`plan/portable-agent-runtime-vision.md`](plan/portable-agent-runtime-vision.md)
 for the current product vision.
 

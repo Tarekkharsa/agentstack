@@ -216,6 +216,6 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
             lifted.len()
         );
     }
-    println!("\nNext: review the manifest, then `agentstack diff` to preview rendering.");
+    println!("\nNext: review the manifest, then `agentstack bootstrap` for the guided preflight.");
     Ok(())
 }

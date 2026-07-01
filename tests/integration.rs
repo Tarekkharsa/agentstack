@@ -61,6 +61,70 @@ mcp:
 }
 
 #[test]
+fn empty_selection_does_not_create_empty_json_scaffold() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let cfg = tmp.child("fresh.json");
+
+    let m: Manifest = toml::from_str("version = 1\n").unwrap();
+    let desc = json_descriptor(cfg.path().to_str().unwrap());
+    let resolver = MapResolver::from([]);
+
+    let plan = plan_target(
+        &m,
+        &desc,
+        &resolver,
+        &Selection::All,
+        &[],
+        Scope::Global,
+        Path::new("/"),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert!(plan.managed.is_empty());
+    assert!(plan.removed.is_empty());
+    assert_eq!(plan.existing, "");
+    assert_eq!(plan.proposed, "");
+    assert!(
+        !plan.changed(),
+        "empty first-run setup should not write a scaffold:\n{}",
+        plan.diff()
+    );
+}
+
+#[test]
+fn empty_selection_still_prunes_previously_managed_entries() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let cfg = tmp.child("existing.json");
+    cfg.write_str(
+        "{\n  \"mcpServers\": {\n    \"old\": { \"type\": \"http\", \"url\": \"https://old\" },\n    \"user\": { \"type\": \"http\", \"url\": \"https://user\" }\n  }\n}\n",
+    )
+    .unwrap();
+
+    let m: Manifest = toml::from_str("version = 1\n").unwrap();
+    let desc = json_descriptor(cfg.path().to_str().unwrap());
+    let resolver = MapResolver::from([]);
+    let previously = vec!["old".to_string()];
+
+    let plan = plan_target(
+        &m,
+        &desc,
+        &resolver,
+        &Selection::All,
+        &previously,
+        Scope::Global,
+        Path::new("/"),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(plan.removed, vec!["old".to_string()]);
+    assert!(plan.changed());
+    assert!(!plan.proposed.contains("\"old\""));
+    assert!(plan.proposed.contains("\"user\""));
+}
+
+#[test]
 fn non_destructive_merge_preserves_other_content_and_is_idempotent() {
     let tmp = assert_fs::TempDir::new().unwrap();
     let cfg = tmp.child("claude.json");
