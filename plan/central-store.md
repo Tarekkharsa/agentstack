@@ -244,6 +244,14 @@ defined by path:
 - [ ] Server refs keep `${REF}` secrets in the library, resolved per-machine at
       call time (unchanged from today).
 
+#### Phase 1b Open Design Questions
+
+- What is the exact manifest reference shape for a central server?
+- Does an inline `[servers.<name>]` always override the library, matching skills?
+- Where does server secret resolution occur: resolver, render, or gateway?
+- What gets locked: definition digest, resolved render shape, or both?
+- How should `doctor` and `explain` report library server provenance and drift?
+
 ### Phase 2: Per-repo overlay (deferred — the second model)
 
 The product owner asked to *support the first two models but start with the
