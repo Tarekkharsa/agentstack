@@ -54,6 +54,19 @@ pub fn skills_home() -> PathBuf {
     agentstack_home().join("skills")
 }
 
+/// `~/.agentstack/lib` — the central capability library. Projects reference its
+/// contents by name instead of copying capability files (see
+/// `plan/central-store.md`). Phase 1 populates `lib/skills/` and `library.toml`.
+pub fn lib_home() -> PathBuf {
+    agentstack_home().join("lib")
+}
+
+/// `~/.agentstack/lib/skills` — skill bodies in the central library, referenced
+/// by name from project manifests.
+pub fn lib_skills_home() -> PathBuf {
+    lib_home().join("skills")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +79,18 @@ mod tests {
             home.join(".codex/config.toml")
         );
         assert_eq!(expand_tilde("/abs/path"), PathBuf::from("/abs/path"));
+    }
+
+    #[test]
+    fn lib_paths_hang_off_home_and_honor_override() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("AGENTSTACK_HOME", "/tmp/as-home");
+        assert_eq!(lib_home(), PathBuf::from("/tmp/as-home/lib"));
+        assert_eq!(lib_skills_home(), PathBuf::from("/tmp/as-home/lib/skills"));
+        // lib/ lives under the same home as the other managed stores.
+        assert_eq!(lib_home(), agentstack_home().join("lib"));
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 }

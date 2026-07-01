@@ -8,9 +8,12 @@ use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
 
 use crate::cli::UseArgs;
+use crate::library::Library;
+use crate::lock::{Lock, LockedSkill};
 use crate::manifest::Manifest;
 use crate::render::skills;
 use crate::render::{plan_target, resolve_targets, Selection};
+use crate::resolve::{ResolvedSkill, SkillOrigin};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 
@@ -25,7 +28,29 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         .with_context(|| format!("no profile '{}' in manifest", args.profile))?;
 
     let selection = Selection::Profile(args.profile.clone());
-    let active_skills = resolve_active_skills(manifest, &args.profile, &ctx.dir);
+    // Resolve active skills up front (library-aware) so an unresolved or broken
+    // skill ref fails clearly before we touch any target's config or skills dir.
+    // NOTE: resolution fetches git-backed sources even on a dry run (via
+    // `Store::resolve`). Harmless for path/library skills (all Phase-1 library
+    // skills are path sources); a non-fetching dry-run mode is tracked in
+    // `plan/central-store.md` Phase 3.
+    let library = Library::load_default()?;
+    let lib_home = crate::util::paths::lib_home();
+    let store = crate::store::Store::default_store();
+    let resolved_skills = resolve_active_skills(
+        manifest,
+        &args.profile,
+        &ctx.dir,
+        &library,
+        &lib_home,
+        &store,
+    )?;
+    // (name, source dir) pairs drive skill materialization; the richer
+    // `ResolvedSkill` list is kept for lockfile recording below.
+    let active_skills: Vec<(String, PathBuf)> = resolved_skills
+        .iter()
+        .map(|r| (r.name.clone(), r.path.clone()))
+        .collect();
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     println!(
@@ -133,6 +158,9 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     if args.write {
         state.save()?;
+        // Record each activated skill's resolved digest so a fresh checkout
+        // resolves the same content (and `doctor`/`explain` can flag drift).
+        record_lock(&ctx.dir, &resolved_skills, manifest, &library)?;
         println!(
             "\n{} activated '{}' on {wrote} target(s).",
             "✓".green(),
@@ -151,39 +179,392 @@ fn strategy_word(s: crate::adapter::descriptor::SkillStrategy) -> &'static str {
     }
 }
 
-/// Resolve a profile's active skills into `(name, absolute source dir)`,
-/// expanding the `"*"` wildcard and warning about missing sources.
+/// Resolve a profile's active skills to concrete [`ResolvedSkill`]s through the
+/// library-aware resolver.
+///
+/// Each explicit skill name resolves inline-first, then from the central library
+/// (see `crate::resolve`). The `"*"` wildcard stays **inline-only**: it expands
+/// to the manifest's inline skills and deliberately does not pull in central
+/// library skills, to avoid surprising broad activation.
+///
+/// Returns an error (before any materialization) if a name resolves nowhere, its
+/// source is broken, or it resolves to a path that is not present on disk.
 fn resolve_active_skills(
     manifest: &Manifest,
     profile_name: &str,
     dir: &Path,
-) -> Vec<(String, PathBuf)> {
+    library: &Library,
+    lib_home: &Path,
+    store: &crate::store::Store,
+) -> Result<Vec<ResolvedSkill>> {
     let profile = match manifest.profiles.get(profile_name) {
         Some(p) => p,
-        None => return Vec::new(),
+        None => return Ok(Vec::new()),
     };
     let names: Vec<String> = if profile.loads_all_skills() {
         manifest.skills.keys().cloned().collect()
     } else {
-        profile
-            .skills
-            .iter()
-            .filter(|n| manifest.skills.contains_key(*n))
-            .cloned()
-            .collect()
+        profile.skills.clone()
     };
 
-    let store = crate::store::Store::default_store();
     let mut out = Vec::new();
     for name in names {
-        let skill = &manifest.skills[&name];
-        match crate::store::local_source_dir(&store, skill, dir) {
-            Some(source) => out.push((name, source)),
-            None => println!(
-                "{} skill '{name}' not available locally — run `agentstack install`",
-                "⚠".yellow()
-            ),
+        let resolved =
+            crate::resolve::resolve_skill(manifest, dir, library, lib_home, store, &name)
+                .with_context(|| {
+                    format!("resolving skill '{name}' for profile '{profile_name}'")
+                })?;
+        if !resolved.path.exists() {
+            anyhow::bail!(
+                "skill '{name}' (profile '{profile_name}') resolved to {} but it is not present on disk — run `agentstack install`",
+                resolved.path.display()
+            );
         }
+        out.push(resolved);
     }
-    out
+    Ok(out)
+}
+
+/// Write each resolved skill's `name`/`source`/`rev`/`checksum` into the
+/// project `agentstack.lock`, so the reference resolves to the same content on
+/// another machine. Existing lock entries for other skills are preserved.
+fn record_lock(
+    dir: &Path,
+    resolved: &[ResolvedSkill],
+    manifest: &Manifest,
+    library: &Library,
+) -> Result<()> {
+    let mut lock = Lock::load(dir)?;
+    for r in resolved {
+        lock.upsert(locked_from_resolved(r, manifest, library));
+    }
+    lock.save(dir)
+}
+
+/// Build a lockfile entry from a resolved skill, recovering the source locator
+/// (`path`/`git`) from wherever the name resolved.
+fn locked_from_resolved(
+    resolved: &ResolvedSkill,
+    manifest: &Manifest,
+    library: &Library,
+) -> LockedSkill {
+    let (path, git) = match resolved.origin {
+        SkillOrigin::Inline => manifest
+            .skills
+            .get(&resolved.name)
+            .map(|s| (s.path.clone(), s.git.clone()))
+            .unwrap_or((None, None)),
+        SkillOrigin::Library => library
+            .get(&resolved.name)
+            .map(|e| (e.path.clone(), e.git.clone()))
+            .unwrap_or((None, None)),
+    };
+    LockedSkill {
+        name: resolved.name.clone(),
+        source: resolved.source_kind.to_string(),
+        path,
+        git,
+        rev: resolved.rev.clone(),
+        checksum: resolved.checksum.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::{Library, LibrarySkill};
+    use crate::store::Store;
+    use assert_fs::prelude::*;
+
+    fn store_in(dir: &assert_fs::TempDir) -> Store {
+        Store::with_root(dir.child("store").path().to_path_buf())
+    }
+
+    /// Write a path-source skill body under `<lib_home>/skills/<name>/` and index
+    /// it in the returned library.
+    fn library_with_skill(lib_home: &assert_fs::TempDir, name: &str, body: &str) -> Library {
+        lib_home
+            .child(format!("skills/{name}/SKILL.md"))
+            .write_str(body)
+            .unwrap();
+        let mut lib = Library::default();
+        lib.upsert(LibrarySkill {
+            name: name.into(),
+            source: "path".into(),
+            path: Some(name.into()),
+            git: None,
+            rev: None,
+            checksum: None,
+            version: None,
+            provenance: Some("consolidated".into()),
+        });
+        lib
+    }
+
+    /// Write an inline skill body under `<proj>/skills/<name>/`.
+    fn write_inline_body(proj: &assert_fs::TempDir, name: &str, body: &str) {
+        proj.child(format!("skills/{name}/SKILL.md"))
+            .write_str(body)
+            .unwrap();
+    }
+
+    #[test]
+    fn library_only_skill_activates_from_lib_home() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = store_in(&proj);
+        let library = library_with_skill(&lib_home, "sql-review", "# lib\n");
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [profiles.p]
+            skills = ["sql-review"]
+            "#,
+        )
+        .unwrap();
+
+        let active = resolve_active_skills(
+            &manifest,
+            "p",
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+        )
+        .unwrap();
+
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].name, "sql-review");
+        assert_eq!(active[0].origin, SkillOrigin::Library);
+        // Path points into the central library's skills home.
+        assert!(active[0].path.starts_with(lib_home.child("skills").path()));
+        assert!(active[0].path.join("SKILL.md").exists());
+        // A digest is captured for the lockfile.
+        assert_eq!(active[0].checksum.len(), 64);
+    }
+
+    #[test]
+    fn inline_skill_materializes_and_wins_over_library() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = store_in(&proj);
+        // Same name in both places, different content.
+        write_inline_body(&proj, "review", "# inline\n");
+        let library = library_with_skill(&lib_home, "review", "# lib\n");
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [skills.review]
+            path = "./skills/review"
+            [profiles.p]
+            skills = ["review"]
+            "#,
+        )
+        .unwrap();
+
+        let active = resolve_active_skills(
+            &manifest,
+            "p",
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+        )
+        .unwrap();
+
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].origin, SkillOrigin::Inline);
+        let body = std::fs::read_to_string(active[0].path.join("SKILL.md")).unwrap();
+        assert_eq!(body, "# inline\n");
+    }
+
+    #[test]
+    fn unresolved_library_name_fails() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = store_in(&proj);
+        let library = Library::default(); // empty
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [profiles.p]
+            skills = ["nope"]
+            "#,
+        )
+        .unwrap();
+
+        let err = resolve_active_skills(
+            &manifest,
+            "p",
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("nope"));
+    }
+
+    #[test]
+    fn broken_library_entry_fails_before_materialization() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = store_in(&proj);
+        // Indexed by name but with neither `path` nor `git` — source is broken.
+        let mut library = Library::default();
+        library.upsert(LibrarySkill {
+            name: "sql-review".into(),
+            source: "path".into(),
+            path: None,
+            git: None,
+            rev: None,
+            checksum: None,
+            version: None,
+            provenance: None,
+        });
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [profiles.p]
+            skills = ["sql-review"]
+            "#,
+        )
+        .unwrap();
+
+        let err = resolve_active_skills(
+            &manifest,
+            "p",
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("sql-review"));
+    }
+
+    #[test]
+    fn wildcard_expands_inline_only_and_ignores_library() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = store_in(&proj);
+        write_inline_body(&proj, "a", "# a\n");
+        write_inline_body(&proj, "b", "# b\n");
+        // A library-only skill that must NOT be activated by the wildcard.
+        let library = library_with_skill(&lib_home, "c", "# c\n");
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [skills.a]
+            path = "./skills/a"
+            [skills.b]
+            path = "./skills/b"
+            [profiles.p]
+            skills = ["*"]
+            "#,
+        )
+        .unwrap();
+
+        let active = resolve_active_skills(
+            &manifest,
+            "p",
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+        )
+        .unwrap();
+
+        let names: Vec<&str> = active.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, vec!["a", "b"]);
+        assert!(
+            !names.contains(&"c"),
+            "wildcard must not pull library skills"
+        );
+    }
+
+    #[test]
+    fn record_lock_writes_resolved_digest_for_library_skill() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = store_in(&proj);
+        let library = library_with_skill(&lib_home, "sql-review", "# lib\n");
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [profiles.p]
+            skills = ["sql-review"]
+            "#,
+        )
+        .unwrap();
+
+        let resolved = resolve_active_skills(
+            &manifest,
+            "p",
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+        )
+        .unwrap();
+
+        record_lock(proj.path(), &resolved, &manifest, &library).unwrap();
+
+        // The lock now pins the library skill's resolved digest.
+        let lock = Lock::load(proj.path()).unwrap();
+        let entry = lock.get("sql-review").expect("lock entry written");
+        assert_eq!(entry.source, "path");
+        assert_eq!(entry.path.as_deref(), Some("sql-review"));
+        assert_eq!(entry.checksum, resolved[0].checksum);
+        assert_eq!(entry.checksum.len(), 64);
+    }
+
+    #[test]
+    fn record_lock_preserves_unrelated_entries() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = store_in(&proj);
+        let library = library_with_skill(&lib_home, "sql-review", "# lib\n");
+
+        // A pre-existing lock entry for a different, now-unmanaged skill.
+        let mut lock = Lock::default();
+        lock.upsert(LockedSkill {
+            name: "other".into(),
+            source: "path".into(),
+            path: Some("other".into()),
+            git: None,
+            rev: None,
+            checksum: "beef".into(),
+        });
+        lock.save(proj.path()).unwrap();
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [profiles.p]
+            skills = ["sql-review"]
+            "#,
+        )
+        .unwrap();
+        let resolved = resolve_active_skills(
+            &manifest,
+            "p",
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+        )
+        .unwrap();
+        record_lock(proj.path(), &resolved, &manifest, &library).unwrap();
+
+        let lock = Lock::load(proj.path()).unwrap();
+        assert!(lock.get("other").is_some(), "unrelated entry preserved");
+        assert!(lock.get("sql-review").is_some(), "new entry added");
+    }
 }

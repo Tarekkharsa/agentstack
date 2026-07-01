@@ -1,14 +1,20 @@
-//! Consolidate scattered skills into one managed home.
+//! Consolidate scattered skills into the central library.
 //!
 //! Skills end up spread across each CLI's own skills directory (`~/.codex/skills/
-//! figma`, `~/.claude/skills/...`). This gathers them into a single managed home
-//! (`~/.agentstack/skills/`) and replaces every original with a symlink back to
-//! it — so the agents still find each skill exactly where they did, but the files
-//! now live in one place agentstack controls.
+//! figma`, `~/.claude/skills/...`). This gathers them into the central capability
+//! library (`~/.agentstack/lib/skills/`) via the library's own insertion path
+//! ([`crate::commands::lib::add_skill`]) and replaces every original with a
+//! symlink back to the library copy — so the agents still find each skill exactly
+//! where they did, but the files now live in one reviewable place, indexed in
+//! `library.toml` with a checksum, and referenced by name.
+//!
+//! The project manifest is **not** modified: a consolidated skill is referenced
+//! by name from the library, and any existing inline `[skills.<name>]` in the
+//! project is left untouched (it keeps overriding, per the resolver).
 //!
 //! Safety invariant: the managed copy is created *before* any original is
-//! removed, and real directories are backed up before deletion. If anything
-//! fails mid-way the originals (or their backups) still hold the files.
+//! removed, and real directories are backed up before deletion. Dry-run by
+//! default; nothing is touched unless `write` is set.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -17,31 +23,46 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::adapter::Registry;
+use crate::commands::lib::{add_skill, LibSource};
+use crate::library::Library;
+use crate::manifest::Manifest;
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 use crate::store::dir_digest;
 use crate::util::paths;
 
 /// Outcome for one consolidated skill.
+#[derive(Debug)]
 pub struct Consolidated {
     pub name: String,
-    /// Managed home path the skill now lives at.
+    /// Library path the skill now lives at (`lib/skills/<name>`).
     pub home: PathBuf,
-    /// CLI ids whose skills dir now symlinks to the managed copy.
+    /// CLI ids whose skills dir now symlinks to the library copy (on a dry run,
+    /// the ids that *would* be linked).
     pub linked_into: Vec<String>,
-    /// True if the files were already in the managed home (nothing moved).
+    /// True if the files were already the library copy / identical content.
     pub already_home: bool,
+    /// True if the project manifest already defines `[skills.<name>]` inline —
+    /// that definition keeps overriding the library copy for this project.
+    pub inline_override: bool,
 }
 
-/// Move discovered on-disk skills into the managed home and symlink the
-/// originals back. `only` limits to specific names; `None` consolidates every
-/// discovered skill. Updates the manifest (`[skills.*]` path entries) and state
-/// (marks them managed for the CLIs they were present in).
+/// Gather discovered on-disk skills into the central library and symlink the
+/// originals back to the library copy. `only` limits to specific names; `None`
+/// consolidates every discovered skill. Inserts each into the library via
+/// [`add_skill`] (index + checksum + provenance) and marks it managed for the
+/// CLIs it was present in. The project manifest is not written — the skill is
+/// referenced by name from the library.
+///
+/// A different-content collision with an existing library entry is a hard error
+/// unless `replace`. When `write` is false, nothing is mutated (preview only).
 pub fn consolidate(
     registry: &Registry,
     manifest_path: &Path,
     project_dir: &Path,
     only: Option<&[String]>,
+    replace: bool,
+    write: bool,
 ) -> Result<Vec<Consolidated>> {
     // Discover: name -> (real source, [(cli id, entry path in that CLI's dir)]).
     let mut found: BTreeMap<String, (PathBuf, Vec<(String, PathBuf)>)> = BTreeMap::new();
@@ -69,85 +90,98 @@ pub fn consolidate(
         anyhow::bail!("no skills found on disk to consolidate");
     }
 
-    let home = paths::skills_home();
-    fs::create_dir_all(&home).with_context(|| format!("creating {}", home.display()))?;
+    let lib_home = paths::lib_home();
+    let lib_skills = lib_home.join("skills");
+    // A snapshot of the index for idempotency/collision decisions (each name is
+    // processed once, so the snapshot never goes stale within this run).
+    let library = Library::load(&lib_home)?;
+    // Read the project manifest to detect inline overrides (never written).
+    let inline_names = inline_skill_names(manifest_path);
     let mut state = State::load()?;
-    let mut manifest_text = fs::read_to_string(manifest_path)
-        .with_context(|| format!("reading {}", manifest_path.display()))?;
     let mut report = Vec::new();
 
     for (name, (source, entries)) in found {
-        let target = home.join(&name);
+        let target = lib_skills.join(&name);
         let source_canon = fs::canonicalize(&source).unwrap_or_else(|_| source.clone());
 
-        // 1. Get the files into the managed home (copy, never move) — unless the
-        //    source already IS the managed copy.
-        let already_home = source_canon == target;
+        // 1. Ensure the files are the library copy, via the library's own
+        //    insertion path. Skip if the source already IS the library copy or
+        //    the library already holds identical content (idempotent re-run).
+        let already_home =
+            source_canon == target || library_has_same(&library, &name, &source_canon);
         if !already_home {
-            if target.exists() {
-                // Same name already consolidated: allow only if identical content.
-                let same = dir_digest(&target).ok() == dir_digest(&source_canon).ok();
-                if !same {
-                    anyhow::bail!(
-                        "a different skill named '{name}' already exists in the skills home ({})",
-                        target.display()
-                    );
-                }
-            } else {
-                backup_dir(&source_canon, &name).ok();
-                copy_dir(&source_canon, &target)
-                    .with_context(|| format!("copying skill '{name}' into the managed home"))?;
-            }
+            add_skill(
+                &lib_home,
+                &name,
+                LibSource::Path(&source_canon),
+                replace,
+                write,
+            )?;
         }
 
-        // 2. Repoint every CLI occurrence to the managed copy.
+        // 2. Repoint every CLI occurrence to the library copy (write only).
         let mut linked = Vec::new();
         for (cli, entry) in &entries {
-            if let Ok(meta) = fs::symlink_metadata(entry) {
-                if meta.file_type().is_symlink() {
-                    fs::remove_file(entry)
-                        .with_context(|| format!("removing link {}", entry.display()))?;
-                } else if meta.is_dir() {
-                    backup_dir(entry, &name).ok();
-                    fs::remove_dir_all(entry)
-                        .with_context(|| format!("removing {}", entry.display()))?;
+            if write {
+                if let Ok(meta) = fs::symlink_metadata(entry) {
+                    if meta.file_type().is_symlink() {
+                        fs::remove_file(entry)
+                            .with_context(|| format!("removing link {}", entry.display()))?;
+                    } else if meta.is_dir() {
+                        backup_dir(entry, &name).ok();
+                        fs::remove_dir_all(entry)
+                            .with_context(|| format!("removing {}", entry.display()))?;
+                    }
                 }
-            }
-            symlink_dir(&target, entry)
-                .with_context(|| format!("linking {} → {}", entry.display(), target.display()))?;
-            linked.push(cli.clone());
+                symlink_dir(&target, entry).with_context(|| {
+                    format!("linking {} → {}", entry.display(), target.display())
+                })?;
 
-            // Mark it managed for this CLI (global) so the matrix shows it on.
-            let key = target_key(cli, Scope::Global);
-            let mut managed = state.managed_skills(&key);
-            if !managed.iter().any(|s| s == &name) {
-                managed.push(name.clone());
+                // Mark it managed for this CLI (global) so the matrix shows it on.
+                let key = target_key(cli, Scope::Global);
+                let mut managed = state.managed_skills(&key);
+                if !managed.iter().any(|s| s == &name) {
+                    managed.push(name.clone());
+                }
+                state.record_skills(&key, managed);
             }
-            state.record_skills(&key, managed);
+            linked.push(cli.clone());
         }
 
-        // 3. Register in the manifest as a path skill pointing at the managed home.
-        let body = serde_json::json!({ "path": target.display().to_string() });
-        manifest_text = crate::commands::add::build_manifest_with(
-            &manifest_text,
-            "skills",
-            &name,
-            &body,
-            None,
-        )?;
-
         report.push(Consolidated {
-            name,
+            name: name.clone(),
             home: target,
             linked_into: linked,
             already_home,
+            inline_override: inline_names.iter().any(|n| n == &name),
         });
     }
 
-    crate::util::atomic::write(manifest_path, &manifest_text)
-        .with_context(|| format!("writing {}", manifest_path.display()))?;
-    state.save()?;
+    // No manifest write: consolidated skills are referenced by name from the
+    // library, and inline overrides are left as-is.
+    if write {
+        state.save()?;
+    }
     Ok(report)
+}
+
+/// Whether the library already holds a `name` entry whose recorded checksum
+/// matches the source directory's current content (an idempotent re-run).
+fn library_has_same(library: &Library, name: &str, source: &Path) -> bool {
+    match library.get(name).and_then(|e| e.checksum.as_deref()) {
+        Some(locked) => dir_digest(source).ok().as_deref() == Some(locked),
+        None => false,
+    }
+}
+
+/// Names defined inline as `[skills.<name>]` in the project manifest (best
+/// effort; a missing/invalid manifest yields none).
+fn inline_skill_names(manifest_path: &Path) -> Vec<String> {
+    fs::read_to_string(manifest_path)
+        .ok()
+        .and_then(|t| toml::from_str::<Manifest>(&t).ok())
+        .map(|m| m.skills.keys().cloned().collect())
+        .unwrap_or_default()
 }
 
 /// Back up a directory under `~/.agentstack/backups/skills/<name>` (best effort).
@@ -163,7 +197,7 @@ fn backup_dir(src: &Path, name: &str) -> Result<()> {
 }
 
 /// Recursively copy a directory tree.
-fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
+pub(crate) fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst).with_context(|| format!("creating {}", dst.display()))?;
     for entry in fs::read_dir(src).with_context(|| format!("reading {}", src.display()))? {
         let entry = entry?;

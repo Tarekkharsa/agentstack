@@ -1,7 +1,23 @@
 //! Static manifest validation: profile references resolve, servers are
 //! internally consistent for their transport.
 
+use std::path::Path;
+
 use super::model::{Manifest, ServerType};
+use crate::library::Library;
+use crate::resolve::{resolve_skill, ResolveError};
+use crate::store::Store;
+
+/// Context enabling library-aware skill-ref validation. Without it, a profile
+/// skill ref must be defined inline (`[skills.*]`) to validate; with it, a ref
+/// may also resolve from the central library. Callers that have not yet been
+/// wired for the library pass no context and keep today's inline-only behavior.
+pub struct ValidateCtx<'a> {
+    pub manifest_dir: &'a Path,
+    pub library: &'a Library,
+    pub lib_home: &'a Path,
+    pub store: &'a Store,
+}
 
 /// A single validation problem. Carries a stable kind for testing plus a
 /// human-readable message for `doctor`/CLI output.
@@ -15,6 +31,10 @@ pub struct Issue {
 pub enum IssueKind {
     UnknownServerRef,
     UnknownSkillRef,
+    /// A skill ref names a known entry, but resolving its source failed (e.g. a
+    /// library entry with a broken/missing source). Distinct from
+    /// `UnknownSkillRef`, which means the name resolves nowhere at all.
+    UnresolvableSkillRef,
     UnknownHookRef,
     MissingTransportFields,
     UnknownTargetServer,
@@ -31,6 +51,7 @@ impl IssueKind {
             self,
             IssueKind::UnknownServerRef
                 | IssueKind::UnknownSkillRef
+                | IssueKind::UnresolvableSkillRef
                 | IssueKind::UnknownHookRef
                 | IssueKind::MissingTransportFields
                 | IssueKind::UnknownTargetServer
@@ -60,6 +81,24 @@ pub fn validate(manifest: &Manifest) -> Vec<Issue> {
 pub fn validate_with_targets<'a>(
     manifest: &Manifest,
     targets: impl IntoIterator<Item = &'a str>,
+) -> Vec<Issue> {
+    run(manifest, targets, None)
+}
+
+/// Validate with library-aware skill resolution: a profile skill ref validates
+/// if it is defined inline **or** resolves from the central library.
+pub fn validate_with_context<'a>(
+    manifest: &Manifest,
+    targets: impl IntoIterator<Item = &'a str>,
+    ctx: &ValidateCtx,
+) -> Vec<Issue> {
+    run(manifest, targets, Some(ctx))
+}
+
+fn run<'a>(
+    manifest: &Manifest,
+    targets: impl IntoIterator<Item = &'a str>,
+    ctx: Option<&ValidateCtx>,
 ) -> Vec<Issue> {
     let mut issues = Vec::new();
     let targets: std::collections::BTreeSet<String> =
@@ -101,11 +140,36 @@ pub fn validate_with_targets<'a>(
             if kref == "*" {
                 continue;
             }
-            if !manifest.skills.contains_key(kref) {
-                issues.push(Issue::new(
+            // Inline definitions validate without touching the store; only
+            // non-inline names consult the library (and only when ctx is given).
+            if manifest.skills.contains_key(kref) {
+                continue;
+            }
+            match ctx {
+                Some(cx) => {
+                    match resolve_skill(
+                        manifest,
+                        cx.manifest_dir,
+                        cx.library,
+                        cx.lib_home,
+                        cx.store,
+                        kref,
+                    ) {
+                        Ok(_) => {}
+                        Err(ResolveError::Unresolved { .. }) => issues.push(Issue::new(
+                            IssueKind::UnknownSkillRef,
+                            format!("profile '{pname}' references unknown skill '{kref}'"),
+                        )),
+                        Err(ResolveError::Source(e)) => issues.push(Issue::new(
+                            IssueKind::UnresolvableSkillRef,
+                            format!("profile '{pname}' skill '{kref}' failed to resolve: {e}"),
+                        )),
+                    }
+                }
+                None => issues.push(Issue::new(
                     IssueKind::UnknownSkillRef,
                     format!("profile '{pname}' references unknown skill '{kref}'"),
-                ));
+                )),
             }
         }
     }
@@ -171,9 +235,32 @@ fn is_native_plugin_id(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::library::LibrarySkill;
+    use assert_fs::prelude::*;
 
     fn parse(s: &str) -> Manifest {
         toml::from_str(s).unwrap()
+    }
+
+    /// A library home with one path-source skill body on disk plus its index
+    /// entry.
+    fn library_with_skill(lib_home: &assert_fs::TempDir, name: &str) -> Library {
+        lib_home
+            .child(format!("skills/{name}/SKILL.md"))
+            .write_str("# body\n")
+            .unwrap();
+        let mut lib = Library::default();
+        lib.upsert(LibrarySkill {
+            name: name.into(),
+            source: "path".into(),
+            path: Some(name.into()),
+            git: None,
+            rev: None,
+            checksum: None,
+            version: None,
+            provenance: Some("consolidated".into()),
+        });
+        lib
     }
 
     #[test]
@@ -272,5 +359,137 @@ mod tests {
         assert!(issues
             .iter()
             .any(|i| i.kind == IssueKind::UnknownPluginTarget));
+    }
+
+    // A profile that references a skill only present in the central library.
+    const PROFILE_REFS_LIBRARY: &str = r#"
+        version = 1
+        [profiles.p]
+        skills = ["sql-review"]
+    "#;
+
+    #[test]
+    fn library_skill_ref_validates_without_inline() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let library = library_with_skill(&lib_home, "sql-review");
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(PROFILE_REFS_LIBRARY);
+        // Without context, the library-only ref is unknown (today's behavior).
+        assert!(validate(&m)
+            .iter()
+            .any(|i| i.kind == IssueKind::UnknownSkillRef));
+        // With context, it resolves and validation is clean.
+        assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx).is_empty());
+    }
+
+    #[test]
+    fn unresolved_skill_ref_still_fails_with_context() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let library = Library::default(); // empty — "sql-review" is nowhere
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(PROFILE_REFS_LIBRARY);
+        let issues = validate_with_context(&m, std::iter::empty::<&str>(), &ctx);
+        assert!(issues.iter().any(|i| i.kind == IssueKind::UnknownSkillRef));
+    }
+
+    #[test]
+    fn inline_skill_ref_still_validates_with_context() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        // Empty library: the ref must validate purely via the inline definition.
+        let library = Library::default();
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(
+            r#"
+            version = 1
+            [skills.play]
+            path = "./skills/play"
+            [profiles.p]
+            skills = ["play"]
+            "#,
+        );
+        assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx).is_empty());
+    }
+
+    #[test]
+    fn wildcard_still_validates_with_context() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let library = Library::default();
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(
+            r#"
+            version = 1
+            [profiles.p]
+            skills = ["*"]
+            "#,
+        );
+        assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx).is_empty());
+    }
+
+    #[test]
+    fn broken_library_source_produces_useful_issue() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        // Library entry present by name but with neither `path` nor `git` — its
+        // source cannot be resolved.
+        let mut library = Library::default();
+        library.upsert(LibrarySkill {
+            name: "sql-review".into(),
+            source: "path".into(),
+            path: None,
+            git: None,
+            rev: None,
+            checksum: None,
+            version: None,
+            provenance: None,
+        });
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(PROFILE_REFS_LIBRARY);
+        let issues = validate_with_context(&m, std::iter::empty::<&str>(), &ctx);
+        let issue = issues
+            .iter()
+            .find(|i| i.kind == IssueKind::UnresolvableSkillRef)
+            .expect("expected an UnresolvableSkillRef issue");
+        // The message names the skill and carries the resolver's reason.
+        assert!(issue.message.contains("sql-review"));
+        assert!(issue.message.contains("failed to resolve"));
     }
 }

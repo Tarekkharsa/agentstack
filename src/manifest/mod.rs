@@ -12,4 +12,6 @@ pub use model::{
     glob_match, Hook, Instruction, Manifest, PluginRecipe, Policy, Profile, Server, ServerType,
     Skill, SkillSource,
 };
-pub use validate::{validate, validate_with_targets, Issue, IssueKind};
+pub use validate::{
+    validate, validate_with_context, validate_with_targets, Issue, IssueKind, ValidateCtx,
+};

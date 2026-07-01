@@ -80,6 +80,10 @@ pub enum Command {
     /// home (`~/.agentstack/skills/`), symlinking the originals back.
     Consolidate(ConsolidateArgs),
 
+    /// Manage the central capability library (`~/.agentstack/lib/`) that projects
+    /// reference by name instead of copying files.
+    Lib(LibArgs),
+
     /// Restore a CLI config from its pre-write backup (undo an apply).
     Restore(RestoreArgs),
 
@@ -496,6 +500,73 @@ pub struct ConsolidateArgs {
     /// Just list the skills found on disk; don't move anything.
     #[arg(long)]
     pub list: bool,
+
+    /// Overwrite a library entry that already exists with different content.
+    #[arg(long)]
+    pub replace: bool,
+
+    /// Write the changes (else dry-run/preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibArgs {
+    #[command(subcommand)]
+    pub kind: LibKind,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LibKind {
+    /// Add a skill to the central library from a local path or git source.
+    Add(LibAddArgs),
+    /// List the skills installed in the central library.
+    List,
+    /// Remove a skill from the central library.
+    Remove(LibRemoveArgs),
+    /// Migrate skills from the legacy `~/.agentstack/skills/` home into the
+    /// central library. Copy-first and reversible: originals are left in place.
+    Migrate(LibMigrateArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct LibMigrateArgs {
+    /// Overwrite library entries that already exist with the same name.
+    #[arg(long)]
+    pub replace: bool,
+    /// Write the change (else dry-run/preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibRemoveArgs {
+    /// The library skill name to remove.
+    pub name: String,
+    /// Write the change (else dry-run/preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibAddArgs {
+    /// The name projects will reference this skill by.
+    pub name: String,
+    /// Add from a local skill directory (must contain SKILL.md).
+    #[arg(long, conflicts_with = "git")]
+    pub path: Option<String>,
+    /// Add from a git source URL.
+    #[arg(long, conflicts_with = "path")]
+    pub git: Option<String>,
+    /// Pin a git revision (branch, tag, or commit). Git sources only.
+    #[arg(long, requires = "git")]
+    pub rev: Option<String>,
+    /// Overwrite an existing library entry of the same name.
+    #[arg(long)]
+    pub replace: bool,
+    /// Write the change (else dry-run/preview).
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[derive(Args, Debug)]

@@ -2,6 +2,10 @@
 
 Date: 2026-06-29
 
+Companion plans: [`code-mode.md`](./code-mode.md) (compact runtime tool surface)
+and [`central-store.md`](./central-store.md) (one central capability library that
+projects reference by name instead of copying).
+
 ## North Star
 
 AgentStack should become the portable operating layer for AI coding agents:

@@ -225,6 +225,12 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
 
+    // Reproducibility: profile skill refs resolve to the same content their
+    // agentstack.lock pins. Central-library (and inline path) skills are checked
+    // offline; git-backed refs are skipped (resolution would fetch).
+    println!("{}", "Reproducibility".bold());
+    check_reproducibility(manifest, &ctx.dir, &store, &mut report);
+
     println!("{}", "Plugin recipes".bold());
     let recipe_statuses = crate::plugin_recipes::statuses(manifest, &ctx.registry, &ctx.dir);
     if recipe_statuses.is_empty() {
@@ -376,6 +382,87 @@ fn resolve_headers(
         .iter()
         .map(|(k, v)| (k.clone(), resolve_str(v, resolver)))
         .collect()
+}
+
+/// Check that each profile's active skills resolve to the content their
+/// `agentstack.lock` pins. Drift (checksum/rev mismatch) and broken refs are
+/// errors so `doctor --ci` gates reproducibility; a library skill that is not
+/// locked yet is a warning. Git-backed refs are skipped offline.
+fn check_reproducibility(
+    manifest: &Manifest,
+    dir: &Path,
+    store: &crate::store::Store,
+    report: &mut Report,
+) {
+    use crate::resolve::{
+        active_skill_names, skill_lock_status, skill_ref_is_git, SkillLockStatus, SkillOrigin,
+    };
+    let lock = crate::lock::Lock::load(dir).unwrap_or_default();
+    let library = crate::library::Library::load_default().unwrap_or_default();
+    let lib_home = paths::lib_home();
+
+    let mut seen = std::collections::BTreeSet::new();
+    let mut emitted = 0usize;
+    for pname in manifest.profiles.keys() {
+        for name in active_skill_names(manifest, pname) {
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            if skill_ref_is_git(&name, manifest, &library) {
+                report.line(
+                    Level::Ok,
+                    format!("{name:<20} git-backed · reproducibility not checked offline"),
+                );
+                emitted += 1;
+                continue;
+            }
+            let r = skill_lock_status(&name, manifest, dir, &library, &lib_home, store, &lock);
+            match &r.status {
+                SkillLockStatus::ResolveFailed { error } => {
+                    report.line(Level::Error, format!("{name:<20} broken ref — {error}"));
+                    emitted += 1;
+                }
+                SkillLockStatus::ChecksumDrift { .. } => {
+                    report.line(
+                        Level::Error,
+                        format!(
+                            "{name:<20} content drifted from lock ↳ agentstack use <profile> --write"
+                        ),
+                    );
+                    emitted += 1;
+                }
+                SkillLockStatus::RevDrift { locked, current } => {
+                    report.line(
+                        Level::Error,
+                        format!("{name:<20} rev drifted: locked {locked}, now {current}"),
+                    );
+                    emitted += 1;
+                }
+                SkillLockStatus::MissingLockEntry => {
+                    // Only nag for library skills; inline-unlocked skills are
+                    // already covered by the Skills section above.
+                    if r.origin == Some(SkillOrigin::Library) {
+                        report.line(
+                            Level::Warn,
+                            format!(
+                                "{name:<20} from library, not locked ↳ agentstack use <profile> --write"
+                            ),
+                        );
+                        emitted += 1;
+                    }
+                }
+                SkillLockStatus::Matches => {
+                    if r.origin == Some(SkillOrigin::Library) {
+                        report.line(Level::Ok, format!("{name:<20} library · matches lock"));
+                        emitted += 1;
+                    }
+                }
+            }
+        }
+    }
+    if emitted == 0 {
+        report.line(Level::Ok, "no library-backed profile skills to verify");
+    }
 }
 
 /// Enforce the `[policy]` block: required/forbidden capabilities + source

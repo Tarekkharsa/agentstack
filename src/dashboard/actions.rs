@@ -422,13 +422,20 @@ pub fn set_settings(manifest_dir: Option<&Path>, args: &Value) -> Result<()> {
     Ok(())
 }
 
-/// Consolidate discovered skills into the managed home (`~/.agentstack/skills/`),
-/// symlinking the originals back. `names` empty = all. Returns the count moved.
+/// Consolidate discovered skills into the central library (`~/.agentstack/lib/
+/// skills/`), symlinking the originals back. `names` empty = all. Applies the
+/// change (write). Returns the count consolidated.
 pub fn consolidate_skills(manifest_dir: Option<&Path>, names: &[String]) -> Result<usize> {
     let ctx = crate::commands::load(manifest_dir)?;
     let only = if names.is_empty() { None } else { Some(names) };
-    let report =
-        crate::consolidate::consolidate(&ctx.registry, &ctx.loaded.manifest_path, &ctx.dir, only)?;
+    let report = crate::consolidate::consolidate(
+        &ctx.registry,
+        &ctx.loaded.manifest_path,
+        &ctx.dir,
+        only,
+        false,
+        true,
+    )?;
     Ok(report.len())
 }
 

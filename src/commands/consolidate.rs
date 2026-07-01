@@ -40,31 +40,59 @@ pub fn run(args: &ConsolidateArgs, manifest_dir: Option<&Path>) -> Result<()> {
         Some(args.names.as_slice())
     };
     let registry = Registry::load()?;
-    let report =
-        crate::consolidate::consolidate(&registry, &ctx.loaded.manifest_path, &ctx.dir, only)?;
+    let report = crate::consolidate::consolidate(
+        &registry,
+        &ctx.loaded.manifest_path,
+        &ctx.dir,
+        only,
+        args.replace,
+        args.write,
+    )?;
 
     for c in &report {
         let where_ = c.linked_into.join(", ");
         if c.already_home {
             println!(
-                "{} {} (already in home) ← {where_}",
+                "{} {} (already in library) ← {where_}",
                 "·".dimmed(),
                 c.name.bold()
             );
         } else {
+            let mark = if args.write {
+                "✓".green().to_string()
+            } else {
+                "→".cyan().to_string()
+            };
             println!(
-                "{} {} → {} ← linked back into {where_}",
-                "✓".green(),
+                "{mark} {} → {} ← linked back into {where_}",
                 c.name.bold(),
                 c.home.display().to_string().dimmed()
             );
         }
+        if c.inline_override {
+            println!(
+                "  {} project defines [skills.{}] inline — that keeps overriding the library copy",
+                "⚠".yellow(),
+                c.name
+            );
+        }
     }
+
+    let verb = if args.write {
+        "Consolidated"
+    } else {
+        "Would consolidate"
+    };
     println!(
-        "\nConsolidated {} skill(s) into {}.",
+        "\n{verb} {} skill(s) into {}.",
         report.len(),
-        crate::util::paths::skills_home().display()
+        crate::util::paths::lib_home().join("skills").display()
     );
-    println!("Originals are now symlinks; backups are in ~/.agentstack/backups/skills/.");
+    if args.write {
+        println!("Originals are now symlinks; backups are in ~/.agentstack/backups/skills/.");
+        println!("Skills are referenced by name from the library (`agentstack lib list`).");
+    } else {
+        println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+    }
     Ok(())
 }
