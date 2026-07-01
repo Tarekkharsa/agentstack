@@ -8,6 +8,7 @@ under an isolated `HOME` inside `runtime/` (gitignored).
 
 ```
 as                      # run the binary against the simulated machine
+demo-firstrun.sh        # clean first-run adoption story (see below)
 demo-central-library.sh # end-to-end central-library walkthrough (see below)
 fixtures/               # demo INPUT — not owned by any project, not the library
   central-library/
@@ -28,6 +29,34 @@ runtime/                # (gitignored) simulated machine — created on first ru
 Three distinct things, so the story is unambiguous: **`fixtures/`** = demo input ·
 **`runtime/ashome/lib/`** = the real central library · **`projects/central-demo/`**
 = a manifest only.
+
+## First-run demo
+
+The clean adoption story on a *fresh machine*, fully fenced. It simulates a dev
+who already runs Claude Code with one MCP server and adopts agentstack to spread
+it across every other CLI:
+
+```sh
+./demo-firstrun.sh
+```
+
+Unlike `./as`, this script builds its **own** throwaway sandbox under
+`runtime/firstrun/` and wipes it each run, so it is always a genuine first run
+(never the pre-seeded `runtime/home`). It walks the core loop end to end —
+`init → bootstrap → doctor --ci → apply → apply --write` — then proves the one
+imported server landed, correctly translated, in all five CLI configs, and that
+a re-run is a boring no-op with `doctor --ci` still green. The header comments
+carry an `asciinema`/`vhs` recipe for turning it into a GIF.
+
+To record it with [VHS](https://github.com/charmbracelet/vhs):
+
+```sh
+vhs demo-firstrun.tape
+```
+
+The GIF is written to `../docs/firstrun.gif`, the path embedded in the product
+README. Review its size before committing. For an asciinema workflow, use the
+commands in the script header.
 
 ## Central library demo
 
