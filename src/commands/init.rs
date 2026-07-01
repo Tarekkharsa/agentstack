@@ -159,15 +159,32 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
         );
     }
 
-    // Lift inline secrets.
+    // Lift inline secrets. This is the moment that matters: plaintext tokens
+    // were sitting in live CLI configs — show exactly where each one was.
     let lifted = lift_secrets(&mut servers);
     if !lifted.is_empty() {
-        let names: Vec<&str> = lifted.iter().map(|l| l.reference.as_str()).collect();
         println!(
-            "{}  Lifted {} inline secret(s) → {}",
+            "{}  {} — lifted to secure references:",
             "🔐".dimmed(),
-            lifted.len(),
-            names.join(", ")
+            format!(
+                "Found {} plaintext token(s) in your live CLI configs",
+                lifted.len()
+            )
+            .yellow()
+            .bold()
+        );
+        let width = lifted.iter().map(|l| l.reference.len()).max().unwrap_or(0);
+        for l in &lifted {
+            println!(
+                "      {} {}  {}",
+                format!("${{{}}}", l.reference).green(),
+                " ".repeat(width.saturating_sub(l.reference.len())),
+                l.origin.dimmed()
+            );
+        }
+        println!(
+            "      {}",
+            "The manifest stays commit-safe; real values resolve locally at apply time.".dimmed()
         );
     }
 
