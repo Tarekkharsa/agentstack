@@ -2,10 +2,12 @@
 
 Date: 2026-07-01
 
-Status: proposal (design notes, not yet implemented)
+Status: Phase 1 complete; Phase 1b proposed
 
 Companion to [`portable-agent-runtime-vision.md`](./portable-agent-runtime-vision.md)
-and [`code-mode.md`](./code-mode.md). This plan does not replace either; it moves
+and [`code-mode.md`](./code-mode.md), and the foundation for
+[`provider-import.md`](./provider-import.md) (the "one command" that imports every
+provider's surfaces into this store). This plan does not replace either; it moves
 the **physical home** of capabilities from per-repo to a single central library,
 and defines how projects pull from it — declaratively (names in config) and
 dynamically (code-mode search/execute).
