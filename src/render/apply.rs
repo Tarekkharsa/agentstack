@@ -15,7 +15,7 @@ use crate::adapter::descriptor::Format;
 use crate::adapter::{render_server, AdapterDescriptor, Registry};
 use crate::library::Library;
 use crate::manifest::{Manifest, Server};
-use crate::resolve::resolve_server;
+use crate::resolve::{resolve_server, ResolvedServer};
 use crate::scope::Scope;
 use crate::secret::Resolver;
 use crate::util::diff;
@@ -222,24 +222,41 @@ fn selection_names(manifest: &Manifest, selection: &Selection) -> Result<Vec<Str
     }
 }
 
-/// The effective server definitions for a selection: `name -> Server`, with
-/// inline manifest servers winning over central-library servers (via
-/// [`resolve_server`]). `${REF}` placeholders are preserved verbatim — secret
-/// resolution is deferred to [`plan_target_with_servers`] at render time. An
-/// unresolved ref is a hard error, so rendering fails clearly before any write.
+/// Resolve a selection's server refs to full [`ResolvedServer`]s (definition +
+/// origin + provenance + digest), inline-first then central library. An
+/// unresolved ref is a hard error, so activation/render fails before any write.
+/// `${REF}`s are preserved verbatim; no secret is resolved here.
+pub fn resolve_active_servers(
+    manifest: &Manifest,
+    library: &Library,
+    lib_home: &Path,
+    selection: &Selection,
+) -> Result<Vec<ResolvedServer>> {
+    let mut out = Vec::new();
+    for name in selection_names(manifest, selection)? {
+        out.push(
+            resolve_server(manifest, library, lib_home, &name)
+                .with_context(|| format!("resolving server '{name}' for rendering"))?,
+        );
+    }
+    Ok(out)
+}
+
+/// The effective server definitions for a selection: `name -> Server`, inline
+/// winning over the central library. `${REF}` placeholders are preserved; secret
+/// resolution is deferred to [`plan_target_with_servers`] at render time.
 pub fn effective_servers(
     manifest: &Manifest,
     library: &Library,
     lib_home: &Path,
     selection: &Selection,
 ) -> Result<IndexMap<String, Server>> {
-    let mut out = IndexMap::new();
-    for name in selection_names(manifest, selection)? {
-        let resolved = resolve_server(manifest, library, lib_home, &name)
-            .with_context(|| format!("resolving server '{name}' for rendering"))?;
-        out.insert(name, resolved.server);
-    }
-    Ok(out)
+    Ok(
+        resolve_active_servers(manifest, library, lib_home, selection)?
+            .into_iter()
+            .map(|r| (r.name, r.server))
+            .collect(),
+    )
 }
 
 /// Decide which target ids to act on: explicit `--target` wins, else the

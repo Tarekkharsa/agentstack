@@ -5,15 +5,16 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use owo_colors::OwoColorize;
 
 use crate::cli::UseArgs;
 use crate::library::Library;
-use crate::lock::{Lock, LockedSkill};
+use crate::lock::{Lock, LockedServer, LockedSkill};
 use crate::manifest::Manifest;
 use crate::render::skills;
 use crate::render::{resolve_targets, Selection};
-use crate::resolve::{ResolveMode, ResolvedSkill, SkillOrigin};
+use crate::resolve::{ResolveMode, ResolvedServer, ResolvedSkill, ServerOrigin, SkillOrigin};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 
@@ -58,10 +59,16 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         .collect();
 
     // Resolve the profile's server refs (inline-first, then central library)
-    // into an effective definition map, once for all targets. Fails clearly
-    // before any target write if a ref resolves nowhere. `${REF}`s stay intact;
-    // they are resolved per-target at render time, not here.
-    let server_map = crate::render::effective_servers(manifest, &library, &lib_home, &selection)?;
+    // once for all targets. Fails clearly before any target write if a ref
+    // resolves nowhere. `${REF}`s stay intact; they are resolved per-target at
+    // render time, not here. The resolved list is kept for lock recording; the
+    // `name -> Server` map drives rendering.
+    let resolved_servers =
+        crate::render::resolve_active_servers(manifest, &library, &lib_home, &selection)?;
+    let server_map: IndexMap<String, crate::manifest::Server> = resolved_servers
+        .iter()
+        .map(|r| (r.name.clone(), r.server.clone()))
+        .collect();
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     println!(
@@ -168,9 +175,17 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     if args.write {
         state.save()?;
-        // Record each activated skill's resolved digest so a fresh checkout
-        // resolves the same content (and `doctor`/`explain` can flag drift).
-        record_lock(&ctx.dir, &resolved_skills, manifest, &library)?;
+        // Record each activated skill + server's resolved digest so a fresh
+        // checkout resolves the same content (and `doctor`/`explain` can flag
+        // drift). Server locks store the definition digest only — never a
+        // resolved secret value.
+        record_lock(
+            &ctx.dir,
+            &resolved_skills,
+            &resolved_servers,
+            manifest,
+            &library,
+        )?;
         println!(
             "\n{} activated '{}' on {wrote} target(s).",
             "✓".green(),
@@ -236,18 +251,31 @@ fn resolve_active_skills(
     Ok(out)
 }
 
-/// Write each resolved skill's `name`/`source`/`rev`/`checksum` into the
-/// project `agentstack.lock`, so the reference resolves to the same content on
-/// another machine. Existing lock entries for other skills are preserved.
+/// Pin each resolved skill + server into the project `agentstack.lock` so the
+/// refs resolve to the same content on another machine. Servers lock the
+/// **definition digest** only — never a resolved secret value. Existing lock
+/// entries for other names are preserved.
 fn record_lock(
     dir: &Path,
-    resolved: &[ResolvedSkill],
+    skills: &[ResolvedSkill],
+    servers: &[ResolvedServer],
     manifest: &Manifest,
     library: &Library,
 ) -> Result<()> {
     let mut lock = Lock::load(dir)?;
-    for r in resolved {
+    for r in skills {
         lock.upsert(locked_from_resolved(r, manifest, library));
+    }
+    for r in servers {
+        lock.upsert_server(LockedServer {
+            name: r.name.clone(),
+            source: match r.origin {
+                ServerOrigin::Inline => "inline",
+                ServerOrigin::Library => "library",
+            }
+            .to_string(),
+            checksum: r.checksum.clone(),
+        });
     }
     lock.save(dir)
 }
@@ -531,7 +559,7 @@ mod tests {
         )
         .unwrap();
 
-        record_lock(proj.path(), &resolved, &manifest, &library).unwrap();
+        record_lock(proj.path(), &resolved, &[], &manifest, &library).unwrap();
 
         // The lock now pins the library skill's resolved digest.
         let lock = Lock::load(proj.path()).unwrap();
@@ -579,10 +607,52 @@ mod tests {
             ResolveMode::Fetch,
         )
         .unwrap();
-        record_lock(proj.path(), &resolved, &manifest, &library).unwrap();
+        record_lock(proj.path(), &resolved, &[], &manifest, &library).unwrap();
 
         let lock = Lock::load(proj.path()).unwrap();
         assert!(lock.get("other").is_some(), "unrelated entry preserved");
         assert!(lock.get("sql-review").is_some(), "new entry added");
+    }
+
+    #[test]
+    fn record_lock_pins_server_definition_digest() {
+        let proj = assert_fs::TempDir::new().unwrap();
+
+        // A resolved library server carrying a ${REF} — its definition digest is
+        // what gets locked (never the secret value).
+        let resolved_server = ResolvedServer {
+            name: "kibana".into(),
+            origin: ServerOrigin::Library,
+            server: toml::from_str(
+                "type = \"http\"\nurl = \"https://x/mcp\"\nheaders = { Authorization = \"Bearer ${TOKEN}\" }\n",
+            )
+            .unwrap(),
+            checksum: "cafebabe".into(),
+            provenance: Some("consolidated:codex".into()),
+        };
+
+        let manifest: Manifest = toml::from_str("version = 1").unwrap();
+        let library = Library::default();
+        record_lock(
+            proj.path(),
+            &[],
+            std::slice::from_ref(&resolved_server),
+            &manifest,
+            &library,
+        )
+        .unwrap();
+
+        let lock = Lock::load(proj.path()).unwrap();
+        let entry = lock
+            .get_server("kibana")
+            .expect("server lock entry written");
+        assert_eq!(entry.source, "library");
+        assert_eq!(entry.checksum, "cafebabe");
+        // The lock holds only name/source/checksum — never a secret value.
+        let text = std::fs::read_to_string(Lock::path(proj.path())).unwrap();
+        assert!(
+            !text.contains("Bearer"),
+            "no definition body or secret in lock"
+        );
     }
 }

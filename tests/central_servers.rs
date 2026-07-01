@@ -8,7 +8,7 @@ use std::fs;
 use std::sync::Mutex;
 
 use agentstack::cli::ApplyArgs;
-use agentstack::commands::apply;
+use agentstack::commands::{apply, explain::explain_text};
 use agentstack::library::{Library, LibraryServer};
 use agentstack::scope::Scope;
 
@@ -124,6 +124,34 @@ fn inline_server_overrides_library_in_apply() {
     );
 
     std::env::remove_var("KIBANA_TOKEN");
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
+#[test]
+fn explain_reports_library_server_origin_and_lock() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    install_library_server(&home, "https://central-kibana/mcp");
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(proj.join("agentstack.toml"), "version = 1\n").unwrap();
+
+    // A library-only server explains: origin, provenance, and (unlocked) status.
+    let out = explain_text("kibana", Some(&proj)).unwrap();
+    assert!(out.contains("MCP server"));
+    assert!(out.contains("central library"), "names its origin: {out}");
+    assert!(out.contains("consolidated:codex"), "shows provenance");
+    assert!(out.contains("not locked"), "shows lockfile status");
+    // The ${REF} stays a placeholder in explain output — never a resolved value.
+    assert!(out.contains("${KIBANA_TOKEN}"));
+
     std::env::remove_var("AGENTSTACK_HOME");
     std::env::remove_var("HOME");
 }

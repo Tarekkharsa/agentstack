@@ -11,8 +11,8 @@ pub mod settings;
 pub mod skills;
 
 pub use apply::{
-    effective_servers, plan_target, plan_target_with_servers, resolve_targets, Selection,
-    TargetPlan,
+    effective_servers, plan_target, plan_target_with_servers, resolve_active_servers,
+    resolve_targets, Selection, TargetPlan,
 };
 pub use hooks::{plan_hooks, HooksPlan};
 pub use settings::{plan_settings, SettingsPlan};

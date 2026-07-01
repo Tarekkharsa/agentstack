@@ -23,12 +23,12 @@ pub fn run(args: &ExplainArgs, manifest_dir: Option<&Path>) -> Result<()> {
 pub fn explain_text(name: &str, manifest_dir: Option<&Path>) -> Result<String> {
     let ctx = crate::commands::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
-    let in_library = crate::library::Library::load_default()
-        .map(|l| l.get(name).is_some())
-        .unwrap_or(false);
-    if manifest.servers.contains_key(name) {
+    let library = crate::library::Library::load_default().unwrap_or_default();
+    let in_library_skill = library.get(name).is_some();
+    let in_library_server = library.get_server(name).is_some();
+    if manifest.servers.contains_key(name) || in_library_server {
         Ok(explain_server(name, &ctx))
-    } else if manifest.skills.contains_key(name) || in_library {
+    } else if manifest.skills.contains_key(name) || in_library_skill {
         Ok(explain_skill(name, &ctx))
     } else {
         anyhow::bail!(
@@ -39,13 +39,30 @@ pub fn explain_text(name: &str, manifest_dir: Option<&Path>) -> Result<String> {
 
 fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
     let manifest = &ctx.loaded.manifest;
-    let server = &manifest.servers[name];
+    let library = crate::library::Library::load_default().unwrap_or_default();
+    let lib_home = crate::util::paths::lib_home();
+
+    // The definition is inline, or (failing that) from the central library.
+    let server = match crate::resolve::resolve_server(manifest, &library, &lib_home, name) {
+        Ok(r) => r.server,
+        Err(e) => {
+            let mut o = String::new();
+            line(&mut o, &format!("{name}  (MCP server)\n"));
+            kv(&mut o, "Source", "central library");
+            kv(&mut o, "Status", &format!("⚠ unresolved — {e}"));
+            return o;
+        }
+    };
+
     let mut o = String::new();
     let transport = match server.server_type {
         ServerType::Http => "http",
         ServerType::Stdio => "stdio",
     };
     line(&mut o, &format!("{name}  (MCP server · {transport})\n"));
+
+    // Where the definition resolves from + its lockfile status.
+    explain_server_lock(&mut o, name, manifest, ctx);
 
     // Provenance.
     match crate::provider::resolve(name) {
@@ -397,6 +414,42 @@ fn origin_label(origin: crate::resolve::SkillOrigin) -> &'static str {
         crate::resolve::SkillOrigin::Inline => "inline (this project)",
         crate::resolve::SkillOrigin::Library => "central library",
     }
+}
+
+/// Append where a server resolves from + its lockfile status. Neutral wording;
+/// drift is noted with ⚠, not treated as an error (severity lives in `doctor`).
+/// Only the definition digest is compared — `${REF}`s stay placeholders.
+fn explain_server_lock(
+    o: &mut String,
+    name: &str,
+    manifest: &crate::manifest::Manifest,
+    ctx: &crate::commands::Context,
+) {
+    use crate::resolve::{ServerLockStatus as S, ServerOrigin};
+    let lock = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
+    let library = crate::library::Library::load_default().unwrap_or_default();
+    let lib_home = crate::util::paths::lib_home();
+    let r = crate::resolve::server_lock_status(name, manifest, &library, &lib_home, &lock);
+    if let Some(origin) = r.origin {
+        kv(
+            o,
+            "Resolves",
+            match origin {
+                ServerOrigin::Inline => "inline (this project)",
+                ServerOrigin::Library => "central library",
+            },
+        );
+    }
+    if let Some(p) = &r.provenance {
+        kv(o, "Provenance", p);
+    }
+    let msg = match &r.status {
+        S::Matches => "matches lock".to_string(),
+        S::MissingLockEntry => "not locked ↳ agentstack use <profile> --write".to_string(),
+        S::ChecksumDrift { .. } => "⚠ definition drifted from lock".to_string(),
+        S::ResolveFailed { error } => format!("⚠ unresolved — {error}"),
+    };
+    kv(o, "Lock", &msg);
 }
 
 /* ---------- helpers ---------- */

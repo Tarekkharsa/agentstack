@@ -15,6 +15,8 @@ pub struct Lock {
     pub version: u32,
     #[serde(default, rename = "skill")]
     pub skills: Vec<LockedSkill>,
+    #[serde(default, rename = "server")]
+    pub servers: Vec<LockedServer>,
 }
 
 impl Default for Lock {
@@ -22,8 +24,20 @@ impl Default for Lock {
         Lock {
             version: 1,
             skills: Vec::new(),
+            servers: Vec::new(),
         }
     }
+}
+
+/// A pinned MCP server: the SHA-256 of its **definition** (a `${REF}`-only
+/// server table — never resolved secret values, never a provider-specific render
+/// shape), so a fresh checkout resolves the same server. `source` is `"inline"`
+/// or `"library"`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedServer {
+    pub name: String,
+    pub source: String,
+    pub checksum: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -86,6 +100,20 @@ impl Lock {
     pub fn retain_names(&mut self, keep: &[String]) {
         self.skills.retain(|s| keep.contains(&s.name));
     }
+
+    pub fn get_server(&self, name: &str) -> Option<&LockedServer> {
+        self.servers.iter().find(|s| s.name == name)
+    }
+
+    /// Insert or replace a server entry, keeping entries sorted by name.
+    pub fn upsert_server(&mut self, entry: LockedServer) {
+        if let Some(existing) = self.servers.iter_mut().find(|s| s.name == entry.name) {
+            *existing = entry;
+        } else {
+            self.servers.push(entry);
+        }
+        self.servers.sort_by(|a, b| a.name.cmp(&b.name));
+    }
 }
 
 #[cfg(test)]
@@ -117,5 +145,27 @@ mod tests {
         let parsed: Lock = toml::from_str(&text).unwrap();
         assert_eq!(parsed.skills, lock.skills);
         assert!(text.contains("[[skill]]"));
+    }
+
+    #[test]
+    fn server_upsert_sorts_and_roundtrips() {
+        let mut lock = Lock::default();
+        lock.upsert_server(LockedServer {
+            name: "kibana".into(),
+            source: "library".into(),
+            checksum: "cafe".into(),
+        });
+        lock.upsert_server(LockedServer {
+            name: "figma".into(),
+            source: "inline".into(),
+            checksum: "beef".into(),
+        });
+        assert_eq!(lock.servers[0].name, "figma", "sorted by name");
+        assert_eq!(lock.get_server("kibana").unwrap().source, "library");
+
+        let text = toml::to_string_pretty(&lock).unwrap();
+        assert!(text.contains("[[server]]"));
+        let parsed: Lock = toml::from_str(&text).unwrap();
+        assert_eq!(parsed.servers, lock.servers);
     }
 }

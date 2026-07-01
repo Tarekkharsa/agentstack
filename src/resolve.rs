@@ -244,6 +244,72 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// How a server's currently-resolved **definition** compares to its
+/// `agentstack.lock` pin. No rev/offline variants — servers are local
+/// definitions, not fetched sources.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerLockStatus {
+    /// The resolved definition digest matches the locked one.
+    Matches,
+    /// The server resolved but has no entry in the lockfile yet.
+    MissingLockEntry,
+    /// The resolved definition digest differs from the locked one.
+    ChecksumDrift { locked: String, current: String },
+    /// The reference could not be resolved (unknown, or a broken/missing
+    /// library definition file).
+    ResolveFailed { error: String },
+}
+
+/// A neutral, render-agnostic lock/drift status for one server. `doctor` maps it
+/// to severity; `explain` renders it as origin/provenance/lock detail.
+#[derive(Debug, Clone)]
+pub struct ServerLockReport {
+    pub name: String,
+    /// `None` when resolution failed.
+    pub origin: Option<ServerOrigin>,
+    pub provenance: Option<String>,
+    pub status: ServerLockStatus,
+}
+
+/// Resolve one server by name and compare its definition digest to the lockfile.
+/// Inline-first, then central library — the same order as activation.
+pub fn server_lock_status(
+    name: &str,
+    manifest: &Manifest,
+    library: &Library,
+    lib_home: &Path,
+    lock: &Lock,
+) -> ServerLockReport {
+    match resolve_server(manifest, library, lib_home, name) {
+        Err(e) => ServerLockReport {
+            name: name.to_string(),
+            origin: None,
+            provenance: None,
+            status: ServerLockStatus::ResolveFailed {
+                error: e.to_string(),
+            },
+        },
+        Ok(resolved) => {
+            let status = match lock.get_server(name) {
+                None => ServerLockStatus::MissingLockEntry,
+                Some(entry) if entry.checksum != resolved.checksum => {
+                    ServerLockStatus::ChecksumDrift {
+                        locked: entry.checksum.clone(),
+                        current: resolved.checksum.clone(),
+                    }
+                }
+                Some(_) => ServerLockStatus::Matches,
+            };
+            ServerLockReport {
+                name: name.to_string(),
+                origin: Some(resolved.origin),
+                provenance: resolved.provenance,
+                status,
+            }
+        }
+    }
+}
+
 /// Expand a profile's skill refs to active skill names, applying the same
 /// wildcard rule as activation (`use_profile`): `"*"` means the manifest's inline
 /// skills only — it does not pull in central-library skills.
@@ -956,5 +1022,103 @@ mod tests {
         let r = resolve_server(&manifest, &library, lib_home.path(), "kibana").unwrap();
         assert_eq!(r.checksum, sha256_hex(content.as_bytes()));
         assert_eq!(r.checksum.len(), 64);
+    }
+
+    // ---------- server lock/drift ----------
+
+    fn server_lock(name: &str, checksum: &str) -> Lock {
+        let mut lock = Lock::default();
+        lock.upsert_server(crate::lock::LockedServer {
+            name: name.into(),
+            source: "library".into(),
+            checksum: checksum.into(),
+        });
+        lock
+    }
+
+    #[test]
+    fn server_lock_matches_and_missing() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let manifest = empty_manifest();
+        let (library, _) = library_with_server(&lib_home, "kibana", "https://x/mcp");
+        let resolved = resolve_server(&manifest, &library, lib_home.path(), "kibana").unwrap();
+
+        // Locked at the current digest → Matches.
+        let lock = server_lock("kibana", &resolved.checksum);
+        let r = server_lock_status("kibana", &manifest, &library, lib_home.path(), &lock);
+        assert_eq!(r.status, ServerLockStatus::Matches);
+        assert_eq!(r.origin, Some(ServerOrigin::Library));
+        assert_eq!(r.provenance.as_deref(), Some("consolidated:codex"));
+
+        // No entry → MissingLockEntry.
+        let r2 = server_lock_status(
+            "kibana",
+            &manifest,
+            &library,
+            lib_home.path(),
+            &Lock::default(),
+        );
+        assert_eq!(r2.status, ServerLockStatus::MissingLockEntry);
+    }
+
+    #[test]
+    fn server_definition_change_is_checksum_drift() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let manifest = empty_manifest();
+        let (library, _) = library_with_server(&lib_home, "kibana", "https://x/mcp");
+        // Lock a stale digest, then change the definition file underneath it.
+        let lock = server_lock("kibana", "staledigest");
+        lib_home
+            .child("servers/kibana.toml")
+            .write_str("type = \"http\"\nurl = \"https://changed/mcp\"\n")
+            .unwrap();
+
+        let r = server_lock_status("kibana", &manifest, &library, lib_home.path(), &lock);
+        match r.status {
+            ServerLockStatus::ChecksumDrift { locked, .. } => assert_eq!(locked, "staledigest"),
+            other => panic!("expected ChecksumDrift, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn broken_library_server_reports_resolve_failed() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let manifest = empty_manifest();
+        // Indexed by name, but the definition file is missing.
+        let mut library = Library::default();
+        library.upsert_server(LibraryServer {
+            name: "kibana".into(),
+            checksum: None,
+            version: None,
+            provenance: None,
+        });
+
+        let r = server_lock_status(
+            "kibana",
+            &manifest,
+            &library,
+            lib_home.path(),
+            &Lock::default(),
+        );
+        assert!(matches!(r.status, ServerLockStatus::ResolveFailed { .. }));
+        assert_eq!(r.origin, None);
+    }
+
+    #[test]
+    fn inline_server_lock_status_reports_inline_origin() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        // Inline "kibana" overrides a same-named library server.
+        let manifest = manifest_with_inline_server("kibana", "https://inline/mcp");
+        let (library, _) = library_with_server(&lib_home, "kibana", "https://central/mcp");
+
+        let r = server_lock_status(
+            "kibana",
+            &manifest,
+            &library,
+            lib_home.path(),
+            &Lock::default(),
+        );
+        assert_eq!(r.origin, Some(ServerOrigin::Inline));
+        assert_eq!(r.provenance, None, "inline has no library provenance");
     }
 }

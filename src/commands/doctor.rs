@@ -233,6 +233,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // offline; git-backed refs are skipped (resolution would fetch).
     println!("{}", "Reproducibility".bold());
     check_reproducibility(manifest, &ctx.dir, &store, &mut report);
+    check_server_reproducibility(manifest, &ctx.dir, &mut report);
 
     println!("{}", "Plugin recipes".bold());
     let recipe_statuses = crate::plugin_recipes::statuses(manifest, &ctx.registry, &ctx.dir);
@@ -476,6 +477,49 @@ fn check_reproducibility(
     }
     if emitted == 0 {
         report.line(Level::Ok, "no library-backed profile skills to verify");
+    }
+}
+
+/// Check that each profile's server refs resolve to the definition their
+/// `agentstack.lock` pins. Definition drift and broken refs are errors (so
+/// `doctor --ci` gates reproducibility); a library server not locked yet is a
+/// warning. Only the definition digest is compared — never a resolved secret.
+fn check_server_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Report) {
+    use crate::resolve::{server_lock_status, ServerLockStatus, ServerOrigin};
+    let lock = crate::lock::Lock::load(dir).unwrap_or_default();
+    let library = crate::library::Library::load_default().unwrap_or_default();
+    let lib_home = paths::lib_home();
+
+    let mut seen = std::collections::BTreeSet::new();
+    for profile in manifest.profiles.values() {
+        for name in &profile.servers {
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            let r = server_lock_status(name, manifest, &library, &lib_home, &lock);
+            match &r.status {
+                ServerLockStatus::ResolveFailed { error } => {
+                    report.line(Level::Error, format!("{name:<20} broken server ref — {error}"));
+                }
+                ServerLockStatus::ChecksumDrift { .. } => report.line(
+                    Level::Error,
+                    format!("{name:<20} server definition drifted from lock ↳ agentstack use <profile> --write"),
+                ),
+                ServerLockStatus::MissingLockEntry => {
+                    if r.origin == Some(ServerOrigin::Library) {
+                        report.line(
+                            Level::Warn,
+                            format!("{name:<20} library server, not locked ↳ agentstack use <profile> --write"),
+                        );
+                    }
+                }
+                ServerLockStatus::Matches => {
+                    if r.origin == Some(ServerOrigin::Library) {
+                        report.line(Level::Ok, format!("{name:<20} library server · matches lock"));
+                    }
+                }
+            }
+        }
     }
 }
 
