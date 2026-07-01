@@ -67,6 +67,13 @@ pub fn lib_skills_home() -> PathBuf {
     lib_home().join("skills")
 }
 
+/// `~/.agentstack/lib/servers` — reusable MCP server definitions in the central
+/// library (Phase 1b), referenced by name from project manifests. Each
+/// `<name>.toml` holds a server definition with `${REF}` secrets only.
+pub fn lib_servers_home() -> PathBuf {
+    lib_home().join("servers")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,6 +96,10 @@ mod tests {
         std::env::set_var("AGENTSTACK_HOME", "/tmp/as-home");
         assert_eq!(lib_home(), PathBuf::from("/tmp/as-home/lib"));
         assert_eq!(lib_skills_home(), PathBuf::from("/tmp/as-home/lib/skills"));
+        assert_eq!(
+            lib_servers_home(),
+            PathBuf::from("/tmp/as-home/lib/servers")
+        );
         // lib/ lives under the same home as the other managed stores.
         assert_eq!(lib_home(), agentstack_home().join("lib"));
         std::env::remove_var("AGENTSTACK_HOME");

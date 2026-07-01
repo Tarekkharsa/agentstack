@@ -7,10 +7,10 @@
 //! `skills = ["name"]` reference to a library entry is the resolver's job, added
 //! on top of this in a later step.
 //!
-//! Phase 1 is skills-only; `servers`/`hooks` tables are intentionally not modeled
-//! yet. The file is an index, not a scan target: entries carry provenance and an
-//! integrity digest so `lib list`, `explain`, and drift checks have metadata to
-//! work with.
+//! Skills ship in Phase 1; servers are modeled here for Phase 1b (the resolver
+//! wiring lands in a later step); `hooks` remain future work. The file is an
+//! index, not a scan target: entries carry provenance and an integrity digest so
+//! `lib list`, `explain`, and drift checks have metadata to work with.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,6 +29,10 @@ pub struct Library {
     /// Skills available in the central library, keyed by unique `name`.
     #[serde(default, rename = "skill")]
     pub skills: Vec<LibrarySkill>,
+    /// MCP servers available in the central library, keyed by unique `name`
+    /// (Phase 1b). The definition lives at `<lib_home>/servers/<name>.toml`.
+    #[serde(default, rename = "server")]
+    pub servers: Vec<LibraryServer>,
 }
 
 impl Default for Library {
@@ -36,6 +40,7 @@ impl Default for Library {
         Library {
             version: 1,
             skills: Vec::new(),
+            servers: Vec::new(),
         }
     }
 }
@@ -69,6 +74,26 @@ pub struct LibrarySkill {
     pub version: Option<String>,
     /// Where the entry came from (e.g. `"consolidated"`, `"catalog:<pack>"`,
     /// `"manual"`). Informational; surfaced by `explain`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
+}
+
+/// One MCP server installed in the central library (Phase 1b). The reusable
+/// definition — a serialized `manifest::Server` with `${REF}` secrets only,
+/// never plaintext — lives at `<lib_home>/servers/<name>.toml`; this index entry
+/// records its identity, integrity digest, and provenance.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LibraryServer {
+    /// The name a project references this server by. Unique within the library.
+    pub name: String,
+    /// SHA-256 of the server definition file (`servers/<name>.toml`). Optional
+    /// until the entry has been written and hashed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
+    /// Optional declared version for the entry (informational).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Where the entry came from (e.g. `"consolidated:<provider>"`, `"manual"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<String>,
 }
@@ -126,6 +151,28 @@ impl Library {
         let before = self.skills.len();
         self.skills.retain(|s| s.name != name);
         self.skills.len() != before
+    }
+
+    /// Look up a library server by the name a project references it by.
+    pub fn get_server(&self, name: &str) -> Option<&LibraryServer> {
+        self.servers.iter().find(|s| s.name == name)
+    }
+
+    /// Insert or replace a server entry, keeping entries sorted by name.
+    pub fn upsert_server(&mut self, entry: LibraryServer) {
+        if let Some(existing) = self.servers.iter_mut().find(|s| s.name == entry.name) {
+            *existing = entry;
+        } else {
+            self.servers.push(entry);
+        }
+        self.servers.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    /// Remove a server entry by name. Returns whether anything was removed.
+    pub fn remove_server(&mut self, name: &str) -> bool {
+        let before = self.servers.len();
+        self.servers.retain(|s| s.name != name);
+        self.servers.len() != before
     }
 }
 
@@ -197,5 +244,59 @@ mod tests {
         lib.upsert(skill("a"));
         assert!(lib.remove("a"));
         assert!(!lib.remove("a"));
+    }
+
+    // ---------- servers (Phase 1b) ----------
+
+    fn server(name: &str) -> LibraryServer {
+        LibraryServer {
+            name: name.into(),
+            checksum: Some("cafe".into()),
+            version: None,
+            provenance: Some("consolidated:codex".into()),
+        }
+    }
+
+    #[test]
+    fn server_upsert_sorts_and_replaces() {
+        let mut lib = Library::default();
+        lib.upsert_server(server("kibana"));
+        lib.upsert_server(server("figma"));
+        assert_eq!(lib.servers[0].name, "figma");
+        // Replace, not duplicate.
+        let mut updated = server("kibana");
+        updated.version = Some("2".into());
+        lib.upsert_server(updated);
+        assert_eq!(lib.servers.len(), 2);
+        assert_eq!(
+            lib.get_server("kibana").unwrap().version.as_deref(),
+            Some("2")
+        );
+    }
+
+    #[test]
+    fn server_remove_reports_whether_present() {
+        let mut lib = Library::default();
+        lib.upsert_server(server("kibana"));
+        assert!(lib.remove_server("kibana"));
+        assert!(!lib.remove_server("kibana"));
+    }
+
+    #[test]
+    fn skills_and_servers_roundtrip_together() {
+        let dir = assert_fs::TempDir::new().unwrap();
+        let mut lib = Library::default();
+        lib.upsert(skill("sql-review"));
+        lib.upsert_server(server("kibana"));
+        lib.save(dir.path()).unwrap();
+
+        let text = fs::read_to_string(Library::path(dir.path())).unwrap();
+        assert!(text.contains("[[skill]]"));
+        assert!(text.contains("[[server]]"));
+
+        let parsed = Library::load(dir.path()).unwrap();
+        assert_eq!(parsed, lib);
+        assert!(parsed.get_server("kibana").is_some());
+        assert!(parsed.get("sql-review").is_some());
     }
 }
