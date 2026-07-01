@@ -387,7 +387,8 @@ fn resolve_headers(
 /// Check that each profile's active skills resolve to the content their
 /// `agentstack.lock` pins. Drift (checksum/rev mismatch) and broken refs are
 /// errors so `doctor --ci` gates reproducibility; a library skill that is not
-/// locked yet is a warning. Git-backed refs are skipped offline.
+/// locked yet is a warning. Resolution is offline (`NoFetch`): a git source not
+/// cached locally is reported, not fetched.
 fn check_reproducibility(
     manifest: &Manifest,
     dir: &Path,
@@ -395,7 +396,7 @@ fn check_reproducibility(
     report: &mut Report,
 ) {
     use crate::resolve::{
-        active_skill_names, skill_lock_status, skill_ref_is_git, SkillLockStatus, SkillOrigin,
+        active_skill_names, skill_lock_status, ResolveMode, SkillLockStatus, SkillOrigin,
     };
     let lock = crate::lock::Lock::load(dir).unwrap_or_default();
     let library = crate::library::Library::load_default().unwrap_or_default();
@@ -408,18 +409,28 @@ fn check_reproducibility(
             if !seen.insert(name.clone()) {
                 continue;
             }
-            if skill_ref_is_git(&name, manifest, &library) {
-                report.line(
-                    Level::Ok,
-                    format!("{name:<20} git-backed · reproducibility not checked offline"),
-                );
-                emitted += 1;
-                continue;
-            }
-            let r = skill_lock_status(&name, manifest, dir, &library, &lib_home, store, &lock);
+            let r = skill_lock_status(
+                &name,
+                manifest,
+                dir,
+                &library,
+                &lib_home,
+                store,
+                &lock,
+                ResolveMode::NoFetch,
+            );
             match &r.status {
                 SkillLockStatus::ResolveFailed { error } => {
                     report.line(Level::Error, format!("{name:<20} broken ref — {error}"));
+                    emitted += 1;
+                }
+                SkillLockStatus::NotAvailableOffline { .. } => {
+                    // Not a failure — a git body just isn't cached; can't verify
+                    // reproducibility offline. Warn, never gate.
+                    report.line(
+                        Level::Warn,
+                        format!("{name:<20} git-backed, not cached — not checked offline"),
+                    );
                     emitted += 1;
                 }
                 SkillLockStatus::ChecksumDrift { .. } => {

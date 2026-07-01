@@ -85,6 +85,44 @@ impl Store {
         }
     }
 
+    /// Resolve a skill to a local directory **without any network access**.
+    /// Path sources resolve as usual. Git sources resolve to the store clone
+    /// *only if it already exists* (reporting its current HEAD); an
+    /// un-cached git source yields `Ok(None)` so callers can report it as
+    /// unavailable offline rather than fetching.
+    pub fn resolve_local(&self, skill: &Skill, manifest_dir: &Path) -> Result<Option<Resolved>> {
+        match skill.source()? {
+            SkillSource::Path(p) => {
+                let path = resolve_path(manifest_dir, &p);
+                let checksum = if path.exists() {
+                    dir_digest(&path)?
+                } else {
+                    String::new()
+                };
+                Ok(Some(Resolved {
+                    path,
+                    rev: None,
+                    checksum,
+                    fetched: false,
+                    source_kind: "path",
+                }))
+            }
+            SkillSource::Git { url, .. } => {
+                let dest = self.git_dir(&url);
+                if !dest.exists() {
+                    return Ok(None);
+                }
+                Ok(Some(Resolved {
+                    rev: git_head(&dest).ok(),
+                    checksum: dir_digest(&dest)?,
+                    path: dest,
+                    fetched: false,
+                    source_kind: "git",
+                }))
+            }
+        }
+    }
+
     fn git_dir(&self, url: &str) -> PathBuf {
         self.root.join("git").join(sanitize(url))
     }

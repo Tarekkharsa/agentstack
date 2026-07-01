@@ -306,23 +306,23 @@ fn explain_lock(
     manifest: &crate::manifest::Manifest,
     ctx: &crate::commands::Context,
 ) {
-    use crate::resolve::SkillLockStatus as S;
+    use crate::resolve::{ResolveMode, SkillLockStatus as S};
     let lock = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
     let library = crate::library::Library::load_default().unwrap_or_default();
 
-    // Git-backed refs: report from the lock without resolving (no fetch).
-    if crate::resolve::skill_ref_is_git(name, manifest, &library) {
-        match lock.get(name) {
-            Some(e) => kv(o, "Lock", &format!("git · pinned {}", short(&e.checksum))),
-            None => kv(o, "Lock", "not locked ↳ agentstack use <profile> --write"),
-        }
-        return;
-    }
-
+    // Offline (`NoFetch`): a git body that isn't cached surfaces as a status,
+    // not a fetch. The resolver carries the case; no git pre-check here.
     let lib_home = crate::util::paths::lib_home();
     let store = Store::default_store();
     let r = crate::resolve::skill_lock_status(
-        name, manifest, &ctx.dir, &library, &lib_home, &store, &lock,
+        name,
+        manifest,
+        &ctx.dir,
+        &library,
+        &lib_home,
+        &store,
+        &lock,
+        ResolveMode::NoFetch,
     );
     if let Some(origin) = r.origin {
         kv(o, "Resolves", origin_label(origin));
@@ -335,6 +335,9 @@ fn explain_lock(
         S::MissingLockEntry => "not locked ↳ agentstack use <profile> --write".to_string(),
         S::ChecksumDrift { .. } => "⚠ content drifted from lock".to_string(),
         S::RevDrift { locked, current } => format!("⚠ rev drifted: locked {locked}, now {current}"),
+        S::NotAvailableOffline { .. } => {
+            "git-backed · not cached (run `agentstack install`)".to_string()
+        }
         S::ResolveFailed { error } => format!("⚠ unresolved — {error}"),
     };
     kv(o, "Lock", &msg);
@@ -345,11 +348,6 @@ fn origin_label(origin: crate::resolve::SkillOrigin) -> &'static str {
         crate::resolve::SkillOrigin::Inline => "inline (this project)",
         crate::resolve::SkillOrigin::Library => "central library",
     }
-}
-
-/// First 12 chars of a checksum, for a glanceable pin.
-fn short(sum: &str) -> &str {
-    &sum[..sum.len().min(12)]
 }
 
 /* ---------- helpers ---------- */

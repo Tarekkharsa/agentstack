@@ -53,13 +53,28 @@ pub struct ResolvedSkill {
     pub provenance: Option<String>,
 }
 
+/// Whether resolution may touch the network.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveMode {
+    /// Fetch git sources as needed (the materializing path).
+    Fetch,
+    /// Never fetch: git sources resolve only from an existing store clone, and
+    /// an un-cached git source is reported as [`ResolveError::NotAvailableOffline`].
+    /// Path/library-path sources resolve identically in both modes.
+    NoFetch,
+}
+
 /// A structured resolution failure. `Unresolved` is the hard error for a name
-/// that matches neither an inline manifest skill nor a library entry; `Source`
-/// wraps an underlying fetch/IO failure while resolving a matched entry.
+/// that matches neither an inline manifest skill nor a library entry;
+/// `NotAvailableOffline` is a non-fatal `NoFetch` outcome for a git source that
+/// is not cached locally; `Source` wraps an underlying fetch/IO failure while
+/// resolving a matched entry.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
     #[error("skill '{name}' is not defined in the project manifest or the central library")]
     Unresolved { name: String },
+    #[error("skill '{name}' (git {url}) is not available offline — run `agentstack install`")]
+    NotAvailableOffline { name: String, url: String },
     #[error(transparent)]
     Source(#[from] anyhow::Error),
 }
@@ -70,8 +85,8 @@ pub enum ResolveError {
 ///   relative skill paths are resolved against.
 /// - `library` / `lib_home`: the loaded central index and its home directory
 ///   (skill bodies live under `<lib_home>/skills/`).
-/// - `store`: reused to resolve both origins to a local path + checksum (and to
-///   fetch git sources, exactly as normal skill materialization does).
+/// - `store`: reused to resolve both origins to a local path + checksum.
+/// - `mode`: whether git sources may be fetched ([`ResolveMode`]).
 pub fn resolve_skill(
     manifest: &Manifest,
     manifest_dir: &Path,
@@ -79,45 +94,66 @@ pub fn resolve_skill(
     lib_home: &Path,
     store: &Store,
     name: &str,
+    mode: ResolveMode,
 ) -> Result<ResolvedSkill, ResolveError> {
-    // 1. Inline manifest skill wins.
-    if let Some(skill) = manifest.skills.get(name) {
-        let resolved = store.resolve(skill, manifest_dir, None)?;
-        return Ok(ResolvedSkill {
-            name: name.to_string(),
-            origin: SkillOrigin::Inline,
-            path: resolved.path,
-            source_kind: resolved.source_kind,
-            rev: resolved.rev,
-            checksum: resolved.checksum,
-            provenance: None,
-        });
-    }
-
-    // 2. Central library.
-    if let Some(entry) = library.get(name) {
+    // Locate the source (inline wins over the central library) and the base dir
+    // its relative paths resolve against.
+    let (skill, base, origin, provenance) = if let Some(skill) = manifest.skills.get(name) {
+        (
+            skill.clone(),
+            manifest_dir.to_path_buf(),
+            SkillOrigin::Inline,
+            None,
+        )
+    } else if let Some(entry) = library.get(name) {
         let skill = Skill {
             path: entry.path.clone(),
             git: entry.git.clone(),
             rev: entry.rev.clone(),
         };
-        // Library path sources are relative to `<lib_home>/skills/`.
-        let base = lib_home.join("skills");
-        let resolved = store.resolve(&skill, &base, entry.rev.as_deref())?;
-        return Ok(ResolvedSkill {
+        (
+            skill,
+            lib_home.join("skills"),
+            SkillOrigin::Library,
+            entry.provenance.clone(),
+        )
+    } else {
+        return Err(ResolveError::Unresolved {
             name: name.to_string(),
-            origin: SkillOrigin::Library,
-            path: resolved.path,
-            source_kind: resolved.source_kind,
-            rev: resolved.rev,
-            checksum: resolved.checksum,
-            provenance: entry.provenance.clone(),
         });
-    }
+    };
 
-    Err(ResolveError::Unresolved {
+    let resolved = resolve_source(store, &skill, &base, mode, name)?;
+    Ok(ResolvedSkill {
         name: name.to_string(),
+        origin,
+        path: resolved.path,
+        source_kind: resolved.source_kind,
+        rev: resolved.rev,
+        checksum: resolved.checksum,
+        provenance,
     })
+}
+
+/// Resolve a located source through the store, honoring the fetch mode. A
+/// `NoFetch` miss on an un-cached git source becomes `NotAvailableOffline`.
+fn resolve_source(
+    store: &Store,
+    skill: &Skill,
+    base: &Path,
+    mode: ResolveMode,
+    name: &str,
+) -> Result<crate::store::Resolved, ResolveError> {
+    match mode {
+        ResolveMode::Fetch => Ok(store.resolve(skill, base, skill.rev.as_deref())?),
+        ResolveMode::NoFetch => match store.resolve_local(skill, base)? {
+            Some(r) => Ok(r),
+            None => Err(ResolveError::NotAvailableOffline {
+                name: name.to_string(),
+                url: skill.git.clone().unwrap_or_default(),
+            }),
+        },
+    }
 }
 
 /// Expand a profile's skill refs to active skill names, applying the same
@@ -129,20 +165,6 @@ pub fn active_skill_names(manifest: &Manifest, profile_name: &str) -> Vec<String
         Some(p) if p.loads_all_skills() => manifest.skills.keys().cloned().collect(),
         Some(p) => p.skills.clone(),
     }
-}
-
-/// Whether a skill ref resolves to a git source (inline or library). Read
-/// commands use this to skip git-backed refs, whose resolution would fetch —
-/// keeping offline checks offline until a non-fetching resolver mode lands
-/// (tracked in `plan/central-store.md` Phase 3).
-pub fn skill_ref_is_git(name: &str, manifest: &Manifest, library: &Library) -> bool {
-    if let Some(s) = manifest.skills.get(name) {
-        return s.git.is_some();
-    }
-    if let Some(e) = library.get(name) {
-        return e.git.is_some();
-    }
-    false
 }
 
 /// How an active skill's currently-resolved content compares to its
@@ -157,6 +179,9 @@ pub enum SkillLockStatus {
     ChecksumDrift { locked: String, current: String },
     /// Git rev differs from the locked rev (both sides carry one).
     RevDrift { locked: String, current: String },
+    /// A git-backed source that is not cached locally, checked under `NoFetch`
+    /// (offline). Not a failure — reproducibility just can't be verified offline.
+    NotAvailableOffline { source: String },
     /// The reference could not be resolved (broken/missing source).
     ResolveFailed { error: String },
 }
@@ -175,7 +200,12 @@ pub struct SkillLockReport {
 
 /// Resolve one skill by name and compare it to its lockfile pin, through the
 /// same resolution seam as activation ([`resolve_skill`]). Checksum drift takes
-/// precedence over rev drift.
+/// precedence over rev drift. `mode` controls whether git sources may be fetched;
+/// read commands pass `NoFetch` so an un-cached git source surfaces as
+/// [`SkillLockStatus::NotAvailableOffline`] rather than a failure.
+// Mirrors `resolve_skill`'s parameter cluster plus lock + mode; a shared
+// resolve-context struct is a worthwhile follow-up but out of scope here.
+#[allow(clippy::too_many_arguments)]
 pub fn skill_lock_status(
     name: &str,
     manifest: &Manifest,
@@ -184,8 +214,15 @@ pub fn skill_lock_status(
     lib_home: &Path,
     store: &Store,
     lock: &Lock,
+    mode: ResolveMode,
 ) -> SkillLockReport {
-    match resolve_skill(manifest, manifest_dir, library, lib_home, store, name) {
+    match resolve_skill(manifest, manifest_dir, library, lib_home, store, name, mode) {
+        Err(ResolveError::NotAvailableOffline { url, .. }) => SkillLockReport {
+            name: name.to_string(),
+            origin: None,
+            provenance: None,
+            status: SkillLockStatus::NotAvailableOffline { source: url },
+        },
         Err(e) => SkillLockReport {
             name: name.to_string(),
             origin: None,
@@ -277,6 +314,7 @@ mod tests {
             lib_home.path(),
             &store,
             "review",
+            ResolveMode::Fetch,
         )
         .unwrap();
 
@@ -302,6 +340,7 @@ mod tests {
             lib_home.path(),
             &store,
             "sql-review",
+            ResolveMode::Fetch,
         )
         .unwrap();
 
@@ -327,6 +366,7 @@ mod tests {
             lib_home.path(),
             &store,
             "x",
+            ResolveMode::Fetch,
         )
         .unwrap();
         assert_eq!(r.checksum.len(), 64, "sha-256 hex digest expected");
@@ -348,6 +388,7 @@ mod tests {
             lib_home.path(),
             &store,
             "nope",
+            ResolveMode::Fetch,
         )
         .unwrap_err();
 
@@ -397,6 +438,7 @@ mod tests {
             lib_home.path(),
             &store,
             "sql-review",
+            ResolveMode::Fetch,
         )
         .unwrap();
         let lock = lock_with(LockedSkill {
@@ -416,6 +458,7 @@ mod tests {
             lib_home.path(),
             &store,
             &lock,
+            ResolveMode::Fetch,
         );
         assert_eq!(report.status, SkillLockStatus::Matches);
         assert_eq!(report.origin, Some(SkillOrigin::Library));
@@ -452,6 +495,7 @@ mod tests {
             lib_home.path(),
             &store,
             &lock,
+            ResolveMode::Fetch,
         );
         match report.status {
             SkillLockStatus::ChecksumDrift { locked, .. } => assert_eq!(locked, "staledigest"),
@@ -475,6 +519,7 @@ mod tests {
             lib_home.path(),
             &store,
             &Lock::default(),
+            ResolveMode::Fetch,
         );
         assert_eq!(report.status, SkillLockStatus::MissingLockEntry);
     }
@@ -505,6 +550,7 @@ mod tests {
             lib_home.path(),
             &store,
             &Lock::default(),
+            ResolveMode::Fetch,
         );
         assert!(matches!(
             report.status,
@@ -531,6 +577,7 @@ mod tests {
             lib_home.path(),
             &store,
             &Lock::default(),
+            ResolveMode::Fetch,
         );
         let lib = skill_lock_status(
             "sql-review",
@@ -540,6 +587,7 @@ mod tests {
             lib_home.path(),
             &store,
             &Lock::default(),
+            ResolveMode::Fetch,
         );
         assert_eq!(inline.origin, Some(SkillOrigin::Inline));
         assert_eq!(inline.provenance, None);
@@ -594,6 +642,7 @@ mod tests {
             lib_home.path(),
             &store,
             "gitskill",
+            ResolveMode::Fetch,
         )
         .unwrap();
         let lock = lock_with(LockedSkill {
@@ -613,6 +662,7 @@ mod tests {
             lib_home.path(),
             &store,
             &lock,
+            ResolveMode::Fetch,
         );
         match report.status {
             SkillLockStatus::RevDrift { locked, current } => {
@@ -620,6 +670,101 @@ mod tests {
                 assert_eq!(Some(current), resolved.rev);
             }
             other => panic!("expected RevDrift, got {other:?}"),
+        }
+    }
+
+    // ---------- NoFetch mode ----------
+
+    /// A library entry pointing at a git URL that has never been cloned.
+    fn uncached_git_library(url: &str) -> Library {
+        let mut lib = Library::default();
+        lib.upsert(LibrarySkill {
+            name: "gitskill".into(),
+            source: "git".into(),
+            path: None,
+            git: Some(url.into()),
+            rev: None,
+            checksum: None,
+            version: None,
+            provenance: None,
+        });
+        lib
+    }
+
+    #[test]
+    fn nofetch_uncached_git_is_not_available_offline() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let manifest = empty_manifest();
+        let library = uncached_git_library("https://example.com/x.git");
+
+        let err = resolve_skill(
+            &manifest,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            "gitskill",
+            ResolveMode::NoFetch,
+        )
+        .unwrap_err();
+
+        match err {
+            ResolveError::NotAvailableOffline { name, url } => {
+                assert_eq!(name, "gitskill");
+                assert_eq!(url, "https://example.com/x.git");
+            }
+            other => panic!("expected NotAvailableOffline, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nofetch_path_skill_resolves_normally() {
+        // Path/library-path sources never fetch, so NoFetch behaves like Fetch.
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let manifest = empty_manifest();
+        let library = library_with_skill(&lib_home, "sql-review", "# body\n");
+
+        let r = resolve_skill(
+            &manifest,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            "sql-review",
+            ResolveMode::NoFetch,
+        )
+        .unwrap();
+        assert_eq!(r.origin, SkillOrigin::Library);
+        assert_eq!(r.checksum.len(), 64);
+    }
+
+    #[test]
+    fn skill_lock_status_reports_offline_for_uncached_git() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let manifest = empty_manifest();
+        let library = uncached_git_library("https://example.com/x.git");
+
+        let report = skill_lock_status(
+            "gitskill",
+            &manifest,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            &Lock::default(),
+            ResolveMode::NoFetch,
+        );
+        match report.status {
+            SkillLockStatus::NotAvailableOffline { source } => {
+                assert_eq!(source, "https://example.com/x.git");
+            }
+            other => panic!("expected NotAvailableOffline, got {other:?}"),
         }
     }
 }

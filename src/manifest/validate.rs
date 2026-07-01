@@ -5,7 +5,7 @@ use std::path::Path;
 
 use super::model::{Manifest, ServerType};
 use crate::library::Library;
-use crate::resolve::{resolve_skill, ResolveError};
+use crate::resolve::{resolve_skill, ResolveError, ResolveMode};
 use crate::store::Store;
 
 /// Context enabling library-aware skill-ref validation. Without it, a profile
@@ -147,6 +147,8 @@ fn run<'a>(
             }
             match ctx {
                 Some(cx) => {
+                    // Validation is offline: a name that resolves to a known
+                    // source is valid even if a git body isn't cached yet.
                     match resolve_skill(
                         manifest,
                         cx.manifest_dir,
@@ -154,8 +156,9 @@ fn run<'a>(
                         cx.lib_home,
                         cx.store,
                         kref,
+                        ResolveMode::NoFetch,
                     ) {
-                        Ok(_) => {}
+                        Ok(_) | Err(ResolveError::NotAvailableOffline { .. }) => {}
                         Err(ResolveError::Unresolved { .. }) => issues.push(Issue::new(
                             IssueKind::UnknownSkillRef,
                             format!("profile '{pname}' references unknown skill '{kref}'"),

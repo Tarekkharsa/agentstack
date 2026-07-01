@@ -265,13 +265,13 @@ first*. This phase adds the overlay:
 - [ ] "Promote" flow: a capability an agent used dynamically can be written into
       the project `agentstack.toml` as a named reference (path B → path A) with a
       preview diff — never a silent config write (D20 trust gate).
-- [ ] **Non-fetching dry-run resolution.** `agentstack use <profile>` (and any
-      pre-flight resolution) currently resolves through `Store::resolve`, which
-      fetches git-backed skill sources even on a dry run. Harmless for path/library
-      skills (all Phase-1 library skills are path sources), but surprising for
-      git-backed skills. Add a non-fetching resolver mode used on dry runs so
-      resolution never touches the network unless `--write`. Deferred from Phase 1
-      step 5 — not central to skills-first local library resolution.
+- [x] **Non-fetching dry-run resolution.** `resolve_skill` takes a
+      `ResolveMode::{Fetch, NoFetch}`; `NoFetch` resolves git sources only from an
+      existing store clone and reports an un-cached one as
+      `ResolveError::NotAvailableOffline` (a non-fatal `SkillLockStatus`). `use`
+      dry-run, `validate`, `doctor`, and `explain` all resolve offline; only
+      `use --write` (and `lib add --git`) fetch. `doctor`/`explain` dropped their
+      git pre-checks and now render the offline case from the status.
 
 ## Trust / safety
 

@@ -13,7 +13,7 @@ use crate::lock::{Lock, LockedSkill};
 use crate::manifest::Manifest;
 use crate::render::skills;
 use crate::render::{plan_target, resolve_targets, Selection};
-use crate::resolve::{ResolvedSkill, SkillOrigin};
+use crate::resolve::{ResolveMode, ResolvedSkill, SkillOrigin};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 
@@ -30,10 +30,13 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let selection = Selection::Profile(args.profile.clone());
     // Resolve active skills up front (library-aware) so an unresolved or broken
     // skill ref fails clearly before we touch any target's config or skills dir.
-    // NOTE: resolution fetches git-backed sources even on a dry run (via
-    // `Store::resolve`). Harmless for path/library skills (all Phase-1 library
-    // skills are path sources); a non-fetching dry-run mode is tracked in
-    // `plan/central-store.md` Phase 3.
+    // A dry run resolves offline (`NoFetch`) — previewing never touches the
+    // network; a real `--write` fetches git-backed sources as needed.
+    let mode = if args.write {
+        ResolveMode::Fetch
+    } else {
+        ResolveMode::NoFetch
+    };
     let library = Library::load_default()?;
     let lib_home = crate::util::paths::lib_home();
     let store = crate::store::Store::default_store();
@@ -44,6 +47,7 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         &library,
         &lib_home,
         &store,
+        mode,
     )?;
     // (name, source dir) pairs drive skill materialization; the richer
     // `ResolvedSkill` list is kept for lockfile recording below.
@@ -196,6 +200,7 @@ fn resolve_active_skills(
     library: &Library,
     lib_home: &Path,
     store: &crate::store::Store,
+    mode: ResolveMode,
 ) -> Result<Vec<ResolvedSkill>> {
     let profile = match manifest.profiles.get(profile_name) {
         Some(p) => p,
@@ -210,7 +215,7 @@ fn resolve_active_skills(
     let mut out = Vec::new();
     for name in names {
         let resolved =
-            crate::resolve::resolve_skill(manifest, dir, library, lib_home, store, &name)
+            crate::resolve::resolve_skill(manifest, dir, library, lib_home, store, &name, mode)
                 .with_context(|| {
                     format!("resolving skill '{name}' for profile '{profile_name}'")
                 })?;
@@ -331,6 +336,7 @@ mod tests {
             &library,
             lib_home.path(),
             &store,
+            ResolveMode::Fetch,
         )
         .unwrap();
 
@@ -371,6 +377,7 @@ mod tests {
             &library,
             lib_home.path(),
             &store,
+            ResolveMode::Fetch,
         )
         .unwrap();
 
@@ -403,6 +410,7 @@ mod tests {
             &library,
             lib_home.path(),
             &store,
+            ResolveMode::Fetch,
         )
         .unwrap_err();
         assert!(err.to_string().contains("nope"));
@@ -442,6 +450,7 @@ mod tests {
             &library,
             lib_home.path(),
             &store,
+            ResolveMode::Fetch,
         )
         .unwrap_err();
         assert!(err.to_string().contains("sql-review"));
@@ -477,6 +486,7 @@ mod tests {
             &library,
             lib_home.path(),
             &store,
+            ResolveMode::Fetch,
         )
         .unwrap();
 
@@ -511,6 +521,7 @@ mod tests {
             &library,
             lib_home.path(),
             &store,
+            ResolveMode::Fetch,
         )
         .unwrap();
 
@@ -559,6 +570,7 @@ mod tests {
             &library,
             lib_home.path(),
             &store,
+            ResolveMode::Fetch,
         )
         .unwrap();
         record_lock(proj.path(), &resolved, &manifest, &library).unwrap();
