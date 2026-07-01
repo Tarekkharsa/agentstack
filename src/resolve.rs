@@ -1,26 +1,26 @@
-//! Skill name resolution — the single seam that maps a `skills = ["name"]`
-//! reference to a concrete on-disk source (see `plan/central-store.md`).
+//! Name resolution — the single seam that maps a `skills = ["name"]` or
+//! `servers = ["name"]` reference to a concrete definition (see
+//! `plan/central-store.md`).
 //!
-//! Resolution order (first hit wins):
+//! Resolution order (first hit wins), for both skills and servers:
 //!
-//! 1. **Inline** — a `[skills.<name>]` entry in the project manifest. An inline
-//!    definition always wins; this is also the collision rule for now (a project
-//!    that wants to override a central skill defines it inline).
-//! 2. **Central library** — a `[[skill]]` entry in `<lib_home>/library.toml`,
-//!    whose body lives under `<lib_home>/skills/`.
+//! 1. **Inline** — a `[skills.<name>]` / `[servers.<name>]` entry in the project
+//!    manifest. An inline definition always wins (a project that wants to override
+//!    a central item defines it inline).
+//! 2. **Central library** — a `[[skill]]` / `[[server]]` entry in
+//!    `<lib_home>/library.toml`, whose body lives under `<lib_home>/skills/` or
+//!    `<lib_home>/servers/<name>.toml`.
 //!
-//! Catalog fallback (fetch-then-reference) is intentionally out of scope for this
-//! step. An unresolved name is a hard, structured error ([`ResolveError`]).
-//!
-//! The resolver returns enough metadata (source kind, rev, checksum, provenance)
-//! for later steps to write project `agentstack.lock` entries and to flag digest
-//! drift; it does not itself write locks or verify against them yet.
+//! An unresolved name is a hard, structured error. Resolvers return the
+//! definition plus metadata (checksum/provenance) for later lock + drift steps;
+//! they never resolve secrets — server `${REF}` values stay intact and are
+//! resolved per-machine only at render/gateway time.
 
 use std::path::{Path, PathBuf};
 
 use crate::library::Library;
 use crate::lock::Lock;
-use crate::manifest::{Manifest, Skill};
+use crate::manifest::{Manifest, Server, Skill};
 use crate::store::Store;
 
 /// Where a resolved skill came from.
@@ -154,6 +154,94 @@ fn resolve_source(
             }),
         },
     }
+}
+
+// ---------- server resolution (Phase 1b) ----------
+
+/// Where a resolved server came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerOrigin {
+    /// Defined inline in the project manifest (`[servers.<name>]`).
+    Inline,
+    /// Resolved from the central library (`[[server]]` + `servers/<name>.toml`).
+    Library,
+}
+
+/// A server name resolved to its **definition** — the `manifest::Server` with
+/// `${REF}` secrets left intact. Secret values are never resolved here; that is
+/// exclusively a render/gateway concern.
+#[derive(Debug, Clone)]
+pub struct ResolvedServer {
+    pub name: String,
+    pub origin: ServerOrigin,
+    /// The server definition, `${REF}` placeholders preserved verbatim.
+    pub server: Server,
+    /// SHA-256 of the definition (the `servers/<name>.toml` file content for a
+    /// library server; the serialized inline table otherwise).
+    pub checksum: String,
+    /// Provenance recorded in the library index (library origin only).
+    pub provenance: Option<String>,
+}
+
+/// A structured server-resolution failure. Mirrors the skill resolver's shape;
+/// servers are local definitions (no fetch), so there is no offline variant.
+#[derive(Debug, thiserror::Error)]
+pub enum ServerResolveError {
+    #[error("server '{name}' is not defined in the project manifest or the central library")]
+    Unresolved { name: String },
+    #[error(transparent)]
+    Source(#[from] anyhow::Error),
+}
+
+/// Resolve a single server name: inline `[servers.<name>]` wins, else the central
+/// library's `[[server]]` entry (definition at `<lib_home>/servers/<name>.toml`).
+/// Returns the definition with `${REF}`s intact — no secret resolution.
+pub fn resolve_server(
+    manifest: &Manifest,
+    library: &Library,
+    lib_home: &Path,
+    name: &str,
+) -> Result<ResolvedServer, ServerResolveError> {
+    // 1. Inline manifest server wins.
+    if let Some(server) = manifest.servers.get(name) {
+        let text = toml::to_string(server)
+            .map_err(|e| anyhow::anyhow!("serializing inline server '{name}': {e}"))?;
+        return Ok(ResolvedServer {
+            name: name.to_string(),
+            origin: ServerOrigin::Inline,
+            server: server.clone(),
+            checksum: sha256_hex(text.as_bytes()),
+            provenance: None,
+        });
+    }
+
+    // 2. Central library.
+    if let Some(entry) = library.get_server(name) {
+        let path = lib_home.join("servers").join(format!("{name}.toml"));
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
+        let server: Server = toml::from_str(&content)
+            .map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
+        return Ok(ResolvedServer {
+            name: name.to_string(),
+            origin: ServerOrigin::Library,
+            server,
+            checksum: sha256_hex(content.as_bytes()),
+            provenance: entry.provenance.clone(),
+        });
+    }
+
+    Err(ServerResolveError::Unresolved {
+        name: name.to_string(),
+    })
+}
+
+/// SHA-256 hex digest of a byte string.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
 }
 
 /// Expand a profile's skill refs to active skill names, applying the same
@@ -766,5 +854,107 @@ mod tests {
             }
             other => panic!("expected NotAvailableOffline, got {other:?}"),
         }
+    }
+
+    // ---------- server resolution (Phase 1b) ----------
+
+    use crate::library::LibraryServer;
+
+    /// Manifest with one inline HTTP server at `url`, carrying a `${REF}` header.
+    fn manifest_with_inline_server(name: &str, url: &str) -> Manifest {
+        let toml = format!(
+            "version = 1\n[servers.{name}]\ntype = \"http\"\nurl = \"{url}\"\n\
+             headers = {{ Authorization = \"Bearer ${{TOKEN}}\" }}\n"
+        );
+        toml::from_str(&toml).unwrap()
+    }
+
+    /// Write a library server definition file and index it. Returns (library,
+    /// file content).
+    fn library_with_server(
+        lib_home: &assert_fs::TempDir,
+        name: &str,
+        url: &str,
+    ) -> (Library, String) {
+        let content = format!(
+            "type = \"http\"\nurl = \"{url}\"\n\n[headers]\nAuthorization = \"Bearer ${{TOKEN}}\"\n"
+        );
+        lib_home
+            .child(format!("servers/{name}.toml"))
+            .write_str(&content)
+            .unwrap();
+        let mut lib = Library::default();
+        lib.upsert_server(LibraryServer {
+            name: name.into(),
+            checksum: None,
+            version: None,
+            provenance: Some("consolidated:codex".into()),
+        });
+        (lib, content)
+    }
+
+    #[test]
+    fn inline_server_wins_over_library() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let manifest = manifest_with_inline_server("kibana", "https://inline/mcp");
+        let (library, _) = library_with_server(&lib_home, "kibana", "https://central/mcp");
+
+        let r = resolve_server(&manifest, &library, lib_home.path(), "kibana").unwrap();
+
+        assert_eq!(r.origin, ServerOrigin::Inline);
+        assert_eq!(r.provenance, None);
+        assert_eq!(r.server.url.as_deref(), Some("https://inline/mcp"));
+    }
+
+    #[test]
+    fn library_server_resolves_from_file() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let manifest = empty_manifest();
+        let (library, _) = library_with_server(&lib_home, "kibana", "https://central/mcp");
+
+        let r = resolve_server(&manifest, &library, lib_home.path(), "kibana").unwrap();
+
+        assert_eq!(r.origin, ServerOrigin::Library);
+        assert_eq!(r.server.url.as_deref(), Some("https://central/mcp"));
+        assert_eq!(r.provenance.as_deref(), Some("consolidated:codex"));
+    }
+
+    #[test]
+    fn server_ref_survives_unresolved_in_definition() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let manifest = empty_manifest();
+        let (library, _) = library_with_server(&lib_home, "kibana", "https://central/mcp");
+
+        let r = resolve_server(&manifest, &library, lib_home.path(), "kibana").unwrap();
+
+        // The resolver never touches secrets — the ${REF} is returned verbatim.
+        assert_eq!(
+            r.server.headers.get("Authorization").map(String::as_str),
+            Some("Bearer ${TOKEN}")
+        );
+    }
+
+    #[test]
+    fn unresolved_server_is_structured_error() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let manifest = empty_manifest();
+        let library = Library::default();
+
+        let err = resolve_server(&manifest, &library, lib_home.path(), "nope").unwrap_err();
+        match err {
+            ServerResolveError::Unresolved { name } => assert_eq!(name, "nope"),
+            other => panic!("expected Unresolved, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn server_checksum_reflects_definition_file() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let manifest = empty_manifest();
+        let (library, content) = library_with_server(&lib_home, "kibana", "https://central/mcp");
+
+        let r = resolve_server(&manifest, &library, lib_home.path(), "kibana").unwrap();
+        assert_eq!(r.checksum, sha256_hex(content.as_bytes()));
+        assert_eq!(r.checksum.len(), 64);
     }
 }
