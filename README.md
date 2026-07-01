@@ -502,7 +502,7 @@ previewed, and merged with visible provenance. Bundled starter skills are
 **agentstack-authored and unofficial** examples, not endorsed vendor content.
 
 For the broader product direction, see
-[`plan/portable-agent-runtime-vision.md`](plan/portable-agent-runtime-vision.md).
+[`docs/plans/portable-agent-runtime-vision.md`](docs/plans/portable-agent-runtime-vision.md).
 
 ## Adding a CLI
 
@@ -534,7 +534,7 @@ editor) · live runs (`run`/`runs`/`kill` + dashboard Runs panel).
 
 **Next:** central library for hooks (`lib/hooks/`) · one-command provider import
 (sweep every CLI's skills + MCP entries into `~/.agentstack`, leaving generated
-views/symlinks behind — see [`plan/provider-import.md`](plan/provider-import.md)) ·
+views/symlinks behind — see [`docs/plans/provider-import.md`](docs/plans/provider-import.md)) ·
 harden pack remove/upgrade ownership · add golden coverage for every adapter ·
 polish the new-machine/team bootstrap path · publish releases + a real demo ·
 dogfood on a team · dashboard trust-footprint views for live runs · marketplace
@@ -542,14 +542,14 @@ providers (skills.sh-style) + optional audit enrichment · reconsider a JSON /
 `mcp.json`-aligned manifest · install/remove flows for native plugin runtimes ·
 discover stray unmanaged agent processes as an advisory view.
 
-See [`agentstack-PLAN.md`](agentstack-PLAN.md) for the full spec and design
+See [`docs/plans/original-spec.md`](docs/plans/original-spec.md) for the full spec and design
 decisions (D1–D22),
-[`plan/central-store.md`](plan/central-store.md) +
-[`plan/provider-import.md`](plan/provider-import.md) for the central-library
+[`docs/plans/central-store.md`](docs/plans/central-store.md) +
+[`docs/plans/provider-import.md`](docs/plans/provider-import.md) for the central-library
 design, [`docs/central-library-guide.html`](docs/central-library-guide.html) for
 a visual guide covering existing projects, new central-library projects, and
 generated provider views, and
-[`plan/portable-agent-runtime-vision.md`](plan/portable-agent-runtime-vision.md)
+[`docs/plans/portable-agent-runtime-vision.md`](docs/plans/portable-agent-runtime-vision.md)
 for the current product vision.
 
 ## License
