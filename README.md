@@ -207,6 +207,23 @@ Implemented and tested:
   `install` fetches them into `~/.agentstack/store/` and writes a SHA-256
   `agentstack.lock`; `install --locked` is reproducible (CI-safe); `update`
   re-resolves git skills; `remove` drops a capability from manifest + lock.
+- **Central capability library (`agentstack lib`)** — one managed home
+  (`~/.agentstack/lib/`) that projects reference **by name** instead of copying
+  files. Skill dirs (`lib/skills/`) and MCP server definitions
+  (`lib/servers/*.toml`) are indexed in `library.toml`; a profile's
+  `skills = ["sql-review"]` / `servers = ["kibana"]` resolve from there, and an
+  inline `[skills.*]` / `[servers.*]` always overrides the library. Name refs are
+  pinned by digest in `agentstack.lock` (servers pin the **definition** digest
+  only — secret values stay `${REF}` and resolve at render/gateway time, never in
+  the library or lock), and `doctor`/`explain` flag drift and show each item's
+  origin + provenance. Profile resolution is offline by default (dry-run `use`,
+  `doctor`, `explain` never fetch); `use --write` fetches git-backed skills when
+  activation needs them. Manage it with `lib add` / `add-server` / `list` /
+  `remove` / `remove-server`;
+  `consolidate` sweeps scattered skills from every CLI into the library and
+  symlinks the originals back; `lib migrate` copies a legacy
+  `~/.agentstack/skills/` home in, preview-first and reversible. Provider folders
+  are never owned — only their skills and MCP entries are managed.
 - **`search` across providers** — the embedded catalog **and the official MCP
   Registry** (`registry.modelcontextprotocol.io`). `agentstack add from <id>`
   resolves a registry/catalog server, lifts its secrets to `${REF}`s, and (on
@@ -218,10 +235,11 @@ Implemented and tested:
   secrets) for moving a setup to a new machine; passphrase-protected.
 - Commands: `init`, `add`, `install` (`--locked`), `update`, `remove`,
   `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
-  `use <profile>`, `instructions`, `adopt`, `restore`, `doctor` (`--ci`,
-  `--live`, `--fix`), `search`, `stats`, `secret set|get|rm|list`,
-  `export`/`import`, `adapters`, `plugins`, `dashboard`, `mcp`, `hook`,
-  `run`/`runs`/`kill`.
+  `use <profile>`, `instructions`, `adopt`, `consolidate`,
+  `lib add|add-server|list|remove|remove-server|migrate`, `restore`,
+  `doctor` (`--ci`, `--live`, `--fix`), `search`, `stats`,
+  `secret set|get|rm|list`, `export`/`import`, `adapters`, `plugins`,
+  `dashboard`, `mcp`, `hook`, `run`/`runs`/`kill`.
 
 ### Live runs (`agentstack run`)
 
@@ -354,6 +372,12 @@ agentstack apply --write
 agentstack use focus --write                 # global scope
 agentstack use focus --scope project --write # into .mcp.json + .claude/skills/
 
+# Central library: put skills/servers in one home, reference them by name
+agentstack consolidate --write               # sweep scattered skills into lib/skills
+agentstack lib add-server kibana --file kibana.toml --write
+agentstack lib list                          # skills + servers, grouped
+# then reference by name in a profile: servers = ["kibana"], skills = ["sql-review"]
+
 # Compile CLAUDE.md / AGENTS.md from shared + per-harness fragments
 agentstack instructions --scope project --write
 
@@ -445,7 +469,9 @@ cargo fmt --check
 ## Roadmap
 
 **Done:** 13 adapters · `init`/`add`/`apply`/`diff`/`use`/`instructions`/`adopt` ·
-package manager (`install`/`update`/`remove` + lockfile) · secrets (keychain +
+package manager (`install`/`update`/`remove` + lockfile) · central capability
+library (`lib` skills + servers referenced by name, digest-pinned in the lock,
+drift in `doctor`/`explain`, `consolidate` into `lib/skills`) · secrets (keychain +
 varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`) ·
 official MCP Registry provider + `search`/`add from` · `[policy]` trust gate ·
 native per-CLI settings (`[settings.*]` → settings.json) · managed plugin
@@ -454,15 +480,21 @@ atomic writes + backups · `export`/`import` · `hook` · agent-operable `mcp`
 server · local dashboard (server/skill matrices, Discover, add-skill, settings
 editor) · live runs (`run`/`runs`/`kill` + dashboard Runs panel).
 
-**Next:** harden pack remove/upgrade ownership · add golden coverage for every
-adapter · polish the new-machine/team bootstrap path · publish releases + a real
-demo · dogfood on a team · dashboard trust-footprint views for live runs ·
-marketplace providers (skills.sh-style) + optional audit enrichment · reconsider
-a JSON / `mcp.json`-aligned manifest · install/remove flows for native plugin
-runtimes · discover stray unmanaged agent processes as an advisory view.
+**Next:** central library for hooks (`lib/hooks/`) · one-command provider import
+(sweep every CLI's skills + MCP entries into `~/.agentstack`, leaving generated
+views/symlinks behind — see [`plan/provider-import.md`](plan/provider-import.md)) ·
+harden pack remove/upgrade ownership · add golden coverage for every adapter ·
+polish the new-machine/team bootstrap path · publish releases + a real demo ·
+dogfood on a team · dashboard trust-footprint views for live runs · marketplace
+providers (skills.sh-style) + optional audit enrichment · reconsider a JSON /
+`mcp.json`-aligned manifest · install/remove flows for native plugin runtimes ·
+discover stray unmanaged agent processes as an advisory view.
 
 See [`agentstack-PLAN.md`](agentstack-PLAN.md) for the full spec and design
-decisions (D1–D22), and
+decisions (D1–D22),
+[`plan/central-store.md`](plan/central-store.md) +
+[`plan/provider-import.md`](plan/provider-import.md) for the central-library
+design, and
 [`plan/portable-agent-runtime-vision.md`](plan/portable-agent-runtime-vision.md)
 for the current product vision.
 
