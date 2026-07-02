@@ -344,7 +344,7 @@ For the broader product direction, see
 
 - [Feature reference](docs/reference.md) — the complete tested inventory and
   full command list.
-- [Central library guide](docs/central-library-guide.html) — visual walkthrough
+- [Central library guide](https://tarekkharsa.github.io/agentstack/) — visual walkthrough
   of referencing skills/servers by name from `~/.agentstack/lib/`; its flows are
   verified by the runnable sandbox (`agentstack-test/demo-central-library.sh`).
 - [Design docs](docs/plans/) — vision, spec, and per-feature plans.
@@ -381,7 +381,7 @@ See [`docs/plans/original-spec.md`](docs/plans/original-spec.md) for the full sp
 decisions (D1–D22),
 [`docs/plans/central-store.md`](docs/plans/central-store.md) +
 [`docs/plans/provider-import.md`](docs/plans/provider-import.md) for the central-library
-design, [`docs/central-library-guide.html`](docs/central-library-guide.html) for
+design, [the central-library guide](https://tarekkharsa.github.io/agentstack/) for
 a visual guide covering existing projects, new central-library projects, and
 generated provider views, and
 [`docs/plans/portable-agent-runtime-vision.md`](docs/plans/portable-agent-runtime-vision.md)
