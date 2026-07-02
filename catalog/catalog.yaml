@@ -133,7 +133,7 @@
   name: using-agentstack
   display: Using agentstack
   description: "Teach an agent to operate agentstack itself — manifests, profiles, the three artifact modes, library skill loading, and safe proposal rules"
-  homepage: https://github.com/Tarek-kharsa/agentstack
+  homepage: https://github.com/tarekkh/agentstack
   tags: [agentstack, meta, setup, mcp, skills]
   path: skills/using-agentstack
 

@@ -36,8 +36,8 @@ for the rendered files: **static** (on disk, gitignored), **clean-at-rest**
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Tarek-kharsa/agentstack/main/install.sh | sh
-# or: brew install tarek-kharsa/tap/agentstack   ·   cargo install agentstack
+curl -fsSL https://raw.githubusercontent.com/tarekkh/agentstack/main/install.sh | sh
+# or: brew install tarekkh/tap/agentstack   ·   cargo install agentstack
 ```
 
 Single static binary, zero runtime dependencies. (Releases are wired up in CI —
@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Tarek-kharsa/agentstack@main   # or pin a release tag
+      - uses: tarekkh/agentstack@main   # or pin a release tag
 ```
 
 `install --locked` proves checked-in skill sources still resolve to the pinned

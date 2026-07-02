@@ -1,7 +1,7 @@
 # agentstack docs
 
 One portable manifest, every agent CLI. Start with the
-[README](https://github.com/Tarek-kharsa/agentstack#readme).
+[README](https://github.com/tarekkh/agentstack#readme).
 
 ## Guides
 

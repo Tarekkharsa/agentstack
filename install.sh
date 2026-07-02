@@ -1,10 +1,10 @@
 #!/bin/sh
 # agentstack installer — downloads the latest release binary for your platform.
-#   curl -fsSL https://raw.githubusercontent.com/Tarek-kharsa/agentstack/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/tarekkh/agentstack/main/install.sh | sh
 set -eu
 
 # AGENTSTACK_INSTALL_REPO overrides the GitHub slug (owner/repo) for forks.
-REPO="${AGENTSTACK_INSTALL_REPO:-Tarek-kharsa/agentstack}"
+REPO="${AGENTSTACK_INSTALL_REPO:-tarekkh/agentstack}"
 PREFIX="${AGENTSTACK_PREFIX:-}"
 VERSION="${AGENTSTACK_VERSION:-latest}"   # "latest" or a release tag like v0.1.0
 
