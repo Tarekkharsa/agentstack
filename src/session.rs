@@ -84,8 +84,12 @@ fn pointer_path() -> PathBuf {
 }
 
 fn dir_key(dir: &Path) -> String {
-    fs::canonicalize(dir)
-        .unwrap_or_else(|_| dir.to_path_buf())
+    // Normalize to the manifest dir: `start` holds ctx.dir (`.agentstack/`),
+    // while `end`/`active` callers may hold the project root — both must
+    // agree on the key or a started session can never be found again.
+    let dir = crate::manifest::resolve_manifest_dir(dir);
+    fs::canonicalize(&dir)
+        .unwrap_or(dir)
         .to_string_lossy()
         .into_owned()
 }

@@ -15,7 +15,6 @@ use serde_json::{json, Value};
 use crate::manifest::load::MANIFEST_FILE;
 use crate::manifest::{Server, ServerType};
 use crate::secret::Resolver;
-use crate::store::{local_source_dir, Store};
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
@@ -680,21 +679,29 @@ fn add_server(args: &Value, dir: Option<&Path>) -> Result<String> {
 }
 
 /// The skills loadable right now: fenced to the active session's profile, or —
-/// when no session is active — the whole manifest (dev-open). This is the
-/// progressive-disclosure catalog: names + one-line descriptions, not payloads.
+/// when no session is active — inline manifest skills plus the whole central
+/// library (dev-open; projects reference library skills by bare name). This is
+/// the progressive-disclosure catalog: names + one-line descriptions, not
+/// payloads.
 fn loadable_skill_names(
     manifest: &crate::manifest::Manifest,
+    library: &crate::library::Library,
     session: Option<&crate::session::Session>,
 ) -> Vec<String> {
+    let all = || {
+        let mut names: Vec<String> = manifest.skills.keys().cloned().collect();
+        for entry in &library.skills {
+            if !names.iter().any(|n| n == &entry.name) {
+                names.push(entry.name.clone());
+            }
+        }
+        names
+    };
     match session.and_then(|s| manifest.profiles.get(&s.profile)) {
-        Some(p) if p.loads_all_skills() => manifest.skills.keys().cloned().collect(),
-        Some(p) => p
-            .skills
-            .iter()
-            .filter(|n| manifest.skills.contains_key(*n))
-            .cloned()
-            .collect(),
-        None => manifest.skills.keys().cloned().collect(),
+        Some(p) if p.loads_all_skills() => all(),
+        // Profile names resolve inline-first, then library, at load time.
+        Some(p) => p.skills.clone(),
+        None => all(),
     }
 }
 
@@ -759,25 +766,42 @@ fn diff_summary(args: &Value, dir: Option<&Path>) -> Result<String> {
 fn list_loadable(dir: Option<&Path>) -> Result<String> {
     let ctx = crate::commands::load(dir)?;
     let m = &ctx.loaded.manifest;
+    let libctx = ctx.library_ctx();
     let session = crate::session::active(&ctx.dir);
     let loaded: std::collections::HashSet<String> = session
         .as_ref()
         .map(|s| s.loads.iter().map(|l| l.name.clone()).collect())
         .unwrap_or_default();
-    let store = Store::default_store();
 
     let mut entries = Vec::new();
-    for name in loadable_skill_names(m, session.as_ref()) {
-        let Some(skill) = m.skills.get(&name) else {
-            continue;
+    for name in loadable_skill_names(m, &libctx.library, session.as_ref()) {
+        let resolved = crate::resolve::resolve_skill(
+            m,
+            &ctx.dir,
+            &libctx.library,
+            &libctx.lib_home,
+            &libctx.store,
+            &name,
+            crate::resolve::ResolveMode::NoFetch,
+        );
+        let (desc, origin) = match &resolved {
+            Ok(r) => (
+                read_skill_md(&r.path).0.unwrap_or_default(),
+                match r.origin {
+                    crate::resolve::SkillOrigin::Inline => "manifest",
+                    crate::resolve::SkillOrigin::Library => "library",
+                },
+            ),
+            Err(_) => (
+                "(not available locally — run `agentstack install`)".to_string(),
+                "unavailable",
+            ),
         };
-        let desc = local_source_dir(&store, skill, &ctx.dir)
-            .and_then(|d| read_skill_md(&d).0)
-            .unwrap_or_default();
         entries.push(json!({
             "name": name,
             "description": desc,
             "kind": "skill",
+            "origin": origin,
             "loaded": loaded.contains(&name),
         }));
     }
@@ -788,7 +812,7 @@ fn list_loadable(dir: Option<&Path>) -> Result<String> {
         "note": if session.is_some() {
             "Fenced to this session's profile. Load only what the task needs."
         } else {
-            "No active session — all manifest skills are loadable (dev-open). Start a session to fence + log loads."
+            "No active session — manifest + central-library skills are loadable (dev-open). Start a session to fence + log loads."
         },
     }))?)
 }
@@ -807,15 +831,15 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
 
     let ctx = crate::commands::load(dir)?;
     let m = &ctx.loaded.manifest;
-    let skill = m
-        .skills
-        .get(name)
-        .with_context(|| format!("no skill '{name}' in the manifest"))?;
+    let libctx = ctx.library_ctx();
 
     let session = crate::session::active(&ctx.dir);
     // Fence: inside a session, only the profile's skills are loadable.
     if let Some(s) = &session {
-        if !loadable_skill_names(m, Some(s)).iter().any(|n| n == name) {
+        if !loadable_skill_names(m, &libctx.library, Some(s))
+            .iter()
+            .any(|n| n == name)
+        {
             anyhow::bail!(
                 "'{name}' is not loadable in session '{}' — add it to the profile to allow it",
                 s.profile
@@ -823,10 +847,18 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
         }
     }
 
-    let source = local_source_dir(&Store::default_store(), skill, &ctx.dir).with_context(|| {
-        format!("skill '{name}' is not available locally — run `agentstack install`")
-    })?;
-    let (_, body) = read_skill_md(&source);
+    // Inline-first, then the central library — same order as `use`.
+    let resolved = crate::resolve::resolve_skill(
+        m,
+        &ctx.dir,
+        &libctx.library,
+        &libctx.lib_home,
+        &libctx.store,
+        name,
+        crate::resolve::ResolveMode::NoFetch,
+    )
+    .with_context(|| format!("loading skill '{name}'"))?;
+    let (_, body) = read_skill_md(&resolved.path);
     let instructions = body.with_context(|| format!("skill '{name}' has no SKILL.md"))?;
 
     let newly = if session.is_some() {
@@ -837,6 +869,10 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
 
     Ok(serde_json::to_string_pretty(&json!({
         "loaded": name,
+        "origin": match resolved.origin {
+            crate::resolve::SkillOrigin::Inline => "manifest",
+            crate::resolve::SkillOrigin::Library => "library",
+        },
         "instructions": instructions,
         "sticky": session.is_some(),
         "newly_loaded": newly,
