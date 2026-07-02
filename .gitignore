@@ -12,6 +12,7 @@ agentstack.local.toml
 /agentstack.lock
 /.agentstack/
 /.mcp.json
+/.claude/skills/
 /skills/
 /plugins/agentstack/
 /.claude-plugin/
@@ -22,9 +23,3 @@ agentstack.local.toml
 
 # macOS
 .DS_Store
-
-# >>> agentstack — generated project artifacts (machine-local) >>>
-/.claude/skills/frontend-skill
-/.claude/skills/playwright
-/.mcp.json
-# <<< agentstack >>>
