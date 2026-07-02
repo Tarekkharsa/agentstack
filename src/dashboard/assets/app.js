@@ -400,6 +400,24 @@ function discover(c) {
     btn("Search", () => doDiscoverSearch(input.value.trim()), "primary"),
   ]));
 
+  // Versioned packs from any git host: a repo with a pack.toml, installed at a
+  // tag. Same policy/content-scan gates as the CLI's `add from git:…`.
+  if (!READONLY) {
+    const gitInput = el("input", { class: "inp", placeholder: "git:github.com/acme/agent-pack@v1.0.0", style: "width:340px" });
+    const installGit = () => {
+      const id = gitInput.value.trim();
+      if (!id) return toast("Enter a git:<host>/<repo>@<tag> pack URL", false);
+      if (!id.startsWith("git:")) return toast("Pack URLs start with git: — e.g. git:github.com/acme/pack@v1.0.0", false);
+      post("/api/add_from", { id }, "Installed pack from " + id);
+    };
+    gitInput.addEventListener("keydown", (e) => { if (e.key === "Enter") installGit(); });
+    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:16px" }, [
+      gitInput,
+      btn("Install pack from git", installGit),
+      el("span", { class: "muted", style: "font-size:12px" }, ["any git host · versioned by tags · policy + content-scan gated"]),
+    ]));
+  }
+
   // Left: results. Right: your stack.
   const left = el("div", { class: "card" }, [el("div", { class: "hd" }, ["Results"]), el("div", { class: "bd" }, [resultsBody()])]);
   const stackRows = DATA.servers.map((s) =>

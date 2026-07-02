@@ -329,6 +329,18 @@ agentstack apply --write                                     # render to native 
 agentstack upgrade linear-pack --write                       # re-resolve and re-pin
 ```
 
+Packs also install from **any git host, versioned by tags** — a repo with a
+`pack.toml` is a publishable pack (`agentstack pack init` scaffolds one):
+
+```sh
+agentstack add from git:github.com/acme/agent-pack@v1.2.0 --write
+agentstack upgrade acme --write     # finds the newest version tag, previews, re-pins
+```
+
+The source is policy-gated **before** anything is fetched (`[policy]
+allowed_sources`), and the clone's skill content passes the same
+hidden-Unicode/injection scan as `install` before anything is written.
+
 Starter packs today: **`linear-pack`**, **`cloudflare-pack`**, **`posthog-pack`**
 (plus the standalone **`pr-triage`** and **`using-agentstack`** skills).
 Instruction prose is opt-in, previewed, and merged with visible provenance.
@@ -366,10 +378,10 @@ cargo fmt --check
 **Done:** the full shipped inventory lives in [`docs/reference.md`](docs/reference.md).
 
 **Next:** central library for hooks (`lib/hooks/`) · `watch` auto-sync ·
-transitive pack dependencies + install from any git host · SBOM export from the
-lockfile · marketplace providers · dashboard trust-footprint views for live
-runs · Windows support for live runs · session auto-start/end from the
-directory hook.
+transitive pack dependencies + semver ranges · team library sync (git-backed
+`~/.agentstack/lib`) · SBOM export from the lockfile · marketplace providers ·
+Windows support for live runs · session auto-start/end from the directory
+hook.
 
 ## License
 

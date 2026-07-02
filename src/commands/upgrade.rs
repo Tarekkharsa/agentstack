@@ -91,15 +91,85 @@ fn upgrade_one(
         .source
         .as_deref()
         .ok_or_else(|| anyhow!("pack '{pack}' has no recorded source to re-resolve"))?;
+
+    // Git pack: re-resolve at the newest version tag on the remote (policy
+    // gates the source again before any fetch).
+    if let Some(git_ref) = crate::provider::gitpack::GitPackRef::parse(source) {
+        let current_tag = git_ref.tag.clone().ok_or_else(|| {
+            anyhow!("pack '{pack}' git source '{source}' has no tag to compare against")
+        })?;
+        let newest = crate::provider::gitpack::GitPackRef {
+            tag: None, // resolve() selects the newest version tag
+            ..git_ref.clone()
+        };
+        let (mut resolved, mut origin) = add::resolve_git_pack_gated(ctx, &newest)?;
+        // Never downgrade: if the newest version tag is not newer than the
+        // installed one, re-resolve at the installed tag (content-diff still
+        // catches a moved tag).
+        let newer = match (
+            crate::provider::gitpack::version_key(&resolved.tag),
+            crate::provider::gitpack::version_key(&current_tag),
+        ) {
+            (Some(n), Some(c)) => n > c,
+            _ => false,
+        };
+        if !newer && resolved.tag != current_tag {
+            (resolved, origin) = add::resolve_git_pack_gated(
+                ctx,
+                &crate::provider::gitpack::GitPackRef {
+                    tag: Some(current_tag.clone()),
+                    ..git_ref.clone()
+                },
+            )?;
+        }
+        if resolved.tag != current_tag {
+            println!(
+                "{} '{pack}': {} -> {} ({})",
+                "newer tag".cyan(),
+                current_tag,
+                resolved.tag.bold(),
+                &resolved.commit[..resolved.commit.len().min(12)]
+            );
+        }
+        let spec = resolved.spec.clone();
+        return upgrade_pack(
+            ctx,
+            manifest_dir,
+            pack,
+            recipe,
+            &resolved.candidate,
+            &spec,
+            args,
+            &origin,
+        );
+    }
+
     let id = source.strip_prefix("catalog:").ok_or_else(|| {
-        anyhow!("pack '{pack}' source '{source}' is not a catalog source; only catalog packs can be upgraded today")
+        anyhow!(
+            "pack '{pack}' source '{source}' is not a catalog or git source; it cannot be upgraded"
+        )
     })?;
     let candidate = provider::resolve(id)
         .ok_or_else(|| anyhow!("pack '{pack}' source id '{id}' is no longer in the catalog"))?;
     let CandidateKind::Pack(spec) = &candidate.kind else {
         anyhow::bail!("catalog id '{id}' is no longer a pack");
     };
-    upgrade_pack(ctx, manifest_dir, pack, recipe, &candidate, spec, args)
+    let origin = add::PackOrigin {
+        assets: add::AssetSource::Embedded,
+        source: format!("catalog:{id}"),
+        version: recipe.version.clone(),
+        rev: None,
+    };
+    upgrade_pack(
+        ctx,
+        manifest_dir,
+        pack,
+        recipe,
+        &candidate,
+        spec,
+        args,
+        &origin,
+    )
 }
 
 /// What re-resolving the pack changed, relative to the installed ledger + disk.
@@ -131,6 +201,7 @@ impl PackDiff {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upgrade_pack(
     ctx: &super::Context,
     manifest_dir: Option<&Path>,
@@ -139,18 +210,27 @@ fn upgrade_pack(
     candidate: &Candidate,
     spec: &PackSpec,
     args: &UpgradeArgs,
+    origin: &add::PackOrigin,
 ) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
 
     // Re-gate the freshly resolved spec on [policy] BEFORE planning any write, so
     // an upgrade can't smuggle in a now-forbidden member or disallowed source.
-    add::check_pack_policy(manifest, pack, spec)?;
+    add::check_pack_policy(manifest, pack, spec, &origin.source)?;
 
     // Instructions are part of the desired state if the pack already has them
     // installed, or the user opts in now with --with-instructions.
     let want_instructions = !recipe.instructions.is_empty() || args.with_instructions;
 
-    let diff_result = diff_pack(ctx, pack, recipe, candidate, spec, want_instructions)?;
+    let diff_result = diff_pack(
+        ctx,
+        pack,
+        recipe,
+        candidate,
+        spec,
+        want_instructions,
+        origin,
+    )?;
 
     if diff_result.is_empty() {
         println!("{} pack '{}' already current.", "✓".green(), pack);
@@ -160,8 +240,15 @@ fn upgrade_pack(
     // Build the post-upgrade manifest text (used for the diff preview and write).
     let original = fs::read_to_string(&ctx.loaded.manifest_path)
         .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
-    let new_text =
-        build_upgraded_manifest(&original, pack, recipe, candidate, spec, want_instructions)?;
+    let new_text = build_upgraded_manifest(
+        &original,
+        pack,
+        recipe,
+        candidate,
+        spec,
+        want_instructions,
+        origin,
+    )?;
 
     println!(
         "{} upgrade pack '{}' in {}",
@@ -207,6 +294,7 @@ fn upgrade_pack(
         want_instructions,
         &original,
         &new_text,
+        origin,
     )?;
     repin_lock(ctx, manifest_dir, recipe, spec)?;
 
@@ -216,6 +304,7 @@ fn upgrade_pack(
 
 /// Compute the member-level diff between the installed ledger/on-disk state and
 /// the re-resolved spec.
+#[allow(clippy::too_many_arguments)]
 fn diff_pack(
     ctx: &super::Context,
     pack: &str,
@@ -223,6 +312,7 @@ fn diff_pack(
     candidate: &Candidate,
     spec: &PackSpec,
     want_instructions: bool,
+    origin: &add::PackOrigin,
 ) -> Result<PackDiff> {
     let manifest = &ctx.loaded.manifest;
     let mut d = PackDiff::default();
@@ -239,7 +329,7 @@ fn diff_pack(
         if !recipe.skills.contains(&s.name) {
             d.skills_added.push(s.name.clone());
         } else if let Some(asset) = &s.path {
-            if skill_content_changed(ctx, &s.name, asset)? {
+            if skill_content_changed(ctx, &s.name, asset, &origin.assets)? {
                 d.skills_changed.push(s.name.clone());
             }
         }
@@ -258,7 +348,7 @@ fn diff_pack(
     };
     if want_instructions {
         for instr in &spec.instructions {
-            let body = add::stamped_instruction(pack, instr)?;
+            let body = add::stamped_instruction_from(pack, instr, &origin.assets)?;
             let on_disk = ctx.dir.join(format!("instructions/{}.md", instr.name));
             if !recipe.instructions.contains(&instr.name) {
                 d.instr_added.push(instr.name.clone());
@@ -279,8 +369,13 @@ fn diff_pack(
     Ok(d)
 }
 
-/// Has the embedded asset for `skill` diverged from what's installed on disk?
-fn skill_content_changed(ctx: &super::Context, skill: &str, asset: &str) -> Result<bool> {
+/// Has the pack's asset for `skill` diverged from what's installed on disk?
+fn skill_content_changed(
+    ctx: &super::Context,
+    skill: &str,
+    asset: &str,
+    assets: &add::AssetSource,
+) -> Result<bool> {
     let on_disk = ctx
         .loaded
         .manifest
@@ -294,10 +389,10 @@ fn skill_content_changed(ctx: &super::Context, skill: &str, asset: &str) -> Resu
     if !installed.exists() {
         return Ok(true);
     }
-    // Extract the embedded asset to a scratch dir and compare content digests.
+    // Extract the pack asset to a scratch dir and compare content digests.
     let tmp = ctx.dir.join(format!(".agentstack-cmp-{}", sanitize(skill)));
     let _ = fs::remove_dir_all(&tmp);
-    let extracted = crate::catalog::extract_asset_dir(asset, &tmp);
+    let extracted = assets.extract_dir(asset, &tmp);
     let changed = match extracted {
         Ok(()) => store::dir_digest(&tmp).ok() != store::dir_digest(&installed).ok(),
         Err(_) => true,
@@ -308,6 +403,7 @@ fn skill_content_changed(ctx: &super::Context, skill: &str, asset: &str) -> Resu
 
 /// Rebuild the manifest with the re-resolved members: drop every current member,
 /// then re-add the desired server + skills + (opt-in) instructions + ledger.
+#[allow(clippy::too_many_arguments)]
 fn build_upgraded_manifest(
     original: &str,
     pack: &str,
@@ -315,6 +411,7 @@ fn build_upgraded_manifest(
     candidate: &Candidate,
     spec: &PackSpec,
     want_instructions: bool,
+    origin: &add::PackOrigin,
 ) -> Result<String> {
     let mut text = original.to_string();
 
@@ -333,8 +430,9 @@ fn build_upgraded_manifest(
     // 2. Re-add the desired members, recording a fresh ledger.
     let mut ledger = PluginRecipe {
         kind: Some("pack".into()),
-        source: Some(format!("catalog:{}", candidate.id)),
-        version: recipe.version.clone(),
+        rev: origin.rev.clone(),
+        source: Some(origin.source.clone()),
+        version: origin.version.clone(),
         description: candidate.description.clone(),
         display: recipe.display.clone(),
         category: None,
@@ -411,6 +509,7 @@ fn build_upgraded_manifest(
 
 /// Apply the upgrade atomically: back up the pack's current files, write the new
 /// manifest, swap the on-disk assets, and on any failure restore everything.
+#[allow(clippy::too_many_arguments)]
 fn apply_upgrade(
     ctx: &super::Context,
     pack: &str,
@@ -419,6 +518,7 @@ fn apply_upgrade(
     want_instructions: bool,
     original: &str,
     new_text: &str,
+    origin: &add::PackOrigin,
 ) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
 
@@ -435,7 +535,7 @@ fn apply_upgrade(
         spec.instructions
             .iter()
             .map(|i| {
-                let body = add::stamped_instruction(pack, i)?;
+                let body = add::stamped_instruction_from(pack, i, &origin.assets)?;
                 Ok((ctx.dir.join(format!("instructions/{}.md", i.name)), body))
             })
             .collect::<Result<_>>()?
@@ -489,7 +589,9 @@ fn apply_upgrade(
             if out.exists() {
                 fs::remove_dir_all(&out).ok();
             }
-            crate::catalog::extract_asset_dir(asset, &out)
+            origin
+                .assets
+                .extract_dir(asset, &out)
                 .with_context(|| format!("extracting skill asset '{asset}'"))?;
         }
         for (out, body) in &new_instr {

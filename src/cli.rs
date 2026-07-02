@@ -118,6 +118,10 @@ pub enum Command {
     /// Inspect the available CLI adapters.
     Adapters(AdaptersArgs),
 
+    /// Author a publishable pack (a git repo with a pack.toml).
+    #[command(subcommand)]
+    Pack(PackCmd),
+
     /// Manage AgentStack plugin recipes and generated native marketplaces.
     Plugins(PluginsArgs),
 
@@ -679,6 +683,20 @@ pub struct AuditArgs {
     /// With --calls: only entries from the last N days.
     #[arg(long, value_name = "DAYS")]
     pub since: Option<u64>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum PackCmd {
+    /// Scaffold a pack.toml + example skill in the current directory. Publish
+    /// by pushing the repo and tagging a version (e.g. v0.1.0); install with
+    /// `agentstack add from git:<host>/<repo>@<tag>`.
+    Init(PackInitArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct PackInitArgs {
+    /// Pack name (defaults to the current directory's name).
+    pub name: Option<String>,
 }
 
 #[derive(Args, Debug)]

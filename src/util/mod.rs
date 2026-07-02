@@ -2,6 +2,7 @@
 
 pub mod atomic;
 pub mod diff;
+pub mod fsx;
 pub mod paths;
 
 /// A process-wide lock for tests that mutate the global `AGENTSTACK_HOME` env

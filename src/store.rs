@@ -152,6 +152,30 @@ fn resolve_path(dir: &Path, p: &str) -> PathBuf {
     }
 }
 
+/// Clone (or refresh) `url` into the store and check out `rev` when given.
+/// Returns the checkout dir and the resolved HEAD commit. The public seam the
+/// git-pack provider uses; skills keep going through [`Store::resolve`].
+pub fn checkout(store: &Store, url: &str, rev: Option<&str>) -> Result<(PathBuf, String)> {
+    let dest = store.git_dir(url);
+    ensure_git(url, rev, &dest)?;
+    let head = git_head(&dest)?;
+    Ok((dest, head))
+}
+
+/// List `url`'s tags via `git ls-remote --tags`, peeled entries preferred,
+/// without cloning. Network; callers gate on policy first.
+pub fn ls_remote_tags(url: &str) -> Result<Vec<String>> {
+    let out = run_git(&["ls-remote", "--tags", url], None)?;
+    let mut tags: Vec<String> = out
+        .lines()
+        .filter_map(|l| l.split_once("refs/tags/").map(|(_, t)| t))
+        .map(|t| t.trim_end_matches("^{}").to_string())
+        .collect();
+    tags.sort();
+    tags.dedup();
+    Ok(tags)
+}
+
 /// Ensure a git clone exists at `dest` and is checked out at `want_rev` (or its
 /// default branch). Returns whether a clone happened.
 fn ensure_git(url: &str, want_rev: Option<&str>, dest: &Path) -> Result<bool> {

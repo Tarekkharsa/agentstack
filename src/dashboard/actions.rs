@@ -340,6 +340,7 @@ pub fn add_plugin_recipe(manifest_dir: Option<&Path>, args: &Value) -> Result<St
 
     let recipe = PluginRecipe {
         kind: None,
+        rev: None,
         source: None,
         instructions: Vec::new(),
         version: str_field(args, "version").unwrap_or_else(|| "0.1.0".into()),

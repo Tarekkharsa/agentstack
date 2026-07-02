@@ -153,6 +153,7 @@ fn create(args: &PluginsCreateArgs, manifest_dir: Option<&Path>) -> Result<()> {
         version: args.version.clone(),
         description: args.description.clone(),
         kind: None,
+        rev: None,
         source: None,
         instructions: Vec::new(),
         display: args.display.clone(),
@@ -939,6 +940,7 @@ fn inspect_native_plugin(
 
     let recipe = PluginRecipe {
         kind: None,
+        rev: None,
         source: None,
         instructions: Vec::new(),
         version: meta

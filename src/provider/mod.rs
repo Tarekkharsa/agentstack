@@ -4,6 +4,7 @@
 //! returns normalized [`Candidate`]s that `add`/`search`/the dashboard render
 //! into any CLI.
 
+pub mod gitpack;
 pub mod registry;
 
 use indexmap::IndexMap;

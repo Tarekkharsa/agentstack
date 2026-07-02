@@ -34,6 +34,12 @@ pub fn run(args: &AddArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
 fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
+
+    // `git:<url>[@<tag>][#subdir]` — a versioned pack from any git host.
+    if let Some(git_ref) = crate::provider::gitpack::GitPackRef::parse(&a.id) {
+        return add_git_pack(a, &ctx, &git_ref);
+    }
+
     let candidate = provider::resolve(&a.id)
         .with_context(|| format!("no capability '{}' in the catalog or registry", a.id))?;
     println!(
@@ -46,8 +52,62 @@ fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
     match &candidate.kind {
         CandidateKind::Server(_) => add_from_server(a, &ctx, &candidate),
         CandidateKind::Skill(skill) => add_from_skill(a, &ctx, &candidate, skill),
-        CandidateKind::Pack(spec) => add_pack(a, &ctx, &candidate, spec),
+        CandidateKind::Pack(spec) => add_pack(
+            a,
+            &ctx,
+            &candidate,
+            spec,
+            &PackOrigin::catalog(&candidate.id),
+        ),
     }
+}
+
+/// Install a pack from a git repo at a version tag. Policy gates the source
+/// *before* anything is fetched; the clone's skill/instruction content passes
+/// the same scan gate as `install` before any manifest planning happens.
+fn add_git_pack(
+    a: &AddFromArgs,
+    ctx: &super::Context,
+    git_ref: &crate::provider::gitpack::GitPackRef,
+) -> Result<()> {
+    let (resolved, origin) = resolve_git_pack_gated(ctx, git_ref)?;
+    println!(
+        "{} {} (git) — {} at {} ({})",
+        "found".green(),
+        resolved.candidate.name.bold(),
+        git_ref.url,
+        resolved.tag.bold(),
+        &resolved.commit[..resolved.commit.len().min(12)],
+    );
+    add_pack(a, ctx, &resolved.candidate, &resolved.spec, &origin)
+}
+
+/// Gate `[policy] allowed_sources` (before any network), then clone + parse +
+/// content-scan the pack. Shared by the CLI, dashboard, and MCP install paths.
+pub(crate) fn resolve_git_pack_gated(
+    ctx: &super::Context,
+    git_ref: &crate::provider::gitpack::GitPackRef,
+) -> Result<(crate::provider::gitpack::ResolvedGitPack, PackOrigin)> {
+    let policy = &ctx.loaded.manifest.policy;
+    if !policy.allowed_sources.is_empty()
+        && !git_ref
+            .policy_sources()
+            .iter()
+            .any(|s| policy.source_allowed(s))
+    {
+        anyhow::bail!(
+            "policy allowed_sources rejects '{}' — nothing fetched",
+            git_ref.policy_sources().last().expect("label")
+        );
+    }
+    let resolved = crate::provider::gitpack::resolve(git_ref)?;
+    let origin = PackOrigin {
+        assets: AssetSource::Dir(resolved.root.clone()),
+        source: resolved.source_id.clone(),
+        version: resolved.tag.clone(),
+        rev: Some(resolved.commit.clone()),
+    };
+    Ok((resolved, origin))
 }
 
 fn add_from_server(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate) -> Result<()> {
@@ -162,11 +222,61 @@ fn skill_entry(skill: &SkillRef) -> Result<(Skill, Option<String>)> {
 /// A bundled-asset extraction queued during pack planning, applied only on
 /// `--write` (so a dry run touches no files on disk).
 enum Extraction {
-    /// Copy an embedded skill dir to a destination relative to the manifest.
+    /// Copy a pack skill dir to a destination relative to the manifest.
     SkillDir { asset: String, dest: String },
     /// Write an instruction file (already provenance-stamped) to a destination
     /// relative to the manifest.
     InstrFile { dest: String, body: String },
+}
+
+/// Where a pack's content and identity come from — the embedded catalog or a
+/// cloned git checkout. Carried through `add_pack` so the same install path
+/// serves both.
+pub(crate) struct PackOrigin {
+    pub assets: AssetSource,
+    /// Ledger id: `catalog:<id>` or `git:<url>@<tag>[#subdir]`.
+    pub source: String,
+    /// Ledger version: the git tag, or the catalog's static version.
+    pub version: String,
+    /// The commit a git tag resolved to (provenance).
+    pub rev: Option<String>,
+}
+
+pub(crate) enum AssetSource {
+    /// Assets compiled into the binary under `catalog/`.
+    Embedded,
+    /// Assets on disk under a cloned pack root.
+    Dir(PathBuf),
+}
+
+impl PackOrigin {
+    pub(crate) fn catalog(id: &str) -> Self {
+        PackOrigin {
+            assets: AssetSource::Embedded,
+            source: format!("catalog:{id}"),
+            version: "0.1.0".into(),
+            rev: None,
+        }
+    }
+}
+
+impl AssetSource {
+    /// Copy one skill dir asset to `out`.
+    pub(crate) fn extract_dir(&self, asset: &str, out: &Path) -> Result<()> {
+        match self {
+            AssetSource::Embedded => crate::catalog::extract_asset_dir(asset, out),
+            AssetSource::Dir(root) => crate::util::fsx::copy_dir_all(&root.join(asset), out),
+        }
+    }
+
+    /// Read one instruction file asset.
+    pub(crate) fn read_file(&self, asset: &str) -> Result<String> {
+        match self {
+            AssetSource::Embedded => crate::catalog::read_asset_file(asset),
+            AssetSource::Dir(root) => fs::read_to_string(root.join(asset))
+                .with_context(|| format!("reading pack file '{asset}'")),
+        }
+    }
 }
 
 /// Install a vendor pack: server + skill(s) + (opt-in) house-rule instructions,
@@ -178,13 +288,14 @@ fn add_pack(
     ctx: &super::Context,
     candidate: &Candidate,
     spec: &PackSpec,
+    origin: &PackOrigin,
 ) -> Result<()> {
     let pack = &candidate.name;
     let manifest = &ctx.loaded.manifest;
 
     // 0. Policy gate FIRST — before planning any write. Evaluate every member
     //    name + source against [policy]; bail atomically on the first violation.
-    check_pack_policy(manifest, pack, spec)?;
+    check_pack_policy(manifest, pack, spec, &origin.source)?;
 
     // 1. Collision check across every target key + the ledger key. Atomic.
     if spec.server.is_some() && manifest.servers.contains_key(pack) {
@@ -252,8 +363,9 @@ fn add_pack(
     let mut extractions: Vec<Extraction> = Vec::new();
     let mut ledger = PluginRecipe {
         kind: Some("pack".into()),
-        source: Some(format!("catalog:{}", candidate.id)),
-        version: "0.1.0".into(),
+        source: Some(origin.source.clone()),
+        rev: origin.rev.clone(),
+        version: origin.version.clone(),
         description: candidate.description.clone(),
         display: None,
         category: None,
@@ -286,7 +398,8 @@ fn add_pack(
     //    `[skills.<name>]` path entry.
     for skill in &spec.skills {
         let Some(asset) = &skill.path else {
-            // git/remote skills aren't part of the embedded MVP pack.
+            // Pack skills are always bundled content (embedded or cloned) —
+            // extracted to a path the lock can digest-pin.
             anyhow::bail!("pack skill '{}' has no bundled path", skill.name);
         };
         let dest = format!("./{asset}");
@@ -314,7 +427,7 @@ fn add_pack(
     //    flat `instructions/<name>.md`. When not, skip but tell the user how.
     if want_instructions {
         for instr in &spec.instructions {
-            let body = stamped_instruction(pack, instr)?;
+            let body = stamped_instruction_from(pack, instr, &origin.assets)?;
             let dest = format!("instructions/{}.md", instr.name);
             let entry = crate::manifest::Instruction {
                 path: format!("./{dest}"),
@@ -383,7 +496,10 @@ fn add_pack(
         let result = match ex {
             Extraction::SkillDir { asset, dest } => {
                 let out = ctx.dir.join(dest);
-                crate::catalog::extract_asset_dir(asset, &out).map(|()| created.push((out, true)))
+                origin
+                    .assets
+                    .extract_dir(asset, &out)
+                    .map(|()| created.push((out, true)))
             }
             Extraction::InstrFile { dest, body } => {
                 let out = ctx.dir.join(dest);
@@ -417,7 +533,12 @@ fn add_pack(
 
 /// Mirror doctor's policy check across every pack member before writing. Bails
 /// (atomically) on the first violation, naming the member + the offending rule.
-pub(crate) fn check_pack_policy(manifest: &Manifest, pack: &str, spec: &PackSpec) -> Result<()> {
+pub(crate) fn check_pack_policy(
+    manifest: &Manifest,
+    pack: &str,
+    spec: &PackSpec,
+    pack_source: &str,
+) -> Result<()> {
     let policy = &manifest.policy;
     if policy.is_empty() {
         return Ok(());
@@ -440,11 +561,10 @@ pub(crate) fn check_pack_policy(manifest: &Manifest, pack: &str, spec: &PackSpec
         }
     }
     // allowed_sources: each skill's source must be allowed. The pack server's
-    // source is the catalog (`catalog:<id>`); skills are extracted to a local
-    // path under the manifest (`path:...`).
+    // source is the pack's own (`catalog:<id>` or `git:<url>@<tag>`); skills
+    // are extracted to a local path under the manifest (`path:...`).
     if !policy.allowed_sources.is_empty() {
-        let pack_source = format!("catalog:{pack}");
-        if spec.server.is_some() && !policy.source_allowed(&pack_source) {
+        if spec.server.is_some() && !policy.source_allowed(pack_source) {
             anyhow::bail!(
                 "policy allowed_sources rejects pack '{pack}' source '{pack_source}' — nothing written"
             );
@@ -470,8 +590,12 @@ pub(crate) fn check_pack_policy(manifest: &Manifest, pack: &str, spec: &PackSpec
 
 /// Extract a pack's bundled instruction and stamp it with a provenance header +
 /// a visible heading so the origin survives into the merged CLAUDE.md/AGENTS.md.
-pub(crate) fn stamped_instruction(pack: &str, instr: &InstrRef) -> Result<String> {
-    let raw = crate::catalog::read_asset_file(&instr.path)?;
+pub(crate) fn stamped_instruction_from(
+    pack: &str,
+    instr: &InstrRef,
+    assets: &AssetSource,
+) -> Result<String> {
+    let raw = assets.read_file(&instr.path)?;
     Ok(format!(
         "{}\n# vendor: {pack} (unofficial)\n\n{}",
         vendor_marker(pack),
@@ -638,9 +762,37 @@ pub struct AddedMembers {
 /// behind the CLI's `--with-instructions`); pack instructions are reported as
 /// available but skipped.
 pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Result<AddedMembers> {
+    let ctx = super::load(Some(dir))?;
+
+    // Git packs come through the same door (dashboard Discover, MCP).
+    if let Some(git_ref) = crate::provider::gitpack::GitPackRef::parse(id) {
+        let (resolved, origin) = resolve_git_pack_gated(&ctx, &git_ref)?;
+        let args = AddFromArgs {
+            id: id.to_string(),
+            profile: profile.map(str::to_string),
+            with_instructions: false,
+            write: true,
+        };
+        add_pack(&args, &ctx, &resolved.candidate, &resolved.spec, &origin)?;
+        return Ok(AddedMembers {
+            servers: resolved
+                .spec
+                .server
+                .iter()
+                .map(|_| resolved.candidate.name.clone())
+                .collect(),
+            skills: resolved
+                .spec
+                .skills
+                .iter()
+                .map(|s| s.name.clone())
+                .collect(),
+            instructions: Vec::new(),
+        });
+    }
+
     let candidate = provider::resolve(id)
         .with_context(|| format!("no capability '{id}' in the catalog or registry"))?;
-    let ctx = super::load(Some(dir))?;
     match &candidate.kind {
         CandidateKind::Server(_) => {
             let manifest = &ctx.loaded.manifest;
@@ -694,7 +846,13 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
                 with_instructions: false,
                 write: true,
             };
-            add_pack(&args, &ctx, &candidate, spec)?;
+            add_pack(
+                &args,
+                &ctx,
+                &candidate,
+                spec,
+                &PackOrigin::catalog(&candidate.id),
+            )?;
             Ok(AddedMembers {
                 servers: spec.server.iter().map(|_| candidate.name.clone()).collect(),
                 skills: spec.skills.iter().map(|s| s.name.clone()).collect(),
@@ -822,7 +980,13 @@ mod tests {
     fn pack_policy_forbids_member() {
         let manifest: Manifest =
             toml::from_str("version = 1\n[policy]\nforbid = [\"linear_breakdown\"]\n").unwrap();
-        let err = check_pack_policy(&manifest, "linear-pack", &linear_pack_spec()).unwrap_err();
+        let err = check_pack_policy(
+            &manifest,
+            "linear-pack",
+            &linear_pack_spec(),
+            "catalog:linear-pack",
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("linear_breakdown"));
         assert!(err.to_string().contains("forbids"));
     }
@@ -834,14 +998,26 @@ mod tests {
         )
         .unwrap();
         // The pack server source `catalog:linear-pack` isn't in the allowlist.
-        let err = check_pack_policy(&manifest, "linear-pack", &linear_pack_spec()).unwrap_err();
+        let err = check_pack_policy(
+            &manifest,
+            "linear-pack",
+            &linear_pack_spec(),
+            "catalog:linear-pack",
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("allowed_sources"));
     }
 
     #[test]
     fn pack_policy_allows_when_empty() {
         let manifest: Manifest = toml::from_str("version = 1\n").unwrap();
-        check_pack_policy(&manifest, "linear-pack", &linear_pack_spec()).unwrap();
+        check_pack_policy(
+            &manifest,
+            "linear-pack",
+            &linear_pack_spec(),
+            "catalog:linear-pack",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -850,7 +1026,7 @@ mod tests {
             name: "linear_rules".into(),
             path: "instructions/linear/rules.md".into(),
         };
-        let out = stamped_instruction("linear-pack", &instr).unwrap();
+        let out = stamped_instruction_from("linear-pack", &instr, &AssetSource::Embedded).unwrap();
         assert!(out.starts_with("<!-- agentstack:vendor linear-pack (unofficial) -->"));
         assert!(out.contains("# vendor: linear-pack (unofficial)"));
     }

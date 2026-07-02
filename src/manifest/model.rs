@@ -213,10 +213,15 @@ pub struct PluginRecipe {
     /// Instruction-fragment member names (used by pack ledgers).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub instructions: Vec<String>,
-    /// Where this recipe was resolved from (catalog id, or `git+rev`). Reserved
-    /// for upgrade re-resolve; recorded by pack ledgers.
+    /// Where this recipe was resolved from (`catalog:<id>` or
+    /// `git:<url>@<tag>[#subdir]`); recorded by pack ledgers, parsed by
+    /// `upgrade` to re-resolve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// The commit a git pack's tag resolved to at install time (provenance;
+    /// content digests live in the lock via each extracted skill).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homepage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

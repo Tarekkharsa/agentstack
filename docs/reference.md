@@ -109,6 +109,19 @@ The complete, implemented-and-tested feature inventory. The
   resolves a registry/catalog server, lifts its secrets to `${REF}`s, and (on
   `apply`) renders it to **all your CLIs at once**. agentstack is the cross-CLI
   *client* over the registry + marketplaces, not another registry.
+- **Git-hosted versioned packs** — any repo with a `pack.toml` installs as a
+  pack from any git host, pinned to a version tag:
+  `add from git:<host>/<repo>[@<tag>][#subdir]` (no tag → newest
+  version-shaped tag; a repo with no version tags is an error, never a
+  floating install). The ledger records `source`/`version`/`rev` (the
+  resolved commit); extracted skills are digest-pinned in the lock so
+  `install --locked` reproduces. `upgrade <pack>` lists remote tags, resolves
+  the newest (never downgrades), previews the member diff, and re-pins on
+  `--write`. `[policy] allowed_sources` is enforced **before** any fetch, and
+  the clone's content passes the install scan gate. `agentstack pack init`
+  scaffolds a publishable pack; the dashboard's Discover pane installs from a
+  git URL with the same gates. (Semver ranges and transitive pack
+  dependencies are deliberately not in v1.)
 - **`adopt`** — the reverse of `apply`: pull a hand-added server from a target
   config back into the manifest, lifting its inline secret, preserving comments.
 - **`add`** — flag-driven (scriptable / agent-operable) add of a server or skill
@@ -253,7 +266,7 @@ agentstack codemode --write    # write client.ts + agentstack-runtime.ts (+ .git
 `lib add|add-server|list|remove|remove-server|migrate`, `restore`,
 `doctor` (`--ci`, `--live`, `--fix`), `audit` (`--json`, `--calls`,
 `--since`), `search`, `stats` (`--live`),
-`secret set|get|rm|list`, `export`/`import`, `adapters`, `plugins`,
+`secret set|get|rm|list`, `export`/`import`, `adapters`, `pack init`, `plugins`,
 `dashboard`, `mcp`, `codemode`, `hook`, `run`/`runs`/`kill`.
 
 ## Everything shipped so far
