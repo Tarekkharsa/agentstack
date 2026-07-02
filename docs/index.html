@@ -88,11 +88,23 @@
       font-size: clamp(18px, 2vw, 23px);
     }
 
+    .install-line {
+      margin-top: 26px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      background: #fffdf8;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--accent-dark);
+      overflow-wrap: anywhere;
+      box-shadow: var(--shadow);
+    }
+
     .hero-actions {
       display: flex;
       flex-wrap: wrap;
       gap: 12px;
-      margin-top: 32px;
+      margin-top: 22px;
     }
 
     .button {
@@ -586,16 +598,18 @@
   <div class="shell">
     <header class="hero">
       <div>
-        <p class="kicker">AgentStack project guide</p>
-        <h1>Old projects, new projects, one control plane.</h1>
+        <p class="kicker">agentstack — one portable manifest, every agent CLI</p>
+        <h1>Declare once. Run anywhere.</h1>
         <p class="hero-copy">
-          Use AgentStack with existing repo-local setups, new central-library projects, or a mixed
-          migration path. The end state is simple: managed capabilities live under
-          <code>~/.agentstack/lib</code>, projects select them by name, and providers receive generated views.
+          Your skills and MCP servers live in one place — <code>~/.agentstack/lib</code>.
+          Each project is just a short file of names. agentstack renders the real
+          config for Claude Code, Codex, Gemini, Cursor, and ten more, with secrets
+          resolved per machine and never committed.
         </p>
+        <div class="install-line"><code>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</code></div>
         <div class="hero-actions">
-          <a class="button" href="#quick-start">Start with commands</a>
-          <a class="button secondary" href="#cases">Compare all cases</a>
+          <a class="button" href="#quick-start">Quick start</a>
+          <a class="button secondary" href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
         </div>
       </div>
 
@@ -683,8 +697,8 @@
       <main>
         <section id="model">
           <div class="section-head">
-            <h2>The rule.</h2>
-            <p>AgentStack supports old repo-local projects and new central-library projects. Centralize capabilities when you are ready; never centralize provider-private state.</p>
+            <h2>The mental model.</h2>
+            <p>Three ownership rules explain everything on this page. Centralize capabilities when you are ready; never centralize provider-private state.</p>
           </div>
 
           <div class="rule-grid">
@@ -1361,14 +1375,14 @@ Authorization = "Bearer real-token-value"</code></pre>
     <footer class="footer">
       <div class="footer-inner">
         <div>
-          <strong>AgentStack central library guide</strong><br>
-          Built from <code>docs/plans/central-store.md</code>, <code>docs/plans/provider-import.md</code>, and the runnable sandbox.
+          <strong>agentstack docs</strong><br>
+          Every flow on this page is verified by the runnable sandbox
+          (<code>agentstack-test/demo-central-library.sh</code>).
         </div>
         <div>
           More docs:
           <a href="https://github.com/Tarekkharsa/agentstack#readme">README</a> ·
           <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">feature reference</a> ·
-          <a href="https://github.com/Tarekkharsa/agentstack/tree/main/docs/plans">design docs</a> ·
           <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
         </div>
       </div>

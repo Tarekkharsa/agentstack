@@ -84,32 +84,24 @@ violations, and high-severity content-scan findings (hidden Unicode in skill or
 instruction content). Warnings still print for advisory issues that do not make
 the setup unsafe to render.
 
-## Why it exists
+## Why agentstack
 
-Managing AI-agent setup today is three tangled pains:
+Setting up AI agents by hand has three problems:
 
-1. **Format fragmentation** — the *same* MCP server is spelled differently per
-   CLI (Codex TOML `[mcp_servers.x]`, Cursor `url`, Windsurf `serverUrl`, Gemini
-   `httpUrl`, VS Code's `servers` key, Claude's `type:"http"`).
-2. **Reproducibility & drift** — a new laptop, a teammate, a fresh devcontainer:
-   everyone re-does setup by hand, and configs drift apart.
-3. **Secrets** — real tokens differ per machine and must never land in git.
+1. **Every CLI spells the same thing differently** — one MCP server needs a
+   different config syntax in Codex, Cursor, Windsurf, Gemini, VS Code, and
+   Claude Code.
+2. **Setups drift and don't travel** — a new laptop, a teammate, or a fresh
+   devcontainer means redoing everything by hand, slightly differently.
+3. **Secrets end up in the wrong places** — real tokens pasted into config
+   files that were never meant to be shared.
 
-The durable value is not only format translation (the ecosystem is slowly
-converging on `mcp.json`). The value is the layer above it:
-**secrets-by-reference, profiles/selective loading, reproducible lockfiles,
-cross-source discovery, runtime launch control, and trust/governance gates** in
-one auditable binary across the CLIs your team actually uses.
-
-## Who it is for
-
-agentstack is most useful when you use more than one agent CLI, share agent
-setup with teammates, switch machines often, or need MCP servers, skills,
-instructions, settings, and secrets to be reviewed in git.
-
-It is probably overkill if you use one agent with one or two hand-managed MCP
-servers and do not care about reproducibility, profiles, drift, or team
-onboarding yet.
+agentstack solves all three with one reviewed file: secrets stay references,
+lockfiles make setups reproducible, and one `apply` renders everything to every
+CLI. It shines when you use more than one agent CLI, share setup with
+teammates, or switch machines often. If you use a single agent with one
+hand-managed server and don't care about any of that yet, you probably don't
+need it.
 
 ## Portable team workflow
 
@@ -333,21 +325,19 @@ agentstack upgrade linear-pack --write                       # re-resolve and re
 ```
 
 Starter packs today: **`linear-pack`**, **`cloudflare-pack`**, **`posthog-pack`**
-(plus the standalone **`pr-triage`** skill). Instruction prose is opt-in,
-previewed, and merged with visible provenance. Bundled starter skills are
-**agentstack-authored and unofficial** examples, not endorsed vendor content.
-
-For the broader product direction, see
-[`docs/plans/portable-agent-runtime-vision.md`](docs/plans/portable-agent-runtime-vision.md).
+(plus the standalone **`pr-triage`** and **`using-agentstack`** skills).
+Instruction prose is opt-in, previewed, and merged with visible provenance.
+Bundled starter skills are **agentstack-authored and unofficial** examples, not
+endorsed vendor content.
 
 ## Docs
 
+- [Central library guide](https://tarekkharsa.github.io/agentstack/) — the
+  visual walkthrough: one library, projects that select by name, generated
+  views for every CLI. Its flows are verified by the runnable sandbox
+  (`agentstack-test/demo-central-library.sh`).
 - [Feature reference](docs/reference.md) — the complete tested inventory and
   full command list.
-- [Central library guide](https://tarekkharsa.github.io/agentstack/) — visual walkthrough
-  of referencing skills/servers by name from `~/.agentstack/lib/`; its flows are
-  verified by the runnable sandbox (`agentstack-test/demo-central-library.sh`).
-- [Design docs](docs/plans/) — vision, spec, and per-feature plans.
 
 ## Adding a CLI
 
@@ -367,25 +357,11 @@ cargo fmt --check
 
 **Done:** the full shipped inventory lives in [`docs/reference.md`](docs/reference.md).
 
-**Next:** central library for hooks (`lib/hooks/`) · one-command provider import
-(sweep every CLI's skills + MCP entries into `~/.agentstack`, leaving generated
-views/symlinks behind — see [`docs/plans/provider-import.md`](docs/plans/provider-import.md)) ·
-harden pack remove/upgrade ownership · add golden coverage for every adapter ·
-polish the new-machine/team bootstrap path · publish releases + a real demo ·
-dogfood on a team · dashboard trust-footprint views for live runs · marketplace
-providers (skills.sh-style) + optional audit enrichment · reconsider a JSON /
-`mcp.json`-aligned manifest · install/remove flows for native plugin runtimes ·
-discover stray unmanaged agent processes as an advisory view.
-
-See [`docs/plans/original-spec.md`](docs/plans/original-spec.md) for the full spec and design
-decisions (D1–D22),
-[`docs/plans/central-store.md`](docs/plans/central-store.md) +
-[`docs/plans/provider-import.md`](docs/plans/provider-import.md) for the central-library
-design, [the central-library guide](https://tarekkharsa.github.io/agentstack/) for
-a visual guide covering existing projects, new central-library projects, and
-generated provider views, and
-[`docs/plans/portable-agent-runtime-vision.md`](docs/plans/portable-agent-runtime-vision.md)
-for the current product vision.
+**Next:** central library for hooks (`lib/hooks/`) · `watch` auto-sync ·
+transitive pack dependencies + install from any git host · SBOM export from the
+lockfile · marketplace providers · dashboard trust-footprint views for live
+runs · Windows support for live runs · session auto-start/end from the
+directory hook.
 
 ## License
 
