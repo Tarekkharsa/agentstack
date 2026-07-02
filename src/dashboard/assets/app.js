@@ -862,7 +862,13 @@ function serverDetail(s, span) {
   (s.env || []).forEach((e) => add("env." + e.key, e.value));
   return el("tr", { class: "detail" }, [el("td", { colspan: span }, [el("div", { class: "bd" }, [
     el("div", { class: "kv" }, kv),
-    el("div", { class: "toolbar", style: "margin-top:10px" }, [btn("Explain trust ⓘ", () => explainModal(s.name))]),
+    el("div", { class: "toolbar", style: "margin-top:10px" }, [
+      btn("Explain trust ⓘ", () => explainModal(s.name)),
+      READONLY ? null : btn("Remove from stack…", () => {
+        if (!confirm(`Remove "${s.name}" from your stack?\n\nIt leaves the manifest now; the next Apply removes it from your tools' configs.`)) return;
+        post("/api/remove", { name: s.name }, "Removed " + s.name + " — review pending changes, then Apply");
+      }, "danger"),
+    ]),
   ])])]);
 }
 
@@ -1555,11 +1561,40 @@ function healthRow(h) {
 function health(c) {
   c.appendChild(pageHead("Health", "Your tools, secrets, and what's out of sync."));
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, DATA.health.map(healthRow))]));
+  // Full doctor — the same checks as `agentstack doctor`, rendered here so the
+  // verify step never needs a terminal.
+  c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [el("div", { class: "bd" }, [
+    el("div", { class: "toolbar" }, [
+      btn("Run doctor", runDoctor, "primary"),
+      el("span", { class: "muted", style: "font-size:13px" }, ["Full check-up: manifest, adapters, secrets, drift, skills, content scan, reproducibility."]),
+    ]),
+    el("div", { id: "doctor-out" }),
+  ])]));
   if (!READONLY) {
     c.appendChild(el("div", { style: "margin-top:16px" }, [
       btn("Preview & apply → global", () => openPreview("global"), "primary"),
     ]));
   }
+}
+function runDoctor() {
+  const out = document.getElementById("doctor-out");
+  if (!out) return;
+  out.innerHTML = "";
+  out.appendChild(el("div", { class: "muted", style: "margin-top:10px" }, ["Running checks…"]));
+  fetch(q("/api/doctor"))
+    .then((r) => r.json())
+    .then((d) => {
+      if (d.error) { out.innerHTML = ""; return toast("Doctor: " + d.error, false); }
+      out.innerHTML = "";
+      const summary = d.errors + " error(s), " + d.warnings + " warning(s).";
+      out.appendChild(el("div", { style: "margin-top:10px;font-weight:600" }, [summary]));
+      (d.sections || []).forEach((s) => {
+        if (!s.lines.length) return;
+        out.appendChild(el("div", { class: "muted", style: "margin-top:12px;font-size:12px;text-transform:uppercase;letter-spacing:.04em" }, [s.title]));
+        s.lines.forEach((l) => out.appendChild(healthRow({ level: l.level, message: l.msg })));
+      });
+    })
+    .catch((e) => { out.innerHTML = ""; toast("Doctor: " + e.message, false); });
 }
 
 /* ---------- diff preview modal ---------- */

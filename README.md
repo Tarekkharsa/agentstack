@@ -338,6 +338,9 @@ endorsed vendor content.
   (`agentstack-test/demo-central-library.sh`).
 - [Feature reference](docs/reference.md) — the complete tested inventory and
   full command list.
+- [The no-terminal path](docs/dashboard.md) — the full capability lifecycle
+  (discover → add → secrets → enable → apply → verify → remove → undo) done
+  entirely from the dashboard UI.
 
 ## Adding a CLI
 

@@ -148,9 +148,14 @@ hand-written CSS — no Node, no framework, still one `cargo build`):
 `agentstack dashboard` opens a cross-harness matrix with secrets, skills,
 settings, profiles, and usage panels. By default it **can write to disk** — set
 secrets, apply to live configs, toggle servers/skills per CLI, edit settings,
-consolidate skills, and install. Pass **`--read-only`** to refuse every mutation
-(browse + preview diffs only). Bound to 127.0.0.1, token-gated, it never exposes
-secret values, and the same unresolved-secret blocking applies to its writes.
+consolidate skills, install, **run doctor** (full check-up rendered in the
+Health tab), and **remove** a capability from the manifest. Pass
+**`--read-only`** to refuse every mutation (browse + preview diffs only) —
+enforced centrally for all POST routes and pinned by a route-matrix test.
+Bound to 127.0.0.1, token-gated, it never exposes secret values, and the same
+unresolved-secret blocking applies to its writes. The complete UI-only
+lifecycle — discover → add → secrets → enable → apply → verify → remove →
+undo — is walked through in [dashboard.md](dashboard.md).
 
 ## Live runs (`agentstack run`)
 

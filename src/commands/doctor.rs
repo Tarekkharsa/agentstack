@@ -24,9 +24,20 @@ enum Level {
     Error,
 }
 
+/// Accumulates every check result (grouped by section) while printing the
+/// familiar terminal report as it goes — unless `quiet`, which is how the
+/// dashboard runs the same checks and renders them itself.
 struct Report {
     errors: usize,
     warnings: usize,
+    quiet: bool,
+    sections: Vec<Section>,
+}
+
+struct Section {
+    title: String,
+    /// (level, message) — level is `ok` / `warn` / `error`.
+    lines: Vec<(&'static str, String)>,
 }
 
 impl Report {
@@ -34,29 +45,117 @@ impl Report {
         Report {
             errors: 0,
             warnings: 0,
+            quiet: false,
+            sections: Vec::new(),
         }
     }
 
+    fn quiet() -> Self {
+        Report {
+            quiet: true,
+            ..Report::new()
+        }
+    }
+
+    fn section(&mut self, title: &str) {
+        if !self.quiet {
+            println!("{}", title.bold());
+        }
+        self.sections.push(Section {
+            title: title.to_string(),
+            lines: Vec::new(),
+        });
+    }
+
     fn line(&mut self, level: Level, msg: impl AsRef<str>) {
-        let mark = match level {
-            Level::Ok => "✓".green().to_string(),
+        let (mark, tag) = match level {
+            Level::Ok => ("✓".green().to_string(), "ok"),
             Level::Warn => {
                 self.warnings += 1;
-                "⚠".yellow().to_string()
+                ("⚠".yellow().to_string(), "warn")
             }
             Level::Error => {
                 self.errors += 1;
-                "✗".red().to_string()
+                ("✗".red().to_string(), "error")
             }
         };
-        println!("  {mark} {}", msg.as_ref());
+        if !self.quiet {
+            println!("  {mark} {}", msg.as_ref());
+        }
+        if self.sections.is_empty() {
+            // Validation issues land before the first titled section.
+            self.sections.push(Section {
+                title: "Manifest".to_string(),
+                lines: Vec::new(),
+            });
+        }
+        self.sections
+            .last_mut()
+            .expect("section exists")
+            .lines
+            .push((tag, msg.as_ref().to_string()));
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "errors": self.errors,
+            "warnings": self.warnings,
+            "sections": self.sections.iter().map(|s| serde_json::json!({
+                "title": s.title,
+                "lines": s.lines.iter().map(|(level, msg)| serde_json::json!({
+                    "level": level,
+                    "msg": msg,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        })
     }
 }
 
 pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let mut report = Report::new();
+    let fixed = run_checks(args, manifest_dir, &mut report)?;
+
+    println!();
+    if fixed > 0 {
+        println!("{} re-applied {fixed} drifted target(s).", "✓".green());
+    }
+    println!(
+        "{} error(s), {} warning(s).",
+        report.errors, report.warnings
+    );
+
+    // In CI mode any error fails the trust gate. Return an error rather than
+    // exiting inline so `main` owns the single exit point and this path stays
+    // testable.
+    if args.ci && report.errors > 0 {
+        anyhow::bail!("doctor found {} error(s) — see report above", report.errors);
+    }
+    Ok(())
+}
+
+/// The same checks `doctor` runs, with fix/live off and nothing printed —
+/// the dashboard's Doctor pane. Returns the structured report as JSON.
+pub fn collect(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
+    let mut report = Report::quiet();
+    run_checks(
+        &DoctorArgs {
+            ci: false,
+            live: false,
+            fix: false,
+        },
+        manifest_dir,
+        &mut report,
+    )?;
+    Ok(report.to_json())
+}
+
+fn run_checks(
+    args: &DoctorArgs,
+    manifest_dir: Option<&Path>,
+    report: &mut Report,
+) -> Result<usize> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
-    let mut report = Report::new();
 
     // Manifest-level validation first — library-aware, so a profile ref to a
     // central-library server/skill is not flagged as unknown.
@@ -78,7 +177,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let mut state = State::load()?;
     let mut fixed = 0;
 
-    println!("{}", "Adapters & CLIs".bold());
+    report.section("Adapters & CLIs");
     for id in &target_ids {
         match ctx.registry.get(id) {
             None => report.line(Level::Error, format!("{id}: unknown adapter")),
@@ -111,7 +210,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
 
-    println!("{}", "Secrets".bold());
+    report.section("Secrets");
     let refs = manifest.referenced_secrets();
     if refs.is_empty() {
         report.line(Level::Ok, "no secrets referenced");
@@ -127,7 +226,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
 
-    println!("{}", "Drift".bold());
+    report.section("Drift");
     let mut any_drift = false;
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -207,7 +306,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         report.line(Level::Ok, "all targets in sync");
     }
 
-    println!("{}", "Quirks".bold());
+    report.section("Quirks");
     let quirks = check_quirks(manifest);
     if quirks.is_empty() {
         report.line(Level::Ok, "no unsupported syntax for any target");
@@ -216,7 +315,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         report.line(Level::Warn, q);
     }
 
-    println!("{}", "Skills".bold());
+    report.section("Skills");
     if manifest.skills.is_empty() {
         report.line(Level::Ok, "no skills defined");
     }
@@ -237,7 +336,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     // Supply-chain content scan (same detectors as `agentstack audit`): hidden
     // Unicode is an error so `--ci` gates it; injection heuristics only warn.
-    println!("{}", "Content scan".bold());
+    report.section("Content scan");
     let mut flagged = 0usize;
     for unit in crate::commands::audit::collect(manifest, &ctx.dir, &store) {
         for f in &unit.findings {
@@ -256,11 +355,11 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // Reproducibility: profile skill refs resolve to the same content their
     // agentstack.lock pins. Central-library (and inline path) skills are checked
     // offline; git-backed refs are skipped (resolution would fetch).
-    println!("{}", "Reproducibility".bold());
-    check_reproducibility(manifest, &ctx.dir, &store, &mut report);
-    check_server_reproducibility(manifest, &ctx.dir, &mut report);
+    report.section("Reproducibility");
+    check_reproducibility(manifest, &ctx.dir, &store, report);
+    check_server_reproducibility(manifest, &ctx.dir, report);
 
-    println!("{}", "Plugin recipes".bold());
+    report.section("Plugin recipes");
     let recipe_statuses = crate::plugin_recipes::statuses(manifest, &ctx.registry, &ctx.dir);
     if recipe_statuses.is_empty() {
         report.line(Level::Ok, "no plugin recipes defined");
@@ -343,12 +442,12 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     if !manifest.policy.is_empty() {
-        println!("{}", "Policy".bold());
-        check_policy(manifest, &mut report);
+        report.section("Policy");
+        check_policy(manifest, report);
     }
 
     if args.live {
-        println!("{}", "MCP connectivity (--live)".bold());
+        report.section("MCP connectivity (--live)");
         let http: Vec<_> = manifest
             .servers
             .iter()
@@ -375,22 +474,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
 
-    println!();
-    if fixed > 0 {
-        println!("{} re-applied {fixed} drifted target(s).", "✓".green());
-    }
-    println!(
-        "{} error(s), {} warning(s).",
-        report.errors, report.warnings
-    );
-
-    // In CI mode any error fails the trust gate. Return an error rather than
-    // exiting inline so `main` owns the single exit point and this path stays
-    // testable.
-    if args.ci && report.errors > 0 {
-        anyhow::bail!("doctor found {} error(s) — see report above", report.errors);
-    }
-    Ok(())
+    Ok(fixed)
 }
 
 /// Substitute `${REF}`s in a single string with resolved values (unresolved

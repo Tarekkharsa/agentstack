@@ -71,6 +71,13 @@ fn route(
     body: &str,
     dir: Option<&Path>,
 ) -> Resp {
+    // Structural read-only gate: every POST is a mutation, so refuse them all
+    // here (individual handlers also gate via `mutation()` — belt and braces).
+    // A future endpoint that forgets `mutation()` still can't write in
+    // `--read-only` mode.
+    if *method == Method::Post && read_only {
+        return forbidden();
+    }
     match (method, path) {
         (Method::Get, "/") => html(INDEX_HTML),
         (Method::Get, "/app.js") => asset(APP_JS, "application/javascript"),
@@ -98,6 +105,16 @@ fn route(
             }
             let all = query_param(query, "all").as_deref() == Some("1");
             match crate::dashboard::snapshot::diffs(dir, scope_of_query(query), all) {
+                Ok(v) => json(&serde_json::to_string(&v).unwrap_or_default()),
+                Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
+            }
+        }
+        (Method::Get, "/api/doctor") => {
+            if !authed {
+                return unauthorized();
+            }
+            // Same checks as `agentstack doctor` (fix/live off), structured.
+            match crate::commands::doctor::collect(dir) {
                 Ok(v) => json(&serde_json::to_string(&v).unwrap_or_default()),
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
@@ -217,6 +234,9 @@ fn route(
         }),
         (Method::Post, "/api/add_server") => mutation(authed, read_only, || {
             crate::dashboard::actions::add_server(dir, &parse(body)).map(|_| ())
+        }),
+        (Method::Post, "/api/remove") => mutation(authed, read_only, || {
+            crate::dashboard::actions::remove_capability(dir, &parse(body)).map(|_| ())
         }),
         (Method::Post, "/api/add_skill") => mutation(authed, read_only, || {
             crate::dashboard::actions::add_skill(dir, &parse(body)).map(|_| ())
@@ -462,6 +482,10 @@ fn scope_of_query(query: &str) -> Scope {
     }
 }
 
+fn forbidden() -> Resp {
+    json("{\"error\":\"dashboard is read-only\"}").with_status_code(403)
+}
+
 fn unauthorized() -> Resp {
     // JSON body so the client can parse + show a clear message (a stale token in
     // the URL is the usual cause).
@@ -545,4 +569,86 @@ fn open_browser(url: &str) -> Result<()> {
 #[allow(dead_code)]
 fn user_assets_dir() -> PathBuf {
     crate::util::paths::agentstack_home().join("dashboard")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every mutating dashboard endpoint. Keep in sync with the POST arms in
+    /// `route` — the test below proves each refuses in `--read-only`, and the
+    /// unknown-path case proves the refusal is the *central* gate, so a future
+    /// endpoint that forgets `mutation()` still can't write.
+    const POST_ROUTES: &[&str] = &[
+        "/api/add_from",
+        "/api/add_hook",
+        "/api/add_plugin_recipe",
+        "/api/add_profile",
+        "/api/add_server",
+        "/api/add_skill",
+        "/api/adopt_all_skills",
+        "/api/adopt_skill",
+        "/api/apply",
+        "/api/consolidate_skills",
+        "/api/import_settings",
+        "/api/init",
+        "/api/install",
+        "/api/pi_install",
+        "/api/plugins_install",
+        "/api/plugins_remove",
+        "/api/plugins_sync",
+        "/api/remove",
+        "/api/run_kill",
+        "/api/secret",
+        "/api/session_end",
+        "/api/session_start",
+        "/api/set_settings",
+        "/api/toggle",
+        "/api/toggle_skill",
+        "/api/undo",
+        "/api/use",
+    ];
+
+    #[test]
+    fn read_only_refuses_every_mutation() {
+        for path in POST_ROUTES {
+            let resp = route(&Method::Post, path, "", true, true, "{}", None);
+            assert_eq!(
+                resp.status_code(),
+                tiny_http::StatusCode(403),
+                "{path} must refuse in --read-only"
+            );
+        }
+        // Unknown POST path: still 403 — the central gate, not per-route luck.
+        let resp = route(
+            &Method::Post,
+            "/api/added_next_year",
+            "",
+            true,
+            true,
+            "{}",
+            None,
+        );
+        assert_eq!(resp.status_code(), tiny_http::StatusCode(403));
+    }
+
+    #[test]
+    fn reads_stay_available_in_read_only() {
+        // Read endpoints answer in --read-only (any non-403 shape is fine;
+        // these run against whatever HOME the test machine has).
+        for path in ["/api/state", "/api/doctor", "/api/history", "/api/runs"] {
+            let resp = route(&Method::Get, path, "", true, true, "", None);
+            assert_ne!(
+                resp.status_code(),
+                tiny_http::StatusCode(403),
+                "{path} must stay readable in --read-only"
+            );
+        }
+    }
+
+    #[test]
+    fn unauthed_is_refused_before_read_only() {
+        let resp = route(&Method::Post, "/api/apply", "", false, false, "{}", None);
+        assert_eq!(resp.status_code(), tiny_http::StatusCode(401));
+    }
 }

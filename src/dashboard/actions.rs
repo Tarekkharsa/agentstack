@@ -650,3 +650,18 @@ fn obj_to_map(v: Option<&Value>) -> IndexMap<String, String> {
         })
         .unwrap_or_default()
 }
+
+/// Remove a server or skill from the manifest (dashboard's `agentstack remove
+/// <name>`). Pack ledgers tear down every member, exactly like the CLI. The
+/// diff prints to the dashboard process's terminal; the UI gets the name back.
+pub fn remove_capability(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
+    let name = str_field(args, "name").context("missing 'name'")?;
+    crate::commands::remove::run(
+        &crate::cli::RemoveArgs {
+            name: name.clone(),
+            write: true,
+        },
+        manifest_dir,
+    )?;
+    Ok(name)
+}
