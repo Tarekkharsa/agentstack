@@ -80,6 +80,7 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     let mut state = State::load()?;
     let mut wrote = 0;
+    let mut blocked_targets: Vec<String> = Vec::new();
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -107,6 +108,7 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 let blocked = !plan.unresolved.is_empty() && !args.allow_unresolved;
                 if plan.changed() {
                     if args.write && blocked {
+                        blocked_targets.push(desc.display.clone());
                         println!(
                             "  {} not written — unresolved secret(s); set them or pass --allow-unresolved",
                             "✗".red()
@@ -186,11 +188,27 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
             manifest,
             &library,
         )?;
-        println!(
-            "\n{} activated '{}' on {wrote} target(s).",
-            "✓".green(),
-            args.profile
-        );
+        if blocked_targets.is_empty() {
+            println!(
+                "\n{} activated '{}' on {wrote} target(s).",
+                "✓".green(),
+                args.profile
+            );
+        } else {
+            // A blocked target is a failure, not a footnote: report it in the
+            // summary and exit nonzero so scripts can't mistake this for done.
+            println!(
+                "\n{} activated '{}' on {wrote} target(s); {} target(s) BLOCKED: {}",
+                "⚠".yellow(),
+                args.profile,
+                blocked_targets.len(),
+                blocked_targets.join(", ")
+            );
+            anyhow::bail!(
+                "unresolved secret(s) blocked {} target(s) — `agentstack secret set <NAME>` or pass --allow-unresolved",
+                blocked_targets.len()
+            );
+        }
     } else {
         println!("\nDry run. Re-run with {} to apply.", "--write".bold());
     }
