@@ -39,7 +39,7 @@ fn run() -> Result<()> {
         Command::Doctor(args) => commands::doctor::run(args, dir),
         Command::Audit(args) => commands::audit::run(args, dir),
         Command::Search(args) => commands::search::run(args, dir),
-        Command::Stats => commands::stats::run(dir),
+        Command::Stats(args) => commands::stats::run(args, dir),
         Command::Adapters(args) => commands::adapters::run(args),
         Command::Plugins(args) => commands::plugins::run(args, dir),
         Command::Secret(args) => commands::secret::run(args, dir),

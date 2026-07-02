@@ -183,6 +183,28 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
         kv(&mut o, "Enabled for", &enabled_summary.join(", "));
     }
 
+    // Context cost: what this server's tools/list payload taxes every session.
+    match crate::footprint::Footprints::load()
+        .unwrap_or_default()
+        .get(name)
+    {
+        Some(f) => kv(
+            &mut o,
+            "Context cost",
+            &format!(
+                "~{} per session across {} tool(s) ({})",
+                crate::footprint::fmt_tokens(f.est_tokens),
+                f.tools,
+                crate::footprint::fmt_age(f.measured_at)
+            ),
+        ),
+        None => kv(
+            &mut o,
+            "Context cost",
+            "unmeasured — run `agentstack stats --live`",
+        ),
+    }
+
     // Safety signals.
     o.push_str("  Safety\n");
     match server.server_type {

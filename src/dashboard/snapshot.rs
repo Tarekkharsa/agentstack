@@ -119,6 +119,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         .collect();
 
     // Servers × adapters matrix + full (commit-safe) config.
+    let footprints = crate::footprint::Footprints::load().unwrap_or_default();
     let servers: Vec<Value> = manifest
         .servers
         .iter()
@@ -142,6 +143,12 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 "headers": s.headers.iter().map(|(k, v)| json!({"key": k, "value": v})).collect::<Vec<_>>(),
                 "env": s.env.iter().map(|(k, v)| json!({"key": k, "value": v})).collect::<Vec<_>>(),
                 "cells": cells,
+                // Context-cost lens (measured via `stats --live`, cached).
+                "footprint": footprints.get(name).map(|f| json!({
+                    "tools": f.tools,
+                    "estTokens": f.est_tokens,
+                    "label": crate::footprint::fmt_tokens(f.est_tokens),
+                })),
             })
         })
         .collect();

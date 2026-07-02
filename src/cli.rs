@@ -112,8 +112,8 @@ pub enum Command {
     /// Search the capability catalog (and mark what's already added).
     Search(SearchArgs),
 
-    /// Show local usage analytics (activation counts + footprint).
-    Stats,
+    /// Show local usage analytics (activation counts + footprint + context cost).
+    Stats(StatsArgs),
 
     /// Inspect the available CLI adapters.
     Adapters(AdaptersArgs),
@@ -669,6 +669,15 @@ pub struct AuditArgs {
     /// Emit machine-readable JSON instead of the text report.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct StatsArgs {
+    /// Measure each server's live context cost (tools/list token footprint)
+    /// through the gateway, then cache it for offline display. Spawns/contacts
+    /// the manifest's servers once.
+    #[arg(long)]
+    pub live: bool,
 }
 
 #[derive(Args, Debug)]

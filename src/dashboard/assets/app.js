@@ -10,6 +10,7 @@ let HISTORY = []; // recent apply events from /api/history
 let HISTORY_LOADED = false;
 let OPEN_SERVER = null;
 let ADD_FORM = false;
+let SORT_BY_COST = false; // servers table: manifest order vs context-cost desc
 let SKILL_FORM = false;
 let HOOK_FORM = false;
 let PLUGIN_FORM = false;
@@ -813,10 +814,18 @@ function servers(c) {
   const head = el("tr", null, [el("th", null, ["capability"])]);
   cols.forEach((a) => head.appendChild(el("th", { class: "cell" }, [a.display])));
   head.appendChild(el("th", null, ["type"]));
+  head.appendChild(el("th", {
+    class: "clickable",
+    title: "Estimated tokens each server's tool list adds to every session (measured by `agentstack stats --live`). Click to sort.",
+    onclick: () => { SORT_BY_COST = !SORT_BY_COST; show("servers"); },
+  }, ["context" + (SORT_BY_COST ? " ↓" : "")]));
 
   const body = el("tbody");
-  if (!d.servers.length) body.appendChild(el("tr", null, [el("td", { colspan: cols.length + 2 }, [el("span", { class: "empty" }, ["No servers yet. Use “+ Add MCP server” or the Discover tab."])])]));
-  d.servers.forEach((s) => {
+  if (!d.servers.length) body.appendChild(el("tr", null, [el("td", { colspan: cols.length + 3 }, [el("span", { class: "empty" }, ["No servers yet. Use “+ Add MCP server” or the Discover tab."])])]));
+  const rows = SORT_BY_COST
+    ? [...d.servers].sort((a, b) => ((b.footprint || {}).estTokens || 0) - ((a.footprint || {}).estTokens || 0))
+    : d.servers;
+  rows.forEach((s) => {
     const tr = el("tr", { class: "clickable" }, [
       el("td", { onclick: () => { OPEN_SERVER = OPEN_SERVER === s.name ? null : s.name; show("servers"); } },
         [el("span", { class: "name" }, [s.name]), el("span", { class: "k" }, ["mcp"])]),
@@ -829,8 +838,11 @@ function servers(c) {
       }));
     });
     tr.appendChild(el("td", null, [badge(s.type, "solid")]));
+    tr.appendChild(el("td", null, [s.footprint
+      ? el("span", { class: "k", title: s.footprint.tools + " tool(s) — estimated context cost per session" }, [s.footprint.label])
+      : el("span", { class: "empty", title: "unmeasured — run `agentstack stats --live`" }, ["—"])]));
     body.appendChild(tr);
-    if (OPEN_SERVER === s.name) body.appendChild(serverDetail(s, cols.length + 2));
+    if (OPEN_SERVER === s.name) body.appendChild(serverDetail(s, cols.length + 3));
   });
   c.appendChild(scopeLegend());
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])])])]));
@@ -840,6 +852,9 @@ function serverDetail(s, span) {
   const kv = [];
   const add = (k, v) => kv.push(el("div", { class: "key" }, [k]), el("div", { class: "mono" }, [v]));
   add("type", s.type);
+  add("context cost", s.footprint
+    ? s.footprint.label + " across " + s.footprint.tools + " tool(s) per session"
+    : "unmeasured — run `agentstack stats --live`");
   if (s.url) add("url", s.url);
   if (s.command) add("command", s.command);
   if (s.args && s.args.length) add("args", s.args.join(" "));

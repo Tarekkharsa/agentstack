@@ -209,3 +209,36 @@ fn stdio_startup_timeout_yields_partial_results() {
         start.elapsed()
     );
 }
+
+#[test]
+fn stats_live_measures_context_cost_through_gateway() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup_home(&home);
+    let proj = tmp.path().join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    let script = write_script(&proj, "fix.sh", FIXTURE);
+    write_manifest(
+        &proj,
+        &format!(
+            "[servers.fix]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"{}\"]\n",
+            script.display()
+        ),
+    );
+
+    // `stats --live` measures via the gateway and caches to footprint.json…
+    agentstack::commands::stats::run(&agentstack::cli::StatsArgs { live: true }, Some(&proj))
+        .unwrap();
+    let fp = agentstack::footprint::Footprints::load().unwrap();
+    let f = fp.get("fix").expect("fix measured");
+    assert_eq!(f.tools, 1);
+    assert!(f.est_tokens > 0, "footprint: {f:?}");
+
+    // …and `explain` reads the cache offline (no live discovery).
+    let text = agentstack::commands::explain::explain_text("fix", Some(&proj)).unwrap();
+    assert!(
+        text.contains("Context cost") && text.contains("tok"),
+        "explain: {text}"
+    );
+}

@@ -99,7 +99,12 @@ The complete, implemented-and-tested feature inventory. The
 - **`add`** — flag-driven (scriptable / agent-operable) add of a server or skill
   to the manifest, optionally into a profile; comments preserved.
 - **`stats`** — local usage analytics: activation counts + per-capability
-  footprint (which target/scope slots it's live in).
+  footprint (which target/scope slots it's live in) + **context cost**.
+  `stats --live` measures each server's `tools/list` token footprint through
+  the gateway (HTTP + stdio) and caches it (`~/.agentstack/footprint.json`);
+  `stats`, `explain`, and the dashboard's Servers matrix then show what each
+  server taxes every session offline, and `stats` flags dead weight
+  (high-cost, never-activated servers) with the exact `remove` command.
 - **`export`/`import`** — age-encrypted bundle (manifest + lock + optionally
   secrets) for moving a setup to a new machine; passphrase-protected.
 
@@ -226,7 +231,8 @@ agentstack codemode --write    # write client.ts + agentstack-runtime.ts (+ .git
 `upgrade`, `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
 `lib add|add-server|list|remove|remove-server|migrate`, `restore`,
-`doctor` (`--ci`, `--live`, `--fix`), `audit` (`--json`), `search`, `stats`,
+`doctor` (`--ci`, `--live`, `--fix`), `audit` (`--json`), `search`,
+`stats` (`--live`),
 `secret set|get|rm|list`, `export`/`import`, `adapters`, `plugins`,
 `dashboard`, `mcp`, `codemode`, `hook`, `run`/`runs`/`kill`.
 
