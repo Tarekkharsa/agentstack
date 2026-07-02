@@ -220,12 +220,14 @@ fn run_calls(args: &AuditArgs) -> Result<()> {
         } else {
             format!("{age_d}d ago")
         };
+        // Pad BEFORE coloring — ANSI escapes would break the column width.
+        let denied = format!("{:>7}", r.denied);
         let denied = if r.denied > 0 {
-            r.denied.to_string().red().to_string()
+            denied.red().to_string()
         } else {
-            r.denied.to_string()
+            denied
         };
-        println!("{name:<40} {:>6} {:>6} {denied:>7}  {last}", r.ok, r.err);
+        println!("{name:<40} {:>6} {:>6} {denied}  {last}", r.ok, r.err);
     }
     println!(
         "\nLog: {} (argument digests only — never values)",

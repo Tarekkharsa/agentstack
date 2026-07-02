@@ -195,6 +195,14 @@ The complete implemented-and-tested inventory — engine internals, plugin
 recipes, live runs, code mode, the full command list — lives in
 [`docs/reference.md`](docs/reference.md).
 
+The closed loop in under a minute — a vendor publishes a versioned pack, a
+fresh machine installs it at its tag, spreads it to every CLI, firewalls one
+of its tools, watches a live call get refused, reads the audit receipts, and
+picks up the vendor's next tag with one `upgrade`
+(`agentstack-test/demo-closed-loop.sh`, fully sandboxed):
+
+![agentstack closed loop: git pack install → apply → firewall → audited calls → upgrade](docs/closed-loop.gif)
+
 ### Per-directory auto-activation (`agentstack hook`)
 
 direnv-style: drop a `.agentstack` file (first line = profile name) in a repo,
