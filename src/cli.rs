@@ -14,7 +14,20 @@ use crate::scope::Scope;
     version,
     about = "One portable manifest, every agent CLI.",
     long_about = "Manage MCP servers + skills across Claude Code, Codex, and more, \
-                  from a single portable .agentstack/agentstack.toml."
+                  from a single portable .agentstack/agentstack.toml.",
+    after_help = "\
+Start here:
+  agentstack                        orientation for this directory
+  init → bootstrap → doctor → apply --write        the core loop
+
+Command map:
+  capabilities:  add · remove · search · install · update · upgrade · lib · consolidate · adopt
+  activate:      use <profile> · apply · session · run · hook · instructions
+  trust:         doctor · audit · explain · diff · restore · secret
+  share & more:  export · import · plugins · stats · adapters · dashboard · mcp · codemode
+
+Rendered files, per project (see README → 'three modes'):
+  static (on disk, gitignored) · clean-at-rest (sessions inject + revert) · zero-files (skills over MCP)"
 )]
 pub struct Cli {
     /// Project or manifest directory (prefers .agentstack/agentstack.toml).

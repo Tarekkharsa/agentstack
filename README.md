@@ -26,6 +26,11 @@ agentstack apply      # preview native config changes
 agentstack apply --write
 ```
 
+Each project then picks one of [three modes](#the-three-modes--where-rendered-files-live)
+for the rendered files: **static** (on disk, gitignored), **clean-at-rest**
+(sessions inject and revert — nothing between sessions), or **zero-files**
+(the agent loads skills from the central library over MCP).
+
 ![agentstack first run: init → bootstrap → doctor --ci → apply --write, fenced](docs/firstrun.gif)
 
 ## Install
@@ -139,7 +144,7 @@ agentstack run codex --profile backend
 env, varlock, OS keychain, or `.env`, and unresolved secrets block writes by
 default so placeholders do not leak into live harness config.
 
-### Where the rendered files live — three modes, your choice
+## The three modes — where rendered files live
 
 You always commit the intent (`.agentstack/agentstack.toml` + `.lock`). What
 happens to the *rendered* project artifacts (`.mcp.json`, `.claude/skills/`

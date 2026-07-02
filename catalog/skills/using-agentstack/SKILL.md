@@ -1,0 +1,65 @@
+---
+name: using-agentstack
+description: Operate agentstack — manage a project's MCP servers, skills, profiles, and secrets from its manifest; activate/deactivate capability sets; load skills from the central library; propose new capabilities safely.
+---
+
+# Using agentstack
+
+Use this skill when a task involves an agent CLI's setup: adding/removing MCP
+servers or skills, switching capability profiles, missing servers/skills in a
+project, secrets that don't resolve, or auditing what an agent can access.
+
+## The mental model (one paragraph)
+
+agentstack is a **compiler**: intent lives in a commit-safe manifest
+(`.agentstack/agentstack.toml`, or legacy root `agentstack.toml`) and is
+rendered into each CLI's native config. Skills and server definitions can live
+in a machine-wide **central library** (`~/.agentstack/lib/`) and be referenced
+**by name**. Secrets are `${REF}` placeholders resolved per machine (env →
+varlock → OS keychain → `.env`); an unresolved secret **blocks** the write.
+Nothing touches disk without `--write`.
+
+## The three artifact modes (recognize which one a project uses)
+
+1. **Static** — `.mcp.json` / `.claude/skills/` exist on disk, gitignored via a
+   managed block. Activate with `agentstack use <profile> --scope project --write`.
+2. **Clean-at-rest** — nothing generated exists between sessions (the manifest
+   has an empty `[profiles.off]`). Capabilities appear only during
+   `agentstack run <cli> --profile <p>` or between
+   `agentstack session start <p> --scope project` and `agentstack session end`.
+   A missing `.mcp.json` in such a project is **intentional — do not create one**.
+3. **Zero-files / MCP** — the agent pulls skills itself through the `agentstack`
+   MCP server: `agentstack_list_loadable` to browse names + descriptions, then
+   `agentstack_load(name, reason)` for the full instructions. Loads are fenced
+   to the session's profile and logged.
+
+## Commands you'll actually use
+
+```bash
+agentstack                       # orientation: CLIs detected, manifest state, next step
+agentstack bootstrap             # preflight: skills, secrets, diff, next action
+agentstack use <profile> --scope project           # dry-run (always safe)
+agentstack use <profile> --scope project --write   # activate
+agentstack search <query>        # catalog + official MCP Registry
+agentstack add from <id>         # add a found server to the manifest (not applied)
+agentstack lib list              # what the central library holds
+agentstack explain <name>        # provenance, secrets, footprint of a capability
+agentstack doctor --ci           # the full trust gate (validation, lock, policy, content scan)
+agentstack audit --json          # re-scan skills/instructions for hidden-unicode/injection
+agentstack secret set NAME       # store a secret in the OS keychain
+agentstack restore <target>      # undo a write from its pre-write backup
+```
+
+## Rules for agents
+
+- **Propose, don't apply.** Edit the manifest (or use `agentstack_add_server`
+  over MCP); let a human review and run `apply`/`use` with `--write`. Dry-run
+  everything first — output without `--write` is always read-only.
+- **Never hand-edit generated files** (`.mcp.json`, `.claude/skills/`
+  symlinks, native CLI configs' managed sections). Change the manifest instead.
+- **Never write a secret value into the manifest or library** — use `${REF}`
+  and tell the user to run `agentstack secret set REF`.
+- A blocked write ("unresolved secret") is a feature, not an error to work
+  around: surface which `${REF}` is missing.
+- To give a project a new skill that exists in the library: add its name to the
+  profile's `skills = [...]` list — no file copying.

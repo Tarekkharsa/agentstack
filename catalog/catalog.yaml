@@ -130,6 +130,14 @@
 
 # --- Standalone skills (agentstack-authored, bundled) ---
 - kind: skill
+  name: using-agentstack
+  display: Using agentstack
+  description: "Teach an agent to operate agentstack itself — manifests, profiles, the three artifact modes, library skill loading, and safe proposal rules"
+  homepage: https://github.com/Tarek-kharsa/agentstack
+  tags: [agentstack, meta, setup, mcp, skills]
+  path: skills/using-agentstack
+
+- kind: skill
   name: pr-triage
   display: PR Triage
   description: "Triage a stack of open pull requests into review/merge/close buckets (unofficial, agentstack-authored)"
