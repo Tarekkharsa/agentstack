@@ -22,10 +22,10 @@ use crate::manifest::{Server, Skill};
 use crate::store::{dir_digest, Store};
 use crate::util::paths;
 
-pub fn run(args: &LibArgs, _manifest_dir: Option<&Path>) -> Result<()> {
+pub fn run(args: &LibArgs, manifest_dir: Option<&Path>) -> Result<()> {
     match &args.kind {
         LibKind::Add(a) => add(a),
-        LibKind::AddServer(a) => add_server_cli(a),
+        LibKind::AddServer(a) => add_server_cli(a, manifest_dir),
         LibKind::List => list(),
         LibKind::Remove(a) => remove(a),
         LibKind::RemoveServer(a) => remove_server_cli(a),
@@ -235,6 +235,24 @@ pub fn add_server(
     replace: bool,
     write: bool,
 ) -> Result<ServerAddOutcome> {
+    let raw =
+        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let server: Server = toml::from_str(&raw)
+        .with_context(|| format!("{} is not a valid MCP server definition", file.display()))?;
+    let provenance = format!("file:{}", absolutize(file)?.display());
+    add_server_def(lib_home, name, &server, provenance, replace, write)
+}
+
+/// Add an in-memory server definition to the library (the core of
+/// [`add_server`]; also used by `--from-manifest`).
+pub fn add_server_def(
+    lib_home: &Path,
+    name: &str,
+    server: &Server,
+    provenance: String,
+    replace: bool,
+    write: bool,
+) -> Result<ServerAddOutcome> {
     if !valid_lib_name(name) {
         bail!("invalid library server name '{name}' — must be non-empty and contain no path separators");
     }
@@ -245,13 +263,9 @@ pub fn add_server(
         bail!("'{name}' is already in the central library — pass --replace to overwrite");
     }
 
-    let raw =
-        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
-    let server: Server = toml::from_str(&raw)
-        .with_context(|| format!("{} is not a valid MCP server definition", file.display()))?;
-    let warnings = suspicious_secrets(&server);
+    let warnings = suspicious_secrets(server);
     // Normalize: re-serialize so exactly a Server table is stored (drops junk).
-    let normalized = toml::to_string_pretty(&server).context("serializing server definition")?;
+    let normalized = toml::to_string_pretty(server).context("serializing server definition")?;
     let checksum = crate::resolve::sha256_hex(normalized.as_bytes());
     let dest = lib_home.join("servers").join(format!("{name}.toml"));
 
@@ -264,7 +278,7 @@ pub fn add_server(
             name: name.to_string(),
             checksum: Some(checksum.clone()),
             version: None,
-            provenance: Some(format!("file:{}", absolutize(file)?.display())),
+            provenance: Some(provenance),
         });
         library.save(lib_home)?;
     }
@@ -279,15 +293,48 @@ pub fn add_server(
     })
 }
 
-fn add_server_cli(args: &LibAddServerArgs) -> Result<()> {
+fn add_server_cli(args: &LibAddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let lib_home = paths::lib_home();
-    let outcome = add_server(
-        &lib_home,
-        &args.name,
-        Path::new(&args.file),
-        args.replace,
-        args.write,
-    )?;
+    let outcome = if args.from_manifest {
+        let ctx = super::load(manifest_dir)?;
+        let Some(server) = ctx.loaded.manifest.servers.get(&args.name) else {
+            let available: Vec<&str> = ctx
+                .loaded
+                .manifest
+                .servers
+                .keys()
+                .map(String::as_str)
+                .collect();
+            bail!(
+                "no [servers.{}] in the manifest — available: {}",
+                args.name,
+                if available.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    available.join(", ")
+                }
+            );
+        };
+        add_server_def(
+            &lib_home,
+            &args.name,
+            server,
+            format!("manifest:{}", ctx.dir.display()),
+            args.replace,
+            args.write,
+        )?
+    } else {
+        let Some(file) = args.file.as_deref() else {
+            bail!("pass --file <definition.toml> or --from-manifest");
+        };
+        add_server(
+            &lib_home,
+            &args.name,
+            Path::new(file),
+            args.replace,
+            args.write,
+        )?
+    };
 
     for w in &outcome.warnings {
         println!("  {} {w}", "⚠".yellow());
@@ -584,6 +631,9 @@ pub struct MigrateReport {
     pub migrated: Vec<String>,
     /// `(entry name, reason)` for directories that were not valid skills.
     pub skipped: Vec<(String, String)>,
+    /// `(adapter id, link path)` for provider symlinks that were (or would be)
+    /// re-pointed from the legacy home to the library.
+    pub repointed: Vec<(String, PathBuf)>,
     pub written: bool,
 }
 
@@ -649,11 +699,82 @@ pub fn migrate_skills(
         migrated.push(name.clone());
     }
 
+    // Finish the move: any CLI's global skills symlink still targeting the
+    // legacy home is re-pointed at the library copy, so harnesses actually
+    // read from the library after a migration (legacy content stays intact,
+    // so this remains reversible).
+    let repointed = repoint_provider_links(old, lib_home, &migrated, write)?;
+
     Ok(MigrateReport {
         migrated,
         skipped,
+        repointed,
         written: write,
     })
+}
+
+/// Whether a symlink (at `link_dir/<name>`, pointing at `target`) resolves
+/// into the legacy skills home `old`.
+fn link_targets_legacy(target: &Path, link_dir: &Path, old: &Path) -> bool {
+    let absolute = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        link_dir.join(target)
+    };
+    // Normalize `..` components lexically (no fs access, so dry-run works on
+    // links whose targets are gone).
+    let mut norm = PathBuf::new();
+    for c in absolute.components() {
+        match c {
+            std::path::Component::ParentDir => {
+                norm.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => norm.push(other),
+        }
+    }
+    norm.starts_with(old)
+}
+
+/// Re-point per-CLI global skills symlinks from the legacy home to the
+/// library for every migrated skill. Returns `(adapter id, link path)` pairs.
+fn repoint_provider_links(
+    old: &Path,
+    lib_home: &Path,
+    migrated: &[String],
+    write: bool,
+) -> Result<Vec<(String, PathBuf)>> {
+    let mut repointed = Vec::new();
+    let registry = crate::adapter::Registry::load()?;
+    for desc in registry.iter() {
+        let Some(dir) = desc.skills_dir_for(crate::scope::Scope::Global, Path::new(".")) else {
+            continue;
+        };
+        for name in migrated {
+            let link = dir.join(name);
+            let Ok(target) = std::fs::read_link(&link) else {
+                continue; // not a symlink (or absent) — never touch real dirs
+            };
+            if !link_targets_legacy(&target, &dir, old) {
+                continue;
+            }
+            let dest = lib_home.join("skills").join(name);
+            if !dest.exists() {
+                continue;
+            }
+            if write {
+                std::fs::remove_file(&link)
+                    .with_context(|| format!("removing old link {}", link.display()))?;
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(&dest, &link)
+                    .with_context(|| format!("linking {} → {}", link.display(), dest.display()))?;
+                #[cfg(not(unix))]
+                bail!("re-pointing symlinks is unix-only for now");
+            }
+            repointed.push((desc.id.clone(), link));
+        }
+    }
+    Ok(repointed)
 }
 
 fn migrate(args: &LibMigrateArgs) -> Result<()> {
@@ -687,6 +808,25 @@ fn migrate(args: &LibMigrateArgs) -> Result<()> {
     }
     for (n, why) in &report.skipped {
         println!("  {} skipped {n} — {why}", "⚠".yellow());
+    }
+    if !report.repointed.is_empty() {
+        let verb = if report.written {
+            "Re-pointed"
+        } else {
+            "Would re-point"
+        };
+        println!(
+            "\n{verb} {} CLI symlink(s) from the legacy home to the library:",
+            report.repointed.len()
+        );
+        for (cli, link) in &report.repointed {
+            let mark = if report.written {
+                "✓".green().to_string()
+            } else {
+                "→".cyan().to_string()
+            };
+            println!("  {mark} {} ({cli})", link.display());
+        }
     }
 
     if report.written {
@@ -1348,5 +1488,35 @@ mod tests {
             .unwrap()
             .get_server("../../../../etc")
             .is_none());
+    }
+
+    #[test]
+    fn legacy_link_detection() {
+        let old = Path::new("/home/u/.agentstack/skills");
+        let dir = Path::new("/home/u/.claude/skills");
+        // Absolute target into the legacy home.
+        assert!(link_targets_legacy(
+            Path::new("/home/u/.agentstack/skills/figma"),
+            dir,
+            old
+        ));
+        // Relative target that resolves into the legacy home.
+        assert!(link_targets_legacy(
+            Path::new("../../.agentstack/skills/figma"),
+            dir,
+            old
+        ));
+        // Target owned by a different manager — leave alone.
+        assert!(!link_targets_legacy(
+            Path::new("../../.agents/skills/find-skills"),
+            dir,
+            old
+        ));
+        // Already pointing at the library — leave alone.
+        assert!(!link_targets_legacy(
+            Path::new("/home/u/.agentstack/lib/skills/figma"),
+            dir,
+            old
+        ));
     }
 }

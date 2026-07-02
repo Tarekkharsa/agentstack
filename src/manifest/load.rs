@@ -57,7 +57,8 @@ pub fn load_from_dir(dir: &Path) -> Result<LoadedManifest> {
     let manifest_path = dir.join(MANIFEST_FILE);
     let base_text = fs::read_to_string(&manifest_path).with_context(|| {
         format!(
-            "no manifest at {} — run `agentstack init` to create one",
+            "no manifest here (looked for {}) — run `agentstack init` to create \
+             .agentstack/agentstack.toml, or point at one with --manifest-dir",
             manifest_path.display()
         )
     })?;

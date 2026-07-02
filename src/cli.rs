@@ -550,8 +550,12 @@ pub struct LibAddServerArgs {
     pub name: String,
     /// Path to a server definition `.toml` (a `manifest::Server` table, with
     /// `${REF}` secrets only — never plaintext).
+    #[arg(long, conflicts_with = "from_manifest")]
+    pub file: Option<String>,
+    /// Lift the `[servers.<name>]` definition from the current manifest into
+    /// the library instead of reading a file.
     #[arg(long)]
-    pub file: String,
+    pub from_manifest: bool,
     /// Overwrite an existing library server of the same name.
     #[arg(long)]
     pub replace: bool,
