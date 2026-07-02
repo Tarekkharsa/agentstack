@@ -311,6 +311,15 @@ previewed, and merged with visible provenance. Bundled starter skills are
 For the broader product direction, see
 [`docs/plans/portable-agent-runtime-vision.md`](docs/plans/portable-agent-runtime-vision.md).
 
+## Docs
+
+- [Feature reference](docs/reference.md) — the complete tested inventory and
+  full command list.
+- [Central library guide](docs/central-library-guide.html) — visual walkthrough
+  of referencing skills/servers by name from `~/.agentstack/lib/`; its flows are
+  verified by the runnable sandbox (`agentstack-test/demo-central-library.sh`).
+- [Design docs](docs/plans/) — vision, spec, and per-feature plans.
+
 ## Adding a CLI
 
 Supporting a new CLI is one YAML descriptor — see `adapters/codex.yaml`. Drop
