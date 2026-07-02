@@ -2,31 +2,31 @@
 #
 # After a release, fill in VERSION and the per-arch sha256 (from the release
 # `.tar.gz` assets), then publish to a tap repo (e.g. tarekkh/homebrew-tap):
-#   brew install tarekkh/tap/agentstack
+#   brew install Tarekkharsa/tap/agentstack
 class Agentstack < Formula
   desc "One portable manifest, every agent CLI — manage MCP servers + skills across AI coding tools"
-  homepage "https://github.com/tarekkh/agentstack"
+  homepage "https://github.com/Tarekkharsa/agentstack"
   version "0.2.0"
   license any_of: ["MIT", "Apache-2.0"]
 
   on_macos do
     on_arm do
-      url "https://github.com/tarekkh/agentstack/releases/download/v#{version}/agentstack-aarch64-apple-darwin.tar.gz"
+      url "https://github.com/Tarekkharsa/agentstack/releases/download/v#{version}/agentstack-aarch64-apple-darwin.tar.gz"
       sha256 "REPLACE_WITH_SHA256"
     end
     on_intel do
-      url "https://github.com/tarekkh/agentstack/releases/download/v#{version}/agentstack-x86_64-apple-darwin.tar.gz"
+      url "https://github.com/Tarekkharsa/agentstack/releases/download/v#{version}/agentstack-x86_64-apple-darwin.tar.gz"
       sha256 "REPLACE_WITH_SHA256"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/tarekkh/agentstack/releases/download/v#{version}/agentstack-aarch64-unknown-linux-gnu.tar.gz"
+      url "https://github.com/Tarekkharsa/agentstack/releases/download/v#{version}/agentstack-aarch64-unknown-linux-gnu.tar.gz"
       sha256 "REPLACE_WITH_SHA256"
     end
     on_intel do
-      url "https://github.com/tarekkh/agentstack/releases/download/v#{version}/agentstack-x86_64-unknown-linux-gnu.tar.gz"
+      url "https://github.com/Tarekkharsa/agentstack/releases/download/v#{version}/agentstack-x86_64-unknown-linux-gnu.tar.gz"
       sha256 "REPLACE_WITH_SHA256"
     end
   end
