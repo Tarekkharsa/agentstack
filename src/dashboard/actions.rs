@@ -32,7 +32,7 @@ pub fn toggle(
         .get(target)
         .with_context(|| format!("unknown target '{target}'"))?;
 
-    let key = target_key(target, scope);
+    let key = target_key(target, scope, &ctx.dir);
     let mut state = State::load()?;
     let previously = state.managed_servers(&key);
 
@@ -95,7 +95,7 @@ pub fn toggle_skill(
     let strategy = desc.skills.as_ref().map(|s| s.strategy).unwrap_or_default();
     let store = Store::default_store();
 
-    let key = target_key(target, scope);
+    let key = target_key(target, scope, &ctx.dir);
     let mut state = State::load()?;
     let previously = state.managed_skills(&key);
 

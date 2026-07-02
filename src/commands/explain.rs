@@ -131,11 +131,11 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
             continue;
         }
         let g_on = state
-            .managed_servers(&target_key(&d.id, Scope::Global))
+            .managed_servers(&target_key(&d.id, Scope::Global, &ctx.dir))
             .iter()
             .any(|s| s == name);
         let p_on = state
-            .managed_servers(&target_key(&d.id, Scope::Project))
+            .managed_servers(&target_key(&d.id, Scope::Project, &ctx.dir))
             .iter()
             .any(|s| s == name);
         let default_for = default.iter().any(|t| *t == d.id);
@@ -302,11 +302,11 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
     for d in ctx.registry.iter() {
         let Some(sk) = &d.skills else { continue };
         let g_on = state
-            .managed_skills(&target_key(&d.id, Scope::Global))
+            .managed_skills(&target_key(&d.id, Scope::Global, &ctx.dir))
             .iter()
             .any(|s| s == name);
         let p_on = state
-            .managed_skills(&target_key(&d.id, Scope::Project))
+            .managed_skills(&target_key(&d.id, Scope::Project, &ctx.dir))
             .iter()
             .any(|s| s == name);
         let strat = format!("{:?}", sk.strategy).to_lowercase();

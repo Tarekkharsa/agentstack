@@ -58,6 +58,8 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // Pre-write snapshots of every file we touch, grouped into one undoable
     // history entry for this apply.
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
+    let project_root = crate::manifest::project_root_of(&ctx.dir);
+    let mut ignore_entries: Vec<String> = Vec::new();
     let mut touched_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
     for id in &target_ids {
@@ -67,7 +69,7 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
             continue;
         };
 
-        let key = target_key(id, scope);
+        let key = target_key(id, scope, &ctx.dir);
         let previously = state.managed_servers(&key);
         let Some(plan) = plan_target_with_servers(
             desc,
@@ -132,6 +134,15 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 state.record(&key, plan.managed.clone(), &plan.proposed);
             }
             println!("  {} up to date", "✓".green());
+        }
+
+        // The rendered project config is machine-local (resolved values) —
+        // feed the managed .gitignore block (up-to-date targets included, so
+        // idempotent re-runs keep the block stable).
+        if scope == Scope::Project && will_write && !state.managed_servers(&key).is_empty() {
+            if let Ok(rel) = plan.config_path.strip_prefix(&project_root) {
+                ignore_entries.push(format!("/{}", rel.display()));
+            }
         }
 
         // Native settings file (permissions, feature flags) — a separate file
@@ -226,6 +237,19 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
             scope.as_str(),
             touched_targets.into_iter().collect(),
             backups,
+        );
+    }
+
+    if will_write
+        && scope == Scope::Project
+        && !args.no_gitignore
+        && crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true)?
+    {
+        println!(
+            "\n{} .gitignore: {} generated path(s) kept out of git ({} to commit them instead)",
+            "✓".green(),
+            ignore_entries.len(),
+            "--no-gitignore".bold()
         );
     }
 

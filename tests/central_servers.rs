@@ -22,6 +22,7 @@ fn apply_args(profile: &str) -> ApplyArgs {
         write: true,
         scope: Some(Scope::Global),
         allow_unresolved: false,
+        no_gitignore: true,
     }
 }
 

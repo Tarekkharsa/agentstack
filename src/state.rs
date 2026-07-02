@@ -46,11 +46,16 @@ pub struct TargetState {
 }
 
 /// State key for a target in a scope. Global keeps the bare id (backward
-/// compatible); project appends `@project`.
-pub fn target_key(id: &str, scope: crate::scope::Scope) -> String {
+/// compatible); project appends `@project:<project root>` — per directory, so
+/// activating one project never inherits (or prunes against) another
+/// project's bookkeeping.
+pub fn target_key(id: &str, scope: crate::scope::Scope, manifest_dir: &std::path::Path) -> String {
     match scope {
         crate::scope::Scope::Global => id.to_string(),
-        crate::scope::Scope::Project => format!("{id}@project"),
+        crate::scope::Scope::Project => {
+            let root = crate::manifest::project_root_of(manifest_dir);
+            format!("{id}@project:{}", root.display())
+        }
     }
 }
 

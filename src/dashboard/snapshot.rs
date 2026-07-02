@@ -128,8 +128,8 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 .map(|id| {
                     json!({
                         "adapter": id,
-                        "global": state.managed_servers(&target_key(id, Scope::Global)).contains(name),
-                        "project": state.managed_servers(&target_key(id, Scope::Project)).contains(name),
+                        "global": state.managed_servers(&target_key(id, Scope::Global, &ctx.dir)).contains(name),
+                        "project": state.managed_servers(&target_key(id, Scope::Project, &ctx.dir)).contains(name),
                     })
                 })
                 .collect();
@@ -183,8 +183,8 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 .map(|id| {
                     json!({
                         "adapter": id,
-                        "global": state.managed_skills(&target_key(id, Scope::Global)).contains(name),
-                        "project": state.managed_skills(&target_key(id, Scope::Project)).contains(name),
+                        "global": state.managed_skills(&target_key(id, Scope::Global, &ctx.dir)).contains(name),
+                        "project": state.managed_skills(&target_key(id, Scope::Project, &ctx.dir)).contains(name),
                     })
                 })
                 .collect();
@@ -616,7 +616,7 @@ fn render_drift_targets(
         };
         let installed = d.is_installed();
         let config_present = d.config_present();
-        let prev = state.managed_servers(&target_key(&id, scope));
+        let prev = state.managed_servers(&target_key(&id, scope, &ctx.dir));
         match crate::render::plan_target(
             manifest,
             d,

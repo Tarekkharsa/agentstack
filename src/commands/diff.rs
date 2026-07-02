@@ -35,7 +35,7 @@ pub fn run(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<()> {
             println!("{} unknown adapter '{id}' — skipping", "⚠".yellow());
             continue;
         };
-        let previously = state.managed_servers(&target_key(id, scope));
+        let previously = state.managed_servers(&target_key(id, scope, &ctx.dir));
         let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,

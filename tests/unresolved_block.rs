@@ -31,6 +31,7 @@ fn args(write: bool, allow_unresolved: bool) -> ApplyArgs {
         write,
         scope: Some(Scope::Global),
         allow_unresolved,
+        no_gitignore: true,
     }
 }
 
@@ -125,6 +126,7 @@ fn use_write_errors_when_all_targets_blocked() {
         scope: Some(Scope::Global),
         write: true,
         allow_unresolved: false,
+        no_gitignore: true,
     };
     let err = agentstack::commands::use_profile::run(&uargs, Some(&proj))
         .expect_err("blocked activation must be an error");

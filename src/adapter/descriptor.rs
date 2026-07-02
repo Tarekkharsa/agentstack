@@ -14,16 +14,7 @@ use crate::util::paths;
 /// root — normalize before joining so `.mcp.json`, `.claude/skills/`, etc.
 /// land where the CLIs actually look.
 fn project_root(project_dir: &Path) -> PathBuf {
-    if project_dir.file_name().and_then(|n| n.to_str())
-        == Some(crate::manifest::load::MANIFEST_SUBDIR)
-    {
-        match project_dir.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
-            _ => project_dir.to_path_buf(),
-        }
-    } else {
-        project_dir.to_path_buf()
-    }
+    crate::manifest::project_root_of(project_dir)
 }
 
 /// One CLI's full descriptor, deserialized from `adapters/<id>.yaml`.

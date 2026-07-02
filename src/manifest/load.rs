@@ -44,6 +44,21 @@ pub fn new_manifest_dir(base: &Path) -> PathBuf {
     }
 }
 
+/// The project root a manifest dir belongs to: the parent for the
+/// `.agentstack/` layout, the dir itself for a legacy root manifest. This is
+/// the anchor for everything project-scoped (`.mcp.json`, `.claude/skills/`,
+/// `.gitignore`).
+pub fn project_root_of(manifest_dir: &Path) -> PathBuf {
+    if manifest_dir.file_name().and_then(|n| n.to_str()) == Some(MANIFEST_SUBDIR) {
+        match manifest_dir.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            _ => manifest_dir.to_path_buf(),
+        }
+    } else {
+        manifest_dir.to_path_buf()
+    }
+}
+
 /// Result of a layered load, keeping the resolved manifest plus provenance.
 pub struct LoadedManifest {
     pub manifest: Manifest,

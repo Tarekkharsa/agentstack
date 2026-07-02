@@ -133,7 +133,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
-        let key = target_key(id, Scope::Global);
+        let key = target_key(id, Scope::Global, &ctx.dir);
         let previously = state.managed_servers(&key);
         let Some(plan) = plan_target(
             manifest,

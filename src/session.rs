@@ -203,7 +203,7 @@ pub fn start(
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
-        let prev = state.managed_servers(&target_key(id, scope));
+        let prev = state.managed_servers(&target_key(id, scope, &ctx.dir));
         if let Some(plan) =
             plan_target_with_servers(desc, &ctx.resolver, &server_map, &prev, scope, &ctx.dir)?
         {
@@ -225,6 +225,7 @@ pub fn start(
         scope: Some(scope),
         write: true,
         allow_unresolved: false,
+        no_gitignore: false,
     };
     crate::commands::use_profile::run(&use_args, manifest_dir)?;
 

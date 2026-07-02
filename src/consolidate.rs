@@ -138,7 +138,7 @@ pub fn consolidate(
                 })?;
 
                 // Mark it managed for this CLI (global) so the matrix shows it on.
-                let key = target_key(cli, Scope::Global);
+                let key = target_key(cli, Scope::Global, project_dir);
                 let mut managed = state.managed_skills(&key);
                 if !managed.iter().any(|s| s == &name) {
                     managed.push(name.clone());

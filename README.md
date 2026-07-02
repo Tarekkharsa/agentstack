@@ -139,6 +139,15 @@ agentstack run codex --profile backend
 env, varlock, OS keychain, or `.env`, and unresolved secrets block writes by
 default so placeholders do not leak into live harness config.
 
+**What lands in your repo is your choice.** You commit the intent
+(`.agentstack/agentstack.toml` + `.lock`); the rendered project artifacts
+(`.mcp.json`, `.claude/skills/` symlinks) are machine-local, so project-scope
+writes keep them out of git automatically via a managed `.gitignore` block.
+Prefer committing the rendered files for your team? Pass `--no-gitignore`
+(files you already track are never affected either way). Want nothing
+generated in the repo at all? Use global scope, or the per-directory
+[hook](#per-directory-auto-activation-agentstack-hook).
+
 ## What works today
 
 - **13 agent CLIs** — Claude Code, Claude Desktop, Codex, Cursor, Windsurf,

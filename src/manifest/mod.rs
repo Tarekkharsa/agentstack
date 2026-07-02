@@ -5,8 +5,8 @@ pub mod model;
 pub mod validate;
 
 pub use load::{
-    load_from_dir, new_manifest_dir, resolve_manifest_dir, LoadedManifest, MANIFEST_FILE,
-    MANIFEST_SUBDIR,
+    load_from_dir, new_manifest_dir, project_root_of, resolve_manifest_dir, LoadedManifest,
+    MANIFEST_FILE, MANIFEST_SUBDIR,
 };
 pub use model::{
     glob_match, Hook, Instruction, Manifest, PluginRecipe, Policy, Profile, Server, ServerType,

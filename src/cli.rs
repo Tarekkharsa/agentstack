@@ -396,6 +396,11 @@ pub struct ApplyArgs {
     /// default unresolved secrets block the write for that target.
     #[arg(long)]
     pub allow_unresolved: bool,
+
+    /// Skip the managed .gitignore block for generated project artifacts —
+    /// pass this when your team commits the rendered files.
+    #[arg(long)]
+    pub no_gitignore: bool,
 }
 
 #[derive(Args, Debug)]
@@ -429,6 +434,11 @@ pub struct UseArgs {
     /// Allow writing even when a `${REF}` did not resolve (off by default).
     #[arg(long)]
     pub allow_unresolved: bool,
+
+    /// Skip the managed .gitignore block for generated project artifacts —
+    /// pass this when your team commits the rendered files.
+    #[arg(long)]
+    pub no_gitignore: bool,
 }
 
 #[derive(Args, Debug)]

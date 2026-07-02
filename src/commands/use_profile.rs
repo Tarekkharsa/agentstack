@@ -81,13 +81,23 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let mut state = State::load()?;
     let mut wrote = 0;
     let mut blocked_targets: Vec<String> = Vec::new();
+    // Project-scope artifacts we write are machine-local (absolute-path
+    // symlinks, resolved values) — collect them for the managed .gitignore
+    // block unless the user opts out.
+    let project_root = crate::manifest::project_root_of(&ctx.dir);
+    let mut ignore_entries: Vec<String> = Vec::new();
+    let mut ignorable = |path: &Path| {
+        if let Ok(rel) = path.strip_prefix(&project_root) {
+            ignore_entries.push(format!("/{}", rel.display()));
+        }
+    };
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             println!("{} unknown adapter '{id}' — skipping", "⚠".yellow());
             continue;
         };
-        let key = target_key(id, scope);
+        let key = target_key(id, scope, &ctx.dir);
         println!("\n{}", desc.display.bold());
 
         // --- servers ---
@@ -123,6 +133,12 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
                         println!("  {} {} server(s) to write", "→".cyan(), plan.managed.len());
                     }
                 } else {
+                    // Even with no file change, keep state in sync with
+                    // reality (mirrors `apply`) — prune tracking and the
+                    // .gitignore block depend on it.
+                    if args.write && !blocked {
+                        state.record(&key, plan.managed.clone(), &plan.proposed);
+                    }
                     println!("  {} servers up to date", "✓".green());
                 }
             }
@@ -173,6 +189,32 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         } else {
             println!("  {} skills up to date", "✓".green());
         }
+
+        // Everything this target has managed (fresh or up to date) feeds the
+        // .gitignore block, so idempotent re-runs keep the block stable.
+        if scope == Scope::Project && args.write {
+            if !state.managed_servers(&key).is_empty() {
+                if let Some((cfg, _)) = desc.config_for(scope, &ctx.dir) {
+                    ignorable(&cfg);
+                }
+            }
+            for name in state.managed_skills(&key) {
+                ignorable(&skills_dir.join(name));
+            }
+        }
+    }
+
+    if args.write
+        && scope == Scope::Project
+        && !args.no_gitignore
+        && crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true)?
+    {
+        println!(
+            "\n{} .gitignore: {} generated path(s) kept out of git ({} to commit them instead)",
+            "✓".green(),
+            ignore_entries.len(),
+            "--no-gitignore".bold()
+        );
     }
 
     if args.write {
