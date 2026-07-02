@@ -669,6 +669,16 @@ pub struct AuditArgs {
     /// Emit machine-readable JSON instead of the text report.
     #[arg(long)]
     pub json: bool,
+
+    /// Summarize the runtime call audit log (~/.agentstack/audit/calls.jsonl):
+    /// every tool call brokered by the gateway, grouped by server/tool, with
+    /// denials. Argument values are never logged — only digests.
+    #[arg(long)]
+    pub calls: bool,
+
+    /// With --calls: only entries from the last N days.
+    #[arg(long, value_name = "DAYS")]
+    pub since: Option<u64>,
 }
 
 #[derive(Args, Debug)]

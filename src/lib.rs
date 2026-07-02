@@ -7,6 +7,7 @@
 //! (non-destructive merge into native config).
 
 pub mod adapter;
+pub mod calllog;
 pub mod catalog;
 pub mod cli;
 pub mod codemode;

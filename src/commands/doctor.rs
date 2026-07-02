@@ -674,6 +674,23 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
             report.line(Level::Ok, "all skill sources within allowlist");
         }
     }
+    // [policy.tools] rules must name real servers — a typo'd server name would
+    // silently firewall nothing.
+    for (server, rules) in &manifest.policy.tools {
+        if manifest.servers.contains_key(server) {
+            let denies = rules.iter().filter(|r| r.starts_with('!')).count();
+            let allows = rules.len() - denies;
+            report.line(
+                Level::Ok,
+                format!("tools '{server}' — {allows} allow / {denies} deny rule(s), enforced at the gateway"),
+            );
+        } else {
+            report.line(
+                Level::Error,
+                format!("[policy.tools] '{server}' — no such server in the manifest"),
+            );
+        }
+    }
 }
 
 /// A policy-matchable source label for a skill, e.g. `git:github.com/acme/repo`

@@ -205,6 +205,31 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
         ),
     }
 
+    // Tool firewall: what [policy.tools] does to this server at the gateway.
+    if let Some(rules) = manifest.policy.tools.get(name) {
+        let denies: Vec<&str> = rules.iter().filter_map(|r| r.strip_prefix('!')).collect();
+        let allows: Vec<&str> = rules
+            .iter()
+            .filter(|r| !r.starts_with('!'))
+            .map(String::as_str)
+            .collect();
+        let mut parts = Vec::new();
+        if !allows.is_empty() {
+            parts.push(format!("allow only [{}]", allows.join(", ")));
+        }
+        if !denies.is_empty() {
+            parts.push(format!("deny [{}]", denies.join(", ")));
+        }
+        kv(
+            &mut o,
+            "Tool policy",
+            &format!(
+                "{} — enforced at the gateway; denied tools are invisible to agents and refused if called",
+                parts.join("; ")
+            ),
+        );
+    }
+
     // Safety signals.
     o.push_str("  Safety\n");
     match server.server_type {

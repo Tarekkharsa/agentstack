@@ -392,10 +392,13 @@ impl HttpTransport {
     }
 }
 
-/// All HTTP upstreams a manifest declares, plus a discovered-tools cache.
+/// All upstreams a manifest declares, plus a discovered-tools cache, the
+/// project's `[policy.tools]` firewall rules, and audit-log context.
 pub struct Gateway {
     upstreams: Vec<Upstream>,
     cache: RefCell<Option<Vec<Value>>>,
+    policy: crate::manifest::Policy,
+    project: Option<String>,
 }
 
 impl Gateway {
@@ -420,6 +423,10 @@ impl Gateway {
                     allow.len()
                 );
             }
+            // `[policy.tools]` travels with the gateway — it is the firewall's
+            // rule set; `project` is audit-log context.
+            let policy = ctx.loaded.manifest.policy.clone();
+            let project = Some(ctx.dir.display().to_string());
             for (name, s) in &ctx.loaded.manifest.servers {
                 if fence.as_ref().is_some_and(|allow| !allow.contains(name)) {
                     continue;
@@ -466,10 +473,18 @@ impl Gateway {
                 };
                 upstreams.push(up);
             }
+            return Gateway {
+                upstreams,
+                cache: RefCell::new(None),
+                policy,
+                project,
+            };
         }
         Gateway {
             upstreams,
             cache: RefCell::new(None),
+            policy: crate::manifest::Policy::default(),
+            project: None,
         }
     }
 
@@ -478,6 +493,8 @@ impl Gateway {
         Gateway {
             upstreams: Vec::new(),
             cache: RefCell::new(Some(Vec::new())),
+            policy: crate::manifest::Policy::default(),
+            project: None,
         }
     }
 
@@ -497,6 +514,13 @@ impl Gateway {
             match up.list_tools() {
                 Ok(tools) => {
                     for t in tools {
+                        // The firewall filters discovery too: a policy-denied
+                        // tool is invisible, not just refusable — it never
+                        // reaches tools_search or code-mode bindings.
+                        let bare = t.get("name").and_then(Value::as_str).unwrap_or("");
+                        if self.policy.tool_allowed(&up.name, bare).is_err() {
+                            continue;
+                        }
                         out.push(namespace_tool(&up.name, &t));
                     }
                 }
@@ -507,11 +531,52 @@ impl Gateway {
         out
     }
 
-    /// If `name` is `<server>__<tool>` and we own that server, forward the call.
+    /// If `name` is `<server>__<tool>` and we own that server, forward the
+    /// call — after the `[policy.tools]` firewall, and with every outcome
+    /// (ok / error / denied) appended to the audit log.
     pub fn try_call(&self, name: &str, args: &Value) -> Option<Result<Value>> {
         let (server, tool) = name.split_once("__")?;
         let up = self.upstreams.iter().find(|u| u.name == server)?;
-        Some(up.call_tool(tool, args.clone()))
+        let started = Instant::now();
+        if let Err(rule) = self.policy.tool_allowed(server, tool) {
+            self.log_call(server, tool, args, "denied", Some(&rule), started);
+            return Some(Err(anyhow!("{server}__{tool}: call refused — {rule}")));
+        }
+        let result = up.call_tool(tool, args.clone());
+        match &result {
+            Ok(_) => self.log_call(server, tool, args, "ok", None, started),
+            Err(e) => self.log_call(server, tool, args, "error", Some(&e.to_string()), started),
+        }
+        Some(result)
+    }
+
+    /// Append one audit record (best-effort; never fails the call). Only the
+    /// argument *digest* is stored — never values, never resolved secrets.
+    fn log_call(
+        &self,
+        server: &str,
+        tool: &str,
+        args: &Value,
+        outcome: &str,
+        detail: Option<&str>,
+        started: Instant,
+    ) {
+        crate::calllog::record(&crate::calllog::CallRecord {
+            ts: crate::calllog::now_epoch(),
+            run: std::env::var(crate::calllog::RUN_ID_ENV).ok(),
+            pid: std::process::id(),
+            project: self.project.clone(),
+            server: server.to_string(),
+            tool: tool.to_string(),
+            args_digest: crate::calllog::digest_args(args),
+            outcome: outcome.to_string(),
+            detail: detail.map(|d| {
+                let mut d = d.to_string();
+                d.truncate(200);
+                d
+            }),
+            ms: started.elapsed().as_millis() as u64,
+        });
     }
 
     /// Rank the proxied tools against `query`, returning at most `limit` hits.
@@ -605,6 +670,8 @@ impl Gateway {
         Gateway {
             upstreams: Vec::new(),
             cache: RefCell::new(Some(tools)),
+            policy: crate::manifest::Policy::default(),
+            project: None,
         }
     }
 }

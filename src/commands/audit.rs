@@ -89,6 +89,9 @@ fn resolve(dir: &Path, p: &str) -> PathBuf {
 }
 
 pub fn run(args: &AuditArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    if args.calls {
+        return run_calls(args);
+    }
     let ctx = super::load(manifest_dir)?;
     let store = Store::default_store();
     let units = collect(&ctx.loaded.manifest, &ctx.dir, &store);
@@ -139,5 +142,94 @@ pub fn run(args: &AuditArgs, manifest_dir: Option<&Path>) -> Result<()> {
     if high > 0 {
         anyhow::bail!("audit found {high} high-severity finding(s) — see report above");
     }
+    Ok(())
+}
+
+/// `audit --calls` — the runtime side of the audit: what the agents actually
+/// called through the gateway, grouped by server/tool, denials up front.
+fn run_calls(args: &AuditArgs) -> Result<()> {
+    let mut entries = crate::calllog::read_all();
+    if let Some(days) = args.since {
+        let cutoff = crate::calllog::now_epoch().saturating_sub(days * 86_400);
+        entries.retain(|e| e.ts >= cutoff);
+    }
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&entries)?);
+        return Ok(());
+    }
+
+    if entries.is_empty() {
+        println!(
+            "No calls logged{}. The log fills as agents call tools through `agentstack mcp`.",
+            args.since
+                .map(|d| format!(" in the last {d}d"))
+                .unwrap_or_default()
+        );
+        return Ok(());
+    }
+
+    // Group by server__tool; track outcomes and last-seen.
+    use std::collections::BTreeMap;
+    struct Row {
+        ok: u64,
+        err: u64,
+        denied: u64,
+        last: u64,
+    }
+    let mut rows: BTreeMap<String, Row> = BTreeMap::new();
+    for e in &entries {
+        let r = rows
+            .entry(format!("{}__{}", e.server, e.tool))
+            .or_insert(Row {
+                ok: 0,
+                err: 0,
+                denied: 0,
+                last: 0,
+            });
+        match e.outcome.as_str() {
+            "ok" => r.ok += 1,
+            "denied" => r.denied += 1,
+            _ => r.err += 1,
+        }
+        r.last = r.last.max(e.ts);
+    }
+
+    let denied_total: u64 = rows.values().map(|r| r.denied).sum();
+    println!(
+        "{} call(s) across {} tool(s){}; {} denied by policy.\n",
+        entries.len(),
+        rows.len(),
+        args.since
+            .map(|d| format!(" in the last {d}d"))
+            .unwrap_or_default(),
+        denied_total,
+    );
+    println!(
+        "{:<40} {:>6} {:>6} {:>7}  {}",
+        "tool".bold(),
+        "ok".bold(),
+        "err".bold(),
+        "denied".bold(),
+        "last".bold()
+    );
+    for (name, r) in &rows {
+        let age_d = crate::calllog::now_epoch().saturating_sub(r.last) / 86_400;
+        let last = if age_d == 0 {
+            "today".to_string()
+        } else {
+            format!("{age_d}d ago")
+        };
+        let denied = if r.denied > 0 {
+            r.denied.to_string().red().to_string()
+        } else {
+            r.denied.to_string()
+        };
+        println!("{name:<40} {:>6} {:>6} {denied:>7}  {last}", r.ok, r.err);
+    }
+    println!(
+        "\nLog: {} (argument digests only — never values)",
+        crate::calllog::log_path().display()
+    );
     Ok(())
 }

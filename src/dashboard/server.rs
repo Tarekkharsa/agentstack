@@ -174,6 +174,33 @@ fn route(
                 .collect();
             json(&serde_json::to_string(&serde_json::json!({ "runs": arr })).unwrap_or_default())
         }
+        (Method::Get, "/api/calls") => {
+            if !authed {
+                return unauthorized();
+            }
+            // Runtime audit log — digests only, never argument values. Newest
+            // first, bounded, filterable by run id and server.
+            let run = query_param(query, "run");
+            let server = query_param(query, "server");
+            let mut entries = crate::calllog::read_all();
+            entries.reverse();
+            let filtered: Vec<_> = entries
+                .into_iter()
+                .filter(|e| match run.as_deref() {
+                    Some(r) => e.run.as_deref() == Some(r),
+                    None => true,
+                })
+                .filter(|e| match server.as_deref() {
+                    Some(s) => e.server == s,
+                    None => true,
+                })
+                .take(500)
+                .collect();
+            json(
+                &serde_json::to_string(&serde_json::json!({ "calls": filtered }))
+                    .unwrap_or_default(),
+            )
+        }
         (Method::Post, "/api/run_kill") => mutation(authed, read_only, || {
             let v = parse(body);
             let force = v.get("force").and_then(Value::as_bool).unwrap_or(false);

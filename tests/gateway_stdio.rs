@@ -242,3 +242,79 @@ fn stats_live_measures_context_cost_through_gateway() {
         "explain: {text}"
     );
 }
+
+#[test]
+fn policy_firewall_hides_denied_tools_and_refuses_calls() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    setup_home(&tmp.path().join("home"));
+    let proj = tmp.path().join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    let script = write_script(&proj, "fix.sh", FIXTURE);
+    write_manifest(
+        &proj,
+        &format!(
+            "[servers.fix]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"{}\"]\n\
+             [policy]\ntools = {{ fix = [\"!echo\"] }}\n",
+            script.display()
+        ),
+    );
+
+    let gw = Gateway::from_manifest(Some(&proj));
+    // The denied tool is invisible to discovery (and so to search/bindings)…
+    assert!(
+        gw.namespaced_tools().is_empty(),
+        "denied tool must not list"
+    );
+    // …and a direct call is refused, naming the rule, without reaching the child.
+    let err = gw
+        .try_call("fix__echo", &json!({ "msg": "sentinel-value-xyz" }))
+        .expect("routed")
+        .expect_err("must be denied");
+    let msg = err.to_string();
+    assert!(msg.contains("refused") && msg.contains("!echo"), "{msg}");
+
+    // The denial is audited — digest only, never the argument value.
+    let log = std::fs::read_to_string(agentstack::calllog::log_path()).unwrap();
+    assert!(
+        !log.contains("sentinel-value-xyz"),
+        "log leaked args: {log}"
+    );
+    let entries = agentstack::calllog::read_all();
+    let e = entries.last().expect("one record");
+    assert_eq!((e.server.as_str(), e.tool.as_str()), ("fix", "echo"));
+    assert_eq!(e.outcome, "denied");
+    assert!(e.detail.as_deref().unwrap_or("").contains("!echo"));
+    assert_eq!(e.args_digest.len(), 12);
+}
+
+#[test]
+fn audit_log_records_ok_calls_with_digest_only() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    setup_home(&tmp.path().join("home"));
+    let proj = tmp.path().join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    let script = write_script(&proj, "fix.sh", FIXTURE);
+    write_manifest(
+        &proj,
+        &format!(
+            "[servers.fix]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"{}\"]\n",
+            script.display()
+        ),
+    );
+
+    let gw = Gateway::from_manifest(Some(&proj));
+    gw.try_call("fix__echo", &json!({ "msg": "sentinel-ok-abc" }))
+        .expect("routed")
+        .expect("call ok");
+
+    let raw = std::fs::read_to_string(agentstack::calllog::log_path()).unwrap();
+    assert!(!raw.contains("sentinel-ok-abc"), "log leaked args: {raw}");
+    let entries = agentstack::calllog::read_all();
+    let e = entries.last().expect("one record");
+    assert_eq!(e.outcome, "ok");
+    assert_eq!((e.server.as_str(), e.tool.as_str()), ("fix", "echo"));
+    assert_eq!(e.args_digest.len(), 12);
+    assert!(e.project.as_deref().unwrap_or("").contains("proj"));
+}

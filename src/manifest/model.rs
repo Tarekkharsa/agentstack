@@ -70,17 +70,55 @@ pub struct Policy {
     /// `git:github.com/acme/*`, `registry:*`, `path:*`). Empty = allow any.
     #[serde(default)]
     pub allowed_sources: Vec<String>,
+    /// Per-server tool rules, enforced at the runtime gateway (the MCP
+    /// firewall). `[policy.tools]` maps a server name to glob patterns over its
+    /// tool names: plain patterns allow, `!`-prefixed patterns deny. With at
+    /// least one allow pattern the list is an allowlist (a tool must match an
+    /// allow and no deny); with only deny patterns everything else is allowed.
+    /// A denied tool is invisible to discovery and refused if called.
+    #[serde(default)]
+    pub tools: IndexMap<String, Vec<String>>,
 }
 
 impl Policy {
     pub fn is_empty(&self) -> bool {
-        self.require.is_empty() && self.forbid.is_empty() && self.allowed_sources.is_empty()
+        self.require.is_empty()
+            && self.forbid.is_empty()
+            && self.allowed_sources.is_empty()
+            && self.tools.is_empty()
     }
 
     /// Whether `source` is allowed (any source allowed when the list is empty).
     pub fn source_allowed(&self, source: &str) -> bool {
         self.allowed_sources.is_empty()
             || self.allowed_sources.iter().any(|p| glob_match(p, source))
+    }
+
+    /// Whether `server`'s `tool` passes `[policy.tools]`. `Ok(())` when allowed;
+    /// `Err(rule)` names the pattern (or the allowlist) that blocks it.
+    pub fn tool_allowed(&self, server: &str, tool: &str) -> Result<(), String> {
+        let Some(rules) = self.tools.get(server) else {
+            return Ok(());
+        };
+        for r in rules {
+            if let Some(deny) = r.strip_prefix('!') {
+                if glob_match(deny, tool) {
+                    return Err(format!("denied by [policy.tools] {server} = \"!{deny}\""));
+                }
+            }
+        }
+        let allows: Vec<&String> = rules.iter().filter(|r| !r.starts_with('!')).collect();
+        if !allows.is_empty() && !allows.iter().any(|a| glob_match(a, tool)) {
+            return Err(format!(
+                "not in the [policy.tools] allowlist for {server} ({})",
+                allows
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -341,6 +379,27 @@ impl Manifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_policy_allow_and_deny() {
+        let p: Policy = toml::from_str(
+            "tools = { github = [\"get_*\", \"list_*\", \"!list_secrets\"], jira = [\"!delete_*\"] }",
+        )
+        .unwrap();
+        // Allowlist: must match an allow and no deny.
+        assert!(p.tool_allowed("github", "get_issue").is_ok());
+        assert!(p.tool_allowed("github", "list_repos").is_ok());
+        assert!(p.tool_allowed("github", "create_issue").is_err());
+        assert!(p.tool_allowed("github", "list_secrets").is_err());
+        // Deny-only: everything else passes.
+        assert!(p.tool_allowed("jira", "get_issue").is_ok());
+        assert!(p.tool_allowed("jira", "delete_issue").is_err());
+        // No rules for a server → unrestricted.
+        assert!(p.tool_allowed("other", "anything").is_ok());
+        // The refusal names the rule.
+        let err = p.tool_allowed("jira", "delete_issue").unwrap_err();
+        assert!(err.contains("!delete_*"), "{err}");
+    }
 
     #[test]
     fn glob_matches_wildcards() {

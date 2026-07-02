@@ -41,6 +41,21 @@ The complete, implemented-and-tested feature inventory. The
 - **Governance (`[policy]`)** — `require`/`forbid` capabilities and an
   `allowed_sources` glob allowlist (e.g. `git:github.com/acme/*`), enforced by
   `doctor --ci`. Cross-source trust gating for executable-intent skills/MCPs.
+- **MCP firewall (`[policy.tools]`)** — per-server tool rules enforced at the
+  runtime gateway: `github = ["get_*", "list_*", "!list_secrets"]` (plain
+  globs allow, `!` denies; allow patterns make the list an allowlist). A
+  denied tool is **invisible** — filtered from `tools_search` and code-mode
+  bindings — and refused with the rule named if called anyway. `doctor`
+  errors on rules naming unknown servers; `explain <server>` shows the
+  effective policy.
+- **Call audit log** — every tool call the gateway brokers (MCP proxy and
+  code-mode alike) appends to `~/.agentstack/audit/calls.jsonl`: timestamp,
+  run id (when launched via `agentstack run`), server, tool, **argument
+  digest** (never values), outcome (`ok`/`error`/`denied`), latency.
+  Summarize with `agentstack audit --calls [--since <days>] [--json]`; the
+  dashboard's Runs panel shows each run's trust footprint (Calls button) and
+  an all-runs view. Best-effort and size-rotated; logging can never fail a
+  call.
 - **Content scanning + `audit`** — every `install` scans skill content for
   hidden Unicode (zero-width characters, bidi overrides, tag characters) and
   prompt-injection heuristics. Hidden-Unicode findings **block the install**
@@ -236,8 +251,8 @@ agentstack codemode --write    # write client.ts + agentstack-runtime.ts (+ .git
 `upgrade`, `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
 `lib add|add-server|list|remove|remove-server|migrate`, `restore`,
-`doctor` (`--ci`, `--live`, `--fix`), `audit` (`--json`), `search`,
-`stats` (`--live`),
+`doctor` (`--ci`, `--live`, `--fix`), `audit` (`--json`, `--calls`,
+`--since`), `search`, `stats` (`--live`),
 `secret set|get|rm|list`, `export`/`import`, `adapters`, `plugins`,
 `dashboard`, `mcp`, `codemode`, `hook`, `run`/`runs`/`kill`.
 

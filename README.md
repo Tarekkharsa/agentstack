@@ -171,6 +171,11 @@ symlinks) is a per-project choice:
   corrupts your real `~/.claude.json`.
 - **Trust gate** — `[policy]` (require/forbid/`allowed_sources`) enforced by
   `doctor --ci`, plus provenance hints at the point of choosing.
+- **MCP firewall + audit** — `[policy.tools]` allow/deny globs per server,
+  enforced at the runtime gateway (denied tools are invisible to agents and
+  refused if called), and an append-only call log — server, tool, argument
+  *digest*, outcome — behind `agentstack audit --calls` and the dashboard's
+  per-run trust footprint.
 - **Live runs** — launch any harness as a tracked process (`agentstack run`),
   optionally with a profile applied just for its lifetime; see and kill every run
   (and its whole process tree) from the CLI or dashboard — no Activity Monitor.

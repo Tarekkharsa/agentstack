@@ -175,8 +175,12 @@ pub fn launch(
         started_session = true;
     }
 
-    // Spawn the harness in its own process group so a later kill takes the tree.
-    let mut child = match spawn_child(&bin, extra_args, &dir) {
+    // Spawn the harness in its own process group so a later kill takes the
+    // tree. The run id rides along as an env var so tool calls the harness's
+    // agent makes through `agentstack mcp` land in the audit log attributed
+    // to this run.
+    let id = gen_id();
+    let mut child = match spawn_child(&bin, extra_args, &dir, &id) {
         Ok(c) => c,
         Err(e) => {
             if started_session && !keep {
@@ -185,8 +189,6 @@ pub fn launch(
             return Err(e).with_context(|| format!("launching {display}"));
         }
     };
-
-    let id = gen_id();
     let pid = child.id() as i32;
     let rec = RunRecord {
         id: id.clone(),
@@ -246,10 +248,17 @@ pub fn kill(id: &str, force: bool) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn spawn_child(bin: &str, args: &[String], cwd: &Path) -> Result<std::process::Child> {
+fn spawn_child(
+    bin: &str,
+    args: &[String],
+    cwd: &Path,
+    run_id: &str,
+) -> Result<std::process::Child> {
     use std::os::unix::process::CommandExt;
     let mut cmd = std::process::Command::new(bin);
-    cmd.args(args).current_dir(cwd);
+    cmd.args(args)
+        .current_dir(cwd)
+        .env(crate::calllog::RUN_ID_ENV, run_id);
     // setpgid(0, 0): make the child its own process-group leader so kill(-pgid)
     // later reaps it and anything it spawned.
     unsafe {
@@ -264,7 +273,12 @@ fn spawn_child(bin: &str, args: &[String], cwd: &Path) -> Result<std::process::C
 }
 
 #[cfg(not(unix))]
-fn spawn_child(_bin: &str, _args: &[String], _cwd: &Path) -> Result<std::process::Child> {
+fn spawn_child(
+    _bin: &str,
+    _args: &[String],
+    _cwd: &Path,
+    _run_id: &str,
+) -> Result<std::process::Child> {
     anyhow::bail!("`agentstack run` is not supported on this platform yet")
 }
 

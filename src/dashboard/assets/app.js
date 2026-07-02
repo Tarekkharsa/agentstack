@@ -574,9 +574,52 @@ function killRun(id, label, force) {
   if (!confirm(msg)) return;
   return post("/api/run_kill", { id, force: !!force }, force ? "Run force-killed" : "Run killed");
 }
+// The trust footprint of a run (or of everything, when runId is null): which
+// tools its agent actually called through the gateway, with denials. Digests
+// only travel over the wire — never argument values.
+function callsModal(runId, label) {
+  fetch(q("/api/calls") + (runId ? "&run=" + encodeURIComponent(runId) : ""))
+    .then((r) => r.json())
+    .then((d) => {
+      const calls = d.calls || [];
+      const byTool = {};
+      calls.forEach((e) => {
+        const k = e.server + "__" + e.tool;
+        byTool[k] = byTool[k] || { ok: 0, error: 0, denied: 0 };
+        byTool[k][e.outcome] = (byTool[k][e.outcome] || 0) + 1;
+      });
+      const names = Object.keys(byTool).sort();
+      const rows = names.map((k) => el("tr", null, [
+        el("td", null, [el("span", { class: "mono" }, [k])]),
+        el("td", null, [String(byTool[k].ok)]),
+        el("td", null, [String(byTool[k].error)]),
+        el("td", null, [byTool[k].denied ? el("span", { style: "color:hsl(0 72% 50%)" }, [String(byTool[k].denied)]) : "0"]),
+      ]));
+      const bd = names.length
+        ? el("div", { class: "table-wrap" }, [el("table", null, [
+            el("thead", null, [el("tr", null, ["tool", "ok", "err", "denied by policy"].map((h) => el("th", null, [h])))]),
+            el("tbody", null, rows),
+          ])])
+        : el("div", { class: "empty" }, [runId
+            ? "No tool calls logged for this run yet. Calls appear as its agent uses servers through `agentstack mcp`."
+            : "No tool calls logged yet. Calls appear as agents use servers through `agentstack mcp`."]);
+      const modal = el("div", { class: "modal" }, [
+        el("div", { class: "mhd" }, [el("span", null, ["Tool calls · " + (label || "all runs")]), btn("✕", closeModal, "icon")]),
+        el("div", { class: "mbd" }, [
+          bd,
+          el("div", { class: "muted", style: "margin-top:10px;font-size:12px" }, ["Audit log records argument digests only — never values. Full log: ~/.agentstack/audit/calls.jsonl (`agentstack audit --calls`)."]),
+        ]),
+      ]);
+      document.getElementById("modal").appendChild(el("div", { class: "overlay", onclick: (e) => e.target.classList.contains("overlay") && closeModal() }, [modal]));
+    })
+    .catch((e) => toast("Calls: " + e.message, false));
+}
 function runs(c) {
   const list = DATA.runs || [];
   c.appendChild(pageHead("Runs", "Live agent processes agentstack launched. Start one from your terminal with `agentstack run <harness>`; stop any of them here — no Activity Monitor needed."));
+  c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
+    btn("All tool calls", () => callsModal(null, null)),
+  ]));
   if (!list.length) {
     c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [
       el("div", { class: "empty" }, ["No live runs. Launch one from your terminal, e.g."]),
@@ -601,9 +644,12 @@ function runs(c) {
       el("td", null, [profCell]),
       el("td", null, [el("div", { style: "display:flex;flex-wrap:wrap;gap:4px" }, footprint)]),
       el("td", null, [el("span", { class: "mono muted" }, [r.cwd])]),
-      el("td", null, READONLY ? [] : [el("div", { style: "display:flex;gap:6px" }, [
-        btn("Kill", () => killRun(r.id, r.display || r.harness, false), "danger"),
-        btn("Force", () => killRun(r.id, r.display || r.harness, true), "danger"),
+      el("td", null, [el("div", { style: "display:flex;gap:6px" }, [
+        btn("Calls", () => callsModal(r.id, r.display || r.harness)),
+        ...(READONLY ? [] : [
+          btn("Kill", () => killRun(r.id, r.display || r.harness, false), "danger"),
+          btn("Force", () => killRun(r.id, r.display || r.harness, true), "danger"),
+        ]),
       ])]),
     ]));
   });
