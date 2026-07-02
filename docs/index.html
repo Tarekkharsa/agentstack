@@ -52,7 +52,6 @@
     }
 
     .hero {
-      min-height: 82svh;
       display: grid;
       grid-template-columns: minmax(280px, 0.86fr) minmax(420px, 1.14fr);
       gap: clamp(28px, 5vw, 72px);
@@ -117,31 +116,16 @@
     }
 
     .map {
-      position: relative;
-      min-height: 620px;
-      padding: 24px;
+      padding: clamp(16px, 2.5vw, 28px);
       border: 1px solid var(--line);
-      background:
-        linear-gradient(#fffdf8, #fffaf0),
-        repeating-linear-gradient(90deg, transparent 0 78px, rgba(29,37,40,0.05) 78px 79px);
+      background: linear-gradient(#fffdf8, #fffaf0);
       box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-
-    .map:before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background-image:
-        linear-gradient(rgba(29,37,40,0.06) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(29,37,40,0.06) 1px, transparent 1px);
-      background-size: 36px 36px;
-      mask-image: linear-gradient(to bottom, black 0%, transparent 90%);
-      pointer-events: none;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 18px;
     }
 
     .node {
-      position: absolute;
       border: 1px solid #c9c2b6;
       background: rgba(255, 253, 248, 0.94);
       padding: 14px;
@@ -168,40 +152,39 @@
       overflow-wrap: anywhere;
     }
 
-    .node.provider { width: 34%; }
-    .node.source { width: 37%; }
-    .node.project { width: 38%; }
-    .node.view { width: 36%; }
-
-    .n1 { left: 5%; top: 8%; }
-    .n2 { right: 5%; top: 8%; }
-    .n3 { left: 31%; top: 38%; width: 38%; border-color: rgba(12,127,120,0.55); }
-    .n4 { left: 5%; bottom: 8%; }
-    .n5 { right: 5%; bottom: 8%; }
-
-    .rail {
-      position: absolute;
-      background: var(--accent);
-      opacity: 0.72;
-      transform-origin: left center;
-      height: 2px;
+    .flow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      min-height: 58px;
     }
 
-    .r1 { left: 34%; top: 29%; width: 26%; transform: rotate(25deg); }
-    .r2 { right: 34%; top: 29%; width: 26%; transform: rotate(155deg); }
-    .r3 { left: 25%; bottom: 27%; width: 27%; transform: rotate(-25deg); }
-    .r4 { right: 25%; bottom: 27%; width: 27%; transform: rotate(205deg); }
+    .flow svg {
+      width: 84px;
+      height: 40px;
+      display: block;
+    }
+
+    .flow svg path {
+      stroke: var(--accent);
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      fill: none;
+    }
+
+    .flow .lbl {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--accent-dark);
+    }
 
     .truth {
-      position: absolute;
-      left: 31%;
-      right: 31%;
-      top: 37%;
-      min-height: 156px;
+      grid-column: 1 / -1;
       border: 2px solid var(--accent);
       background: #f4fff9;
       padding: 18px;
-      z-index: 2;
     }
 
     .truth h2 {
@@ -545,15 +528,6 @@
         grid-template-columns: 1fr;
       }
 
-      .map {
-        min-height: 560px;
-      }
-
-      .truth {
-        left: 18%;
-        right: 18%;
-      }
-
       .layout {
         grid-template-columns: 1fr;
       }
@@ -585,27 +559,13 @@
       }
 
       .map {
-        min-height: 710px;
         padding: 14px;
+        gap: 4px 12px;
       }
 
-      .node,
-      .node.provider,
-      .node.source,
-      .node.project,
-      .node.view,
-      .truth {
-        position: relative;
-        left: auto;
-        right: auto;
-        top: auto;
-        bottom: auto;
-        width: auto;
-        margin-bottom: 12px;
-      }
-
-      .rail {
-        display: none;
+      .flow svg {
+        width: 56px;
+        height: 30px;
       }
 
       nav {
@@ -640,15 +600,32 @@
       </div>
 
       <div class="map" aria-label="Central library system map">
-        <div class="node source n1">
-          <strong>Fixtures or imports</strong>
-          <span>Local files, git skills, provider-discovered MCP entries.</span>
-          <code>fixtures/central-library/*</code>
+        <div class="node source">
+          <strong>Imports &amp; sources</strong>
+          <span>Local skill dirs, git skills, catalog and registry servers.</span>
+          <code>lib add · add-server · init</code>
         </div>
-        <div class="node provider n2">
+        <div class="node provider">
           <strong>Provider folders</strong>
-          <span>Auth, caches, history and private state remain provider-owned.</span>
-          <code>~/.codex, ~/.claude, ~/.pi</code>
+          <span>Auth, caches, and private state stay provider-owned.</span>
+          <code>~/.claude, ~/.codex, ~/.pi</code>
+        </div>
+        <div class="flow">
+          <svg viewBox="0 0 100 44" aria-hidden="true">
+            <defs>
+              <marker id="ah1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="#0c7f78" stroke="none"></path>
+              </marker>
+            </defs>
+            <path d="M14,6 L86,38" marker-end="url(#ah1)"></path>
+          </svg>
+          <span class="lbl">add / migrate in</span>
+        </div>
+        <div class="flow">
+          <svg viewBox="0 0 100 44" aria-hidden="true">
+            <path d="M86,6 L14,38" marker-end="url(#ah1)"></path>
+          </svg>
+          <span class="lbl">consolidate</span>
         </div>
         <div class="truth">
           <h2>~/.agentstack/lib</h2>
@@ -660,20 +637,28 @@
             <li>hooks/ and instructions/ later</li>
           </ul>
         </div>
-        <div class="node project n4">
+        <div class="flow">
+          <svg viewBox="0 0 100 44" aria-hidden="true">
+            <path d="M86,6 L14,38" marker-end="url(#ah1)"></path>
+          </svg>
+          <span class="lbl">names resolve</span>
+        </div>
+        <div class="flow">
+          <svg viewBox="0 0 100 44" aria-hidden="true">
+            <path d="M14,6 L86,38" marker-end="url(#ah1)"></path>
+          </svg>
+          <span class="lbl">use --write</span>
+        </div>
+        <div class="node project">
           <strong>Project manifest</strong>
-          <span>References central capabilities by name.</span>
+          <span>Selects central capabilities by name — nothing copied.</span>
           <code>servers = ["kibana"]<br>skills = ["sql-review"]</code>
         </div>
-        <div class="node view n5">
+        <div class="node view">
           <strong>Generated views</strong>
-          <span>Symlinks and rendered config entries that CLIs can read.</span>
+          <span>Symlinks and rendered config the CLIs actually read.</span>
           <code>.claude/skills, .mcp.json, config.toml</code>
         </div>
-        <div class="rail r1"></div>
-        <div class="rail r2"></div>
-        <div class="rail r3"></div>
-        <div class="rail r4"></div>
       </div>
     </header>
 
