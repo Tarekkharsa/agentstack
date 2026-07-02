@@ -18,6 +18,9 @@ agentstack.local.toml
 /.claude-plugin/
 /.agents/
 
+# internal planning docs — pruned from the public repo
+/plan/
+
 # encrypted bundles
 *.age
 
