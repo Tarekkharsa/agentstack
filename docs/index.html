@@ -604,7 +604,10 @@
           Your skills and MCP servers live in one place — <code>~/.agentstack/lib</code>.
           Each project is just a short file of names. agentstack renders the real
           config for Claude Code, Codex, Gemini, Cursor, and ten more, with secrets
-          resolved per machine and never committed.
+          resolved per machine and never committed. Install versioned packs from
+          any git host, firewall any server's tools at the runtime gateway
+          (<code>[policy.tools]</code>), and read audit receipts for every call an
+          agent makes.
         </p>
         <div class="install-line"><code>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</code></div>
         <div class="hero-actions">
@@ -1309,8 +1312,21 @@ Authorization = "Bearer real-token-value"</code></pre>
               <button class="copy" type="button">Copy</button>
             </header>
             <pre><code>cd agentstack-test
-./demo-central-library.sh</code></pre>
+./demo-central-library.sh     # the central-library architecture
+./demo-closed-loop.sh         # pack install → apply → firewall → receipts → upgrade</code></pre>
           </div>
+
+          <p style="margin-top: 18px;">
+            The closed-loop demo — a vendor publishes a versioned pack, a fresh
+            machine installs it at its tag, spreads it to every CLI, firewalls a
+            destructive tool, watches a live call get refused, reads the audit
+            receipts, and picks up the next tag with one <code>upgrade</code>:
+          </p>
+          <img src="closed-loop.gif" alt="agentstack closed loop: git pack install, apply, firewall, audited calls, upgrade" style="width: 100%; border-radius: 10px; margin-top: 10px;" loading="lazy" />
+          <p style="margin-top: 10px;">
+            For dashboard-first users, the same lifecycle works without a terminal —
+            see <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">the no-terminal path</a>.
+          </p>
 
           <table style="margin-top: 22px;">
             <thead>
@@ -1355,6 +1371,11 @@ Authorization = "Bearer real-token-value"</code></pre>
                 <li><span class="status">Done</span> Name resolution with inline override.</li>
                 <li><span class="status">Done</span> Digest locks, doctor drift, explain provenance.</li>
                 <li><span class="status">Done</span> <code>lib add</code>, <code>add-server</code>, <code>list</code>, <code>remove</code>, <code>remove-server</code>, <code>migrate</code>.</li>
+                <li><span class="status">Done</span> Runtime gateway proxies HTTP <em>and</em> stdio servers (zero-files mode).</li>
+                <li><span class="status">Done</span> MCP firewall (<code>[policy.tools]</code>) + call audit log with per-run receipts.</li>
+                <li><span class="status">Done</span> Versioned packs from any git host (<code>pack.toml</code> + tags, <code>upgrade</code>, <code>pack init</code>).</li>
+                <li><span class="status">Done</span> Context-cost lens (<code>stats --live</code>) — what each server taxes every session.</li>
+                <li><span class="status">Done</span> Dashboard closes the loop: doctor pane, remove action, hard read-only gate.</li>
               </ul>
             </div>
 
@@ -1363,8 +1384,8 @@ Authorization = "Bearer real-token-value"</code></pre>
               <ul>
                 <li><span class="status pending">Next</span> <code>lib/hooks</code> and reusable instruction sets.</li>
                 <li><span class="status pending">Next</span> One-command provider import and onboarding.</li>
-                <li><span class="status pending">Next</span> Extensions and plugin runtime centralization.</li>
-                <li><span class="status pending">Next</span> Cleaner dashboard affordances for generated vs source files.</li>
+                <li><span class="status pending">Next</span> Semver ranges + transitive pack dependencies.</li>
+                <li><span class="status pending">Next</span> Team library sync (git-backed <code>~/.agentstack/lib</code>) and SBOM export.</li>
               </ul>
             </div>
           </div>
