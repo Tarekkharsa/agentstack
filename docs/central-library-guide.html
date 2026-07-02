@@ -1195,6 +1195,7 @@ Authorization = "Bearer ${KIBANA_TOKEN}"</code></pre>
 Authorization = "Bearer real-token-value"</code></pre>
               </div>
               <p><code>lib add-server</code> warns on suspicious literal secrets. The design rule is still simple: central files hold refs, not values.</p>
+              <p>Skill content is also scanned on <code>install</code>: hidden Unicode (zero-width characters, bidi overrides) blocks the install, prompt-injection heuristics warn, and <code>agentstack audit</code> re-scans everything materialized — so what enters the library is checked, not just checksummed.</p>
             </div>
           </div>
 
@@ -1340,7 +1341,7 @@ Authorization = "Bearer real-token-value"</code></pre>
       <div class="footer-inner">
         <div>
           <strong>AgentStack central library guide</strong><br>
-          Built from <code>plan/central-store.md</code>, <code>plan/provider-import.md</code>, and the runnable sandbox.
+          Built from <code>docs/plans/central-store.md</code>, <code>docs/plans/provider-import.md</code>, and the runnable sandbox.
         </div>
         <div>
           Open locally: <code>docs/central-library-guide.html</code>
