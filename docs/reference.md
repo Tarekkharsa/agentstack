@@ -190,7 +190,9 @@ e.g. Claude Code:
 
 ### Compact proxied surface + code mode
 
-`agentstack mcp` also **proxies** the project's HTTP MCP servers. Instead of
+`agentstack mcp` also **proxies** the project's MCP servers — HTTP and stdio
+(stdio children spawn lazily in their own process group, get `${REF}`s resolved
+into their env per session, and are tree-killed when the session ends). Instead of
 dumping every upstream tool into `tools/list` (context bloat that grows with each
 server you add), the proxied surface collapses behind two stable tools:
 

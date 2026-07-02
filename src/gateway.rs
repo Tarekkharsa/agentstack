@@ -1,10 +1,10 @@
-//! Runtime MCP gateway (v1). Connects to the HTTP MCP servers a project's
-//! manifest declares and re-exposes their tools through `agentstack mcp`, so the
-//! manifest plus a one-time registration is enough — no `apply`, nothing written
-//! into a native config, secrets resolved per-machine at call time.
+//! Runtime MCP gateway. Connects to the MCP servers a project's manifest
+//! declares — HTTP and stdio — and re-exposes their tools through
+//! `agentstack mcp`, so the manifest plus a one-time registration is enough —
+//! no `apply`, nothing written into a native config, secrets resolved
+//! per-machine at call time.
 //!
-//! Scope of v1, deliberately bounded:
-//! - HTTP servers only (stdio child-process servers are a follow-up).
+//! Scope, deliberately bounded:
 //! - The manifest is resolved once per launch — one project per process. No cwd
 //!   watching and no `tools/list_changed`; a new project means a new launch.
 //! - Discovery is lazy (on first `tools/list`) with a per-server timeout and
@@ -12,9 +12,18 @@
 //! - Upstream tool descriptions are forwarded with a `[via <server>]` provenance
 //!   prefix and a length cap — the manifest is the allowlist; this is a first
 //!   guard against tool-poisoning via aggregated descriptions.
+//!
+//! Stdio lifecycle: a stdio server's child process is spawned lazily on the
+//! first message that needs it, in its own process group (the same pattern as
+//! `agentstack run`). Dropping the gateway — the MCP session ending — closes the
+//! child's stdin (EOF, the polite MCP shutdown), then SIGTERMs and finally
+//! SIGKILLs the whole group, so nothing it spawned outlives the session. If
+//! agentstack itself dies without cleanup (`kill -9`), the kernel closes the
+//! pipes and a well-behaved MCP server exits on stdin EOF. Secrets are resolved
+//! into the child's env at spawn time and are never logged.
 
 use std::cell::{Cell, RefCell};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
@@ -25,23 +34,199 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 const PROTOCOL: &str = "2025-06-18";
 const DESC_CAP: usize = 600;
 
-/// One upstream HTTP MCP server, with a minimal Streamable-HTTP JSON-RPC client.
+/// How long a stdio tool call may run. Generous: upstream tools do real work
+/// (searches, builds); the HTTP side's 5s request timeout is its own bound.
+const STDIO_CALL_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long a stdio server gets from spawn to its `initialize` response —
+/// `npx`-style servers may install on first run. Env-overridable so tests can
+/// exercise the timeout path without waiting out the real default.
+fn stdio_start_timeout() -> Duration {
+    std::env::var("AGENTSTACK_STDIO_START_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_secs(10))
+}
+
+/// One upstream MCP server behind either transport.
 pub struct Upstream {
     pub name: String,
-    url: String,
-    headers: Vec<(String, String)>,
-    /// `${REF}`s in this server's URL/headers that did not resolve on this
-    /// machine. A call is refused (with a clear message) rather than sent with a
-    /// literal `${REF}` that would fail upstream as a confusing auth error.
+    /// `${REF}`s in this server's URL/headers/env/args that did not resolve on
+    /// this machine. A call is refused (with a clear message) rather than sent
+    /// with a literal `${REF}` that would fail upstream as a confusing auth
+    /// error.
     unresolved: Vec<String>,
-    client: reqwest::blocking::Client,
-    session: RefCell<Option<String>>,
+    transport: Transport,
     initialized: RefCell<bool>,
     next_id: Cell<i64>,
 }
 
+enum Transport {
+    Http(HttpTransport),
+    Stdio(StdioTransport),
+}
+
+/// Minimal Streamable-HTTP JSON-RPC client.
+struct HttpTransport {
+    url: String,
+    headers: Vec<(String, String)>,
+    client: reqwest::blocking::Client,
+    session: RefCell<Option<String>>,
+}
+
+/// A stdio child-process JSON-RPC client (one line = one message). The child is
+/// spawned lazily; a dedicated reader thread parses its stdout into a channel so
+/// requests can wait with a deadline instead of blocking forever.
+struct StdioTransport {
+    command: String,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+    child: RefCell<Option<StdioChild>>,
+}
+
+struct StdioChild {
+    proc: std::process::Child,
+    /// `Some` for the child's whole working life; taken (closed → EOF) first
+    /// during Drop, because stdin EOF is the polite MCP shutdown signal.
+    stdin: Option<std::process::ChildStdin>,
+    rx: std::sync::mpsc::Receiver<Value>,
+}
+
+impl StdioChild {
+    /// Poll `try_wait` for up to `dur`; true once the child has exited.
+    fn wait_for_exit(&mut self, dur: Duration) -> bool {
+        let deadline = Instant::now() + dur;
+        loop {
+            if matches!(self.proc.try_wait(), Ok(Some(_))) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+impl Drop for StdioChild {
+    fn drop(&mut self) {
+        // Escalation ladder: stdin EOF (polite MCP shutdown) → SIGTERM to the
+        // process group → SIGKILL to the group. The child is its own group
+        // leader (see spawn), so anything *it* spawned goes too — the same
+        // tree-kill contract as `agentstack kill`.
+        drop(self.stdin.take());
+        if self.wait_for_exit(Duration::from_millis(200)) {
+            return;
+        }
+        #[cfg(unix)]
+        {
+            let pid = self.proc.id() as i32;
+            unsafe { libc::kill(-pid, libc::SIGTERM) };
+            if self.wait_for_exit(Duration::from_millis(300)) {
+                return;
+            }
+            unsafe { libc::kill(-pid, libc::SIGKILL) };
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = self.proc.kill();
+        }
+        let _ = self.proc.wait();
+    }
+}
+
+impl StdioTransport {
+    fn spawn(&self) -> Result<StdioChild> {
+        let mut cmd = std::process::Command::new(&self.command);
+        cmd.args(&self.args)
+            .envs(self.env.iter().cloned())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            // The child's stderr flows to ours: `agentstack mcp` keeps the
+            // protocol on the real stdout, so this is debug-visible and safe.
+            .stderr(std::process::Stdio::inherit());
+        #[cfg(unix)]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            // setpgid(0, 0): own process group, so Drop can tree-kill it.
+            cmd.pre_exec(|| {
+                if libc::setpgid(0, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut proc = cmd
+            .spawn()
+            .with_context(|| format!("spawning '{}'", self.command))?;
+        let stdin = Some(proc.stdin.take().expect("piped stdin"));
+        let stdout = proc.stdout.take().expect("piped stdout");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                // Skip non-JSON stdout noise; only JSON-RPC frames go through.
+                if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                    if tx.send(v).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        Ok(StdioChild { proc, stdin, rx })
+    }
+
+    /// Send one JSON-RPC message; for a request (has an id), wait for the
+    /// matching response until `timeout`. Server-initiated notifications and
+    /// stale replies are skipped, not fatal.
+    fn request(&self, body: &Value, timeout: Duration) -> Result<Option<Value>> {
+        let mut slot = self.child.borrow_mut();
+        let mut child = match slot.take() {
+            Some(c) => c,
+            None => self.spawn()?,
+        };
+        use std::io::Write;
+        let line = serde_json::to_string(body)?;
+        let stdin = child.stdin.as_mut().expect("stdin open until drop");
+        if let Err(e) = writeln!(stdin, "{line}").and_then(|()| stdin.flush()) {
+            // Dead child: drop it (reaps + group-kills); the next call respawns.
+            drop(child);
+            anyhow::bail!("server process is not accepting input: {e}");
+        }
+        let Some(id) = body.get("id").cloned() else {
+            *slot = Some(child);
+            return Ok(None);
+        };
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match child.rx.recv_timeout(remaining) {
+                Ok(msg) => {
+                    if msg.get("id") == Some(&id) && msg.get("method").is_none() {
+                        *slot = Some(child);
+                        return Ok(Some(msg));
+                    }
+                    // A notification, a server-initiated request, or a stale
+                    // reply to a timed-out call — skip and keep waiting.
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // Keep the child: a slow tool call is not a dead server.
+                    *slot = Some(child);
+                    anyhow::bail!("no response after {}s", timeout.as_secs());
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    drop(child);
+                    anyhow::bail!("server process exited");
+                }
+            }
+        }
+    }
+}
+
 impl Upstream {
-    fn new(
+    fn http(
         name: String,
         url: String,
         headers: Vec<(String, String)>,
@@ -52,66 +237,62 @@ impl Upstream {
             .build()?;
         Ok(Self {
             name,
-            url,
-            headers,
             unresolved,
-            client,
-            session: RefCell::new(None),
+            transport: Transport::Http(HttpTransport {
+                url,
+                headers,
+                client,
+                session: RefCell::new(None),
+            }),
             initialized: RefCell::new(false),
             next_id: Cell::new(1),
         })
     }
 
-    /// POST a JSON-RPC message; parse a JSON or SSE response. `None` for an
-    /// accepted notification with no body.
-    fn post(&self, body: &Value) -> Result<Option<Value>> {
-        let mut req = self
-            .client
-            .post(&self.url)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json, text/event-stream")
-            .header("MCP-Protocol-Version", PROTOCOL);
-        for (k, v) in &self.headers {
-            req = req.header(k, v);
+    fn stdio(
+        name: String,
+        command: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        unresolved: Vec<String>,
+    ) -> Self {
+        Self {
+            name,
+            unresolved,
+            transport: Transport::Stdio(StdioTransport {
+                command,
+                args,
+                env,
+                child: RefCell::new(None),
+            }),
+            initialized: RefCell::new(false),
+            next_id: Cell::new(1),
         }
-        if let Some(sid) = self.session.borrow().as_ref() {
-            req = req.header("Mcp-Session-Id", sid);
+    }
+
+    /// Send one JSON-RPC message over whichever transport. `None` for an
+    /// accepted notification with no body. `timeout` bounds stdio waits; the
+    /// HTTP client carries its own request timeout.
+    fn send(&self, body: &Value, timeout: Duration) -> Result<Option<Value>> {
+        match &self.transport {
+            Transport::Http(h) => h.post(&self.name, body),
+            Transport::Stdio(s) => s
+                .request(body, timeout)
+                .with_context(|| format!("contacting {}", self.name)),
         }
-        let resp = req
-            .json(body)
-            .send()
-            .with_context(|| format!("contacting {}", self.name))?;
-        if let Some(sid) = resp
-            .headers()
-            .get("mcp-session-id")
-            .and_then(|v| v.to_str().ok())
-        {
-            *self.session.borrow_mut() = Some(sid.to_string());
-        }
-        let ctype = resp
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-        let text = resp.text()?;
-        if text.trim().is_empty() {
-            return Ok(None);
-        }
-        let val = if ctype.contains("text/event-stream") {
-            parse_sse(&text)
-        } else {
-            serde_json::from_str(&text).ok()
-        };
-        Ok(val)
     }
 
     fn rpc(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id.get();
         self.next_id.set(id + 1);
+        let timeout = if method == "initialize" {
+            stdio_start_timeout()
+        } else {
+            STDIO_CALL_TIMEOUT
+        };
         let body = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
         let resp = self
-            .post(&body)?
+            .send(&body, timeout)?
             .ok_or_else(|| anyhow!("{}: empty response to {method}", self.name))?;
         if let Some(err) = resp.get("error") {
             let msg = err
@@ -135,7 +316,10 @@ impl Upstream {
                 "clientInfo": { "name": "agentstack-gateway", "version": env!("CARGO_PKG_VERSION") }
             }),
         )?;
-        let _ = self.post(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+        let _ = self.send(
+            &json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            STDIO_CALL_TIMEOUT,
+        );
         *self.initialized.borrow_mut() = true;
         Ok(())
     }
@@ -162,6 +346,52 @@ impl Upstream {
     }
 }
 
+impl HttpTransport {
+    /// POST a JSON-RPC message; parse a JSON or SSE response. `None` for an
+    /// accepted notification with no body.
+    fn post(&self, name: &str, body: &Value) -> Result<Option<Value>> {
+        let mut req = self
+            .client
+            .post(&self.url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream")
+            .header("MCP-Protocol-Version", PROTOCOL);
+        for (k, v) in &self.headers {
+            req = req.header(k, v);
+        }
+        if let Some(sid) = self.session.borrow().as_ref() {
+            req = req.header("Mcp-Session-Id", sid);
+        }
+        let resp = req
+            .json(body)
+            .send()
+            .with_context(|| format!("contacting {name}"))?;
+        if let Some(sid) = resp
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+        {
+            *self.session.borrow_mut() = Some(sid.to_string());
+        }
+        let ctype = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let text = resp.text()?;
+        if text.trim().is_empty() {
+            return Ok(None);
+        }
+        let val = if ctype.contains("text/event-stream") {
+            parse_sse(&text)
+        } else {
+            serde_json::from_str(&text).ok()
+        };
+        Ok(val)
+    }
+}
+
 /// All HTTP upstreams a manifest declares, plus a discovered-tools cache.
 pub struct Gateway {
     upstreams: Vec<Upstream>,
@@ -169,9 +399,10 @@ pub struct Gateway {
 }
 
 impl Gateway {
-    /// Build from the manifest at `dir`, resolving `${REF}`s in URLs/headers from
-    /// the live resolver. Best-effort: returns an empty gateway if the manifest
-    /// can't load. Only HTTP servers are included in v1.
+    /// Build from the manifest at `dir`, resolving `${REF}`s in URLs, headers,
+    /// commands, args, and env from the live resolver. Best-effort: returns an
+    /// empty gateway if the manifest can't load. HTTP and stdio servers are both
+    /// proxied; stdio children spawn lazily, on the first message that needs one.
     pub fn from_manifest(dir: Option<&std::path::Path>) -> Gateway {
         let mut upstreams = Vec::new();
         if let Ok(ctx) = crate::commands::load(dir) {
@@ -189,48 +420,51 @@ impl Gateway {
                     allow.len()
                 );
             }
-            let mut skipped_stdio = 0;
             for (name, s) in &ctx.loaded.manifest.servers {
                 if fence.as_ref().is_some_and(|allow| !allow.contains(name)) {
                     continue;
                 }
-                if s.server_type != ServerType::Http {
-                    skipped_stdio += 1;
-                    continue;
-                }
-                let Some(url) = &s.url else { continue };
                 // Collect any `${REF}`s that don't resolve here (across URL +
-                // headers) so a call can fail fast with a clear message instead
-                // of sending a literal `${REF}` upstream.
+                // headers + args + env) so a call can fail fast with a clear
+                // message instead of sending a literal `${REF}` upstream.
                 let mut unresolved = Vec::new();
-                let url =
-                    crate::adapter::render::substitute(url, &ctx.resolver, false, &mut unresolved);
-                let headers = s
-                    .headers
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            k.clone(),
-                            crate::adapter::render::substitute(
-                                v,
-                                &ctx.resolver,
-                                false,
-                                &mut unresolved,
-                            ),
-                        )
-                    })
-                    .collect();
-                unresolved.sort();
-                unresolved.dedup();
-                match Upstream::new(name.clone(), url, headers, unresolved) {
-                    Ok(u) => upstreams.push(u),
-                    Err(e) => eprintln!("gateway: skipping '{name}': {e}"),
-                }
-            }
-            if skipped_stdio > 0 {
-                eprintln!(
-                    "gateway: {skipped_stdio} stdio server(s) not yet proxied (v1 is HTTP-only)"
-                );
+                let sub = |v: &str, unresolved: &mut Vec<String>| {
+                    crate::adapter::render::substitute(v, &ctx.resolver, false, unresolved)
+                };
+                let up = match s.server_type {
+                    ServerType::Http => {
+                        let Some(url) = &s.url else { continue };
+                        let url = sub(url, &mut unresolved);
+                        let headers = s
+                            .headers
+                            .iter()
+                            .map(|(k, v)| (k.clone(), sub(v, &mut unresolved)))
+                            .collect();
+                        unresolved.sort();
+                        unresolved.dedup();
+                        match Upstream::http(name.clone(), url, headers, unresolved) {
+                            Ok(u) => u,
+                            Err(e) => {
+                                eprintln!("gateway: skipping '{name}': {e}");
+                                continue;
+                            }
+                        }
+                    }
+                    ServerType::Stdio => {
+                        let Some(command) = &s.command else { continue };
+                        let command = sub(command, &mut unresolved);
+                        let args = s.args.iter().map(|a| sub(a, &mut unresolved)).collect();
+                        let env = s
+                            .env
+                            .iter()
+                            .map(|(k, v)| (k.clone(), sub(v, &mut unresolved)))
+                            .collect();
+                        unresolved.sort();
+                        unresolved.dedup();
+                        Upstream::stdio(name.clone(), command, args, env, unresolved)
+                    }
+                };
+                upstreams.push(up);
             }
         }
         Gateway {

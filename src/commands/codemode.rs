@@ -25,8 +25,8 @@ pub fn run(args: &CodemodeArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let servers = gateway.proxied_servers();
 
     if servers.is_empty() {
-        println!("No HTTP MCP servers to proxy in this project — nothing to generate.");
-        println!("Add one with `agentstack add server …` (gateway v1 is HTTP-only), then re-run.");
+        println!("No MCP servers to proxy in this project — nothing to generate.");
+        println!("Add one with `agentstack add server …`, then re-run.");
         return Ok(());
     }
 
