@@ -61,6 +61,64 @@ impl TargetPlan {
     pub fn write(&self) -> Result<()> {
         crate::util::atomic::write(&self.config_path, &self.proposed)
     }
+
+    /// After a prune-to-zero at PROJECT scope, delete the config file when
+    /// nothing but the empty managed section remains (`{"mcpServers": {}}`)
+    /// — a husk that would sit untracked in the repo forever. Files carrying
+    /// any other content are never touched. Returns whether it was removed.
+    pub fn remove_if_empty_shell(&self, desc: &AdapterDescriptor) -> bool {
+        if self.scope != Scope::Project || !self.managed.is_empty() {
+            return false;
+        }
+        let Some(mcp) = desc.mcp.as_ref() else {
+            return false;
+        };
+        // Only the format matters here; the path arg is unused for it.
+        let Some((_, format)) = desc.config_for(self.scope, Path::new(".")) else {
+            return false;
+        };
+        if is_empty_shell(&self.proposed, &mcp.location, format)
+            && fs::remove_file(&self.config_path).is_ok()
+        {
+            return true;
+        }
+        false
+    }
+}
+
+/// True when `content` is exactly an empty managed section at (dotted)
+/// `location` and nothing else — e.g. `{"mcpServers": {}}`.
+fn is_empty_shell(content: &str, location: &str, format: Format) -> bool {
+    let value: Value = match format {
+        Format::Json => match serde_json::from_str(content) {
+            Ok(v) => v,
+            Err(_) => return false,
+        },
+        Format::Toml => {
+            let Ok(t) = content.parse::<toml::Value>() else {
+                return false;
+            };
+            match serde_json::to_value(t) {
+                Ok(v) => v,
+                Err(_) => return false,
+            }
+        }
+    };
+    let mut cur = &value;
+    for key in location.split('.') {
+        let Some(obj) = cur.as_object() else {
+            return false;
+        };
+        // Any sibling next to the managed chain means real user content.
+        if obj.len() != 1 {
+            return false;
+        }
+        match obj.get(key) {
+            Some(v) => cur = v,
+            None => return false,
+        }
+    }
+    cur.as_object().is_some_and(|o| o.is_empty())
 }
 
 /// Which servers a run targets.
@@ -443,5 +501,40 @@ mod tests {
 
         std::env::remove_var("AGENTSTACK_HOME");
         std::env::remove_var("HOME");
+    }
+
+    #[test]
+    fn empty_shell_detection() {
+        // Pure husk → empty shell.
+        assert!(is_empty_shell(
+            "{\n  \"mcpServers\": {}\n}",
+            "mcpServers",
+            Format::Json
+        ));
+        // A remaining server → not empty.
+        assert!(!is_empty_shell(
+            "{\"mcpServers\": {\"x\": {}}}",
+            "mcpServers",
+            Format::Json
+        ));
+        // Sibling user content → never delete.
+        assert!(!is_empty_shell(
+            "{\"mcpServers\": {}, \"inputs\": []}",
+            "mcpServers",
+            Format::Json
+        ));
+        // TOML husk (empty table) and non-husk.
+        assert!(is_empty_shell(
+            "[mcp_servers]\n",
+            "mcp_servers",
+            Format::Toml
+        ));
+        assert!(!is_empty_shell(
+            "[mcp_servers.x]\ncommand = \"npx\"\n",
+            "mcp_servers",
+            Format::Toml
+        ));
+        // Unparseable → never delete.
+        assert!(!is_empty_shell("not json", "mcpServers", Format::Json));
     }
 }

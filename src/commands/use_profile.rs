@@ -128,7 +128,15 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
                         state.record(&key, plan.managed.clone(), &plan.proposed);
                         crate::usage::bump(&plan.managed);
                         wrote += 1;
-                        println!("  {} servers → {}", "✓".green(), plan.config_path.display());
+                        if plan.remove_if_empty_shell(desc) {
+                            println!(
+                                "  {} removed empty {}",
+                                "−".yellow(),
+                                plan.config_path.display()
+                            );
+                        } else {
+                            println!("  {} servers → {}", "✓".green(), plan.config_path.display());
+                        }
                     } else {
                         println!("  {} {} server(s) to write", "→".cyan(), plan.managed.len());
                     }
