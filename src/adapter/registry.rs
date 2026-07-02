@@ -107,4 +107,26 @@ mod tests {
             assert!(reg.get(id).is_some(), "adapter {id} failed to load");
         }
     }
+
+    /// Project-scope paths must anchor at the PROJECT ROOT even when the caller
+    /// holds the `.agentstack/` manifest dir — `.mcp.json` and `.claude/skills`
+    /// nested inside `.agentstack/` are invisible to the CLIs.
+    #[test]
+    fn project_paths_anchor_at_root_for_agentstack_layout() {
+        use crate::scope::Scope;
+        use std::path::Path;
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("claude-code").unwrap();
+
+        let manifest_dir = Path::new("/repo/.agentstack");
+        let (cfg, _) = desc.config_for(Scope::Project, manifest_dir).unwrap();
+        assert_eq!(cfg, Path::new("/repo/.mcp.json"));
+        let skills = desc.skills_dir_for(Scope::Project, manifest_dir).unwrap();
+        assert_eq!(skills, Path::new("/repo/.claude/skills"));
+
+        // Legacy layout: manifest at the root — paths unchanged.
+        let root = Path::new("/repo");
+        let (cfg, _) = desc.config_for(Scope::Project, root).unwrap();
+        assert_eq!(cfg, Path::new("/repo/.mcp.json"));
+    }
 }

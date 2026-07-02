@@ -2,12 +2,29 @@
 //! manifest into one CLI's native config. Supporting a new CLI = adding one of
 //! these YAML files, not editing core code.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
 use crate::scope::Scope;
 use crate::util::paths;
+
+/// Project-scope paths anchor at the PROJECT ROOT. Callers usually hold the
+/// manifest dir, which under the `.agentstack/` layout is one level below the
+/// root — normalize before joining so `.mcp.json`, `.claude/skills/`, etc.
+/// land where the CLIs actually look.
+fn project_root(project_dir: &Path) -> PathBuf {
+    if project_dir.file_name().and_then(|n| n.to_str())
+        == Some(crate::manifest::load::MANIFEST_SUBDIR)
+    {
+        match project_dir.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            _ => project_dir.to_path_buf(),
+        }
+    } else {
+        project_dir.to_path_buf()
+    }
+}
 
 /// One CLI's full descriptor, deserialized from `adapters/<id>.yaml`.
 #[derive(Debug, Clone, Deserialize)]
@@ -57,7 +74,7 @@ impl AdapterDescriptor {
             Scope::Project => {
                 let p = self.project.as_ref()?;
                 let fmt = p.format.unwrap_or(config.format);
-                Some((project_dir.join(&p.config), fmt))
+                Some((project_root(project_dir).join(&p.config), fmt))
             }
         }
     }
@@ -72,7 +89,10 @@ impl AdapterDescriptor {
         let s = self.settings.as_ref()?;
         match scope {
             Scope::Global => Some((paths::expand_tilde(&s.global), s.format)),
-            Scope::Project => s.project.as_ref().map(|p| (project_dir.join(p), s.format)),
+            Scope::Project => s
+                .project
+                .as_ref()
+                .map(|p| (project_root(project_dir).join(p), s.format)),
         }
     }
 
@@ -85,7 +105,10 @@ impl AdapterDescriptor {
         let h = self.hooks.as_ref()?;
         match scope {
             Scope::Global => Some((paths::expand_tilde(&h.global), h.format)),
-            Scope::Project => h.project.as_ref().map(|p| (project_dir.join(p), h.format)),
+            Scope::Project => h
+                .project
+                .as_ref()
+                .map(|p| (project_root(project_dir).join(p), h.format)),
         }
     }
 
@@ -98,7 +121,10 @@ impl AdapterDescriptor {
         let e = self.extensions.as_ref()?;
         match scope {
             Scope::Global => Some(paths::expand_tilde(&e.dir)),
-            Scope::Project => e.project_dir.as_ref().map(|d| project_dir.join(d)),
+            Scope::Project => e
+                .project_dir
+                .as_ref()
+                .map(|d| project_root(project_dir).join(d)),
         }
     }
 
@@ -107,7 +133,10 @@ impl AdapterDescriptor {
         let s = self.skills.as_ref()?;
         match scope {
             Scope::Global => Some(paths::expand_tilde(&s.dir)),
-            Scope::Project => s.project_dir.as_ref().map(|d| project_dir.join(d)),
+            Scope::Project => s
+                .project_dir
+                .as_ref()
+                .map(|d| project_root(project_dir).join(d)),
         }
     }
 
@@ -248,7 +277,10 @@ impl InstructionsSpec {
     pub fn path_for(&self, scope: Scope, project_dir: &std::path::Path) -> Option<PathBuf> {
         match scope {
             Scope::Global => Some(paths::expand_tilde(&self.global)),
-            Scope::Project => self.project.as_ref().map(|p| project_dir.join(p)),
+            Scope::Project => self
+                .project
+                .as_ref()
+                .map(|p| project_root(project_dir).join(p)),
         }
     }
 }
