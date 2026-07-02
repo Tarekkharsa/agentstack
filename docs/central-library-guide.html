@@ -758,6 +758,38 @@
               </tr>
             </tbody>
           </table>
+
+          <div class="section-head" style="margin-top: 28px">
+            <h2>Then choose where rendered files live.</h2>
+            <p>Independently of the path above, each project picks one of three artifact modes.</p>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Mode</th>
+                <th>How</th>
+                <th>Trade-off</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Static</strong> (default)</td>
+                <td><code>use &lt;profile&gt; --scope project --write</code> — artifacts on disk, auto-kept out of git via a managed <code>.gitignore</code> block (<code>--no-gitignore</code> to commit them).</td>
+                <td>Works with harnesses launched any way; generated files exist on disk.</td>
+              </tr>
+              <tr>
+                <td><strong>Clean-at-rest</strong></td>
+                <td>Empty <code>[profiles.off]</code> + <code>use off --scope project --write</code> once; then <code>agentstack run &lt;cli&gt; --profile &lt;p&gt;</code> or <code>session start</code>/<code>end</code> inject and revert per session (pruning-to-zero deletes even the empty config file).</td>
+                <td>Nothing generated exists between sessions — but a harness launched <em>directly</em> sees no project servers/skills while at rest. One <code>use</code> flips back to static.</td>
+              </tr>
+              <tr>
+                <td><strong>Zero files (MCP)</strong></td>
+                <td>Register <code>agentstack mcp</code> globally; the agent lists and loads library skills at runtime via <code>agentstack_list_loadable</code> / <code>agentstack_load</code> (session-fenced, loads logged with reasons).</td>
+                <td>No files in the repo at all; skill triggering is model-driven rather than automatic frontmatter matching.</td>
+              </tr>
+            </tbody>
+          </table>
         </section>
 
         <section id="folders">

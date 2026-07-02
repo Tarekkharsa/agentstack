@@ -139,14 +139,29 @@ agentstack run codex --profile backend
 env, varlock, OS keychain, or `.env`, and unresolved secrets block writes by
 default so placeholders do not leak into live harness config.
 
-**What lands in your repo is your choice.** You commit the intent
-(`.agentstack/agentstack.toml` + `.lock`); the rendered project artifacts
-(`.mcp.json`, `.claude/skills/` symlinks) are machine-local, so project-scope
-writes keep them out of git automatically via a managed `.gitignore` block.
-Prefer committing the rendered files for your team? Pass `--no-gitignore`
-(files you already track are never affected either way). Want nothing
-generated in the repo at all? Use global scope, or the per-directory
-[hook](#per-directory-auto-activation-agentstack-hook).
+### Where the rendered files live — three modes, your choice
+
+You always commit the intent (`.agentstack/agentstack.toml` + `.lock`). What
+happens to the *rendered* project artifacts (`.mcp.json`, `.claude/skills/`
+symlinks) is a per-project choice:
+
+1. **Static (default)** — artifacts sit on disk, kept out of git automatically
+   via a managed `.gitignore` block (they're machine-local: absolute-path
+   symlinks, resolved values). Works with harnesses launched any way. Prefer
+   committing them for your team? `--no-gitignore` — files you already track
+   are never affected either way.
+2. **Clean-at-rest** — nothing generated exists between sessions. Add an empty
+   profile (`[profiles.off]`), run `use off --scope project --write` once, then
+   work through `agentstack run <cli> --profile <p>` (injects on launch,
+   reverts on exit) or `session start <p> --scope project` … `session end`.
+   Pruning-to-zero even deletes the empty config file, so `git status` stays
+   silent. **Trade-off:** launching the harness *directly* (not through
+   agentstack) sees no project servers/skills while at rest — and one command
+   (`use <p> --scope project --write`) flips the project back to static.
+3. **Zero files, model-driven** — register `agentstack mcp` once (global) and
+   the agent itself lists and loads skills from the central library at runtime
+   (`agentstack_list_loadable` / `agentstack_load`, session-fenced and logged).
+   No skill files in the repo at all; instructions travel over MCP.
 
 ## What works today
 
