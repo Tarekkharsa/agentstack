@@ -17,18 +17,17 @@ use crate::scope::Scope;
                   from a single portable .agentstack/agentstack.toml.",
     after_help = "\
 Start here:
-  agentstack                        orientation for this directory
-  init → bootstrap → doctor → apply --write        the core loop
+  agentstack                     orientation + the one next step for this directory
+  init → bootstrap → apply                       preview, then confirm to write
 
-Command map:
-  capabilities:  add · remove · search · install · update · upgrade · lib · consolidate · adopt
-  activate:      use <profile> · apply · session · run · hook · instructions
-  zero-files:    connect <harness> · trust <dir> · disconnect (register the gateway once, no per-repo files)
-  trust:         doctor · audit · optimize · explain · diff · restore · secret
-  share & more:  export · import · plugins · stats · adapters · dashboard · mcp · codemode
+The list above is the everyday surface. Everything else is grouped below —
+run `agentstack <command> --help` for any of them:
 
-Rendered files, per project (see README → 'three modes'):
-  static (on disk, gitignored) · clean-at-rest (sessions inject + revert) · zero-files (skills over MCP)"
+  Capabilities & library   remove · install · update · upgrade · lib · consolidate · adopt
+  Activate & run           use · session · run · runs · kill · hook · instructions
+  Zero-files bridge        connect · trust · disconnect · mcp · codemode
+  Inspect & tune           diff · explain · audit · optimize · stats · restore · secret
+  Share & extend           export · import · pack · plugins · adapters"
 )]
 pub struct Cli {
     /// Project or manifest directory (prefers .agentstack/agentstack.toml).
@@ -41,8 +40,17 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
+// The subcommand surface is large; to keep `--help` navigable we show only the
+// everyday core loop in clap's native "Commands" list and hide the rest with
+// `hide = true`. Hidden commands still run, still have their own `--help`, and
+// are cataloged (grouped by how often you reach for them) in the `after_help`
+// map on `Cli` above. This is display-only progressive disclosure — dispatch
+// (src/main.rs) matches by variant, so grouping/ordering here is free to change
+// without touching behavior. Promote a command to the everyday list by dropping
+// its `hide` attribute (and moving it out of the after_help group).
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    // ── Everyday: the core loop most projects ever need (shown in --help) ─
     /// Discover installed CLIs and reverse-engineer a manifest from their
     /// existing MCP configs, lifting inline secrets into `${REF}`s.
     Init(InitArgs),
@@ -50,71 +58,131 @@ pub enum Command {
     /// Add a server or skill to the manifest.
     Add(AddArgs),
 
-    /// Fetch skill sources into the store and write the lockfile.
-    Install(InstallArgs),
-
-    /// Re-resolve git skills to their latest and rewrite the lockfile.
-    Update(UpdateArgs),
-
-    /// Remove a server or skill from the manifest (and lockfile).
-    Remove(RemoveArgs),
-
-    /// Re-resolve an installed vendor pack from its recorded source and apply
-    /// any changes (server, skills, house rules), re-pinning the lockfile.
-    Upgrade(UpgradeArgs),
+    /// Search the capability catalog (and mark what's already added).
+    Search(SearchArgs),
 
     /// Guided setup: install skills, check secrets, preview/apply, then doctor.
     Bootstrap(BootstrapArgs),
 
     /// Render the manifest into each target's native config.
     ///
-    /// Read-only by default: shows the diff and writes nothing. Pass `--write`
-    /// to apply the changes.
+    /// Shows the diff first. In a terminal, asks before writing; pass `--write`
+    /// to apply directly.
     Apply(ApplyArgs),
-
-    /// Show drift between the manifest and the on-disk configs.
-    Diff(DiffArgs),
-
-    /// Explain a server or skill: where it came from, what secrets it needs,
-    /// which tools get it and what files get written, and its safety signals.
-    Explain(ExplainArgs),
-
-    /// Activate a profile: render its servers + materialize its skills.
-    Use(UseArgs),
-
-    /// Manage ephemeral sessions: load a profile (+ optional plugin) for now,
-    /// then revert it. A safety hatch for the dashboard's session feature.
-    Session(SessionArgs),
-
-    /// Compile instruction fragments into each harness's CLAUDE.md / AGENTS.md.
-    Instructions(InstructionsArgs),
-
-    /// Pull hand-added servers from a target config back into the manifest.
-    Adopt(AdoptArgs),
-
-    /// Gather scattered skills from every CLI's skills dir into one managed
-    /// home (`~/.agentstack/skills/`), symlinking the originals back.
-    Consolidate(ConsolidateArgs),
-
-    /// Manage the central capability library (`~/.agentstack/lib/`) that projects
-    /// reference by name instead of copying files.
-    Lib(LibArgs),
-
-    /// Restore a CLI config from its pre-write backup (undo an apply).
-    Restore(RestoreArgs),
 
     /// Verify everything is wired up: adapters, secrets, drift, quirks, skills.
     Doctor(DoctorArgs),
 
+    /// Open the local web dashboard.
+    Dashboard(DashboardArgs),
+
+    // ── Capabilities & library (hidden from --help; see the after_help map) ─
+    /// Remove a server or skill from the manifest (and lockfile).
+    #[command(hide = true)]
+    Remove(RemoveArgs),
+
+    /// Fetch skill sources into the store and write the lockfile.
+    #[command(hide = true)]
+    Install(InstallArgs),
+
+    /// Re-resolve git skills to their latest and rewrite the lockfile.
+    #[command(hide = true)]
+    Update(UpdateArgs),
+
+    /// Re-resolve an installed vendor pack from its recorded source and apply
+    /// any changes (server, skills, house rules), re-pinning the lockfile.
+    #[command(hide = true)]
+    Upgrade(UpgradeArgs),
+
+    /// Manage the central capability library (`~/.agentstack/lib/`) that projects
+    /// reference by name instead of copying files.
+    #[command(hide = true)]
+    Lib(LibArgs),
+
+    /// Gather scattered skills from every CLI's skills dir into one managed
+    /// home (`~/.agentstack/skills/`), symlinking the originals back.
+    #[command(hide = true)]
+    Consolidate(ConsolidateArgs),
+
+    /// Pull hand-added servers from a target config back into the manifest.
+    #[command(hide = true)]
+    Adopt(AdoptArgs),
+
+    // ── Activate & run ───────────────────────────────────────────────────
+    /// Activate a profile: render its servers + materialize its skills.
+    #[command(hide = true)]
+    Use(UseArgs),
+
+    /// Manage ephemeral sessions: load a profile (+ optional plugin) for now,
+    /// then revert it. A safety hatch for the dashboard's session feature.
+    #[command(hide = true)]
+    Session(SessionArgs),
+
+    /// Launch an agent CLI as a tracked run: optionally apply a profile for its
+    /// lifetime, then observe/kill it here or from the dashboard.
+    #[command(hide = true)]
+    Run(RunArgs),
+
+    /// List live tracked runs (harness, pid, profile, uptime).
+    #[command(hide = true)]
+    Runs(RunsArgs),
+
+    /// Kill a tracked run by id (and revert its profile if it owned one).
+    #[command(hide = true)]
+    Kill(KillArgs),
+
+    /// Print a shell hook for per-directory profile auto-activation.
+    #[command(hide = true)]
+    Hook(HookArgs),
+
+    /// Compile instruction fragments into each harness's CLAUDE.md / AGENTS.md.
+    #[command(hide = true)]
+    Instructions(InstructionsArgs),
+
+    // ── Zero-files bridge ────────────────────────────────────────────────
+    /// Register the agentstack gateway once, globally, in a harness's MCP
+    /// config — after that, every trusted repo brings its own servers through
+    /// `agentstack mcp --auto-project` with no per-project files (zero-files
+    /// mode made automatic). Dry-run by default.
+    #[command(hide = true)]
+    Connect(ConnectArgs),
+
+    /// Trust a project's manifest for the zero-files bridge (direnv-style).
+    /// Until trusted, an auto-discovered project gets control-plane tools only:
+    /// none of its servers are spawned or contacted, no secrets are resolved.
+    /// Trust pins the manifest's content digest — editing the manifest requires
+    /// re-trusting it.
+    #[command(hide = true)]
+    Trust(TrustArgs),
+
+    /// Remove the agentstack gateway entry from a harness's global MCP config.
+    #[command(hide = true)]
+    Disconnect(DisconnectArgs),
+
+    /// Run agentstack as an MCP server over stdio (for an agent to call).
+    #[command(hide = true)]
+    Mcp(McpArgs),
+
+    /// Generate a typed code-mode client for this project's proxied MCP servers,
+    /// so an agent can call several upstream tools from one program it runs in
+    /// its own sandbox. Read-only by default; `--write` materializes the files.
+    #[command(hide = true)]
+    Codemode(CodemodeArgs),
+
+    // ── Inspect & tune ───────────────────────────────────────────────────
+    /// Show drift between the manifest and the on-disk configs.
+    #[command(hide = true)]
+    Diff(DiffArgs),
+
+    /// Explain a server or skill: where it came from, what secrets it needs,
+    /// which tools get it and what files get written, and its safety signals.
+    #[command(hide = true)]
+    Explain(ExplainArgs),
+
     /// Scan skill sources and instruction files for hidden Unicode and
     /// prompt-injection heuristics. Exits nonzero on high-severity findings.
+    #[command(hide = true)]
     Audit(AuditArgs),
-
-    /// Search the capability catalog (and mark what's already added).
-    Search(SearchArgs),
-
-    /// Show local usage analytics (activation counts + footprint + context cost).
-    Stats(StatsArgs),
 
     /// Turn the signals agentstack already collects (usage, call audit log,
     /// context costs, trust ledger) into concrete recommendations: inert
@@ -122,66 +190,41 @@ pub enum Command {
     /// recommendation carries evidence, the exact command/TOML, and why it is
     /// safe or needs review. Read-only by default; `--write` applies only the
     /// safe class.
+    #[command(hide = true)]
     Optimize(OptimizeArgs),
 
-    /// Inspect the available CLI adapters.
-    Adapters(AdaptersArgs),
+    /// Show local usage analytics (activation counts + footprint + context cost).
+    #[command(hide = true)]
+    Stats(StatsArgs),
 
-    /// Author a publishable pack (a git repo with a pack.toml).
-    #[command(subcommand)]
-    Pack(PackCmd),
-
-    /// Manage AgentStack plugin recipes and generated native marketplaces.
-    Plugins(PluginsArgs),
+    /// Restore a CLI config from its pre-write backup (undo an apply).
+    #[command(hide = true)]
+    Restore(RestoreArgs),
 
     /// Manage secrets in the OS keychain.
+    #[command(hide = true)]
     Secret(SecretArgs),
 
+    // ── Share & extend ───────────────────────────────────────────────────
     /// Export the manifest (+ lock, + optionally secrets) as an encrypted bundle.
+    #[command(hide = true)]
     Export(ExportArgs),
 
     /// Import an encrypted bundle on a new machine.
+    #[command(hide = true)]
     Import(ImportArgs),
 
-    /// Open the local web dashboard.
-    Dashboard(DashboardArgs),
+    /// Author a publishable pack (a git repo with a pack.toml).
+    #[command(subcommand, hide = true)]
+    Pack(PackCmd),
 
-    /// Run agentstack as an MCP server over stdio (for an agent to call).
-    Mcp(McpArgs),
+    /// Manage AgentStack plugin recipes and generated native marketplaces.
+    #[command(hide = true)]
+    Plugins(PluginsArgs),
 
-    /// Register the agentstack gateway once, globally, in a harness's MCP
-    /// config — after that, every trusted repo brings its own servers through
-    /// `agentstack mcp --auto-project` with no per-project files (zero-files
-    /// mode made automatic). Dry-run by default.
-    Connect(ConnectArgs),
-
-    /// Remove the agentstack gateway entry from a harness's global MCP config.
-    Disconnect(DisconnectArgs),
-
-    /// Trust a project's manifest for the zero-files bridge (direnv-style).
-    /// Until trusted, an auto-discovered project gets control-plane tools only:
-    /// none of its servers are spawned or contacted, no secrets are resolved.
-    /// Trust pins the manifest's content digest — editing the manifest requires
-    /// re-trusting it.
-    Trust(TrustArgs),
-
-    /// Generate a typed code-mode client for this project's proxied MCP servers,
-    /// so an agent can call several upstream tools from one program it runs in
-    /// its own sandbox. Read-only by default; `--write` materializes the files.
-    Codemode(CodemodeArgs),
-
-    /// Print a shell hook for per-directory profile auto-activation.
-    Hook(HookArgs),
-
-    /// Launch an agent CLI as a tracked run: optionally apply a profile for its
-    /// lifetime, then observe/kill it here or from the dashboard.
-    Run(RunArgs),
-
-    /// List live tracked runs (harness, pid, profile, uptime).
-    Runs(RunsArgs),
-
-    /// Kill a tracked run by id (and revert its profile if it owned one).
-    Kill(KillArgs),
+    /// Inspect the available CLI adapters.
+    #[command(hide = true)]
+    Adapters(AdaptersArgs),
 }
 
 #[derive(Args, Debug)]
@@ -482,11 +525,11 @@ pub struct ApplyArgs {
     #[arg(long, value_name = "NAME")]
     pub profile: Option<String>,
 
-    /// Show what would change without writing (the default).
+    /// Show what would change without writing, and skip the interactive prompt.
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Actually write the changes to disk.
+    /// Write the changes to disk without prompting.
     #[arg(long)]
     pub write: bool,
 

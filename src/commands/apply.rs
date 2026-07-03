@@ -1,5 +1,5 @@
 //! `agentstack apply` — render the manifest into each target's native config.
-//! Read-only by default; `--write` performs the (non-destructive) write.
+//! Shows a preview first; TTY users can confirm, and `--write` applies directly.
 
 use std::path::Path;
 
@@ -15,7 +15,57 @@ use crate::render::{
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 
+/// What a render pass observed, so `run` can decide whether to prompt.
+struct Outcome {
+    /// How many targets (across servers/settings/hooks) have pending changes.
+    changed_count: usize,
+    /// Structural validation errors — nothing will be written until fixed, so
+    /// there is nothing to confirm.
+    blocked: bool,
+}
+
 pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let requested = args.write && !args.dry_run;
+    if requested {
+        // `--write`: apply directly. The scripting / CI escape hatch — never
+        // prompts, whatever the terminal is.
+        render(args, manifest_dir, true, false, true)?;
+        return Ok(());
+    }
+    // No `--write`. An explicit `--dry-run`, or any non-interactive shell (CI,
+    // pipes, redirects), keeps the classic read-only behavior exactly: show the
+    // diff and the "re-run with --write" hint, write nothing, never block on
+    // input.
+    if args.dry_run || !crate::util::confirm::is_interactive() {
+        render(args, manifest_dir, false, false, true)?;
+        return Ok(());
+    }
+    // Interactive default: show the dry-run diff (no re-run hint), then offer to
+    // apply it in place.
+    let outcome = render(args, manifest_dir, false, false, false)?;
+    if outcome.changed_count == 0 || outcome.blocked {
+        return Ok(());
+    }
+    if crate::util::confirm::confirm("\nApply these changes?")? {
+        // Confirmed: a quiet second pass writes without re-printing the diff.
+        render(args, manifest_dir, true, true, true)?;
+    } else {
+        println!("Not written. Re-run with {} to apply.", "--write".bold());
+    }
+    Ok(())
+}
+
+/// One render pass. `want_write` requests a write (still gated on validation);
+/// `quiet` suppresses the diff bodies for the confirmed second pass; `rerun_hint`
+/// controls whether the dry-run summary points at `--write` (off when a prompt
+/// follows).
+fn render(
+    args: &ApplyArgs,
+    manifest_dir: Option<&Path>,
+    want_write: bool,
+    quiet: bool,
+    rerun_hint: bool,
+) -> Result<Outcome> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
     let scope = args.scope.unwrap_or(Scope::Global);
@@ -30,25 +80,32 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let libctx = ctx.library_ctx();
     let vctx = libctx.validate_ctx(&ctx.dir);
     let target_ids_for_validation: Vec<&str> = ctx.registry.ids().collect();
-    let has_errors = print_validation(manifest, target_ids_for_validation, &vctx);
+    let has_errors = print_validation(manifest, target_ids_for_validation, &vctx, quiet);
     let server_map = effective_servers(manifest, &libctx.library, &libctx.lib_home, &selection)?;
 
-    let mut will_write = args.write && !args.dry_run;
+    let mut will_write = want_write;
 
     // Structural validation errors would produce broken/partial config — never
     // write on them.
     if will_write && has_errors {
-        println!(
-            "\n{} manifest has validation errors — not writing. Fix them first.",
-            "✗".red()
-        );
+        if !quiet {
+            println!(
+                "\n{} manifest has validation errors — not writing. Fix them first.",
+                "✗".red()
+            );
+        }
         will_write = false;
     }
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     if target_ids.is_empty() {
-        println!("No targets to apply to. Set [targets].default or pass --target.");
-        return Ok(());
+        if !quiet {
+            println!("No targets to apply to. Set [targets].default or pass --target.");
+        }
+        return Ok(Outcome {
+            changed_count: 0,
+            blocked: has_errors,
+        });
     }
 
     println!("Scope: {scope}");
@@ -109,7 +166,9 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
         if plan.changed() {
             changed_count += 1;
-            print!("{}", indent(&plan.diff()));
+            if !quiet {
+                print!("{}", indent(&plan.diff()));
+            }
             if will_write && blocked {
                 println!(
                     "  {} not written — unresolved secret(s); set them or pass --allow-unresolved",
@@ -182,7 +241,9 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
                     "·".dimmed(),
                     sp.settings_path.display()
                 );
-                print!("{}", indent(&sp.diff()));
+                if !quiet {
+                    print!("{}", indent(&sp.diff()));
+                }
                 if will_write && sblocked {
                     println!(
                         "  {} settings not written — unresolved secret(s)",
@@ -216,7 +277,9 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
             if hp.changed() {
                 changed_count += 1;
                 println!("  {} hooks → {}", "·".dimmed(), hp.path.display());
-                print!("{}", indent(&hp.diff()));
+                if !quiet {
+                    print!("{}", indent(&hp.diff()));
+                }
                 if will_write && hblocked {
                     println!("  {} hooks not written — unresolved secret(s)", "✗".red());
                 } else if will_write {
@@ -264,33 +327,47 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     println!();
     if will_write {
         println!("Applied to {changed_count} target(s).");
-    } else {
+    } else if rerun_hint {
         println!(
             "{changed_count} target(s) would change. Re-run with {} to write.",
             "--write".bold()
         );
+    } else {
+        // A confirm prompt is about to follow — don't tell the user to re-run.
+        println!("{changed_count} target(s) would change.");
     }
-    if error_count > 0 {
+    if error_count > 0 && !quiet {
         println!("{error_count} issue(s) — resolve before writing.");
     }
 
-    Ok(())
+    Ok(Outcome {
+        changed_count,
+        blocked: has_errors,
+    })
 }
 
-/// Print validation issues; return true if any are structural errors.
+/// Print validation issues (unless `quiet`); return true if any are structural
+/// errors. The error check runs regardless of `quiet` so a write is still gated
+/// on a clean manifest.
 fn print_validation(
     manifest: &crate::manifest::Manifest,
     target_ids: Vec<&str>,
     vctx: &ValidateCtx,
+    quiet: bool,
 ) -> bool {
     let issues = validate_with_context(manifest, target_ids, vctx);
     let mut has_error = false;
     for issue in &issues {
         if issue.kind.is_error() {
             has_error = true;
-            println!("{} {}", "✗".red(), issue.message);
-        } else {
-            println!("{} {}", "⚠".yellow(), issue.message);
+        }
+        if !quiet {
+            let (mark, msg) = if issue.kind.is_error() {
+                ("✗".red().to_string(), &issue.message)
+            } else {
+                ("⚠".yellow().to_string(), &issue.message)
+            };
+            println!("{mark} {msg}");
         }
     }
     has_error

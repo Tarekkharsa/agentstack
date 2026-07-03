@@ -4,34 +4,12 @@
 > MCP servers, skills, instructions, settings, hooks, and profiles — runnable
 > across coding agents, repos, machines, and teammates.
 
-agentstack turns AI-agent setup into a reproducible repo artifact. You declare
-capabilities once in a commit-safe `.agentstack/agentstack.toml`; agentstack
-**compiles** that intent into each agent CLI's native config — Claude Code,
-Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS Code, GitHub Copilot CLI,
-OpenCode, Antigravity, Junie, Kiro, and Pi — resolving secrets locally on each
-machine.
-
-The goal is not just config sync. agentstack is the control layer for portable
-agent environments: bootstrap a new laptop, share a team setup through git,
-launch an agent with a known profile, audit what it can access, and remove or
-upgrade capabilities without hand-editing every harness.
-
-The core loop is intentionally small:
-
-```sh
-agentstack init       # import the setup you already have
-agentstack bootstrap  # preflight: CLIs, skills, secrets, diff, next action
-agentstack doctor     # prove the manifest is valid and reproducible
-agentstack apply      # preview native config changes
-agentstack apply --write
-```
-
-Each project then picks one of [three modes](#the-three-modes--where-rendered-files-live)
-for the rendered files: **static** (on disk, gitignored), **clean-at-rest**
-(sessions inject and revert — nothing between sessions), or **zero-files**
-(the agent loads skills from the central library over MCP).
-
-![agentstack first run: init → bootstrap → doctor --ci → apply --write, fenced](docs/firstrun.gif)
+You set up MCP servers, skills, and instructions **once** in a single
+`.agentstack/agentstack.toml`, and agentstack writes them into every agent CLI's
+own config format for you — Claude Code, Claude Desktop, Codex, Cursor, Windsurf,
+Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro, and
+Pi. Secrets stay as references and resolve locally on each machine, so the file
+is safe to commit and share.
 
 ## Install
 
@@ -40,49 +18,33 @@ curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install
 # or: brew install Tarekkharsa/tap/agentstack   ·   cargo install agentstack
 ```
 
-Single static binary, zero runtime dependencies. (Releases are wired up in CI —
-see [RELEASING.md](RELEASING.md).)
+Single static binary, zero runtime dependencies.
 
-## Quick start
+## Quick start — from your current setup to every CLI
 
-Start with the setup already on your machine:
-
-```bash
-agentstack init
-agentstack bootstrap
-agentstack secret set GH_PAT       # only when bootstrap reports a missing ref
-agentstack doctor
-agentstack apply                   # dry-run diff
-agentstack apply --write
-```
-
-For a team repo, commit `.agentstack/agentstack.toml` and
-`.agentstack/agentstack.lock`, but never commit local secrets. In CI, the trust
-gate is:
+You don't start from a blank page. `init` reads the agent config already on your
+machine and turns it into a manifest; `bootstrap` walks you through the rest.
 
 ```bash
-agentstack install --locked
-agentstack doctor --ci
+agentstack init         # import the servers + skills you already have
+agentstack bootstrap    # checks CLIs, skills, and secrets; shows what's missing
+agentstack apply        # preview each CLI's config changes, then confirm to write
+                        # (in scripts/CI, `apply --write` skips the prompt)
 ```
 
-or, as a one-line GitHub Action:
+![agentstack first run: init → bootstrap → apply](docs/firstrun.gif)
 
-```yaml
-jobs:
-  agent-setup:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Tarekkharsa/agentstack@main   # or pin a release tag
+If `bootstrap` reports a secret it couldn't find (say a GitHub token), store it
+once — it goes in your OS keychain, never the manifest:
+
+```bash
+agentstack secret set GH_PAT
 ```
 
-`install --locked` proves checked-in skill sources still resolve to the pinned
-lockfile entries; it fails instead of rewriting the lock. `doctor --ci` then
-fails on structural manifest errors (unknown refs, missing transport fields),
-unresolved required secrets, invalid target configs, lock drift, policy
-violations, and high-severity content-scan findings (hidden Unicode in skill or
-instruction content). Warnings still print for advisory issues that do not make
-the setup unsafe to render.
+That's the whole everyday loop. Everything below is for when you want more:
+sharing a setup with a teammate, launching agents with a profile, or auditing
+what an agent can touch. Run `agentstack` with no arguments any time and it tells
+you the one next step for the directory you're in.
 
 ## Why agentstack
 
@@ -135,6 +97,28 @@ agentstack run codex --profile backend
 `agentstack.toml` is portable. Secrets are not. They resolve per machine from
 env, varlock, OS keychain, or `.env`, and unresolved secrets block writes by
 default so placeholders do not leak into live harness config.
+
+In CI, the trust gate is two commands — or the one-line GitHub Action:
+
+```bash
+agentstack install --locked   # fail if sources no longer match the pinned lock
+agentstack doctor --ci        # fail on manifest errors, drift, policy, unsafe content
+```
+
+```yaml
+jobs:
+  agent-setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Tarekkharsa/agentstack@main   # or pin a release tag
+```
+
+`install --locked` proves checked-in skill sources still resolve to the pinned
+lockfile entries instead of rewriting the lock. `doctor --ci` then fails on
+structural manifest errors, unresolved required secrets, invalid target configs,
+lock drift, policy violations, and high-severity content-scan findings (hidden
+Unicode in skill or instruction content). Advisory issues stay warnings.
 
 ## The three modes — where rendered files live
 
@@ -230,7 +214,9 @@ eval "$(agentstack hook zsh)"   # or bash / fish
 echo backend > .agentstack       # in a project
 ```
 
-`apply`/`use`/`instructions` **never write** without an explicit `--write`.
+`apply` previews first and asks before writing in an interactive terminal; in
+scripts and CI it stays read-only unless you pass `--write`. `use` and
+`instructions` still require an explicit `--write`.
 
 ### Secrets
 
@@ -266,13 +252,14 @@ agentstack bootstrap --write  # install skills, apply configs, then doctor
 # See what would change in your real configs (read-only)
 agentstack diff
 
-# Dry-run a render (shows the diff, writes nothing)
+# Preview a render. In a terminal, agentstack asks before writing; in scripts,
+# this stays read-only unless you pass --write.
 agentstack apply
 
 # Only a profile's servers, to one target
 agentstack apply --profile backend --target codex
 
-# Actually write (non-destructively, tracked in state.json)
+# Write directly without prompting (non-destructive, tracked in state.json)
 agentstack apply --write
 
 # Activate a profile: render its servers + materialize only its skills

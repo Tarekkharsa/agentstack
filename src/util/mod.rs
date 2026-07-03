@@ -1,6 +1,7 @@
 //! Small shared helpers.
 
 pub mod atomic;
+pub mod confirm;
 pub mod diff;
 pub mod fsx;
 pub mod paths;
