@@ -22,7 +22,12 @@ pub const BRIDGE_ENTRY: &str = "agentstack";
 
 pub fn run_connect(args: &ConnectArgs) -> Result<()> {
     let registry = Registry::load()?;
-    let targets = select_targets(&registry, &args.harnesses, args.all, /*for_removal=*/ false)?;
+    let targets = select_targets(
+        &registry,
+        &args.harnesses,
+        args.all,
+        /*for_removal=*/ false,
+    )?;
     let command = bridge_command(args.command.as_deref());
     let bridge = bridge_server(&command);
 
@@ -35,7 +40,9 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
         else {
             continue; // select_targets already filtered these out
         };
-        let Some(mcp) = desc.mcp.as_ref() else { continue };
+        let Some(mcp) = desc.mcp.as_ref() else {
+            continue;
+        };
 
         println!("\n{} ({})", desc.display.bold(), path.display());
 
@@ -68,7 +75,10 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
         }
 
         changed += 1;
-        print!("{}", indent(&crate::util::diff::render(&existing, &proposed)));
+        print!(
+            "{}",
+            indent(&crate::util::diff::render(&existing, &proposed))
+        );
         if args.write {
             backups.push(crate::history::capture(
                 &path,
@@ -76,7 +86,10 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
             ));
             touched.push(desc.display.clone());
             crate::util::atomic::write(&path, &proposed)?;
-            println!("  {} bridge registered (agentstack mcp --auto-project)", "✓".green());
+            println!(
+                "  {} bridge registered (agentstack mcp --auto-project)",
+                "✓".green()
+            );
         } else {
             println!("  {} would register the bridge", "→".cyan());
         }
@@ -95,7 +108,12 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
 
 pub fn run_disconnect(args: &DisconnectArgs) -> Result<()> {
     let registry = Registry::load()?;
-    let targets = select_targets(&registry, &args.harnesses, args.all, /*for_removal=*/ true)?;
+    let targets = select_targets(
+        &registry,
+        &args.harnesses,
+        args.all,
+        /*for_removal=*/ true,
+    )?;
 
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
     let mut touched: Vec<String> = Vec::new();
@@ -106,7 +124,9 @@ pub fn run_disconnect(args: &DisconnectArgs) -> Result<()> {
         else {
             continue;
         };
-        let Some(mcp) = desc.mcp.as_ref() else { continue };
+        let Some(mcp) = desc.mcp.as_ref() else {
+            continue;
+        };
 
         println!("\n{} ({})", desc.display.bold(), path.display());
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
@@ -116,7 +136,9 @@ pub fn run_disconnect(args: &DisconnectArgs) -> Result<()> {
         }
         let removals = vec![BRIDGE_ENTRY.to_string()];
         let proposed = match format {
-            Format::Json => merge_json::merge_with_removals(&existing, &mcp.location, &[], &removals)?,
+            Format::Json => {
+                merge_json::merge_with_removals(&existing, &mcp.location, &[], &removals)?
+            }
             Format::Toml => merge_toml::merge_with_removals(
                 &existing,
                 &mcp.location,
@@ -130,7 +152,10 @@ pub fn run_disconnect(args: &DisconnectArgs) -> Result<()> {
             continue;
         }
         changed += 1;
-        print!("{}", indent(&crate::util::diff::render(&existing, &proposed)));
+        print!(
+            "{}",
+            indent(&crate::util::diff::render(&existing, &proposed))
+        );
         if args.write {
             backups.push(crate::history::capture(
                 &path,
@@ -159,9 +184,9 @@ fn select_targets<'r>(
     if !ids.is_empty() {
         let mut out = Vec::new();
         for id in ids {
-            let desc = registry
-                .get(id)
-                .with_context(|| format!("unknown adapter '{id}' (see `agentstack adapters list`)"))?;
+            let desc = registry.get(id).with_context(|| {
+                format!("unknown adapter '{id}' (see `agentstack adapters list`)")
+            })?;
             if desc.mcp.is_none() || desc.config.is_none() {
                 anyhow::bail!("{id} has no MCP config — the bridge doesn't apply to it");
             }
@@ -326,14 +351,13 @@ mod tests {
         assert!(r.representable);
         assert_eq!(r.value["type"], "stdio");
         assert_eq!(r.value["command"], "/usr/local/bin/agentstack");
-        assert_eq!(r.value["args"], serde_json::json!(["mcp", "--auto-project"]));
+        assert_eq!(
+            r.value["args"],
+            serde_json::json!(["mcp", "--auto-project"])
+        );
         let mcp = desc.mcp.as_ref().unwrap();
-        let out = merge_json::merge(
-            "",
-            &mcp.location,
-            &[(BRIDGE_ENTRY.to_string(), r.value)],
-        )
-        .unwrap();
+        let out =
+            merge_json::merge("", &mcp.location, &[(BRIDGE_ENTRY.to_string(), r.value)]).unwrap();
         assert!(has_bridge_entry(&out, &mcp.location, Format::Json));
 
         // Codex: TOML, no transport tag.

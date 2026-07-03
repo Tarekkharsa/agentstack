@@ -206,7 +206,10 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
     let window_note = if inp.calls.is_empty() {
         "audit log is empty".to_string()
     } else {
-        format!("{} gateway call(s) over {span}d in the audit log", inp.calls.len())
+        format!(
+            "{} gateway call(s) over {span}d in the audit log",
+            inp.calls.len()
+        )
     };
 
     for (name, _server) in &inp.manifest.servers {
@@ -332,7 +335,10 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                     ),
                 ];
                 if inp.managed_anywhere.contains(name) {
-                    ev.push("also rendered natively — direct calls there are invisible to this count".into());
+                    ev.push(
+                        "also rendered natively — direct calls there are invisible to this count"
+                            .into(),
+                    );
                 }
                 recs.push(Recommendation {
                     kind: "firewall-narrow",
@@ -497,12 +503,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
     recs
 }
 
-fn print_report(
-    ctx: &super::Context,
-    recs: &[Recommendation],
-    calls: &[CallRecord],
-    span: u64,
-) {
+fn print_report(ctx: &super::Context, recs: &[Recommendation], calls: &[CallRecord], span: u64) {
     println!("{} — {}", "Optimize".bold(), ctx.dir.display());
     println!(
         "Data: {} gateway call(s) over {span}d · activations since first apply · context costs from `stats --live`\n",
@@ -515,7 +516,10 @@ fn print_report(
         );
     }
     if recs.is_empty() {
-        println!("{} nothing to recommend — the stack looks lean.", "✓".green());
+        println!(
+            "{} nothing to recommend — the stack looks lean.",
+            "✓".green()
+        );
         return;
     }
     for r in recs {
@@ -729,7 +733,12 @@ mod tests {
         );
         let mut calls = vec![old_call()];
         for i in 0..12 {
-            calls.push(call("big", if i % 2 == 0 { "search" } else { "get" }, "ok", NOW - 86_400));
+            calls.push(call(
+                "big",
+                if i % 2 == 0 { "search" } else { "get" },
+                "ok",
+                NOW - 86_400,
+            ));
         }
         // A denied-only tool must NOT make it into the proposed allowlist —
         // that would loosen policy, not narrow it.

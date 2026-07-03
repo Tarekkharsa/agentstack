@@ -1306,14 +1306,18 @@ mod tests {
         let req = auto.roots_request().expect("roots requested");
         assert_eq!(req["method"], "roots/list");
         assert_eq!(req["id"], ROOTS_REQUEST_ID);
-        assert!(auto.roots_request().is_none(), "asked once, not per message");
+        assert!(
+            auto.roots_request().is_none(),
+            "asked once, not per message"
+        );
     }
 
     #[test]
     fn auto_project_absorbs_only_its_own_roots_response() {
         let mut auto = AutoProject::new(None);
         // A normal request must pass through.
-        assert!(!auto.absorb_roots_response(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })));
+        assert!(!auto
+            .absorb_roots_response(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })));
         // Someone else's response id must pass through too.
         assert!(!auto.absorb_roots_response(&json!({ "jsonrpc": "2.0", "id": 7, "result": {} })));
         // Ours is absorbed and its file roots recorded.
@@ -1355,7 +1359,10 @@ mod tests {
         let mut auto = AutoProject::new(None);
         auto.roots.push(proj.path().to_path_buf());
         auto.ensure_gateway();
-        assert!(!auto.gateway().is_empty(), "trusted → gateway proxies the manifest");
+        assert!(
+            !auto.gateway().is_empty(),
+            "trusted → gateway proxies the manifest"
+        );
         auto.shutdown();
 
         std::env::remove_var("AGENTSTACK_HOME");
