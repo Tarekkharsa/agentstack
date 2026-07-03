@@ -755,6 +755,11 @@
                 <td>Project contains selection only: <code>servers = ["kibana"]</code>, <code>skills = ["sql-review"]</code>.</td>
               </tr>
               <tr>
+                <td>Many repos, one machine, no per-repo files</td>
+                <td>Register the bridge once: <code>agentstack connect --all --write</code>. Then per repo: review + <code>agentstack trust .</code>.</td>
+                <td>Every trusted repo's servers, firewall, audit log, and skills load automatically at session start — nothing rendered into the repo.</td>
+              </tr>
+              <tr>
                 <td>Team or second machine</td>
                 <td>Use locks, <code>doctor</code>, and <code>explain</code> to verify resolved digests and drift.</td>
                 <td>Same names resolve to the same content or fail loudly.</td>
@@ -1120,6 +1125,19 @@ agentstack consolidate --write
 agentstack consolidate sql-review --write</code></pre>
               </div>
             </div>
+          
+            <div class="panel">
+              <h3>Tune with evidence</h3>
+              <div class="codebox">
+                <header>
+                  <span>shell</span>
+                  <button class="copy" type="button">Copy</button>
+                </header>
+                <pre><code>agentstack audit --calls   # the gateway call log
+agentstack optimize        # evidence-backed recommendations
+agentstack optimize --write  # apply only the provably-safe class</code></pre>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -1373,6 +1391,7 @@ Authorization = "Bearer real-token-value"</code></pre>
                 <li><span class="status">Done</span> <code>lib add</code>, <code>add-server</code>, <code>list</code>, <code>remove</code>, <code>remove-server</code>, <code>migrate</code>.</li>
                 <li><span class="status">Done</span> Runtime gateway proxies HTTP <em>and</em> stdio servers (zero-files mode).</li>
                 <li><span class="status">Done</span> Zero-copy bridge: <code>connect</code>/<code>disconnect</code>, <code>mcp --auto-project</code> (roots &rarr; walk-up &rarr; env), digest-pinned <code>trust</code>.</li>
+                <li><span class="status">Done</span> <code>optimize</code>: evidence-backed recommendations from usage/audit/cost signals; <code>--write</code> applies only the provably-safe class.</li>
                 <li><span class="status">Done</span> MCP firewall (<code>[policy.tools]</code>) + call audit log with per-run receipts.</li>
                 <li><span class="status">Done</span> Versioned packs from any git host (<code>pack.toml</code> + tags, <code>upgrade</code>, <code>pack init</code>).</li>
                 <li><span class="status">Done</span> Context-cost lens (<code>stats --live</code>) — what each server taxes every session.</li>

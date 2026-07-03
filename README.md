@@ -196,6 +196,16 @@ symlinks) is a per-project choice:
 - **Agent-operable** — `agentstack mcp` runs as an MCP server (agent proposes,
   human applies) and proxies project servers behind a compact search + typed
   code-mode bindings surface.
+- **Zero-copy bridge** — `agentstack connect --all --write` registers the
+  gateway once per harness; `mcp --auto-project` then discovers each repo at
+  session start (client roots → cwd walk-up → env) and proxies its stack with
+  no per-repo files. direnv-style safety: repos are inert until
+  `agentstack trust .` pins their manifest digest; any edit re-requires trust.
+- **Optimize** — `agentstack optimize` turns the collected signals (usage,
+  call audit log, context costs, trust ledger) into recommendations — inert
+  servers, firewall allowlists, denied/erroring tools — each with evidence,
+  the exact command or TOML, and a safety rationale; `--write` applies only
+  the provably-safe class.
 
 The complete implemented-and-tested inventory — engine internals, plugin
 recipes, live runs, code mode, the full command list — lives in
@@ -282,6 +292,16 @@ agentstack instructions --scope project --write
 agentstack run claude-code --profile design   # profile reverts on exit
 agentstack runs                               # list live runs (--json to script)
 agentstack kill <id>                          # SIGTERM→SIGKILL; --force for immediate
+
+# Zero-copy bridge: register the gateway once per harness, trust repos one by one
+agentstack connect --all --write              # one global entry per harness (undo: disconnect)
+agentstack trust .                            # review what THIS repo would run, then pin it
+agentstack trust --list                       # audit every grant; edits invalidate digests
+
+# Tune with evidence once runtime data has accumulated
+agentstack audit --calls                      # the gateway call log (digests, outcomes)
+agentstack optimize                           # recommendations with evidence + exact actions
+agentstack optimize --write                   # apply only the provably-safe class
 ```
 
 ### Manifest example
