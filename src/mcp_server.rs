@@ -6,7 +6,7 @@
 //! nothing executed). The agent proposes; a human still runs `apply`.
 
 use std::io::{BufRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
@@ -18,7 +18,11 @@ use crate::secret::Resolver;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
-pub fn serve(manifest_dir: Option<&Path>) -> Result<()> {
+/// The id of the one client-bound request we make (`roots/list` in auto mode).
+/// Server-initiated ids live in their own namespace, so a string is safe.
+const ROOTS_REQUEST_ID: &str = "agentstack:roots";
+
+pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
     let dir = manifest_dir.map(Path::to_path_buf);
     let stdin = std::io::stdin();
     // On stdio, stdout must carry only JSON-RPC. Library code (apply, profiles,
@@ -26,23 +30,53 @@ pub fn serve(manifest_dir: Option<&Path>) -> Result<()> {
     // so reserve the real stdout for responses and redirect fd 1 to stderr.
     let mut out = protocol_writer();
 
-    // Build the runtime gateway once for this launch (one project per process).
-    let gateway = crate::gateway::Gateway::from_manifest(dir.as_deref());
-    if !gateway.is_empty() {
-        eprintln!("agentstack mcp: gateway active — proxying this project's HTTP MCP servers");
+    if !auto_project {
+        // Eager, one-project-per-process mode (the default): the manifest is
+        // cwd-or-flag and the gateway is built once for this launch.
+        let gateway = crate::gateway::Gateway::from_manifest(dir.as_deref());
+        if !gateway.is_empty() {
+            eprintln!("agentstack mcp: gateway active — proxying this project's MCP servers");
+        }
+
+        // Code mode (Phase 2): expose a loopback, token-gated endpoint the generated
+        // client POSTs to. Best-effort and contained — None when there's nothing to
+        // proxy. agentstack only brokers the call here; it never runs the agent's code.
+        let runtime = crate::codemode::endpoint::start(dir.as_deref());
+        if let Some(rt) = &runtime {
+            eprintln!(
+                "agentstack mcp: code-mode runtime at {} (loopback · token-gated). Generate a client with `agentstack codemode --write`.",
+                rt.url
+            );
+        }
+
+        for line in stdin.lock().lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(req) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if let Some(resp) = handle(&req, dir.as_deref(), &gateway) {
+                writeln!(out, "{}", serde_json::to_string(&resp)?)?;
+                out.flush()?;
+            }
+        }
+        // Remove the machine-local endpoint coordinate file so a dead port+token
+        // isn't left behind for the next shim call.
+        if let Some(rt) = runtime {
+            rt.shutdown();
+        }
+        return Ok(());
     }
 
-    // Code mode (Phase 2): expose a loopback, token-gated endpoint the generated
-    // client POSTs to. Best-effort and contained — None when there's nothing to
-    // proxy. agentstack only brokers the call here; it never runs the agent's code.
-    let runtime = crate::codemode::endpoint::start(dir.as_deref());
-    if let Some(rt) = &runtime {
-        eprintln!(
-            "agentstack mcp: code-mode runtime at {} (loopback · token-gated). Generate a client with `agentstack codemode --write`.",
-            rt.url
-        );
-    }
-
+    // --auto-project (the zero-files bridge, registered once globally by
+    // `agentstack connect`): discover the active project per session — client
+    // roots → cwd walk-up → $AGENTSTACK_MANIFEST_DIR — and trust-gate it. The
+    // gateway is built lazily on the first tools/call, which gives the client
+    // time to answer our roots/list request; tools/list is static and needs
+    // no gateway.
+    let mut auto = AutoProject::new(dir);
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -51,17 +85,222 @@ pub fn serve(manifest_dir: Option<&Path>) -> Result<()> {
         let Ok(req) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
-        if let Some(resp) = handle(&req, dir.as_deref(), &gateway) {
+        // The client's answer to our roots/list request is ours, not a request
+        // to serve.
+        if auto.absorb_roots_response(&req) {
+            continue;
+        }
+        match req.get("method").and_then(Value::as_str).unwrap_or("") {
+            "initialize" => auto.note_client_capabilities(&req),
+            "notifications/initialized" => {
+                if let Some(request) = auto.roots_request() {
+                    writeln!(out, "{}", serde_json::to_string(&request)?)?;
+                    out.flush()?;
+                }
+            }
+            "tools/call" => auto.ensure_gateway(),
+            _ => {}
+        }
+        if let Some(resp) = handle(&req, auto.dir(), auto.gateway()) {
             writeln!(out, "{}", serde_json::to_string(&resp)?)?;
             out.flush()?;
         }
     }
-    // Remove the machine-local endpoint coordinate file so a dead port+token
-    // isn't left behind for the next shim call.
-    if let Some(rt) = runtime {
-        rt.shutdown();
-    }
+    auto.shutdown();
     Ok(())
+}
+
+/// Session state for `--auto-project`: which project this MCP session belongs
+/// to, resolved once per session (a new project means a new harness session,
+/// which means a fresh bridge process — no cwd watching needed).
+struct AutoProject {
+    /// `--manifest-dir`, which wins outright and skips the trust gate (naming
+    /// a directory on the command line is itself the consent, exactly like the
+    /// default eager mode).
+    explicit: Option<PathBuf>,
+    client_has_roots: bool,
+    roots_requested: bool,
+    /// Project base candidates from the client's roots/list answer.
+    roots: Vec<PathBuf>,
+    /// The resolved project base — set even when untrusted, so control-plane
+    /// tools (list/explain/diff/add, all commit-safe) still see the manifest.
+    /// Only the *runtime* surface (spawning/contacting servers, resolving
+    /// secrets, code mode) is trust-gated.
+    dir: Option<PathBuf>,
+    gateway: crate::gateway::Gateway,
+    built: bool,
+    runtime: Option<crate::codemode::endpoint::RuntimeHandle>,
+}
+
+impl AutoProject {
+    fn new(explicit: Option<PathBuf>) -> Self {
+        AutoProject {
+            explicit,
+            client_has_roots: false,
+            roots_requested: false,
+            roots: Vec::new(),
+            dir: None,
+            gateway: crate::gateway::Gateway::empty(),
+            built: false,
+            runtime: None,
+        }
+    }
+
+    fn dir(&self) -> Option<&Path> {
+        self.dir.as_deref().or(self.explicit.as_deref())
+    }
+
+    fn gateway(&self) -> &crate::gateway::Gateway {
+        &self.gateway
+    }
+
+    /// Record whether the client can answer `roots/list` (from its declared
+    /// capabilities at `initialize`).
+    fn note_client_capabilities(&mut self, req: &Value) {
+        if req
+            .pointer("/params/capabilities/roots")
+            .is_some_and(|v| !v.is_null())
+        {
+            self.client_has_roots = true;
+        }
+    }
+
+    /// The one request we send: ask the client for its workspace roots, right
+    /// after `notifications/initialized` (the earliest the protocol allows).
+    fn roots_request(&mut self) -> Option<Value> {
+        if !self.client_has_roots || self.roots_requested || self.built {
+            return None;
+        }
+        self.roots_requested = true;
+        Some(json!({ "jsonrpc": "2.0", "id": ROOTS_REQUEST_ID, "method": "roots/list" }))
+    }
+
+    /// Absorb the client's answer to our roots/list request. Returns true when
+    /// the message was ours (and must not be dispatched to `handle`).
+    fn absorb_roots_response(&mut self, msg: &Value) -> bool {
+        if msg.get("method").is_some() || msg.get("id") != Some(&json!(ROOTS_REQUEST_ID)) {
+            return false;
+        }
+        if let Some(roots) = msg.pointer("/result/roots").and_then(Value::as_array) {
+            for root in roots {
+                if let Some(path) = root
+                    .get("uri")
+                    .and_then(Value::as_str)
+                    .and_then(file_uri_to_path)
+                {
+                    self.roots.push(path);
+                }
+            }
+        }
+        true
+    }
+
+    /// Resolve the project and build the gateway, once. Runs on the first
+    /// tools/call — by then a roots-capable client has long since answered.
+    fn ensure_gateway(&mut self) {
+        if self.built {
+            return;
+        }
+        self.built = true;
+
+        if let Some(dir) = self.explicit.clone() {
+            self.activate(&dir);
+            return;
+        }
+        let Some(base) = self.discover() else {
+            eprintln!(
+                "agentstack mcp: no project manifest found (client roots, cwd, $AGENTSTACK_MANIFEST_DIR) — control-plane tools only"
+            );
+            return;
+        };
+        self.dir = Some(base.clone());
+        match crate::trust::check(&base) {
+            crate::trust::TrustState::Trusted => self.activate(&base),
+            crate::trust::TrustState::Changed => eprintln!(
+                "agentstack mcp: {} was trusted but its manifest CHANGED since — control-plane tools only. Review it, then re-run `agentstack trust {}`.",
+                base.display(),
+                base.display()
+            ),
+            crate::trust::TrustState::Untrusted => eprintln!(
+                "agentstack mcp: {} is not trusted — control-plane tools only (none of its servers are spawned or contacted, no secrets resolved). Run `agentstack trust {}` to enable it.",
+                base.display(),
+                base.display()
+            ),
+        }
+    }
+
+    /// Candidate order: every client root (walked up), then the process cwd
+    /// (walked up), then $AGENTSTACK_MANIFEST_DIR taken as a base directly.
+    fn discover(&self) -> Option<PathBuf> {
+        for root in &self.roots {
+            if let Some(base) = crate::manifest::discover_project_base(root) {
+                return Some(base);
+            }
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            if let Some(base) = crate::manifest::discover_project_base(&cwd) {
+                return Some(base);
+            }
+        }
+        if let Some(dir) = std::env::var_os("AGENTSTACK_MANIFEST_DIR") {
+            let dir = PathBuf::from(dir);
+            if crate::manifest::resolve_manifest_dir(&dir)
+                .join(MANIFEST_FILE)
+                .exists()
+            {
+                return Some(dir);
+            }
+        }
+        None
+    }
+
+    fn activate(&mut self, base: &Path) {
+        self.dir = Some(base.to_path_buf());
+        self.gateway = crate::gateway::Gateway::from_manifest(Some(base));
+        if !self.gateway.is_empty() {
+            eprintln!(
+                "agentstack mcp: gateway active for {} — proxying its MCP servers",
+                base.display()
+            );
+        }
+        self.runtime = crate::codemode::endpoint::start(Some(base));
+        if let Some(rt) = &self.runtime {
+            eprintln!(
+                "agentstack mcp: code-mode runtime at {} (loopback · token-gated)",
+                rt.url
+            );
+        }
+    }
+
+    fn shutdown(mut self) {
+        if let Some(rt) = self.runtime.take() {
+            rt.shutdown();
+        }
+    }
+}
+
+/// `file://` URI → local path, with minimal percent-decoding. Non-file URIs
+/// (a client rooted at a remote workspace) yield `None`.
+fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
+    let rest = uri.strip_prefix("file://")?;
+    // `file:///x` → "/x"; `file://localhost/x` → drop the host part.
+    let slash = rest.find('/')?;
+    let raw = &rest[slash..];
+    let mut bytes = Vec::with_capacity(raw.len());
+    let rb = raw.as_bytes();
+    let mut i = 0;
+    while i < rb.len() {
+        if rb[i] == b'%' && i + 3 <= rb.len() {
+            if let Ok(byte) = u8::from_str_radix(&raw[i + 1..i + 3], 16) {
+                bytes.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        bytes.push(rb[i]);
+        i += 1;
+    }
+    Some(PathBuf::from(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
 /// The channel JSON-RPC responses are written to. On Unix, duplicate the real
@@ -1031,6 +1270,118 @@ mod tests {
         assert!(text.contains("agentstack-runtime.ts"));
         assert!(text.contains("## Recipe"));
         assert_eq!(resp["result"]["isError"], false);
+    }
+
+    #[test]
+    fn file_uri_parsing_handles_plain_and_encoded_and_rejects_remote() {
+        assert_eq!(
+            file_uri_to_path("file:///Users/x/repo"),
+            Some(std::path::PathBuf::from("/Users/x/repo"))
+        );
+        assert_eq!(
+            file_uri_to_path("file://localhost/srv/repo"),
+            Some(std::path::PathBuf::from("/srv/repo"))
+        );
+        assert_eq!(
+            file_uri_to_path("file:///Users/x/my%20repo"),
+            Some(std::path::PathBuf::from("/Users/x/my repo"))
+        );
+        assert_eq!(file_uri_to_path("https://example.com/x"), None);
+    }
+
+    #[test]
+    fn auto_project_requests_roots_only_when_client_supports_them() {
+        // No roots capability declared → never ask.
+        let mut auto = AutoProject::new(None);
+        auto.note_client_capabilities(
+            &json!({ "method": "initialize", "params": { "capabilities": {} } }),
+        );
+        assert!(auto.roots_request().is_none());
+
+        // Roots declared → ask exactly once.
+        let mut auto = AutoProject::new(None);
+        auto.note_client_capabilities(
+            &json!({ "method": "initialize", "params": { "capabilities": { "roots": {} } } }),
+        );
+        let req = auto.roots_request().expect("roots requested");
+        assert_eq!(req["method"], "roots/list");
+        assert_eq!(req["id"], ROOTS_REQUEST_ID);
+        assert!(auto.roots_request().is_none(), "asked once, not per message");
+    }
+
+    #[test]
+    fn auto_project_absorbs_only_its_own_roots_response() {
+        let mut auto = AutoProject::new(None);
+        // A normal request must pass through.
+        assert!(!auto.absorb_roots_response(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })));
+        // Someone else's response id must pass through too.
+        assert!(!auto.absorb_roots_response(&json!({ "jsonrpc": "2.0", "id": 7, "result": {} })));
+        // Ours is absorbed and its file roots recorded.
+        let ours = json!({
+            "jsonrpc": "2.0", "id": ROOTS_REQUEST_ID,
+            "result": { "roots": [
+                { "uri": "file:///tmp/repo", "name": "repo" },
+                { "uri": "https://remote/ws" }
+            ] }
+        });
+        assert!(auto.absorb_roots_response(&ours));
+        assert_eq!(auto.roots, vec![std::path::PathBuf::from("/tmp/repo")]);
+    }
+
+    #[test]
+    fn auto_project_gates_untrusted_manifests_to_control_plane_only() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
+            .unwrap();
+
+        // Untrusted: the project resolves (control-plane tools see it) but the
+        // runtime gateway stays empty — nothing spawned, nothing contacted.
+        let mut auto = AutoProject::new(None);
+        auto.roots.push(proj.path().to_path_buf());
+        auto.ensure_gateway();
+        assert_eq!(auto.dir(), Some(proj.path()));
+        assert!(auto.gateway().is_empty(), "untrusted → empty gateway");
+
+        // Trusted: the same discovery now builds a live gateway.
+        crate::trust::trust(proj.path()).unwrap();
+        let mut auto = AutoProject::new(None);
+        auto.roots.push(proj.path().to_path_buf());
+        auto.ensure_gateway();
+        assert!(!auto.gateway().is_empty(), "trusted → gateway proxies the manifest");
+        auto.shutdown();
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn explicit_manifest_dir_skips_the_trust_gate() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
+            .unwrap();
+
+        // Naming the directory is the consent — same semantics as eager mode.
+        let mut auto = AutoProject::new(Some(proj.path().to_path_buf()));
+        auto.ensure_gateway();
+        assert!(!auto.gateway().is_empty());
+        auto.shutdown();
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     #[test]

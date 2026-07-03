@@ -219,12 +219,50 @@ agentstack can run as an MCP server over stdio, so the agent itself can discover
 and propose capabilities — tools: `agentstack_search`, `agentstack_list`,
 `agentstack_doctor`, `agentstack_add_server`. Writes go to the **manifest only**
 (commit-safe `${REF}`s, nothing executed): the agent proposes, a human reviews
-and runs `apply` (the §9g/D20 trust gate). Register it like any stdio MCP server,
-e.g. Claude Code:
+and runs `apply` (the §9g/D20 trust gate). Register it once per harness:
+
+```bash
+agentstack connect claude-code codex   # dry-run: shows the config diff
+agentstack connect --all --write       # every installed harness with MCP support
+```
+
+`connect` writes one small entry — `agentstack mcp --auto-project` — into the
+harness's **global** MCP config (undo with `disconnect`, verify with `doctor`).
+You can still register it by hand like any stdio MCP server if you prefer:
 
 ```json
-{ "mcpServers": { "agentstack": { "type": "stdio", "command": "agentstack", "args": ["mcp"] } } }
+{ "mcpServers": { "agentstack": { "type": "stdio", "command": "agentstack", "args": ["mcp", "--auto-project"] } } }
 ```
+
+### The zero-copy bridge (`--auto-project` + `trust`)
+
+With `--auto-project`, one global registration serves **every** repo: at session
+start the gateway discovers the active project — MCP client roots → cwd walk-up →
+`$AGENTSTACK_MANIFEST_DIR` — and exposes that repo's stack. Move to another repo,
+open a new session, get that repo's stack. No `.mcp.json`, no rendered files; a
+repo needs only its `.agentstack/agentstack.toml` (+ lock).
+
+Auto-discovery is **trust-gated**, direnv-style. A manifest can declare stdio
+servers (arbitrary local commands) and reference secrets, so a repo you just
+cloned gets **control-plane tools only** — nothing spawned, nothing contacted,
+no secrets resolved — until you review it and run:
+
+```bash
+agentstack trust .          # shows what the manifest runs/contacts, then pins its digest
+agentstack trust --list     # every trusted project + whether its manifest still matches
+agentstack trust --revoke   # withdraw
+```
+
+Trust is pinned to the manifest's content digest (including
+`agentstack.local.toml`): any edit — a `git pull`, say — drops the project back
+to control-plane-only until re-trusted. Explicit `--manifest-dir` skips the gate
+(naming a directory is the consent), matching plain `agentstack mcp`.
+
+Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
+skills-over-MCP (`agentstack_list_loadable`/`agentstack_load`) are fully
+zero-copy. Native skill folders and instruction files (`CLAUDE.md`/`AGENTS.md`)
+are read from disk by the harnesses themselves and still need render mode
+(`apply`/`use`) — `connect` prints this per harness.
 
 ### Compact proxied surface + code mode
 
@@ -246,8 +284,9 @@ server you add), the proxied surface collapses behind two stable tools:
   **one** small program that calls several upstream tools and runs it with its own
   code/bash tool — one program instead of many tool round-trips.
 
-agentstack emits the bindings and brokers the real MCP calls (resolving `${REF}`s
-per call over a loopback, token-gated endpoint); the agent's code runs in the
+agentstack emits the bindings and brokers the real MCP calls over a loopback,
+token-gated endpoint (`${REF}`s are resolved once per gateway session, at
+launch — never emitted into bindings or logs); the agent's code runs in the
 **harness's** own sandbox — never inside agentstack, which stays a compiler, not a
 runtime. (A full Code Mode in the [TanStack](https://tanstack.com/ai/latest/docs/code-mode/code-mode)
 sense — a sandboxed `execute_typescript` executor — is reserved for a future
@@ -267,7 +306,8 @@ agentstack codemode --write    # write client.ts + agentstack-runtime.ts (+ .git
 `doctor` (`--ci`, `--live`, `--fix`), `audit` (`--json`, `--calls`,
 `--since`), `search`, `stats` (`--live`),
 `secret set|get|rm|list`, `export`/`import`, `adapters`, `pack init`, `plugins`,
-`dashboard`, `mcp`, `codemode`, `hook`, `run`/`runs`/`kill`.
+`dashboard`, `mcp` (`--auto-project`), `connect`/`disconnect`,
+`trust` (`--list`, `--revoke`), `codemode`, `hook`, `run`/`runs`/`kill`.
 
 ## Everything shipped so far
 
@@ -283,4 +323,5 @@ native Claude Code/Codex packages + marketplaces) · atomic writes + backups ·
 `export`/`import` · `hook` · agent-operable `mcp` server · local dashboard
 (server/skill matrices, Discover, add-skill, settings editor) · live runs
 (`run`/`runs`/`kill` + dashboard Runs panel) · GitHub Action trust gate ·
-nightly adapter-conformance CI.
+nightly adapter-conformance CI · zero-copy bridge (`connect` + `mcp
+--auto-project` + digest-pinned `trust`).

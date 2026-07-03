@@ -155,10 +155,16 @@ symlinks) is a per-project choice:
    silent. **Trade-off:** launching the harness *directly* (not through
    agentstack) sees no project servers/skills while at rest — and one command
    (`use <p> --scope project --write`) flips the project back to static.
-3. **Zero files, model-driven** — register `agentstack mcp` once (global) and
-   the agent itself lists and loads skills from the central library at runtime
-   (`agentstack_list_loadable` / `agentstack_load`, session-fenced and logged).
-   No skill files in the repo at all; instructions travel over MCP.
+3. **Zero files, model-driven** — `agentstack connect --all --write` registers
+   the gateway once, globally, per harness. After that every **trusted** repo
+   brings its own stack automatically: `agentstack mcp --auto-project` discovers
+   the active project at session start (client roots → cwd walk-up →
+   `$AGENTSTACK_MANIFEST_DIR`) and proxies its servers — firewall, audit log,
+   and skills over MCP (`agentstack_list_loadable` / `agentstack_load`,
+   session-fenced and logged) included. No per-repo files at all. Safety:
+   auto-discovery is direnv-style trust-gated — a freshly cloned repo gets
+   control-plane tools only (nothing spawned, no secrets resolved) until you
+   review it and run `agentstack trust .`; any manifest edit re-requires trust.
 
 ## What works today
 

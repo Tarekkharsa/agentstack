@@ -791,8 +791,8 @@
               </tr>
               <tr>
                 <td><strong>Zero files (MCP)</strong></td>
-                <td>Register <code>agentstack mcp</code> globally; the agent lists and loads library skills at runtime via <code>agentstack_list_loadable</code> / <code>agentstack_load</code> (session-fenced, loads logged with reasons).</td>
-                <td>No files in the repo at all; skill triggering is model-driven rather than automatic frontmatter matching.</td>
+                <td><code>agentstack connect --all --write</code> registers the gateway once per harness; <code>agentstack mcp --auto-project</code> then discovers each trusted repo at session start (client roots &rarr; cwd walk-up &rarr; <code>$AGENTSTACK_MANIFEST_DIR</code>) and proxies its servers, firewall, audit log, and skills (<code>agentstack_list_loadable</code> / <code>agentstack_load</code>, session-fenced, loads logged with reasons).</td>
+                <td>No files in the repo at all. direnv-style safety: an untrusted repo gets control-plane tools only until <code>agentstack trust .</code> pins its manifest digest. Skill triggering is model-driven rather than automatic frontmatter matching.</td>
               </tr>
             </tbody>
           </table>
@@ -989,7 +989,7 @@ agentstack lib add sql-review --path ./skills/sql-review --write
 
             <div class="panel">
               <h3>Migrate an inline server</h3>
-              <p>Today this is a manual export to a server file, then <code>lib add-server</code>. A future <code>--from-manifest</code> helper can automate it.</p>
+              <p>Lift it straight from the manifest with <code>lib add-server &lt;name&gt; --from-manifest --write</code>, or point <code>--file</code> at a server definition file.</p>
               <div class="codebox">
                 <header>
                   <span>server definition file</span>
@@ -1372,6 +1372,7 @@ Authorization = "Bearer real-token-value"</code></pre>
                 <li><span class="status">Done</span> Digest locks, doctor drift, explain provenance.</li>
                 <li><span class="status">Done</span> <code>lib add</code>, <code>add-server</code>, <code>list</code>, <code>remove</code>, <code>remove-server</code>, <code>migrate</code>.</li>
                 <li><span class="status">Done</span> Runtime gateway proxies HTTP <em>and</em> stdio servers (zero-files mode).</li>
+                <li><span class="status">Done</span> Zero-copy bridge: <code>connect</code>/<code>disconnect</code>, <code>mcp --auto-project</code> (roots &rarr; walk-up &rarr; env), digest-pinned <code>trust</code>.</li>
                 <li><span class="status">Done</span> MCP firewall (<code>[policy.tools]</code>) + call audit log with per-run receipts.</li>
                 <li><span class="status">Done</span> Versioned packs from any git host (<code>pack.toml</code> + tags, <code>upgrade</code>, <code>pack init</code>).</li>
                 <li><span class="status">Done</span> Context-cost lens (<code>stats --live</code>) — what each server taxes every session.</li>

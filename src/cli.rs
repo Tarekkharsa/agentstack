@@ -23,6 +23,7 @@ Start here:
 Command map:
   capabilities:  add · remove · search · install · update · upgrade · lib · consolidate · adopt
   activate:      use <profile> · apply · session · run · hook · instructions
+  zero-files:    connect <harness> · trust <dir> · disconnect (register the gateway once, no per-repo files)
   trust:         doctor · audit · explain · diff · restore · secret
   share & more:  export · import · plugins · stats · adapters · dashboard · mcp · codemode
 
@@ -138,7 +139,23 @@ pub enum Command {
     Dashboard(DashboardArgs),
 
     /// Run agentstack as an MCP server over stdio (for an agent to call).
-    Mcp,
+    Mcp(McpArgs),
+
+    /// Register the agentstack gateway once, globally, in a harness's MCP
+    /// config — after that, every trusted repo brings its own servers through
+    /// `agentstack mcp --auto-project` with no per-project files (zero-files
+    /// mode made automatic). Dry-run by default.
+    Connect(ConnectArgs),
+
+    /// Remove the agentstack gateway entry from a harness's global MCP config.
+    Disconnect(DisconnectArgs),
+
+    /// Trust a project's manifest for the zero-files bridge (direnv-style).
+    /// Until trusted, an auto-discovered project gets control-plane tools only:
+    /// none of its servers are spawned or contacted, no secrets are resolved.
+    /// Trust pins the manifest's content digest — editing the manifest requires
+    /// re-trusting it.
+    Trust(TrustArgs),
 
     /// Generate a typed code-mode client for this project's proxied MCP servers,
     /// so an agent can call several upstream tools from one program it runs in
@@ -157,6 +174,67 @@ pub enum Command {
 
     /// Kill a tracked run by id (and revert its profile if it owned one).
     Kill(KillArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct McpArgs {
+    /// Discover the active project per session instead of pinning to the launch
+    /// cwd: MCP client roots → cwd walk-up → $AGENTSTACK_MANIFEST_DIR → none.
+    /// Auto-discovered projects are trust-gated (`agentstack trust`): an
+    /// untrusted manifest exposes control-plane tools only. This is the flag
+    /// `agentstack connect` registers.
+    #[arg(long)]
+    pub auto_project: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ConnectArgs {
+    /// Harness/adapter ids to register the gateway in (e.g. `claude-code`
+    /// `codex`). With none given, use --all.
+    #[arg(value_name = "HARNESS")]
+    pub harnesses: Vec<String>,
+
+    /// Register in every installed harness that supports MCP.
+    #[arg(long)]
+    pub all: bool,
+
+    /// Write the change (else dry-run: show the diff per harness).
+    #[arg(long)]
+    pub write: bool,
+
+    /// Path to the agentstack binary to register (default: this executable).
+    #[arg(long, value_name = "PATH")]
+    pub command: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct DisconnectArgs {
+    /// Harness/adapter ids to remove the gateway from.
+    #[arg(value_name = "HARNESS")]
+    pub harnesses: Vec<String>,
+
+    /// Remove from every harness that currently has the gateway registered.
+    #[arg(long)]
+    pub all: bool,
+
+    /// Write the change (else dry-run: show the diff per harness).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct TrustArgs {
+    /// Project directory (walks up to find the manifest). Defaults to `.`.
+    #[arg(value_name = "PATH")]
+    pub path: Option<PathBuf>,
+
+    /// List every trusted project and whether its manifest still matches.
+    #[arg(long)]
+    pub list: bool,
+
+    /// Withdraw trust for the project instead of granting it.
+    #[arg(long)]
+    pub revoke: bool,
 }
 
 #[derive(Args, Debug)]

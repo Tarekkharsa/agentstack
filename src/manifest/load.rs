@@ -44,6 +44,25 @@ pub fn new_manifest_dir(base: &Path) -> PathBuf {
     }
 }
 
+/// Walk upward from `start` to the filesystem root looking for a project that
+/// carries a manifest (`.agentstack/agentstack.toml` preferred, legacy root
+/// `agentstack.toml` accepted). Returns the project BASE dir — the dir you'd
+/// hand to [`resolve_manifest_dir`] / `commands::load` — not the manifest dir.
+/// This is how the zero-files bridge follows the agent into a repo when it was
+/// launched from a subdirectory (or a GUI harness's own cwd).
+pub fn discover_project_base(start: &Path) -> Option<PathBuf> {
+    let mut cur = Some(start);
+    while let Some(dir) = cur {
+        if dir.join(MANIFEST_SUBDIR).join(MANIFEST_FILE).exists()
+            || dir.join(MANIFEST_FILE).exists()
+        {
+            return Some(dir.to_path_buf());
+        }
+        cur = dir.parent();
+    }
+    None
+}
+
 /// The project root a manifest dir belongs to: the parent for the
 /// `.agentstack/` layout, the dir itself for a legacy root manifest. This is
 /// the anchor for everything project-scoped (`.mcp.json`, `.claude/skills/`,
@@ -150,6 +169,26 @@ mod tests {
         fs::write(nested.join(MANIFEST_FILE), "version = 1\n").unwrap();
         assert_eq!(resolve_manifest_dir(base2), nested);
         assert_eq!(new_manifest_dir(base2), nested);
+    }
+
+    #[test]
+    fn discover_walks_up_to_the_project_base() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let base = tmp.path();
+        let nested = base.join(MANIFEST_SUBDIR);
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join(MANIFEST_FILE), "version = 1\n").unwrap();
+        let deep = base.join("src/render/deeper");
+        fs::create_dir_all(&deep).unwrap();
+
+        // From the base itself and from a deep subdir → the same base.
+        assert_eq!(discover_project_base(base), Some(base.to_path_buf()));
+        assert_eq!(discover_project_base(&deep), Some(base.to_path_buf()));
+
+        // A tree with no manifest anywhere above → None. (TempDirs live under
+        // the system temp root, which carries no manifest.)
+        let bare = assert_fs::TempDir::new().unwrap();
+        assert_eq!(discover_project_base(bare.path()), None);
     }
 
     #[test]

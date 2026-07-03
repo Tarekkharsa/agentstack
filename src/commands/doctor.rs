@@ -210,6 +210,53 @@ fn run_checks(
         }
     }
 
+    // Zero-files bridge: which harnesses have the global `agentstack mcp
+    // --auto-project` gateway registered, and where this project stands with
+    // the trust gate. Not being connected is a choice, not a fault — only a
+    // stale trust digest warns.
+    report.section("Zero-files bridge");
+    let mut connected = 0;
+    for id in &target_ids {
+        let Some(desc) = ctx.registry.get(id) else {
+            continue;
+        };
+        let (Some(cfg), Some(mcp)) = (desc.config.as_ref(), desc.mcp.as_ref()) else {
+            continue;
+        };
+        if !desc.detected() {
+            continue;
+        }
+        let path = paths::expand_tilde(&cfg.path);
+        let existing = std::fs::read_to_string(&path).unwrap_or_default();
+        if crate::commands::connect::has_bridge_entry(&existing, &mcp.location, cfg.format) {
+            connected += 1;
+            report.line(
+                Level::Ok,
+                format!("{:<14} bridge registered (agentstack mcp)", desc.display),
+            );
+        }
+    }
+    if connected == 0 {
+        report.line(
+            Level::Ok,
+            "no harness connected — optional ↳ agentstack connect --all",
+        );
+    }
+    let base = crate::manifest::project_root_of(&ctx.dir);
+    match crate::trust::check(&base) {
+        crate::trust::TrustState::Trusted => {
+            report.line(Level::Ok, "this project is trusted for auto mode")
+        }
+        crate::trust::TrustState::Changed => report.line(
+            Level::Warn,
+            "trusted, but the manifest changed since ↳ review + agentstack trust",
+        ),
+        crate::trust::TrustState::Untrusted => report.line(
+            Level::Ok,
+            "not trusted for auto mode — untrusted repos get control-plane tools only ↳ agentstack trust",
+        ),
+    }
+
     report.section("Secrets");
     let refs = manifest.referenced_secrets();
     if refs.is_empty() {

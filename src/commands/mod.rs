@@ -8,6 +8,7 @@ pub mod audit;
 pub mod bootstrap;
 pub mod bundle;
 pub mod codemode;
+pub mod connect;
 pub mod consolidate;
 pub mod diff;
 pub mod doctor;
@@ -27,6 +28,7 @@ pub mod search;
 pub mod secret;
 pub mod session;
 pub mod stats;
+pub mod trust;
 pub mod upgrade;
 pub mod use_profile;
 
