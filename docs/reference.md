@@ -297,6 +297,31 @@ agentstack codemode            # dry-run: what would be generated
 agentstack codemode --write    # write client.ts + agentstack-runtime.ts (+ .gitignore)
 ```
 
+## Optimize (`agentstack optimize`)
+
+Turns the signals agentstack already collects — activation counts, the gateway
+call audit log, per-server context costs (`stats --live`), the trust ledger —
+into concrete recommendations: inert servers to remove, `[policy.tools]`
+allowlists to narrow high-cost servers to the tools you actually use, denied
+and erroring calls to review, stale trust grants to refresh or revoke.
+
+The contract: **every recommendation carries its evidence** (numbers, window,
+data source), **the exact command or TOML** to act on it, and **why it is safe
+or why it needs review**. One stated limit: the audit log only sees
+gateway-brokered calls — a server rendered into a native config is called
+directly by the harness, so such servers are never auto-removed on "no calls"
+evidence alone.
+
+```bash
+agentstack optimize              # read-only report
+agentstack optimize --json       # machine-readable
+agentstack optimize --since 30   # only the last 30 days of runtime evidence
+agentstack optimize --write      # apply ONLY the safe class: provably-inert
+                                 # manifest entries (no calls, no activations,
+                                 # no profile, not rendered anywhere, ≥14d of
+                                 # history) and trust grants for deleted dirs
+```
+
 ## All commands
 
 `init`, `add`, `install` (`--locked`, `--allow-flagged`), `update`, `remove`,
@@ -304,7 +329,8 @@ agentstack codemode --write    # write client.ts + agentstack-runtime.ts (+ .git
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
 `lib add|add-server|list|remove|remove-server|migrate`, `restore`,
 `doctor` (`--ci`, `--live`, `--fix`), `audit` (`--json`, `--calls`,
-`--since`), `search`, `stats` (`--live`),
+`--since`), `optimize` (`--json`, `--write`, `--since`), `search`,
+`stats` (`--live`),
 `secret set|get|rm|list`, `export`/`import`, `adapters`, `pack init`, `plugins`,
 `dashboard`, `mcp` (`--auto-project`), `connect`/`disconnect`,
 `trust` (`--list`, `--revoke`), `codemode`, `hook`, `run`/`runs`/`kill`.
@@ -324,4 +350,5 @@ native Claude Code/Codex packages + marketplaces) · atomic writes + backups ·
 (server/skill matrices, Discover, add-skill, settings editor) · live runs
 (`run`/`runs`/`kill` + dashboard Runs panel) · GitHub Action trust gate ·
 nightly adapter-conformance CI · zero-copy bridge (`connect` + `mcp
---auto-project` + digest-pinned `trust`).
+--auto-project` + digest-pinned `trust`) · `optimize` (evidence-backed
+recommendations from usage/audit/cost signals, safe-class `--write`).

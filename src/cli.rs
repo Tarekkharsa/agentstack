@@ -24,7 +24,7 @@ Command map:
   capabilities:  add · remove · search · install · update · upgrade · lib · consolidate · adopt
   activate:      use <profile> · apply · session · run · hook · instructions
   zero-files:    connect <harness> · trust <dir> · disconnect (register the gateway once, no per-repo files)
-  trust:         doctor · audit · explain · diff · restore · secret
+  trust:         doctor · audit · optimize · explain · diff · restore · secret
   share & more:  export · import · plugins · stats · adapters · dashboard · mcp · codemode
 
 Rendered files, per project (see README → 'three modes'):
@@ -115,6 +115,14 @@ pub enum Command {
 
     /// Show local usage analytics (activation counts + footprint + context cost).
     Stats(StatsArgs),
+
+    /// Turn the signals agentstack already collects (usage, call audit log,
+    /// context costs, trust ledger) into concrete recommendations: inert
+    /// servers, firewall narrowing, denied/erroring tools, stale trust. Every
+    /// recommendation carries evidence, the exact command/TOML, and why it is
+    /// safe or needs review. Read-only by default; `--write` applies only the
+    /// safe class.
+    Optimize(OptimizeArgs),
 
     /// Inspect the available CLI adapters.
     Adapters(AdaptersArgs),
@@ -784,6 +792,22 @@ pub struct StatsArgs {
     /// the manifest's servers once.
     #[arg(long)]
     pub live: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct OptimizeArgs {
+    /// Emit the recommendations as machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+
+    /// Apply the recommendations marked safe (inert manifest entries, dead
+    /// trust grants). Everything else stays a printed suggestion.
+    #[arg(long, conflicts_with = "json")]
+    pub write: bool,
+
+    /// Only consider audit-log records from the last N days.
+    #[arg(long, value_name = "DAYS")]
+    pub since: Option<u64>,
 }
 
 #[derive(Args, Debug)]
