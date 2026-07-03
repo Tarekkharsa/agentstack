@@ -127,7 +127,9 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     )?;
 
     println!("\n{}", "Apply".bold());
-    super::apply::run(&apply_args(args, scope, true), manifest_dir)?;
+    // Quiet write: the diff was already shown in the preview above, so this
+    // prints only the per-target write results rather than repeating it.
+    super::apply::write_quiet(&apply_args(args, scope, true), manifest_dir)?;
 
     println!("\n{}", "Doctor".bold());
     super::doctor::run(

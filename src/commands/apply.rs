@@ -65,6 +65,13 @@ pub(crate) fn preview(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<O
     render(args, manifest_dir, false, false, false)
 }
 
+/// Apply for real without re-printing the diff — the write half for a caller
+/// (e.g. `setup`) that already showed the `preview` and got its own confirm.
+/// Prints only the per-target write results, so the diff isn't shown twice.
+pub(crate) fn write_quiet(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    render(args, manifest_dir, true, true, true).map(|_| ())
+}
+
 /// One render pass. `want_write` requests a write (still gated on validation);
 /// `quiet` suppresses the diff bodies for the confirmed second pass; `rerun_hint`
 /// controls whether the dry-run summary points at `--write` (off when a prompt
