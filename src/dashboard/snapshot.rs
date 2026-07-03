@@ -509,6 +509,34 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         })
         .collect();
 
+    // Zero-files bridge: which detected harnesses carry the global
+    // `agentstack mcp --auto-project` entry, and where this project stands with
+    // the trust gate. Read-only mirror of `doctor`'s bridge section — the
+    // dashboard shows it; granting trust stays a terminal act.
+    let bridge_harnesses: Vec<Value> = ctx
+        .registry
+        .iter()
+        .filter(|d| d.mcp.is_some() && d.config.is_some() && d.detected())
+        .map(|d| {
+            let (cfg, mcp) = (d.config.as_ref().unwrap(), d.mcp.as_ref().unwrap());
+            let path = crate::util::paths::expand_tilde(&cfg.path);
+            let existing = std::fs::read_to_string(&path).unwrap_or_default();
+            let connected =
+                crate::commands::connect::has_bridge_entry(&existing, &mcp.location, cfg.format);
+            json!({ "id": d.id, "display": d.display, "connected": connected })
+        })
+        .collect();
+    let project_base = crate::manifest::project_root_of(&ctx.dir);
+    let bridge = json!({
+        "harnesses": bridge_harnesses,
+        "project": project_base.display().to_string(),
+        "trust": match crate::trust::check(&project_base) {
+            crate::trust::TrustState::Trusted => "trusted",
+            crate::trust::TrustState::Changed => "changed",
+            crate::trust::TrustState::Untrusted => "untrusted",
+        },
+    });
+
     Ok(json!({
         "meta": {
             "name": manifest.meta.name,
@@ -516,6 +544,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
             "version": env!("CARGO_PKG_VERSION"),
             "defaultTargets": manifest.targets.default,
         },
+        "bridge": bridge,
         "adapters": adapters,
         "servers": servers,
         "skills": skills,

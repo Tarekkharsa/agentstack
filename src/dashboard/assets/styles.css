@@ -176,6 +176,7 @@ tbody tr.clickable:hover { background: hsl(var(--muted) / 0.5); }
 
 /* Command center */
 .overview-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.8fr); gap: 14px; margin-top: 16px; }
+.stack-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .next-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid hsl(var(--border)); }
 .next-action:first-child { border-top: none; padding-top: 0; }
 .next-main { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }

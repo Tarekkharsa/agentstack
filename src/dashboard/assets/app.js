@@ -482,7 +482,7 @@ function overview(c) {
 
   c.appendChild(el("div", { class: "overview-grid" }, [
     nextActionsCard(),
-    stackSummaryCard(installed),
+    el("div", { class: "stack-col" }, [stackSummaryCard(installed), bridgeCard()]),
   ]));
 
   c.appendChild(el("div", { class: "section-title" }, ["Health"]));
@@ -545,6 +545,42 @@ function stackSummaryCard(installed) {
       summaryLine("Hooks", plural((DATA.hooks || []).length, "hook")),
       summaryLine("Mode", READONLY ? "read-only" : "read-write"),
     ]),
+  ]);
+}
+
+/* Zero-files bridge: connected harnesses + this project's trust state. A
+   read-only mirror of `doctor`'s bridge section — granting trust is a terminal
+   act (`agentstack trust .`), deliberately not a dashboard button. */
+function bridgeCard() {
+  const b = DATA.bridge || { harnesses: [], trust: "untrusted" };
+  const connected = b.harnesses.filter((h) => h.connected);
+  const trustBadge =
+    b.trust === "trusted" ? badge("trusted", "green") :
+    b.trust === "changed" ? badge("manifest changed", "amber") :
+    badge("untrusted", "");
+  const body = [
+    el("div", { class: "summary-line" }, [
+      el("span", { class: "muted" }, ["This project"]),
+      trustBadge,
+    ]),
+    el("div", { class: "summary-line" }, [
+      el("span", { class: "muted" }, ["Harnesses connected"]),
+      el("span", { class: "mono" }, [`${connected.length}/${b.harnesses.length}`]),
+    ]),
+  ];
+  if (connected.length) {
+    body.push(el("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin-top:8px" },
+      connected.map((h) => badge(h.display, "solid"))));
+  }
+  const hint =
+    !connected.length ? "Register the gateway once: agentstack connect --all --write" :
+    b.trust === "trusted" ? "This repo's stack loads automatically in connected harnesses — no per-repo files." :
+    b.trust === "changed" ? "Manifest edited since trusted — review it, then: agentstack trust ." :
+    "Bridge sessions here get control-plane tools only until: agentstack trust .";
+  body.push(el("div", { class: "muted", style: "font-size:12px;margin-top:8px" }, [hint]));
+  return el("div", { class: "card" }, [
+    el("div", { class: "hd" }, ["Zero-files bridge", el("small", null, ["connect once · trust per repo"])]),
+    el("div", { class: "bd" }, body),
   ]);
 }
 
