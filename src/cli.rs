@@ -18,7 +18,8 @@ use crate::scope::Scope;
     after_help = "\
 Start here:
   agentstack                     orientation + the one next step for this directory
-  init → bootstrap → apply                       preview, then confirm to write
+  agentstack setup               guided one-command setup: import, preview, apply
+  init → bootstrap → apply                       the same steps, run individually
 
 The list above is the everyday surface. Everything else is grouped below —
 run `agentstack <command> --help` for any of them:
@@ -51,6 +52,10 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     // ── Everyday: the core loop most projects ever need (shown in --help) ─
+    /// Guided one-command setup: import if needed, configure, preview, confirm,
+    /// apply, then verify — the everyday loop behind a single command.
+    Setup(SetupArgs),
+
     /// Discover installed CLIs and reverse-engineer a manifest from their
     /// existing MCP configs, lifting inline secrets into `${REF}`s.
     Init(InitArgs),
@@ -75,14 +80,6 @@ pub enum Command {
 
     /// Open the local web dashboard.
     Dashboard(DashboardArgs),
-
-    // The one-command newcomer path: imports if needed, previews, confirms,
-    // applies, verifies. Hidden for now (it orchestrates the everyday commands);
-    // promote to the shown list once the flow has proven out.
-    /// Guided one-command setup: import if needed, configure, preview, confirm,
-    /// apply, then verify — the everyday loop behind a single command.
-    #[command(hide = true)]
-    Setup(SetupArgs),
 
     // ── Capabilities & library (hidden from --help; see the after_help map) ─
     /// Remove a server or skill from the manifest (and lockfile).

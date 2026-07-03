@@ -44,8 +44,8 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
     let next = if !manifest_path.exists() {
         println!("  {}  none in this directory", "Manifest".bold());
         (
-            "agentstack init",
-            "import the setup already on this machine",
+            "agentstack setup",
+            "guided one-command setup — import, preview, apply",
         )
     } else {
         match super::load(manifest_dir) {
@@ -66,8 +66,8 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
                     m.targets.default.len()
                 );
                 (
-                    "agentstack bootstrap",
-                    "preflight: skills, secrets, diff, next action",
+                    "agentstack setup",
+                    "preview and apply your setup across every CLI",
                 )
             }
             Err(err) => {

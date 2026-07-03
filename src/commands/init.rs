@@ -87,6 +87,17 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
 }
 
 pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    run_impl(args, manifest_dir, true)
+}
+
+/// The import step as `setup` drives it: `setup` prints its own guidance and
+/// continues automatically, so the standalone "run bootstrap next" tail is
+/// suppressed to avoid contradicting the wizard's flow.
+pub(crate) fn run_for_setup(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    run_impl(args, manifest_dir, false)
+}
+
+fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Result<()> {
     let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
@@ -233,6 +244,10 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
             lifted.len()
         );
     }
-    println!("\nNext: review the manifest, then `agentstack bootstrap` for the guided preflight.");
+    if show_next {
+        println!(
+            "\nNext: review the manifest, then `agentstack bootstrap` for the guided preflight."
+        );
+    }
     Ok(())
 }
