@@ -28,6 +28,7 @@ pub mod runs;
 pub mod search;
 pub mod secret;
 pub mod session;
+pub mod setup;
 pub mod stats;
 pub mod trust;
 pub mod upgrade;

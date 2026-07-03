@@ -26,6 +26,7 @@ fn run() -> Result<()> {
         Command::Remove(args) => commands::remove::run(args, dir),
         Command::Upgrade(args) => commands::upgrade::run(args, dir),
         Command::Bootstrap(args) => commands::bootstrap::run(args, dir),
+        Command::Setup(args) => commands::setup::run(args, dir),
         Command::Apply(args) => commands::apply::run(args, dir),
         Command::Diff(args) => commands::diff::run(args, dir),
         Command::Explain(args) => commands::explain::run(args, dir),

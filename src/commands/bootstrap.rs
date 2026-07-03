@@ -37,10 +37,11 @@ pub fn run(args: &BootstrapArgs, manifest_dir: Option<&Path>) -> Result<()> {
         println!("Targets: {}", target_ids.join(", "));
     }
 
-    let validation_errors = print_validation(manifest, ctx.registry.ids().collect());
-    print_adapters(&ctx, &target_ids);
-    let skill_issues = print_skills(&ctx)?;
-    let missing_secrets = print_secrets(manifest, &ctx.dir);
+    let Preflight {
+        validation_errors,
+        skill_issues,
+        missing_secrets,
+    } = preflight(&ctx, &target_ids)?;
 
     println!();
     if args.write {
@@ -103,6 +104,32 @@ pub fn run(args: &BootstrapArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// The read-only preflight summary, shared with `setup`.
+pub(crate) struct Preflight {
+    /// A structural manifest error — nothing should be written until fixed.
+    pub validation_errors: bool,
+    /// Skill sources that are missing, unlocked, or stale.
+    pub skill_issues: usize,
+    /// Referenced `${REF}`s that don't resolve on this machine.
+    pub missing_secrets: Vec<String>,
+}
+
+/// Inspect adapters, skills, and secrets and print the same preflight report
+/// `bootstrap` shows, returning a summary so callers can decide what to do next.
+/// Read-only — touches no config.
+pub(crate) fn preflight(ctx: &super::Context, target_ids: &[String]) -> Result<Preflight> {
+    let manifest = &ctx.loaded.manifest;
+    let validation_errors = print_validation(manifest, ctx.registry.ids().collect());
+    print_adapters(ctx, target_ids);
+    let skill_issues = print_skills(ctx)?;
+    let missing_secrets = print_secrets(manifest, &ctx.dir);
+    Ok(Preflight {
+        validation_errors,
+        skill_issues,
+        missing_secrets,
+    })
 }
 
 fn apply_args(args: &BootstrapArgs, write: bool, scope: Scope) -> ApplyArgs {

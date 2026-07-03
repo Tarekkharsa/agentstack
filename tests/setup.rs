@@ -1,0 +1,77 @@
+//! `agentstack setup` is the interactive newcomer wizard. In a non-interactive
+//! shell (CI, pipes — which is what `cargo test` is) it must preview and stop
+//! at the confirm having written nothing to any live CLI config. With no
+//! manifest, it must not run `init` in a non-interactive shell.
+
+use std::fs;
+use std::sync::Mutex;
+
+use agentstack::cli::SetupArgs;
+use agentstack::commands::setup;
+use agentstack::scope::Scope;
+
+// setup + init read/write process-global HOME; serialize with sibling tests.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn args() -> SetupArgs {
+    SetupArgs {
+        targets: vec!["claude-code".into()],
+        profile: None,
+        scope: Some(Scope::Global),
+    }
+}
+
+fn set_home(home: &std::path::Path) {
+    fs::create_dir_all(home).unwrap();
+    std::env::set_var("HOME", home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+}
+
+#[test]
+fn setup_previews_but_writes_nothing_without_a_terminal() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    set_home(&tmp.path().join("home"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.demo]\ntype = \"http\"\nurl = \"https://demo/mcp\"\n",
+    )
+    .unwrap();
+
+    // Non-interactive: previews, then stops at the confirm without writing.
+    setup::run(&args(), Some(&proj)).unwrap();
+
+    assert!(
+        !tmp.path().join("home/.claude.json").exists(),
+        "setup in a non-interactive shell must not touch live CLI config"
+    );
+}
+
+#[test]
+fn setup_does_not_run_init_without_a_terminal() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    set_home(&tmp.path().join("home"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+
+    // No manifest yet, and no terminal: setup is interactive-only and should not
+    // run `init` or otherwise write files.
+    setup::run(&args(), Some(&proj)).unwrap();
+
+    let created =
+        proj.join(".agentstack/agentstack.toml").exists() || proj.join("agentstack.toml").exists();
+    assert!(
+        !created,
+        "setup must not run init or create a manifest without a terminal"
+    );
+    assert!(
+        !tmp.path().join("home/.claude.json").exists(),
+        "setup must not write live config without a terminal"
+    );
+}

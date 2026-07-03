@@ -15,13 +15,17 @@ use crate::render::{
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 
-/// What a render pass observed, so `run` can decide whether to prompt.
-struct Outcome {
+/// What a render pass observed, so callers can decide whether to prompt.
+pub(crate) struct Outcome {
     /// How many targets (across servers/settings/hooks) have pending changes.
-    changed_count: usize,
+    pub changed_count: usize,
     /// Structural validation errors — nothing will be written until fixed, so
     /// there is nothing to confirm.
-    blocked: bool,
+    pub validation_errors: bool,
+    /// Unresolved secrets that would block at least one write. `apply` may still
+    /// let a user confirm a partial write; setup uses this to stop before any
+    /// newcomer wizard write.
+    pub write_blockers: usize,
 }
 
 pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
@@ -43,7 +47,7 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // Interactive default: show the dry-run diff (no re-run hint), then offer to
     // apply it in place.
     let outcome = render(args, manifest_dir, false, false, false)?;
-    if outcome.changed_count == 0 || outcome.blocked {
+    if outcome.changed_count == 0 || outcome.validation_errors {
         return Ok(());
     }
     if crate::util::confirm::confirm("\nApply these changes?")? {
@@ -53,6 +57,12 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
         println!("Not written. Re-run with {} to apply.", "--write".bold());
     }
     Ok(())
+}
+
+/// Show the dry-run diff without the "re-run with `--write`" hint, for a caller
+/// (e.g. `setup`) that shows this preview and then drives its own confirm.
+pub(crate) fn preview(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<Outcome> {
+    render(args, manifest_dir, false, false, false)
 }
 
 /// One render pass. `want_write` requests a write (still gated on validation);
@@ -104,7 +114,8 @@ fn render(
         }
         return Ok(Outcome {
             changed_count: 0,
-            blocked: has_errors,
+            validation_errors: has_errors,
+            write_blockers: 0,
         });
     }
 
@@ -112,6 +123,7 @@ fn render(
     let mut state = State::load()?;
     let mut changed_count = 0;
     let mut error_count = 0;
+    let mut write_blockers = 0;
     // Pre-write snapshots of every file we touch, grouped into one undoable
     // history entry for this apply.
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
@@ -163,6 +175,9 @@ fn render(
         }
         // Unresolved `${REF}`s must never reach a live config file.
         let blocked = !plan.unresolved.is_empty() && !args.allow_unresolved;
+        if blocked {
+            write_blockers += 1;
+        }
 
         if plan.changed() {
             changed_count += 1;
@@ -228,6 +243,9 @@ fn render(
                 error_count += 1;
             }
             let sblocked = !sp.unresolved.is_empty() && !args.allow_unresolved;
+            if sblocked {
+                write_blockers += 1;
+            }
             for r in &sp.removed {
                 println!(
                     "  {} pruning setting '{r}' (no longer in manifest)",
@@ -274,6 +292,9 @@ fn render(
                 error_count += 1;
             }
             let hblocked = !hp.unresolved.is_empty() && !args.allow_unresolved;
+            if hblocked {
+                write_blockers += 1;
+            }
             if hp.changed() {
                 changed_count += 1;
                 println!("  {} hooks → {}", "·".dimmed(), hp.path.display());
@@ -342,7 +363,8 @@ fn render(
 
     Ok(Outcome {
         changed_count,
-        blocked: has_errors,
+        validation_errors: has_errors,
+        write_blockers,
     })
 }
 

@@ -76,6 +76,14 @@ pub enum Command {
     /// Open the local web dashboard.
     Dashboard(DashboardArgs),
 
+    // The one-command newcomer path: imports if needed, previews, confirms,
+    // applies, verifies. Hidden for now (it orchestrates the everyday commands);
+    // promote to the shown list once the flow has proven out.
+    /// Guided one-command setup: import if needed, configure, preview, confirm,
+    /// apply, then verify — the everyday loop behind a single command.
+    #[command(hide = true)]
+    Setup(SetupArgs),
+
     // ── Capabilities & library (hidden from --help; see the after_help map) ─
     /// Remove a server or skill from the manifest (and lockfile).
     #[command(hide = true)]
@@ -424,6 +432,24 @@ pub struct BootstrapArgs {
     /// preflight plus diff preview.
     #[arg(long)]
     pub write: bool,
+}
+
+/// `setup` is the interactive newcomer wizard; it deliberately has no `--write`
+/// (it confirms in a terminal and stays dry-run everywhere else). Scripts use
+/// `init` + `bootstrap --write`.
+#[derive(Args, Debug)]
+pub struct SetupArgs {
+    /// Only configure these target ids (repeatable). Defaults to [targets].default.
+    #[arg(long = "target", value_name = "ID")]
+    pub targets: Vec<String>,
+
+    /// Configure only the servers in this profile.
+    #[arg(long, value_name = "NAME")]
+    pub profile: Option<String>,
+
+    /// Which scope to write: global (~) or project (repo). Defaults to global.
+    #[arg(long, value_enum)]
+    pub scope: Option<Scope>,
 }
 
 #[derive(Args, Debug)]
