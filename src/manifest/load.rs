@@ -403,10 +403,7 @@ mod tests {
         .unwrap();
         let inner = proj.join("src");
         fs::create_dir_all(&inner).unwrap();
-        assert_eq!(
-            discover_project_base_below(&inner, Some(&home)),
-            Some(proj)
-        );
+        assert_eq!(discover_project_base_below(&inner, Some(&home)), Some(proj));
 
         match prev_as_home {
             Some(v) => std::env::set_var("AGENTSTACK_HOME", v),

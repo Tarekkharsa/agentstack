@@ -242,9 +242,11 @@ fn doctor_accepts_a_project_compiled_at_project_scope() {
         .iter()
         .find(|s| s["title"] == "Instructions")
         .expect("Instructions section");
-    let stale = instr["lines"].as_array().unwrap().iter().any(|l| {
-        l["level"] == "warn" && l["msg"].as_str().unwrap().contains("stale")
-    });
+    let stale = instr["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|l| l["level"] == "warn" && l["msg"].as_str().unwrap().contains("stale"));
     assert!(
         !stale,
         "in-sync project-scope compile must not warn stale: {report}"
@@ -266,7 +268,10 @@ fn doctor_accepts_a_project_compiled_at_project_scope() {
                 .unwrap()
                 .contains("agentstack instructions --write")
     });
-    assert!(stale, "a genuinely stale region should still warn: {report}");
+    assert!(
+        stale,
+        "a genuinely stale region should still warn: {report}"
+    );
 
     std::env::remove_var("AGENTSTACK_HOME");
     std::env::remove_var("HOME");
