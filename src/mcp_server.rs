@@ -836,8 +836,23 @@ fn doctor_summary(dir: Option<&Path>) -> Result<String> {
         .iter()
         .filter(|n| ctx.resolver.resolve(n).is_some())
         .count();
+    // The trust gate decides whether this project's servers are proxied at all
+    // in auto mode — without this line an agent can't tell a healthy-but-empty
+    // stack from a gated one.
+    let base = crate::manifest::project_root_of(&ctx.dir);
+    let trust = match crate::trust::check(&base) {
+        crate::trust::TrustState::Trusted => "trusted (servers are proxied in auto mode)".into(),
+        crate::trust::TrustState::Changed => format!(
+            "manifest changed since trusted — servers are NOT proxied in auto mode until a human re-runs `agentstack trust {}`",
+            base.display()
+        ),
+        crate::trust::TrustState::Untrusted => format!(
+            "not trusted — servers are NOT proxied in auto mode until a human runs `agentstack trust {}`",
+            base.display()
+        ),
+    };
     Ok(format!(
-        "Harnesses installed: {installed}/{}\nServers: {}\nSkills: {}\nSecrets resolved: {resolved}/{}",
+        "Harnesses installed: {installed}/{}\nServers: {}\nSkills: {}\nSecrets resolved: {resolved}/{}\nTrust (auto mode): {trust}",
         ctx.registry.ids().count(),
         m.servers.len(),
         m.skills.len(),
@@ -1450,6 +1465,31 @@ mod tests {
         );
         assert!(auto.trust_note().is_none(), "trusted → no note");
         auto.shutdown();
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn doctor_summary_reports_trust_state() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
+            .unwrap();
+
+        let text = doctor_summary(Some(proj.path())).unwrap();
+        assert!(text.contains("Trust (auto mode): not trusted"), "{text}");
+        assert!(text.contains("agentstack trust"), "{text}");
+
+        crate::trust::trust(proj.path()).unwrap();
+        let text = doctor_summary(Some(proj.path())).unwrap();
+        assert!(text.contains("Trust (auto mode): trusted"), "{text}");
 
         std::env::remove_var("AGENTSTACK_HOME");
     }
