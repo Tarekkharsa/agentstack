@@ -55,6 +55,7 @@ fn run() -> Result<()> {
         Command::Trust(args) => commands::trust::run(args),
         Command::Codemode(args) => commands::codemode::run(args, dir),
         Command::Hook(args) => commands::hook::run(args),
+        Command::SelfCmd(args) => commands::self_cmd::run(args),
         Command::Run(args) => commands::runs::run(args, dir),
         Command::Runs(args) => commands::runs::list(args),
         Command::Kill(args) => commands::runs::kill(args),
