@@ -132,6 +132,7 @@ fn install_dir(explicit: Option<&Path>) -> Result<PathBuf> {
         .join(".local/bin"))
 }
 
+#[derive(Debug)]
 enum LinkOutcome {
     AlreadyLinked,
     Created,
@@ -139,15 +140,28 @@ enum LinkOutcome {
     Replaced(PathBuf),
 }
 
-/// Point `dest` at `exe`. A dest that already resolves to `exe` is a no-op;
-/// symlinks are ours to re-point freely (that's the rebuild/upgrade path); a
-/// foreign regular file needs `--force`.
+/// Point `dest` at `exe`. A dest that already resolves to `exe` is a no-op.
+/// Without `--force`, only a dest that looks like a previous self-link is
+/// replaced (that's the rebuild/upgrade path): a symlink whose target is an
+/// agentstack binary or no longer exists (see [`symlink_is_ours`]), or a
+/// copied link carrying our marker (see [`copy_marker`]). Anything else — a
+/// symlink somebody pointed at an unrelated tool, or a foreign regular file —
+/// needs `--force`.
 fn link_into(exe: &Path, dest: &Path, force: bool) -> Result<LinkOutcome> {
     if let Ok(meta) = std::fs::symlink_metadata(dest) {
         if dest.canonicalize().ok().as_deref() == Some(exe) {
             return Ok(LinkOutcome::AlreadyLinked);
         }
-        if !meta.file_type().is_symlink() && !force {
+        if meta.file_type().is_symlink() {
+            if !force && !symlink_is_ours(dest) {
+                let target = std::fs::read_link(dest).unwrap_or_else(|_| dest.to_path_buf());
+                anyhow::bail!(
+                    "{} is a symlink to {} — not an agentstack binary; re-point it with --force",
+                    dest.display(),
+                    target.display()
+                );
+            }
+        } else if !force && !copy_marker(dest).exists() {
             anyhow::bail!(
                 "{} exists and is not a symlink — not overwriting a real file without --force",
                 dest.display()
@@ -155,11 +169,40 @@ fn link_into(exe: &Path, dest: &Path, force: bool) -> Result<LinkOutcome> {
         }
         let old = std::fs::read_link(dest).unwrap_or_else(|_| dest.to_path_buf());
         std::fs::remove_file(dest).with_context(|| format!("removing {}", dest.display()))?;
+        // Drop any stale copy marker; `make_link` re-creates it on platforms
+        // that copy instead of symlinking.
+        let _ = std::fs::remove_file(copy_marker(dest));
         make_link(exe, dest)?;
         return Ok(LinkOutcome::Replaced(old));
     }
     make_link(exe, dest)?;
     Ok(LinkOutcome::Created)
+}
+
+/// True when the existing symlink at `dest` is safe to re-point without
+/// `--force`: its target's file name is the agentstack binary name (a
+/// previous build of us — where it lives doesn't matter) or the target no
+/// longer exists (stale link, nothing left to protect). A symlink to an
+/// unrelated binary is somebody else's wiring.
+fn symlink_is_ours(dest: &Path) -> bool {
+    let Ok(target) = std::fs::read_link(dest) else {
+        return false;
+    };
+    if dest.canonicalize().is_err() {
+        return true;
+    }
+    target.file_name() == Some(std::ffi::OsStr::new(&bin_name()))
+}
+
+/// Sidecar written next to a copied (non-unix) link — `agentstack.exe.self-link`
+/// — marking the copy as agentstack's own, so a `self link` re-run after a
+/// rebuild replaces it without `--force`. Chosen over always-allowing
+/// replacement on non-unix so a real agentstack binary someone installed by
+/// hand (no marker) stays protected.
+fn copy_marker(dest: &Path) -> PathBuf {
+    let mut name = dest.file_name().unwrap_or_default().to_os_string();
+    name.push(".self-link");
+    dest.with_file_name(name)
 }
 
 #[cfg(unix)]
@@ -169,12 +212,16 @@ fn make_link(exe: &Path, dest: &Path) -> Result<()> {
 }
 
 /// Windows symlinks need elevation; a copy is the portable equivalent
-/// (re-run `self link` after a rebuild).
+/// (re-run `self link` after a rebuild). The sidecar marker tags the copy as
+/// ours so that re-run replaces it without `--force` (see [`copy_marker`]).
 #[cfg(not(unix))]
 fn make_link(exe: &Path, dest: &Path) -> Result<()> {
     std::fs::copy(exe, dest)
         .map(|_| ())
-        .with_context(|| format!("copying {} → {}", exe.display(), dest.display()))
+        .with_context(|| format!("copying {} → {}", exe.display(), dest.display()))?;
+    // Best-effort: without the marker the next re-link just needs --force.
+    let _ = std::fs::write(copy_marker(dest), format!("{}\n", exe.display()));
+    Ok(())
 }
 
 /// True when `dir` is writable by this user — the `[ -w ]` check install.sh
@@ -265,7 +312,8 @@ mod tests {
             LinkOutcome::AlreadyLinked
         ));
 
-        // A symlink to some other binary is re-pointed without --force.
+        // A symlink to an older agentstack build (target named like our
+        // binary) is re-pointed without --force — the rebuild/upgrade path.
         let other = tmp.child("old/agentstack");
         other.write_str("#!old").unwrap();
         std::fs::remove_file(&dest).unwrap();
@@ -285,6 +333,81 @@ mod tests {
             LinkOutcome::Replaced(_)
         ));
         assert_eq!(dest.canonicalize().unwrap(), exe);
+    }
+
+    /// A symlink named `agentstack` that somebody pointed at an unrelated
+    /// binary is their wiring, not ours — re-pointing it takes --force. A
+    /// broken symlink (target gone) protects nothing and re-points freely.
+    #[cfg(unix)]
+    #[test]
+    fn link_into_guards_unrelated_symlinks_but_repoints_broken_ones() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let exe = tmp.child("build/agentstack");
+        exe.write_str("#!binary").unwrap();
+        let exe = exe.path().canonicalize().unwrap();
+        let dest = tmp.path().join("bin/agentstack");
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+
+        // dest → an unrelated tool: refused without --force, left untouched.
+        let other = tmp.child("tools/kubectl");
+        other.write_str("#!other").unwrap();
+        std::os::unix::fs::symlink(other.path(), &dest).unwrap();
+        let err = link_into(&exe, &dest, false).unwrap_err();
+        assert!(
+            err.to_string().contains("--force"),
+            "error must point at --force, got: {err}"
+        );
+        assert_eq!(
+            std::fs::read_link(&dest).unwrap(),
+            other.path(),
+            "refused link must be left untouched"
+        );
+
+        // --force re-points it.
+        assert!(matches!(
+            link_into(&exe, &dest, true).unwrap(),
+            LinkOutcome::Replaced(_)
+        ));
+        assert_eq!(dest.canonicalize().unwrap(), exe);
+
+        // dest → a target that no longer exists (whatever its name): stale,
+        // re-pointed without --force.
+        std::fs::remove_file(&dest).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("gone/some-old-tool"), &dest).unwrap();
+        assert!(matches!(
+            link_into(&exe, &dest, false).unwrap(),
+            LinkOutcome::Replaced(_)
+        ));
+        assert_eq!(dest.canonicalize().unwrap(), exe);
+    }
+
+    /// A previous non-unix `self link` leaves a copy plus a marker sidecar
+    /// (see `copy_marker`). Re-running after a rebuild must replace that copy
+    /// without --force — and clean the marker up when the replacement is a
+    /// real symlink.
+    #[cfg(unix)]
+    #[test]
+    fn link_into_replaces_marked_copy_without_force() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let exe = tmp.child("build/agentstack");
+        exe.write_str("#!binary").unwrap();
+        let exe = exe.path().canonicalize().unwrap();
+        let dest = tmp.path().join("bin/agentstack");
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+
+        // What non-unix make_link leaves behind: the copied binary + marker.
+        std::fs::write(&dest, "old copied build").unwrap();
+        std::fs::write(copy_marker(&dest), "/old/build/agentstack\n").unwrap();
+
+        assert!(matches!(
+            link_into(&exe, &dest, false).unwrap(),
+            LinkOutcome::Replaced(_)
+        ));
+        assert_eq!(dest.canonicalize().unwrap(), exe);
+        assert!(
+            !copy_marker(&dest).exists(),
+            "stale marker cleaned up once dest is a real symlink"
+        );
     }
 
     #[test]
