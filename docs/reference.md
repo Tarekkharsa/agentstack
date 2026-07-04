@@ -258,6 +258,10 @@ Trust is pinned to the manifest's content digest (including
 to control-plane-only until re-trusted. Explicit `--manifest-dir` skips the gate
 (naming a directory is the consent), matching plain `agentstack mcp`.
 
+The gate is visible from inside the session, not just on stderr: when the
+project is untrusted (or its manifest changed since it was trusted),
+`tools_search` says so and names the exact `agentstack trust <dir>` command.
+
 Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
 skills-over-MCP (`agentstack_list_loadable`/`agentstack_load`) are fully
 zero-copy. Native skill folders and instruction files (`CLAUDE.md`/`AGENTS.md`)

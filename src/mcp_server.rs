@@ -57,7 +57,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             let Ok(req) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
-            if let Some(resp) = handle(&req, dir.as_deref(), &gateway) {
+            if let Some(resp) = handle(&req, dir.as_deref(), &gateway, None) {
                 writeln!(out, "{}", serde_json::to_string(&resp)?)?;
                 out.flush()?;
             }
@@ -101,7 +101,12 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             "tools/call" => auto.ensure_gateway(),
             _ => {}
         }
-        if let Some(resp) = handle(&req, auto.dir(), auto.gateway()) {
+        if let Some(resp) = handle(
+            &req,
+            auto.dir(),
+            auto.gateway(),
+            auto.trust_note().as_deref(),
+        ) {
             writeln!(out, "{}", serde_json::to_string(&resp)?)?;
             out.flush()?;
         }
@@ -127,6 +132,9 @@ struct AutoProject {
     /// Only the *runtime* surface (spawning/contacting servers, resolving
     /// secrets, code mode) is trust-gated.
     dir: Option<PathBuf>,
+    /// The trust decision made at gateway-build time — kept so responses can
+    /// say *why* nothing is proxied instead of leaving it on stderr only.
+    trust: Option<crate::trust::TrustState>,
     gateway: crate::gateway::Gateway,
     built: bool,
     runtime: Option<crate::codemode::endpoint::RuntimeHandle>,
@@ -140,6 +148,7 @@ impl AutoProject {
             roots_requested: false,
             roots: Vec::new(),
             dir: None,
+            trust: None,
             gateway: crate::gateway::Gateway::empty(),
             built: false,
             runtime: None,
@@ -214,7 +223,9 @@ impl AutoProject {
             return;
         };
         self.dir = Some(base.clone());
-        match crate::trust::check(&base) {
+        let state = crate::trust::check(&base);
+        self.trust = Some(state.clone());
+        match state {
             crate::trust::TrustState::Trusted => self.activate(&base),
             crate::trust::TrustState::Changed => eprintln!(
                 "agentstack mcp: {} was trusted but its manifest CHANGED since — control-plane tools only. Review it, then re-run `agentstack trust {}`.",
@@ -226,6 +237,21 @@ impl AutoProject {
                 base.display(),
                 base.display()
             ),
+        }
+    }
+
+    /// Why the proxied surface is empty, when the reason is the trust gate.
+    /// `None` when trusted, undecided, or when there is no project at all.
+    fn trust_note(&self) -> Option<String> {
+        let dir = self.dir.as_ref()?.display();
+        match self.trust.as_ref()? {
+            crate::trust::TrustState::Trusted => None,
+            crate::trust::TrustState::Untrusted => Some(format!(
+                "This project ({dir}) is not trusted for auto mode, so none of its MCP servers are proxied (spawned or contacted). Ask a human to review the manifest and run `agentstack trust {dir}` to enable them."
+            )),
+            crate::trust::TrustState::Changed => Some(format!(
+                "This project ({dir}) was trusted, but its manifest changed since — its MCP servers are not proxied until it is re-trusted. Ask a human to review the change and re-run `agentstack trust {dir}`."
+            )),
         }
     }
 
@@ -322,7 +348,12 @@ fn protocol_writer() -> Box<dyn Write> {
     Box::new(std::io::stdout())
 }
 
-fn handle(req: &Value, dir: Option<&Path>, gateway: &crate::gateway::Gateway) -> Option<Value> {
+fn handle(
+    req: &Value,
+    dir: Option<&Path>,
+    gateway: &crate::gateway::Gateway,
+    trust_note: Option<&str>,
+) -> Option<Value> {
     let id = req.get("id").cloned();
     let method = req.get("method")?.as_str()?;
     match method {
@@ -356,7 +387,7 @@ fn handle(req: &Value, dir: Option<&Path>, gateway: &crate::gateway::Gateway) ->
             if name == "tools_search" {
                 return Some(result(
                     id,
-                    json!({ "content": [{ "type": "text", "text": tools_search_text(gateway, &args) }], "isError": false }),
+                    json!({ "content": [{ "type": "text", "text": tools_search_text(gateway, &args, trust_note) }], "isError": false }),
                 ));
             }
             // Code-mode binding generation also needs the gateway. Generator, not
@@ -671,7 +702,12 @@ fn search_text(query: &str) -> String {
 /// Route a `tools_search` call. With `entity` set it returns one tool's full
 /// detail (the single-tool depth); otherwise it returns a ranked compact list
 /// for `query`. Strictly read-only over the gateway's proxied surface.
-fn tools_search_text(gateway: &crate::gateway::Gateway, args: &Value) -> String {
+/// `trust_note` explains an empty surface caused by the trust gate.
+fn tools_search_text(
+    gateway: &crate::gateway::Gateway,
+    args: &Value,
+    trust_note: Option<&str>,
+) -> String {
     if let Some(entity) = args
         .get("entity")
         .and_then(Value::as_str)
@@ -691,21 +727,31 @@ fn tools_search_text(gateway: &crate::gateway::Gateway, args: &Value) -> String 
         .and_then(Value::as_u64)
         .map(|n| n as usize);
     let hits = gateway.search(query, limit);
-    format_hits(query, &hits, max_response)
+    format_hits(query, &hits, max_response, trust_note)
 }
 
 /// Compact ranked cards: one line per tool with its name, summary, and the entity
 /// ref to inspect it. `max_response` trims the lowest-ranked tail (cards are
 /// emitted best-first) so the response stays small, noting what was omitted.
-fn format_hits(query: &str, hits: &[crate::gateway::Hit], max_response: Option<usize>) -> String {
+/// With zero hits and a `trust_note`, the note IS the answer — the surface is
+/// empty because the project isn't trusted, not because it proxies nothing.
+fn format_hits(
+    query: &str,
+    hits: &[crate::gateway::Hit],
+    max_response: Option<usize>,
+    trust_note: Option<&str>,
+) -> String {
     if hits.is_empty() {
+        if let Some(note) = trust_note {
+            return format!("No proxied tools available. {note}");
+        }
         let scope = if query.trim().is_empty() {
             "This project proxies no upstream MCP tools.".to_string()
         } else {
             format!("No proxied tools match '{query}'.")
         };
         return format!(
-            "{scope} (Proxied tools come from the HTTP MCP servers your manifest declares.)"
+            "{scope} (Proxied tools come from the MCP servers your manifest declares.)"
         );
     }
     let mut out = format!(
@@ -1141,7 +1187,7 @@ mod tests {
     fn initialize_returns_server_info() {
         let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" });
         let gw = crate::gateway::Gateway::empty();
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         assert_eq!(resp["result"]["serverInfo"]["name"], "agentstack");
         assert_eq!(resp["id"], 1);
     }
@@ -1150,7 +1196,7 @@ mod tests {
     fn tools_list_includes_search_and_add() {
         let req = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" });
         let gw = crate::gateway::Gateway::empty();
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let names: Vec<&str> = resp["result"]["tools"]
             .as_array()
             .unwrap()
@@ -1190,7 +1236,7 @@ mod tests {
     fn notifications_get_no_response() {
         let req = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
         let gw = crate::gateway::Gateway::empty();
-        assert!(handle(&req, None, &gw).is_none());
+        assert!(handle(&req, None, &gw, None).is_none());
     }
 
     /// A namespaced fixture tool, shaped like the gateway's discovered cache.
@@ -1207,7 +1253,7 @@ mod tests {
         // control-plane tools — the proxied surface hides behind tools_search.
         let gw = crate::gateway::Gateway::with_tools(proxied_fixture());
         let req = json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/list" });
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let names: Vec<&str> = resp["result"]["tools"]
             .as_array()
             .unwrap()
@@ -1226,7 +1272,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 8, "method": "tools/call",
             "params": { "name": "tools_search", "arguments": { "query": "file" } }
         });
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("figma__get_file"));
         assert!(text.contains("entity=\"figma__get_file:tool\""));
@@ -1240,7 +1286,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 9, "method": "tools/call",
             "params": { "name": "tools_search", "arguments": { "entity": "figma__get_file:tool" } }
         });
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("**Server:** figma"));
         assert!(text.contains("fileKey"));
@@ -1250,9 +1296,46 @@ mod tests {
             "jsonrpc": "2.0", "id": 10, "method": "tools/call",
             "params": { "name": "tools_search", "arguments": { "entity": "figma__nope:tool" } }
         });
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("No proxied tool matches"));
+    }
+
+    #[test]
+    fn tools_search_empty_surface_names_the_trust_command_when_untrusted() {
+        let gw = crate::gateway::Gateway::empty();
+        let note = "This project (/tmp/repo) is not trusted for auto mode, so none of its MCP servers are proxied (spawned or contacted). Ask a human to review the manifest and run `agentstack trust /tmp/repo` to enable them.";
+        for args in [json!({}), json!({ "query": "figma" })] {
+            let req = json!({
+                "jsonrpc": "2.0", "id": 12, "method": "tools/call",
+                "params": { "name": "tools_search", "arguments": args }
+            });
+            let resp = handle(&req, None, &gw, Some(note)).unwrap();
+            let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(text.contains("agentstack trust /tmp/repo"), "got: {text}");
+            assert!(
+                !text.contains("proxies no upstream"),
+                "the misleading no-tools message must not appear when the gate is the cause"
+            );
+        }
+    }
+
+    #[test]
+    fn tools_search_empty_surface_without_trust_note_stays_neutral() {
+        // No trust note (eager mode, or a trusted project with no servers) —
+        // the plain message, without the stale HTTP-only claim.
+        let gw = crate::gateway::Gateway::empty();
+        let req = json!({
+            "jsonrpc": "2.0", "id": 13, "method": "tools/call",
+            "params": { "name": "tools_search", "arguments": {} }
+        });
+        let resp = handle(&req, None, &gw, None).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("proxies no upstream MCP tools"));
+        assert!(
+            !text.contains("HTTP MCP servers"),
+            "stdio shipped — wording"
+        );
     }
 
     #[test]
@@ -1262,7 +1345,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 11, "method": "tools/call",
             "params": { "name": "tools_bindings", "arguments": {} }
         });
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         // The generated client + shim + recipe, all secret-free.
         assert!(text.contains("export const codemode = {"));
@@ -1353,6 +1436,8 @@ mod tests {
         auto.ensure_gateway();
         assert_eq!(auto.dir(), Some(proj.path()));
         assert!(auto.gateway().is_empty(), "untrusted → empty gateway");
+        let note = auto.trust_note().expect("untrusted → a trust note");
+        assert!(note.contains("agentstack trust"), "got: {note}");
 
         // Trusted: the same discovery now builds a live gateway.
         crate::trust::trust(proj.path()).unwrap();
@@ -1363,6 +1448,7 @@ mod tests {
             !auto.gateway().is_empty(),
             "trusted → gateway proxies the manifest"
         );
+        assert!(auto.trust_note().is_none(), "trusted → no note");
         auto.shutdown();
 
         std::env::remove_var("AGENTSTACK_HOME");
@@ -1398,7 +1484,7 @@ mod tests {
             "params": { "name": "agentstack_search", "arguments": { "query": "github" } }
         });
         let gw = crate::gateway::Gateway::empty();
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("github"));
         assert_eq!(resp["result"]["isError"], false);
