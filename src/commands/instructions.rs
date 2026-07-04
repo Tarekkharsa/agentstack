@@ -30,6 +30,7 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
         );
     }
     let mut changed = 0;
+    let mut blocked = 0;
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -74,8 +75,16 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
                     .collect::<String>()
             );
             if args.write {
-                plan.write()?;
-                println!("  {} wrote managed region", "✓".green());
+                // A missing fragment source blocks the write, like apply:
+                // compiling without it would silently delete that fragment's
+                // previously compiled content from the managed region.
+                if plan.missing.is_empty() {
+                    plan.write()?;
+                    println!("  {} wrote managed region", "✓".green());
+                } else {
+                    blocked += 1;
+                    println!("  {} not written — missing fragment source(s)", "✗".red());
+                }
             } else {
                 println!("  {} would update managed region", "→".cyan());
             }
@@ -92,6 +101,9 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
             "{changed} instruction file(s) would change. Re-run with {} to write.",
             "--write".bold()
         );
+    }
+    if blocked > 0 {
+        anyhow::bail!("{blocked} instruction file(s) not written — missing fragment source(s)");
     }
     Ok(())
 }

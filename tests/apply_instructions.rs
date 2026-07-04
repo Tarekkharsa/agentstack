@@ -309,3 +309,52 @@ fn doctor_ci_fails_on_a_missing_fragment_source() {
     std::env::remove_var("AGENTSTACK_HOME");
     std::env::remove_var("HOME");
 }
+
+#[test]
+fn standalone_instructions_write_blocks_on_missing_fragment_sources() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("instructions")).unwrap();
+    fs::write(proj.join("instructions/house.md"), "House rule one.\n").unwrap();
+    fs::write(proj.join("instructions/extra.md"), "Extra rule two.\n").unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [instructions.house]\npath = \"./instructions/house.md\"\n\
+         [instructions.extra]\npath = \"./instructions/extra.md\"\n",
+    )
+    .unwrap();
+    let iargs = agentstack::cli::InstructionsArgs {
+        targets: vec!["claude-code".into()],
+        scope: Some(Scope::Global),
+        write: true,
+    };
+
+    // First compile lands both fragments.
+    agentstack::commands::instructions::run(&iargs, Some(&proj)).unwrap();
+    let file = home.join(".claude/CLAUDE.md");
+    let before = fs::read_to_string(&file).unwrap();
+    assert!(before.contains("House rule one."));
+    assert!(before.contains("Extra rule two."));
+
+    // A partially missing source must BLOCK the write — compiling without it
+    // would silently drop its content from the managed region.
+    fs::remove_file(proj.join("instructions/extra.md")).unwrap();
+    let err = agentstack::commands::instructions::run(&iargs, Some(&proj)).unwrap_err();
+    assert!(
+        err.to_string().contains("missing fragment source"),
+        "got: {err:#}"
+    );
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        before,
+        "managed region untouched when a source is missing"
+    );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
