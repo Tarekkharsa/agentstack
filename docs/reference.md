@@ -92,9 +92,17 @@ The complete, implemented-and-tested feature inventory. The
 - **Selective skills** via profiles — `use <profile>` materializes only that
   profile's skills (symlink, with copy fallback), pruning the rest it owns and
   never clobbering hand-made skill dirs.
-- **Instruction files** — compile shared + harness-specific fragments into each
-  CLI's `CLAUDE.md` / `AGENTS.md`, inside a managed `<!-- agentstack -->` region
-  that preserves all surrounding hand-written prose.
+- **Instruction files** — compile shared + harness-specific `[instructions.*]`
+  fragments into each CLI's `CLAUDE.md` / `AGENTS.md`, inside a managed
+  `<!-- agentstack -->` region that preserves all surrounding hand-written
+  prose (`agentstack instructions`; dry-run by default, `--write` applies).
+- **Machine-level manifest (`init --global`)** — seeds
+  `~/.agentstack/agentstack.toml` plus an `instructions/` dir: a first-class
+  home for *personal*, cross-project instruction fragments (the operational
+  knowledge you'd otherwise re-teach each agent). Compile them with
+  `agentstack instructions --manifest-dir ~ --write`. The zero-files bridge
+  deliberately never discovers this layer as a project — it cannot be
+  `trust`ed or activated by `mcp --auto-project`.
 - **Native settings** — manage each CLI's own settings file (Claude Code
   `~/.claude/settings.json` permissions/feature flags, Codex `config.toml`) from
   one `[settings.<cli>]` block. `apply` merges only the keys you declare into the
@@ -324,7 +332,7 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 
 ## All commands
 
-`init`, `add`, `install` (`--locked`, `--allow-flagged`), `update`, `remove`,
+`init` (`--global`), `add`, `install` (`--locked`, `--allow-flagged`), `update`, `remove`,
 `upgrade`, `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
 `lib add|add-server|list|remove|remove-server|migrate`, `restore`,

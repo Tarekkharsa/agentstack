@@ -41,6 +41,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
         println!("\nNo manifest here yet — importing the setup already on this machine.\n");
         super::init::run_for_setup(
             &InitArgs {
+                global: false,
                 force: false,
                 dry_run: false,
                 no_keychain: false,

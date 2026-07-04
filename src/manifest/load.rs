@@ -50,9 +50,21 @@ pub fn new_manifest_dir(base: &Path) -> PathBuf {
 /// hand to [`resolve_manifest_dir`] / `commands::load` — not the manifest dir.
 /// This is how the zero-files bridge follows the agent into a repo when it was
 /// launched from a subdirectory (or a GUI harness's own cwd).
+///
+/// The walk stops AT the `$HOME` layer without matching it: the home manifest
+/// (`~/.agentstack/agentstack.toml`, seeded by `init --global`) is the personal
+/// machine-level layer, not a project — it must never be discovered (and so
+/// never offered for `trust`, never activated) by the zero-files bridge.
 pub fn discover_project_base(start: &Path) -> Option<PathBuf> {
+    discover_project_base_below(start, dirs::home_dir().as_deref())
+}
+
+fn discover_project_base_below(start: &Path, home: Option<&Path>) -> Option<PathBuf> {
     let mut cur = Some(start);
     while let Some(dir) = cur {
+        if home == Some(dir) {
+            return None;
+        }
         if dir.join(MANIFEST_SUBDIR).join(MANIFEST_FILE).exists()
             || dir.join(MANIFEST_FILE).exists()
         {
@@ -189,6 +201,38 @@ mod tests {
         // the system temp root, which carries no manifest.)
         let bare = assert_fs::TempDir::new().unwrap();
         assert_eq!(discover_project_base(bare.path()), None);
+    }
+
+    #[test]
+    fn discover_never_surfaces_the_home_layer() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        // The machine-level manifest lives at ~/.agentstack/agentstack.toml…
+        fs::create_dir_all(home.join(MANIFEST_SUBDIR)).unwrap();
+        fs::write(
+            home.join(MANIFEST_SUBDIR).join(MANIFEST_FILE),
+            "version = 1\n",
+        )
+        .unwrap();
+        let deep = home.join("code/somewhere/deep");
+        fs::create_dir_all(&deep).unwrap();
+
+        // …but it is not a project: the walk-up stops at $HOME empty-handed,
+        // from a subdirectory and from $HOME itself.
+        assert_eq!(discover_project_base_below(&deep, Some(&home)), None);
+        assert_eq!(discover_project_base_below(&home, Some(&home)), None);
+
+        // A real project below $HOME is still discovered normally.
+        let proj = home.join("code/proj");
+        fs::create_dir_all(proj.join(MANIFEST_SUBDIR)).unwrap();
+        fs::write(
+            proj.join(MANIFEST_SUBDIR).join(MANIFEST_FILE),
+            "version = 1\n",
+        )
+        .unwrap();
+        let inner = proj.join("src");
+        fs::create_dir_all(&inner).unwrap();
+        assert_eq!(discover_project_base_below(&inner, Some(&home)), Some(proj));
     }
 
     #[test]

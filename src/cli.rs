@@ -25,7 +25,7 @@ The list above is the everyday surface. Everything else is grouped below —
 run `agentstack <command> --help` for any of them:
 
   Capabilities & library   remove · install · update · upgrade · lib · consolidate · adopt
-  Activate & run           use · session · run · runs · kill · hook · instructions
+  Activate & run           use · session · run · runs · kill · hook
   Zero-files bridge        connect · trust · disconnect · mcp · codemode
   Inspect & tune           diff · explain · audit · optimize · stats · restore · secret
   Share & extend           export · import · pack · plugins · adapters"
@@ -74,6 +74,11 @@ pub enum Command {
     /// Shows the diff first. In a terminal, asks before writing; pass `--write`
     /// to apply directly.
     Apply(ApplyArgs),
+
+    /// Compile [instructions.*] fragments into each harness's CLAUDE.md /
+    /// AGENTS.md (a managed region; hand-written prose is preserved). Dry-run
+    /// by default; `--write` applies.
+    Instructions(InstructionsArgs),
 
     /// Verify everything is wired up: adapters, secrets, drift, quirks, skills.
     Doctor(DoctorArgs),
@@ -139,10 +144,6 @@ pub enum Command {
     /// Print a shell hook for per-directory profile auto-activation.
     #[command(hide = true)]
     Hook(HookArgs),
-
-    /// Compile instruction fragments into each harness's CLAUDE.md / AGENTS.md.
-    #[command(hide = true)]
-    Instructions(InstructionsArgs),
 
     // ── Zero-files bridge ────────────────────────────────────────────────
     /// Register the agentstack gateway once, globally, in a harness's MCP
@@ -524,6 +525,13 @@ pub struct AddSkillArgs {
 
 #[derive(Args, Debug)]
 pub struct InitArgs {
+    /// Seed the machine-level manifest (`~/.agentstack/agentstack.toml`)
+    /// instead of importing a project: an empty [instructions] block plus an
+    /// `instructions/` dir for personal, cross-project fragments compiled into
+    /// each CLI's global CLAUDE.md / AGENTS.md. Nothing is imported.
+    #[arg(long)]
+    pub global: bool,
+
     /// Overwrite an existing agentstack.toml.
     #[arg(long)]
     pub force: bool,

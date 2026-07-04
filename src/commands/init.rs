@@ -87,7 +87,78 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
 }
 
 pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    if args.global {
+        return run_global(args);
+    }
     run_impl(args, manifest_dir, true)
+}
+
+/// Template for the machine-level manifest. Deliberately NOT an import: the
+/// personal layer starts empty and explicit — it carries intent that travels
+/// with the user (instruction fragments, eventually more), not a copy of
+/// whatever the CLIs happen to hold today (that's project `init`'s job).
+const GLOBAL_MANIFEST_TEMPLATE: &str = "\
+# Machine-level agentstack manifest — the personal layer.
+# Cross-project intent that travels with YOU, not with a repo: instruction
+# fragments compiled into each CLI's global CLAUDE.md / AGENTS.md.
+#
+# Declare a fragment, drop its markdown in ./instructions/, then compile:
+#
+#   [instructions.style]
+#   path = \"./instructions/style.md\"   # relative to this directory
+#   targets = [\"*\"]                     # or [\"claude-code\", \"codex\"]
+#
+version = 1
+
+[instructions]
+";
+
+/// `agentstack init --global` — seed `~/.agentstack/agentstack.toml` (honoring
+/// `AGENTSTACK_HOME`) with an empty `[instructions]` block and an
+/// `instructions/` dir. This blesses the home layer as a first-class manifest:
+/// `agentstack instructions` run from `$HOME` (or with `--manifest-dir`)
+/// compiles its fragments into each CLI's global instruction file. The
+/// zero-files bridge deliberately never discovers this layer as a project
+/// (see `manifest::discover_project_base`).
+fn run_global(args: &InitArgs) -> Result<()> {
+    let home = crate::util::paths::agentstack_home();
+    let manifest_path = home.join(MANIFEST_FILE);
+    if manifest_path.exists() && !args.force {
+        anyhow::bail!(
+            "{} already exists — use --force to overwrite",
+            manifest_path.display()
+        );
+    }
+
+    let instr_dir = home.join("instructions");
+    std::fs::create_dir_all(&instr_dir)
+        .with_context(|| format!("creating {}", instr_dir.display()))?;
+    crate::util::atomic::write(&manifest_path, GLOBAL_MANIFEST_TEMPLATE)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+
+    println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());
+    println!("{}  Created {}/", "📁".dimmed(), instr_dir.display());
+    println!(
+        "\nNext: drop a fragment in {}/, declare it under [instructions.*], then:",
+        instr_dir.display()
+    );
+    println!("    {}", instructions_hint(&home).bold());
+    Ok(())
+}
+
+/// The exact `instructions --write` invocation for the machine-level manifest:
+/// plain from `$HOME` when the layer lives at the default `~/.agentstack`,
+/// spelled with `--manifest-dir` when `AGENTSTACK_HOME` relocated it.
+pub(crate) fn instructions_hint(home: &Path) -> String {
+    let default_home = dirs::home_dir().map(|h| h.join(".agentstack"));
+    if default_home.as_deref() == Some(home) {
+        "agentstack instructions --manifest-dir ~ --write".to_string()
+    } else {
+        format!(
+            "agentstack instructions --manifest-dir {} --write",
+            home.display()
+        )
+    }
 }
 
 /// The import step as `setup` drives it: `setup` prints its own guidance and
