@@ -1075,6 +1075,9 @@ fn list_loadable(dir: Option<&Path>) -> Result<String> {
 
     let mut entries = Vec::new();
     for name in loadable_skill_names(m, &libctx.library, session.as_ref()) {
+        // PathOnly: this catalog only reads SKILL.md descriptions — digesting
+        // every skill body here would turn a cheap list into a full-library
+        // read+hash pass.
         let resolved = crate::resolve::resolve_skill(
             m,
             &ctx.dir,
@@ -1082,7 +1085,7 @@ fn list_loadable(dir: Option<&Path>) -> Result<String> {
             &libctx.lib_home,
             &libctx.store,
             &name,
-            crate::resolve::ResolveMode::NoFetch,
+            crate::resolve::ResolveMode::PathOnly,
         );
         let (desc, origin) = match &resolved {
             Ok(r) => (
@@ -1147,7 +1150,9 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
         }
     }
 
-    // Inline-first, then the central library — same order as `use`.
+    // Inline-first, then the central library — same order as `use`. PathOnly:
+    // loading returns SKILL.md's text; nothing here records a lock entry, so
+    // there is no reason to digest the body.
     let resolved = crate::resolve::resolve_skill(
         m,
         &ctx.dir,
@@ -1155,7 +1160,7 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
         &libctx.lib_home,
         &libctx.store,
         name,
-        crate::resolve::ResolveMode::NoFetch,
+        crate::resolve::ResolveMode::PathOnly,
     )
     .with_context(|| format!("loading skill '{name}'"))?;
     let (_, body) = read_skill_md(&resolved.path);

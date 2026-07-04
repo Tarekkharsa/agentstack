@@ -123,6 +123,41 @@ impl Store {
         }
     }
 
+    /// Locate a skill's directory without network access **or content
+    /// digesting** — for read-only callers that only need the path (reading
+    /// `SKILL.md`, listing). `checksum` is left empty, so the result must never
+    /// feed lock recording; digesting is what makes small ops pay a whole-
+    /// library read+hash. Un-cached git sources yield `Ok(None)`, like
+    /// [`Store::resolve_local`].
+    pub fn resolve_path_only(
+        &self,
+        skill: &Skill,
+        manifest_dir: &Path,
+    ) -> Result<Option<Resolved>> {
+        match skill.source()? {
+            SkillSource::Path(p) => Ok(Some(Resolved {
+                path: resolve_path(manifest_dir, &p),
+                rev: None,
+                checksum: String::new(),
+                fetched: false,
+                source_kind: "path",
+            })),
+            SkillSource::Git { url, .. } => {
+                let dest = self.git_dir(&url);
+                if !dest.exists() {
+                    return Ok(None);
+                }
+                Ok(Some(Resolved {
+                    path: dest,
+                    rev: None,
+                    checksum: String::new(),
+                    fetched: false,
+                    source_kind: "git",
+                }))
+            }
+        }
+    }
+
     fn git_dir(&self, url: &str) -> PathBuf {
         self.root.join("git").join(sanitize(url))
     }

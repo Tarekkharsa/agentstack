@@ -46,14 +46,15 @@ pub struct ResolvedSkill {
     pub source_kind: &'static str,
     /// Resolved git revision (git sources only).
     pub rev: Option<String>,
-    /// SHA-256 of the content. Empty only if a path source does not exist on
-    /// disk yet.
+    /// SHA-256 of the content. Empty if a path source does not exist on disk
+    /// yet, or when resolved with [`ResolveMode::PathOnly`] (which skips
+    /// digesting entirely).
     pub checksum: String,
     /// Provenance recorded in the library index (library origin only).
     pub provenance: Option<String>,
 }
 
-/// Whether resolution may touch the network.
+/// Whether resolution may touch the network, and how much content work it does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolveMode {
     /// Fetch git sources as needed (the materializing path).
@@ -62,6 +63,11 @@ pub enum ResolveMode {
     /// an un-cached git source is reported as [`ResolveError::NotAvailableOffline`].
     /// Path/library-path sources resolve identically in both modes.
     NoFetch,
+    /// Locate only: no network and **no content digest** — the returned
+    /// `checksum` is empty. For read-only surfaces that just need the skill's
+    /// path (list/load), where digesting would read+hash the whole body for
+    /// nothing. Never use for anything that records a lock entry.
+    PathOnly,
 }
 
 /// A structured resolution failure. `Unresolved` is the hard error for a name
@@ -136,7 +142,8 @@ pub fn resolve_skill(
 }
 
 /// Resolve a located source through the store, honoring the fetch mode. A
-/// `NoFetch` miss on an un-cached git source becomes `NotAvailableOffline`.
+/// `NoFetch`/`PathOnly` miss on an un-cached git source becomes
+/// `NotAvailableOffline`.
 fn resolve_source(
     store: &Store,
     skill: &Skill,
@@ -144,15 +151,17 @@ fn resolve_source(
     mode: ResolveMode,
     name: &str,
 ) -> Result<crate::store::Resolved, ResolveError> {
-    match mode {
-        ResolveMode::Fetch => Ok(store.resolve(skill, base, skill.rev.as_deref())?),
-        ResolveMode::NoFetch => match store.resolve_local(skill, base)? {
-            Some(r) => Ok(r),
-            None => Err(ResolveError::NotAvailableOffline {
-                name: name.to_string(),
-                url: skill.git.clone().unwrap_or_default(),
-            }),
-        },
+    let local = match mode {
+        ResolveMode::Fetch => return Ok(store.resolve(skill, base, skill.rev.as_deref())?),
+        ResolveMode::NoFetch => store.resolve_local(skill, base)?,
+        ResolveMode::PathOnly => store.resolve_path_only(skill, base)?,
+    };
+    match local {
+        Some(r) => Ok(r),
+        None => Err(ResolveError::NotAvailableOffline {
+            name: name.to_string(),
+            url: skill.git.clone().unwrap_or_default(),
+        }),
     }
 }
 
@@ -894,6 +903,79 @@ mod tests {
         .unwrap();
         assert_eq!(r.origin, SkillOrigin::Library);
         assert_eq!(r.checksum.len(), 64);
+    }
+
+    #[test]
+    fn path_only_locates_without_digesting() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let manifest = empty_manifest();
+        let library = library_with_skill(&lib_home, "sql-review", "# body\n");
+
+        let r = resolve_skill(
+            &manifest,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            "sql-review",
+            ResolveMode::PathOnly,
+        )
+        .unwrap();
+        assert_eq!(r.origin, SkillOrigin::Library);
+        assert!(r.path.join("SKILL.md").exists());
+        assert!(r.checksum.is_empty(), "PathOnly must not digest");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_only_never_reads_skill_contents() {
+        use std::os::unix::fs::PermissionsExt;
+        // An unreadable file inside the skill makes any digest pass fail —
+        // PathOnly must still resolve because it never opens file contents.
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let manifest = empty_manifest();
+        let library = library_with_skill(&lib_home, "sql-review", "# body\n");
+        let locked = lib_home.child("skills/sql-review/vendored.bin");
+        locked.write_str("sealed").unwrap();
+        std::fs::set_permissions(locked.path(), std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let path_only = resolve_skill(
+            &manifest,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            "sql-review",
+            ResolveMode::PathOnly,
+        );
+        // Restore permissions before asserting so the TempDir can clean up.
+        std::fs::set_permissions(locked.path(), std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(path_only.is_ok(), "PathOnly reads no file bodies");
+    }
+
+    #[test]
+    fn path_only_uncached_git_is_not_available_offline() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let manifest = empty_manifest();
+        let library = uncached_git_library("https://example.com/x.git");
+
+        let err = resolve_skill(
+            &manifest,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            "gitskill",
+            ResolveMode::PathOnly,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ResolveError::NotAvailableOffline { .. }));
     }
 
     #[test]
