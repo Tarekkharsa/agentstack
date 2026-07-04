@@ -599,9 +599,7 @@ fn check_reproducibility(
                 SkillLockStatus::ChecksumDrift { .. } => {
                     report.line(
                         Level::Error,
-                        format!(
-                            "{name:<20} content drifted from lock ↳ agentstack use <profile> --write"
-                        ),
+                        format!("{name:<20} content drifted from lock ↳ agentstack lock"),
                     );
                     emitted += 1;
                 }
@@ -618,9 +616,7 @@ fn check_reproducibility(
                     if r.origin == Some(SkillOrigin::Library) {
                         report.line(
                             Level::Warn,
-                            format!(
-                                "{name:<20} from library, not locked ↳ agentstack use <profile> --write"
-                            ),
+                            format!("{name:<20} from library, not locked ↳ agentstack lock"),
                         );
                         emitted += 1;
                     }
@@ -658,23 +654,29 @@ fn check_server_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Re
             let r = server_lock_status(name, manifest, &library, &lib_home, &lock);
             match &r.status {
                 ServerLockStatus::ResolveFailed { error } => {
-                    report.line(Level::Error, format!("{name:<20} broken server ref — {error}"));
+                    report.line(
+                        Level::Error,
+                        format!("{name:<20} broken server ref — {error}"),
+                    );
                 }
                 ServerLockStatus::ChecksumDrift { .. } => report.line(
                     Level::Error,
-                    format!("{name:<20} server definition drifted from lock ↳ agentstack use <profile> --write"),
+                    format!("{name:<20} server definition drifted from lock ↳ agentstack lock"),
                 ),
                 ServerLockStatus::MissingLockEntry => {
                     if r.origin == Some(ServerOrigin::Library) {
                         report.line(
                             Level::Warn,
-                            format!("{name:<20} library server, not locked ↳ agentstack use <profile> --write"),
+                            format!("{name:<20} library server, not locked ↳ agentstack lock"),
                         );
                     }
                 }
                 ServerLockStatus::Matches => {
                     if r.origin == Some(ServerOrigin::Library) {
-                        report.line(Level::Ok, format!("{name:<20} library server · matches lock"));
+                        report.line(
+                            Level::Ok,
+                            format!("{name:<20} library server · matches lock"),
+                        );
                     }
                 }
             }

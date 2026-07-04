@@ -41,9 +41,22 @@ fn sync(
     let store = Store::default_store();
     let mut lock = Lock::load(&ctx.dir)?;
 
-    if manifest.skills.is_empty() {
+    // Skill names any profile references. In a clean-at-rest manifest these
+    // resolve from the central library with no inline [skills.*] entry, and
+    // their lock entries (written by `use --write` / `lock`) must survive the
+    // reconcile pass below.
+    let profile_names = profile_skill_names(manifest);
+
+    if manifest.skills.is_empty() && profile_names.is_empty() {
         println!("Manifest defines no skills — nothing to install.");
         return Ok(());
+    }
+    if manifest.skills.is_empty() {
+        println!(
+            "Manifest defines no inline skills; {} profile-referenced skill(s) resolve \
+             from the central library — pin them with `agentstack lock`.",
+            profile_names.len()
+        );
     }
 
     let mut changed = false;
@@ -131,8 +144,12 @@ fn sync(
         }
     }
 
-    // Drop locked skills no longer in the manifest.
-    let keep: Vec<String> = manifest.skills.keys().cloned().collect();
+    // Drop locked skills no longer in the manifest. "In the manifest" covers
+    // inline [skills.*] entries AND profile-referenced names — a library-backed
+    // profile skill has no inline entry, yet its lock pin (from `use --write` /
+    // `lock`) must not be silently deleted here.
+    let mut keep: Vec<String> = manifest.skills.keys().cloned().collect();
+    keep.extend(profile_names);
     let before = lock.skills.len();
     lock.retain_names(&keep);
     if lock.skills.len() != before {
@@ -152,6 +169,17 @@ fn sync(
         anyhow::bail!("{errors} skill(s) failed to resolve");
     }
     Ok(())
+}
+
+/// Every skill name any profile references, deduplicated (wildcards expand
+/// inline-only, exactly as activation does). Used to keep the lockfile's
+/// reconcile pass from pruning library-backed profile skills.
+fn profile_skill_names(manifest: &crate::manifest::Manifest) -> Vec<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for pname in manifest.profiles.keys() {
+        out.extend(crate::resolve::active_skill_names(manifest, pname));
+    }
+    out.into_iter().collect()
 }
 
 pub(crate) fn locked_entry(

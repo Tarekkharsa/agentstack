@@ -72,6 +72,10 @@ The complete, implemented-and-tested feature inventory. The
   `install` fetches them into `~/.agentstack/store/` and writes a SHA-256
   `agentstack.lock`; `install --locked` is reproducible (CI-safe); `update`
   re-resolves git skills; `remove` drops a capability from manifest + lock.
+  `install` is profile-aware: skills a profile references by name (resolved
+  from the central library, no inline `[skills.*]` entry) keep their lock
+  pins through the reconcile pass — pin or refresh those with
+  `agentstack lock`.
 - **Central capability library (`agentstack lib`)** — one managed home
   (`~/.agentstack/lib/`) that projects reference **by name** instead of copying
   files. Skill dirs (`lib/skills/`) and MCP server definitions
