@@ -162,6 +162,53 @@ fn apply_without_instructions_leaves_a_foreign_region_alone() {
 }
 
 #[test]
+fn project_scope_apply_never_empties_a_region_over_inherited_fragments() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+
+    // The machine layer declares a fragment → merge_user_layer makes every
+    // project load's `instructions` non-empty.
+    let as_home = home.join(".agentstack");
+    fs::create_dir_all(as_home.join("instructions")).unwrap();
+    fs::write(
+        as_home.join("agentstack.toml"),
+        "version = 1\n[instructions.style]\npath = \"./instructions/style.md\"\n",
+    )
+    .unwrap();
+    fs::write(as_home.join("instructions/style.md"), "Machine style.\n").unwrap();
+
+    // A project with NO instructions of its own, whose committed CLAUDE.md
+    // already carries a managed region (e.g. compiled and checked in).
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.demo]\ntype = \"http\"\nurl = \"https://demo/mcp\"\n",
+    )
+    .unwrap();
+    let existing =
+        "# Repo\n\n<!-- agentstack:start -->\nCommitted rules.\n<!-- agentstack:end -->\n";
+    fs::write(proj.join("CLAUDE.md"), existing).unwrap();
+
+    // Project scope filters out every inherited fragment — the compile is
+    // empty, and an empty compile must never remove the committed region.
+    let mut a = args(true);
+    a.scope = Some(Scope::Project);
+    apply::run(&a, Some(&proj)).unwrap();
+    assert_eq!(
+        fs::read_to_string(proj.join("CLAUDE.md")).unwrap(),
+        existing,
+        "an all-filtered (empty) compile must not touch the repo's managed region"
+    );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
+#[test]
 fn doctor_ci_fails_on_a_missing_fragment_source() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();

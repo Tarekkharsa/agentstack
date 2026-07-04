@@ -333,7 +333,13 @@ fn render(
         // any must never touch — let alone empty out — a region another layer
         // (e.g. the machine manifest seeded by `init --global`) owns.
         if !manifest.instructions.is_empty() {
-            if let Some(ip) = plan_instructions(manifest, desc, scope, &ctx.dir) {
+            // …and only when fragments actually apply at THIS scope: project
+            // scope filters out every machine-layer fragment, so a project
+            // with none of its own compiles to an empty string there — writing
+            // that would strip a committed managed region from the repo.
+            if let Some(ip) = plan_instructions(manifest, desc, scope, &ctx.dir)
+                .filter(|ip| !ip.fragments.is_empty() || !ip.missing.is_empty())
+            {
                 for m in &ip.missing {
                     println!("  {} instruction fragment '{m}' source missing", "✗".red());
                     error_count += 1;
