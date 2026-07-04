@@ -14,9 +14,13 @@ is safe to commit and share.
 ## Install
 
 ```sh
+# After the first GitHub release is published (see RELEASING.md):
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
 # or: brew install Tarekkharsa/tap/agentstack   ·   cargo install agentstack
 ```
+
+Until then, install from source — `cargo install --path .`, or link a release
+build with `agentstack self link` (see [Develop](#develop)).
 
 Single static binary, zero runtime dependencies.
 
@@ -393,6 +397,23 @@ cargo test          # unit + golden (insta) + integration
 cargo clippy --all-targets
 cargo fmt --check
 ```
+
+### Install from source
+
+```bash
+cargo install --path .                  # `agentstack` on PATH via ~/.cargo/bin
+
+# or link a release build directly:
+cargo build --release
+./target/release/agentstack self link   # symlink into /usr/local/bin or ~/.local/bin
+agentstack self which                   # verify what a bare `agentstack` runs
+```
+
+Don't wrap the binary in a shell function or alias: those exist only in
+interactive shells, so agent harnesses and scripts — which spawn
+non-interactive shells — won't see them. A real file on PATH (what `self
+link` creates) works everywhere, and `connect` registers that stable path in
+harness configs so they survive rebuilds.
 
 ## Roadmap
 

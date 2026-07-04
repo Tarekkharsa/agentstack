@@ -24,7 +24,8 @@ The complete, implemented-and-tested feature inventory. The
   bytes, including floats, preserved exactly); TOML uses `toml_edit` to keep
   comments and formatting.
 - **State tracking** (`~/.agentstack/state.json`) so `apply` prunes entries we
-  own that left the manifest, and `doctor`/`diff` detect hand-edits.
+  own that left the manifest, and `doctor`/`diff` detect hand-edits — see
+  [drift: adopt or apply?](#drift-adopt-or-apply) for which fix to run.
 - **Global vs project scope** (`--scope`): writes default to **global** (each
   CLI's `~/.claude.json`, `~/.claude/skills`); pass `--scope project` to write a
   repo's project locations (`.mcp.json`, `.claude/skills/`) so any agent opening
@@ -123,7 +124,9 @@ The complete, implemented-and-tested feature inventory. The
   git URL with the same gates. (Semver ranges and transitive pack
   dependencies are deliberately not in v1.)
 - **`adopt`** — the reverse of `apply`: pull a hand-added server from a target
-  config back into the manifest, lifting its inline secret, preserving comments.
+  config back into the manifest, lifting its inline secret, preserving
+  comments. The keep-side of every drift decision — see
+  [drift: adopt or apply?](#drift-adopt-or-apply).
 - **`add`** — flag-driven (scriptable / agent-operable) add of a server or skill
   to the manifest, optionally into a profile; comments preserved.
 - **`stats`** — local usage analytics: activation counts + per-capability
@@ -135,6 +138,24 @@ The complete, implemented-and-tested feature inventory. The
   (high-cost, never-activated servers) with the exact `remove` command.
 - **`export`/`import`** — age-encrypted bundle (manifest + lock + optionally
   secrets) for moving a setup to a new machine; passphrase-protected.
+
+### Drift: adopt or apply?
+
+`doctor` flags drift in both directions, and the fixes are opposites — pick
+by which side holds the truth:
+
+- **"edited on disk since last apply"** — the live config changed after our
+  last write. Review with `agentstack diff`; if the hand-edit should stay,
+  `agentstack adopt` pulls it into the manifest. If the manifest is right,
+  `agentstack apply --write` re-renders over the edit.
+- **"would REMOVE \<names\>"** — the manifest no longer selects entries we
+  manage, so the next `apply --write` deletes them from the live config.
+  `agentstack adopt` first if any of them should survive; apply only when
+  the removal is intended.
+- Entries recorded by a **different manifest** are never pruned implicitly
+  (global scope is shared by every manifest on the machine): `apply` keeps
+  them and says so. Prune them with an explicit `apply --prune-foreign`, or
+  `adopt` them into the current manifest.
 
 ## Managed plugin recipes
 
@@ -325,7 +346,8 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 ## All commands
 
 `init`, `add`, `install` (`--locked`, `--allow-flagged`), `update`, `remove`,
-`upgrade`, `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
+`upgrade`, `bootstrap` (`--write`), `apply` (`--scope`, `--write`,
+`--prune-foreign`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
 `lib add|add-server|list|remove|remove-server|migrate`, `restore`,
 `doctor` (`--ci`, `--live`, `--fix`), `audit` (`--json`, `--calls`,
@@ -333,7 +355,8 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 `stats` (`--live`),
 `secret set|get|rm|list`, `export`/`import`, `adapters`, `pack init`, `plugins`,
 `dashboard`, `mcp` (`--auto-project`), `connect`/`disconnect`,
-`trust` (`--list`, `--revoke`), `codemode`, `hook`, `run`/`runs`/`kill`.
+`trust` (`--list`, `--revoke`), `codemode`, `hook`, `run`/`runs`/`kill`,
+`self link|which`.
 
 ## Everything shipped so far
 
