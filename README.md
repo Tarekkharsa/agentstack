@@ -138,8 +138,9 @@ symlinks) is a per-project choice:
    profile (`[profiles.off]`), run `use off --scope project --write` once, then
    work through `agentstack run <cli> --profile <p>` (injects on launch,
    reverts on exit) or `session start <p> --scope project` … `session end`.
-   Pruning-to-zero even deletes the empty config file — and leaves any
-   committed `.gitignore` block alone — so `git status` stays silent. **Trade-off:** launching the harness *directly* (not through
+   Pruning-to-zero even deletes the empty config file and the emptied skills
+   dir — and leaves any committed `.gitignore` block alone — so `git status`
+   stays silent. **Trade-off:** launching the harness *directly* (not through
    agentstack) sees no project servers/skills while at rest — and one command
    (`use <p> --scope project --write`) flips the project back to static.
 3. **Zero files, model-driven** — `agentstack connect --all --write` registers

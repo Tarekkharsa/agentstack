@@ -65,6 +65,10 @@ fn activation_writes_stable_entries_and_deactivation_keeps_the_block() {
         after_off, after_use,
         "deactivation must leave the managed block untouched"
     );
+    assert!(
+        !proj.join(".claude/skills").exists(),
+        "deactivation removes the emptied managed skills dir"
+    );
 
     std::env::remove_var("AGENTSTACK_HOME");
     std::env::remove_var("HOME");

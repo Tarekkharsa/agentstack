@@ -74,10 +74,16 @@ pub fn plan(
 }
 
 /// Perform the plan: remove pruned managed skills, then materialize the active
-/// set. Conflicting (user-owned) names are skipped.
+/// set. Conflicting (user-owned) names are skipped. A plan that leaves nothing
+/// managed also clears the skills dir itself if pruning emptied it — so
+/// deactivation leaves no stray `.claude/skills/` husk behind.
 pub fn materialize(plan: &SkillPlan) -> Result<()> {
-    fs::create_dir_all(&plan.skills_dir)
-        .with_context(|| format!("creating {}", plan.skills_dir.display()))?;
+    // Prune-only plans (deactivation) must not create the very dir they are
+    // about to empty.
+    if !plan.active.is_empty() {
+        fs::create_dir_all(&plan.skills_dir)
+            .with_context(|| format!("creating {}", plan.skills_dir.display()))?;
+    }
 
     for name in &plan.to_remove {
         remove_managed(&plan.skills_dir.join(name))?;
@@ -101,6 +107,12 @@ pub fn materialize(plan: &SkillPlan) -> Result<()> {
                 fs::write(dest.join(MARKER), b"agentstack\n").ok();
             }
         }
+    }
+
+    // Nothing managed here any more: best-effort rmdir of the emptied dir.
+    // `remove_dir` refuses non-empty dirs, so user content is inherently safe.
+    if plan.managed_names().is_empty() {
+        let _ = fs::remove_dir(&plan.skills_dir);
     }
     Ok(())
 }
@@ -197,6 +209,67 @@ mod tests {
         materialize(&p2).unwrap();
         assert!(skills_dir.join("a").exists());
         assert!(!skills_dir.join("b").exists());
+    }
+
+    #[test]
+    fn prune_to_zero_removes_the_emptied_skills_dir() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let a = lib_skill(&tmp, "a");
+        let skills_dir = tmp.child("skills").path().to_path_buf();
+
+        let p1 = plan(
+            skills_dir.clone(),
+            SkillStrategy::Symlink,
+            vec![("a".into(), a)],
+            &[],
+        );
+        materialize(&p1).unwrap();
+        assert!(skills_dir.exists());
+
+        // Deactivation: pruning the last managed skill removes the dir itself.
+        let p2 = plan(
+            skills_dir.clone(),
+            SkillStrategy::Symlink,
+            vec![],
+            &["a".to_string()],
+        );
+        materialize(&p2).unwrap();
+        assert!(!skills_dir.exists(), "emptied managed dir removed");
+    }
+
+    #[test]
+    fn prune_only_plans_keep_user_content_and_create_nothing() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let skills_dir = tmp.child("skills");
+        skills_dir
+            .child("mine/SKILL.md")
+            .write_str("user's own\n")
+            .unwrap();
+
+        // User content keeps the dir alive through a full prune.
+        let p = plan(
+            skills_dir.path().to_path_buf(),
+            SkillStrategy::Symlink,
+            vec![],
+            &["gone".to_string()],
+        );
+        materialize(&p).unwrap();
+        assert!(skills_dir.child("mine/SKILL.md").path().exists());
+        assert!(skills_dir.path().exists());
+
+        // And a prune-only plan never creates a missing dir.
+        let missing = tmp.child("other-skills").path().to_path_buf();
+        let p2 = plan(
+            missing.clone(),
+            SkillStrategy::Symlink,
+            vec![],
+            &["gone".to_string()],
+        );
+        materialize(&p2).unwrap();
+        assert!(
+            !missing.exists(),
+            "prune-only plans must not create the dir"
+        );
     }
 
     #[test]

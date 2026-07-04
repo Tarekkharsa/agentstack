@@ -290,11 +290,14 @@ pub fn end(manifest_dir: Option<&Path>) -> Result<()> {
     if let Some(hid) = &sess.history_id {
         let _ = crate::history::undo(hid);
     }
-    // 2. Remove the skills the session materialized.
+    // 2. Remove the skills the session materialized. If that emptied the
+    //    skills dir, clear it too (rmdir semantics: refuses non-empty dirs,
+    //    so anything the user put there survives).
     for sa in &sess.skill_adds {
         for name in &sa.names {
             remove_entry(&Path::new(&sa.dir).join(name));
         }
+        let _ = fs::remove_dir(Path::new(&sa.dir));
     }
     // 3. Uninstall the session plugin.
     if let Some(pl) = &sess.plugin {

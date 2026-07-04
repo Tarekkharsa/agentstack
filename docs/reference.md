@@ -98,7 +98,9 @@ The complete, implemented-and-tested feature inventory. The
   are never owned — only their skills and MCP entries are managed.
 - **Selective skills** via profiles — `use <profile>` materializes only that
   profile's skills (symlink, with copy fallback), pruning the rest it owns and
-  never clobbering hand-made skill dirs.
+  never clobbering hand-made skill dirs. When a prune empties the managed
+  skills dir (deactivation, `session end`), the dir itself is removed too —
+  rmdir semantics, so a dir holding any user content always survives.
 - **Instruction files** — compile shared + harness-specific fragments into each
   CLI's `CLAUDE.md` / `AGENTS.md`, inside a managed `<!-- agentstack -->` region
   that preserves all surrounding hand-written prose.
