@@ -49,6 +49,34 @@ fn init_global_seeds_home_manifest_and_instructions_dir() {
 }
 
 #[test]
+fn init_global_dry_run_writes_nothing() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join(".agentstack");
+    std::env::set_var("AGENTSTACK_HOME", &home);
+
+    let mut preview = args(false);
+    preview.dry_run = true;
+
+    // Dry-run on a clean machine: no manifest, no instructions dir, no home.
+    init::run(&preview, None).unwrap();
+    assert!(!home.exists(), "--dry-run must not create anything");
+
+    // Dry-run over an existing manifest previews without --force and without
+    // overwriting.
+    init::run(&args(false), None).unwrap();
+    let before = fs::read_to_string(home.join("agentstack.toml")).unwrap();
+    init::run(&preview, None).unwrap();
+    assert_eq!(
+        fs::read_to_string(home.join("agentstack.toml")).unwrap(),
+        before,
+        "--dry-run must leave an existing manifest untouched"
+    );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+#[test]
 fn house_rules_seed_is_idempotent_and_compiles() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();

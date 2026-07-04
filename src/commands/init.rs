@@ -123,11 +123,24 @@ version = 1
 fn run_global(args: &InitArgs) -> Result<()> {
     let home = crate::util::paths::agentstack_home();
     let manifest_path = home.join(MANIFEST_FILE);
-    if manifest_path.exists() && !args.force {
+    let instr_dir = home.join("instructions");
+    if manifest_path.exists() && !args.force && !args.dry_run {
         anyhow::bail!(
-            "{} already exists — use --force to overwrite",
+            "{} already exists — use --force to overwrite or --dry-run to preview",
             manifest_path.display()
         );
+    }
+
+    // Preview before ANY filesystem write (and before the house-rules prompt).
+    if args.dry_run {
+        println!("\n{} (preview — nothing written)\n", MANIFEST_FILE.bold());
+        println!("{GLOBAL_MANIFEST_TEMPLATE}");
+        println!("Would write {}", manifest_path.display());
+        println!("Would create {}/", instr_dir.display());
+        println!(
+            "Would offer the agentstack house rules fragment ([instructions.{HOUSE_RULES_NAME}])."
+        );
+        return Ok(());
     }
     if manifest_path.exists() {
         // --force: start over from the template (ensure_global_manifest would
@@ -137,7 +150,6 @@ fn run_global(args: &InitArgs) -> Result<()> {
     }
 
     ensure_global_manifest()?;
-    let instr_dir = home.join("instructions");
     println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());
     println!("{}  Created {}/", "📁".dimmed(), instr_dir.display());
 
