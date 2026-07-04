@@ -32,16 +32,21 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
 
     if !auto_project {
         // Eager, one-project-per-process mode (the default): the manifest is
-        // cwd-or-flag and the gateway is built once for this launch.
-        let gateway = crate::gateway::Gateway::from_manifest(dir.as_deref());
-        if !gateway.is_empty() {
+        // cwd-or-flag and the gateway is built ONCE for this launch, shared by
+        // the stdio loop and the code-mode endpoint (one set of upstream
+        // connections / stdio children per process, not one per surface).
+        let gateway = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::gateway::Gateway::from_manifest(dir.as_deref()),
+        ));
+        if !lock_gateway(&gateway).is_empty() {
             eprintln!("agentstack mcp: gateway active — proxying this project's MCP servers");
         }
 
         // Code mode (Phase 2): expose a loopback, token-gated endpoint the generated
         // client POSTs to. Best-effort and contained — None when there's nothing to
         // proxy. agentstack only brokers the call here; it never runs the agent's code.
-        let runtime = crate::codemode::endpoint::start(dir.as_deref());
+        let runtime =
+            crate::codemode::endpoint::start(dir.as_deref(), std::sync::Arc::clone(&gateway));
         if let Some(rt) = &runtime {
             eprintln!(
                 "agentstack mcp: code-mode runtime at {} (loopback · token-gated). Generate a client with `agentstack codemode --write`.",
@@ -57,7 +62,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             let Ok(req) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
-            if let Some(resp) = handle(&req, dir.as_deref(), &gateway, None) {
+            if let Some(resp) = handle(&req, dir.as_deref(), &lock_gateway(&gateway), None) {
                 writeln!(out, "{}", serde_json::to_string(&resp)?)?;
                 out.flush()?;
             }
@@ -104,7 +109,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
         if let Some(resp) = handle(
             &req,
             auto.dir(),
-            auto.gateway(),
+            &auto.gateway(),
             auto.trust_note().as_deref(),
         ) {
             writeln!(out, "{}", serde_json::to_string(&resp)?)?;
@@ -113,6 +118,14 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
     }
     auto.shutdown();
     Ok(())
+}
+
+/// Lock the process-shared gateway, riding through a poisoned mutex (a panic
+/// mid-call must not wedge every later request).
+fn lock_gateway(
+    gateway: &std::sync::Mutex<crate::gateway::Gateway>,
+) -> std::sync::MutexGuard<'_, crate::gateway::Gateway> {
+    gateway.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Session state for `--auto-project`: which project this MCP session belongs
@@ -135,7 +148,9 @@ struct AutoProject {
     /// The trust decision made at gateway-build time — kept so responses can
     /// say *why* nothing is proxied instead of leaving it on stderr only.
     trust: Option<crate::trust::TrustState>,
-    gateway: crate::gateway::Gateway,
+    /// Shared with the code-mode endpoint thread, so the process holds one set
+    /// of upstream connections (and stdio children), not one per surface.
+    gateway: std::sync::Arc<std::sync::Mutex<crate::gateway::Gateway>>,
     built: bool,
     runtime: Option<crate::codemode::endpoint::RuntimeHandle>,
 }
@@ -149,7 +164,7 @@ impl AutoProject {
             roots: Vec::new(),
             dir: None,
             trust: None,
-            gateway: crate::gateway::Gateway::empty(),
+            gateway: std::sync::Arc::new(std::sync::Mutex::new(crate::gateway::Gateway::empty())),
             built: false,
             runtime: None,
         }
@@ -159,8 +174,8 @@ impl AutoProject {
         self.dir.as_deref().or(self.explicit.as_deref())
     }
 
-    fn gateway(&self) -> &crate::gateway::Gateway {
-        &self.gateway
+    fn gateway(&self) -> std::sync::MutexGuard<'_, crate::gateway::Gateway> {
+        lock_gateway(&self.gateway)
     }
 
     /// Record whether the client can answer `roots/list` (from its declared
@@ -282,14 +297,19 @@ impl AutoProject {
 
     fn activate(&mut self, base: &Path) {
         self.dir = Some(base.to_path_buf());
-        self.gateway = crate::gateway::Gateway::from_manifest(Some(base));
-        if !self.gateway.is_empty() {
+        // One gateway per process: the code-mode endpoint shares it instead of
+        // building (and connecting/spawning) its own copy of every upstream.
+        self.gateway = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::gateway::Gateway::from_manifest(Some(base)),
+        ));
+        if !self.gateway().is_empty() {
             eprintln!(
                 "agentstack mcp: gateway active for {} — proxying its MCP servers",
                 base.display()
             );
         }
-        self.runtime = crate::codemode::endpoint::start(Some(base));
+        self.runtime =
+            crate::codemode::endpoint::start(Some(base), std::sync::Arc::clone(&self.gateway));
         if let Some(rt) = &self.runtime {
             eprintln!(
                 "agentstack mcp: code-mode runtime at {} (loopback · token-gated)",

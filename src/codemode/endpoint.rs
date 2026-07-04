@@ -10,6 +10,7 @@
 //! only brokers the real upstream MCP call.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -32,13 +33,15 @@ impl RuntimeHandle {
     }
 }
 
-/// Start the endpoint for the project at `dir`. Best-effort and side-effect
-/// contained: returns `None` when there are no HTTP upstreams to proxy or the
-/// loopback socket / coordinate file can't be created. Serves calls on a
-/// detached thread until the process exits.
-pub fn start(dir: Option<&Path>) -> Option<RuntimeHandle> {
-    let gateway = Gateway::from_manifest(dir);
-    if gateway.is_empty() {
+/// Start the endpoint for the project at `dir`, serving calls through the
+/// caller's `gateway` — the same one the MCP serve loop uses, so upstream
+/// connections (and lazily spawned stdio children) exist once per process,
+/// not once per surface. Best-effort and side-effect contained: returns
+/// `None` when there is nothing to proxy or the loopback socket / coordinate
+/// file can't be created. Serves calls on a detached thread until the process
+/// exits.
+pub fn start(dir: Option<&Path>, gateway: Arc<Mutex<Gateway>>) -> Option<RuntimeHandle> {
+    if gateway.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
         return None;
     }
     let server = Server::http("127.0.0.1:0").ok()?;
@@ -54,8 +57,9 @@ pub fn start(dir: Option<&Path>) -> Option<RuntimeHandle> {
 
     let token_for_thread = token;
     std::thread::spawn(move || {
-        // Single-threaded request loop: the gateway is `Send` but not `Sync`, so
-        // we never share it across threads — one thread owns it for its lifetime.
+        // Single-threaded request loop. The gateway is `Send` but not `Sync`;
+        // it is shared with the stdio serve loop behind the mutex, so each
+        // call locks for its duration (calls were already serialized per loop).
         for mut req in server.incoming_requests() {
             let authed = req.headers().iter().any(|h| {
                 h.field.equiv("X-Agentstack-Token") && h.value.as_str() == token_for_thread
@@ -68,7 +72,8 @@ pub fn start(dir: Option<&Path>) -> Option<RuntimeHandle> {
                     json!({ "error": "unauthorized — endpoint token mismatch" }).to_string(),
                 )
             } else {
-                handle_runtime_call(&gateway, &body)
+                let gw = gateway.lock().unwrap_or_else(|e| e.into_inner());
+                handle_runtime_call(&gw, &body)
             };
             let resp = Response::from_string(payload)
                 .with_status_code(status)
