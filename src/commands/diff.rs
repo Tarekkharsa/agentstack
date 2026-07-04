@@ -11,7 +11,21 @@ use crate::render::{effective_servers, plan_target_with_servers, resolve_targets
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 
+/// What the diff pass found — beyond the printed report, so callers/tests can
+/// assert on it.
+pub struct Outcome {
+    /// Targets whose on-disk config differs from the render.
+    pub drifted: usize,
+    /// Per-target foreign entries the apply guard would keep — surfaced here
+    /// instead of being previewed as pending deletions: `(display, names)`.
+    pub kept: Vec<(String, Vec<String>)>,
+}
+
 pub fn run(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    report(args, manifest_dir).map(|_| ())
+}
+
+pub fn report(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<Outcome> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
     let scope = args.scope.unwrap_or(Scope::Global);
@@ -29,13 +43,27 @@ pub fn run(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     let state = State::load()?;
     let mut drift = 0;
+    let mut kept_all: Vec<(String, Vec<String>)> = Vec::new();
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             println!("{} unknown adapter '{id}' — skipping", "⚠".yellow());
             continue;
         };
-        let previously = state.managed_servers(&target_key(id, scope, &ctx.dir));
+        let key = target_key(id, scope, &ctx.dir);
+        let mut previously = state.managed_servers(&key);
+        // Same cross-manifest guard as apply: entries another manifest
+        // recorded won't be pruned by a bare `apply --write`, so don't
+        // preview them as pending deletions here either — surface them.
+        let mut kept = state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
+            server_map.contains_key(n)
+        });
+        // Plus names an earlier guarded write already kept on disk.
+        for n in state.kept_foreign(&key) {
+            if !kept.contains(&n) && !server_map.contains_key(&n) {
+                kept.push(n);
+            }
+        }
         let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
@@ -48,6 +76,15 @@ pub fn run(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<()> {
             continue;
         };
         println!("\n{} ({})", plan.display.bold(), plan.config_path.display());
+        if !kept.is_empty() {
+            println!(
+                "  {} keeping {} — applied by another manifest ↳ keep: agentstack adopt · \
+                 prune: agentstack apply --prune-foreign",
+                "⚠".yellow(),
+                kept.join(", ")
+            );
+            kept_all.push((plan.display.clone(), kept));
+        }
         if plan.changed() {
             drift += 1;
             for l in plan.diff().lines() {
@@ -68,5 +105,8 @@ pub fn run(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<()> {
         );
     }
 
-    Ok(())
+    Ok(Outcome {
+        drifted: drift,
+        kept: kept_all,
+    })
 }

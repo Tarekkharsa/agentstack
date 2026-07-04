@@ -8,8 +8,8 @@
 use std::fs;
 use std::sync::Mutex;
 
-use agentstack::cli::ApplyArgs;
-use agentstack::commands::apply;
+use agentstack::cli::{ApplyArgs, DiffArgs};
+use agentstack::commands::{apply, diff};
 use agentstack::state::{manifest_identity, State};
 
 // apply mutates the process-global HOME; serialize these tests.
@@ -201,6 +201,73 @@ fn guarded_apply_reruns_keep_tracking_kept_foreign() {
         vec!["kibana_mcp".to_string()],
         "kept-foreign tracking must survive re-runs"
     );
+}
+
+fn diff_args() -> DiffArgs {
+    DiffArgs {
+        targets: vec![],
+        profile: None,
+        scope: None,
+    }
+}
+
+/// `diff` must apply the same cross-manifest guard as `apply`: a foreign
+/// entry is not a pending deletion (a bare `apply --write` would keep it),
+/// so it must not be previewed as one — it's surfaced as kept instead.
+#[test]
+fn diff_does_not_preview_foreign_prunes() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup(&home);
+
+    // Manifest A applies kibana_mcp for real (normalized formatting + state).
+    let proj_a = tmp.path().join("proj-a");
+    fs::create_dir_all(&proj_a).unwrap();
+    fs::write(
+        proj_a.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.kibana_mcp]\ntype = \"http\"\nurl = \"https://kibana/mcp\"\n",
+    )
+    .unwrap();
+    apply::run(&apply_args(false), Some(&proj_a)).unwrap();
+
+    // Manifest B selects nothing at all — the only "change" the old diff saw
+    // was deleting A's server.
+    let proj_b = tmp.path().join("proj-b");
+    fs::create_dir_all(&proj_b).unwrap();
+    fs::write(
+        proj_b.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
+    )
+    .unwrap();
+
+    let outcome = diff::report(&diff_args(), Some(&proj_b)).unwrap();
+    assert_eq!(
+        outcome.drifted, 0,
+        "a foreign entry is not drift — apply's guard keeps it"
+    );
+    assert_eq!(outcome.kept.len(), 1, "kept names surfaced");
+    assert_eq!(outcome.kept[0].1, vec!["kibana_mcp".to_string()]);
+}
+
+/// After a guarded apply, the kept-foreign bookkeeping (not the managed set)
+/// carries the name — diff must keep surfacing it.
+#[test]
+fn diff_surfaces_kept_foreign_after_guarded_apply() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup(&home);
+    seed_state_from_manifest_a(tmp.path(), &home);
+    let proj_b = write_manifest_b(tmp.path());
+
+    apply::run(&apply_args(false), Some(&proj_b)).unwrap();
+
+    let outcome = diff::report(&diff_args(), Some(&proj_b)).unwrap();
+    assert_eq!(outcome.drifted, 0, "config in sync after the guarded write");
+    assert_eq!(outcome.kept.len(), 1);
+    assert_eq!(outcome.kept[0].1, vec!["kibana_mcp".to_string()]);
 }
 
 /// The recording manifest itself must keep pruning its own removals — the

@@ -154,8 +154,10 @@ by which side holds the truth:
   the removal is intended.
 - Entries recorded by a **different manifest** are never pruned implicitly
   (global scope is shared by every manifest on the machine): `apply` keeps
-  them and says so. Prune them with an explicit `apply --prune-foreign`, or
-  `adopt` them into the current manifest.
+  them and says so, and `diff`/`doctor` keep surfacing them as kept — not as
+  pending deletions — until you decide. Prune them with an explicit
+  `apply --prune-foreign` (it still works after the guarded write recorded
+  its own set), or `adopt` them into the current manifest.
 
 ## Managed plugin recipes
 
