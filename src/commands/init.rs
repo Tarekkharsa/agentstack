@@ -2,7 +2,7 @@
 //! existing MCP servers into one manifest, and lift inline secrets into
 //! `${REF}`s (stored in the keychain).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
@@ -87,7 +87,178 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
 }
 
 pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    if args.global {
+        return run_global(args);
+    }
     run_impl(args, manifest_dir, true)
+}
+
+/// Template for the machine-level manifest. Deliberately NOT an import: the
+/// personal layer starts empty and explicit — it carries intent that travels
+/// with the user (instruction fragments, eventually more), not a copy of
+/// whatever the CLIs happen to hold today (that's project `init`'s job).
+const GLOBAL_MANIFEST_TEMPLATE: &str = "\
+# Machine-level agentstack manifest — the personal layer.
+# Cross-project intent that travels with YOU, not with a repo: instruction
+# fragments compiled into each CLI's global CLAUDE.md / AGENTS.md.
+#
+# Declare a fragment, drop its markdown in ./instructions/, then compile:
+#
+#   [instructions.style]
+#   path = \"./instructions/style.md\"   # relative to this directory
+#   targets = [\"*\"]                     # or [\"claude-code\", \"codex\"]
+#
+version = 1
+
+[instructions]
+";
+
+/// `agentstack init --global` — seed `~/.agentstack/agentstack.toml` (honoring
+/// `AGENTSTACK_HOME`) with an empty `[instructions]` block and an
+/// `instructions/` dir. This blesses the home layer as a first-class manifest:
+/// `agentstack instructions` run from `$HOME` (or with `--manifest-dir`)
+/// compiles its fragments into each CLI's global instruction file. The
+/// zero-files bridge deliberately never discovers this layer as a project
+/// (see `manifest::discover_project_base`).
+fn run_global(args: &InitArgs) -> Result<()> {
+    let home = crate::util::paths::agentstack_home();
+    let manifest_path = home.join(MANIFEST_FILE);
+    let instr_dir = home.join("instructions");
+    if manifest_path.exists() && !args.force && !args.dry_run {
+        anyhow::bail!(
+            "{} already exists — use --force to overwrite or --dry-run to preview",
+            manifest_path.display()
+        );
+    }
+
+    // Preview before ANY filesystem write (and before the house-rules prompt).
+    if args.dry_run {
+        println!("\n{} (preview — nothing written)\n", MANIFEST_FILE.bold());
+        println!("{GLOBAL_MANIFEST_TEMPLATE}");
+        println!("Would write {}", manifest_path.display());
+        println!("Would create {}/", instr_dir.display());
+        println!(
+            "Would offer the agentstack house rules fragment ([instructions.{HOUSE_RULES_NAME}])."
+        );
+        return Ok(());
+    }
+    if manifest_path.exists() {
+        // --force: start over from the template (ensure_global_manifest would
+        // keep the existing file).
+        std::fs::remove_file(&manifest_path)
+            .with_context(|| format!("removing {}", manifest_path.display()))?;
+    }
+
+    ensure_global_manifest()?;
+    println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());
+    println!("{}  Created {}/", "📁".dimmed(), instr_dir.display());
+
+    // Offer the agentstack house rules — the fragment that teaches every agent
+    // the manifest-first workflow. Opt-in (it steers the daily-driver agent),
+    // like pack instructions. Non-interactive shells skip; `setup` re-offers.
+    if crate::util::confirm::confirm(
+        "\nInstall the agentstack house rules fragment (teaches agents the manifest-first workflow)?",
+    )? {
+        if seed_house_rules(&home)? {
+            println!(
+                "  {} installed [instructions.{HOUSE_RULES_NAME}] → {}/{HOUSE_RULES_NAME}.md",
+                "✓".green(),
+                instr_dir.display()
+            );
+        }
+    } else {
+        println!(
+            "  {} skipped — `agentstack setup` will offer them again.",
+            "·".dimmed()
+        );
+    }
+
+    println!(
+        "\nNext: drop fragments in {}/, declare them under [instructions.*], then:",
+        instr_dir.display()
+    );
+    println!("    {}", instructions_hint(&home).bold());
+    Ok(())
+}
+
+/// Name and bundled source of the agentstack house-rules fragment, shared by
+/// `init --global` and `setup` so both seed the same thing.
+pub const HOUSE_RULES_NAME: &str = "agentstack";
+const HOUSE_RULES_ASSET: &str = "instructions/agentstack/rules.md";
+
+/// Ensure the machine-level manifest exists (seeding the template and the
+/// `instructions/` dir if needed); returns the home manifest dir.
+pub fn ensure_global_manifest() -> Result<PathBuf> {
+    let home = crate::util::paths::agentstack_home();
+    let manifest_path = home.join(MANIFEST_FILE);
+    let instr_dir = home.join("instructions");
+    std::fs::create_dir_all(&instr_dir)
+        .with_context(|| format!("creating {}", instr_dir.display()))?;
+    if !manifest_path.exists() {
+        crate::util::atomic::write(&manifest_path, GLOBAL_MANIFEST_TEMPLATE)
+            .with_context(|| format!("writing {}", manifest_path.display()))?;
+    }
+    Ok(home)
+}
+
+/// Install the agentstack house-rules fragment into the manifest at `dir`:
+/// extract the bundled markdown to `instructions/agentstack.md` (an existing
+/// file — possibly user-edited — is kept) and declare it under
+/// `[instructions.agentstack]`, preserving manifest comments. Returns `false`
+/// when the manifest already declares the fragment.
+pub fn seed_house_rules(dir: &Path) -> Result<bool> {
+    let manifest_path = dir.join(MANIFEST_FILE);
+    let text = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let manifest: Manifest =
+        toml::from_str(&text).with_context(|| format!("parsing {}", manifest_path.display()))?;
+    if manifest.instructions.contains_key(HOUSE_RULES_NAME) {
+        return Ok(false);
+    }
+
+    let dest = dir
+        .join("instructions")
+        .join(format!("{HOUSE_RULES_NAME}.md"));
+    if !dest.exists() {
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        let body = crate::catalog::read_asset_file(HOUSE_RULES_ASSET)?;
+        crate::util::atomic::write(&dest, &body)
+            .with_context(|| format!("writing {}", dest.display()))?;
+    }
+
+    let entry = crate::manifest::Instruction {
+        path: format!("./instructions/{HOUSE_RULES_NAME}.md"),
+        targets: vec!["*".into()],
+        from_user_layer: false,
+    };
+    let new_text = super::add::build_manifest_with(
+        &text,
+        "instructions",
+        HOUSE_RULES_NAME,
+        &serde_json::to_value(&entry)?,
+        None,
+    )?;
+    crate::util::atomic::write(&manifest_path, &new_text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    Ok(true)
+}
+
+/// The exact `instructions --write` invocation for the machine-level manifest:
+/// plain from `$HOME` when the layer lives at the default `~/.agentstack`,
+/// spelled with `--manifest-dir` when `AGENTSTACK_HOME` relocated it.
+pub(crate) fn instructions_hint(home: &Path) -> String {
+    let default_home = dirs::home_dir().map(|h| h.join(".agentstack"));
+    if default_home.as_deref() == Some(home) {
+        "agentstack instructions --manifest-dir ~ --write".to_string()
+    } else {
+        format!(
+            "agentstack instructions --manifest-dir {} --write",
+            home.display()
+        )
+    }
 }
 
 /// The import step as `setup` drives it: `setup` prints its own guidance and

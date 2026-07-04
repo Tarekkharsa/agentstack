@@ -50,9 +50,39 @@ pub fn new_manifest_dir(base: &Path) -> PathBuf {
 /// hand to [`resolve_manifest_dir`] / `commands::load` — not the manifest dir.
 /// This is how the zero-files bridge follows the agent into a repo when it was
 /// launched from a subdirectory (or a GUI harness's own cwd).
+///
+/// The walk stops AT the `$HOME` layer without matching it, and likewise stops
+/// empty-handed at the machine home itself (`~/.agentstack`, or a relocated
+/// `AGENTSTACK_HOME`): the home manifest (`~/.agentstack/agentstack.toml`,
+/// seeded by `init --global`) is the personal machine-level layer, not a
+/// project — it must never be discovered (and so never offered for `trust`,
+/// never activated) by the zero-files bridge, even for sessions rooted inside
+/// it.
 pub fn discover_project_base(start: &Path) -> Option<PathBuf> {
+    discover_project_base_below(start, dirs::home_dir().as_deref())
+}
+
+fn discover_project_base_below(start: &Path, home: Option<&Path>) -> Option<PathBuf> {
+    // The machine home (~/.agentstack, or wherever AGENTSTACK_HOME relocated
+    // it) carries the machine manifest at its ROOT, so it matches the
+    // legacy-root check below before the walk ever reaches $HOME. Compare
+    // canonicalized so symlinked spellings still match.
+    let machine_home = crate::util::paths::agentstack_home();
+    let machine_home_canon = machine_home.canonicalize().ok();
     let mut cur = Some(start);
     while let Some(dir) = cur {
+        if home == Some(dir) {
+            return None;
+        }
+        // Checked BEFORE the manifest-existence test: a session rooted at or
+        // below the machine home (e.g. editing personal fragments) must never
+        // discover the machine manifest as a project — it would become
+        // trustable/spawnable via the zero-files bridge.
+        if dir == machine_home
+            || (machine_home_canon.is_some() && dir.canonicalize().ok() == machine_home_canon)
+        {
+            return None;
+        }
         if dir.join(MANIFEST_SUBDIR).join(MANIFEST_FILE).exists()
             || dir.join(MANIFEST_FILE).exists()
         {
@@ -83,6 +113,10 @@ pub struct LoadedManifest {
     pub manifest: Manifest,
     pub manifest_path: PathBuf,
     pub local_path: Option<PathBuf>,
+    /// The machine-level manifest whose `[instructions]` merged in beneath
+    /// this one via [`merge_user_layer`]; `None` when that layer is absent,
+    /// wasn't merged, or IS this manifest.
+    pub user_path: Option<PathBuf>,
 }
 
 /// Load `agentstack.toml` from `dir`, deep-merging `agentstack.local.toml` over
@@ -119,7 +153,78 @@ pub fn load_from_dir(dir: &Path) -> Result<LoadedManifest> {
         manifest,
         manifest_path,
         local_path,
+        user_path: None,
     })
+}
+
+/// Merge the machine-level manifest's `[instructions]` — and ONLY those —
+/// beneath an already-loaded project manifest. Layer order is user → project
+/// → project-local (the project side of that chain is already collapsed in
+/// `loaded`), so a project fragment of the same name wins outright: a project
+/// that redefines a fragment fully owns it, which is more predictable than a
+/// field-by-field splice of personal and team content. Inherited fragments
+/// are flagged `from_user_layer` (compiled at global scope only, see
+/// `render::instructions`), listed FIRST (machine-wide rules before project
+/// rules), and their relative paths are re-anchored at the machine layer.
+///
+/// Servers, skills, settings, and hooks are deliberately NOT inherited:
+/// personal capabilities must never auto-inject into a team project, and the
+/// trust digest doesn't cover this layer — it must never widen the runtime
+/// surface. Called by `commands::load` (every command's context), not by
+/// [`load_from_dir`], so primitive loads (trust review, the machine layer
+/// itself) stay single-layer.
+///
+/// A missing or unparseable machine layer is a silent no-op — a broken
+/// personal file must not take every project down — as is loading the machine
+/// manifest itself.
+pub fn merge_user_layer(loaded: &mut LoadedManifest) {
+    let home = crate::util::paths::agentstack_home();
+    let user_manifest = home.join(MANIFEST_FILE);
+    if !user_manifest.exists() {
+        return;
+    }
+    // Never merge the layer beneath itself (canonicalize survives symlinked
+    // temp dirs and `~` spellings).
+    let project_dir = loaded
+        .manifest_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let same = match (home.canonicalize(), project_dir.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => home == project_dir,
+    };
+    if same {
+        return;
+    }
+    let Ok(text) = fs::read_to_string(&user_manifest) else {
+        return;
+    };
+    let Ok(user) = toml::from_str::<Manifest>(&text) else {
+        return;
+    };
+    if user.instructions.is_empty() {
+        return;
+    }
+
+    let mut merged = indexmap::IndexMap::new();
+    for (name, mut instr) in user.instructions {
+        if loaded.manifest.instructions.contains_key(&name) {
+            continue; // the project's definition wins
+        }
+        let p = Path::new(&instr.path);
+        if !p.is_absolute() {
+            let rel = p.strip_prefix("./").unwrap_or(p);
+            instr.path = home.join(rel).display().to_string();
+        }
+        instr.from_user_layer = true;
+        merged.insert(name, instr);
+    }
+    if merged.is_empty() {
+        return;
+    }
+    merged.extend(std::mem::take(&mut loaded.manifest.instructions));
+    loaded.manifest.instructions = merged;
+    loaded.user_path = Some(user_manifest);
 }
 
 /// Deep-merge `overlay` into `base`. Tables merge key-by-key (recursively);
@@ -189,6 +294,121 @@ mod tests {
         // the system temp root, which carries no manifest.)
         let bare = assert_fs::TempDir::new().unwrap();
         assert_eq!(discover_project_base(bare.path()), None);
+    }
+
+    #[test]
+    fn discover_never_surfaces_the_home_layer() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        // The machine-level manifest lives at ~/.agentstack/agentstack.toml…
+        fs::create_dir_all(home.join(MANIFEST_SUBDIR)).unwrap();
+        fs::write(
+            home.join(MANIFEST_SUBDIR).join(MANIFEST_FILE),
+            "version = 1\n",
+        )
+        .unwrap();
+        let deep = home.join("code/somewhere/deep");
+        fs::create_dir_all(&deep).unwrap();
+
+        // …but it is not a project: the walk-up stops at $HOME empty-handed,
+        // from a subdirectory and from $HOME itself.
+        assert_eq!(discover_project_base_below(&deep, Some(&home)), None);
+        assert_eq!(discover_project_base_below(&home, Some(&home)), None);
+
+        // A real project below $HOME is still discovered normally.
+        let proj = home.join("code/proj");
+        fs::create_dir_all(proj.join(MANIFEST_SUBDIR)).unwrap();
+        fs::write(
+            proj.join(MANIFEST_SUBDIR).join(MANIFEST_FILE),
+            "version = 1\n",
+        )
+        .unwrap();
+        let inner = proj.join("src");
+        fs::create_dir_all(&inner).unwrap();
+        assert_eq!(discover_project_base_below(&inner, Some(&home)), Some(proj));
+    }
+
+    #[test]
+    fn discovery_inside_the_default_machine_home_never_matches_it() {
+        // ~/.agentstack carries the machine manifest at its ROOT, so it matches
+        // the legacy-root check before the walk ever reaches $HOME. A session
+        // rooted at or below it (e.g. editing personal fragments) must not
+        // discover the machine manifest as a project — that would make the
+        // personal layer trustable/spawnable via the zero-files bridge.
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev_home = std::env::var_os("HOME");
+        let prev_as_home = std::env::var_os("AGENTSTACK_HOME");
+
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        let machine = home.join(".agentstack");
+        fs::create_dir_all(machine.join("instructions")).unwrap();
+        fs::write(machine.join(MANIFEST_FILE), "version = 1\n").unwrap();
+        // Default layout: agentstack_home() derives from $HOME.
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("AGENTSTACK_HOME");
+
+        assert_eq!(
+            discover_project_base_below(&machine.join("instructions"), Some(&home)),
+            None,
+            "a walk started below ~/.agentstack must not surface the machine manifest"
+        );
+        assert_eq!(
+            discover_project_base_below(&machine, Some(&home)),
+            None,
+            "a walk started at ~/.agentstack itself must not surface it either"
+        );
+
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        match prev_as_home {
+            Some(v) => std::env::set_var("AGENTSTACK_HOME", v),
+            None => std::env::remove_var("AGENTSTACK_HOME"),
+        }
+    }
+
+    #[test]
+    fn discovery_inside_a_relocated_machine_home_never_matches_it() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev_as_home = std::env::var_os("AGENTSTACK_HOME");
+
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        // AGENTSTACK_HOME relocated outside $HOME entirely.
+        let machine = tmp.path().join("relocated/as-home");
+        fs::create_dir_all(machine.join("instructions")).unwrap();
+        fs::write(machine.join(MANIFEST_FILE), "version = 1\n").unwrap();
+        std::env::set_var("AGENTSTACK_HOME", &machine);
+
+        assert_eq!(
+            discover_project_base_below(&machine.join("instructions"), Some(&home)),
+            None
+        );
+        assert_eq!(discover_project_base_below(&machine, Some(&home)), None);
+
+        // A real project elsewhere is still discovered normally.
+        let proj = tmp.path().join("relocated/proj");
+        fs::create_dir_all(proj.join(MANIFEST_SUBDIR)).unwrap();
+        fs::write(
+            proj.join(MANIFEST_SUBDIR).join(MANIFEST_FILE),
+            "version = 1\n",
+        )
+        .unwrap();
+        let inner = proj.join("src");
+        fs::create_dir_all(&inner).unwrap();
+        assert_eq!(discover_project_base_below(&inner, Some(&home)), Some(proj));
+
+        match prev_as_home {
+            Some(v) => std::env::set_var("AGENTSTACK_HOME", v),
+            None => std::env::remove_var("AGENTSTACK_HOME"),
+        }
     }
 
     #[test]

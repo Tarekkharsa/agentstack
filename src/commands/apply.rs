@@ -8,6 +8,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::ApplyArgs;
 use crate::manifest::{validate_with_context, ValidateCtx};
+use crate::render::instructions::plan_instructions;
 use crate::render::{
     effective_servers, plan_hooks, plan_settings, plan_target_with_servers, resolve_targets,
     Selection,
@@ -324,6 +325,64 @@ fn render(
                 }
             } else if will_write && !hblocked {
                 state.record_hooks(&key, hp.managed.clone());
+            }
+        }
+
+        // Instruction fragments (the managed region of CLAUDE.md / AGENTS.md).
+        // Only when the manifest declares [instructions.*]: a manifest without
+        // any must never touch — let alone empty out — a region another layer
+        // (e.g. the machine manifest seeded by `init --global`) owns.
+        if !manifest.instructions.is_empty() {
+            // …and only when fragments actually apply at THIS scope: project
+            // scope filters out every machine-layer fragment, so a project
+            // with none of its own compiles to an empty string there — writing
+            // that would strip a committed managed region from the repo.
+            if let Some(ip) = plan_instructions(manifest, desc, scope, &ctx.dir)
+                .filter(|ip| !ip.fragments.is_empty() || !ip.missing.is_empty())
+            {
+                for m in &ip.missing {
+                    println!("  {} instruction fragment '{m}' source missing", "✗".red());
+                    error_count += 1;
+                }
+                // A missing source already dropped its content from the
+                // compile — writing now would delete previously compiled
+                // fragments (all sources missing empties the whole region).
+                // Block the write, mirroring the unresolved-secret path.
+                let iblocked = !ip.missing.is_empty();
+                if iblocked {
+                    write_blockers += 1;
+                }
+                if ip.changed() {
+                    changed_count += 1;
+                    println!("  {} instructions → {}", "·".dimmed(), ip.path.display());
+                    if !quiet {
+                        print!("{}", indent(&ip.diff()));
+                    }
+                    if will_write && iblocked {
+                        println!(
+                            "  {} instructions not written — missing fragment source(s)",
+                            "✗".red()
+                        );
+                    } else if will_write {
+                        backups.push(crate::history::capture(
+                            &ip.path,
+                            format!("{} · instructions", desc.display),
+                        ));
+                        touched_targets.insert(desc.display.clone());
+                        ip.write()?;
+                        println!(
+                            "  {} wrote {} instruction fragment(s)",
+                            "✓".green(),
+                            ip.fragments.len()
+                        );
+                    } else {
+                        println!(
+                            "  {} {} instruction fragment(s) to apply",
+                            "→".cyan(),
+                            ip.fragments.len()
+                        );
+                    }
+                }
             }
         }
     }

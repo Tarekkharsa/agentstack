@@ -432,6 +432,7 @@ fn add_pack(
             let entry = crate::manifest::Instruction {
                 path: format!("./{dest}"),
                 targets: vec!["*".into()],
+                from_user_layer: false,
             };
             text = build_manifest_with(
                 &text,
@@ -633,6 +634,14 @@ fn print_pack_next_steps(pack: &str, spec: &PackSpec, with_instructions: bool) {
         let reference = format!("{}_TOKEN", sanitize_ref(pack));
         println!(
             "{} set the server secret: `agentstack secret set {reference}` (or via varlock), then `agentstack apply`.",
+            "↳".cyan()
+        );
+    }
+    if !spec.instructions.is_empty() && with_instructions {
+        // The fragments are declared but not compiled yet — hand over the
+        // exact command that lands them in each CLI's CLAUDE.md / AGENTS.md.
+        println!(
+            "{} compile the installed house rules into your agents' instruction files: `agentstack instructions --write`.",
             "↳".cyan()
         );
     }

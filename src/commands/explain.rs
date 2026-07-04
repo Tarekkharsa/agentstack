@@ -30,11 +30,49 @@ pub fn explain_text(name: &str, manifest_dir: Option<&Path>) -> Result<String> {
         Ok(explain_server(name, &ctx))
     } else if manifest.skills.contains_key(name) || in_library_skill {
         Ok(explain_skill(name, &ctx))
+    } else if manifest.instructions.contains_key(name) {
+        Ok(explain_instruction(name, &ctx))
     } else {
         anyhow::bail!(
-            "no server or skill '{name}' in the manifest or central library. Try `agentstack search {name}` to find one to add."
+            "no server, skill, or instruction '{name}' in the manifest or central library. Try `agentstack search {name}` to find one to add."
         )
     }
+}
+
+/// Instruction fragments are simpler than servers/skills: what matters is
+/// where the fragment comes from (this project vs the machine layer), where
+/// its source lives, and which harnesses it compiles into.
+fn explain_instruction(name: &str, ctx: &crate::commands::Context) -> String {
+    let instr = &ctx.loaded.manifest.instructions[name];
+    let mut out = format!("# {name} (instruction fragment)\n\n");
+    if instr.from_user_layer {
+        let layer = ctx
+            .loaded
+            .user_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "machine manifest".into());
+        out.push_str(&format!(
+            "Origin: machine layer ({layer}) — merged beneath this project; compiles at GLOBAL scope only.\n"
+        ));
+    } else {
+        out.push_str("Origin: this project's manifest.\n");
+    }
+    out.push_str(&format!("Source: {}\n", instr.path));
+    let src = Path::new(&instr.path);
+    let resolved = if src.is_absolute() {
+        src.to_path_buf()
+    } else {
+        ctx.dir.join(src)
+    };
+    if !resolved.exists() {
+        out.push_str("  ✗ source file missing\n");
+    }
+    out.push_str(&format!(
+        "Targets: {} — compiled into each one's CLAUDE.md / AGENTS.md managed region by `agentstack instructions --write` (or `apply`).\n",
+        instr.targets.join(", ")
+    ));
+    out
 }
 
 fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {

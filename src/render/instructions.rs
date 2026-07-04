@@ -57,6 +57,12 @@ pub fn plan_instructions(
         if !instr.applies_to(&desc.id) {
             continue;
         }
+        // Fragments inherited from the machine-level manifest are personal:
+        // they compile into the global files only, never into a repo's
+        // (typically committed) project-scope CLAUDE.md / AGENTS.md.
+        if instr.from_user_layer && scope == Scope::Project {
+            continue;
+        }
         let src = resolve(project_dir, &instr.path);
         match fs::read_to_string(&src) {
             Ok(text) => {

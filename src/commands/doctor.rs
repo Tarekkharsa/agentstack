@@ -371,6 +371,94 @@ fn run_checks(
         report.line(Level::Ok, "all targets in sync");
     }
 
+    // Instruction fragments: the managed region of each CLAUDE.md / AGENTS.md
+    // must match what the manifest would compile at SOME scope the project
+    // actually uses (apply picks the scope per invocation), and every declared
+    // fragment source must exist. A missing source is an error (`--ci` gates
+    // it); a stale region is drift, so it warns.
+    report.section("Instructions");
+    if manifest.instructions.is_empty() {
+        report.line(Level::Ok, "no instruction fragments defined");
+    } else {
+        // Provenance: fragments inherited from the machine-level manifest.
+        let inherited = manifest
+            .instructions
+            .values()
+            .filter(|i| i.from_user_layer)
+            .count();
+        if let (Some(up), true) = (&ctx.loaded.user_path, inherited > 0) {
+            report.line(
+                Level::Ok,
+                format!(
+                    "{inherited} fragment(s) inherited from the machine manifest ({})",
+                    up.display()
+                ),
+            );
+        }
+        let mut instr_issues = 0;
+        for id in &target_ids {
+            let Some(desc) = ctx.registry.get(id) else {
+                continue;
+            };
+            let global = crate::render::instructions::plan_instructions(
+                manifest,
+                desc,
+                Scope::Global,
+                &ctx.dir,
+            );
+            let project = crate::render::instructions::plan_instructions(
+                manifest,
+                desc,
+                Scope::Project,
+                &ctx.dir,
+            );
+            // Missing sources are scope-independent; the global plan sees
+            // every declared fragment (project scope filters out inherited
+            // machine-layer ones), so report from it alone.
+            if let Some(plan) = &global {
+                for m in &plan.missing {
+                    instr_issues += 1;
+                    report.line(
+                        Level::Error,
+                        format!("{:<14} fragment '{m}' source missing", desc.display),
+                    );
+                }
+            }
+            // Staleness: `apply`/`instructions` pick the scope per invocation,
+            // so a project compiled at project scope must not warn forever
+            // against a global file it never writes. Warn only when NO scope
+            // that actually compiles fragments is in sync, naming the stale
+            // scope(s).
+            let mut stale_scopes: Vec<&str> = Vec::new();
+            let mut in_sync = false;
+            for (label, plan) in [("global", &global), ("project", &project)] {
+                let Some(plan) = plan else { continue };
+                if plan.fragments.is_empty() && plan.missing.is_empty() {
+                    continue; // nothing compiles at this scope
+                }
+                if plan.changed() {
+                    stale_scopes.push(label);
+                } else {
+                    in_sync = true;
+                }
+            }
+            if !in_sync && !stale_scopes.is_empty() {
+                instr_issues += 1;
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<14} managed region stale ({} scope) ↳ agentstack instructions --write",
+                        desc.display,
+                        stale_scopes.join("/")
+                    ),
+                );
+            }
+        }
+        if instr_issues == 0 {
+            report.line(Level::Ok, "all instruction files match the manifest");
+        }
+    }
+
     report.section("Quirks");
     let quirks = check_quirks(manifest);
     if quirks.is_empty() {

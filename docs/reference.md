@@ -115,9 +115,40 @@ The complete, implemented-and-tested feature inventory. The
   never clobbering hand-made skill dirs. When a prune empties the managed
   skills dir (deactivation, `session end`), the dir itself is removed too —
   rmdir semantics, so a dir holding any user content always survives.
-- **Instruction files** — compile shared + harness-specific fragments into each
-  CLI's `CLAUDE.md` / `AGENTS.md`, inside a managed `<!-- agentstack -->` region
-  that preserves all surrounding hand-written prose.
+- **Instruction files** — compile shared + harness-specific `[instructions.*]`
+  fragments into each CLI's `CLAUDE.md` / `AGENTS.md`, inside a managed
+  `<!-- agentstack -->` region that preserves all surrounding hand-written
+  prose (`agentstack instructions`; dry-run by default, `--write` applies).
+  Part of the mainstream lifecycle: `apply` (and therefore `setup`) compiles
+  the region alongside servers/settings/hooks behind the same `--write` gate —
+  a manifest with no `[instructions.*]` never touches a region another layer
+  owns — and `doctor` flags a stale managed region (warn ↳ `instructions
+  --write`) or a missing fragment source (error, gates `--ci`). Installing a
+  pack's house rules prints the exact compile command as the next step.
+- **Machine-level manifest (`init --global`)** — seeds
+  `~/.agentstack/agentstack.toml` plus an `instructions/` dir: a first-class
+  home for *personal*, cross-project instruction fragments (the operational
+  knowledge you'd otherwise re-teach each agent). Compile them with
+  `agentstack instructions --manifest-dir ~ --write`. The zero-files bridge
+  deliberately never discovers this layer as a project — it cannot be
+  `trust`ed or activated by `mcp --auto-project`.
+- **User layer beneath every project** — the machine manifest's
+  `[instructions]` (and only those) merge in beneath each project load, order
+  user → project → project-local; a project fragment of the same name wins
+  outright. Inherited fragments compile at **global scope only** (personal
+  rules never land in a repo's committed `CLAUDE.md`), and servers/skills/
+  settings deliberately do **not** inherit — personal capabilities never
+  auto-inject into a team project, and the trust digest is unaffected.
+  Provenance is visible everywhere: `instructions` labels inherited fragments
+  `(machine)`, `doctor` counts them, and `explain <fragment>` names the layer.
+- **agentstack house rules** — a bundled instruction fragment
+  (`[instructions.agentstack]`) that teaches every agent the manifest-first
+  workflow: never edit rendered configs, the three artifact modes (a
+  clean-at-rest project's missing `.mcp.json` is intentional), re-lock after
+  editing profiles, and the drift decision rule (keep a hand-added server →
+  `adopt`; manifest is truth → `apply --write`). `init --global` and `setup`
+  offer to install it into the machine manifest (opt-in, like pack
+  instructions).
 - **Native settings** — manage each CLI's own settings file (Claude Code
   `~/.claude/settings.json` permissions/feature flags, Codex `config.toml`) from
   one `[settings.<cli>]` block. `apply` merges only the keys you declare into the
@@ -287,6 +318,13 @@ project is untrusted (or its manifest changed since it was trusted),
 `tools_search` says so and names the exact `agentstack trust <dir>` command,
 and `agentstack_doctor` includes a `Trust (auto mode):` line.
 
+agentstack's own manual — the bundled `using-agentstack` skill — is always
+loadable through the control plane: it appears in `agentstack_list_loadable`
+even with no project manifest, in untrusted (control-plane-only) sessions, and
+through session fences, served from the copy embedded in the binary (a
+project's own `using-agentstack` skill overrides it). An agent that can reach
+the gateway can always learn how to drive it.
+
 Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
 skills-over-MCP (`agentstack_list_loadable`/`agentstack_load`) are fully
 zero-copy. Native skill folders and instruction files (`CLAUDE.md`/`AGENTS.md`)
@@ -353,7 +391,7 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 
 ## All commands
 
-`init`, `add`, `install` (`--locked`, `--allow-flagged`), `update`,
+`init` (`--global`), `add`, `install` (`--locked`, `--allow-flagged`), `update`,
 `lock` (`--profile`), `remove`,
 `upgrade`, `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,

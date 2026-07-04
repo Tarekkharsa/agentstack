@@ -485,6 +485,7 @@ fn build_upgraded_manifest(
             let entry = Instruction {
                 path: format!("./instructions/{}.md", instr.name),
                 targets: vec!["*".into()],
+                from_user_layer: false,
             };
             text = add::build_manifest_with(
                 &text,

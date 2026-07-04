@@ -503,7 +503,7 @@ fn tool_defs() -> Value {
         },
         {
             "name": "agentstack_list_loadable",
-            "description": "List the skills you're allowed to load right now, each with a one-line description (the cheap catalog — not the full instructions). When a session is active the list is fenced to that session's profile. Call this first, read the descriptions, then load only what the task needs.",
+            "description": "List the skills you're allowed to load right now, each with a one-line description (the cheap catalog — not the full instructions). When a session is active the list is fenced to that session's profile. agentstack's own manual (using-agentstack) is always listed — load it when a task involves changing an agent's servers/skills/setup. Call this first, read the descriptions, then load only what the task needs.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
@@ -1083,8 +1083,70 @@ fn diff_summary(args: &Value, dir: Option<&Path>) -> Result<String> {
     Ok(out)
 }
 
+/// agentstack's own manual (`catalog/skills/using-agentstack`), embedded in the
+/// binary via `CATALOG_ASSETS`. It is ALWAYS loadable through the control
+/// plane: with no project manifest at all, in untrusted (control-plane-only)
+/// sessions, and through any session fence — it executes nothing, and it's how
+/// an agent learns to drive the rest of these tools. A project's own
+/// `using-agentstack` skill (manifest or library) still wins when it resolves.
+const BUILTIN_MANUAL: &str = "using-agentstack";
+const BUILTIN_MANUAL_ASSET: &str = "skills/using-agentstack/SKILL.md";
+
+fn builtin_manual_md() -> Result<String> {
+    crate::catalog::read_asset_file(BUILTIN_MANUAL_ASSET)
+}
+
+/// Whether a manifest file is present where `commands::load` would look for
+/// one — distinguishes "no manifest anywhere" from "manifest exists but failed
+/// to load" (parse error, bad schema, unreadable overlay).
+fn manifest_file_exists(dir: Option<&Path>) -> bool {
+    let base = match dir {
+        Some(d) => d.to_path_buf(),
+        None => match std::env::current_dir() {
+            Ok(d) => d,
+            Err(_) => return false,
+        },
+    };
+    crate::manifest::resolve_manifest_dir(&base)
+        .join(MANIFEST_FILE)
+        .exists()
+}
+
+fn builtin_manual_entry(md: &str, loaded: bool) -> Value {
+    json!({
+        "name": BUILTIN_MANUAL,
+        "description": parse_frontmatter_description(md).unwrap_or_default(),
+        "kind": "skill",
+        "origin": "builtin",
+        "loaded": loaded,
+    })
+}
+
 fn list_loadable(dir: Option<&Path>) -> Result<String> {
-    let ctx = crate::commands::load(dir)?;
+    // No manifest anywhere (a control-plane-only session outside any project):
+    // the built-in manual is still loadable. A manifest that EXISTS but fails
+    // to load is a different story — surface the load error instead of
+    // reporting the project as manifest-less.
+    let ctx = match crate::commands::load(dir) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            let entries = vec![builtin_manual_entry(&builtin_manual_md()?, false)];
+            let note = if manifest_file_exists(dir) {
+                format!(
+                    "Project manifest failed to load ({err:#}) — only agentstack's built-in manual is loadable until it is fixed."
+                )
+            } else {
+                "No project manifest found — only agentstack's built-in manual is loadable."
+                    .to_string()
+            };
+            return Ok(serde_json::to_string_pretty(&json!({
+                "loadable": entries,
+                "fenced": false,
+                "session": Value::Null,
+                "note": note,
+            }))?);
+        }
+    };
     let m = &ctx.loaded.manifest;
     let libctx = ctx.library_ctx();
     let session = crate::session::active(&ctx.dir);
@@ -1128,6 +1190,14 @@ fn list_loadable(dir: Option<&Path>) -> Result<String> {
             "loaded": loaded.contains(&name),
         }));
     }
+    // The built-in manual rides along unless the project carries its own copy
+    // (already listed above) — session fences never exclude it.
+    if !entries.iter().any(|e| e["name"] == BUILTIN_MANUAL) {
+        entries.insert(
+            0,
+            builtin_manual_entry(&builtin_manual_md()?, loaded.contains(BUILTIN_MANUAL)),
+        );
+    }
     Ok(serde_json::to_string_pretty(&json!({
         "loadable": entries,
         "fenced": session.is_some(),
@@ -1152,7 +1222,49 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
         .filter(|s| !s.is_empty())
         .context("`reason` is required — say why this task needs the skill")?;
 
-    let ctx = crate::commands::load(dir)?;
+    let ctx = crate::commands::load(dir);
+
+    // The built-in manual: served from the embedded copy whenever the project's
+    // own `using-agentstack` isn't loadable + resolvable — including with no
+    // manifest at all and through session fences.
+    if name == BUILTIN_MANUAL {
+        let project_copy = ctx.as_ref().ok().is_some_and(|ctx| {
+            let libctx = ctx.library_ctx();
+            let session = crate::session::active(&ctx.dir);
+            loadable_skill_names(&ctx.loaded.manifest, &libctx.library, session.as_ref())
+                .iter()
+                .any(|n| n == BUILTIN_MANUAL)
+                && crate::resolve::resolve_skill(
+                    &ctx.loaded.manifest,
+                    &ctx.dir,
+                    &libctx.library,
+                    &libctx.lib_home,
+                    &libctx.store,
+                    BUILTIN_MANUAL,
+                    crate::resolve::ResolveMode::NoFetch,
+                )
+                .is_ok()
+        });
+        if !project_copy {
+            // Loads are still session-logged when a session is active.
+            let (sticky, newly) = match &ctx {
+                Ok(c) if crate::session::active(&c.dir).is_some() => {
+                    (true, crate::session::record_load(&c.dir, name, reason)?)
+                }
+                _ => (false, false),
+            };
+            return Ok(serde_json::to_string_pretty(&json!({
+                "loaded": name,
+                "origin": "builtin",
+                "instructions": builtin_manual_md()?,
+                "sticky": sticky,
+                "newly_loaded": newly,
+                "fenced": false,
+            }))?);
+        }
+    }
+
+    let ctx = ctx?;
     let m = &ctx.loaded.manifest;
     let libctx = ctx.library_ctx();
 
@@ -1515,6 +1627,92 @@ mod tests {
         crate::trust::trust(proj.path()).unwrap();
         let text = doctor_summary(Some(proj.path())).unwrap();
         assert!(text.contains("Trust (auto mode): trusted"), "{text}");
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn builtin_manual_is_always_loadable() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        // No manifest anywhere: the manual is the whole catalog.
+        let empty = assert_fs::TempDir::new().unwrap();
+        let out = list_loadable(Some(empty.path())).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let names: Vec<&str> = v["loadable"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec![BUILTIN_MANUAL]);
+        assert_eq!(v["loadable"][0]["origin"], "builtin");
+
+        // …and it loads, serving the embedded SKILL.md body.
+        let args = json!({ "name": BUILTIN_MANUAL, "reason": "learn the tools" });
+        let out = load_capability(&args, Some(empty.path())).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["origin"], "builtin");
+        assert!(v["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("# Using agentstack"));
+
+        // With a project manifest that doesn't define it, it rides along.
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n")
+            .unwrap();
+        let out = list_loadable(Some(proj.path())).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let entry = &v["loadable"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["name"] == BUILTIN_MANUAL)
+            .expect("manual listed alongside the project's skills");
+        assert_eq!(entry["origin"], "builtin");
+        let out = load_capability(&args, Some(proj.path())).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["origin"], "builtin");
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn list_loadable_surfaces_a_broken_manifest_instead_of_calling_it_absent() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        // A manifest that exists but does not parse.
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = \n")
+            .unwrap();
+
+        let out = list_loadable(Some(proj.path())).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        // The manual still rides along…
+        assert_eq!(v["loadable"][0]["name"], BUILTIN_MANUAL);
+        // …but the note reports a load FAILURE, not an absent manifest.
+        let note = v["note"].as_str().unwrap();
+        assert!(
+            note.contains("failed to load"),
+            "note should surface the load error: {note}"
+        );
+        assert!(
+            !note.contains("No project manifest found"),
+            "a broken manifest must not be reported as absent: {note}"
+        );
 
         std::env::remove_var("AGENTSTACK_HOME");
     }

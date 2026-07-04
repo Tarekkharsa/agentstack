@@ -23,6 +23,12 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     println!("Scope: {scope}");
+    if let Some(up) = &ctx.loaded.user_path {
+        println!(
+            "Machine layer: {} (its fragments merge in beneath this project's, global scope only)",
+            up.display()
+        );
+    }
     let mut changed = 0;
 
     for id in &target_ids {
@@ -41,7 +47,22 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
             println!("  no fragments target this harness");
             continue;
         }
-        println!("  fragments: {}", plan.fragments.join(", "));
+        let labels: Vec<String> = plan
+            .fragments
+            .iter()
+            .map(|n| {
+                if manifest
+                    .instructions
+                    .get(n)
+                    .is_some_and(|i| i.from_user_layer)
+                {
+                    format!("{n} (machine)")
+                } else {
+                    n.clone()
+                }
+            })
+            .collect();
+        println!("  fragments: {}", labels.join(", "));
 
         if plan.changed() {
             changed += 1;

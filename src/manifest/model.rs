@@ -153,6 +153,14 @@ pub struct Instruction {
     /// Adapter ids this fragment applies to; `["*"]` (the default) = all.
     #[serde(default = "all_targets")]
     pub targets: Vec<String>,
+    /// True when this fragment was inherited from the machine-level manifest
+    /// (`~/.agentstack/agentstack.toml`, see [`super::merge_user_layer`])
+    /// rather than declared by this project or its local overlay. Inherited
+    /// fragments compile at GLOBAL scope only — personal rules never land in
+    /// a repo's committed project-scope CLAUDE.md / AGENTS.md. Load-time
+    /// provenance; never (de)serialized.
+    #[serde(skip)]
+    pub from_user_layer: bool,
 }
 
 fn all_targets() -> Vec<String> {
