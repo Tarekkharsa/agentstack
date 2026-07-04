@@ -96,6 +96,12 @@ The complete, implemented-and-tested feature inventory. The
   fragments into each CLI's `CLAUDE.md` / `AGENTS.md`, inside a managed
   `<!-- agentstack -->` region that preserves all surrounding hand-written
   prose (`agentstack instructions`; dry-run by default, `--write` applies).
+  Part of the mainstream lifecycle: `apply` (and therefore `setup`) compiles
+  the region alongside servers/settings/hooks behind the same `--write` gate —
+  a manifest with no `[instructions.*]` never touches a region another layer
+  owns — and `doctor` flags a stale managed region (warn ↳ `instructions
+  --write`) or a missing fragment source (error, gates `--ci`). Installing a
+  pack's house rules prints the exact compile command as the next step.
 - **Machine-level manifest (`init --global`)** — seeds
   `~/.agentstack/agentstack.toml` plus an `instructions/` dir: a first-class
   home for *personal*, cross-project instruction fragments (the operational

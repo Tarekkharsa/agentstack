@@ -636,6 +636,14 @@ fn print_pack_next_steps(pack: &str, spec: &PackSpec, with_instructions: bool) {
             "↳".cyan()
         );
     }
+    if !spec.instructions.is_empty() && with_instructions {
+        // The fragments are declared but not compiled yet — hand over the
+        // exact command that lands them in each CLI's CLAUDE.md / AGENTS.md.
+        println!(
+            "{} compile the installed house rules into your agents' instruction files: `agentstack instructions --write`.",
+            "↳".cyan()
+        );
+    }
     if !spec.instructions.is_empty() && !with_instructions {
         println!(
             "{} house rules were skipped — re-run with `--with-instructions` to install them.",

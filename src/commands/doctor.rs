@@ -353,6 +353,50 @@ fn run_checks(
         report.line(Level::Ok, "all targets in sync");
     }
 
+    // Instruction fragments: the managed region of each CLAUDE.md / AGENTS.md
+    // must match what the manifest would compile (global scope, like Drift),
+    // and every declared fragment source must exist. A missing source is an
+    // error (`--ci` gates it); a stale region is drift, so it warns.
+    report.section("Instructions");
+    if manifest.instructions.is_empty() {
+        report.line(Level::Ok, "no instruction fragments defined");
+    } else {
+        let mut instr_issues = 0;
+        for id in &target_ids {
+            let Some(desc) = ctx.registry.get(id) else {
+                continue;
+            };
+            let Some(plan) = crate::render::instructions::plan_instructions(
+                manifest,
+                desc,
+                Scope::Global,
+                &ctx.dir,
+            ) else {
+                continue;
+            };
+            for m in &plan.missing {
+                instr_issues += 1;
+                report.line(
+                    Level::Error,
+                    format!("{:<14} fragment '{m}' source missing", desc.display),
+                );
+            }
+            if plan.changed() {
+                instr_issues += 1;
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<14} managed region stale ↳ agentstack instructions --write",
+                        desc.display
+                    ),
+                );
+            }
+        }
+        if instr_issues == 0 {
+            report.line(Level::Ok, "all instruction files match the manifest");
+        }
+    }
+
     report.section("Quirks");
     let quirks = check_quirks(manifest);
     if quirks.is_empty() {

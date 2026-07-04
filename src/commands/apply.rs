@@ -8,6 +8,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::ApplyArgs;
 use crate::manifest::{validate_with_context, ValidateCtx};
+use crate::render::instructions::plan_instructions;
 use crate::render::{
     effective_servers, plan_hooks, plan_settings, plan_target_with_servers, resolve_targets,
     Selection,
@@ -324,6 +325,45 @@ fn render(
                 }
             } else if will_write && !hblocked {
                 state.record_hooks(&key, hp.managed.clone());
+            }
+        }
+
+        // Instruction fragments (the managed region of CLAUDE.md / AGENTS.md).
+        // Only when the manifest declares [instructions.*]: a manifest without
+        // any must never touch — let alone empty out — a region another layer
+        // (e.g. the machine manifest seeded by `init --global`) owns.
+        if !manifest.instructions.is_empty() {
+            if let Some(ip) = plan_instructions(manifest, desc, scope, &ctx.dir) {
+                for m in &ip.missing {
+                    println!("  {} instruction fragment '{m}' source missing", "✗".red());
+                    error_count += 1;
+                }
+                if ip.changed() {
+                    changed_count += 1;
+                    println!("  {} instructions → {}", "·".dimmed(), ip.path.display());
+                    if !quiet {
+                        print!("{}", indent(&ip.diff()));
+                    }
+                    if will_write {
+                        backups.push(crate::history::capture(
+                            &ip.path,
+                            format!("{} · instructions", desc.display),
+                        ));
+                        touched_targets.insert(desc.display.clone());
+                        ip.write()?;
+                        println!(
+                            "  {} wrote {} instruction fragment(s)",
+                            "✓".green(),
+                            ip.fragments.len()
+                        );
+                    } else {
+                        println!(
+                            "  {} {} instruction fragment(s) to apply",
+                            "→".cyan(),
+                            ip.fragments.len()
+                        );
+                    }
+                }
             }
         }
     }
