@@ -3,11 +3,15 @@
 //! Project-scope writes (`.mcp.json`, `.claude/skills/*` symlinks) are
 //! machine-local: symlinks carry absolute home paths and rendered configs can
 //! carry resolved secrets. By default they are kept out of git via a marked
-//! block this module owns — created, updated, and emptied as the managed set
-//! changes, never touching the rest of the file. Files a user already tracks
-//! in git are unaffected (gitignore never hides tracked files), so
-//! commit-the-artifacts workflows keep working; `--no-gitignore` opts out of
-//! the block entirely.
+//! block this module owns — created and updated as the managed set changes,
+//! never touching the rest of the file. Callers pass **stable,
+//! directory-level entries** (the managed config file, the skills dir with a
+//! trailing slash) so the block does not churn as profile membership changes,
+//! and an emptied managed set (deactivation) **leaves the block intact**:
+//! removing it would dirty a `.gitignore` a team may have committed. Files a
+//! user already tracks in git are unaffected (gitignore never hides tracked
+//! files), so commit-the-artifacts workflows keep working; `--no-gitignore`
+//! opts out of the block entirely.
 
 use std::fs;
 use std::path::Path;
@@ -38,18 +42,19 @@ pub fn ensure_block(project_root: &Path, entries: &[String], write: bool) -> Res
     Ok(true)
 }
 
-/// Replace (or insert, or drop) the managed block in `existing`, leaving every
-/// other byte untouched.
+/// Replace (or insert) the managed block in `existing`, leaving every other
+/// byte untouched. An empty entry set changes nothing: deactivation must not
+/// strip a block a team may have committed (the stable entries stay correct
+/// for the next activation anyway).
 fn splice(existing: &str, entries: &[String]) -> String {
     let mut sorted: Vec<&str> = entries.iter().map(String::as_str).collect();
     sorted.sort_unstable();
     sorted.dedup();
 
-    let block = if sorted.is_empty() {
-        String::new()
-    } else {
-        format!("{BEGIN}\n{}\n{END}\n", sorted.join("\n"))
-    };
+    if sorted.is_empty() {
+        return existing.to_string();
+    }
+    let block = format!("{BEGIN}\n{}\n{END}\n", sorted.join("\n"));
 
     let lines: Vec<&str> = existing.lines().collect();
     let begin = lines.iter().position(|l| l.trim() == BEGIN);
@@ -58,14 +63,7 @@ fn splice(existing: &str, entries: &[String]) -> String {
     match (begin, end) {
         (Some(b), Some(e)) if b <= e => {
             let mut out: Vec<String> = lines[..b].iter().map(|s| s.to_string()).collect();
-            if !block.is_empty() {
-                out.push(block.trim_end().to_string());
-            } else {
-                // Dropping the block: also drop a now-dangling blank line above.
-                while out.last().is_some_and(|l| l.trim().is_empty()) {
-                    out.pop();
-                }
-            }
+            out.push(block.trim_end().to_string());
             out.extend(lines[e + 1..].iter().map(|s| s.to_string()));
             let mut s = out.join("\n");
             if !s.is_empty() {
@@ -73,7 +71,6 @@ fn splice(existing: &str, entries: &[String]) -> String {
             }
             s
         }
-        _ if block.is_empty() => existing.to_string(),
         _ => {
             let mut s = existing.trim_end().to_string();
             if !s.is_empty() {
@@ -115,11 +112,23 @@ mod tests {
     }
 
     #[test]
-    fn empty_entries_drop_the_block() {
+    fn empty_entries_leave_the_block_intact() {
+        // Deactivation: the existing block stays byte-identical — dropping it
+        // would dirty a committed .gitignore in team repos.
         let with = splice("dist/\n", &e(&["/.mcp.json"]));
-        let without = splice(&with, &[]);
-        assert_eq!(without, "dist/\n");
-        // And a no-block file stays byte-identical.
+        assert_eq!(splice(&with, &[]), with);
+        // And a no-block file stays byte-identical too.
         assert_eq!(splice("dist/\n", &[]), "dist/\n");
+    }
+
+    #[test]
+    fn directory_level_entries_are_stable_across_reruns() {
+        // Callers emit the skills dir (trailing slash) + the managed config
+        // file — not per-skill lines — so re-splicing the same set is a no-op
+        // whatever the active skill membership is.
+        let first = splice("", &e(&["/.claude/skills/", "/.mcp.json"]));
+        assert!(first.contains("/.claude/skills/\n"));
+        let second = splice(&first, &e(&["/.mcp.json", "/.claude/skills/"]));
+        assert_eq!(first, second);
     }
 }

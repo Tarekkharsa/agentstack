@@ -345,9 +345,8 @@ fn render(
         && crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true)?
     {
         println!(
-            "\n{} .gitignore: {} generated path(s) kept out of git ({} to commit them instead)",
+            "\n{} .gitignore: managed block updated — generated artifacts stay out of git ({} to commit them instead)",
             "✓".green(),
-            ignore_entries.len(),
             "--no-gitignore".bold()
         );
     }

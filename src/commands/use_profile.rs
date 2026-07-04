@@ -83,12 +83,15 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let mut blocked_targets: Vec<String> = Vec::new();
     // Project-scope artifacts we write are machine-local (absolute-path
     // symlinks, resolved values) — collect them for the managed .gitignore
-    // block unless the user opts out.
+    // block unless the user opts out. Entries are stable and directory-level
+    // (the config file, the whole skills dir) so the block never churns as
+    // profile membership changes.
     let project_root = crate::manifest::project_root_of(&ctx.dir);
     let mut ignore_entries: Vec<String> = Vec::new();
-    let mut ignorable = |path: &Path| {
+    let mut ignorable = |path: &Path, is_dir: bool| {
         if let Ok(rel) = path.strip_prefix(&project_root) {
-            ignore_entries.push(format!("/{}", rel.display()));
+            let suffix = if is_dir { "/" } else { "" };
+            ignore_entries.push(format!("/{}{suffix}", rel.display()));
         }
     };
 
@@ -203,11 +206,11 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         if scope == Scope::Project && args.write {
             if !state.managed_servers(&key).is_empty() {
                 if let Some((cfg, _)) = desc.config_for(scope, &ctx.dir) {
-                    ignorable(&cfg);
+                    ignorable(&cfg, false);
                 }
             }
-            for name in state.managed_skills(&key) {
-                ignorable(&skills_dir.join(name));
+            if !state.managed_skills(&key).is_empty() {
+                ignorable(&skills_dir, true);
             }
         }
     }
@@ -218,9 +221,8 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         && crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true)?
     {
         println!(
-            "\n{} .gitignore: {} generated path(s) kept out of git ({} to commit them instead)",
+            "\n{} .gitignore: managed block updated — generated artifacts stay out of git ({} to commit them instead)",
             "✓".green(),
-            ignore_entries.len(),
             "--no-gitignore".bold()
         );
     }
