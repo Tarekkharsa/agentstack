@@ -1015,6 +1015,22 @@ fn builtin_manual_md() -> Result<String> {
     crate::catalog::read_asset_file(BUILTIN_MANUAL_ASSET)
 }
 
+/// Whether a manifest file is present where `commands::load` would look for
+/// one — distinguishes "no manifest anywhere" from "manifest exists but failed
+/// to load" (parse error, bad schema, unreadable overlay).
+fn manifest_file_exists(dir: Option<&Path>) -> bool {
+    let base = match dir {
+        Some(d) => d.to_path_buf(),
+        None => match std::env::current_dir() {
+            Ok(d) => d,
+            Err(_) => return false,
+        },
+    };
+    crate::manifest::resolve_manifest_dir(&base)
+        .join(MANIFEST_FILE)
+        .exists()
+}
+
 fn builtin_manual_entry(md: &str, loaded: bool) -> Value {
     json!({
         "name": BUILTIN_MANUAL,
@@ -1027,15 +1043,28 @@ fn builtin_manual_entry(md: &str, loaded: bool) -> Value {
 
 fn list_loadable(dir: Option<&Path>) -> Result<String> {
     // No manifest anywhere (a control-plane-only session outside any project):
-    // the built-in manual is still loadable.
-    let Ok(ctx) = crate::commands::load(dir) else {
-        let entries = vec![builtin_manual_entry(&builtin_manual_md()?, false)];
-        return Ok(serde_json::to_string_pretty(&json!({
-            "loadable": entries,
-            "fenced": false,
-            "session": Value::Null,
-            "note": "No project manifest found — only agentstack's built-in manual is loadable.",
-        }))?);
+    // the built-in manual is still loadable. A manifest that EXISTS but fails
+    // to load is a different story — surface the load error instead of
+    // reporting the project as manifest-less.
+    let ctx = match crate::commands::load(dir) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            let entries = vec![builtin_manual_entry(&builtin_manual_md()?, false)];
+            let note = if manifest_file_exists(dir) {
+                format!(
+                    "Project manifest failed to load ({err:#}) — only agentstack's built-in manual is loadable until it is fixed."
+                )
+            } else {
+                "No project manifest found — only agentstack's built-in manual is loadable."
+                    .to_string()
+            };
+            return Ok(serde_json::to_string_pretty(&json!({
+                "loadable": entries,
+                "fenced": false,
+                "session": Value::Null,
+                "note": note,
+            }))?);
+        }
     };
     let m = &ctx.loaded.manifest;
     let libctx = ctx.library_ctx();
@@ -1500,6 +1529,39 @@ mod tests {
         let out = load_capability(&args, Some(proj.path())).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["origin"], "builtin");
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn list_loadable_surfaces_a_broken_manifest_instead_of_calling_it_absent() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        // A manifest that exists but does not parse.
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = \n")
+            .unwrap();
+
+        let out = list_loadable(Some(proj.path())).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        // The manual still rides along…
+        assert_eq!(v["loadable"][0]["name"], BUILTIN_MANUAL);
+        // …but the note reports a load FAILURE, not an absent manifest.
+        let note = v["note"].as_str().unwrap();
+        assert!(
+            note.contains("failed to load"),
+            "note should surface the load error: {note}"
+        );
+        assert!(
+            !note.contains("No project manifest found"),
+            "a broken manifest must not be reported as absent: {note}"
+        );
 
         std::env::remove_var("AGENTSTACK_HOME");
     }
