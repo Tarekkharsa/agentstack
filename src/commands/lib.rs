@@ -51,6 +51,11 @@ pub struct AddOutcome {
     pub checksum: String,
     /// The `lib/skills/<name>` directory for path sources; `None` for git.
     pub dest: Option<PathBuf>,
+    /// The absolutized source directory for path sources; `None` for git.
+    pub source_path: Option<PathBuf>,
+    /// Advisory notes — e.g. a temp-dir source whose recorded provenance
+    /// will dangle once the OS cleans it up.
+    pub warnings: Vec<String>,
     /// False on a dry run (nothing was written).
     pub written: bool,
     /// True when an existing entry of the same name was overwritten.
@@ -84,7 +89,8 @@ pub fn add_skill(
         bail!("'{name}' is already in the central library — pass --replace to overwrite");
     }
 
-    let (entry, dest, checksum, source_kind) = match source {
+    let mut warnings = Vec::new();
+    let (entry, dest, checksum, source_kind, source_path) = match source {
         LibSource::Path(src) => {
             let src = absolutize(src)?;
             require_skill_md(&src)?;
@@ -94,6 +100,16 @@ pub fn add_skill(
                     "source {} is already the library location — nothing to add",
                     src.display()
                 );
+            }
+            // Provenance records the source verbatim; flag it when that path
+            // won't outlive an OS temp cleanup (lib list/explain would show a
+            // dead path forever).
+            if is_temp_path(&src) {
+                warnings.push(format!(
+                    "source {} is a temporary directory — the recorded provenance will \
+                     dangle once it is cleaned up (the library copy is unaffected)",
+                    src.display()
+                ));
             }
             // Digest the source now so the preview reflects what would land; a
             // write copies first and re-digests the destination.
@@ -117,7 +133,7 @@ pub fn add_skill(
                 version: None,
                 provenance: Some(format!("path:{}", src.display())),
             };
-            (entry, Some(dest), checksum, "path")
+            (entry, Some(dest), checksum, "path", Some(src))
         }
         LibSource::Git { url, rev } => {
             // Resolving fetches into the store (needed to learn rev + checksum and
@@ -142,7 +158,7 @@ pub fn add_skill(
                 version: None,
                 provenance: Some(format!("git:{url}")),
             };
-            (entry, None, resolved.checksum, "git")
+            (entry, None, resolved.checksum, "git", None)
         }
     };
 
@@ -156,6 +172,8 @@ pub fn add_skill(
         source_kind,
         checksum,
         dest,
+        source_path,
+        warnings,
         written: write,
         replaced: replacing,
     })
@@ -175,6 +193,9 @@ fn add(args: &LibAddArgs) -> Result<()> {
 
     let outcome = add_skill(&lib_home, &args.name, source, args.replace, args.write)?;
 
+    for w in &outcome.warnings {
+        println!("  {} {w}", "⚠".yellow());
+    }
     let verb = if outcome.replaced { "replace" } else { "add" };
     let past = if outcome.replaced {
         "replaced"
@@ -189,7 +210,11 @@ fn add(args: &LibAddArgs) -> Result<()> {
             outcome.source_kind
         );
         if let Some(dest) = &outcome.dest {
-            println!("  files → {}", dest.display());
+            match &outcome.source_path {
+                Some(src) => println!("  copied {} → {}", src.display(), dest.display()),
+                None => println!("  files → {}", dest.display()),
+            }
+            println!("  the library copy is now canonical — edits to the source have no effect");
         }
         println!("  checksum {}", short(&outcome.checksum));
     } else {
@@ -199,7 +224,15 @@ fn add(args: &LibAddArgs) -> Result<()> {
             outcome.source_kind
         );
         if let Some(dest) = &outcome.dest {
-            println!("  {} files → {}", "→".cyan(), dest.display());
+            match &outcome.source_path {
+                Some(src) => println!(
+                    "  {} copy {} → {} (the library copy becomes canonical)",
+                    "→".cyan(),
+                    src.display(),
+                    dest.display()
+                ),
+                None => println!("  {} files → {}", "→".cyan(), dest.display()),
+            }
         }
         println!("  {} checksum {}", "→".cyan(), short(&outcome.checksum));
         println!("\nDry run. Re-run with {} to apply.", "--write".bold());
@@ -239,8 +272,19 @@ pub fn add_server(
         std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
     let server: Server = toml::from_str(&raw)
         .with_context(|| format!("{} is not a valid MCP server definition", file.display()))?;
-    let provenance = format!("file:{}", absolutize(file)?.display());
-    add_server_def(lib_home, name, &server, provenance, replace, write)
+    let src = absolutize(file)?;
+    let provenance = format!("file:{}", src.display());
+    let mut outcome = add_server_def(lib_home, name, &server, provenance, replace, write)?;
+    // Same honesty as `lib add --path`: a temp-dir source leaves a provenance
+    // path that lib list/explain will show long after the OS cleaned it up.
+    if is_temp_path(&src) {
+        outcome.warnings.push(format!(
+            "source {} is a temporary location — the recorded provenance will \
+             dangle once it is cleaned up (the library definition is unaffected)",
+            src.display()
+        ));
+    }
+    Ok(outcome)
 }
 
 /// Add an in-memory server definition to the library (the core of
@@ -874,6 +918,32 @@ fn absolutize(p: &Path) -> Result<PathBuf> {
     }
 }
 
+/// Whether a path lives under an ephemeral location — the OS temp dir,
+/// `$TMPDIR`, or the conventional `/tmp` / `/private/tmp` — so recording it as
+/// provenance would immortalize a path that won't exist later. Raw and
+/// canonicalized forms are both compared, so macOS's `/tmp → /private/tmp`
+/// symlink can't hide a match.
+fn is_temp_path(p: &Path) -> bool {
+    let mut roots = vec![
+        std::env::temp_dir(),
+        PathBuf::from("/tmp"),
+        PathBuf::from("/private/tmp"),
+    ];
+    if let Ok(t) = std::env::var("TMPDIR") {
+        if !t.is_empty() {
+            roots.push(PathBuf::from(t));
+        }
+    }
+    let p_canon = std::fs::canonicalize(p).ok();
+    roots.iter().any(|r| {
+        let r_canon = std::fs::canonicalize(r).ok();
+        let under = |base: &Path| {
+            p.starts_with(base) || p_canon.as_deref().is_some_and(|pc| pc.starts_with(base))
+        };
+        under(r) || r_canon.as_deref().is_some_and(under)
+    })
+}
+
 fn require_skill_md(dir: &Path) -> Result<()> {
     if !dir.join("SKILL.md").exists() {
         bail!(
@@ -926,6 +996,34 @@ mod tests {
         assert_eq!(entry.path.as_deref(), Some("sql-review"));
         assert_eq!(entry.checksum.as_deref(), Some(out.checksum.as_str()));
         assert!(entry.provenance.as_deref().unwrap().starts_with("path:"));
+    }
+
+    #[test]
+    fn temp_dir_source_warns_and_records_source_path() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        // assert_fs temp dirs live under the OS temp dir — exactly the
+        // ephemeral-provenance case.
+        let work = assert_fs::TempDir::new().unwrap();
+        let src = src_skill(&work, "# body\n");
+
+        let out = add_skill(lib.path(), "eph", LibSource::Path(&src), false, true).unwrap();
+
+        assert!(out.source_path.is_some(), "source path surfaced for output");
+        assert!(
+            out.warnings.iter().any(|w| w.contains("temporary")),
+            "temp source flagged: {:?}",
+            out.warnings
+        );
+        // The copy itself still lands and is indexed as usual.
+        assert!(lib.child("skills/eph/SKILL.md").path().exists());
+    }
+
+    #[test]
+    fn is_temp_path_matches_temp_roots_only() {
+        assert!(is_temp_path(&std::env::temp_dir().join("x")));
+        assert!(is_temp_path(Path::new("/tmp/skill-src")));
+        assert!(is_temp_path(Path::new("/private/tmp/skill-src")));
+        assert!(!is_temp_path(Path::new("/opt/team/skills/sql-review")));
     }
 
     #[test]

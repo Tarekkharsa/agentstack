@@ -91,7 +91,11 @@ The complete, implemented-and-tested feature inventory. The
   profile's name refs in `agentstack.lock` **without** rendering configs or
   materializing skills — the lock-only path for clean-at-rest repos that keep
   no generated files. Manage it with `lib add` / `add-server` / `list` /
-  `remove` / `remove-server`;
+  `remove` / `remove-server`. `lib add --path` **copies** the source into
+  `lib/skills/<name>` — the library copy is canonical from then on (edits to
+  the source have no effect), provenance records the original path for
+  `lib list`/`explain`, and a temp-dir source gets a warning since that
+  recorded path will dangle after cleanup;
   `consolidate` sweeps scattered skills from every CLI into the library and
   symlinks the originals back; `lib migrate` copies a legacy
   `~/.agentstack/skills/` home in, preview-first and reversible. Provider folders
