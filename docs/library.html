@@ -1,952 +1,323 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AgentStack Project and Central Library Guide</title>
-  <style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Central library — agentstack</title>
+<meta name="description" content="One managed home for skills and MCP servers; projects select by name and stay digest-pinned. The agentstack central-library guide.">
+<style>
+  :root {
+    --paper: #FBFAF7;
+    --ink: #1C2024;
+    --muted: #5B6570;
+    --accent: #B4540A;
+    --line: #E4E0D8;
+    --term: #14181C;
+    --term-ink: #D7DEE4;
+    --term-dim: #6B7683;
+    --term-green: #7CC08B;
+    --term-amber: #E0A056;
+    --code-bg: #F2EFE9;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #f7f5ef;
-      --ink: #1d2528;
-      --muted: #657174;
-      --line: #d7d2c7;
-      --soft: #ece7dd;
-      --panel: #fffdf8;
-      --accent: #0c7f78;
-      --accent-dark: #075a56;
-      --warn: #9a5c00;
-      --code: #11191b;
-      --code-soft: #1c282b;
-      --ok: #167348;
-      --shadow: 0 18px 48px rgba(39, 35, 25, 0.10);
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-
-    * { box-sizing: border-box; }
-
-    html {
-      scroll-behavior: smooth;
-      background: var(--bg);
-      color: var(--ink);
-    }
-
-    body {
-      margin: 0;
-      font-family: var(--sans);
-      line-height: 1.5;
-    }
-
-    a {
-      color: var(--accent-dark);
-      text-decoration-thickness: 1px;
-      text-underline-offset: 3px;
-    }
-
-    code, pre {
-      font-family: var(--mono);
-    }
-
-    .shell {
-      min-height: 100vh;
-    }
-
-    .hero {
-      display: grid;
-      grid-template-columns: minmax(280px, 0.86fr) minmax(420px, 1.14fr);
-      gap: clamp(28px, 5vw, 72px);
-      align-items: center;
-      padding: clamp(28px, 5vw, 72px);
-      border-bottom: 1px solid var(--line);
-      background:
-        linear-gradient(120deg, rgba(247,245,239,0.96), rgba(247,245,239,0.76)),
-        radial-gradient(circle at 82% 28%, rgba(12,127,120,0.20), transparent 36%),
-        linear-gradient(135deg, #f7f5ef 0%, #ece7dd 100%);
-    }
-
-    .kicker {
-      margin: 0 0 18px;
-      color: var(--accent-dark);
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-
-    h1 {
-      margin: 0;
-      max-width: 860px;
-      font-size: clamp(48px, 8vw, 104px);
-      line-height: 0.92;
-      letter-spacing: 0;
-    }
-
-    .hero-copy {
-      max-width: 710px;
-      margin: 28px 0 0;
-      color: #3d494c;
-      font-size: clamp(18px, 2vw, 23px);
-    }
-
-    .install-line {
-      margin-top: 26px;
-      padding: 12px 14px;
-      border: 1px solid var(--line);
-      background: #fffdf8;
-      font-family: var(--mono);
-      font-size: 13px;
-      color: var(--accent-dark);
-      overflow-wrap: anywhere;
-      box-shadow: var(--shadow);
-    }
-
-    .hero-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-top: 22px;
-    }
-
-    .button {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      min-height: 44px;
-      padding: 0 16px;
-      border: 1px solid var(--ink);
-      background: var(--ink);
-      color: #fff;
-      text-decoration: none;
-      font-weight: 800;
-      font-size: 14px;
-    }
-
-    .button.secondary {
-      background: transparent;
-      color: var(--ink);
-      border-color: #9d978c;
-    }
-
-    .map {
-      padding: clamp(16px, 2.5vw, 28px);
-      border: 1px solid var(--line);
-      background: linear-gradient(#fffdf8, #fffaf0);
-      box-shadow: var(--shadow);
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px 18px;
-    }
-
-    .node {
-      border: 1px solid #c9c2b6;
-      background: rgba(255, 253, 248, 0.94);
-      padding: 14px;
-      box-shadow: 0 8px 22px rgba(33, 27, 18, 0.08);
-    }
-
-    .node strong {
-      display: block;
-      margin-bottom: 5px;
-      font-size: 15px;
-    }
-
-    .node span {
-      display: block;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .node code {
-      display: block;
-      margin-top: 8px;
-      color: var(--accent-dark);
-      font-size: 12px;
-      overflow-wrap: anywhere;
-    }
-
-    .flow {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 2px;
-      min-height: 58px;
-    }
-
-    .flow svg {
-      width: 84px;
-      height: 40px;
-      display: block;
-    }
-
-    .flow svg path {
-      stroke: var(--accent);
-      stroke-width: 2.5;
-      stroke-linecap: round;
-      fill: none;
-    }
-
-    .flow .lbl {
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--accent-dark);
-    }
-
-    .truth {
-      grid-column: 1 / -1;
-      border: 2px solid var(--accent);
-      background: #f4fff9;
-      padding: 18px;
-    }
-
-    .truth h2 {
-      margin: 0 0 8px;
-      font-size: 26px;
-      letter-spacing: 0;
-    }
-
-    .truth p {
-      margin: 0;
-      color: #385255;
-      font-size: 14px;
-    }
-
-    .truth ul {
-      margin: 14px 0 0;
-      padding-left: 18px;
-      font-family: var(--mono);
-      font-size: 12px;
-      color: #123a38;
-    }
-
-    .layout {
-      display: grid;
-      grid-template-columns: 260px minmax(0, 1fr);
-      gap: 42px;
-      max-width: 1440px;
-      margin: 0 auto;
-      padding: 42px clamp(22px, 4vw, 64px) 80px;
-    }
-
-    nav {
-      position: sticky;
-      top: 24px;
-      align-self: start;
-      border-left: 1px solid var(--line);
-      padding-left: 18px;
-    }
-
-    nav p {
-      margin: 0 0 12px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-
-    nav a {
-      display: block;
-      padding: 8px 0;
-      color: #334044;
-      font-size: 14px;
-      text-decoration: none;
-    }
-
-    nav a:hover {
-      color: var(--accent-dark);
-    }
-
-    main {
-      min-width: 0;
-    }
-
-    section {
-      padding: 56px 0;
-      border-bottom: 1px solid var(--line);
-    }
-
-    section:first-child {
-      padding-top: 0;
-    }
-
-    .section-head {
-      max-width: 820px;
-      margin-bottom: 28px;
-    }
-
-    .section-head h2 {
-      margin: 0;
-      font-size: clamp(30px, 4vw, 54px);
-      line-height: 1;
-      letter-spacing: 0;
-    }
-
-    .section-head p {
-      margin: 14px 0 0;
-      color: var(--muted);
-      font-size: 17px;
-    }
-
-    .rule-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
-    }
-
-    .rule {
-      border-top: 2px solid var(--ink);
-      padding-top: 16px;
-    }
-
-    .rule strong {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 17px;
-    }
-
-    .rule p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    .two-col {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: 22px;
-      align-items: start;
-    }
-
-    .panel {
-      border: 1px solid var(--line);
-      background: var(--panel);
-      padding: 20px;
-    }
-
-    .panel h3 {
-      margin: 0 0 10px;
-      font-size: 20px;
-    }
-
-    .panel p, .panel li {
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    .panel p {
-      margin: 0 0 12px;
-    }
-
-    .file-tree {
-      font-family: var(--mono);
-      font-size: 13px;
-      line-height: 1.7;
-      color: #223033;
-      white-space: pre-wrap;
-    }
-
-    .good {
-      border-color: rgba(22,115,72,0.35);
-      background: #f6fff8;
-    }
-
-    .warn {
-      border-color: rgba(154,92,0,0.35);
-      background: #fff9ec;
-    }
-
-    .codebox {
-      position: relative;
-      margin: 14px 0 0;
-      background: var(--code);
-      color: #e8f0ec;
-      border: 1px solid #2a393c;
-      overflow: hidden;
-    }
-
-    .codebox header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      min-height: 42px;
-      padding: 0 12px;
-      background: var(--code-soft);
-      border-bottom: 1px solid #314245;
-      color: #b8c8c8;
-      font-size: 12px;
-      font-family: var(--mono);
-    }
-
-    .copy {
-      border: 1px solid #547074;
-      background: transparent;
-      color: #dce9e6;
-      font: 700 12px var(--sans);
-      padding: 6px 9px;
-      cursor: pointer;
-    }
-
-    .copy:hover {
-      border-color: #8ebeba;
-      color: #fff;
-    }
-
-    pre {
-      margin: 0;
-      padding: 18px;
-      overflow-x: auto;
-      font-size: 13px;
-      line-height: 1.6;
-    }
-
-    .case-controls {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin: 0 0 20px;
-    }
-
-    .chip {
-      min-height: 38px;
-      padding: 0 12px;
-      border: 1px solid #a7a095;
-      background: transparent;
-      color: #263235;
-      font-weight: 800;
-      cursor: pointer;
-    }
-
-    .chip.active {
-      background: var(--accent);
-      color: #fff;
-      border-color: var(--accent);
-    }
-
-    .case-list {
-      display: grid;
-      gap: 1px;
-      border: 1px solid var(--line);
-      background: var(--line);
-    }
-
-    .case-row {
-      display: grid;
-      grid-template-columns: 170px minmax(0, 1fr) minmax(220px, 0.75fr);
-      gap: 22px;
-      padding: 18px;
-      background: var(--panel);
-    }
-
-    .case-row[hidden] {
-      display: none;
-    }
-
-    .case-row b {
-      display: block;
-      font-size: 14px;
-    }
-
-    .case-row p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    .tag {
-      display: inline-flex;
-      align-items: center;
-      min-height: 24px;
-      padding: 0 8px;
-      border: 1px solid #beb7ab;
-      color: #4b575a;
-      font-size: 12px;
-      font-weight: 800;
-      text-transform: uppercase;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: var(--panel);
-      border: 1px solid var(--line);
-    }
-
-    th, td {
-      padding: 14px;
-      border-bottom: 1px solid var(--line);
-      text-align: left;
-      vertical-align: top;
-      font-size: 14px;
-    }
-
-    th {
-      color: #3b474a;
-      background: var(--soft);
-      font-size: 12px;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-    }
-
-    td code {
-      color: var(--accent-dark);
-      font-size: 12px;
-    }
-
-    .status {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--ok);
-      font-weight: 800;
-    }
-
-    .pending {
-      color: var(--warn);
-    }
-
-    .callout {
-      border-left: 4px solid var(--accent);
-      background: #f4fff9;
-      padding: 18px 20px;
-      margin: 22px 0;
-      color: #2e4547;
-    }
-
-    .callout strong {
-      color: var(--ink);
-    }
-
-    .footer {
-      padding: 46px clamp(22px, 4vw, 64px);
-      color: var(--muted);
-      background: #e9e3d8;
-      border-top: 1px solid var(--line);
-    }
-
-    .footer-inner {
-      max-width: 1440px;
-      margin: 0 auto;
-      display: flex;
-      justify-content: space-between;
-      gap: 24px;
-      flex-wrap: wrap;
-    }
-
-    @media (max-width: 980px) {
-      .hero {
-        min-height: auto;
-        grid-template-columns: 1fr;
-      }
-
-      .layout {
-        grid-template-columns: 1fr;
-      }
-
-      nav {
-        position: static;
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 4px 18px;
-      }
-
-      nav p {
-        grid-column: 1 / -1;
-      }
-
-      .rule-grid,
-      .two-col {
-        grid-template-columns: 1fr;
-      }
-
-      .case-row {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    @media (max-width: 640px) {
-      .hero {
-        padding: 26px 18px 36px;
-      }
-
-      .map {
-        padding: 14px;
-        gap: 4px 12px;
-      }
-
-      .flow svg {
-        width: 56px;
-        height: 30px;
-      }
-
-      nav {
-        grid-template-columns: 1fr;
-      }
-
-      th, td {
-        display: block;
-      }
-
-      th {
-        border-bottom: 0;
-      }
-    }
-  </style>
+      --paper: #16191D;
+      --ink: #E8E6E1;
+      --muted: #9AA3AC;
+      --accent: #E08843;
+      --line: #2A2F35;
+      --code-bg: #1E2227;
+      --term: #0E1114;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 17px/1.65 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  header.site { border-bottom: 1px solid var(--line); }
+  .bar {
+    max-width: 46rem; margin: 0 auto; padding: 0.9rem 1.25rem;
+    display: flex; align-items: baseline; gap: 1.25rem; flex-wrap: wrap;
+  }
+  .wordmark { font-family: var(--mono); font-weight: 700; font-size: 1rem; color: var(--ink); }
+  .wordmark:hover { text-decoration: none; }
+  .bar nav { margin-left: auto; display: flex; gap: 1.1rem; flex-wrap: wrap; }
+  .bar nav a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+  .bar nav a:hover { color: var(--accent); }
+  .bar nav a[aria-current] { color: var(--accent); }
+
+  main { max-width: 46rem; margin: 0 auto; padding: 0 1.25rem 5rem; }
+  section { margin-top: 4.25rem; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
+    margin: 0 0 0.6rem;
+  }
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(1.6rem, 4.5vw, 2.3rem);
+    line-height: 1.25; letter-spacing: -0.02em;
+    margin: 2.75rem 0 1rem;
+  }
+  h1 .accent { color: var(--accent); }
+  h2 { font-family: var(--mono); font-size: 1.15rem; letter-spacing: -0.01em; margin: 0 0 0.9rem; }
+  h3 { font-family: var(--mono); font-size: 0.95rem; margin: 1.6rem 0 0.5rem; }
+  p { margin: 0 0 1rem; }
+  .lede { font-size: 1.05rem; color: var(--muted); max-width: 40rem; }
+  .muted { color: var(--muted); }
+  .small { font-size: 0.85rem; }
+
+  code {
+    font-family: var(--mono); font-size: 0.86em;
+    background: var(--code-bg); padding: 0.12em 0.35em; border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1rem 1.1rem; overflow-x: auto; margin: 0 0 1rem;
+    font: 0.84rem/1.6 var(--mono);
+  }
+  pre code { background: none; padding: 0; font-size: 1em; }
+
+  .term {
+    background: var(--term); color: var(--term-ink);
+    border-radius: 10px; margin: 1.75rem 0 0.5rem;
+    box-shadow: 0 12px 32px rgba(10, 14, 18, 0.18);
+  }
+  .term-head {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.65rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+  .term-head span { width: 10px; height: 10px; border-radius: 50%; background: var(--term-dim); opacity: 0.45; }
+  .term-head b { margin-left: auto; font: 500 0.7rem var(--mono); color: var(--term-dim); letter-spacing: 0.08em; }
+  .term pre { background: none; border: 0; margin: 0; padding: 1.1rem 1.25rem 1.25rem; color: inherit; font-size: 0.86rem; }
+  .term .p { color: var(--term-dim); user-select: none; }
+  .term .c { color: var(--term-dim); }
+  .term .ok { color: var(--term-green); }
+  .term .hi { color: var(--term-amber); }
+
+  .grid2 { display: grid; gap: 1rem; grid-template-columns: 1fr 1fr; margin: 1.25rem 0; }
+  @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+  .panel { border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.1rem; }
+  .panel > .cap {
+    font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+    margin: 0 0 0.7rem;
+  }
+  .panel > .cap.good { color: var(--accent); }
+  .panel pre { margin-bottom: 0; }
+  .panel p { font-size: 0.92rem; color: var(--muted); }
+  .panel p:last-child { margin-bottom: 0; }
+  .panel ul { margin: 0; padding-left: 1.1rem; font-size: 0.92rem; color: var(--muted); }
+  .panel ul li { margin: 0.3rem 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 1.25rem 0; font-size: 0.93rem; }
+  th, td { text-align: left; padding: 0.6rem 0.9rem 0.6rem 0; border-top: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border-top: 0; }
+  td:first-child { white-space: normal; }
+  td .muted { font-size: 0.9em; }
+
+  dl.rules { margin: 1.25rem 0 0; }
+  dl.rules dt { font-family: var(--mono); font-size: 0.95rem; font-weight: 700; margin-top: 1.4rem; }
+  dl.rules dd { margin: 0.35rem 0 0; color: var(--muted); }
+
+  .note {
+    border-left: 3px solid var(--accent); padding: 0.15rem 0 0.15rem 1rem;
+    margin: 1.25rem 0; color: var(--muted); font-size: 0.95rem;
+  }
+
+  .chips { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1.25rem 0 0.5rem; }
+  .chip {
+    font: 600 0.75rem var(--mono); letter-spacing: 0.05em;
+    color: var(--muted); background: none;
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 0.3rem 0.85rem; cursor: pointer;
+  }
+  .chip:hover { color: var(--accent); border-color: var(--accent); }
+  .chip.active { color: var(--paper); background: var(--accent); border-color: var(--accent); }
+
+  ul.cases { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+  ul.cases li { padding: 0.75rem 0; border-top: 1px solid var(--line); }
+  ul.cases b { font-family: var(--mono); font-size: 0.92rem; }
+  ul.cases p { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.93rem; }
+  ul.cases .tag {
+    font-family: var(--mono); font-size: 0.68rem; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent);
+    margin-right: 0.5rem;
+  }
+
+  ol.steps { margin: 1.25rem 0 0; padding: 0; list-style: none; counter-reset: step; }
+  ol.steps li {
+    counter-increment: step;
+    padding: 0.85rem 0; border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: 2.4rem 1fr; gap: 0.4rem 0.9rem; align-items: baseline;
+  }
+  ol.steps li::before { content: counter(step); font: 700 0.85rem var(--mono); color: var(--accent); }
+  ol.steps b { font-family: var(--mono); font-size: 0.92rem; }
+  ol.steps p { margin: 0; color: var(--muted); font-size: 0.95rem; grid-column: 2; }
+
+  figure { margin: 1.5rem 0; }
+  figure img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); }
+  figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; }
+
+  .done::before, .next::before {
+    font: 700 0.68rem var(--mono); letter-spacing: 0.08em; margin-right: 0.5rem;
+  }
+  .done::before { content: "DONE"; color: var(--accent); }
+  .next::before { content: "NEXT"; color: var(--muted); }
+
+  footer.site { border-top: 1px solid var(--line); margin-top: 5rem; }
+  footer.site .bar { padding: 1.4rem 1.25rem; font-size: 0.85rem; color: var(--muted); }
+
+  @media (max-width: 560px) {
+    body { font-size: 16px; }
+    ol.steps li { grid-template-columns: 1.6rem 1fr; }
+    .bar nav { gap: 0.8rem; }
+  }
+</style>
 </head>
 <body>
-  <div class="shell">
-    <header class="hero">
-      <div>
-        <p class="kicker">agentstack — one portable manifest, every agent CLI</p>
-        <h1>Declare once. Run anywhere.</h1>
-        <p class="hero-copy">
-          Your skills and MCP servers live in one place — <code>~/.agentstack/lib</code>.
-          Each project is just a short file of names. agentstack renders the real
-          config for Claude Code, Codex, Gemini, Cursor, and ten more, with secrets
-          resolved per machine and never committed. Install versioned packs from
-          any git host, firewall any server's tools at the runtime gateway
-          (<code>[policy.tools]</code>), and read audit receipts for every call an
-          agent makes.
-        </p>
-        <div class="install-line"><code>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</code></div>
-        <div class="hero-actions">
-          <a class="button" href="#quick-start">Quick start</a>
-          <a class="button secondary" href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
-        </div>
-      </div>
 
-      <div class="map" aria-label="Central library system map">
-        <div class="node source">
-          <strong>Imports &amp; sources</strong>
-          <span>Local skill dirs, git skills, catalog and registry servers.</span>
-          <code>lib add · add-server · init</code>
-        </div>
-        <div class="node provider">
-          <strong>Provider folders</strong>
-          <span>Auth, caches, and private state stay provider-owned.</span>
-          <code>~/.claude, ~/.codex, ~/.pi</code>
-        </div>
-        <div class="flow">
-          <svg viewBox="0 0 100 44" aria-hidden="true">
-            <defs>
-              <marker id="ah1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M0,0 L10,5 L0,10 z" fill="#0c7f78" stroke="none"></path>
-              </marker>
-            </defs>
-            <path d="M14,6 L86,38" marker-end="url(#ah1)"></path>
-          </svg>
-          <span class="lbl">add / migrate in</span>
-        </div>
-        <div class="flow">
-          <svg viewBox="0 0 100 44" aria-hidden="true">
-            <path d="M86,6 L14,38" marker-end="url(#ah1)"></path>
-          </svg>
-          <span class="lbl">consolidate</span>
-        </div>
-        <div class="truth">
-          <h2>~/.agentstack/lib</h2>
-          <p>The source of truth for managed capabilities.</p>
-          <ul>
-            <li>library.toml</li>
-            <li>skills/&lt;name&gt;/</li>
-            <li>servers/&lt;name&gt;.toml</li>
-            <li>hooks/ and instructions/ later</li>
-          </ul>
-        </div>
-        <div class="flow">
-          <svg viewBox="0 0 100 44" aria-hidden="true">
-            <path d="M86,6 L14,38" marker-end="url(#ah1)"></path>
-          </svg>
-          <span class="lbl">names resolve</span>
-        </div>
-        <div class="flow">
-          <svg viewBox="0 0 100 44" aria-hidden="true">
-            <path d="M14,6 L86,38" marker-end="url(#ah1)"></path>
-          </svg>
-          <span class="lbl">use --write</span>
-        </div>
-        <div class="node project">
-          <strong>Project manifest</strong>
-          <span>Selects central capabilities by name — nothing copied.</span>
-          <code>servers = ["kibana"]<br>skills = ["sql-review"]</code>
-        </div>
-        <div class="node view">
-          <strong>Generated views</strong>
-          <span>Symlinks and rendered config the CLIs actually read.</span>
-          <code>.claude/skills, .mcp.json, config.toml</code>
-        </div>
-      </div>
-    </header>
+<header class="site">
+  <div class="bar">
+    <a class="wordmark" href="./">agentstack</a>
+    <nav aria-label="Project links">
+      <a href="https://github.com/Tarekkharsa/agentstack">github</a>
+      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">reference</a>
+      <a href="library.html" aria-current="page">library&nbsp;guide</a>
+      <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
+    </nav>
+  </div>
+</header>
 
-    <div class="layout">
-      <nav aria-label="Page navigation">
-        <p>Guide</p>
-        <a href="#model">Model</a>
-        <a href="#choose">Choose Path</a>
-        <a href="#modes">Three Modes</a>
-        <a href="#folders">Folders</a>
-        <a href="#quick-start">Quick Start</a>
-        <a href="#existing-projects">Existing Projects</a>
-        <a href="#new-projects">New Projects</a>
-        <a href="#examples">Examples</a>
-        <a href="#cases">Cases</a>
-        <a href="#secrets">Secrets and Locking</a>
-        <a href="#provider-views">Provider Views</a>
-        <a href="#sandbox">Sandbox Demo</a>
-        <a href="#roadmap">Roadmap</a>
-      </nav>
+<main>
 
-      <main>
-        <section id="model">
-          <div class="section-head">
-            <h2>The mental model.</h2>
-            <p>Three ownership rules explain everything on this page. Centralize capabilities when you are ready; never centralize provider-private state.</p>
-          </div>
+  <h1>Declare once.<br>Run anywhere.<span class="accent">_</span></h1>
+  <p class="lede">
+    Your skills and MCP servers live in one place — <code>~/.agentstack/lib</code>.
+    Each project is just a short file of names. agentstack renders the real
+    config for every CLI, with secrets resolved per machine and never committed.
+  </p>
 
-          <div class="rule-grid">
-            <div class="rule">
-              <strong>AgentStack owns definitions</strong>
-              <p>Skills and MCP server definitions live once under <code>~/.agentstack/lib</code> and are indexed in <code>library.toml</code>.</p>
-            </div>
-            <div class="rule">
-              <strong>Projects own selection</strong>
-              <p>A project profile names what it needs. The project does not need to copy the skill or server definition.</p>
-            </div>
-            <div class="rule">
-              <strong>Providers receive views</strong>
-              <p>Provider folders get symlinks or generated config entries only. AgentStack never owns the whole provider folder.</p>
-            </div>
-          </div>
+  <div class="term">
+    <div class="term-head" aria-hidden="true"><span></span><span></span><span></span><b>how a name becomes config</b></div>
+    <pre><code><span class="c">sources                 the library                 each project</span>
+local dirs ───┐
+git skills ───┼──▶  <span class="hi">~/.agentstack/lib</span>  ◀──── lib add · consolidate
+catalog ──────┘     ├─ library.toml
+                    ├─ skills/sql-review/
+                    └─ servers/kibana.toml
 
-          <div class="callout">
-            <strong>Why you may still see files inside some projects:</strong> existing projects can keep local skills, inline MCP definitions, and generated provider files. That is supported. The clean central model is shown by <code>agentstack-test/projects/central-demo</code>, which contains only an <code>agentstack.toml</code> manifest.
-          </div>
-        </section>
+<span class="c"># a project selects by NAME — nothing copied:</span>
+[profiles.backend]
+servers = [<span class="ok">"kibana"</span>]
+skills  = [<span class="ok">"sql-review"</span>]
 
-        <section id="choose">
-          <div class="section-head">
-            <h2>Choose your path.</h2>
-            <p>Start from where your project is today. You do not have to migrate everything at once.</p>
-          </div>
+<span class="c"># use --write renders the views the CLIs actually read:</span>
+.mcp.json · .claude/skills/ · ~/.codex/config.toml</code></pre>
+  </div>
+  <p class="small muted">
+    Three ownership rules explain this whole page — and the digest lock makes
+    the same names resolve to the same content on every machine, or fail loudly.
+  </p>
 
-          <table>
-            <thead>
-              <tr>
-                <th>Starting point</th>
-                <th>What to do</th>
-                <th>Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Existing project with <code>[skills.*]</code> and <code>[servers.*]</code></td>
-                <td>Keep it working. Run <code>agentstack doctor</code>, then centralize one skill or server at a time.</td>
-                <td>Backwards compatible local project, with optional central items.</td>
-              </tr>
-              <tr>
-                <td>Existing provider folders with scattered skills</td>
-                <td>Run <code>agentstack consolidate</code>, review the preview, then <code>agentstack consolidate --write</code>.</td>
-                <td>Skills move into <code>~/.agentstack/lib/skills</code>; provider skill dirs become symlinks/views.</td>
-              </tr>
-              <tr>
-                <td>New project</td>
-                <td>Add capabilities to the central library first, then reference names in profiles.</td>
-                <td>Project contains selection only: <code>servers = ["kibana"]</code>, <code>skills = ["sql-review"]</code>.</td>
-              </tr>
-              <tr>
-                <td>Many repos, one machine, no per-repo files</td>
-                <td>Register the bridge once: <code>agentstack connect --all --write</code>. Then per repo: review + <code>agentstack trust .</code>.</td>
-                <td>Every trusted repo's servers, firewall, audit log, and skills load automatically at session start — nothing rendered into the repo.</td>
-              </tr>
-              <tr>
-                <td>Team or second machine</td>
-                <td>Use locks, <code>doctor</code>, and <code>explain</code> to verify resolved digests and drift.</td>
-                <td>Same names resolve to the same content or fail loudly.</td>
-              </tr>
-            </tbody>
-          </table>
+  <section id="model">
+    <p class="eyebrow">Mental model</p>
+    <h2>Three ownership rules</h2>
+    <dl class="rules">
+      <dt>agentstack owns definitions</dt>
+      <dd>Skills and MCP server definitions live once under
+          <code>~/.agentstack/lib</code>, indexed in <code>library.toml</code>.</dd>
+      <dt>projects own selection</dt>
+      <dd>A project profile names what it needs. It never copies the skill or
+          server definition — an inline <code>[servers.*]</code>/<code>[skills.*]</code>
+          table, when present, deliberately wins over the library.</dd>
+      <dt>providers receive views</dt>
+      <dd>Provider folders get symlinks or generated config entries only.
+          agentstack never owns <code>~/.claude</code>, <code>~/.codex</code>, or
+          any provider folder wholesale.</dd>
+    </dl>
+  </section>
 
-        </section>
+  <section id="choose">
+    <p class="eyebrow">Choose your path</p>
+    <h2>Start from where you are</h2>
+    <p class="muted">You don't have to migrate everything at once.</p>
+    <table>
+      <thead><tr><th>Starting point</th><th>What to do</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Existing project with inline <code>[servers.*]</code> / <code>[skills.*]</code></td>
+          <td class="muted">Keep it working. Run <code>agentstack doctor</code>, then centralize one capability at a time.</td>
+        </tr>
+        <tr>
+          <td>Skills scattered across provider folders</td>
+          <td class="muted"><code>agentstack consolidate</code> — preview, then <code>--write</code>. Skills move into the library; originals become symlinks.</td>
+        </tr>
+        <tr>
+          <td>New project</td>
+          <td class="muted">Add capabilities to the library first; the project manifest holds names only.</td>
+        </tr>
+        <tr>
+          <td>Many repos, no per-repo files</td>
+          <td class="muted"><code>agentstack connect --all --write</code> once, then review + <code>agentstack trust .</code> per repo — servers, firewall, audit log, and skills load at session start.</td>
+        </tr>
+        <tr>
+          <td>Team or second machine</td>
+          <td class="muted"><code>lock</code>, <code>doctor</code>, and <code>explain</code> verify that the same names resolve to the same digests — or fail loudly.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
 
-        <section id="modes">
-          <div class="section-head">
-            <h2>The three modes: where rendered files live.</h2>
-            <p>Independently of the path above, each project picks one of three artifact modes. This decides what a <code>git status</code> ever shows.</p>
-          </div>
+  <section id="quickstart">
+    <p class="eyebrow">Quick start</p>
+    <h2>Library entry → name reference → running CLI</h2>
+    <div class="term">
+      <div class="term-head" aria-hidden="true"><span></span><span></span><span></span><b>central-library flow</b></div>
+      <pre><code><span class="p">$</span> agentstack lib add-server kibana --file kibana.toml --write
+<span class="p">$</span> agentstack lib add sql-review --path ./sql-review --write
+<span class="ok">✓</span> copied ./sql-review → ~/.agentstack/lib/skills/sql-review
+  <span class="c">the library copy is now canonical — edits to the source have no effect</span>
 
-          <table>
-            <thead>
-              <tr>
-                <th>Mode</th>
-                <th>How</th>
-                <th>Trade-off</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>Static</strong> (default)</td>
-                <td><code>use &lt;profile&gt; --scope project --write</code> — artifacts on disk, auto-kept out of git via a managed <code>.gitignore</code> block (<code>--no-gitignore</code> to commit them).</td>
-                <td>Works with harnesses launched any way; generated files exist on disk.</td>
-              </tr>
-              <tr>
-                <td><strong>Clean-at-rest</strong></td>
-                <td>Empty <code>[profiles.off]</code> + <code>use off --scope project --write</code> once; then <code>agentstack run &lt;cli&gt; --profile &lt;p&gt;</code> or <code>session start</code>/<code>end</code> inject and revert per session (pruning-to-zero deletes even the empty config file).</td>
-                <td>Nothing generated exists between sessions — but a harness launched <em>directly</em> sees no project servers/skills while at rest. One <code>use</code> flips back to static.</td>
-              </tr>
-              <tr>
-                <td><strong>Zero files (MCP)</strong></td>
-                <td><code>agentstack connect --all --write</code> registers the gateway once per harness; <code>agentstack mcp --auto-project</code> then discovers each trusted repo at session start (client roots &rarr; cwd walk-up &rarr; <code>$AGENTSTACK_MANIFEST_DIR</code>) and proxies its servers, firewall, audit log, and skills (<code>agentstack_list_loadable</code> / <code>agentstack_load</code>, session-fenced, loads logged with reasons).</td>
-                <td>No files in the repo at all. direnv-style safety: an untrusted repo gets control-plane tools only until <code>agentstack trust .</code> pins its manifest digest. Skill triggering is model-driven rather than automatic frontmatter matching.</td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-
-        <section id="folders">
-          <div class="section-head">
-            <h2>What goes where.</h2>
-            <p>The same capability can pass through fixtures, central library, project manifest, generated provider view, and lockfile. Each has a different job.</p>
-          </div>
-
-          <div class="two-col">
-            <div class="panel good">
-              <h3>Clean central-demo source tree</h3>
-              <div class="file-tree">agentstack-test/
-  fixtures/
-    central-library/
-      kibana.toml
-      sql-review/SKILL.md
-  projects/
-    central-demo/
-      agentstack.toml
-  runtime/                 # gitignored
-    ashome/lib/            # real central library after script runs
-    home/.claude.json      # generated provider view</div>
-            </div>
-
-            <div class="panel warn">
-              <h3>What should not be treated as source</h3>
-              <div class="file-tree">projects/*/.mcp.json          # generated project MCP view
-projects/*/.claude/skills/   # generated or symlinked skill view
-projects/*/agentstack.lock   # generated during demo runs
-runtime/                     # simulated machine state
-~/.codex, ~/.claude, ~/.pi   # provider-owned private state</div>
-            </div>
-          </div>
-
-          <table style="margin-top: 22px;">
-            <thead>
-              <tr>
-                <th>Place</th>
-                <th>Purpose</th>
-                <th>Commit?</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><code>fixtures/central-library</code></td>
-                <td>Demo input files used to seed the central library.</td>
-                <td>Yes, for the sandbox demo.</td>
-              </tr>
-              <tr>
-                <td><code>~/.agentstack/lib</code></td>
-                <td>Actual managed home for installed skills and server definitions.</td>
-                <td>No, machine-local state.</td>
-              </tr>
-              <tr>
-                <td><code>projects/*/agentstack.toml</code></td>
-                <td>Project source of truth: profiles reference names.</td>
-                <td>Yes.</td>
-              </tr>
-              <tr>
-                <td><code>.mcp.json</code>, <code>.claude/skills</code></td>
-                <td>Provider-readable generated views.</td>
-                <td>No.</td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-
-        <section id="quick-start">
-          <div class="section-head">
-            <h2>Quick start.</h2>
-            <p>Add a skill and MCP server to the central library, then reference both by name from a profile.</p>
-          </div>
-
-          <div class="codebox">
-            <header>
-              <span>central-library flow</span>
-              <button class="copy" type="button">Copy</button>
-            </header>
-            <pre><code>agentstack lib add-server kibana --file fixtures/central-library/kibana.toml --write
-agentstack lib add sql-review --path fixtures/central-library/sql-review --write
-agentstack lib list
-
-# projects/central-demo/agentstack.toml
+<span class="c"># the whole project manifest:</span>
+<span class="p">$</span> cat .agentstack/agentstack.toml
 [profiles.central]
 servers = ["kibana"]
-skills = ["sql-review"]
+skills  = ["sql-review"]
 
-agentstack --manifest-dir projects/central-demo use central --write
-agentstack --manifest-dir projects/central-demo explain kibana
-agentstack --manifest-dir projects/central-demo doctor</code></pre>
-          </div>
+<span class="p">$</span> agentstack use central --write   <span class="c"># render views + pin digests</span>
+<span class="p">$</span> agentstack lock                  <span class="c"># or: pin WITHOUT rendering anything</span>
+<span class="p">$</span> agentstack explain kibana        <span class="c"># origin, provenance, lock, secrets</span></code></pre>
+    </div>
+    <p class="small muted">
+      <code>agentstack lock</code> is the clean-at-rest companion: it resolves
+      every profile's name refs and pins them in <code>agentstack.lock</code>
+      without materializing a single file.
+    </p>
+  </section>
 
-          <div class="two-col" style="margin-top: 22px;">
-            <div class="panel">
-              <h3>Project manifest stays small</h3>
-              <div class="codebox">
-                <header>
-                  <span>agentstack.toml</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>version = 1
-
-[profiles.central]
-servers = ["kibana"]
-skills = ["sql-review"]
-
-[targets]
-default = ["claude-code", "codex"]</code></pre>
-              </div>
-            </div>
-
-            <div class="panel">
-              <h3>Library server keeps secret refs</h3>
-              <div class="codebox">
-                <header>
-                  <span>lib/servers/kibana.toml</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>type = "http"
-url = "https://kibana.example.com/mcp"
-
-[headers]
-Authorization = "Bearer ${KIBANA_TOKEN}"</code></pre>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="existing-projects">
-          <div class="section-head">
-            <h2>Existing projects.</h2>
-            <p>Old projects do not need a flag day. Inline definitions and local skills still work, and they can coexist with central references.</p>
-          </div>
-
-          <div class="two-col">
-            <div class="panel warn">
-              <h3>Before: repo-local definitions</h3>
-              <p>This is still valid. It is the compatibility mode many existing projects start with.</p>
-              <div class="codebox">
-                <header>
-                  <span>old project agentstack.toml</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>[servers.kibana]
+  <section id="migrate">
+    <p class="eyebrow">Existing projects</p>
+    <h2>Centralize one capability at a time</h2>
+    <div class="grid2">
+      <div class="panel">
+        <p class="cap">before — repo-local</p>
+        <pre><code>[servers.kibana]
 type = "http"
-url = "https://kibana.example.com/mcp"
+url  = "https://kibana.example.com/mcp"
 
 [servers.kibana.headers]
 Authorization = "Bearer ${KIBANA_TOKEN}"
@@ -956,508 +327,199 @@ path = "./skills/sql-review"
 
 [profiles.backend]
 servers = ["kibana"]
-skills = ["sql-review"]</code></pre>
-              </div>
-            </div>
-
-            <div class="panel good">
-              <h3>After: central references</h3>
-              <p>The project keeps only the selection. Definitions live in <code>~/.agentstack/lib</code>.</p>
-              <div class="codebox">
-                <header>
-                  <span>centralized agentstack.toml</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>[profiles.backend]
+skills  = ["sql-review"]</code></pre>
+      </div>
+      <div class="panel">
+        <p class="cap good">after — central names</p>
+        <pre><code>[profiles.backend]
 servers = ["kibana"]
-skills = ["sql-review"]</code></pre>
-              </div>
-            </div>
-          </div>
+skills  = ["sql-review"]</code></pre>
+        <p>The profile lines don't change — the definitions just moved home.
+           Migrate a skill with <code>lib add &lt;name&gt; --path … --write</code>,
+           a server with <code>lib add-server &lt;name&gt; --from-manifest --write</code>,
+           then delete the inline table.</p>
+      </div>
+    </div>
+    <div class="note">
+      Inline override is intentional: while a project still defines
+      <code>[servers.kibana]</code>, that local definition wins. Remove the
+      inline table only when you want the central copy used.
+    </div>
+  </section>
 
-          <div class="two-col" style="margin-top: 22px;">
-            <div class="panel">
-              <h3>Migrate a local skill</h3>
-              <div class="codebox">
-                <header>
-                  <span>one skill at a time</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>agentstack lib add sql-review --path ./skills/sql-review
-agentstack lib add sql-review --path ./skills/sql-review --write
+  <section id="commands">
+    <p class="eyebrow">Commands</p>
+    <h2>The library toolbox</h2>
+    <table>
+      <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>lib add &lt;name&gt; --path|--git</code></td><td class="muted">Copy a skill into the library (<code>--replace</code> to update). Warns on temp-dir sources and on skills over ~10&nbsp;MiB.</td></tr>
+        <tr><td><code>lib add-server &lt;name&gt; --file|--from-manifest</code></td><td class="muted">Store a reusable server definition — <code>${REF}</code>s intact.</td></tr>
+        <tr><td><code>lib list</code> / <code>lib remove</code></td><td class="muted">See or drop entries; provenance and checksums included.</td></tr>
+        <tr><td><code>consolidate</code></td><td class="muted">Sweep skills from every CLI's folder into the library, symlinking originals back. Preview first.</td></tr>
+        <tr><td><code>lib migrate</code></td><td class="muted">Copy a legacy <code>~/.agentstack/skills/</code> home in — copy-first, reversible.</td></tr>
+        <tr><td><code>lock [--profile &lt;p&gt;]</code></td><td class="muted">Pin every profile's name refs in the lockfile without rendering configs or materializing skills.</td></tr>
+        <tr><td><code>explain &lt;name&gt;</code> / <code>doctor</code></td><td class="muted">Provenance, lock status, drift — with the exact fix command.</td></tr>
+        <tr><td><code>audit --calls</code> / <code>optimize</code></td><td class="muted">Evidence from the gateway call log; <code>optimize --write</code> applies only the provably-safe class.</td></tr>
+      </tbody>
+    </table>
+  </section>
 
-# Then remove the local [skills.sql-review] table from the project.
-# The existing profile name keeps working:
-# skills = ["sql-review"]</code></pre>
-              </div>
-            </div>
-
-            <div class="panel">
-              <h3>Migrate an inline server</h3>
-              <p>Lift it straight from the manifest with <code>lib add-server &lt;name&gt; --from-manifest --write</code>, or point <code>--file</code> at a server definition file.</p>
-              <div class="codebox">
-                <header>
-                  <span>server definition file</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code># kibana.toml
-type = "http"
-url = "https://kibana.example.com/mcp"
-
-[headers]
-Authorization = "Bearer ${KIBANA_TOKEN}"
-
-agentstack lib add-server kibana --file kibana.toml --write
-
-# Then remove the local [servers.kibana] table from the project.
-# servers = ["kibana"] now resolves from the library.</code></pre>
-              </div>
-            </div>
-          </div>
-
-          <div class="callout">
-            <strong>Inline override is intentional:</strong> if a project keeps <code>[servers.kibana]</code> or <code>[skills.sql-review]</code>, that local definition wins over the central library. Remove the inline table only when you want the central copy to be used.
-          </div>
-        </section>
-
-        <section id="new-projects">
-          <div class="section-head">
-            <h2>New projects.</h2>
-            <p>For a fresh project, start central. Add capabilities to the library once, then keep the project manifest small.</p>
-          </div>
-
-          <div class="two-col">
-            <div class="panel good">
-              <h3>Recommended project shape</h3>
-              <div class="file-tree">my-project/
-  agentstack.toml       # profiles and targets only
-  src/
-  README.md</div>
-              <p>No copied skill folder and no inline MCP definition are required unless this project needs an override.</p>
-            </div>
-
-            <div class="panel">
-              <h3>New-project setup</h3>
-              <div class="codebox">
-                <header>
-                  <span>fresh project</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>agentstack lib list
-agentstack lib add-server kibana --file ~/agentstack-fixtures/kibana.toml --write
-agentstack lib add sql-review --path ~/agentstack-fixtures/sql-review --write
-
-cat > agentstack.toml <<'EOF'
-version = 1
-
-[profiles.backend]
-servers = ["kibana"]
-skills = ["sql-review"]
-
-[targets]
-default = ["claude-code", "codex"]
-EOF
-
-agentstack use backend --write
-agentstack doctor</code></pre>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="examples">
-          <div class="section-head">
-            <h2>Command examples.</h2>
-            <p>Common operations for adding, activating, checking, and cleaning central capabilities.</p>
-          </div>
-
-          <div class="two-col">
-            <div class="panel">
-              <h3>Add and list</h3>
-              <div class="codebox">
-                <header>
-                  <span>library management</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>agentstack lib add sql-review --path ./fixtures/central-library/sql-review --write
-agentstack lib add-server kibana --file ./fixtures/central-library/kibana.toml --write
-agentstack lib list</code></pre>
-              </div>
-            </div>
-
-            <div class="panel">
-              <h3>Replace or remove</h3>
-              <div class="codebox">
-                <header>
-                  <span>updates</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>agentstack lib add sql-review --path ./new-sql-review --replace --write
-agentstack lib add-server kibana --file ./new-kibana.toml --replace --write
-agentstack lib remove sql-review --write
-agentstack lib remove-server kibana --write</code></pre>
-              </div>
-            </div>
-
-            <div class="panel">
-              <h3>Migrate old skill home</h3>
-              <p>Copy-first and reversible. Original files under the legacy home remain in place.</p>
-              <div class="codebox">
-                <header>
-                  <span>legacy skills home</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>agentstack lib migrate
-agentstack lib migrate --write</code></pre>
-              </div>
-            </div>
-
-            <div class="panel">
-              <h3>Consolidate provider skills</h3>
-              <p>Sweeps known provider skill directories into <code>lib/skills</code> and symlinks originals back.</p>
-              <div class="codebox">
-                <header>
-                  <span>skills consolidation</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>agentstack consolidate
-agentstack consolidate --write
-agentstack consolidate sql-review --write</code></pre>
-              </div>
-            </div>
-          
-            <div class="panel">
-              <h3>Tune with evidence</h3>
-              <div class="codebox">
-                <header>
-                  <span>shell</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>agentstack audit --calls   # the gateway call log
-agentstack optimize        # evidence-backed recommendations
-agentstack optimize --write  # apply only the provably-safe class</code></pre>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="cases">
-          <div class="section-head">
-            <h2>All cases.</h2>
-            <p>Filter by what you are looking at: central library, project files, generated provider views, or legacy compatibility.</p>
-          </div>
-
-          <div class="case-controls" aria-label="Case filters">
-            <button class="chip active" type="button" data-filter="all">All</button>
-            <button class="chip" type="button" data-filter="central">Central</button>
-            <button class="chip" type="button" data-filter="project">Project</button>
-            <button class="chip" type="button" data-filter="provider">Provider view</button>
-            <button class="chip" type="button" data-filter="legacy">Legacy</button>
-            <button class="chip" type="button" data-filter="safety">Safety</button>
-          </div>
-
-          <div class="case-list">
-            <div class="case-row" data-case="central project">
-              <b>Clean central project</b>
-              <p><code>central-demo</code> contains only <code>agentstack.toml</code>. It references <code>kibana</code> and <code>sql-review</code> by name.</p>
-              <p><span class="tag">Source of truth</span> Project selection, central definitions.</p>
-            </div>
-            <div class="case-row" data-case="central safety">
-              <b>Central skill</b>
-              <p><code>lib/skills/sql-review/SKILL.md</code> is the real managed copy. Provider skill folders receive symlinks or materialized views.</p>
-              <p><span class="tag">Implemented</span> Managed by <code>lib add</code> and <code>consolidate</code>.</p>
-            </div>
-            <div class="case-row" data-case="central safety">
-              <b>Central MCP server</b>
-              <p><code>lib/servers/kibana.toml</code> stores the reusable server definition with <code>${REF}</code> placeholders.</p>
-              <p><span class="tag">Implemented</span> Managed by <code>lib add-server</code>.</p>
-            </div>
-            <div class="case-row" data-case="project legacy">
-              <b>Inline override</b>
-              <p>If a project defines <code>[servers.kibana]</code> or <code>[skills.sql-review]</code>, that local definition wins over the library.</p>
-              <p><span class="tag">Intentional</span> This preserves repo-specific overrides.</p>
-            </div>
-            <div class="case-row" data-case="project legacy">
-              <b>Existing local skill folder</b>
-              <p>A project can still contain <code>skills/sql-review/SKILL.md</code> when it uses an inline <code>[skills.sql-review].path</code>.</p>
-              <p><span class="tag">Supported</span> Migrate later with <code>lib add</code> or <code>consolidate</code>.</p>
-            </div>
-            <div class="case-row" data-case="project legacy">
-              <b>Existing inline MCP server</b>
-              <p>A project can still define <code>[servers.kibana]</code> inline. That server remains project-owned until you add it to <code>lib/servers</code> and remove the inline table.</p>
-              <p><span class="tag">Supported</span> Useful for one-off project-specific config.</p>
-            </div>
-            <div class="case-row" data-case="provider">
-              <b>Project-scoped MCP file</b>
-              <p><code>.mcp.json</code> can appear in a project because some CLIs read project-local provider views.</p>
-              <p><span class="tag">Generated</span> It is not the source of truth.</p>
-            </div>
-            <div class="case-row" data-case="provider">
-              <b>Project skill view</b>
-              <p><code>.claude/skills</code> or <code>.codex/skills</code> can appear after activation so providers can read selected skills.</p>
-              <p><span class="tag">Generated</span> Gitignore it.</p>
-            </div>
-            <div class="case-row" data-case="legacy">
-              <b>Old sample projects</b>
-              <p><code>web-app</code>, <code>api-service</code>, and <code>data-pipeline</code> may still show local skills or inline MCP examples.</p>
-              <p><span class="tag">Compatibility</span> They test older workflows.</p>
-            </div>
-            <div class="case-row" data-case="central project">
-              <b>Mixed migration</b>
-              <p>A profile can reference one central capability and one inline/local capability while you migrate gradually.</p>
-              <p><span class="tag">Practical</span> No flag day required.</p>
-            </div>
-            <div class="case-row" data-case="safety">
-              <b>Provider folder</b>
-              <p><code>~/.codex</code>, <code>~/.claude</code>, and <code>~/.pi</code> contain private provider state. AgentStack does not own them wholesale.</p>
-              <p><span class="tag">Boundary</span> Only known managed surfaces are touched.</p>
-            </div>
-            <div class="case-row" data-case="safety central">
-              <b>Lock drift</b>
-              <p>Changing a central skill or server definition after activation changes its digest. <code>doctor</code> and <code>explain</code> show drift.</p>
-              <p><span class="tag">Reproducible</span> Servers lock definition digest only.</p>
-            </div>
-          </div>
-        </section>
-
-        <section id="secrets">
-          <div class="section-head">
-            <h2>Secrets and locking.</h2>
-            <p>The central library stores definitions, never machine-local secret values.</p>
-          </div>
-
-          <div class="two-col">
-            <div class="panel good">
-              <h3>Safe central definition</h3>
-              <div class="codebox">
-                <header>
-                  <span>${REF} stays in the library</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>[headers]
+  <section id="secrets">
+    <p class="eyebrow">Secrets &amp; locking</p>
+    <h2>Definitions, never values</h2>
+    <div class="grid2">
+      <div class="panel">
+        <p class="cap good">safe central definition</p>
+        <pre><code>[headers]
 Authorization = "Bearer ${KIBANA_TOKEN}"</code></pre>
-              </div>
-              <p>At render or gateway time, the local resolver turns <code>${KIBANA_TOKEN}</code> into the machine's actual value.</p>
-            </div>
-
-            <div class="panel warn">
-              <h3>Never commit this in the library</h3>
-              <div class="codebox">
-                <header>
-                  <span>plaintext value</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>[headers]
+        <p>At render or gateway time the local resolver turns
+           <code>${KIBANA_TOKEN}</code> into that machine's value — env,
+           varlock, OS keychain, or <code>.env</code>.</p>
+      </div>
+      <div class="panel">
+        <p class="cap">never in the library</p>
+        <pre><code>[headers]
 Authorization = "Bearer real-token-value"</code></pre>
-              </div>
-              <p><code>lib add-server</code> warns on suspicious literal secrets. The design rule is still simple: central files hold refs, not values.</p>
-              <p>Skill content is also scanned on <code>install</code>: hidden Unicode (zero-width characters, bidi overrides) blocks the install, prompt-injection heuristics warn, and <code>agentstack audit</code> re-scans everything materialized — so what enters the library is checked, not just checksummed.</p>
-            </div>
-          </div>
+        <p><code>lib add-server</code> warns on literal secrets. Skill content is
+           scanned on install too: hidden Unicode blocks, injection heuristics
+           warn, <code>audit</code> re-scans everything materialized.</p>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Item</th><th>Locked</th><th>Not locked</th></tr></thead>
+      <tbody>
+        <tr><td>Skill</td><td class="muted">Content checksum + source locator</td><td class="muted">Generated provider copies</td></tr>
+        <tr><td>MCP server</td><td class="muted">Definition checksum with <code>${REF}</code>s</td><td class="muted">Resolved secret values, per-CLI render shape</td></tr>
+      </tbody>
+    </table>
+  </section>
 
-          <table style="margin-top: 22px;">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Locked material</th>
-                <th>Not locked</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Skill</td>
-                <td>Content checksum and source locator.</td>
-                <td>Generated provider copies.</td>
-              </tr>
-              <tr>
-                <td>MCP server</td>
-                <td>Definition checksum with <code>${REF}</code> placeholders.</td>
-                <td>Resolved secret values and provider-specific render shape.</td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
+  <section id="cases">
+    <p class="eyebrow">Field guide</p>
+    <h2>Every file you might encounter</h2>
+    <div class="chips" role="group" aria-label="Filter cases">
+      <button class="chip active" type="button" data-filter="all">all</button>
+      <button class="chip" type="button" data-filter="central">central</button>
+      <button class="chip" type="button" data-filter="project">project</button>
+      <button class="chip" type="button" data-filter="provider">provider view</button>
+      <button class="chip" type="button" data-filter="safety">safety</button>
+    </div>
+    <ul class="cases">
+      <li data-case="central project"><b>Clean central project</b>
+        <p>An <code>agentstack.toml</code> that references <code>kibana</code> and <code>sql-review</code> by name — and nothing else. <span class="tag">source of truth</span></p></li>
+      <li data-case="central safety"><b>Central skill</b>
+        <p><code>lib/skills/sql-review/SKILL.md</code> is the real managed copy; provider folders receive symlinks or views. <span class="tag">lib add · consolidate</span></p></li>
+      <li data-case="central safety"><b>Central MCP server</b>
+        <p><code>lib/servers/kibana.toml</code> holds the reusable definition with <code>${REF}</code> placeholders. <span class="tag">lib add-server</span></p></li>
+      <li data-case="project"><b>Inline override</b>
+        <p>A project's own <code>[servers.kibana]</code> wins over the library — intentional, for repo-specific config. <span class="tag">supported</span></p></li>
+      <li data-case="project"><b>Local skill folder</b>
+        <p><code>skills/sql-review/</code> with an inline <code>[skills.sql-review].path</code> still works; migrate whenever. <span class="tag">supported</span></p></li>
+      <li data-case="provider"><b>Project-scoped MCP file</b>
+        <p><code>.mcp.json</code> appears because some CLIs read project-local views. Generated — not the source of truth. <span class="tag">gitignored</span></p></li>
+      <li data-case="provider"><b>Project skill view</b>
+        <p><code>.claude/skills/</code> appears after activation so providers can read selected skills; the managed <code>.gitignore</code> block keeps it out of git. <span class="tag">gitignored</span></p></li>
+      <li data-case="safety"><b>Provider folder</b>
+        <p><code>~/.claude</code>, <code>~/.codex</code>, <code>~/.pi</code> hold private provider state; only known managed surfaces are ever touched. <span class="tag">boundary</span></p></li>
+      <li data-case="safety central"><b>Lock drift</b>
+        <p>Editing a central definition changes its digest — <code>doctor</code> and <code>explain</code> show the drift, <code>install --locked</code> fails loudly in CI. <span class="tag">reproducible</span></p></li>
+    </ul>
+  </section>
 
-        <section id="provider-views">
-          <div class="section-head">
-            <h2>Generated provider views.</h2>
-            <p>CLIs still need files in the shapes they understand. AgentStack renders those views from the central source.</p>
-          </div>
-
-          <div class="two-col">
-            <div class="panel">
-              <h3>Provider view example</h3>
-              <div class="codebox">
-                <header>
-                  <span>simulated ~/.claude.json after use --write</span>
-                  <button class="copy" type="button">Copy</button>
-                </header>
-                <pre><code>{
+  <section id="views">
+    <p class="eyebrow">Provider views</p>
+    <h2>What the CLIs actually read</h2>
+    <div class="grid2">
+      <div class="panel">
+        <p class="cap">~/.claude.json after use --write</p>
+        <pre><code>{
   "mcpServers": {
     "kibana": {
       "type": "http",
       "url": "https://kibana.example.com/mcp",
       "headers": {
-        "Authorization": "Bearer demo-secret-value"
+        "Authorization": "Bearer local-secret"
       }
     }
   }
 }</code></pre>
-              </div>
-            </div>
+      </div>
+      <div class="panel">
+        <p class="cap good">why that's fine</p>
+        <ul>
+          <li>The provider view is generated output, backed up before every mutation.</li>
+          <li>Only agentstack-owned entries are changed or pruned — hand-added ones are guarded, and drift hints offer <code>adopt</code> before <code>apply --write</code>.</li>
+          <li>The resolved secret lives only in the machine-local view; the lock never contains it.</li>
+          <li>The library remains the single source of truth.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
 
-            <div class="panel">
-              <h3>Why this is okay</h3>
-              <ul>
-                <li>The provider view is generated output.</li>
-                <li>It is backed up before mutation.</li>
-                <li>Only AgentStack-owned entries are changed or pruned.</li>
-                <li>The central library remains the source of truth.</li>
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        <section id="sandbox">
-          <div class="section-head">
-            <h2>Sandbox demo.</h2>
-            <p>The runnable demo proves the central architecture without touching your real provider folders.</p>
-          </div>
-
-          <div class="codebox">
-            <header>
-              <span>run it</span>
-              <button class="copy" type="button">Copy</button>
-            </header>
-            <pre><code>cd agentstack-test
+  <section id="sandbox">
+    <p class="eyebrow">Prove it</p>
+    <h2>The runnable sandbox</h2>
+    <p class="muted">
+      Every flow on this page is verified by a sandboxed demo that never touches
+      your real provider folders:
+    </p>
+    <pre><code>cd agentstack-test
 ./demo-central-library.sh     # the central-library architecture
 ./demo-closed-loop.sh         # pack install → apply → firewall → receipts → upgrade</code></pre>
-          </div>
+    <figure>
+      <img src="closed-loop.gif" alt="Terminal recording: install a versioned pack, apply everywhere, firewall a tool, watch the audited refusal, upgrade" loading="lazy">
+      <figcaption>The closed loop — a vendor pack installed at its tag, firewalled, audited, and upgraded.</figcaption>
+    </figure>
+  </section>
 
-          <p style="margin-top: 18px;">
-            The closed-loop demo — a vendor publishes a versioned pack, a fresh
-            machine installs it at its tag, spreads it to every CLI, firewalls a
-            destructive tool, watches a live call get refused, reads the audit
-            receipts, and picks up the next tag with one <code>upgrade</code>:
-          </p>
-          <img src="closed-loop.gif" alt="agentstack closed loop: git pack install, apply, firewall, audited calls, upgrade" style="width: 100%; border-radius: 10px; margin-top: 10px;" loading="lazy" />
-          <p style="margin-top: 10px;">
-            For dashboard-first users, the same lifecycle works without a terminal —
-            see <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">the no-terminal path</a>.
-          </p>
+  <section id="roadmap">
+    <p class="eyebrow">Status</p>
+    <h2>Implemented and next</h2>
+    <ul class="cases">
+      <li><b class="done">Central skills + server definitions</b>
+        <p>Name resolution with inline override; digest locks; doctor drift; explain provenance; the full <code>lib</code> toolbox.</p></li>
+      <li><b class="done">Lock-only pinning</b>
+        <p><code>agentstack lock</code> pins profile refs without rendering — clean-at-rest repos never need the activate/deactivate dance.</p></li>
+      <li><b class="done">Zero-files bridge</b>
+        <p><code>connect</code> once per harness; trusted repos proxy their stack at session start — firewall, audit log, and skills over MCP included. The <code>using-agentstack</code> manual is always loadable, even untrusted.</p></li>
+      <li><b class="done">Machine-level instructions</b>
+        <p><code>init --global</code> + a user layer that merges personal instruction fragments beneath every project — global scope only, never a repo's committed files.</p></li>
+      <li><b class="next">Library-backed hooks and instruction fragments</b>
+        <p>Name-refs for <code>lib/hooks/</code> and shared instruction sets, riding the same resolve/lock pipeline.</p></li>
+      <li><b class="next">Team library sync + SBOM</b>
+        <p>Git-backed <code>~/.agentstack/lib</code> so one teammate's library entry reaches every machine; SBOM export from the lockfile.</p></li>
+      <li><b class="next">Semver ranges + transitive pack dependencies</b>
+        <p>Deliberately out of packs v1.</p></li>
+    </ul>
+  </section>
 
-          <table style="margin-top: 22px;">
-            <thead>
-              <tr>
-                <th>Step</th>
-                <th>What it proves</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><code>lib add-server</code> + <code>lib add</code></td>
-                <td>Fixtures become central library entries under <code>runtime/ashome/lib</code>.</td>
-              </tr>
-              <tr>
-                <td><code>use central --write</code></td>
-                <td>Name references render server config and materialize the skill.</td>
-              </tr>
-              <tr>
-                <td><code>explain kibana</code></td>
-                <td>Origin, provenance, lock status, and secret refs are visible.</td>
-              </tr>
-              <tr>
-                <td>Generated Claude config</td>
-                <td>The provider sees the resolved local secret, but the lock does not contain it.</td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
+</main>
 
-        <section id="roadmap">
-          <div class="section-head">
-            <h2>Implemented and next.</h2>
-            <p>The central skills and MCP server story is implemented. Hooks, instructions, extensions, and the one-command provider import follow the same boundary.</p>
-          </div>
-
-          <div class="two-col">
-            <div class="panel good">
-              <h3>Implemented</h3>
-              <ul>
-                <li><span class="status">Done</span> <code>lib/skills</code> central skill store.</li>
-                <li><span class="status">Done</span> <code>lib/servers</code> central MCP definition store.</li>
-                <li><span class="status">Done</span> Name resolution with inline override.</li>
-                <li><span class="status">Done</span> Digest locks, doctor drift, explain provenance.</li>
-                <li><span class="status">Done</span> <code>lib add</code>, <code>add-server</code>, <code>list</code>, <code>remove</code>, <code>remove-server</code>, <code>migrate</code>.</li>
-                <li><span class="status">Done</span> Runtime gateway proxies HTTP <em>and</em> stdio servers (zero-files mode).</li>
-                <li><span class="status">Done</span> Zero-copy bridge: <code>connect</code>/<code>disconnect</code>, <code>mcp --auto-project</code> (roots &rarr; walk-up &rarr; env), digest-pinned <code>trust</code>.</li>
-                <li><span class="status">Done</span> <code>optimize</code>: evidence-backed recommendations from usage/audit/cost signals; <code>--write</code> applies only the provably-safe class.</li>
-                <li><span class="status">Done</span> MCP firewall (<code>[policy.tools]</code>) + call audit log with per-run receipts.</li>
-                <li><span class="status">Done</span> Versioned packs from any git host (<code>pack.toml</code> + tags, <code>upgrade</code>, <code>pack init</code>).</li>
-                <li><span class="status">Done</span> Context-cost lens (<code>stats --live</code>) — what each server taxes every session.</li>
-                <li><span class="status">Done</span> Dashboard closes the loop: doctor pane, remove action, hard read-only gate.</li>
-              </ul>
-            </div>
-
-            <div class="panel warn">
-              <h3>Next</h3>
-              <ul>
-                <li><span class="status pending">Next</span> <code>lib/hooks</code> and reusable instruction sets.</li>
-                <li><span class="status pending">Next</span> One-command provider import and onboarding.</li>
-                <li><span class="status pending">Next</span> Semver ranges + transitive pack dependencies.</li>
-                <li><span class="status pending">Next</span> Team library sync (git-backed <code>~/.agentstack/lib</code>) and SBOM export.</li>
-              </ul>
-            </div>
-          </div>
-        </section>
-      </main>
-    </div>
-
-    <footer class="footer">
-      <div class="footer-inner">
-        <div>
-          <strong>agentstack docs</strong><br>
-          Every flow on this page is verified by the runnable sandbox
-          (<code>agentstack-test/demo-central-library.sh</code>).
-        </div>
-        <div>
-          More docs:
-          <a href="https://github.com/Tarekkharsa/agentstack#readme">README</a> ·
-          <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">feature reference</a> ·
-          <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
-        </div>
-      </div>
-    </footer>
+<footer class="site">
+  <div class="bar">
+    <span>Every flow here is verified by <code>agentstack-test/demo-central-library.sh</code>.</span>
+    <nav aria-label="Footer links" style="margin-left:auto">
+      <a href="./">docs home</a>
+      <a href="https://github.com/Tarekkharsa/agentstack">source</a>
+    </nav>
   </div>
+</footer>
 
-  <script>
-    document.querySelectorAll('.copy').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const box = button.closest('.codebox');
-        const text = box ? box.querySelector('code').innerText : '';
-        try {
-          await navigator.clipboard.writeText(text);
-          const original = button.textContent;
-          button.textContent = 'Copied';
-          setTimeout(() => { button.textContent = original; }, 1100);
-        } catch (_) {
-          button.textContent = 'Select text';
-        }
-      });
+<script>
+  const chips = document.querySelectorAll(".chip");
+  const rows = document.querySelectorAll("[data-case]");
+  for (const chip of chips) {
+    chip.addEventListener("click", () => {
+      for (const c of chips) c.classList.remove("active");
+      chip.classList.add("active");
+      const f = chip.dataset.filter;
+      for (const row of rows) {
+        row.hidden = f !== "all" && !row.dataset.case.split(" ").includes(f);
+      }
     });
+  }
+</script>
 
-    const chips = document.querySelectorAll('[data-filter]');
-    const rows = document.querySelectorAll('[data-case]');
-    chips.forEach((chip) => {
-      chip.addEventListener('click', () => {
-        chips.forEach((c) => c.classList.remove('active'));
-        chip.classList.add('active');
-        const filter = chip.dataset.filter;
-        rows.forEach((row) => {
-          row.hidden = filter !== 'all' && !row.dataset.case.split(' ').includes(filter);
-        });
-      });
-    });
-  </script>
 </body>
 </html>
