@@ -652,7 +652,13 @@ fn render_drift_targets(
         };
         let installed = d.is_installed();
         let config_present = d.config_present();
-        let prev = state.managed_servers(&target_key(&id, scope, &ctx.dir));
+        let key = target_key(&id, scope, &ctx.dir);
+        let mut prev = state.managed_servers(&key);
+        // Match apply's cross-manifest guard so this preview shows what a
+        // write would actually do: foreign-recorded entries are kept.
+        state.foreign_prunes(&key, scope, &ctx.dir, &mut prev, |n| {
+            manifest.servers.contains_key(n)
+        });
         match crate::render::plan_target(
             manifest,
             d,

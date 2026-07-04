@@ -350,6 +350,7 @@ fn route(
                 write: true,
                 scope: Some(scope_of(body)),
                 allow_unresolved: false,
+                prune_foreign: false,
                 no_gitignore: false,
             };
             crate::commands::apply::run(&args, dir)
@@ -413,6 +414,7 @@ fn route(
                 scope: Some(scope_of(body)),
                 write: true,
                 allow_unresolved: false,
+                prune_foreign: false,
                 no_gitignore: false,
             };
             crate::commands::use_profile::run(&args, dir)

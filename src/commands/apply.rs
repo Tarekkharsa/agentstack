@@ -129,6 +129,7 @@ fn render(
 
     println!("Scope: {scope}");
     let mut state = State::load()?;
+    let identity = crate::state::manifest_identity(&ctx.dir);
     let mut changed_count = 0;
     let mut error_count = 0;
     let mut write_blockers = 0;
@@ -147,7 +148,39 @@ fn render(
         };
 
         let key = target_key(id, scope, &ctx.dir);
-        let previously = state.managed_servers(&key);
+        let mut previously = state.managed_servers(&key);
+        // Names an earlier guarded write kept on disk (state bookkeeping —
+        // they left `managed_servers` when this manifest recorded its own
+        // set). Ones the manifest now selects become managed again below.
+        let kept_before: Vec<String> = state
+            .kept_foreign(&key)
+            .into_iter()
+            .filter(|n| !server_map.contains_key(n))
+            .collect();
+        // Guard cross-manifest global prunes: entries another manifest applied
+        // are kept (and reported below), not deleted, unless --prune-foreign.
+        let foreign = if args.prune_foreign {
+            // Fold previously-kept names into the prune set — the escape
+            // hatch must still reach them after a guarded write re-recorded
+            // this key with only our own managed set.
+            for n in &kept_before {
+                if !previously.contains(n) {
+                    previously.push(n.clone());
+                }
+            }
+            Vec::new()
+        } else {
+            let mut f = state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
+                server_map.contains_key(n)
+            });
+            // Keep surfacing (and tracking) what earlier runs kept.
+            for n in &kept_before {
+                if !f.contains(n) {
+                    f.push(n.clone());
+                }
+            }
+            f
+        };
         let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
@@ -168,6 +201,14 @@ fn render(
         }
         for r in &plan.removed {
             println!("  {} pruning '{r}' (no longer in manifest)", "−".yellow());
+        }
+        if !foreign.is_empty() {
+            println!(
+                "  {} keeping {} — applied by another manifest ↳ keep: agentstack adopt · \
+                 prune: agentstack apply --prune-foreign",
+                "⚠".yellow(),
+                foreign.join(", ")
+            );
         }
         for s in &plan.skipped {
             println!(
@@ -204,7 +245,11 @@ fn render(
                 ));
                 touched_targets.insert(desc.display.clone());
                 plan.write()?;
-                state.record(&key, plan.managed.clone(), &plan.proposed);
+                state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                // Track what this guarded write kept on disk (empty after a
+                // --prune-foreign actually pruned them) — see
+                // TargetState::kept_foreign.
+                state.record_kept_foreign(&key, foreign.clone());
                 crate::usage::bump(&plan.managed);
                 if plan.remove_if_empty_shell(desc) {
                     println!(
@@ -221,7 +266,8 @@ fn render(
         } else {
             // Even with no file change, keep state in sync with reality.
             if will_write {
-                state.record(&key, plan.managed.clone(), &plan.proposed);
+                state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                state.record_kept_foreign(&key, foreign.clone());
             }
             println!("  {} up to date", "✓".green());
         }

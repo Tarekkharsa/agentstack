@@ -171,6 +171,7 @@ fn apply_args(args: &SetupArgs, scope: Scope, write: bool) -> ApplyArgs {
         write,
         scope: Some(scope),
         allow_unresolved: false,
+        prune_foreign: false,
         no_gitignore: false,
     }
 }

@@ -28,6 +28,7 @@ fn args(write: bool) -> ApplyArgs {
         scope: Some(Scope::Global),
         allow_unresolved: false,
         no_gitignore: true,
+        prune_foreign: false,
     }
 }
 

@@ -293,12 +293,41 @@ fn run_checks(
 
     report.section("Drift");
     let mut any_drift = false;
+    let identity = state::manifest_identity(&ctx.dir);
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
         let key = target_key(id, Scope::Global, &ctx.dir);
-        let previously = state.managed_servers(&key);
+        // Was this key's managed set recorded by a different manifest? Its
+        // leftover entries are then not ours to prune (see
+        // State::foreign_prunes): `--fix` keeps them, and the report points at
+        // `apply --prune-foreign` instead of `apply --write`.
+        let foreign_key = state
+            .manifest_source(&key)
+            .is_some_and(|src| src != identity);
+        let mut previously = state.managed_servers(&key);
+        let kept = if args.fix {
+            state.foreign_prunes(&key, Scope::Global, &ctx.dir, &mut previously, |n| {
+                manifest.servers.contains_key(n)
+            })
+        } else {
+            Vec::new()
+        };
+        // Names an earlier guarded write kept on disk (state bookkeeping —
+        // they left `managed_servers` when the writing manifest recorded its
+        // own set, so neither `foreign_key` nor the plan sees them). Keep
+        // reporting the adopt-or-prune choice until one of them happens.
+        let mut kept_report: Vec<String> = state
+            .kept_foreign(&key)
+            .into_iter()
+            .filter(|n| !manifest.servers.contains_key(n))
+            .collect();
+        for k in &kept {
+            if !kept_report.contains(k) {
+                kept_report.push(k.clone());
+            }
+        }
         let Some(plan) = plan_target(
             manifest,
             desc,
@@ -312,6 +341,18 @@ fn run_checks(
             continue;
         };
 
+        if !kept_report.is_empty() {
+            any_drift = true;
+            report.line(
+                Level::Warn,
+                format!(
+                    "{:<14} kept {} — applied by another manifest ↳ keep them: \
+                     agentstack adopt · prune them: agentstack apply --prune-foreign",
+                    desc.display,
+                    kept_report.join(", ")
+                ),
+            );
+        }
         // Hand-edit since our last write?
         if let Some(ts) = state.targets.get(&key) {
             if !ts.last_hash.is_empty() {
@@ -320,7 +361,11 @@ fn run_checks(
                     any_drift = true;
                     report.line(
                         Level::Warn,
-                        format!("{:<14} edited on disk since last apply", desc.display),
+                        format!(
+                            "{:<14} edited on disk since last apply ↳ review: agentstack diff · \
+                             keep the hand-edit: agentstack adopt",
+                            desc.display
+                        ),
                     );
                 }
             }
@@ -341,7 +386,10 @@ fn run_checks(
                 );
             } else if args.fix {
                 plan.write()?;
-                state.record(&key, plan.managed.clone(), &plan.proposed);
+                state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                // A --fix write is a guarded write too: keep the kept-foreign
+                // names reachable for a later `apply --prune-foreign`.
+                state.record_kept_foreign(&key, kept_report.clone());
                 fixed += 1;
                 report.line(
                     Level::Ok,
@@ -351,14 +399,36 @@ fn run_checks(
                         plan.managed.len()
                     ),
                 );
-            } else {
+            } else if plan.removed.is_empty() {
                 any_drift = true;
                 report.line(
                     Level::Warn,
                     format!(
                         "{:<14} {} change(s) pending ↳ agentstack apply --write",
                         desc.display,
-                        plan.managed.len().max(plan.removed.len())
+                        plan.managed.len()
+                    ),
+                );
+            } else {
+                // A pending prune deletes real entries from a live config —
+                // name the victims and offer the keep path, never just the
+                // one-way "apply --write" hint (which would silently remove
+                // them, e.g. hand-added or foreign-manifest servers).
+                any_drift = true;
+                let prune_cmd = if foreign_key {
+                    // apply's guard keeps foreign entries — pruning them
+                    // takes the explicit flag.
+                    "agentstack apply --prune-foreign"
+                } else {
+                    "agentstack apply --write"
+                };
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<14} would REMOVE {} ↳ keep them: agentstack adopt · \
+                         prune them: {prune_cmd}",
+                        desc.display,
+                        plan.removed.join(", ")
                     ),
                 );
             }

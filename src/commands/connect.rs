@@ -248,17 +248,28 @@ fn bridge_server(command: &str) -> Server {
     }
 }
 
-/// The binary to register: an explicit override, else this executable's real
-/// path. An absolute path matters — GUI harnesses spawn MCP servers without a
-/// login shell's $PATH.
+/// The binary to register: an explicit override, else the stable PATH install
+/// when it resolves to this executable (the `agentstack self link` symlink —
+/// so configs survive rebuilds instead of pinning e.g. target/release), else
+/// this executable's real path. An absolute path matters either way — GUI
+/// harnesses spawn MCP servers without a login shell's $PATH.
 fn bridge_command(explicit: Option<&str>) -> String {
     if let Some(c) = explicit {
         return c.to_string();
     }
-    std::env::current_exe()
+    let exe = std::env::current_exe()
         .ok()
-        .and_then(|p| p.canonicalize().ok())
-        .map(|p| p.display().to_string())
+        .and_then(|p| p.canonicalize().ok());
+    if let Some(exe) = &exe {
+        for cand in
+            crate::commands::self_cmd::find_all_on_path(&crate::commands::self_cmd::bin_name())
+        {
+            if cand.canonicalize().ok().as_ref() == Some(exe) {
+                return cand.display().to_string();
+            }
+        }
+    }
+    exe.map(|p| p.display().to_string())
         .unwrap_or_else(|| "agentstack".to_string())
 }
 
@@ -376,6 +387,41 @@ mod tests {
         assert!(out.contains("[mcp_servers.agentstack]"));
         assert!(out.contains("--auto-project"));
         assert!(has_bridge_entry(&out, &mcp.location, Format::Toml));
+    }
+
+    /// After `self link`, connect must register the stable symlink path — not
+    /// this process's build location — so harness configs survive rebuilds.
+    #[cfg(unix)]
+    #[test]
+    fn bridge_command_prefers_stable_path_install_over_current_exe() {
+        use assert_fs::prelude::*;
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let exe = std::env::current_exe().unwrap().canonicalize().unwrap();
+
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let bin = tmp.child("bin");
+        bin.create_dir_all().unwrap();
+        let link = bin.path().join(crate::commands::self_cmd::bin_name());
+        std::os::unix::fs::symlink(&exe, &link).unwrap();
+
+        let old = std::env::var_os("PATH");
+        std::env::set_var("PATH", bin.path());
+        let picked = bridge_command(None);
+        // A PATH entry that is some other binary must NOT be picked.
+        std::fs::remove_file(&link).unwrap();
+        std::fs::write(&link, "other").unwrap();
+        let unrelated = bridge_command(None);
+        match old {
+            Some(p) => std::env::set_var("PATH", p),
+            None => std::env::remove_var("PATH"),
+        }
+
+        assert_eq!(picked, link.display().to_string());
+        assert_eq!(unrelated, exe.display().to_string());
+        // An explicit override always wins.
+        assert_eq!(bridge_command(Some("/x/agentstack")), "/x/agentstack");
     }
 
     #[test]

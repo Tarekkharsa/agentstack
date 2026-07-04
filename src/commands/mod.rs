@@ -28,6 +28,7 @@ pub mod restore;
 pub mod runs;
 pub mod search;
 pub mod secret;
+pub mod self_cmd;
 pub mod session;
 pub mod setup;
 pub mod stats;

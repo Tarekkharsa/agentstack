@@ -28,7 +28,7 @@ run `agentstack <command> --help` for any of them:
   Activate & run           use · session · run · runs · kill · hook
   Zero-files bridge        connect · trust · disconnect · mcp · codemode
   Inspect & tune           diff · explain · audit · optimize · stats · restore · secret
-  Share & extend           export · import · pack · plugins · adapters"
+  Share & extend           export · import · pack · plugins · adapters · self"
 )]
 pub struct Cli {
     /// Project or manifest directory (prefers .agentstack/agentstack.toml).
@@ -238,6 +238,41 @@ pub enum Command {
     /// Inspect the available CLI adapters.
     #[command(hide = true)]
     Adapters(AdaptersArgs),
+
+    /// Manage this binary's own install: `self link` puts a stable `agentstack`
+    /// on PATH (a symlink, no installer needed); `self which` shows which
+    /// binary a bare `agentstack` runs and flags stale links.
+    #[command(name = "self", hide = true)]
+    SelfCmd(SelfArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct SelfArgs {
+    #[command(subcommand)]
+    pub command: SelfCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SelfCommand {
+    /// Symlink the running binary into a PATH dir, so `agentstack` works from
+    /// every shell (interactive or not) without an installer or shell wrapper.
+    Link(SelfLinkArgs),
+    /// Show what `agentstack` on PATH resolves to vs the binary running now,
+    /// flagging stale or broken links (e.g. after a rebuild).
+    Which,
+}
+
+#[derive(Args, Debug)]
+pub struct SelfLinkArgs {
+    /// Directory to link into. Default: $AGENTSTACK_PREFIX, else
+    /// /usr/local/bin when writable, else ~/.local/bin (same as install.sh).
+    #[arg(long, value_name = "DIR")]
+    pub prefix: Option<PathBuf>,
+
+    /// Replace an existing regular file at the destination (an existing
+    /// symlink is always re-pointed; a real file is refused without this).
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args, Debug)]
@@ -588,6 +623,13 @@ pub struct ApplyArgs {
     #[arg(long)]
     pub allow_unresolved: bool,
 
+    /// Also prune global entries that a *different* manifest applied. By
+    /// default those are kept (and reported) — pruning them would silently
+    /// delete another setup's servers; `agentstack adopt` pulls them into
+    /// this manifest instead.
+    #[arg(long)]
+    pub prune_foreign: bool,
+
     /// Skip the managed .gitignore block for generated project artifacts —
     /// pass this when your team commits the rendered files.
     #[arg(long)]
@@ -625,6 +667,11 @@ pub struct UseArgs {
     /// Allow writing even when a `${REF}` did not resolve (off by default).
     #[arg(long)]
     pub allow_unresolved: bool,
+
+    /// Also prune global entries that a *different* manifest applied (kept
+    /// and reported by default — see `agentstack apply --help`).
+    #[arg(long)]
+    pub prune_foreign: bool,
 
     /// Skip the managed .gitignore block for generated project artifacts —
     /// pass this when your team commits the rendered files.

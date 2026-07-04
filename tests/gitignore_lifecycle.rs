@@ -18,6 +18,7 @@ fn use_args(profile: &str) -> UseArgs {
         write: true,
         allow_unresolved: false,
         no_gitignore: false,
+        prune_foreign: false,
     }
 }
 

@@ -213,6 +213,7 @@ pub fn start(
         scope: Some(scope),
         write: true,
         allow_unresolved: false,
+        prune_foreign: false,
         no_gitignore: false,
     };
     let libctx = ctx.library_ctx();
