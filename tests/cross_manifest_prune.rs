@@ -126,6 +126,83 @@ fn prune_foreign_flag_restores_the_old_prune() {
     assert!(config.contains("beta"), "B's own server written: {config}");
 }
 
+/// The escape hatch must survive the guarded write that precedes it. A
+/// guarded `apply --write` from manifest B keeps A's server on disk but
+/// re-records the state key with only B's managed set (and B as source) — so
+/// a follow-up `apply --prune-foreign` used to be a silent no-op ("up to
+/// date") and the foreign server stayed in the live config forever,
+/// untracked. The kept names must stay reachable (state bookkeeping) so the
+/// advertised follow-up command actually prunes them.
+#[test]
+fn prune_foreign_still_works_after_guarded_apply() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup(&home);
+    seed_state_from_manifest_a(tmp.path(), &home);
+    let proj_b = write_manifest_b(tmp.path());
+
+    // Step 1: guarded apply from B — A's server is kept on disk.
+    apply::run(&apply_args(false), Some(&proj_b)).unwrap();
+    let config = fs::read_to_string(home.join(".claude.json")).unwrap();
+    assert!(
+        config.contains("kibana_mcp"),
+        "guarded apply keeps the foreign server, got: {config}"
+    );
+
+    // The kept-foreign name stays reachable in state even though B's record
+    // overwrote the managed set.
+    let state = State::load().unwrap();
+    assert_eq!(
+        state.kept_foreign("claude-code"),
+        vec!["kibana_mcp".to_string()],
+        "guarded write must track what it kept"
+    );
+
+    // Step 2: the advertised follow-up — `apply --prune-foreign` — must
+    // still prune the kept entry, not report "up to date".
+    apply::run(&apply_args(true), Some(&proj_b)).unwrap();
+    let config = fs::read_to_string(home.join(".claude.json")).unwrap();
+    assert!(
+        !config.contains("kibana_mcp"),
+        "--prune-foreign must prune the previously-kept server, got: {config}"
+    );
+    assert!(config.contains("beta"), "B's own server intact: {config}");
+
+    // And the bookkeeping clears once they're gone.
+    let state = State::load().unwrap();
+    assert!(
+        state.kept_foreign("claude-code").is_empty(),
+        "kept-foreign list cleared after the prune"
+    );
+}
+
+/// Re-running the guarded apply (no --prune-foreign) must keep reporting and
+/// tracking the kept entries — the choice stays open run over run.
+#[test]
+fn guarded_apply_reruns_keep_tracking_kept_foreign() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup(&home);
+    seed_state_from_manifest_a(tmp.path(), &home);
+    let proj_b = write_manifest_b(tmp.path());
+
+    apply::run(&apply_args(false), Some(&proj_b)).unwrap();
+    // Second run: state now names B as source, so the cross-manifest guard
+    // itself no longer fires — the kept list must carry the name forward.
+    apply::run(&apply_args(false), Some(&proj_b)).unwrap();
+
+    let config = fs::read_to_string(home.join(".claude.json")).unwrap();
+    assert!(config.contains("kibana_mcp"), "still kept: {config}");
+    let state = State::load().unwrap();
+    assert_eq!(
+        state.kept_foreign("claude-code"),
+        vec!["kibana_mcp".to_string()],
+        "kept-foreign tracking must survive re-runs"
+    );
+}
+
 /// The recording manifest itself must keep pruning its own removals — the
 /// guard only fires across manifests.
 #[test]

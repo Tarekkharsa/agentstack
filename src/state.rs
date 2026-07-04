@@ -51,6 +51,14 @@ pub struct TargetState {
     /// their next apply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_manifest: Option<String>,
+    /// Foreign-manifest server names a guarded write *kept* on disk (see
+    /// [`State::foreign_prunes`]). They are present in the live config but no
+    /// longer in `managed_servers` once the writing manifest records its own
+    /// set — this list keeps them reachable so `apply --prune-foreign` still
+    /// prunes them later and `doctor`/`diff` keep reporting the adopt-or-prune
+    /// choice. Empty (default) in pre-schema state files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_foreign: Vec<String>,
 }
 
 /// Identity of the manifest at `dir` for the cross-manifest prune guard: the
@@ -128,6 +136,24 @@ impl State {
         entry.managed_servers = managed_servers;
         entry.last_hash = hash(content);
         entry.source_manifest = Some(source.to_string());
+    }
+
+    /// Foreign-manifest server names a guarded write left on disk under
+    /// `key` — in the live config but not in `managed_servers` (see
+    /// [`TargetState::kept_foreign`]).
+    pub fn kept_foreign(&self, key: &str) -> Vec<String> {
+        self.targets
+            .get(key)
+            .map(|t| t.kept_foreign.clone())
+            .unwrap_or_default()
+    }
+
+    /// Record the kept-foreign set for `key`. Guarded writes pass the names
+    /// they kept; a `--prune-foreign` write passes an empty set once the
+    /// entries are actually gone.
+    pub fn record_kept_foreign(&mut self, key: &str, kept: Vec<String>) {
+        let entry = self.targets.entry(key.to_string()).or_default();
+        entry.kept_foreign = kept;
     }
 
     /// The manifest that last recorded `key`'s managed servers (None for
@@ -246,8 +272,8 @@ mod tests {
         assert_eq!(s.manifest_source("codex"), Some("/a/agentstack.toml"));
     }
 
-    /// Pre-schema state files (no `source_manifest`) must still load — the
-    /// field is additive.
+    /// Pre-schema state files (no `source_manifest`, no `kept_foreign`) must
+    /// still load — the fields are additive.
     #[test]
     fn old_state_without_source_manifest_loads() {
         let s: State = serde_json::from_str(
@@ -256,6 +282,28 @@ mod tests {
         .unwrap();
         assert_eq!(s.managed_servers("codex"), vec!["kibana".to_string()]);
         assert_eq!(s.manifest_source("codex"), None);
+        assert!(s.kept_foreign("codex").is_empty());
+    }
+
+    /// `record()` re-records the managed set without clobbering the
+    /// kept-foreign bookkeeping — the exact overwrite that made the
+    /// `--prune-foreign` follow-up a one-shot before the field existed.
+    #[test]
+    fn kept_foreign_survives_record_and_clears_explicitly() {
+        let mut s = State::default();
+        s.record_kept_foreign("codex", vec!["kibana".into()]);
+        s.record(
+            "codex",
+            vec!["beta".into()],
+            "content",
+            "/b/agentstack.toml",
+        );
+        assert_eq!(s.kept_foreign("codex"), vec!["kibana".to_string()]);
+        // Empty lists serialize away (state.json stays tidy) …
+        s.record_kept_foreign("codex", Vec::new());
+        assert!(s.kept_foreign("codex").is_empty());
+        let text = serde_json::to_string(&s).unwrap();
+        assert!(!text.contains("kept_foreign"));
     }
 
     #[test]

@@ -141,6 +141,74 @@ fn foreign_pending_prune_hints_prune_foreign() {
     );
 }
 
+/// After a guarded `apply --write` keeps a foreign server, state re-records
+/// the key with only the writing manifest's set — doctor used to go silent
+/// (the entry was in nobody's managed list any more). The kept-foreign
+/// bookkeeping must keep the adopt-or-prune choice on the report.
+#[test]
+fn kept_foreign_stays_reported_after_guarded_apply() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup(&home);
+
+    let cfg = home.join(".claude.json");
+    let content = "{\n  \"mcpServers\": {\n    \"kibana_mcp\": { \"type\": \"http\", \"url\": \"https://kibana/mcp\" }\n  }\n}\n";
+    fs::write(&cfg, content).unwrap();
+
+    // Recorded by manifest A…
+    let proj_a = tmp.path().join("proj-a");
+    fs::create_dir_all(&proj_a).unwrap();
+    fs::write(proj_a.join("agentstack.toml"), "version = 1\n").unwrap();
+    let mut state = State::default();
+    state.record(
+        "claude-code",
+        vec!["kibana_mcp".into()],
+        content,
+        &manifest_identity(&proj_a),
+    );
+    state.save().unwrap();
+
+    // …then manifest B runs a guarded `apply --write`: kibana_mcp is kept on
+    // disk, B becomes the recorded source, and the kept name moves to the
+    // kept-foreign list.
+    let proj_b = tmp.path().join("proj-b");
+    fs::create_dir_all(&proj_b).unwrap();
+    fs::write(
+        proj_b.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.beta]\ntype = \"http\"\nurl = \"https://beta/mcp\"\n",
+    )
+    .unwrap();
+    agentstack::commands::apply::run(
+        &agentstack::cli::ApplyArgs {
+            targets: vec![],
+            profile: None,
+            dry_run: false,
+            write: true,
+            scope: None,
+            allow_unresolved: false,
+            prune_foreign: false,
+            no_gitignore: true,
+        },
+        Some(&proj_b),
+    )
+    .unwrap();
+
+    // Doctor (from B) must still report the kept entry with both paths.
+    let report = doctor::collect(Some(&proj_b)).unwrap();
+    let drift = section_msgs(&report, "Drift").join("\n");
+    assert!(
+        drift.contains("kept kibana_mcp") && drift.contains("applied by another manifest"),
+        "kept-foreign entry must stay on the report, got: {drift}"
+    );
+    assert!(
+        drift.contains("keep them: agentstack adopt")
+            && drift.contains("prune them: agentstack apply --prune-foreign"),
+        "adopt-or-prune choice must stay offered, got: {drift}"
+    );
+}
+
 /// A config edited by hand since our last write gets a next step, not just a
 /// bare observation.
 #[test]

@@ -103,14 +103,37 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
         // --- servers ---
         let mut previously = state.managed_servers(&key);
+        // Names an earlier guarded write kept on disk (state bookkeeping —
+        // they left `managed_servers` when this manifest recorded its own
+        // set). Ones the profile now selects become managed again below.
+        let kept_before: Vec<String> = state
+            .kept_foreign(&key)
+            .into_iter()
+            .filter(|n| !server_map.contains_key(n))
+            .collect();
         // Guard cross-manifest global prunes: entries another manifest applied
         // are kept (and reported below), not deleted, unless --prune-foreign.
         let foreign = if args.prune_foreign {
+            // Fold previously-kept names into the prune set — the escape
+            // hatch must still reach them after a guarded write re-recorded
+            // this key with only our own managed set.
+            for n in &kept_before {
+                if !previously.contains(n) {
+                    previously.push(n.clone());
+                }
+            }
             Vec::new()
         } else {
-            state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
+            let mut f = state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
                 server_map.contains_key(n)
-            })
+            });
+            // Keep surfacing (and tracking) what earlier runs kept.
+            for n in &kept_before {
+                if !f.contains(n) {
+                    f.push(n.clone());
+                }
+            }
+            f
         };
         match crate::render::plan_target_with_servers(
             desc,
@@ -145,6 +168,9 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
                     } else if args.write {
                         plan.write()?;
                         state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                        // Track what this guarded write kept on disk (empty
+                        // after a --prune-foreign actually pruned them).
+                        state.record_kept_foreign(&key, foreign.clone());
                         crate::usage::bump(&plan.managed);
                         wrote += 1;
                         if plan.remove_if_empty_shell(desc) {
@@ -165,6 +191,7 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
                     // .gitignore block depend on it.
                     if args.write && !blocked {
                         state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                        state.record_kept_foreign(&key, foreign.clone());
                     }
                     println!("  {} servers up to date", "✓".green());
                 }

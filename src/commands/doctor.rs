@@ -296,6 +296,20 @@ fn run_checks(
         } else {
             Vec::new()
         };
+        // Names an earlier guarded write kept on disk (state bookkeeping —
+        // they left `managed_servers` when the writing manifest recorded its
+        // own set, so neither `foreign_key` nor the plan sees them). Keep
+        // reporting the adopt-or-prune choice until one of them happens.
+        let mut kept_report: Vec<String> = state
+            .kept_foreign(&key)
+            .into_iter()
+            .filter(|n| !manifest.servers.contains_key(n))
+            .collect();
+        for k in &kept {
+            if !kept_report.contains(k) {
+                kept_report.push(k.clone());
+            }
+        }
         let Some(plan) = plan_target(
             manifest,
             desc,
@@ -309,7 +323,7 @@ fn run_checks(
             continue;
         };
 
-        if !kept.is_empty() {
+        if !kept_report.is_empty() {
             any_drift = true;
             report.line(
                 Level::Warn,
@@ -317,7 +331,7 @@ fn run_checks(
                     "{:<14} kept {} — applied by another manifest ↳ keep them: \
                      agentstack adopt · prune them: agentstack apply --prune-foreign",
                     desc.display,
-                    kept.join(", ")
+                    kept_report.join(", ")
                 ),
             );
         }
@@ -355,6 +369,9 @@ fn run_checks(
             } else if args.fix {
                 plan.write()?;
                 state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                // A --fix write is a guarded write too: keep the kept-foreign
+                // names reachable for a later `apply --prune-foreign`.
+                state.record_kept_foreign(&key, kept_report.clone());
                 fixed += 1;
                 report.line(
                     Level::Ok,
