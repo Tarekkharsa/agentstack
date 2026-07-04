@@ -62,7 +62,9 @@ The complete, implemented-and-tested feature inventory. The
   (override with `--allow-flagged`); injection heuristics warn. `agentstack
   audit` (`--json`) re-scans everything materialized — skills and instruction
   files — and `doctor --ci` fails on high-severity findings, so a poisoned
-  skill can't slide into CI unnoticed.
+  skill can't slide into CI unnoticed. Everyday `doctor` skips this scan (it
+  reads every skill body); opt in with `doctor --deep` — `--ci` always
+  includes it, and the dashboard's Doctor pane runs it too.
 - **`doctor --live`** — real MCP `initialize` handshake over HTTP; reports
   server name + tool count, or classifies the error (auth / http / connect).
 
@@ -340,7 +342,7 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 `upgrade`, `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
 `lib add|add-server|list|remove|remove-server|migrate`, `restore`,
-`doctor` (`--ci`, `--live`, `--fix`), `audit` (`--json`, `--calls`,
+`doctor` (`--ci`, `--live`, `--fix`, `--deep`), `audit` (`--json`, `--calls`,
 `--since`), `optimize` (`--json`, `--write`, `--since`), `search`,
 `stats` (`--live`),
 `secret set|get|rm|list`, `export`/`import`, `adapters`, `pack init`, `plugins`,
@@ -353,7 +355,7 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 package manager (`install`/`update`/`remove` + lockfile) · central capability
 library (`lib` skills + servers referenced by name, digest-pinned in the lock,
 drift in `doctor`/`explain`, `consolidate` into `lib/skills`) · secrets (keychain +
-varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`) ·
+varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`/`--deep`) ·
 content scanning on install + `audit` · official MCP Registry provider +
 `search`/`add from` · `[policy]` trust gate · native per-CLI settings
 (`[settings.*]` → settings.json) · managed plugin recipes (`[plugins.*]` →

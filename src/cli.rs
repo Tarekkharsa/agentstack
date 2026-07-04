@@ -818,6 +818,11 @@ pub struct DoctorArgs {
     /// Repair safe issues (re-apply drifted target configs).
     #[arg(long)]
     pub fix: bool,
+
+    /// Run the supply-chain content scan (reads every skill body — slow on
+    /// large libraries). Always on with --ci.
+    #[arg(long)]
+    pub deep: bool,
 }
 
 #[derive(Args, Debug)]

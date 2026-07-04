@@ -134,7 +134,8 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
 }
 
 /// The same checks `doctor` runs, with fix/live off and nothing printed —
-/// the dashboard's Doctor pane. Returns the structured report as JSON.
+/// the dashboard's Doctor pane. Deep stays on: the pane is an explicit
+/// "run the check-up" surface, so it keeps the content scan's findings.
 pub fn collect(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
     let mut report = Report::quiet();
     run_checks(
@@ -142,6 +143,7 @@ pub fn collect(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
             ci: false,
             live: false,
             fix: false,
+            deep: true,
         },
         manifest_dir,
         &mut report,
@@ -399,20 +401,29 @@ fn run_checks(
 
     // Supply-chain content scan (same detectors as `agentstack audit`): hidden
     // Unicode is an error so `--ci` gates it; injection heuristics only warn.
+    // It reads every skill body, so the everyday run skips it — `--deep` opts
+    // in and `--ci` (the trust gate) always includes it.
     report.section("Content scan");
-    let mut flagged = 0usize;
-    for unit in crate::commands::audit::collect(manifest, &ctx.dir, &store) {
-        for f in &unit.findings {
-            flagged += 1;
-            let level = match f.severity {
-                crate::scan::Severity::High => Level::Error,
-                crate::scan::Severity::Warn => Level::Warn,
-            };
-            report.line(level, format!("{:<20} {}", unit.name, f.describe()));
+    if args.ci || args.deep {
+        let mut flagged = 0usize;
+        for unit in crate::commands::audit::collect(manifest, &ctx.dir, &store) {
+            for f in &unit.findings {
+                flagged += 1;
+                let level = match f.severity {
+                    crate::scan::Severity::High => Level::Error,
+                    crate::scan::Severity::Warn => Level::Warn,
+                };
+                report.line(level, format!("{:<20} {}", unit.name, f.describe()));
+            }
         }
-    }
-    if flagged == 0 {
-        report.line(Level::Ok, "no hidden-unicode or injection findings");
+        if flagged == 0 {
+            report.line(Level::Ok, "no hidden-unicode or injection findings");
+        }
+    } else {
+        report.line(
+            Level::Ok,
+            "skipped (reads every skill body) ↳ agentstack doctor --deep — always on in --ci",
+        );
     }
 
     // Reproducibility: profile skill refs resolve to the same content their
@@ -807,4 +818,54 @@ fn check_quirks(manifest: &Manifest) -> Vec<String> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_fs::prelude::*;
+
+    /// The one line under "Content scan" for a run with the given flags.
+    fn scan_line(deep: bool, ci: bool, proj: &Path) -> String {
+        let mut report = Report::quiet();
+        run_checks(
+            &DoctorArgs {
+                ci,
+                live: false,
+                fix: false,
+                deep,
+            },
+            Some(proj),
+            &mut report,
+        )
+        .unwrap();
+        let section = report
+            .sections
+            .iter()
+            .find(|s| s.title == "Content scan")
+            .expect("content scan section present");
+        section.lines[0].1.clone()
+    }
+
+    #[test]
+    fn content_scan_runs_only_with_deep_or_ci() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("AGENTSTACK_HOME", home.path().join(".agentstack"));
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child("agentstack.toml")
+            .write_str("version = 1\n[targets]\ndefault = [\"claude-code\"]\n")
+            .unwrap();
+
+        // Fast default skips; --deep and --ci both run the real scan.
+        assert!(scan_line(false, false, proj.path()).contains("skipped"));
+        assert!(!scan_line(true, false, proj.path()).contains("skipped"));
+        assert!(!scan_line(false, true, proj.path()).contains("skipped"));
+
+        std::env::remove_var("AGENTSTACK_HOME");
+        std::env::remove_var("HOME");
+    }
 }

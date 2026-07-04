@@ -25,6 +25,7 @@ fn ci_args() -> DoctorArgs {
         ci: true,
         live: false,
         fix: false,
+        deep: false,
     }
 }
 
@@ -93,6 +94,7 @@ fn non_ci_never_fails_on_validation_error() {
         ci: false,
         live: false,
         fix: false,
+        deep: false,
     };
     doctor::run(&dargs, Some(&proj)).expect("non-CI doctor must not fail on a validation error");
 }
