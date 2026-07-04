@@ -274,6 +274,13 @@ Trust is pinned to the manifest's content digest (including
 to control-plane-only until re-trusted. Explicit `--manifest-dir` skips the gate
 (naming a directory is the consent), matching plain `agentstack mcp`.
 
+agentstack's own manual — the bundled `using-agentstack` skill — is always
+loadable through the control plane: it appears in `agentstack_list_loadable`
+even with no project manifest, in untrusted (control-plane-only) sessions, and
+through session fences, served from the copy embedded in the binary (a
+project's own `using-agentstack` skill overrides it). An agent that can reach
+the gateway can always learn how to drive it.
+
 Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
 skills-over-MCP (`agentstack_list_loadable`/`agentstack_load`) are fully
 zero-copy. Native skill folders and instruction files (`CLAUDE.md`/`AGENTS.md`)
