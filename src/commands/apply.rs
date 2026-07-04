@@ -338,13 +338,26 @@ fn render(
                     println!("  {} instruction fragment '{m}' source missing", "✗".red());
                     error_count += 1;
                 }
+                // A missing source already dropped its content from the
+                // compile — writing now would delete previously compiled
+                // fragments (all sources missing empties the whole region).
+                // Block the write, mirroring the unresolved-secret path.
+                let iblocked = !ip.missing.is_empty();
+                if iblocked {
+                    write_blockers += 1;
+                }
                 if ip.changed() {
                     changed_count += 1;
                     println!("  {} instructions → {}", "·".dimmed(), ip.path.display());
                     if !quiet {
                         print!("{}", indent(&ip.diff()));
                     }
-                    if will_write {
+                    if will_write && iblocked {
+                        println!(
+                            "  {} instructions not written — missing fragment source(s)",
+                            "✗".red()
+                        );
+                    } else if will_write {
                         backups.push(crate::history::capture(
                             &ip.path,
                             format!("{} · instructions", desc.display),

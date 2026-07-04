@@ -93,6 +93,42 @@ fn apply_write_compiles_instructions_into_the_global_file() {
 }
 
 #[test]
+fn apply_write_blocks_on_a_missing_fragment_source() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("instructions")).unwrap();
+    fs::write(proj.join("instructions/house.md"), "House rule one.\n").unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [instructions.house]\npath = \"./instructions/house.md\"\n",
+    )
+    .unwrap();
+    apply::run(&args(true), Some(&proj)).unwrap();
+    let before = fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap();
+    assert!(before.contains("House rule one."));
+
+    // The fragment source disappears (deleted, bad checkout, typoed path).
+    fs::remove_file(proj.join("instructions/house.md")).unwrap();
+
+    // A missing source must BLOCK the write — a compile that silently dropped
+    // the fragment would delete the previously compiled region.
+    apply::run(&args(true), Some(&proj)).unwrap();
+    let after = fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap();
+    assert_eq!(
+        after, before,
+        "missing fragment source must not clobber the compiled region"
+    );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
+#[test]
 fn apply_without_instructions_leaves_a_foreign_region_alone() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
