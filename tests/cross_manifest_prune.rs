@@ -8,8 +8,8 @@
 use std::fs;
 use std::sync::Mutex;
 
-use agentstack::cli::{ApplyArgs, DiffArgs};
-use agentstack::commands::{apply, diff};
+use agentstack::cli::{ApplyArgs, DiffArgs, UseArgs};
+use agentstack::commands::{apply, diff, use_profile};
 use agentstack::state::{manifest_identity, State};
 
 // apply mutates the process-global HOME; serialize these tests.
@@ -201,6 +201,58 @@ fn guarded_apply_reruns_keep_tracking_kept_foreign() {
         vec!["kibana_mcp".to_string()],
         "kept-foreign tracking must survive re-runs"
     );
+}
+
+/// `use --prune-foreign` shares apply's guard — and must share the fix: the
+/// escape hatch keeps working after a guarded `use --write` re-recorded the
+/// key with only the profile's managed set.
+#[test]
+fn use_prune_foreign_still_works_after_guarded_use() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup(&home);
+    seed_state_from_manifest_a(tmp.path(), &home);
+
+    // Manifest B activates a profile that doesn't include A's server.
+    let proj_b = tmp.path().join("proj-b");
+    fs::create_dir_all(&proj_b).unwrap();
+    fs::write(
+        proj_b.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.beta]\ntype = \"http\"\nurl = \"https://beta/mcp\"\n\
+         [profiles.p]\nservers = [\"beta\"]\n",
+    )
+    .unwrap();
+    let use_args = |prune_foreign: bool| UseArgs {
+        profile: "p".into(),
+        targets: vec![],
+        scope: None,
+        write: true,
+        allow_unresolved: false,
+        prune_foreign,
+        no_gitignore: true,
+    };
+
+    use_profile::run(&use_args(false), Some(&proj_b)).unwrap();
+    let config = fs::read_to_string(home.join(".claude.json")).unwrap();
+    assert!(config.contains("kibana_mcp"), "guarded use keeps: {config}");
+    assert_eq!(
+        State::load().unwrap().kept_foreign("claude-code"),
+        vec!["kibana_mcp".to_string()]
+    );
+
+    use_profile::run(&use_args(true), Some(&proj_b)).unwrap();
+    let config = fs::read_to_string(home.join(".claude.json")).unwrap();
+    assert!(
+        !config.contains("kibana_mcp"),
+        "use --prune-foreign must still prune the kept server, got: {config}"
+    );
+    assert!(config.contains("beta"), "profile server intact: {config}");
+    assert!(State::load()
+        .unwrap()
+        .kept_foreign("claude-code")
+        .is_empty());
 }
 
 fn diff_args() -> DiffArgs {
