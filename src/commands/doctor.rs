@@ -302,7 +302,11 @@ fn run_checks(
                     any_drift = true;
                     report.line(
                         Level::Warn,
-                        format!("{:<14} edited on disk since last apply", desc.display),
+                        format!(
+                            "{:<14} edited on disk since last apply ↳ review: agentstack diff · \
+                             keep the hand-edit: agentstack adopt",
+                            desc.display
+                        ),
                     );
                 }
             }
@@ -333,14 +337,29 @@ fn run_checks(
                         plan.managed.len()
                     ),
                 );
-            } else {
+            } else if plan.removed.is_empty() {
                 any_drift = true;
                 report.line(
                     Level::Warn,
                     format!(
                         "{:<14} {} change(s) pending ↳ agentstack apply --write",
                         desc.display,
-                        plan.managed.len().max(plan.removed.len())
+                        plan.managed.len()
+                    ),
+                );
+            } else {
+                // A pending prune deletes real entries from a live config —
+                // name the victims and offer the keep path, never just the
+                // one-way "apply --write" hint (which would silently remove
+                // them, e.g. hand-added or foreign-manifest servers).
+                any_drift = true;
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<14} would REMOVE {} ↳ keep them: agentstack adopt · \
+                         prune them: agentstack apply --write",
+                        desc.display,
+                        plan.removed.join(", ")
                     ),
                 );
             }
