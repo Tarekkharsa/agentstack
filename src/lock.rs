@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub const LOCK_FILE: &str = "agentstack.lock";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Lock {
     pub version: u32,
     #[serde(default, rename = "skill")]

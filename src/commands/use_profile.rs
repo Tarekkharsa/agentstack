@@ -18,10 +18,27 @@ use crate::resolve::{ResolveMode, ResolvedServer, ResolvedSkill, ServerOrigin, S
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 
-pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    let ctx = super::load(manifest_dir)?;
+/// Everything activation needs, resolved once: the profile's skills and
+/// servers through the library-aware resolvers. Produced by [`prepare`],
+/// consumed by [`activate`] — callers that already planned against the same
+/// data (session start snapshots) reuse it instead of re-resolving.
+pub struct Prepared {
+    pub resolved_skills: Vec<ResolvedSkill>,
+    pub resolved_servers: Vec<ResolvedServer>,
+    /// `name -> Server` view of `resolved_servers` — the shape rendering wants.
+    pub server_map: IndexMap<String, crate::manifest::Server>,
+}
+
+/// Resolve a profile's skills + servers (inline-first, then central library),
+/// failing clearly before anything is written. A dry run resolves offline
+/// (`NoFetch`) — previewing never touches the network; a real `--write`
+/// fetches git-backed sources as needed.
+pub fn prepare(
+    ctx: &super::Context,
+    libctx: &super::LibraryCtx,
+    args: &UseArgs,
+) -> Result<Prepared> {
     let manifest = &ctx.loaded.manifest;
-    let scope = args.scope.unwrap_or(Scope::Global);
 
     // Early guard: the profile must exist (its servers are resolved below).
     manifest
@@ -29,45 +46,70 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         .get(&args.profile)
         .with_context(|| format!("no profile '{}' in manifest", args.profile))?;
 
-    let selection = Selection::Profile(args.profile.clone());
-    // Resolve active skills up front (library-aware) so an unresolved or broken
-    // skill ref fails clearly before we touch any target's config or skills dir.
-    // A dry run resolves offline (`NoFetch`) — previewing never touches the
-    // network; a real `--write` fetches git-backed sources as needed.
     let mode = if args.write {
         ResolveMode::Fetch
     } else {
         ResolveMode::NoFetch
     };
-    let library = Library::load_default()?;
-    let lib_home = crate::util::paths::lib_home();
-    let store = crate::store::Store::default_store();
     let resolved_skills = resolve_active_skills(
         manifest,
         &args.profile,
         &ctx.dir,
-        &library,
-        &lib_home,
-        &store,
+        &libctx.library,
+        &libctx.lib_home,
+        &libctx.store,
         mode,
     )?;
+
+    // `${REF}`s stay intact; they are resolved per-target at render time, not
+    // here. The resolved list is kept for lock recording; the `name -> Server`
+    // map drives rendering.
+    let selection = Selection::Profile(args.profile.clone());
+    let resolved_servers = crate::render::resolve_active_servers(
+        manifest,
+        &libctx.library,
+        &libctx.lib_home,
+        &selection,
+    )?;
+    let server_map: IndexMap<String, crate::manifest::Server> = resolved_servers
+        .iter()
+        .map(|r| (r.name.clone(), r.server.clone()))
+        .collect();
+
+    Ok(Prepared {
+        resolved_skills,
+        resolved_servers,
+        server_map,
+    })
+}
+
+pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let ctx = super::load(manifest_dir)?;
+    let libctx = ctx.library_ctx();
+    let prepared = prepare(&ctx, &libctx, args)?;
+    activate(&ctx, &libctx, args, &prepared)
+}
+
+/// Render the prepared profile into every target (servers + skills), record
+/// state, and pin the lockfile. The write half of `run` — takes pre-loaded
+/// context and pre-resolved sets so callers like session start don't load and
+/// resolve everything twice.
+pub fn activate(
+    ctx: &super::Context,
+    libctx: &super::LibraryCtx,
+    args: &UseArgs,
+    prepared: &Prepared,
+) -> Result<()> {
+    let manifest = &ctx.loaded.manifest;
+    let scope = args.scope.unwrap_or(Scope::Global);
+    let resolved_skills = &prepared.resolved_skills;
+    let resolved_servers = &prepared.resolved_servers;
+    let server_map = &prepared.server_map;
     // (name, source dir) pairs drive skill materialization; the richer
     // `ResolvedSkill` list is kept for lockfile recording below.
     let active_skills: Vec<(String, PathBuf)> = resolved_skills
         .iter()
         .map(|r| (r.name.clone(), r.path.clone()))
-        .collect();
-
-    // Resolve the profile's server refs (inline-first, then central library)
-    // once for all targets. Fails clearly before any target write if a ref
-    // resolves nowhere. `${REF}`s stay intact; they are resolved per-target at
-    // render time, not here. The resolved list is kept for lock recording; the
-    // `name -> Server` map drives rendering.
-    let resolved_servers =
-        crate::render::resolve_active_servers(manifest, &library, &lib_home, &selection)?;
-    let server_map: IndexMap<String, crate::manifest::Server> = resolved_servers
-        .iter()
-        .map(|r| (r.name.clone(), r.server.clone()))
         .collect();
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
@@ -105,7 +147,7 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         match crate::render::plan_target_with_servers(
             desc,
             &ctx.resolver,
-            &server_map,
+            server_map,
             &previously,
             scope,
             &ctx.dir,
@@ -233,10 +275,10 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         // resolved secret value.
         record_lock(
             &ctx.dir,
-            &resolved_skills,
-            &resolved_servers,
+            resolved_skills,
+            resolved_servers,
             manifest,
-            &library,
+            &libctx.library,
         )?;
         if blocked_targets.is_empty() {
             println!(
@@ -331,6 +373,7 @@ fn record_lock(
     library: &Library,
 ) -> Result<()> {
     let mut lock = Lock::load(dir)?;
+    let before = lock.clone();
     for r in skills {
         lock.upsert(locked_from_resolved(r, manifest, library));
     }
@@ -344,6 +387,11 @@ fn record_lock(
             .to_string(),
             checksum: r.checksum.clone(),
         });
+    }
+    // Re-activating an unchanged profile is the common case — don't churn the
+    // lockfile's mtime (and anything watching it) for a byte-identical pin.
+    if lock == before {
+        return Ok(());
     }
     lock.save(dir)
 }
@@ -680,6 +728,67 @@ mod tests {
         let lock = Lock::load(proj.path()).unwrap();
         assert!(lock.get("other").is_some(), "unrelated entry preserved");
         assert!(lock.get("sql-review").is_some(), "new entry added");
+    }
+
+    #[test]
+    fn record_lock_skips_the_write_when_nothing_changed() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = store_in(&proj);
+        let library = library_with_skill(&lib_home, "sql-review", "# lib\n");
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [profiles.p]
+            skills = ["sql-review"]
+            "#,
+        )
+        .unwrap();
+        let resolved = resolve_active_skills(
+            &manifest,
+            "p",
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            ResolveMode::Fetch,
+        )
+        .unwrap();
+        record_lock(proj.path(), &resolved, &[], &manifest, &library).unwrap();
+
+        // Plant a marker a rewrite would erase (parsing drops comments): if the
+        // pins are byte-identical, record_lock must leave the file alone.
+        let path = Lock::path(proj.path());
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str("# marker\n");
+        std::fs::write(&path, &text).unwrap();
+
+        record_lock(proj.path(), &resolved, &[], &manifest, &library).unwrap();
+        assert!(
+            std::fs::read_to_string(&path).unwrap().contains("# marker"),
+            "unchanged pins must not rewrite the lockfile"
+        );
+
+        // A real change (new content digest) does rewrite.
+        lib_home
+            .child("skills/sql-review/SKILL.md")
+            .write_str("# changed\n")
+            .unwrap();
+        let resolved = resolve_active_skills(
+            &manifest,
+            "p",
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            ResolveMode::Fetch,
+        )
+        .unwrap();
+        record_lock(proj.path(), &resolved, &[], &manifest, &library).unwrap();
+        assert!(
+            !std::fs::read_to_string(&path).unwrap().contains("# marker"),
+            "changed pins rewrite the lockfile"
+        );
     }
 
     #[test]
