@@ -83,7 +83,10 @@ The complete, implemented-and-tested feature inventory. The
   the library or lock), and `doctor`/`explain` flag drift and show each item's
   origin + provenance. Profile resolution is offline by default (dry-run `use`,
   `doctor`, `explain` never fetch); `use --write` fetches git-backed skills when
-  activation needs them. Manage it with `lib add` / `add-server` / `list` /
+  activation needs them. `agentstack lock [--profile <name>]` pins every
+  profile's name refs in `agentstack.lock` **without** rendering configs or
+  materializing skills — the lock-only path for clean-at-rest repos that keep
+  no generated files. Manage it with `lib add` / `add-server` / `list` /
   `remove` / `remove-server`;
   `consolidate` sweeps scattered skills from every CLI into the library and
   symlinks the originals back; `lib migrate` copies a legacy
@@ -240,7 +243,8 @@ With `--auto-project`, one global registration serves **every** repo: at session
 start the gateway discovers the active project — MCP client roots → cwd walk-up →
 `$AGENTSTACK_MANIFEST_DIR` — and exposes that repo's stack. Move to another repo,
 open a new session, get that repo's stack. No `.mcp.json`, no rendered files; a
-repo needs only its `.agentstack/agentstack.toml` (+ lock).
+repo needs only its `.agentstack/agentstack.toml` (+ lock — pin library refs
+with `agentstack lock`, which never renders or materializes anything).
 
 Auto-discovery is **trust-gated**, direnv-style. A manifest can declare stdio
 servers (arbitrary local commands) and reference secrets, so a repo you just
@@ -324,7 +328,8 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 
 ## All commands
 
-`init`, `add`, `install` (`--locked`, `--allow-flagged`), `update`, `remove`,
+`init`, `add`, `install` (`--locked`, `--allow-flagged`), `update`,
+`lock` (`--profile`), `remove`,
 `upgrade`, `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
 `lib add|add-server|list|remove|remove-server|migrate`, `restore`,

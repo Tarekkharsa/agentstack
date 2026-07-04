@@ -24,7 +24,7 @@ Start here:
 The list above is the everyday surface. Everything else is grouped below —
 run `agentstack <command> --help` for any of them:
 
-  Capabilities & library   remove · install · update · upgrade · lib · consolidate · adopt
+  Capabilities & library   remove · install · update · lock · upgrade · lib · consolidate · adopt
   Activate & run           use · session · run · runs · kill · hook · instructions
   Zero-files bridge        connect · trust · disconnect · mcp · codemode
   Inspect & tune           diff · explain · audit · optimize · stats · restore · secret
@@ -93,6 +93,13 @@ pub enum Command {
     /// Re-resolve git skills to their latest and rewrite the lockfile.
     #[command(hide = true)]
     Update(UpdateArgs),
+
+    /// Resolve each profile's skill + server refs (library-aware) and pin them
+    /// in `agentstack.lock` — no configs rendered, no skills materialized. The
+    /// lock-only counterpart of `use <profile> --write`, for clean-at-rest
+    /// repos that keep no generated files.
+    #[command(hide = true)]
+    Lock(LockArgs),
 
     /// Re-resolve an installed vendor pack from its recorded source and apply
     /// any changes (server, skills, house rules), re-pinning the lockfile.
@@ -374,6 +381,13 @@ pub struct InstallArgs {
 pub struct UpdateArgs {
     /// Only update this skill (default: all git skills).
     pub name: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct LockArgs {
+    /// Only pin this profile's refs (default: every profile in the manifest).
+    #[arg(long, value_name = "NAME")]
+    pub profile: Option<String>,
 }
 
 #[derive(Args, Debug)]

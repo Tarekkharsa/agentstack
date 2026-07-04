@@ -23,6 +23,7 @@ fn run() -> Result<()> {
         Command::Add(args) => commands::add::run(args, dir),
         Command::Install(args) => commands::install::run(args, dir),
         Command::Update(args) => commands::install::run_update(args, dir),
+        Command::Lock(args) => commands::lock::run(args, dir),
         Command::Remove(args) => commands::remove::run(args, dir),
         Command::Upgrade(args) => commands::upgrade::run(args, dir),
         Command::Bootstrap(args) => commands::bootstrap::run(args, dir),

@@ -282,7 +282,10 @@ fn strategy_word(s: crate::adapter::descriptor::SkillStrategy) -> &'static str {
 ///
 /// Returns an error (before any materialization) if a name resolves nowhere, its
 /// source is broken, or it resolves to a path that is not present on disk.
-fn resolve_active_skills(
+///
+/// Shared with `agentstack lock`, which pins the same resolution without
+/// materializing anything.
+pub(crate) fn resolve_active_skills(
     manifest: &Manifest,
     profile_name: &str,
     dir: &Path,
@@ -323,7 +326,9 @@ fn resolve_active_skills(
 /// refs resolve to the same content on another machine. Servers lock the
 /// **definition digest** only — never a resolved secret value. Existing lock
 /// entries for other names are preserved.
-fn record_lock(
+///
+/// Shared with `agentstack lock` (the lock-only path).
+pub(crate) fn record_lock(
     dir: &Path,
     skills: &[ResolvedSkill],
     servers: &[ResolvedServer],
