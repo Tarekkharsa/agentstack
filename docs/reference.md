@@ -75,8 +75,9 @@ The complete, implemented-and-tested feature inventory. The
   `agentstack.lock`; `install --locked` is reproducible (CI-safe); `update`
   re-resolves git skills; `remove` drops a capability from manifest + lock.
   Repeat digests are served from a stat-fingerprint cache
-  (`~/.agentstack/digest-cache.json`: file count + size + mtime + path hash per
-  dir) — any mismatch falls back to the full read+hash, so `doctor`/`use` over
+  (`~/.agentstack/digest-cache.json`: file count + total size + max mtime +
+  a hash of the sorted relative paths, each with its file's size and mtime) —
+  any mismatch falls back to the full read+hash, so `doctor`/`use` over
   a large library cost stat calls, not a re-hash of every byte. Delete the file
   to force full re-hashing.
 - **Central capability library (`agentstack lib`)** — one managed home

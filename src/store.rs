@@ -263,7 +263,8 @@ fn sanitize(url: &str) -> String {
 // skill, painful when doctor/use/install digest a multi-hundred-MB library on
 // every run. The cache maps a canonical dir to the digest it had under a stat
 // fingerprint (file count + total size + max mtime + a hash of the sorted
-// relative paths). Any mismatch falls back to the full read+hash; a matching
+// relative paths, each with its file's size and mtime). Any mismatch falls
+// back to the full read+hash; a matching
 // fingerprint turns a multi-second pass into stat calls.
 
 /// Where digest cache entries live: `~/.agentstack/digest-cache.json`.
@@ -281,8 +282,10 @@ struct DirFingerprint {
     files: u64,
     bytes: u64,
     max_mtime_ns: u64,
-    /// SHA-256 over the sorted relative paths — catches renames, which leave
-    /// count/size/mtime untouched but change the content digest.
+    /// SHA-256 over the sorted relative paths, each folded with its file's
+    /// (size, mtime) — catches renames *and* per-file stat changes the
+    /// directory aggregates miss (e.g. two files swapping sizes, or an
+    /// mtime-preserving replacement whose mtime stays below the max).
     paths_sha: String,
 }
 
@@ -324,16 +327,23 @@ fn dir_fingerprint(root: &Path) -> Result<DirFingerprint> {
     let mut max_mtime_ns = 0u64;
     let mut hasher = Sha256::new();
     for rel in &files {
-        hasher.update(rel.to_string_lossy().as_bytes());
-        hasher.update([0]);
         let meta = fs::metadata(root.join(rel))
             .with_context(|| format!("stat {}", root.join(rel).display()))?;
+        let mtime_ns = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        // Per-file stats go into the hash, not just the aggregates: two files
+        // swapping sizes (or a replacement carrying an old mtime below the
+        // max) leave count/total/max unchanged but must break the fingerprint.
+        hasher.update(rel.to_string_lossy().as_bytes());
+        hasher.update([0]);
+        hasher.update(meta.len().to_le_bytes());
+        hasher.update(mtime_ns.to_le_bytes());
         bytes = bytes.saturating_add(meta.len());
-        if let Ok(mtime) = meta.modified() {
-            if let Ok(d) = mtime.duration_since(std::time::UNIX_EPOCH) {
-                max_mtime_ns = max_mtime_ns.max(d.as_nanos() as u64);
-            }
-        }
+        max_mtime_ns = max_mtime_ns.max(mtime_ns);
     }
     Ok(DirFingerprint {
         files: files.len() as u64,
@@ -557,6 +567,89 @@ mod tests {
             let after_rename = dir_digest_cached(tmp.path()).unwrap();
             assert_ne!(after_rename, "deadbeef");
             assert_eq!(after_rename, dir_digest(tmp.path()).unwrap());
+        });
+    }
+
+    /// Pin a file's mtime to an exact time so two directory states can be
+    /// made stat-identical in the aggregate.
+    fn set_mtime(path: &Path, t: std::time::SystemTime) {
+        fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+    }
+
+    #[test]
+    fn size_swap_with_identical_aggregates_changes_fingerprint() {
+        with_home(|home| {
+            // Two files swap sizes between states: file count, TOTAL bytes and
+            // max mtime are all identical — only the per-path stats differ. An
+            // aggregate-only fingerprint collides here and serves a stale
+            // digest.
+            let t = std::time::SystemTime::now() - std::time::Duration::from_secs(30);
+            let tmp = assert_fs::TempDir::new().unwrap();
+            tmp.child("a.txt").write_str("aa").unwrap();
+            tmp.child("b.txt").write_str("bbbb").unwrap();
+            set_mtime(&tmp.path().join("a.txt"), t);
+            set_mtime(&tmp.path().join("b.txt"), t);
+            let before = dir_fingerprint(tmp.path()).unwrap();
+            dir_digest_cached(tmp.path()).unwrap();
+
+            // Poison the cached sha to detect whether it gets served.
+            let cache_path = home.path().join("digest-cache.json");
+            let mut v: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&cache_path).unwrap()).unwrap();
+            v["entries"][cache_key(tmp.path())]["sha256"] = "deadbeef".into();
+            fs::write(&cache_path, serde_json::to_string(&v).unwrap()).unwrap();
+
+            tmp.child("a.txt").write_str("bbbb").unwrap();
+            tmp.child("b.txt").write_str("aa").unwrap();
+            set_mtime(&tmp.path().join("a.txt"), t);
+            set_mtime(&tmp.path().join("b.txt"), t);
+
+            let after = dir_fingerprint(tmp.path()).unwrap();
+            assert_eq!(before.files, after.files);
+            assert_eq!(before.bytes, after.bytes);
+            assert_eq!(before.max_mtime_ns, after.max_mtime_ns);
+            assert_ne!(before, after, "per-path sizes must break the fingerprint");
+
+            let digest = dir_digest_cached(tmp.path()).unwrap();
+            assert_ne!(
+                digest, "deadbeef",
+                "stale digest served for swapped content"
+            );
+            assert_eq!(digest, dir_digest(tmp.path()).unwrap());
+        });
+    }
+
+    #[test]
+    fn mtime_preserving_replacement_below_max_changes_fingerprint() {
+        with_home(|_home| {
+            // Simulate `cp -p` / `rsync -t` dropping in a same-size file that
+            // carries an old mtime still below the directory's max: aggregates
+            // are unchanged, but the per-path mtime moved.
+            let now = std::time::SystemTime::now();
+            let t_old = now - std::time::Duration::from_secs(60);
+            let t_max = now - std::time::Duration::from_secs(10);
+            let t_carried = now - std::time::Duration::from_secs(40);
+            let tmp = assert_fs::TempDir::new().unwrap();
+            tmp.child("a.txt").write_str("hello").unwrap();
+            tmp.child("b.txt").write_str("world").unwrap();
+            set_mtime(&tmp.path().join("a.txt"), t_old);
+            set_mtime(&tmp.path().join("b.txt"), t_max);
+            let before = dir_fingerprint(tmp.path()).unwrap();
+
+            // Same-size content replacement whose mtime stays under the max.
+            tmp.child("a.txt").write_str("HELLO").unwrap();
+            set_mtime(&tmp.path().join("a.txt"), t_carried);
+
+            let after = dir_fingerprint(tmp.path()).unwrap();
+            assert_eq!(before.files, after.files);
+            assert_eq!(before.bytes, after.bytes);
+            assert_eq!(before.max_mtime_ns, after.max_mtime_ns);
+            assert_ne!(before, after, "per-path mtime must break the fingerprint");
         });
     }
 
