@@ -96,3 +96,60 @@ fn non_ci_never_fails_on_validation_error() {
     };
     doctor::run(&dargs, Some(&proj)).expect("non-CI doctor must not fail on a validation error");
 }
+
+/// Trust visibility: an untrusted project is Ok-level noise — until a harness
+/// actually has the bridge registered AND the manifest declares servers. Then
+/// every auto-mode session silently drops to control-plane tools, so `doctor`
+/// must warn and name the trust command.
+#[test]
+fn untrusted_warns_only_when_bridge_is_registered_and_servers_declared() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup(&home);
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n",
+    )
+    .unwrap();
+
+    let bridge_line = |report: &serde_json::Value| -> (String, String) {
+        let sections = report["sections"].as_array().unwrap();
+        let s = sections
+            .iter()
+            .find(|s| s["title"] == "Zero-files bridge")
+            .expect("bridge section present");
+        let line = s["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["msg"].as_str().unwrap().contains("trusted"))
+            .expect("trust line present");
+        (
+            line["level"].as_str().unwrap().to_string(),
+            line["msg"].as_str().unwrap().to_string(),
+        )
+    };
+
+    // No harness connected → untrusted stays Ok-level.
+    let (level, _) = bridge_line(&doctor::collect(Some(&proj)).unwrap());
+    assert_eq!(level, "ok", "no bridge registered → no warning");
+
+    // Register the bridge in claude-code's global config (config presence is
+    // detection) → the same untrusted state must now warn, naming the command.
+    fs::write(
+        home.join(".claude.json"),
+        r#"{ "mcpServers": { "agentstack": { "type": "stdio", "command": "agentstack", "args": ["mcp", "--auto-project"] } } }"#,
+    )
+    .unwrap();
+    let (level, msg) = bridge_line(&doctor::collect(Some(&proj)).unwrap());
+    assert_eq!(level, "warn", "bridge + declared servers → warn: {msg}");
+    assert!(
+        msg.contains("agentstack trust"),
+        "hint names the command: {msg}"
+    );
+}

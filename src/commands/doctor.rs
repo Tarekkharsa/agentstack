@@ -251,10 +251,26 @@ fn run_checks(
             Level::Warn,
             "trusted, but the manifest changed since ↳ review + agentstack trust",
         ),
-        crate::trust::TrustState::Untrusted => report.line(
-            Level::Ok,
-            "not trusted for auto mode — untrusted repos get control-plane tools only ↳ agentstack trust",
-        ),
+        // Untrusted is a choice, not a fault (Ok) — unless a harness actually
+        // uses the bridge AND the manifest declares servers: then every session
+        // here silently gets control-plane tools only, which is worth a warning.
+        crate::trust::TrustState::Untrusted => {
+            if connected > 0 && !manifest.servers.is_empty() {
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "not trusted — {connected} harness(es) use the bridge, but this project's {} server(s) are not proxied ↳ agentstack trust {}",
+                        manifest.servers.len(),
+                        base.display()
+                    ),
+                );
+            } else {
+                report.line(
+                    Level::Ok,
+                    "not trusted for auto mode — untrusted repos get control-plane tools only ↳ agentstack trust",
+                );
+            }
+        }
     }
 
     report.section("Secrets");
