@@ -103,6 +103,14 @@ The complete, implemented-and-tested feature inventory. The
   `agentstack instructions --manifest-dir ~ --write`. The zero-files bridge
   deliberately never discovers this layer as a project — it cannot be
   `trust`ed or activated by `mcp --auto-project`.
+- **agentstack house rules** — a bundled instruction fragment
+  (`[instructions.agentstack]`) that teaches every agent the manifest-first
+  workflow: never edit rendered configs, the three artifact modes (a
+  clean-at-rest project's missing `.mcp.json` is intentional), re-lock after
+  editing profiles, and the drift decision rule (keep a hand-added server →
+  `adopt`; manifest is truth → `apply --write`). `init --global` and `setup`
+  offer to install it into the machine manifest (opt-in, like pack
+  instructions).
 - **Native settings** — manage each CLI's own settings file (Claude Code
   `~/.claude/settings.json` permissions/feature flags, Codex `config.toml`) from
   one `[settings.<cli>]` block. `apply` merges only the keys you declare into the

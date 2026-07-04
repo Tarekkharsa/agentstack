@@ -142,7 +142,12 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
         manifest_dir,
     )?;
 
-    // 7. Done — point at the obvious next step.
+    // 7. Machine layer: offer the agentstack house rules once. They live in
+    //    the personal manifest (~/.agentstack), not this project, so every
+    //    repo's agents get them via the global CLAUDE.md / AGENTS.md.
+    offer_house_rules(&ctx, &target_ids)?;
+
+    // 8. Done — point at the obvious next step.
     println!("\n{} Setup complete.", "✓".green());
     match ctx.loaded.manifest.profiles.keys().next() {
         Some(profile) => println!(
@@ -167,6 +172,73 @@ fn apply_args(args: &SetupArgs, scope: Scope, write: bool) -> ApplyArgs {
         allow_unresolved: false,
         no_gitignore: false,
     }
+}
+
+/// Offer to install the agentstack house-rules fragment into the machine-level
+/// manifest and compile it right away. Interactive-only (it's an offer), a
+/// silent no-op when the fragment is already declared, and never fails setup:
+/// the setup itself succeeded either way.
+fn offer_house_rules(ctx: &super::Context, target_ids: &[String]) -> Result<()> {
+    if !crate::util::confirm::is_interactive() {
+        return Ok(());
+    }
+    let home = crate::util::paths::agentstack_home();
+    if let Ok(loaded) = crate::manifest::load_from_dir(&home) {
+        if loaded
+            .manifest
+            .instructions
+            .contains_key(super::init::HOUSE_RULES_NAME)
+        {
+            return Ok(());
+        }
+    }
+
+    println!("\n{}", "House rules".bold());
+    println!(
+        "  agentstack ships a house-rules fragment that teaches every agent the\n\
+         \x20 manifest-first workflow (never edit rendered configs, drift rules,\n\
+         \x20 clean-at-rest projects). It lives in your machine manifest and compiles\n\
+         \x20 into each CLI's global CLAUDE.md / AGENTS.md."
+    );
+    if !crate::util::confirm::confirm("  Install them?")? {
+        println!(
+            "  {} skipped — install later with `agentstack init --global`.",
+            "·".dimmed()
+        );
+        return Ok(());
+    }
+
+    super::init::ensure_global_manifest()?;
+    super::init::seed_house_rules(&home)?;
+    let loaded = crate::manifest::load_from_dir(&home)?;
+
+    // Consent was just given — compile the machine layer for the same targets
+    // this setup configured, at global scope (the layer's home turf).
+    for id in target_ids {
+        let Some(desc) = ctx.registry.get(id) else {
+            continue;
+        };
+        let Some(plan) = crate::render::instructions::plan_instructions(
+            &loaded.manifest,
+            desc,
+            Scope::Global,
+            &home,
+        ) else {
+            continue;
+        };
+        if plan.changed() {
+            plan.write()?;
+            println!(
+                "  {} {} — wrote managed region ({})",
+                "✓".green(),
+                desc.display,
+                plan.path.display()
+            );
+        } else {
+            println!("  {} {} — up to date", "✓".green(), desc.display);
+        }
+    }
+    Ok(())
 }
 
 /// Prompt (hidden input) to store each missing secret in the keychain, then

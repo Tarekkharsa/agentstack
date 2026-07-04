@@ -47,3 +47,49 @@ fn init_global_seeds_home_manifest_and_instructions_dir() {
 
     std::env::remove_var("AGENTSTACK_HOME");
 }
+
+#[test]
+fn house_rules_seed_is_idempotent_and_compiles() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join(".agentstack");
+    std::env::set_var("HOME", tmp.path());
+    std::env::set_var("AGENTSTACK_HOME", &home);
+
+    let dir = init::ensure_global_manifest().unwrap();
+    assert_eq!(dir, home);
+    assert!(init::seed_house_rules(&home).unwrap());
+    assert!(
+        !init::seed_house_rules(&home).unwrap(),
+        "second seed is a no-op"
+    );
+
+    // The manifest declares the fragment and the bundled body landed on disk.
+    let loaded = agentstack::manifest::load_from_dir(&home).unwrap();
+    let instr = loaded
+        .manifest
+        .instructions
+        .get(init::HOUSE_RULES_NAME)
+        .expect("[instructions.agentstack] declared");
+    assert_eq!(instr.path, "./instructions/agentstack.md");
+    let body = fs::read_to_string(home.join("instructions/agentstack.md")).unwrap();
+    assert!(body.contains("agentstack house rules"));
+    assert!(body.contains("do not create one")); // clean-at-rest lesson
+
+    // And it compiles into a managed region for a harness.
+    let reg = agentstack::adapter::Registry::load().unwrap();
+    let desc = reg.get("claude-code").unwrap();
+    let plan = agentstack::render::instructions::plan_instructions(
+        &loaded.manifest,
+        desc,
+        agentstack::scope::Scope::Global,
+        &home,
+    )
+    .unwrap();
+    assert_eq!(plan.fragments, vec![init::HOUSE_RULES_NAME.to_string()]);
+    assert!(plan.proposed.contains("agentstack house rules"));
+    assert!(plan.proposed.contains("<!-- agentstack:start -->"));
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
