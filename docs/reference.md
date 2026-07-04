@@ -89,7 +89,9 @@ The complete, implemented-and-tested feature inventory. The
   origin + provenance. Profile resolution is offline by default (dry-run `use`,
   `doctor`, `explain` never fetch); `use --write` fetches git-backed skills when
   activation needs them. Manage it with `lib add` / `add-server` / `list` /
-  `remove` / `remove-server`;
+  `remove` / `remove-server`; `lib add` warns when a skill exceeds ~10 MiB —
+  vendored dependencies (node_modules and friends) make every full-library
+  pass pay to read them;
   `consolidate` sweeps scattered skills from every CLI into the library and
   symlinks the originals back; `lib migrate` copies a legacy
   `~/.agentstack/skills/` home in, preview-first and reversible. Provider folders

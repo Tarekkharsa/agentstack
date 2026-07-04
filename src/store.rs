@@ -377,6 +377,20 @@ pub fn dir_digest_cached(root: &Path) -> Result<String> {
     Ok(sha256)
 }
 
+/// Total size in bytes of a directory's files (`.git` excluded, like
+/// [`dir_digest`]). Best-effort: unreadable entries count as zero.
+pub fn dir_size(root: &Path) -> u64 {
+    let mut files: Vec<PathBuf> = Vec::new();
+    if collect_files(root, root, &mut files).is_err() {
+        return 0;
+    }
+    files
+        .iter()
+        .filter_map(|rel| fs::metadata(root.join(rel)).ok())
+        .map(|m| m.len())
+        .sum()
+}
+
 /// SHA-256 digest of a directory's contents (relative paths + file bytes,
 /// sorted; `.git` excluded).
 pub fn dir_digest(root: &Path) -> Result<String> {
