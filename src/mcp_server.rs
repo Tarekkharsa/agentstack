@@ -32,16 +32,21 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
 
     if !auto_project {
         // Eager, one-project-per-process mode (the default): the manifest is
-        // cwd-or-flag and the gateway is built once for this launch.
-        let gateway = crate::gateway::Gateway::from_manifest(dir.as_deref());
-        if !gateway.is_empty() {
+        // cwd-or-flag and the gateway is built ONCE for this launch, shared by
+        // the stdio loop and the code-mode endpoint (one set of upstream
+        // connections / stdio children per process, not one per surface).
+        let gateway = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::gateway::Gateway::from_manifest(dir.as_deref()),
+        ));
+        if !lock_gateway(&gateway).is_empty() {
             eprintln!("agentstack mcp: gateway active — proxying this project's MCP servers");
         }
 
         // Code mode (Phase 2): expose a loopback, token-gated endpoint the generated
         // client POSTs to. Best-effort and contained — None when there's nothing to
         // proxy. agentstack only brokers the call here; it never runs the agent's code.
-        let runtime = crate::codemode::endpoint::start(dir.as_deref());
+        let runtime =
+            crate::codemode::endpoint::start(dir.as_deref(), std::sync::Arc::clone(&gateway));
         if let Some(rt) = &runtime {
             eprintln!(
                 "agentstack mcp: code-mode runtime at {} (loopback · token-gated). Generate a client with `agentstack codemode --write`.",
@@ -57,7 +62,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             let Ok(req) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
-            if let Some(resp) = handle(&req, dir.as_deref(), &gateway) {
+            if let Some(resp) = handle(&req, dir.as_deref(), &lock_gateway(&gateway), None) {
                 writeln!(out, "{}", serde_json::to_string(&resp)?)?;
                 out.flush()?;
             }
@@ -101,13 +106,26 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             "tools/call" => auto.ensure_gateway(),
             _ => {}
         }
-        if let Some(resp) = handle(&req, auto.dir(), auto.gateway()) {
+        if let Some(resp) = handle(
+            &req,
+            auto.dir(),
+            &auto.gateway(),
+            auto.trust_note().as_deref(),
+        ) {
             writeln!(out, "{}", serde_json::to_string(&resp)?)?;
             out.flush()?;
         }
     }
     auto.shutdown();
     Ok(())
+}
+
+/// Lock the process-shared gateway, riding through a poisoned mutex (a panic
+/// mid-call must not wedge every later request).
+fn lock_gateway(
+    gateway: &std::sync::Mutex<crate::gateway::Gateway>,
+) -> std::sync::MutexGuard<'_, crate::gateway::Gateway> {
+    gateway.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Session state for `--auto-project`: which project this MCP session belongs
@@ -127,7 +145,12 @@ struct AutoProject {
     /// Only the *runtime* surface (spawning/contacting servers, resolving
     /// secrets, code mode) is trust-gated.
     dir: Option<PathBuf>,
-    gateway: crate::gateway::Gateway,
+    /// The trust decision made at gateway-build time — kept so responses can
+    /// say *why* nothing is proxied instead of leaving it on stderr only.
+    trust: Option<crate::trust::TrustState>,
+    /// Shared with the code-mode endpoint thread, so the process holds one set
+    /// of upstream connections (and stdio children), not one per surface.
+    gateway: std::sync::Arc<std::sync::Mutex<crate::gateway::Gateway>>,
     built: bool,
     runtime: Option<crate::codemode::endpoint::RuntimeHandle>,
 }
@@ -140,7 +163,8 @@ impl AutoProject {
             roots_requested: false,
             roots: Vec::new(),
             dir: None,
-            gateway: crate::gateway::Gateway::empty(),
+            trust: None,
+            gateway: std::sync::Arc::new(std::sync::Mutex::new(crate::gateway::Gateway::empty())),
             built: false,
             runtime: None,
         }
@@ -150,8 +174,8 @@ impl AutoProject {
         self.dir.as_deref().or(self.explicit.as_deref())
     }
 
-    fn gateway(&self) -> &crate::gateway::Gateway {
-        &self.gateway
+    fn gateway(&self) -> std::sync::MutexGuard<'_, crate::gateway::Gateway> {
+        lock_gateway(&self.gateway)
     }
 
     /// Record whether the client can answer `roots/list` (from its declared
@@ -214,7 +238,9 @@ impl AutoProject {
             return;
         };
         self.dir = Some(base.clone());
-        match crate::trust::check(&base) {
+        let state = crate::trust::check(&base);
+        self.trust = Some(state.clone());
+        match state {
             crate::trust::TrustState::Trusted => self.activate(&base),
             crate::trust::TrustState::Changed => eprintln!(
                 "agentstack mcp: {} was trusted but its manifest CHANGED since — control-plane tools only. Review it, then re-run `agentstack trust {}`.",
@@ -226,6 +252,21 @@ impl AutoProject {
                 base.display(),
                 base.display()
             ),
+        }
+    }
+
+    /// Why the proxied surface is empty, when the reason is the trust gate.
+    /// `None` when trusted, undecided, or when there is no project at all.
+    fn trust_note(&self) -> Option<String> {
+        let dir = self.dir.as_ref()?.display();
+        match self.trust.as_ref()? {
+            crate::trust::TrustState::Trusted => None,
+            crate::trust::TrustState::Untrusted => Some(format!(
+                "This project ({dir}) is not trusted for auto mode, so none of its MCP servers are proxied (spawned or contacted). Ask a human to review the manifest and run `agentstack trust {dir}` to enable them."
+            )),
+            crate::trust::TrustState::Changed => Some(format!(
+                "This project ({dir}) was trusted, but its manifest changed since — its MCP servers are not proxied until it is re-trusted. Ask a human to review the change and re-run `agentstack trust {dir}`."
+            )),
         }
     }
 
@@ -256,14 +297,19 @@ impl AutoProject {
 
     fn activate(&mut self, base: &Path) {
         self.dir = Some(base.to_path_buf());
-        self.gateway = crate::gateway::Gateway::from_manifest(Some(base));
-        if !self.gateway.is_empty() {
+        // One gateway per process: the code-mode endpoint shares it instead of
+        // building (and connecting/spawning) its own copy of every upstream.
+        self.gateway = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::gateway::Gateway::from_manifest(Some(base)),
+        ));
+        if !self.gateway().is_empty() {
             eprintln!(
                 "agentstack mcp: gateway active for {} — proxying its MCP servers",
                 base.display()
             );
         }
-        self.runtime = crate::codemode::endpoint::start(Some(base));
+        self.runtime =
+            crate::codemode::endpoint::start(Some(base), std::sync::Arc::clone(&self.gateway));
         if let Some(rt) = &self.runtime {
             eprintln!(
                 "agentstack mcp: code-mode runtime at {} (loopback · token-gated)",
@@ -322,7 +368,12 @@ fn protocol_writer() -> Box<dyn Write> {
     Box::new(std::io::stdout())
 }
 
-fn handle(req: &Value, dir: Option<&Path>, gateway: &crate::gateway::Gateway) -> Option<Value> {
+fn handle(
+    req: &Value,
+    dir: Option<&Path>,
+    gateway: &crate::gateway::Gateway,
+    trust_note: Option<&str>,
+) -> Option<Value> {
     let id = req.get("id").cloned();
     let method = req.get("method")?.as_str()?;
     match method {
@@ -356,7 +407,7 @@ fn handle(req: &Value, dir: Option<&Path>, gateway: &crate::gateway::Gateway) ->
             if name == "tools_search" {
                 return Some(result(
                     id,
-                    json!({ "content": [{ "type": "text", "text": tools_search_text(gateway, &args) }], "isError": false }),
+                    json!({ "content": [{ "type": "text", "text": tools_search_text(gateway, &args, trust_note) }], "isError": false }),
                 ));
             }
             // Code-mode binding generation also needs the gateway. Generator, not
@@ -671,7 +722,12 @@ fn search_text(query: &str) -> String {
 /// Route a `tools_search` call. With `entity` set it returns one tool's full
 /// detail (the single-tool depth); otherwise it returns a ranked compact list
 /// for `query`. Strictly read-only over the gateway's proxied surface.
-fn tools_search_text(gateway: &crate::gateway::Gateway, args: &Value) -> String {
+/// `trust_note` explains an empty surface caused by the trust gate.
+fn tools_search_text(
+    gateway: &crate::gateway::Gateway,
+    args: &Value,
+    trust_note: Option<&str>,
+) -> String {
     if let Some(entity) = args
         .get("entity")
         .and_then(Value::as_str)
@@ -691,21 +747,31 @@ fn tools_search_text(gateway: &crate::gateway::Gateway, args: &Value) -> String 
         .and_then(Value::as_u64)
         .map(|n| n as usize);
     let hits = gateway.search(query, limit);
-    format_hits(query, &hits, max_response)
+    format_hits(query, &hits, max_response, trust_note)
 }
 
 /// Compact ranked cards: one line per tool with its name, summary, and the entity
 /// ref to inspect it. `max_response` trims the lowest-ranked tail (cards are
 /// emitted best-first) so the response stays small, noting what was omitted.
-fn format_hits(query: &str, hits: &[crate::gateway::Hit], max_response: Option<usize>) -> String {
+/// With zero hits and a `trust_note`, the note IS the answer — the surface is
+/// empty because the project isn't trusted, not because it proxies nothing.
+fn format_hits(
+    query: &str,
+    hits: &[crate::gateway::Hit],
+    max_response: Option<usize>,
+    trust_note: Option<&str>,
+) -> String {
     if hits.is_empty() {
+        if let Some(note) = trust_note {
+            return format!("No proxied tools available. {note}");
+        }
         let scope = if query.trim().is_empty() {
             "This project proxies no upstream MCP tools.".to_string()
         } else {
             format!("No proxied tools match '{query}'.")
         };
         return format!(
-            "{scope} (Proxied tools come from the HTTP MCP servers your manifest declares.)"
+            "{scope} (Proxied tools come from the MCP servers your manifest declares.)"
         );
     }
     let mut out = format!(
@@ -790,8 +856,23 @@ fn doctor_summary(dir: Option<&Path>) -> Result<String> {
         .iter()
         .filter(|n| ctx.resolver.resolve(n).is_some())
         .count();
+    // The trust gate decides whether this project's servers are proxied at all
+    // in auto mode — without this line an agent can't tell a healthy-but-empty
+    // stack from a gated one.
+    let base = crate::manifest::project_root_of(&ctx.dir);
+    let trust = match crate::trust::check(&base) {
+        crate::trust::TrustState::Trusted => "trusted (servers are proxied in auto mode)".into(),
+        crate::trust::TrustState::Changed => format!(
+            "manifest changed since trusted — servers are NOT proxied in auto mode until a human re-runs `agentstack trust {}`",
+            base.display()
+        ),
+        crate::trust::TrustState::Untrusted => format!(
+            "not trusted — servers are NOT proxied in auto mode until a human runs `agentstack trust {}`",
+            base.display()
+        ),
+    };
     Ok(format!(
-        "Harnesses installed: {installed}/{}\nServers: {}\nSkills: {}\nSecrets resolved: {resolved}/{}",
+        "Harnesses installed: {installed}/{}\nServers: {}\nSkills: {}\nSecrets resolved: {resolved}/{}\nTrust (auto mode): {trust}",
         ctx.registry.ids().count(),
         m.servers.len(),
         m.skills.len(),
@@ -1014,6 +1095,9 @@ fn list_loadable(dir: Option<&Path>) -> Result<String> {
 
     let mut entries = Vec::new();
     for name in loadable_skill_names(m, &libctx.library, session.as_ref()) {
+        // PathOnly: this catalog only reads SKILL.md descriptions — digesting
+        // every skill body here would turn a cheap list into a full-library
+        // read+hash pass.
         let resolved = crate::resolve::resolve_skill(
             m,
             &ctx.dir,
@@ -1021,7 +1105,7 @@ fn list_loadable(dir: Option<&Path>) -> Result<String> {
             &libctx.lib_home,
             &libctx.store,
             &name,
-            crate::resolve::ResolveMode::NoFetch,
+            crate::resolve::ResolveMode::PathOnly,
         );
         let (desc, origin) = match &resolved {
             Ok(r) => (
@@ -1086,7 +1170,9 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
         }
     }
 
-    // Inline-first, then the central library — same order as `use`.
+    // Inline-first, then the central library — same order as `use`. PathOnly:
+    // loading returns SKILL.md's text; nothing here records a lock entry, so
+    // there is no reason to digest the body.
     let resolved = crate::resolve::resolve_skill(
         m,
         &ctx.dir,
@@ -1094,7 +1180,7 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
         &libctx.lib_home,
         &libctx.store,
         name,
-        crate::resolve::ResolveMode::NoFetch,
+        crate::resolve::ResolveMode::PathOnly,
     )
     .with_context(|| format!("loading skill '{name}'"))?;
     let (_, body) = read_skill_md(&resolved.path);
@@ -1141,7 +1227,7 @@ mod tests {
     fn initialize_returns_server_info() {
         let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" });
         let gw = crate::gateway::Gateway::empty();
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         assert_eq!(resp["result"]["serverInfo"]["name"], "agentstack");
         assert_eq!(resp["id"], 1);
     }
@@ -1150,7 +1236,7 @@ mod tests {
     fn tools_list_includes_search_and_add() {
         let req = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" });
         let gw = crate::gateway::Gateway::empty();
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let names: Vec<&str> = resp["result"]["tools"]
             .as_array()
             .unwrap()
@@ -1190,7 +1276,7 @@ mod tests {
     fn notifications_get_no_response() {
         let req = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
         let gw = crate::gateway::Gateway::empty();
-        assert!(handle(&req, None, &gw).is_none());
+        assert!(handle(&req, None, &gw, None).is_none());
     }
 
     /// A namespaced fixture tool, shaped like the gateway's discovered cache.
@@ -1207,7 +1293,7 @@ mod tests {
         // control-plane tools — the proxied surface hides behind tools_search.
         let gw = crate::gateway::Gateway::with_tools(proxied_fixture());
         let req = json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/list" });
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let names: Vec<&str> = resp["result"]["tools"]
             .as_array()
             .unwrap()
@@ -1226,7 +1312,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 8, "method": "tools/call",
             "params": { "name": "tools_search", "arguments": { "query": "file" } }
         });
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("figma__get_file"));
         assert!(text.contains("entity=\"figma__get_file:tool\""));
@@ -1240,7 +1326,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 9, "method": "tools/call",
             "params": { "name": "tools_search", "arguments": { "entity": "figma__get_file:tool" } }
         });
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("**Server:** figma"));
         assert!(text.contains("fileKey"));
@@ -1250,9 +1336,46 @@ mod tests {
             "jsonrpc": "2.0", "id": 10, "method": "tools/call",
             "params": { "name": "tools_search", "arguments": { "entity": "figma__nope:tool" } }
         });
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("No proxied tool matches"));
+    }
+
+    #[test]
+    fn tools_search_empty_surface_names_the_trust_command_when_untrusted() {
+        let gw = crate::gateway::Gateway::empty();
+        let note = "This project (/tmp/repo) is not trusted for auto mode, so none of its MCP servers are proxied (spawned or contacted). Ask a human to review the manifest and run `agentstack trust /tmp/repo` to enable them.";
+        for args in [json!({}), json!({ "query": "figma" })] {
+            let req = json!({
+                "jsonrpc": "2.0", "id": 12, "method": "tools/call",
+                "params": { "name": "tools_search", "arguments": args }
+            });
+            let resp = handle(&req, None, &gw, Some(note)).unwrap();
+            let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(text.contains("agentstack trust /tmp/repo"), "got: {text}");
+            assert!(
+                !text.contains("proxies no upstream"),
+                "the misleading no-tools message must not appear when the gate is the cause"
+            );
+        }
+    }
+
+    #[test]
+    fn tools_search_empty_surface_without_trust_note_stays_neutral() {
+        // No trust note (eager mode, or a trusted project with no servers) —
+        // the plain message, without the stale HTTP-only claim.
+        let gw = crate::gateway::Gateway::empty();
+        let req = json!({
+            "jsonrpc": "2.0", "id": 13, "method": "tools/call",
+            "params": { "name": "tools_search", "arguments": {} }
+        });
+        let resp = handle(&req, None, &gw, None).unwrap();
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("proxies no upstream MCP tools"));
+        assert!(
+            !text.contains("HTTP MCP servers"),
+            "stdio shipped — wording"
+        );
     }
 
     #[test]
@@ -1262,7 +1385,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 11, "method": "tools/call",
             "params": { "name": "tools_bindings", "arguments": {} }
         });
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         // The generated client + shim + recipe, all secret-free.
         assert!(text.contains("export const codemode = {"));
@@ -1353,6 +1476,8 @@ mod tests {
         auto.ensure_gateway();
         assert_eq!(auto.dir(), Some(proj.path()));
         assert!(auto.gateway().is_empty(), "untrusted → empty gateway");
+        let note = auto.trust_note().expect("untrusted → a trust note");
+        assert!(note.contains("agentstack trust"), "got: {note}");
 
         // Trusted: the same discovery now builds a live gateway.
         crate::trust::trust(proj.path()).unwrap();
@@ -1363,7 +1488,33 @@ mod tests {
             !auto.gateway().is_empty(),
             "trusted → gateway proxies the manifest"
         );
+        assert!(auto.trust_note().is_none(), "trusted → no note");
         auto.shutdown();
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn doctor_summary_reports_trust_state() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
+            .unwrap();
+
+        let text = doctor_summary(Some(proj.path())).unwrap();
+        assert!(text.contains("Trust (auto mode): not trusted"), "{text}");
+        assert!(text.contains("agentstack trust"), "{text}");
+
+        crate::trust::trust(proj.path()).unwrap();
+        let text = doctor_summary(Some(proj.path())).unwrap();
+        assert!(text.contains("Trust (auto mode): trusted"), "{text}");
 
         std::env::remove_var("AGENTSTACK_HOME");
     }
@@ -1398,7 +1549,7 @@ mod tests {
             "params": { "name": "agentstack_search", "arguments": { "query": "github" } }
         });
         let gw = crate::gateway::Gateway::empty();
-        let resp = handle(&req, None, &gw).unwrap();
+        let resp = handle(&req, None, &gw, None).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("github"));
         assert_eq!(resp["result"]["isError"], false);

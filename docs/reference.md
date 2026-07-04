@@ -62,7 +62,9 @@ The complete, implemented-and-tested feature inventory. The
   (override with `--allow-flagged`); injection heuristics warn. `agentstack
   audit` (`--json`) re-scans everything materialized — skills and instruction
   files — and `doctor --ci` fails on high-severity findings, so a poisoned
-  skill can't slide into CI unnoticed.
+  skill can't slide into CI unnoticed. Everyday `doctor` skips this scan (it
+  reads every skill body); opt in with `doctor --deep` — `--ci` always
+  includes it, and the dashboard's Doctor pane runs it too.
 - **`doctor --live`** — real MCP `initialize` handshake over HTTP; reports
   server name + tool count, or classifies the error (auth / http / connect).
 
@@ -76,6 +78,12 @@ The complete, implemented-and-tested feature inventory. The
   from the central library, no inline `[skills.*]` entry) keep their lock
   pins through the reconcile pass — pin or refresh those with
   `agentstack lock`.
+  Repeat digests are served from a stat-fingerprint cache
+  (`~/.agentstack/digest-cache.json`: file count + total size + max mtime +
+  a hash of the sorted relative paths, each with its file's size and mtime) —
+  any mismatch falls back to the full read+hash, so `doctor`/`use` over
+  a large library cost stat calls, not a re-hash of every byte. Delete the file
+  to force full re-hashing.
 - **Central capability library (`agentstack lib`)** — one managed home
   (`~/.agentstack/lib/`) that projects reference **by name** instead of copying
   files. Skill dirs (`lib/skills/`) and MCP server definitions
@@ -95,7 +103,9 @@ The complete, implemented-and-tested feature inventory. The
   `lib/skills/<name>` — the library copy is canonical from then on (edits to
   the source have no effect), provenance records the original path for
   `lib list`/`explain`, and a temp-dir source gets a warning since that
-  recorded path will dangle after cleanup;
+  recorded path will dangle after cleanup. `lib add` also warns when a skill
+  exceeds ~10 MiB — vendored dependencies (node_modules and friends) make
+  every full-library pass pay to read them;
   `consolidate` sweeps scattered skills from every CLI into the library and
   symlinks the originals back; `lib migrate` copies a legacy
   `~/.agentstack/skills/` home in, preview-first and reversible. Provider folders
@@ -272,6 +282,11 @@ Trust is pinned to the manifest's content digest (including
 to control-plane-only until re-trusted. Explicit `--manifest-dir` skips the gate
 (naming a directory is the consent), matching plain `agentstack mcp`.
 
+The gate is visible from inside the session, not just on stderr: when the
+project is untrusted (or its manifest changed since it was trusted),
+`tools_search` says so and names the exact `agentstack trust <dir>` command,
+and `agentstack_doctor` includes a `Trust (auto mode):` line.
+
 Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
 skills-over-MCP (`agentstack_list_loadable`/`agentstack_load`) are fully
 zero-copy. Native skill folders and instruction files (`CLAUDE.md`/`AGENTS.md`)
@@ -343,7 +358,7 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 `upgrade`, `bootstrap` (`--write`), `apply` (`--scope`, `--write`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
 `lib add|add-server|list|remove|remove-server|migrate`, `restore`,
-`doctor` (`--ci`, `--live`, `--fix`), `audit` (`--json`, `--calls`,
+`doctor` (`--ci`, `--live`, `--fix`, `--deep`), `audit` (`--json`, `--calls`,
 `--since`), `optimize` (`--json`, `--write`, `--since`), `search`,
 `stats` (`--live`),
 `secret set|get|rm|list`, `export`/`import`, `adapters`, `pack init`, `plugins`,
@@ -356,7 +371,7 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 package manager (`install`/`update`/`remove` + lockfile) · central capability
 library (`lib` skills + servers referenced by name, digest-pinned in the lock,
 drift in `doctor`/`explain`, `consolidate` into `lib/skills`) · secrets (keychain +
-varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`) ·
+varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`/`--deep`) ·
 content scanning on install + `audit` · official MCP Registry provider +
 `search`/`add from` · `[policy]` trust gate · native per-CLI settings
 (`[settings.*]` → settings.json) · managed plugin recipes (`[plugins.*]` →

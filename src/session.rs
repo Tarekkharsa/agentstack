@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::render::{effective_servers, plan_target_with_servers, resolve_targets, Selection};
+use crate::render::{plan_target_with_servers, resolve_targets};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
 use crate::util::paths;
@@ -201,13 +201,22 @@ pub fn start(
         .get(profile)
         .with_context(|| format!("no profile '{profile}' in the manifest"))?;
 
-    let selection = Selection::Profile(profile.to_string());
     let state = State::load().unwrap_or_default();
     let target_ids = resolve_targets(manifest, &ctx.registry, &[]);
 
-    // Library-aware effective server set (inline-first, then central library).
+    // Resolve the profile once (library-aware, inline-first) — the same
+    // prepared set drives the snapshot planning below AND the activation, so
+    // start doesn't load and resolve everything twice.
+    let use_args = crate::cli::UseArgs {
+        profile: profile.to_string(),
+        targets: vec![],
+        scope: Some(scope),
+        write: true,
+        allow_unresolved: false,
+        no_gitignore: false,
+    };
     let libctx = ctx.library_ctx();
-    let server_map = effective_servers(manifest, &libctx.library, &libctx.lib_home, &selection)?;
+    let prepared = crate::commands::use_profile::prepare(&ctx, &libctx, &use_args)?;
 
     // Snapshot: server config files (for undo) + skills dirs (to detect adds,
     // and whether each dir pre-existed so `end` can restore exactly).
@@ -219,9 +228,14 @@ pub fn start(
             continue;
         };
         let prev = state.managed_servers(&target_key(id, scope, &ctx.dir));
-        if let Some(plan) =
-            plan_target_with_servers(desc, &ctx.resolver, &server_map, &prev, scope, &ctx.dir)?
-        {
+        if let Some(plan) = plan_target_with_servers(
+            desc,
+            &ctx.resolver,
+            &prepared.server_map,
+            &prev,
+            scope,
+            &ctx.dir,
+        )? {
             backups.push(crate::history::capture(
                 &plan.config_path,
                 format!("{} · servers", desc.display),
@@ -234,15 +248,7 @@ pub fn start(
     }
 
     // Activate the profile (servers + skills) in this scope.
-    let use_args = crate::cli::UseArgs {
-        profile: profile.to_string(),
-        targets: vec![],
-        scope: Some(scope),
-        write: true,
-        allow_unresolved: false,
-        no_gitignore: false,
-    };
-    crate::commands::use_profile::run(&use_args, manifest_dir)?;
+    crate::commands::use_profile::activate(&ctx, &libctx, &use_args, &prepared)?;
 
     // Record the server snapshots as one undoable history entry.
     let history_id = crate::history::record(scope.as_str(), touched.into_iter().collect(), backups)

@@ -19,8 +19,12 @@ use crate::cli::{
 };
 use crate::library::{Library, LibraryServer, LibrarySkill};
 use crate::manifest::{Server, Skill};
-use crate::store::{dir_digest, Store};
+use crate::store::{dir_digest, dir_size, Store};
 use crate::util::paths;
+
+/// Above this, a skill is almost certainly carrying vendored dependencies —
+/// and every full-library pass (doctor, install, use) pays to read it.
+const LARGE_SKILL_BYTES: u64 = 10 * 1024 * 1024;
 
 pub fn run(args: &LibArgs, manifest_dir: Option<&Path>) -> Result<()> {
     match &args.kind {
@@ -60,6 +64,9 @@ pub struct AddOutcome {
     pub written: bool,
     /// True when an existing entry of the same name was overwritten.
     pub replaced: bool,
+    /// Total content size in bytes — surfaced so callers can warn on skills
+    /// large enough to slow every full-library scan.
+    pub total_bytes: u64,
 }
 
 /// Insert a skill into the central library at `lib_home`. The single library
@@ -90,7 +97,7 @@ pub fn add_skill(
     }
 
     let mut warnings = Vec::new();
-    let (entry, dest, checksum, source_kind, source_path) = match source {
+    let (entry, dest, checksum, source_kind, source_path, total_bytes) = match source {
         LibSource::Path(src) => {
             let src = absolutize(src)?;
             require_skill_md(&src)?;
@@ -113,15 +120,15 @@ pub fn add_skill(
             }
             // Digest the source now so the preview reflects what would land; a
             // write copies first and re-digests the destination.
-            let checksum = if write {
+            let (checksum, total_bytes) = if write {
                 if dest.exists() {
                     std::fs::remove_dir_all(&dest)
                         .with_context(|| format!("removing {}", dest.display()))?;
                 }
                 crate::consolidate::copy_dir(&src, &dest)?;
-                dir_digest(&dest)?
+                (dir_digest(&dest)?, dir_size(&dest))
             } else {
-                dir_digest(&src)?
+                (dir_digest(&src)?, dir_size(&src))
             };
             let entry = LibrarySkill {
                 name: name.to_string(),
@@ -133,7 +140,7 @@ pub fn add_skill(
                 version: None,
                 provenance: Some(format!("path:{}", src.display())),
             };
-            (entry, Some(dest), checksum, "path", Some(src))
+            (entry, Some(dest), checksum, "path", Some(src), total_bytes)
         }
         LibSource::Git { url, rev } => {
             // Resolving fetches into the store (needed to learn rev + checksum and
@@ -158,9 +165,22 @@ pub fn add_skill(
                 version: None,
                 provenance: Some(format!("git:{url}")),
             };
-            (entry, None, resolved.checksum, "git", None)
+            let total_bytes = dir_size(&resolved.path);
+            (entry, None, resolved.checksum, "git", None, total_bytes)
         }
     };
+
+    // Oversized skills make every full-library pass (doctor, install, use)
+    // expensive for every consumer — surface it on the outcome so the CLI,
+    // MCP, and consolidate callers all warn uniformly.
+    if total_bytes > LARGE_SKILL_BYTES {
+        warnings.push(format!(
+            "'{name}' is {} — every full-library pass (doctor, install, use) reads all of it. \
+             Vendored dependencies (node_modules, venvs, build output) don't belong in a skill; \
+             ship the instructions and fetch dependencies at run time.",
+            human_bytes(total_bytes)
+        ));
+    }
 
     if write {
         library.upsert(entry);
@@ -176,6 +196,7 @@ pub fn add_skill(
         warnings,
         written: write,
         replaced: replacing,
+        total_bytes,
     })
 }
 
@@ -967,6 +988,22 @@ fn short(sum: &str) -> &str {
     &sum[..sum.len().min(12)]
 }
 
+/// Human-readable byte count (binary units, one decimal).
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1024,6 +1061,50 @@ mod tests {
         assert!(is_temp_path(Path::new("/tmp/skill-src")));
         assert!(is_temp_path(Path::new("/private/tmp/skill-src")));
         assert!(!is_temp_path(Path::new("/opt/team/skills/sql-review")));
+    }
+
+    #[test]
+    fn add_reports_total_bytes_for_size_warnings() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        work.child("src/SKILL.md").write_str("# body\n").unwrap();
+        work.child("src/vendored/blob.bin")
+            .write_binary(&[0u8; 4096])
+            .unwrap();
+        let src = work.child("src").path().to_path_buf();
+
+        // Preview and write both surface the size (the preview is where the
+        // warning is most useful — before the copy happens).
+        let dry = add_skill(lib.path(), "big", LibSource::Path(&src), false, false).unwrap();
+        assert!(dry.total_bytes >= 4096, "got {}", dry.total_bytes);
+        let wet = add_skill(lib.path(), "big", LibSource::Path(&src), false, true).unwrap();
+        assert_eq!(wet.total_bytes, dry.total_bytes);
+    }
+
+    #[test]
+    fn human_bytes_picks_sane_units() {
+        assert_eq!(human_bytes(512), "512 B");
+        assert_eq!(human_bytes(10 * 1024 * 1024 + 512 * 1024), "10.5 MiB");
+        assert_eq!(human_bytes(389 * 1024 * 1024), "389.0 MiB");
+        assert_eq!(human_bytes(3 * 1024 * 1024 * 1024), "3.0 GiB");
+    }
+
+    #[test]
+    fn oversized_skill_warns_in_outcome() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        work.child("src/SKILL.md").write_str("# body\n").unwrap();
+        work.child("src/vendored/blob.bin")
+            .write_binary(&vec![0u8; LARGE_SKILL_BYTES as usize + 1])
+            .unwrap();
+        let src = work.child("src").path().to_path_buf();
+
+        let out = add_skill(lib.path(), "huge", LibSource::Path(&src), false, false).unwrap();
+        assert!(
+            out.warnings.iter().any(|w| w.contains("full-library pass")),
+            "size warning surfaced on the outcome: {:?}",
+            out.warnings
+        );
     }
 
     #[test]
