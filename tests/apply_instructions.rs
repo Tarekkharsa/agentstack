@@ -209,6 +209,70 @@ fn project_scope_apply_never_empties_a_region_over_inherited_fragments() {
 }
 
 #[test]
+fn doctor_accepts_a_project_compiled_at_project_scope() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("instructions")).unwrap();
+    fs::write(proj.join("instructions/house.md"), "House rule one.\n").unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [instructions.house]\npath = \"./instructions/house.md\"\n",
+    )
+    .unwrap();
+
+    // The project compiles at PROJECT scope — it never writes the global file.
+    let mut a = args(true);
+    a.scope = Some(Scope::Project);
+    apply::run(&a, Some(&proj)).unwrap();
+    assert!(fs::read_to_string(proj.join("CLAUDE.md"))
+        .unwrap()
+        .contains("House rule one."));
+    assert!(!home.join(".claude/CLAUDE.md").exists());
+
+    // Doctor must not warn forever against the global file it never writes.
+    let report = doctor::collect(Some(&proj)).unwrap();
+    let instr = report["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["title"] == "Instructions")
+        .expect("Instructions section");
+    let stale = instr["lines"].as_array().unwrap().iter().any(|l| {
+        l["level"] == "warn" && l["msg"].as_str().unwrap().contains("stale")
+    });
+    assert!(
+        !stale,
+        "in-sync project-scope compile must not warn stale: {report}"
+    );
+
+    // Editing the fragment makes the project-scope region genuinely stale.
+    fs::write(proj.join("instructions/house.md"), "House rule two.\n").unwrap();
+    let report = doctor::collect(Some(&proj)).unwrap();
+    let instr = report["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["title"] == "Instructions")
+        .expect("Instructions section");
+    let stale = instr["lines"].as_array().unwrap().iter().any(|l| {
+        l["level"] == "warn"
+            && l["msg"]
+                .as_str()
+                .unwrap()
+                .contains("agentstack instructions --write")
+    });
+    assert!(stale, "a genuinely stale region should still warn: {report}");
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
+#[test]
 fn doctor_ci_fails_on_a_missing_fragment_source() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
