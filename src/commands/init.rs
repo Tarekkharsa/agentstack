@@ -220,6 +220,7 @@ pub fn seed_house_rules(dir: &Path) -> Result<bool> {
     let entry = crate::manifest::Instruction {
         path: format!("./instructions/{HOUSE_RULES_NAME}.md"),
         targets: vec!["*".into()],
+        from_user_layer: false,
     };
     let new_text = super::add::build_manifest_with(
         &text,

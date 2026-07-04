@@ -432,6 +432,7 @@ fn add_pack(
             let entry = crate::manifest::Instruction {
                 path: format!("./{dest}"),
                 targets: vec!["*".into()],
+                from_user_layer: false,
             };
             text = build_manifest_with(
                 &text,

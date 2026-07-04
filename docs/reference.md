@@ -109,6 +109,15 @@ The complete, implemented-and-tested feature inventory. The
   `agentstack instructions --manifest-dir ~ --write`. The zero-files bridge
   deliberately never discovers this layer as a project — it cannot be
   `trust`ed or activated by `mcp --auto-project`.
+- **User layer beneath every project** — the machine manifest's
+  `[instructions]` (and only those) merge in beneath each project load, order
+  user → project → project-local; a project fragment of the same name wins
+  outright. Inherited fragments compile at **global scope only** (personal
+  rules never land in a repo's committed `CLAUDE.md`), and servers/skills/
+  settings deliberately do **not** inherit — personal capabilities never
+  auto-inject into a team project, and the trust digest is unaffected.
+  Provenance is visible everywhere: `instructions` labels inherited fragments
+  `(machine)`, `doctor` counts them, and `explain <fragment>` names the layer.
 - **agentstack house rules** — a bundled instruction fragment
   (`[instructions.agentstack]`) that teaches every agent the manifest-first
   workflow: never edit rendered configs, the three artifact modes (a

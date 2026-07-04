@@ -361,6 +361,21 @@ fn run_checks(
     if manifest.instructions.is_empty() {
         report.line(Level::Ok, "no instruction fragments defined");
     } else {
+        // Provenance: fragments inherited from the machine-level manifest.
+        let inherited = manifest
+            .instructions
+            .values()
+            .filter(|i| i.from_user_layer)
+            .count();
+        if let (Some(up), true) = (&ctx.loaded.user_path, inherited > 0) {
+            report.line(
+                Level::Ok,
+                format!(
+                    "{inherited} fragment(s) inherited from the machine manifest ({})",
+                    up.display()
+                ),
+            );
+        }
         let mut instr_issues = 0;
         for id in &target_ids {
             let Some(desc) = ctx.registry.get(id) else {

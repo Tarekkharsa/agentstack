@@ -95,6 +95,10 @@ pub struct LoadedManifest {
     pub manifest: Manifest,
     pub manifest_path: PathBuf,
     pub local_path: Option<PathBuf>,
+    /// The machine-level manifest whose `[instructions]` merged in beneath
+    /// this one via [`merge_user_layer`]; `None` when that layer is absent,
+    /// wasn't merged, or IS this manifest.
+    pub user_path: Option<PathBuf>,
 }
 
 /// Load `agentstack.toml` from `dir`, deep-merging `agentstack.local.toml` over
@@ -131,7 +135,78 @@ pub fn load_from_dir(dir: &Path) -> Result<LoadedManifest> {
         manifest,
         manifest_path,
         local_path,
+        user_path: None,
     })
+}
+
+/// Merge the machine-level manifest's `[instructions]` — and ONLY those —
+/// beneath an already-loaded project manifest. Layer order is user → project
+/// → project-local (the project side of that chain is already collapsed in
+/// `loaded`), so a project fragment of the same name wins outright: a project
+/// that redefines a fragment fully owns it, which is more predictable than a
+/// field-by-field splice of personal and team content. Inherited fragments
+/// are flagged `from_user_layer` (compiled at global scope only, see
+/// `render::instructions`), listed FIRST (machine-wide rules before project
+/// rules), and their relative paths are re-anchored at the machine layer.
+///
+/// Servers, skills, settings, and hooks are deliberately NOT inherited:
+/// personal capabilities must never auto-inject into a team project, and the
+/// trust digest doesn't cover this layer — it must never widen the runtime
+/// surface. Called by `commands::load` (every command's context), not by
+/// [`load_from_dir`], so primitive loads (trust review, the machine layer
+/// itself) stay single-layer.
+///
+/// A missing or unparseable machine layer is a silent no-op — a broken
+/// personal file must not take every project down — as is loading the machine
+/// manifest itself.
+pub fn merge_user_layer(loaded: &mut LoadedManifest) {
+    let home = crate::util::paths::agentstack_home();
+    let user_manifest = home.join(MANIFEST_FILE);
+    if !user_manifest.exists() {
+        return;
+    }
+    // Never merge the layer beneath itself (canonicalize survives symlinked
+    // temp dirs and `~` spellings).
+    let project_dir = loaded
+        .manifest_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let same = match (home.canonicalize(), project_dir.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => home == project_dir,
+    };
+    if same {
+        return;
+    }
+    let Ok(text) = fs::read_to_string(&user_manifest) else {
+        return;
+    };
+    let Ok(user) = toml::from_str::<Manifest>(&text) else {
+        return;
+    };
+    if user.instructions.is_empty() {
+        return;
+    }
+
+    let mut merged = indexmap::IndexMap::new();
+    for (name, mut instr) in user.instructions {
+        if loaded.manifest.instructions.contains_key(&name) {
+            continue; // the project's definition wins
+        }
+        let p = Path::new(&instr.path);
+        if !p.is_absolute() {
+            let rel = p.strip_prefix("./").unwrap_or(p);
+            instr.path = home.join(rel).display().to_string();
+        }
+        instr.from_user_layer = true;
+        merged.insert(name, instr);
+    }
+    if merged.is_empty() {
+        return;
+    }
+    merged.extend(std::mem::take(&mut loaded.manifest.instructions));
+    loaded.manifest.instructions = merged;
+    loaded.user_path = Some(user_manifest);
 }
 
 /// Deep-merge `overlay` into `base`. Tables merge key-by-key (recursively);

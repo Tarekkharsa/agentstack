@@ -93,7 +93,11 @@ pub fn load(manifest_dir: Option<&Path>) -> Result<Context> {
     };
     // Prefer the `.agentstack/` layout, falling back to a legacy root manifest.
     let dir = manifest::resolve_manifest_dir(&base);
-    let loaded = manifest::load_from_dir(&dir)?;
+    let mut loaded = manifest::load_from_dir(&dir)?;
+    // The machine-level manifest's [instructions] merge in beneath every
+    // project load (instructions only — never servers/skills; see
+    // manifest::merge_user_layer for the whole contract).
+    manifest::merge_user_layer(&mut loaded);
     let registry = Registry::load()?;
     let resolver = Chain::default_for_dir(&dir);
     Ok(Context {
