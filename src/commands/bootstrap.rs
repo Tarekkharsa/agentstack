@@ -140,6 +140,7 @@ fn apply_args(args: &BootstrapArgs, write: bool, scope: Scope) -> ApplyArgs {
         write,
         scope: Some(scope),
         allow_unresolved: false,
+        prune_foreign: false,
         no_gitignore: false,
     }
 }

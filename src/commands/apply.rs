@@ -128,6 +128,7 @@ fn render(
 
     println!("Scope: {scope}");
     let mut state = State::load()?;
+    let identity = crate::state::manifest_identity(&ctx.dir);
     let mut changed_count = 0;
     let mut error_count = 0;
     let mut write_blockers = 0;
@@ -146,7 +147,16 @@ fn render(
         };
 
         let key = target_key(id, scope, &ctx.dir);
-        let previously = state.managed_servers(&key);
+        let mut previously = state.managed_servers(&key);
+        // Guard cross-manifest global prunes: entries another manifest applied
+        // are kept (and reported below), not deleted, unless --prune-foreign.
+        let foreign = if args.prune_foreign {
+            Vec::new()
+        } else {
+            state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
+                server_map.contains_key(n)
+            })
+        };
         let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
@@ -167,6 +177,14 @@ fn render(
         }
         for r in &plan.removed {
             println!("  {} pruning '{r}' (no longer in manifest)", "−".yellow());
+        }
+        if !foreign.is_empty() {
+            println!(
+                "  {} keeping {} — applied by another manifest ↳ keep: agentstack adopt · \
+                 prune: agentstack apply --prune-foreign",
+                "⚠".yellow(),
+                foreign.join(", ")
+            );
         }
         for s in &plan.skipped {
             println!(
@@ -203,7 +221,7 @@ fn render(
                 ));
                 touched_targets.insert(desc.display.clone());
                 plan.write()?;
-                state.record(&key, plan.managed.clone(), &plan.proposed);
+                state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
                 crate::usage::bump(&plan.managed);
                 if plan.remove_if_empty_shell(desc) {
                     println!(
@@ -220,7 +238,7 @@ fn render(
         } else {
             // Even with no file change, keep state in sync with reality.
             if will_write {
-                state.record(&key, plan.managed.clone(), &plan.proposed);
+                state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
             }
             println!("  {} up to date", "✓".green());
         }

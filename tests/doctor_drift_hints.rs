@@ -9,7 +9,7 @@ use std::fs;
 use std::sync::Mutex;
 
 use agentstack::commands::doctor;
-use agentstack::state::State;
+use agentstack::state::{manifest_identity, State};
 
 // doctor mutates the process-global HOME; serialize these tests.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -55,15 +55,6 @@ fn pending_prune_names_victims_and_offers_adopt() {
 }
 "#;
     fs::write(&cfg, content).unwrap();
-    // …that a previous apply recorded as managed (hash matches disk, so the
-    // hand-edit branch stays quiet and only the prune warning fires).
-    let mut state = State::default();
-    state.record(
-        "claude-code",
-        vec!["kibana_mcp".into(), "figma".into()],
-        content,
-    );
-    state.save().unwrap();
 
     // The current manifest selects neither server.
     let proj = tmp.path().join("proj");
@@ -73,6 +64,18 @@ fn pending_prune_names_victims_and_offers_adopt() {
         "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
     )
     .unwrap();
+
+    // …that a previous apply of this same manifest recorded as managed (hash
+    // matches disk, so the hand-edit branch stays quiet and only the prune
+    // warning fires).
+    let mut state = State::default();
+    state.record(
+        "claude-code",
+        vec!["kibana_mcp".into(), "figma".into()],
+        content,
+        &manifest_identity(&proj),
+    );
+    state.save().unwrap();
 
     let report = doctor::collect(Some(&proj)).unwrap();
     let drift = section_msgs(&report, "Drift").join("\n");
@@ -87,6 +90,54 @@ fn pending_prune_names_victims_and_offers_adopt() {
     assert!(
         drift.contains("prune them: agentstack apply --write"),
         "prune path must stay available, got: {drift}"
+    );
+}
+
+/// When the managed set was recorded by a *different* manifest, a bare
+/// `apply --write` no longer prunes it (cross-manifest guard) — the hint must
+/// point at the explicit `--prune-foreign` escape hatch instead.
+#[test]
+fn foreign_pending_prune_hints_prune_foreign() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup(&home);
+
+    let cfg = home.join(".claude.json");
+    let content = "{\n  \"mcpServers\": {\n    \"kibana_mcp\": { \"type\": \"http\", \"url\": \"https://kibana/mcp\" }\n  }\n}\n";
+    fs::write(&cfg, content).unwrap();
+
+    // Recorded by manifest A…
+    let proj_a = tmp.path().join("proj-a");
+    fs::create_dir_all(&proj_a).unwrap();
+    fs::write(proj_a.join("agentstack.toml"), "version = 1\n").unwrap();
+    let mut state = State::default();
+    state.record(
+        "claude-code",
+        vec!["kibana_mcp".into()],
+        content,
+        &manifest_identity(&proj_a),
+    );
+    state.save().unwrap();
+
+    // …while doctor runs from manifest B, which doesn't select it.
+    let proj_b = tmp.path().join("proj-b");
+    fs::create_dir_all(&proj_b).unwrap();
+    fs::write(
+        proj_b.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
+    )
+    .unwrap();
+
+    let report = doctor::collect(Some(&proj_b)).unwrap();
+    let drift = section_msgs(&report, "Drift").join("\n");
+    assert!(
+        drift.contains("would REMOVE kibana_mcp"),
+        "victim named, got: {drift}"
+    );
+    assert!(
+        drift.contains("prune them: agentstack apply --prune-foreign"),
+        "foreign prune must point at --prune-foreign, got: {drift}"
     );
 }
 
@@ -105,11 +156,6 @@ fn hand_edit_hints_diff_and_adopt() {
         "{\n  \"mcpServers\": {\n    \"kibana_mcp\": { \"type\": \"http\", \"url\": \"https://kibana/mcp\" }\n  }\n}\n",
     )
     .unwrap();
-    // Recorded hash differs from what's on disk now → the hand-edit branch.
-    let mut state = State::default();
-    state.record("claude-code", vec!["kibana_mcp".into()], "what we wrote");
-    state.save().unwrap();
-
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
     fs::write(
@@ -118,6 +164,16 @@ fn hand_edit_hints_diff_and_adopt() {
          [servers.kibana_mcp]\ntype = \"http\"\nurl = \"https://kibana/mcp\"\n",
     )
     .unwrap();
+
+    // Recorded hash differs from what's on disk now → the hand-edit branch.
+    let mut state = State::default();
+    state.record(
+        "claude-code",
+        vec!["kibana_mcp".into()],
+        "what we wrote",
+        &manifest_identity(&proj),
+    );
+    state.save().unwrap();
 
     let report = doctor::collect(Some(&proj)).unwrap();
     let drift = section_msgs(&report, "Drift").join("\n");

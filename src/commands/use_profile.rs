@@ -79,6 +79,7 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
     );
 
     let mut state = State::load()?;
+    let identity = crate::state::manifest_identity(&ctx.dir);
     let mut wrote = 0;
     let mut blocked_targets: Vec<String> = Vec::new();
     // Project-scope artifacts we write are machine-local (absolute-path
@@ -101,7 +102,16 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         println!("\n{}", desc.display.bold());
 
         // --- servers ---
-        let previously = state.managed_servers(&key);
+        let mut previously = state.managed_servers(&key);
+        // Guard cross-manifest global prunes: entries another manifest applied
+        // are kept (and reported below), not deleted, unless --prune-foreign.
+        let foreign = if args.prune_foreign {
+            Vec::new()
+        } else {
+            state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
+                server_map.contains_key(n)
+            })
+        };
         match crate::render::plan_target_with_servers(
             desc,
             &ctx.resolver,
@@ -112,6 +122,15 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
         )? {
             None => println!("  servers: no {scope} scope"),
             Some(plan) => {
+                if !foreign.is_empty() {
+                    println!(
+                        "  {} keeping {} — applied by another manifest ↳ keep: agentstack adopt · \
+                         prune: agentstack use {} --prune-foreign",
+                        "⚠".yellow(),
+                        foreign.join(", "),
+                        args.profile
+                    );
+                }
                 for u in &plan.unresolved {
                     println!("  {} unresolved secret {}", "✗".red(), u);
                 }
@@ -125,7 +144,7 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
                         );
                     } else if args.write {
                         plan.write()?;
-                        state.record(&key, plan.managed.clone(), &plan.proposed);
+                        state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
                         crate::usage::bump(&plan.managed);
                         wrote += 1;
                         if plan.remove_if_empty_shell(desc) {
@@ -145,7 +164,7 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
                     // reality (mirrors `apply`) — prune tracking and the
                     // .gitignore block depend on it.
                     if args.write && !blocked {
-                        state.record(&key, plan.managed.clone(), &plan.proposed);
+                        state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
                     }
                     println!("  {} servers up to date", "✓".green());
                 }

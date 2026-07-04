@@ -601,6 +601,13 @@ pub struct ApplyArgs {
     #[arg(long)]
     pub allow_unresolved: bool,
 
+    /// Also prune global entries that a *different* manifest applied. By
+    /// default those are kept (and reported) — pruning them would silently
+    /// delete another setup's servers; `agentstack adopt` pulls them into
+    /// this manifest instead.
+    #[arg(long)]
+    pub prune_foreign: bool,
+
     /// Skip the managed .gitignore block for generated project artifacts —
     /// pass this when your team commits the rendered files.
     #[arg(long)]
@@ -638,6 +645,11 @@ pub struct UseArgs {
     /// Allow writing even when a `${REF}` did not resolve (off by default).
     #[arg(long)]
     pub allow_unresolved: bool,
+
+    /// Also prune global entries that a *different* manifest applied (kept
+    /// and reported by default — see `agentstack apply --help`).
+    #[arg(long)]
+    pub prune_foreign: bool,
 
     /// Skip the managed .gitignore block for generated project artifacts —
     /// pass this when your team commits the rendered files.

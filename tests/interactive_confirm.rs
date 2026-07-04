@@ -31,6 +31,7 @@ fn args(write: bool) -> ApplyArgs {
         write,
         scope: Some(Scope::Global),
         allow_unresolved: false,
+        prune_foreign: false,
         no_gitignore: true,
     }
 }

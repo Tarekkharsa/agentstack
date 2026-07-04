@@ -229,6 +229,7 @@ pub fn start(
         scope: Some(scope),
         write: true,
         allow_unresolved: false,
+        prune_foreign: false,
         no_gitignore: false,
     };
     crate::commands::use_profile::run(&use_args, manifest_dir)?;

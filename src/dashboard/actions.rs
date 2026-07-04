@@ -34,7 +34,7 @@ pub fn toggle(
 
     let key = target_key(target, scope, &ctx.dir);
     let mut state = State::load()?;
-    let previously = state.managed_servers(&key);
+    let mut previously = state.managed_servers(&key);
 
     let mut wanted = previously.clone();
     if enable {
@@ -44,6 +44,16 @@ pub fn toggle(
     } else {
         wanted.retain(|s| s != server);
     }
+
+    // Guard cross-manifest global prunes: a toggle only ever intends to touch
+    // `server`, so entries another manifest applied are left alone rather
+    // than swept out by the re-render. The explicitly toggled server stays
+    // prunable — that's the user's intent. (Selection::Explicit drops names
+    // the manifest doesn't know, so a foreign name in `wanted` is a prune
+    // candidate unless filtered here.)
+    state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
+        n == server || (wanted.iter().any(|w| w == n) && manifest.servers.contains_key(n))
+    });
 
     let plan = plan_target(
         manifest,
@@ -65,7 +75,12 @@ pub fn toggle(
         );
     }
     plan.write()?;
-    state.record(&key, plan.managed.clone(), &plan.proposed);
+    state.record(
+        &key,
+        plan.managed.clone(),
+        &plan.proposed,
+        &crate::state::manifest_identity(&ctx.dir),
+    );
     state.save()?;
     crate::usage::bump(&[server.to_string()]);
     Ok(())
