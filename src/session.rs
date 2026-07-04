@@ -24,6 +24,16 @@ use crate::util::paths;
 pub struct SkillAdd {
     pub dir: String,
     pub names: Vec<String>,
+    /// Whether the skills dir already existed before the session started.
+    /// `end` removes the emptied dir only when the session created it —
+    /// exact restore, never deleting a dir the user made. Defaults to true
+    /// so records from older versions conservatively never rmdir.
+    #[serde(default = "default_true")]
+    pub dir_preexisted: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// One on-demand capability load the agent performed during a session — the
@@ -199,10 +209,11 @@ pub fn start(
     let libctx = ctx.library_ctx();
     let server_map = effective_servers(manifest, &libctx.library, &libctx.lib_home, &selection)?;
 
-    // Snapshot: server config files (for undo) + skills dirs (to detect adds).
+    // Snapshot: server config files (for undo) + skills dirs (to detect adds,
+    // and whether each dir pre-existed so `end` can restore exactly).
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
     let mut touched: BTreeSet<String> = BTreeSet::new();
-    let mut skill_before: Vec<(PathBuf, BTreeSet<String>)> = Vec::new();
+    let mut skill_before: Vec<(PathBuf, bool, BTreeSet<String>)> = Vec::new();
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
@@ -218,7 +229,7 @@ pub fn start(
             touched.insert(desc.display.clone());
         }
         if let Some(sd) = desc.skills_dir_for(scope, &ctx.dir) {
-            skill_before.push((sd.clone(), dir_entries(&sd)));
+            skill_before.push((sd.clone(), sd.exists(), dir_entries(&sd)));
         }
     }
 
@@ -239,12 +250,13 @@ pub fn start(
 
     // Which skills did activation add? (so end removes exactly those)
     let mut skill_adds = Vec::new();
-    for (sd, before) in skill_before {
+    for (sd, existed, before) in skill_before {
         let added: Vec<String> = dir_entries(&sd).difference(&before).cloned().collect();
         if !added.is_empty() {
             skill_adds.push(SkillAdd {
                 dir: sd.to_string_lossy().into_owned(),
                 names: added,
+                dir_preexisted: existed,
             });
         }
     }
@@ -290,14 +302,17 @@ pub fn end(manifest_dir: Option<&Path>) -> Result<()> {
     if let Some(hid) = &sess.history_id {
         let _ = crate::history::undo(hid);
     }
-    // 2. Remove the skills the session materialized. If that emptied the
-    //    skills dir, clear it too (rmdir semantics: refuses non-empty dirs,
-    //    so anything the user put there survives).
+    // 2. Remove the skills the session materialized. A dir the session itself
+    //    created is cleared too when emptied (rmdir semantics: refuses
+    //    non-empty dirs) — but a dir that pre-existed the session is left in
+    //    place even if empty: `end` promises an exact restore.
     for sa in &sess.skill_adds {
         for name in &sa.names {
             remove_entry(&Path::new(&sa.dir).join(name));
         }
-        let _ = fs::remove_dir(Path::new(&sa.dir));
+        if !sa.dir_preexisted {
+            let _ = fs::remove_dir(Path::new(&sa.dir));
+        }
     }
     // 3. Uninstall the session plugin.
     if let Some(pl) = &sess.plugin {

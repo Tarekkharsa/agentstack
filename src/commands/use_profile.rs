@@ -201,15 +201,19 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
             println!("  {} skills up to date", "✓".green());
         }
 
-        // Everything this target has managed (fresh or up to date) feeds the
-        // .gitignore block, so idempotent re-runs keep the block stable.
+        // A target that manages ANYTHING (servers or skills) emits its full
+        // stable entry pair — config file + skills dir — so switching between
+        // skills-only and server-only profiles can never churn the block (a
+        // stale-but-stable ignore line is harmless; a churning one dirties
+        // committed files). A fully-deactivated target emits nothing, and the
+        // keep-on-empty splice leaves any existing block intact.
         if scope == Scope::Project && args.write {
-            if !state.managed_servers(&key).is_empty() {
+            let manages_anything =
+                !state.managed_servers(&key).is_empty() || !state.managed_skills(&key).is_empty();
+            if manages_anything {
                 if let Some((cfg, _)) = desc.config_for(scope, &ctx.dir) {
                     ignorable(&cfg, false);
                 }
-            }
-            if !state.managed_skills(&key).is_empty() {
                 ignorable(&skills_dir, true);
             }
         }
