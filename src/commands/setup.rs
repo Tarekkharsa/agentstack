@@ -177,8 +177,19 @@ fn apply_args(args: &SetupArgs, scope: Scope, write: bool) -> ApplyArgs {
 /// Offer to install the agentstack house-rules fragment into the machine-level
 /// manifest and compile it right away. Interactive-only (it's an offer), a
 /// silent no-op when the fragment is already declared, and never fails setup:
-/// the setup itself succeeded either way.
+/// the setup itself succeeded either way, so any error here is logged and
+/// swallowed.
 fn offer_house_rules(ctx: &super::Context, target_ids: &[String]) -> Result<()> {
+    if let Err(err) = offer_house_rules_inner(ctx, target_ids) {
+        println!(
+            "  {} house-rules offer failed ({err:#}) — setup itself succeeded; retry with `agentstack init --global`.",
+            "⚠".yellow()
+        );
+    }
+    Ok(())
+}
+
+fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Result<()> {
     if !crate::util::confirm::is_interactive() {
         return Ok(());
     }
