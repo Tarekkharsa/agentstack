@@ -100,13 +100,20 @@ The complete, implemented-and-tested feature inventory. The
   profile's name refs in `agentstack.lock` **without** rendering configs or
   materializing skills — the lock-only path for clean-at-rest repos that keep
   no generated files. Manage it with `lib add` / `add-server` / `list` /
-  `remove` / `remove-server`. `lib add --path` **copies** the source into
-  `lib/skills/<name>` — the library copy is canonical from then on (edits to
-  the source have no effect), provenance records the original path for
+  `remove` / `remove-server` / `sync`. `lib add --path` **copies** the source
+  into `lib/skills/<name>` — the library copy is canonical from then on (edits
+  to the source have no effect), provenance records the original path for
   `lib list`/`explain`, and a temp-dir source gets a warning since that
-  recorded path will dangle after cleanup. `lib add` also warns when a skill
-  exceeds ~10 MiB — vendored dependencies (node_modules and friends) make
-  every full-library pass pay to read them;
+  recorded path will dangle after cleanup. `lib add --git <url> --subpath <dir>`
+  (or `--git <url>#<dir>`) installs a skill that lives in a repo subdirectory —
+  the marketplace/monorepo layout — recording truthful `git:<url>@<rev>#<dir>`
+  provenance. Every `lib add` runs the same hidden-unicode / prompt-injection
+  content scan as `install`/`audit` before the copy becomes canonical (high
+  findings block unless `--allow-flagged`), and warns when a skill exceeds
+  ~10 MiB — vendored dependencies (node_modules and friends) make every
+  full-library pass pay to read them. `lib sync` versions the library as a git
+  repo across machines (init/clone/pull/commit/push, `--status` to preview);
+  the content-store cache stays local and `${REF}` secrets never travel;
   `consolidate` sweeps scattered skills from every CLI into the library and
   symlinks the originals back; `lib migrate` copies a legacy
   `~/.agentstack/skills/` home in, preview-first and reversible. Provider folders
@@ -419,11 +426,13 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 `upgrade`, `bootstrap` (`--write`), `apply` (`--scope`, `--write`,
 `--prune-foreign`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
-`lib add|add-server|list|remove|remove-server|migrate`, `restore`,
+`lib add|add-server|list|remove|remove-server|migrate|sync`
+(`lib add`: `--path`, `--git`/`--subpath`, `--allow-flagged`), `restore`,
 `doctor` (`--ci`, `--live`, `--fix`, `--deep`), `audit` (`--json`, `--calls`,
-`--since`), `optimize` (`--json`, `--write`, `--since`), `search`,
-`stats` (`--live`),
-`secret set|get|rm|list`, `export`/`import`, `adapters`, `pack init`, `plugins`,
+`--since`), `optimize` (`--json`, `--write`, `--since`), `analyze` (`--json`),
+`search`, `stats` (`--live`),
+`secret set|get|rm|list`, `export`/`import`, `adapters` (`list|show|validate`),
+`pack init`, `plugins`,
 `dashboard`, `mcp` (`--auto-project`), `connect`/`disconnect`,
 `trust` (`--list`, `--revoke`), `codemode`, `hook`, `run`/`runs`/`kill`,
 `self link|which`.

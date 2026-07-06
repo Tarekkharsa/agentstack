@@ -108,6 +108,36 @@ default = ["claude-code", "codex"]
 
 The [feature reference](docs/reference.md) has the complete command list.
 
+## A shared library of skills & servers
+
+Install a capability once into your machine-wide **central library**
+(`~/.agentstack/lib`), then reference it **by name** from any project's profile —
+no copying files between repos.
+
+```bash
+agentstack search codex                    # find shipped skills + registry servers
+agentstack add from run-codex              # add a shipped skill to this manifest
+
+# Add your own — from a local dir, or straight from a git repo:
+agentstack lib add sql-review --path ./skills/sql-review --write
+agentstack lib add improve --git https://github.com/acme/skills \
+    --subpath skills/improve --write       # subdir layouts (marketplaces/monorepos)
+
+agentstack lib list                        # what's installed, with provenance
+```
+
+Every add is content-scanned (hidden-unicode / prompt-injection) before it
+lands. agentstack ships a starter catalog — `run-codex`, `sync-library`,
+`analyze-usage`, `route-by-cost`, `using-agentstack`, and more.
+
+Keep the library consistent across machines by versioning it as a git repo —
+secrets never travel, since server definitions carry `${REF}` placeholders only:
+
+```bash
+agentstack lib sync --init --remote git@github.com:you/agent-lib.git
+agentstack lib sync                        # commit local changes, pull, push
+```
+
 ## Share it with a team
 
 Commit `.agentstack/` (manifest + lock). A teammate — or your CI — then runs:
@@ -135,10 +165,12 @@ steps:
 ## Where rendered files live — pick a mode
 
 You always commit the *intent* (`agentstack.toml` + `.lock`). The rendered
-artifacts (`.mcp.json`, `.claude/skills/`) are a per-project choice:
+artifacts (`.mcp.json`, `.claude/skills/`, and the compiled `CLAUDE.md` /
+`AGENTS.md`) are a per-project choice:
 
 - **Static** (default) — artifacts sit on disk, kept out of git by a managed
-  `.gitignore` block. Works however you launch your tools.
+  `.gitignore` block, so a repo tracks only your `.agentstack/` intent. Works
+  however you launch your tools. (Pass `--no-gitignore` to commit them instead.)
 - **Clean-at-rest** — nothing generated exists between sessions; profiles are
   injected by `agentstack run` / `session start` and reverted on exit.
   `git status` stays silent.
@@ -164,6 +196,9 @@ Details and trade-offs: [feature reference → three modes](docs/reference.md).
 - **Personal layer** — `agentstack init --global` gives your machine-wide
   instructions a home; they merge beneath every project without ever landing
   in a repo's committed files.
+- **Usage insight** — `agentstack analyze` reports what you actually call (from
+  the runtime audit log) and flags library capabilities you installed but never
+  use, so pruning is data-driven. Read-only and local.
 
 The closed loop in under a minute — install a versioned pack, spread it to
 every CLI, firewall a tool, watch the refusal in the audit log, upgrade to the
@@ -184,8 +219,10 @@ PATH; `self which` verifies what a bare `agentstack` runs). Don't wrap the
 binary in a shell function or alias — those exist only in interactive shells,
 so agent harnesses and scripts won't see them.
 
-Adding a CLI is one YAML descriptor — see `adapters/codex.yaml`; drop your own
-into `~/.agentstack/adapters/` without rebuilding.
+Adding a CLI is one YAML descriptor — copy `adapters/codex.yaml`, check it with
+`agentstack adapters validate my-agent.yaml`, then drop it into
+`~/.agentstack/adapters/` (no rebuild). `agentstack adapters list` marks which
+adapters are yours; a broken drop-in is skipped with a warning, never fatal.
 
 ## License
 
