@@ -19,6 +19,9 @@ note() { printf '  \033[2m%s\033[0m\n' "$*"; }
 # ── isolated sandbox (nothing touches your real config) ──────────────────────
 SBX="$(mktemp -d)"; export AGENTSTACK_HOME="$SBX/home"; export HOME="$SBX/fakehome"
 mkdir -p "$AGENTSTACK_HOME" "$HOME"
+# the sandbox HOME has no git identity; the library-sync scene commits
+export GIT_AUTHOR_NAME="demo" GIT_AUTHOR_EMAIL="demo@example.com"
+export GIT_COMMITTER_NAME="demo" GIT_COMMITTER_EMAIL="demo@example.com"
 SBXC="$(cd "$SBX" && pwd -P)"        # canonical form (macOS: /var → /private/var)
 trap 'rm -rf "$SBX"' EXIT
 
@@ -105,5 +108,32 @@ run 'demo__secret_read   # denied by [policy.tools] demo = "!secret_read"'
 callsecret
 tail -1 "$AGENTSTACK_HOME/audit/calls.jsonl" | python3 -c "import json,sys;d=json.load(sys.stdin);print('  audit:',{k:d.get(k) for k in ['tool','outcome','detail']})"
 
-say "That's the gate: clone → inert → review → trust → firewalled → audited."
-printf '\033[1;32m  Nothing an agent can touch that you didn'\''t review. No files copied into the repo.\033[0m\n\n'
+say "One more gate: your central library syncs machine-to-machine over git. Secrets don't."
+git init --bare -q "$SBX/remote.git"
+rm -rf "$AGENTSTACK_HOME/lib"
+"$AS" lib sync --init --remote "$SBX/remote.git" >/dev/null 2>&1   # clone the (empty) team remote
+mkdir -p "$AGENTSTACK_HOME/lib/servers"
+cat > "$AGENTSTACK_HOME/lib/servers/payments.toml" <<'EOF'
+type = "http"
+url = "https://payments.internal/mcp"
+
+[headers]
+Authorization = "Bearer sk-live-9f3a1c"
+EOF
+note 'someone pastes a REAL token into a shared server definition…'
+run "agentstack lib sync"
+"$AS" lib sync 2>&1 | clean | sed 's/^/  /' || true
+
+say "Blocked before it ever reaches a commit. Make it a \${REF} and it travels safely:"
+cat > "$AGENTSTACK_HOME/lib/servers/payments.toml" <<'EOF'
+type = "http"
+url = "https://payments.internal/mcp"
+
+[headers]
+Authorization = "Bearer ${PAYMENTS_TOKEN}"
+EOF
+run "agentstack lib sync"
+"$AS" lib sync 2>&1 | clean | sed 's/^/  /'
+
+say "That's the gate: clone → inert → review → trust → firewalled → audited — and secrets never travel."
+printf '\033[1;32m  Nothing an agent can touch that you didn'\''t review. Nothing secret ever pushed.\033[0m\n\n'
