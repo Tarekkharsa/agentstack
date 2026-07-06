@@ -790,6 +790,26 @@ pub enum LibKind {
     /// Migrate skills from the legacy `~/.agentstack/skills/` home into the
     /// central library. Copy-first and reversible: originals are left in place.
     Migrate(LibMigrateArgs),
+    /// Sync the central library across machines as a git repo (commit local
+    /// changes, pull, push). Secrets never travel — server defs are `${REF}`.
+    Sync(LibSyncArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct LibSyncArgs {
+    /// Set up the library as a git repo (first-time). With --remote pointing at
+    /// an existing library repo and an empty/absent library, this clones it.
+    #[arg(long)]
+    pub init: bool,
+    /// The git remote URL — recorded on --init, or added/updated on a later run.
+    #[arg(long)]
+    pub remote: Option<String>,
+    /// Show working-tree changes and ahead/behind vs. the remote; change nothing.
+    #[arg(long)]
+    pub status: bool,
+    /// Commit message for local changes (default: a snapshot line).
+    #[arg(long)]
+    pub message: Option<String>,
 }
 
 #[derive(Args, Debug)]

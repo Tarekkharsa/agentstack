@@ -15,7 +15,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::{
     LibAddArgs, LibAddServerArgs, LibArgs, LibKind, LibMigrateArgs, LibRemoveArgs,
-    LibRemoveServerArgs,
+    LibRemoveServerArgs, LibSyncArgs,
 };
 use crate::library::{Library, LibraryServer, LibrarySkill};
 use crate::manifest::{Server, Skill};
@@ -35,6 +35,7 @@ pub fn run(args: &LibArgs, manifest_dir: Option<&Path>) -> Result<()> {
         LibKind::Remove(a) => remove(a),
         LibKind::RemoveServer(a) => remove_server_cli(a),
         LibKind::Migrate(a) => migrate(a),
+        LibKind::Sync(a) => sync(a),
     }
 }
 
@@ -1018,6 +1019,218 @@ fn is_temp_path(p: &Path) -> bool {
         };
         under(r) || r_canon.as_deref().is_some_and(under)
     })
+}
+
+// ---------- lib sync (cross-machine) ----------
+//
+// The central library (`~/.agentstack/lib`) is versioned as an ordinary git
+// repo the user pushes/pulls across machines. The content-store cache lives
+// *outside* it (`~/.agentstack/store`), so it never travels; server definitions
+// carry `${REF}` placeholders only, so no secret value is ever committed.
+
+const LIB_GITIGNORE: &str = "# agentstack central library — synced across machines.\n\
+     # The content store cache lives outside this repo (~/.agentstack/store) and\n\
+     # never travels. Nothing secret belongs here: server defs are ${REF} only.\n\
+     .DS_Store\n";
+
+/// Run git in `dir`, returning trimmed stdout; a non-zero exit is an error
+/// carrying git's stderr.
+fn git_out(dir: &Path, args: &[&str]) -> Result<String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .context("running git (is it installed?)")?;
+    if !out.status.success() {
+        bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Whether a git invocation succeeds — for probing state (remote set, upstream).
+fn git_ok(dir: &Path, args: &[&str]) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn sync(args: &LibSyncArgs) -> Result<()> {
+    let lib = paths::lib_home();
+
+    if args.init {
+        return sync_init(&lib, args.remote.as_deref());
+    }
+    if !lib.join(".git").exists() {
+        bail!(
+            "the central library at {} is not a git repo yet — run \
+             `agentstack lib sync --init [--remote <url>]`",
+            lib.display()
+        );
+    }
+    if let Some(url) = &args.remote {
+        set_remote(&lib, url)?;
+        println!("{} remote set → {url}", "✓".green());
+    }
+    if args.status {
+        return sync_status(&lib);
+    }
+    sync_now(&lib, args.message.as_deref())
+}
+
+/// First-time setup. With a remote and an empty/absent library, clone it (fresh
+/// machine); otherwise `git init` the local library in place.
+fn sync_init(lib: &Path, remote: Option<&str>) -> Result<()> {
+    if lib.join(".git").exists() {
+        println!("{} already a git repo at {}", "✓".green(), lib.display());
+        if let Some(url) = remote {
+            set_remote(lib, url)?;
+            println!("  remote → {url}");
+        }
+        return Ok(());
+    }
+
+    let empty = std::fs::read_dir(lib)
+        .map(|mut d| d.next().is_none())
+        .unwrap_or(true);
+    if empty {
+        let Some(url) = remote else {
+            bail!(
+                "the central library at {} is empty — add a skill/server first, \
+                 or pass --remote <url> to clone an existing library",
+                lib.display()
+            );
+        };
+        if let Some(parent) = lib.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let out = std::process::Command::new("git")
+            .args(["clone", url, &lib.to_string_lossy()])
+            .output()
+            .context("running git clone")?;
+        if !out.status.success() {
+            bail!(
+                "git clone failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        println!(
+            "{} cloned library from {url} → {}",
+            "✓".green(),
+            lib.display()
+        );
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(lib)?;
+    git_out(lib, &["init"])?;
+    let gitignore = lib.join(".gitignore");
+    if !gitignore.exists() {
+        std::fs::write(&gitignore, LIB_GITIGNORE)
+            .with_context(|| format!("writing {}", gitignore.display()))?;
+    }
+    git_out(lib, &["add", "-A"])?;
+    git_out(lib, &["commit", "-m", "agentstack library snapshot"])?;
+    println!(
+        "{} initialized library git repo at {}",
+        "✓".green(),
+        lib.display()
+    );
+    if let Some(url) = remote {
+        set_remote(lib, url)?;
+        println!("  remote → {url}");
+        println!("  run `agentstack lib sync` to push");
+    }
+    Ok(())
+}
+
+/// Add or update the `origin` remote.
+fn set_remote(lib: &Path, url: &str) -> Result<()> {
+    if git_ok(lib, &["remote", "get-url", "origin"]) {
+        git_out(lib, &["remote", "set-url", "origin", url])?;
+    } else {
+        git_out(lib, &["remote", "add", "origin", url])?;
+    }
+    Ok(())
+}
+
+/// Read-only report: working-tree changes + ahead/behind vs. the remote.
+fn sync_status(lib: &Path) -> Result<()> {
+    let dirty = git_out(lib, &["status", "--short"])?;
+    if dirty.is_empty() {
+        println!("{} working tree clean", "✓".green());
+    } else {
+        println!("{} local changes:", "→".cyan());
+        for line in dirty.lines() {
+            println!("    {line}");
+        }
+    }
+    if git_ok(lib, &["rev-parse", "--abbrev-ref", "@{u}"]) {
+        let _ = std::process::Command::new("git")
+            .arg("-C")
+            .arg(lib)
+            .args(["fetch", "--quiet"])
+            .output();
+        if let Ok(counts) = git_out(lib, &["rev-list", "--left-right", "--count", "@{u}...HEAD"]) {
+            let mut it = counts.split_whitespace();
+            let behind = it.next().unwrap_or("0");
+            let ahead = it.next().unwrap_or("0");
+            println!("  {ahead} ahead, {behind} behind the remote");
+        }
+    } else {
+        println!("  no remote tracking branch yet (run `agentstack lib sync` to push)");
+    }
+    Ok(())
+}
+
+/// Commit local changes, then pull + push if a remote is configured.
+fn sync_now(lib: &Path, message: Option<&str>) -> Result<()> {
+    let dirty = git_out(lib, &["status", "--short"])?;
+    if dirty.is_empty() {
+        println!("{} no local changes", "·".dimmed());
+    } else {
+        git_out(lib, &["add", "-A"])?;
+        let msg = message.unwrap_or("agentstack library sync");
+        git_out(lib, &["commit", "-m", msg])?;
+        println!("{} committed local changes", "✓".green());
+    }
+
+    if !git_ok(lib, &["remote", "get-url", "origin"]) {
+        println!("  no remote configured — run `agentstack lib sync --remote <url>` to set one");
+        return Ok(());
+    }
+    let branch = git_out(lib, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    if git_ok(lib, &["rev-parse", "--abbrev-ref", "@{u}"]) {
+        // A rebase pull keeps history linear; surface conflicts for the user to
+        // resolve rather than leaving a half-finished merge.
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(lib)
+            .args(["pull", "--rebase"])
+            .output()
+            .context("running git pull")?;
+        if !out.status.success() {
+            bail!(
+                "git pull --rebase failed: {}\nresolve in {} then re-run `agentstack lib sync`",
+                String::from_utf8_lossy(&out.stderr).trim(),
+                lib.display()
+            );
+        }
+        println!("{} pulled from remote", "✓".green());
+        git_out(lib, &["push"])?;
+    } else {
+        git_out(lib, &["push", "-u", "origin", &branch])?;
+    }
+    println!("{} pushed to remote", "✓".green());
+    Ok(())
 }
 
 fn require_skill_md(dir: &Path) -> Result<()> {
