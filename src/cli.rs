@@ -27,7 +27,7 @@ run `agentstack <command> --help` for any of them:
   Capabilities & library   remove · install · update · lock · upgrade · lib · consolidate · adopt
   Activate & run           use · session · run · runs · kill · hook
   Zero-files bridge        connect · trust · disconnect · mcp · codemode
-  Inspect & tune           diff · explain · audit · optimize · stats · restore · secret
+  Inspect & tune           diff · explain · audit · analyze · stats · restore · secret
   Share & extend           export · import · pack · plugins · adapters · self"
 )]
 pub struct Cli {
@@ -209,6 +209,10 @@ pub enum Command {
     /// Show local usage analytics (activation counts + footprint + context cost).
     #[command(hide = true)]
     Stats(StatsArgs),
+
+    /// Report brokered call activity (from the audit log) and library-wide dead
+    /// weight — capabilities installed but never used. Read-only, local.
+    Analyze(AnalyzeArgs),
 
     /// Restore a CLI config from its pre-write backup (undo an apply).
     #[command(hide = true)]
@@ -960,6 +964,13 @@ pub struct StatsArgs {
     /// the manifest's servers once.
     #[arg(long)]
     pub live: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct AnalyzeArgs {
+    /// Emit the report as JSON (for the dashboard or further processing).
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]
