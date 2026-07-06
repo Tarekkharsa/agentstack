@@ -374,16 +374,28 @@ fn run_checks(
         if plan.changed() {
             // An unresolved `${REF}` must never reach a live config — same gate
             // as `apply`/`toggle`. `doctor --fix` has no override, so we refuse.
-            if args.fix && !plan.unresolved.is_empty() {
+            if args.fix && (!plan.unresolved.is_empty() || !plan.failed.is_empty()) {
                 any_drift = true;
-                report.line(
-                    Level::Error,
-                    format!(
-                        "{:<14} not fixed — unresolved secret(s): {}",
-                        desc.display,
-                        plan.unresolved.join(", ")
-                    ),
-                );
+                if !plan.unresolved.is_empty() {
+                    report.line(
+                        Level::Error,
+                        format!(
+                            "{:<14} not fixed — unresolved secret(s): {}",
+                            desc.display,
+                            plan.unresolved.join(", ")
+                        ),
+                    );
+                }
+                if !plan.failed.is_empty() {
+                    report.line(
+                        Level::Error,
+                        format!(
+                            "{:<14} not fixed — secret read failure(s): {}",
+                            desc.display,
+                            plan.failed.join(", ")
+                        ),
+                    );
+                }
             } else if args.fix {
                 plan.write()?;
                 state.record(&key, plan.managed.clone(), &plan.proposed, &identity);

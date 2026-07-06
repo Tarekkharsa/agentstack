@@ -7,14 +7,18 @@ use serde_json::{Map, Value};
 
 use super::descriptor::{AdapterDescriptor, SecretMode};
 use crate::manifest::{Server, ServerType};
-use crate::secret::Resolver;
+use crate::secret::{Lookup, Resolver};
 
 /// A rendered server entry plus any secret references that could not be
 /// resolved on this machine (surfaced by `doctor`/`apply`).
 pub struct Rendered {
     /// The server body, keyed by the server name.
     pub value: Value,
+    /// `${REF}`s no secret store has (genuinely not set).
     pub unresolved: Vec<String>,
+    /// `${REF}`s a store errored on while reading — `(name, why)`. Not the
+    /// same as unresolved: the secret may well be set, the read failed.
+    pub failed: Vec<(String, String)>,
     /// Whether this adapter's config format can represent this server's
     /// transport at all. `false` means the descriptor maps no field for the
     /// server's defining attribute (e.g. an HTTP server for the stdio-only
@@ -31,12 +35,14 @@ pub fn render_server(
 ) -> Rendered {
     let mut body: Map<String, Value> = Map::new();
     let mut unresolved: Vec<String> = Vec::new();
+    let mut failed: Vec<(String, String)> = Vec::new();
 
     // CLIs with no MCP support render nothing.
     let Some(mcp) = desc.mcp.as_ref() else {
         return Rendered {
             value: Value::Object(body),
             unresolved,
+            failed,
             representable: false,
         };
     };
@@ -50,7 +56,7 @@ pub fn render_server(
     };
 
     let passthrough = mcp.secret_mode == SecretMode::Passthrough;
-    let mut sub = |s: &str| substitute(s, resolver, passthrough, &mut unresolved);
+    let mut sub = |s: &str| substitute_with(s, resolver, passthrough, &mut unresolved, &mut failed);
 
     // 1. Transport tag (e.g. Claude's "type": "http").
     if let Some(t) = &mcp.transport {
@@ -118,17 +124,19 @@ pub fn render_server(
         for (k, v) in extra {
             body.insert(
                 k.clone(),
-                substitute_value(v, resolver, passthrough, &mut unresolved),
+                substitute_value(v, resolver, passthrough, &mut unresolved, &mut failed),
             );
         }
     }
 
-    // De-duplicate unresolved refs while keeping first-seen order.
+    // De-duplicate refs while keeping first-seen order.
     unresolved.dedup();
+    failed.dedup_by(|a, b| a.0 == b.0);
 
     Rendered {
         value: Value::Object(body),
         unresolved,
+        failed,
         representable,
     }
 }
@@ -140,12 +148,19 @@ fn substitute_value(
     resolver: &dyn Resolver,
     passthrough: bool,
     unresolved: &mut Vec<String>,
+    failed: &mut Vec<(String, String)>,
 ) -> Value {
     match v {
-        Value::String(s) => Value::String(substitute(s, resolver, passthrough, unresolved)),
+        Value::String(s) => Value::String(substitute_with(
+            s,
+            resolver,
+            passthrough,
+            unresolved,
+            failed,
+        )),
         Value::Array(a) => Value::Array(
             a.iter()
-                .map(|el| substitute_value(el, resolver, passthrough, unresolved))
+                .map(|el| substitute_value(el, resolver, passthrough, unresolved, failed))
                 .collect(),
         ),
         Value::Object(o) => Value::Object(
@@ -153,7 +168,7 @@ fn substitute_value(
                 .map(|(k, el)| {
                     (
                         k.clone(),
-                        substitute_value(el, resolver, passthrough, unresolved),
+                        substitute_value(el, resolver, passthrough, unresolved, failed),
                     )
                 })
                 .collect(),
@@ -162,15 +177,36 @@ fn substitute_value(
     }
 }
 
-/// Replace every `${NAME}` token in `s`. In passthrough mode the token is left
-/// verbatim. Otherwise it is resolved; unresolved tokens are recorded and left
-/// in place (never silently blanked). Spans that are not valid reference names
-/// (shell syntax like `${VAR:-fallback}`) are left verbatim and not recorded.
+/// [`substitute_with`] for callers with a single issue channel (hooks,
+/// settings, gateway): read failures fold into `unresolved` with the failure
+/// message attached, so they still block writes and read honestly.
 pub(crate) fn substitute(
     s: &str,
     resolver: &dyn Resolver,
     passthrough: bool,
     unresolved: &mut Vec<String>,
+) -> String {
+    let mut failed = Vec::new();
+    let out = substitute_with(s, resolver, passthrough, unresolved, &mut failed);
+    unresolved.extend(
+        failed
+            .into_iter()
+            .map(|(name, why)| format!("{name} — {why}")),
+    );
+    out
+}
+
+/// Replace every `${NAME}` token in `s`. In passthrough mode the token is left
+/// verbatim. Otherwise it is resolved; tokens that don't resolve are recorded
+/// and left in place (never silently blanked) — misses in `unresolved`, store
+/// read errors in `failed`. Spans that are not valid reference names (shell
+/// syntax like `${VAR:-fallback}`) are left verbatim and not recorded.
+pub(crate) fn substitute_with(
+    s: &str,
+    resolver: &dyn Resolver,
+    passthrough: bool,
+    unresolved: &mut Vec<String>,
+    failed: &mut Vec<(String, String)>,
 ) -> String {
     if passthrough || !s.contains("${") {
         return s.to_string();
@@ -183,10 +219,14 @@ pub(crate) fn substitute(
             if let Some(end) = inner.find('}') {
                 let name = &inner[..end];
                 if crate::secret::is_ref_name(name) {
-                    match resolver.resolve(name) {
-                        Some(val) => out.push_str(&val),
-                        None => {
+                    match resolver.lookup(name) {
+                        Lookup::Found(val) => out.push_str(&val),
+                        Lookup::Missing => {
                             unresolved.push(name.to_string());
+                            out.push_str(&rest[..2 + end + 1]); // keep `${NAME}`
+                        }
+                        Lookup::Failed(why) => {
+                            failed.push((name.to_string(), why));
                             out.push_str(&rest[..2 + end + 1]); // keep `${NAME}`
                         }
                     }
@@ -368,6 +408,47 @@ mod tests {
         );
         assert_eq!(out, "héllo v Ω=${GREETING:-héllo}");
         assert!(unresolved.is_empty());
+    }
+
+    #[test]
+    fn failed_store_read_is_failed_not_unresolved() {
+        struct FailingResolver;
+        impl Resolver for FailingResolver {
+            fn resolve(&self, name: &str) -> Option<String> {
+                self.lookup(name).found()
+            }
+            fn lookup(&self, _name: &str) -> Lookup {
+                Lookup::Failed("keychain read failed: timeout".into())
+            }
+        }
+
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("claude-code").unwrap();
+        let s = server(
+            r#"
+            type = "http"
+            url = "https://x"
+            headers = { Authorization = "Bearer ${TOK}" }
+            "#,
+        );
+        let r = render_server(desc, &s, &FailingResolver);
+        assert!(r.unresolved.is_empty(), "a read error is not a miss");
+        assert_eq!(
+            r.failed,
+            vec![(
+                "TOK".to_string(),
+                "keychain read failed: timeout".to_string()
+            )]
+        );
+        // The token stays in place, same as an unresolved ref.
+        assert_eq!(r.value["headers"]["Authorization"], "Bearer ${TOK}");
+
+        // The single-channel wrapper folds the failure into `unresolved`
+        // with the message attached (hooks/settings/gateway path).
+        let mut unresolved = Vec::new();
+        let out = substitute("${TOK}", &FailingResolver, false, &mut unresolved);
+        assert_eq!(out, "${TOK}");
+        assert_eq!(unresolved, vec!["TOK — keychain read failed: timeout"]);
     }
 
     #[test]

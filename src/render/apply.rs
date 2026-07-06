@@ -34,8 +34,12 @@ pub struct TargetPlan {
     pub managed: Vec<String>,
     /// Names we previously managed but pruned this run (left the selection).
     pub removed: Vec<String>,
-    /// `${REF}`s that did not resolve on this machine.
+    /// `${REF}`s that did not resolve on this machine (no store has them).
     pub unresolved: Vec<String>,
+    /// `${REF}`s a secret store errored on while reading (e.g. a keychain
+    /// failure) — the secret may be set; the read failed. Blocks writes like
+    /// `unresolved`, but is reported as a read failure, not a missing secret.
+    pub failed: Vec<String>,
     /// Selected servers this target's config format can't represent (e.g. an
     /// HTTP server for the stdio-only Claude Desktop config). Skipped from the
     /// render rather than written as an empty entry; surfaced so the user knows
@@ -186,6 +190,7 @@ pub fn plan_target_with_servers(
 
     let mut entries: Vec<(String, Value)> = Vec::new();
     let mut unresolved: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
     let mut managed: Vec<String> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
     for (name, server) in servers {
@@ -198,6 +203,9 @@ pub fn plan_target_with_servers(
         }
         for u in rendered.unresolved {
             unresolved.push(format!("{u} (server '{name}')"));
+        }
+        for (f, why) in rendered.failed {
+            failed.push(format!("{f} (server '{name}') — {why}"));
         }
         entries.push((name.clone(), rendered.value));
         managed.push(name.clone());
@@ -244,6 +252,7 @@ pub fn plan_target_with_servers(
         managed,
         removed,
         unresolved,
+        failed,
         skipped,
     }))
 }
@@ -500,6 +509,78 @@ mod tests {
         );
 
         std::env::remove_var("AGENTSTACK_HOME");
+        std::env::remove_var("HOME");
+    }
+
+    #[test]
+    fn one_resolution_per_ref_per_run_across_targets() {
+        // The observed bug: apply resolved KIBANA_TOKEN fresh for every
+        // target × server; a transient keychain failure partway through the
+        // run made the same secret "unresolved" for the last targets only.
+        // The chain must read each distinct ref once per run, so every target
+        // sees the same value — even if the store turns flaky afterwards.
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        /// Succeeds only on the very first read, then fails forever.
+        struct FirstReadOnly {
+            calls: Rc<Cell<usize>>,
+        }
+        impl crate::secret::Resolver for FirstReadOnly {
+            fn resolve(&self, name: &str) -> Option<String> {
+                self.lookup(name).found()
+            }
+            fn lookup(&self, _name: &str) -> crate::secret::Lookup {
+                self.calls.set(self.calls.get() + 1);
+                if self.calls.get() == 1 {
+                    crate::secret::Lookup::Found("secret123".into())
+                } else {
+                    crate::secret::Lookup::Failed("keychain read failed: flaky".into())
+                }
+            }
+        }
+
+        let calls = Rc::new(Cell::new(0));
+        let chain = crate::secret::Chain::new(vec![Box::new(FirstReadOnly {
+            calls: calls.clone(),
+        })]);
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [servers.kibana_mcp]
+            type = "http"
+            url = "https://x/mcp"
+            headers = { Authorization = "Bearer ${KIBANA_TOKEN}" }
+            "#,
+        )
+        .unwrap();
+        let servers: IndexMap<String, Server> = manifest.servers.clone();
+
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        let reg = Registry::load().unwrap();
+        let proj = assert_fs::TempDir::new().unwrap();
+
+        // Same run (same chain), several targets — as `apply --write` does.
+        for target in ["claude-code", "opencode", "codex"] {
+            let desc = reg.get(target).unwrap();
+            let plan =
+                plan_target_with_servers(desc, &chain, &servers, &[], Scope::Global, proj.path())
+                    .unwrap()
+                    .unwrap();
+            assert!(
+                plan.unresolved.is_empty() && plan.failed.is_empty(),
+                "{target} must reuse the first resolution, got unresolved={:?} failed={:?}",
+                plan.unresolved,
+                plan.failed
+            );
+            assert!(plan.proposed.contains("secret123"), "{}", plan.proposed);
+        }
+        assert_eq!(calls.get(), 1, "one store read per distinct ref per run");
         std::env::remove_var("HOME");
     }
 

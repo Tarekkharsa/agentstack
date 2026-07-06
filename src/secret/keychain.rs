@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 
-use super::Resolver;
+use super::{Lookup, Resolver};
 
 /// Service name under which all agentstack secrets are stored.
 pub const SERVICE: &str = "agentstack";
@@ -16,7 +16,26 @@ pub struct KeychainResolver;
 
 impl Resolver for KeychainResolver {
     fn resolve(&self, name: &str) -> Option<String> {
-        entry(name).ok()?.get_password().ok()
+        self.lookup(name).found()
+    }
+
+    fn lookup(&self, name: &str) -> Lookup {
+        read_with_retry(|| get(name))
+    }
+}
+
+/// A keychain read can fail transiently (the `security` daemon under load);
+/// retry once, and report a persistent failure as [`Lookup::Failed`]. Reading
+/// "error" as "not stored" is what used to block `apply` with a bogus
+/// "unresolved secret" for a secret that is in the keychain.
+fn read_with_retry(read: impl Fn() -> Result<Option<String>>) -> Lookup {
+    if let Ok(outcome) = read() {
+        return outcome.map_or(Lookup::Missing, Lookup::Found);
+    }
+    match read() {
+        Ok(Some(v)) => Lookup::Found(v),
+        Ok(None) => Lookup::Missing,
+        Err(e) => Lookup::Failed(format!("keychain read failed: {e:#}")),
     }
 }
 
@@ -47,5 +66,51 @@ pub fn delete(name: &str) -> Result<bool> {
         Ok(()) => Ok(true),
         Err(keyring::Error::NoEntry) => Ok(false),
         Err(e) => Err(e).with_context(|| format!("deleting secret '{name}' from keychain")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn retry_recovers_from_one_transient_failure() {
+        let calls = Cell::new(0);
+        let out = read_with_retry(|| {
+            calls.set(calls.get() + 1);
+            if calls.get() == 1 {
+                anyhow::bail!("security daemon timed out")
+            }
+            Ok(Some("v".to_string()))
+        });
+        assert_eq!(out, Lookup::Found("v".into()));
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn persistent_failure_reports_failed_not_missing() {
+        let calls = Cell::new(0);
+        let out = read_with_retry(|| {
+            calls.set(calls.get() + 1);
+            anyhow::bail!("security daemon timed out")
+        });
+        let Lookup::Failed(msg) = out else {
+            panic!("expected Failed, got {out:?}");
+        };
+        assert!(msg.contains("keychain read failed"), "{msg}");
+        assert!(msg.contains("security daemon timed out"), "{msg}");
+        assert_eq!(calls.get(), 2, "exactly one retry");
+    }
+
+    #[test]
+    fn genuine_not_found_is_missing_without_retry() {
+        let calls = Cell::new(0);
+        let out = read_with_retry(|| {
+            calls.set(calls.get() + 1);
+            Ok(None)
+        });
+        assert_eq!(out, Lookup::Missing);
+        assert_eq!(calls.get(), 1, "a clean miss is not retried");
     }
 }

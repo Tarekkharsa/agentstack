@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
 
 pub mod keychain;
 pub mod varlock;
@@ -21,19 +22,57 @@ pub mod varlock;
 pub use keychain::KeychainResolver;
 pub use varlock::VarlockResolver;
 
+/// The outcome of one reference lookup. `Failed` is a backing store erroring
+/// while reading (e.g. a keychain timeout) — distinct from `Missing` so callers
+/// don't misreport a transient read failure as "secret not set".
+#[derive(Clone, Debug, PartialEq)]
+pub enum Lookup {
+    Found(String),
+    /// No store has this name.
+    Missing,
+    /// A store errored while reading; the message names the store and cause.
+    Failed(String),
+}
+
+impl Lookup {
+    pub fn found(self) -> Option<String> {
+        match self {
+            Lookup::Found(v) => Some(v),
+            _ => None,
+        }
+    }
+}
+
 /// Anything that can turn a reference name into its secret value.
 pub trait Resolver {
     fn resolve(&self, name: &str) -> Option<String>;
+
+    /// Error-aware lookup. The default can't tell a read failure from a miss;
+    /// resolvers with fallible backends (keychain) override it.
+    fn lookup(&self, name: &str) -> Lookup {
+        match self.resolve(name) {
+            Some(v) => Lookup::Found(v),
+            None => Lookup::Missing,
+        }
+    }
 }
 
 /// Tries each resolver in order, returning the first hit.
 pub struct Chain {
     links: Vec<Box<dyn Resolver>>,
+    /// One lookup per distinct name per `Chain` (≈ per command run). Rendering
+    /// re-resolves the same `${REF}` for every target × server; without the
+    /// cache a single flaky keychain read mid-run makes the ref resolve for
+    /// some targets and count as unresolved for others.
+    cache: Mutex<HashMap<String, Lookup>>,
 }
 
 impl Chain {
     pub fn new(links: Vec<Box<dyn Resolver>>) -> Self {
-        Chain { links }
+        Chain {
+            links,
+            cache: Mutex::new(HashMap::new()),
+        }
     }
 
     /// The default chain for a manifest directory: env → varlock → keychain →
@@ -47,13 +86,46 @@ impl Chain {
         if let Some(dotenv) = DotEnvResolver::from_dir(dir) {
             links.push(Box::new(dotenv));
         }
-        Chain { links }
+        Chain::new(links)
     }
 }
 
 impl Resolver for Chain {
     fn resolve(&self, name: &str) -> Option<String> {
-        self.links.iter().find_map(|l| l.resolve(name))
+        self.lookup(name).found()
+    }
+
+    fn lookup(&self, name: &str) -> Lookup {
+        if let Some(hit) = self.cache.lock().unwrap().get(name) {
+            return hit.clone();
+        }
+        // A failed link doesn't stop the walk — a later store may still have
+        // the value. Only when nothing has it does the failure win over
+        // `Missing`, so the caller reports "read failed", not "not set".
+        let mut failure: Option<Lookup> = None;
+        let mut out = Lookup::Missing;
+        for link in &self.links {
+            match link.lookup(name) {
+                Lookup::Found(v) => {
+                    out = Lookup::Found(v);
+                    break;
+                }
+                Lookup::Failed(e) => {
+                    failure.get_or_insert(Lookup::Failed(e));
+                }
+                Lookup::Missing => {}
+            }
+        }
+        if out == Lookup::Missing {
+            if let Some(f) = failure {
+                out = f;
+            }
+        }
+        self.cache
+            .lock()
+            .unwrap()
+            .insert(name.to_string(), out.clone());
+        out
     }
 }
 
@@ -246,5 +318,66 @@ mod tests {
             Box::new(MapResolver::from([("X", "second")])),
         ]);
         assert_eq!(chain.resolve("X").as_deref(), Some("first"));
+    }
+
+    /// Counts lookups delegated to an inner resolver.
+    pub(crate) struct CountingResolver<R> {
+        pub inner: R,
+        pub calls: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl<R: Resolver> Resolver for CountingResolver<R> {
+        fn resolve(&self, name: &str) -> Option<String> {
+            self.lookup(name).found()
+        }
+        fn lookup(&self, name: &str) -> Lookup {
+            self.calls.set(self.calls.get() + 1);
+            self.inner.lookup(name)
+        }
+    }
+
+    #[test]
+    fn chain_resolves_each_name_once() {
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let chain = Chain::new(vec![Box::new(CountingResolver {
+            inner: MapResolver::from([("X", "v")]),
+            calls: calls.clone(),
+        })]);
+        assert_eq!(chain.resolve("X").as_deref(), Some("v"));
+        assert_eq!(chain.resolve("X").as_deref(), Some("v"));
+        assert_eq!(chain.lookup("X"), Lookup::Found("v".into()));
+        assert_eq!(calls.get(), 1, "hit cached after the first lookup");
+
+        // Misses are cached too — a consistent outcome per name per run.
+        calls.set(0);
+        assert_eq!(chain.resolve("MISSING"), None);
+        assert_eq!(chain.resolve("MISSING"), None);
+        assert_eq!(calls.get(), 1, "miss cached after the first lookup");
+    }
+
+    struct FailingResolver;
+    impl Resolver for FailingResolver {
+        fn resolve(&self, name: &str) -> Option<String> {
+            self.lookup(name).found()
+        }
+        fn lookup(&self, _name: &str) -> Lookup {
+            Lookup::Failed("store read failed".into())
+        }
+    }
+
+    #[test]
+    fn chain_failed_link_falls_through_but_wins_over_missing() {
+        let chain = Chain::new(vec![
+            Box::new(FailingResolver),
+            Box::new(MapResolver::from([("X", "v")])),
+        ]);
+        // A later store can still satisfy the lookup…
+        assert_eq!(chain.lookup("X"), Lookup::Found("v".into()));
+        // …but when nothing has it, the failure is reported, not a miss.
+        assert_eq!(
+            chain.lookup("Z"),
+            Lookup::Failed("store read failed".into())
+        );
+        assert_eq!(chain.resolve("Z"), None);
     }
 }

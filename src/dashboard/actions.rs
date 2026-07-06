@@ -74,6 +74,13 @@ pub fn toggle(
             plan.unresolved.join(", ")
         );
     }
+    if !plan.failed.is_empty() {
+        let suffix = if plan.failed.len() == 1 { "" } else { "s" };
+        anyhow::bail!(
+            "secret read failure{suffix}: {} — the secret may be set; retry",
+            plan.failed.join(", ")
+        );
+    }
     plan.write()?;
     state.record(
         &key,

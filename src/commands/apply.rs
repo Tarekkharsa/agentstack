@@ -231,8 +231,18 @@ fn render(
             println!("  {} unresolved secret {}", "✗".red(), u);
             error_count += 1;
         }
-        // Unresolved `${REF}`s must never reach a live config file.
-        let blocked = !plan.unresolved.is_empty() && !args.allow_unresolved;
+        for f in &plan.failed {
+            println!(
+                "  {} secret read failed {} — the secret may be set; retry the apply",
+                "✗".red(),
+                f
+            );
+            error_count += 1;
+        }
+        // `${REF}`s that didn't resolve must never reach a live config file —
+        // whether the secret is missing or a store failed to read it.
+        let blocked =
+            (!plan.unresolved.is_empty() || !plan.failed.is_empty()) && !args.allow_unresolved;
         if blocked {
             write_blockers += 1;
         }
@@ -245,8 +255,13 @@ fn render(
             }
             if will_write && blocked {
                 blocked_targets.insert(desc.display.clone());
+                let reason = if plan.unresolved.is_empty() {
+                    "secret read failure(s); retry the apply"
+                } else {
+                    "unresolved secret(s); set them"
+                };
                 println!(
-                    "  {} not written — unresolved secret(s); set them or pass --allow-unresolved",
+                    "  {} not written — {reason} or pass --allow-unresolved",
                     "✗".red()
                 );
             } else if will_write {

@@ -196,12 +196,25 @@ pub fn activate(
                 for u in &plan.unresolved {
                     println!("  {} unresolved secret {}", "✗".red(), u);
                 }
-                let blocked = !plan.unresolved.is_empty() && !args.allow_unresolved;
+                for f in &plan.failed {
+                    println!(
+                        "  {} secret read failed {} — the secret may be set; retry",
+                        "✗".red(),
+                        f
+                    );
+                }
+                let blocked = (!plan.unresolved.is_empty() || !plan.failed.is_empty())
+                    && !args.allow_unresolved;
                 if plan.changed() {
                     if args.write && blocked {
                         blocked_targets.push(desc.display.clone());
+                        let reason = if plan.unresolved.is_empty() {
+                            "secret read failure(s); retry"
+                        } else {
+                            "unresolved secret(s); set them"
+                        };
                         println!(
-                            "  {} not written — unresolved secret(s); set them or pass --allow-unresolved",
+                            "  {} not written — {reason} or pass --allow-unresolved",
                             "✗".red()
                         );
                     } else if args.write {
