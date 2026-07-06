@@ -6,14 +6,23 @@
 //! resolved secrets, and instruction files are compiled from the manifest's
 //! fragments. By default they are kept out of git via a marked block this
 //! module owns — created and updated as the managed set changes, never touching
-//! the rest of the file. Callers pass **stable,
-//! directory-level entries** (the managed config file, the skills dir with a
-//! trailing slash) so the block does not churn as profile membership changes,
-//! and an emptied managed set (deactivation) **leaves the block intact**:
-//! removing it would dirty a `.gitignore` a team may have committed. Files a
-//! user already tracks in git are unaffected (gitignore never hides tracked
-//! files), so commit-the-artifacts workflows keep working; `--no-gitignore`
-//! opts out of the block entirely.
+//! the rest of the file.
+//!
+//! A path is ignored **iff agentstack wrote it this run, or a persistent record
+//! (state / on-disk managed marker) says agentstack currently manages it** —
+//! never merely because the manifest declares it. A run whose writes were all
+//! blocked (unresolved secrets) records nothing and so contributes nothing: it
+//! must not hide a hand-maintained `.mcp.json` / `CLAUDE.md` from `git status`.
+//! `apply` and `use` derive the [`Managed`] flags from the SAME records, so
+//! alternating them on an unchanged setup yields a byte-identical block.
+//!
+//! Callers pass **stable, directory-level** paths (the managed config file, the
+//! skills dir with a trailing slash) so the block does not churn as profile
+//! membership changes, and an emptied managed set (deactivation) **leaves the
+//! block intact**: removing it would dirty a `.gitignore` a team may have
+//! committed. Files a user already tracks in git are unaffected (gitignore never
+//! hides tracked files), so commit-the-artifacts workflows keep working;
+//! `--no-gitignore` opts out of the block entirely.
 
 use std::fs;
 use std::path::Path;
@@ -21,25 +30,38 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::adapter::AdapterDescriptor;
-use crate::manifest::Manifest;
 use crate::scope::Scope;
 
 const BEGIN: &str = "# >>> agentstack — generated project artifacts (machine-local) >>>";
 const END: &str = "# <<< agentstack >>>";
 
-/// The stable, directory-level ignore entries for one target's generated
-/// project-scope artifacts, derived from what the manifest **declares** — not
-/// from what any single command happens to write this run. `use` and `apply`
-/// both emit this set, so the managed block is identical whichever you run (no
-/// churn on a possibly-committed `.gitignore`). Entries are project-root
-/// relative and `/`-prefixed (dirs get a trailing `/`). Being generous is safe:
-/// ignoring a path that isn't generated yet is a no-op, whereas failing to
-/// ignore a generated file is the bug this prevents.
+/// Which of a target's generated project-scope artifacts agentstack currently
+/// manages. Each caller computes these **after** its write sections, from
+/// outcomes and persistent records (see the module docs), not from manifest
+/// declarations — so a blocked write contributes nothing and both commands
+/// agree on an unchanged setup.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Managed {
+    /// The MCP config file: `state.managed_servers` (or `kept_foreign`) is
+    /// non-empty, so a managed — possibly secret-carrying — file is on disk.
+    pub config: bool,
+    /// The skills dir: skills were materialized this run, or state records that
+    /// they were (bare existence of the dir is not enough — a user may hand-own
+    /// it).
+    pub skills: bool,
+    /// The compiled instruction file: it was written this run, or already
+    /// carries agentstack's managed region on disk.
+    pub instructions: bool,
+}
+
+/// The stable, directory-level ignore entries for the artifacts one target
+/// currently manages (`managed`). Entries are project-root relative and
+/// `/`-prefixed (dirs get a trailing `/`).
 pub fn managed_entries(
-    manifest: &Manifest,
     desc: &AdapterDescriptor,
     scope: Scope,
     manifest_dir: &Path,
+    managed: Managed,
 ) -> Vec<String> {
     let project_root = crate::manifest::project_root_of(manifest_dir);
     let mut out = Vec::new();
@@ -53,31 +75,17 @@ pub fn managed_entries(
         }
     };
 
-    // MCP config file — when the manifest declares any servers.
-    if !manifest.servers.is_empty() {
+    if managed.config {
         if let Some((cfg, _)) = desc.config_for(scope, manifest_dir) {
             push(&cfg, false);
         }
     }
-    // Skills directory — when any skill can be materialized (inline, or via a
-    // profile that references library skills).
-    let has_skills =
-        !manifest.skills.is_empty() || manifest.profiles.values().any(|p| !p.skills.is_empty());
-    if has_skills {
+    if managed.skills {
         if let Some(dir) = desc.skills_dir_for(scope, manifest_dir) {
             push(&dir, true);
         }
     }
-    // Compiled instruction file — only when a fragment actually compiles at
-    // THIS scope for THIS target. Machine-layer fragments (from `init --global`,
-    // folded in by merge_user_layer) compile at global scope only, so a project
-    // carrying only those generates no project CLAUDE.md — and must not gitignore
-    // a hand-written one. Mirror plan_instructions' own filter.
-    let has_instructions = manifest
-        .instructions
-        .values()
-        .any(|i| i.applies_to(&desc.id) && !(scope == Scope::Project && i.from_user_layer));
-    if has_instructions {
+    if managed.instructions {
         if let Some(p) = desc
             .instructions
             .as_ref()

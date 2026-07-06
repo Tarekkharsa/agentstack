@@ -562,7 +562,7 @@ fn apply_upgrade(
     for (i, dir) in old_skill_dirs.iter().enumerate() {
         if dir.exists() {
             let dst = backup_root.join(format!("skill-{i}"));
-            copy_dir_all(dir, &dst)?;
+            crate::util::fsx::copy_dir_all(dir, &dst)?;
             backups.push((dir.clone(), dst, true));
         }
     }
@@ -619,7 +619,7 @@ fn apply_upgrade(
         for (orig, backup, is_dir) in &backups {
             if *is_dir {
                 let _ = fs::remove_dir_all(orig);
-                let _ = copy_dir_all(backup, orig);
+                let _ = crate::util::fsx::copy_dir_all(backup, orig);
             } else {
                 if let Some(parent) = orig.parent() {
                     let _ = fs::create_dir_all(parent);
@@ -685,21 +685,6 @@ fn print_change_summary(d: &PackDiff) {
     line("house rules added", &d.instr_added);
     line("house rules changed", &d.instr_body_changed);
     line("house rules removed", &d.instr_removed);
-}
-
-fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst).with_context(|| format!("creating {}", dst.display()))?;
-    for entry in fs::read_dir(src).with_context(|| format!("reading {}", src.display()))? {
-        let entry = entry?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir_all(&from, &to)?;
-        } else {
-            fs::copy(&from, &to).with_context(|| format!("copying {}", from.display()))?;
-        }
-    }
-    Ok(())
 }
 
 /// Filesystem-safe slug for scratch/backup directory names.

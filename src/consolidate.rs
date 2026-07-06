@@ -197,39 +197,17 @@ fn backup_dir(src: &Path, name: &str) -> Result<()> {
     if dest.exists() {
         let _ = fs::remove_dir_all(&dest);
     }
-    copy_dir(src, &dest)
+    crate::util::fsx::copy_dir_all_following_symlinks(src, &dest)
 }
 
-/// Recursively copy a directory tree.
+/// Recursively copy a directory tree, following symlinks.
+///
+/// Kept as a thin re-export so [`crate::commands::lib::add_skill`] — which
+/// calls this by name — doesn't need to spell out the fsx path; the `.git`
+/// skip and symlink-following recursion live once in
+/// [`crate::util::fsx::copy_dir_all_following_symlinks`].
 pub(crate) fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst).with_context(|| format!("creating {}", dst.display()))?;
-    for entry in fs::read_dir(src).with_context(|| format!("reading {}", src.display()))? {
-        let entry = entry?;
-        // Never carry a source's `.git` into the library copy: it bloats the
-        // skill and, once the library is itself a git repo (`lib sync`), a
-        // nested `.git` is recorded as a gitlink and the body vanishes on clone.
-        if entry.file_name() == ".git" {
-            continue;
-        }
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        let ft = entry.file_type()?;
-        if ft.is_dir() {
-            copy_dir(&from, &to)?;
-        } else if ft.is_symlink() {
-            // Copy the link's target contents (skills rarely nest links; keep it simple).
-            if let Ok(real) = fs::canonicalize(&from) {
-                if real.is_dir() {
-                    copy_dir(&real, &to)?;
-                } else {
-                    fs::copy(&real, &to)?;
-                }
-            }
-        } else {
-            fs::copy(&from, &to).with_context(|| format!("copying {}", from.display()))?;
-        }
-    }
-    Ok(())
+    crate::util::fsx::copy_dir_all_following_symlinks(src, dst)
 }
 
 #[cfg(unix)]

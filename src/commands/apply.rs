@@ -148,16 +148,9 @@ fn render(
         };
 
         let key = target_key(id, scope, &ctx.dir);
-
-        // Managed .gitignore block: the manifest's declared project-scope
-        // artifacts (config, skills dir, compiled instruction file). Derived
-        // from the manifest — the same set `use` emits — so the block never
-        // churns as you alternate the two commands.
-        if scope == Scope::Project && will_write {
-            ignore_entries.extend(crate::render::gitignore::managed_entries(
-                manifest, desc, scope, &ctx.dir,
-            ));
-        }
+        // Whether this run compiled the instruction file — one input to the
+        // managed .gitignore block computed at the end of this target's loop.
+        let mut wrote_instructions = false;
 
         let mut previously = state.managed_servers(&key);
         // Names an earlier guarded write kept on disk (state bookkeeping —
@@ -418,6 +411,7 @@ fn render(
                         ));
                         touched_targets.insert(desc.display.clone());
                         ip.write()?;
+                        wrote_instructions = true;
                         println!(
                             "  {} wrote {} instruction fragment(s)",
                             "✓".green(),
@@ -432,6 +426,31 @@ fn render(
                     }
                 }
             }
+        }
+
+        // Managed .gitignore block: emit an entry only for an artifact this
+        // target actually manages now — after the write sections above, so a
+        // blocked write (nothing recorded) contributes nothing. Both flags read
+        // persistent records `use` shares, keeping the block churn-free across
+        // the two commands. `apply` never materializes skills, so its skills
+        // flag is purely the record a prior `use` left.
+        if scope == Scope::Project && will_write {
+            let instr_path = desc
+                .instructions
+                .as_ref()
+                .and_then(|s| s.path_for(scope, &ctx.dir));
+            let managed = crate::render::gitignore::Managed {
+                config: !state.managed_servers(&key).is_empty()
+                    || !state.kept_foreign(&key).is_empty(),
+                skills: !state.managed_skills(&key).is_empty(),
+                instructions: wrote_instructions
+                    || instr_path
+                        .as_deref()
+                        .is_some_and(crate::render::instructions::manages_file),
+            };
+            ignore_entries.extend(crate::render::gitignore::managed_entries(
+                desc, scope, &ctx.dir, managed,
+            ));
         }
     }
 

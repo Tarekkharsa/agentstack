@@ -245,6 +245,17 @@ impl Instruction {
     pub fn applies_to(&self, id: &str) -> bool {
         self.targets.iter().any(|t| t == "*" || t == id)
     }
+
+    /// Whether this fragment compiles into `target_id`'s instruction file at
+    /// `scope`. Machine-layer fragments ([`Self::from_user_layer`]) are
+    /// personal: they compile at global scope only, never into a repo's
+    /// committed project-scope CLAUDE.md / AGENTS.md. The single predicate the
+    /// compile ([`crate::render::instructions::plan_instructions`]) filters on,
+    /// so no other site can drift from it.
+    pub fn compiles_at(&self, target_id: &str, scope: crate::scope::Scope) -> bool {
+        self.applies_to(target_id)
+            && !(self.from_user_layer && scope == crate::scope::Scope::Project)
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]

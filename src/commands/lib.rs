@@ -484,7 +484,10 @@ fn add_server_cli(args: &LibAddServerArgs, manifest_dir: Option<&Path>) -> Resul
     Ok(())
 }
 
-/// Header/env values that look like literal secrets (not `${REF}`s).
+/// Values in a server definition that look like literal secrets (not `${REF}`s).
+/// Covers every field a real credential could hide in: headers, env, the `url`
+/// (userinfo password + secretish query params), and `args` (secretish
+/// `key=value` and the value following a secretish flag).
 fn suspicious_secrets(server: &Server) -> Vec<String> {
     let mut out = Vec::new();
     let mut scan = |k: &str, v: &str| {
@@ -500,13 +503,79 @@ fn suspicious_secrets(server: &Server) -> Vec<String> {
     for (k, v) in &server.env {
         scan(k, v);
     }
+    if let Some(url) = &server.url {
+        out.extend(url_secrets(url));
+    }
+    out.extend(arg_secrets(&server.args));
+    out
+}
+
+/// Literal-secret findings in a server `url`: a password embedded in the
+/// userinfo (`https://user:TOKEN@host`) or a secretish query parameter
+/// (`?api_key=…`). `${REF}` values are exempt.
+fn url_secrets(url: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    // The authority is everything before the path/query/fragment.
+    let authority = after_scheme.split(['/', '?', '#']).next().unwrap_or("");
+    if let Some((userinfo, _host)) = authority.rsplit_once('@') {
+        // A password (the part after ':') is a credential by construction.
+        if let Some((_user, pass)) = userinfo.split_once(':') {
+            if !pass.is_empty() && !pass.contains("${") {
+                out.push("url embeds a literal password in its userinfo — use ${REF} instead".into());
+            }
+        }
+    }
+    if let Some((_, query)) = after_scheme.split_once('?') {
+        let query = query.split('#').next().unwrap_or(query);
+        for pair in query.split('&') {
+            if let Some((k, v)) = pair.split_once('=') {
+                if !v.contains("${") && looks_secretish(k, v) {
+                    out.push(format!(
+                        "url query parameter '{k}' has a literal value that looks like a secret — use ${{REF}} instead"
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Literal-secret findings in server `args`: a `key=value` (or `--key=value`)
+/// whose key is secretish, or the value following a secretish flag
+/// (`--token VALUE`). `${REF}` values are exempt.
+fn arg_secrets(args: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for (i, arg) in args.iter().enumerate() {
+        if let Some((k, v)) = arg.split_once('=') {
+            let key = k.trim_start_matches('-');
+            if !v.contains("${") && looks_secretish(key, v) {
+                out.push(format!(
+                    "arg '{key}' has a literal value that looks like a secret — use ${{REF}} instead"
+                ));
+                continue;
+            }
+        }
+        // A secretish flag names a credential; its value is the next arg.
+        if arg.starts_with('-') && key_is_secretish(arg.trim_start_matches('-')) {
+            if let Some(v) = args.get(i + 1) {
+                if !v.is_empty() && !v.contains("${") {
+                    out.push(format!(
+                        "arg following '{arg}' looks like a literal secret — use ${{REF}} instead"
+                    ));
+                }
+            }
+        }
+    }
     out
 }
 
 fn looks_secretish(key: &str, val: &str) -> bool {
-    if val.is_empty() {
-        return false;
-    }
+    !val.is_empty() && key_is_secretish(key)
+}
+
+/// Whether `key` names a secret (case-insensitive substring match).
+fn key_is_secretish(key: &str) -> bool {
     let k = key.to_lowercase();
     [
         "authorization",
@@ -521,6 +590,23 @@ fn looks_secretish(key: &str, val: &str) -> bool {
     ]
     .iter()
     .any(|s| k.contains(s))
+}
+
+/// The secretish `key = "value"` assignments in a single line of TOML-ish text
+/// (also `key: "value"` inside an inline table): each offending key. A value
+/// containing `${` is a reference, not a literal — exempt. Used where a file
+/// won't parse (F3) and when scanning outgoing commits (F6).
+fn secretish_keys_in_line(line: &str) -> Vec<String> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r#"([A-Za-z0-9_.-]+)\s*[=:]\s*"([^"]*)""#).unwrap());
+    re.captures_iter(line)
+        .filter_map(|c| {
+            let key = c.get(1)?.as_str();
+            let val = c.get(2)?.as_str();
+            (!val.is_empty() && !val.contains("${") && key_is_secretish(key))
+                .then(|| key.to_string())
+        })
+        .collect()
 }
 
 /// The result of a server removal (or a dry-run preview of one).
@@ -1205,8 +1291,10 @@ fn sync_now(lib: &Path, message: Option<&str>, allow_secrets: bool) -> Result<()
     }
 
     // The library's core promise is that secrets never travel. Enforce it: a
-    // server definition with a literal (non-`${REF}`) secret blocks the push.
-    // Server bodies are the only place a value could hide — skills are prose.
+    // server definition with a literal (non-`${REF}`) secret blocks the push,
+    // across every server field (headers, env, url, args). The outgoing-history
+    // scan below covers a secret that was committed once and later edited out —
+    // still in the commits that carry it, even though the working tree is clean.
     let leaks = library_secret_leaks(lib);
     if !leaks.is_empty() && !allow_secrets {
         let list = leaks
@@ -1248,14 +1336,25 @@ fn sync_now(lib: &Path, message: Option<&str>, allow_secrets: bool) -> Result<()
     // (normal), no upstream but the remote branch already exists (a second
     // machine that ran --init locally), or an empty remote (first push).
     let has_upstream = git_ok(lib, &["rev-parse", "--abbrev-ref", "@{u}"]);
-    let _ = std::process::Command::new("git")
-        .arg("-C")
-        .arg(lib)
-        .args(["fetch", "origin", "--quiet"])
-        .output();
-    let remote_has_branch = git_ok(lib, &["rev-parse", "--verify", &format!("origin/{branch}")]);
+    // The explicit fetch + probe only serve the no-upstream case (a second
+    // machine whose remote branch exists but isn't tracked yet). With an
+    // upstream, `git pull` fetches for us — fetching here too is a wasted
+    // round-trip.
+    let mut remote_has_branch = false;
+    if !has_upstream {
+        let _ = std::process::Command::new("git")
+            .arg("-C")
+            .arg(lib)
+            .args(["fetch", "origin", "--quiet"])
+            .output();
+        remote_has_branch =
+            git_ok(lib, &["rev-parse", "--verify", &format!("origin/{branch}")]);
+    }
 
     if has_upstream || remote_has_branch {
+        // Record HEAD so an unchanged pull can skip re-scanning long-accepted
+        // content (a no-op "Already up to date" leaves HEAD untouched).
+        let before = git_out(lib, &["rev-parse", "HEAD"]).ok();
         let mut pull = vec!["pull", "--rebase"];
         if !has_upstream {
             pull.extend(["origin", branch.as_str()]);
@@ -1268,7 +1367,22 @@ fn sync_now(lib: &Path, message: Option<&str>, allow_secrets: bool) -> Result<()
             .context("running git pull")?;
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr);
+            let el = err.to_lowercase();
             let d = lib.display();
+            // Only point at `rebase --continue` when a rebase is actually
+            // paused; offline/auth failures leave none and that command errors.
+            let rebasing = lib.join(".git/rebase-merge").exists()
+                || lib.join(".git/rebase-apply").exists()
+                || el.contains("conflict");
+            let network_auth = [
+                "could not resolve host",
+                "could not read from remote",
+                "authentication failed",
+                "permission denied",
+                "unable to access",
+            ]
+            .iter()
+            .any(|s| el.contains(s));
             let hint = if err.contains("unrelated histories") {
                 format!(
                     "\nthe local and remote libraries have separate histories — back up {d} and \
@@ -1276,17 +1390,57 @@ fn sync_now(lib: &Path, message: Option<&str>, allow_secrets: bool) -> Result<()
                      library, or reconcile manually: \
                      `git -C {d} pull --rebase --allow-unrelated-histories origin {branch}`"
                 )
-            } else {
+            } else if rebasing {
                 format!(
                     "\nresolve conflicts in {d}, then `git -C {d} rebase --continue` and re-run"
                 )
+            } else if network_auth {
+                "\ncheck your connection and credentials, then re-run `agentstack lib sync`".into()
+            } else {
+                format!("\ngit pull failed in {d} — see the error above and re-run")
             };
             bail!("git pull --rebase failed: {}{hint}", err.trim());
         }
         println!("{} pulled from remote", "✓".green());
         // The same supply-chain gate as `lib add`, applied to pulled content —
-        // warn-only, since blocking a completed pull would strand the working tree.
-        scan_pulled_skills(lib);
+        // warn-only, since blocking a completed pull would strand the working
+        // tree. Scan only what the pull actually moved (F8): an unchanged HEAD
+        // skips it; a moved HEAD scans just the changed skills.
+        match before {
+            Some(old) => {
+                let now = git_out(lib, &["rev-parse", "HEAD"]).unwrap_or_default();
+                if now != old {
+                    match git_out(lib, &["diff", "--name-only", &format!("{old}..HEAD")]) {
+                        Ok(changed) => scan_changed_skills(lib, &changed),
+                        Err(_) => scan_pulled_skills(lib),
+                    }
+                }
+            }
+            None => scan_pulled_skills(lib),
+        }
+    }
+
+    // A secret committed once (via plain git or --allow-secrets) and later
+    // edited out is gone from the working tree but still in the commits about to
+    // be pushed — scan the outgoing range so the plaintext can't ride along.
+    let range = if has_upstream {
+        Some("@{u}..HEAD".to_string())
+    } else if remote_has_branch {
+        Some(format!("origin/{branch}..HEAD"))
+    } else {
+        None // first push: the whole local history is outgoing
+    };
+    let outgoing = outgoing_secret_leaks(lib, range.as_deref());
+    if !outgoing.is_empty() && !allow_secrets {
+        let list = outgoing
+            .iter()
+            .map(|l| format!("    {l}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        bail!(
+            "refusing to sync — a secret in an earlier commit is still in the outgoing history \
+             (rewrite that history, or pass --allow-secrets to override):\n{list}"
+        );
     }
 
     if has_upstream {
@@ -1298,8 +1452,11 @@ fn sync_now(lib: &Path, message: Option<&str>, allow_secrets: bool) -> Result<()
     Ok(())
 }
 
-/// Server definitions in the library that carry a literal (non-`${REF}`) secret
-/// — the only place in the library a real value could hide before a sync push.
+/// Server definitions in the library that carry a literal (non-`${REF}`) secret,
+/// across every field (headers, env, url, args). An unreadable or unparseable
+/// `servers/*.toml` is itself a leak entry: the gate fails closed rather than
+/// waving through a hand-edited file it can't inspect (a broken TOML still
+/// carries its plaintext into the push).
 fn library_secret_leaks(lib: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(lib.join("servers")) else {
         return Vec::new();
@@ -1310,15 +1467,31 @@ fn library_secret_leaks(lib: &Path) -> Vec<String> {
         if path.extension().and_then(|e| e.to_str()) != Some("toml") {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(server) = toml::from_str::<Server>(&text) else {
-            continue;
-        };
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-        for w in suspicious_secrets(&server) {
-            out.push(format!("{name}: {w}"));
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            out.push(format!("{name}: cannot be read — fix it before syncing"));
+            continue;
+        };
+        match toml::from_str::<Server>(&text) {
+            Ok(server) => {
+                for w in suspicious_secrets(&server) {
+                    out.push(format!("{name}: {w}"));
+                }
+            }
+            Err(_) => {
+                out.push(format!(
+                    "{name}: cannot be parsed as a server definition — fix it before syncing"
+                ));
+                // Won't parse, but a secret-looking line still travels — surface
+                // it by name from the raw text so the message is actionable.
+                for line in text.lines() {
+                    for key in secretish_keys_in_line(line) {
+                        out.push(format!(
+                            "{name}: '{key}' has a literal value that looks like a secret — use ${{REF}} instead"
+                        ));
+                    }
+                }
+            }
         }
     }
     out
@@ -1337,6 +1510,73 @@ fn scan_pulled_skills(lib: &Path) {
             println!("  {} pulled content: {}", "⚠".yellow(), f.describe());
         }
     }
+}
+
+/// Scan only the skills a pull touched (paths from `git diff --name-only`), so
+/// long-accepted content isn't re-flagged every sync (F8). Each changed
+/// `skills/<name>/…` path maps to its skill subtree, scanned once.
+fn scan_changed_skills(lib: &Path, changed: &str) {
+    let mut seen = std::collections::BTreeSet::new();
+    for path in changed.lines() {
+        let Some(rest) = path.strip_prefix("skills/") else {
+            continue;
+        };
+        let name = rest.split('/').next().unwrap_or("");
+        if name.is_empty() || !seen.insert(name.to_string()) {
+            continue;
+        }
+        let subtree = lib.join("skills").join(name);
+        if !subtree.exists() {
+            continue; // removed by the pull
+        }
+        if let Ok(findings) = crate::scan::scan_tree(&subtree) {
+            for f in &findings {
+                println!("  {} pulled content: {}", "⚠".yellow(), f.describe());
+            }
+        }
+    }
+}
+
+/// Literal secrets in the commits about to be pushed. The working-tree gate only
+/// sees current files; a secret committed once and edited out still travels in
+/// its commit. Scan the added `servers/…` lines across the outgoing range
+/// (`None` = the whole history, for a first push). Best-effort: a git failure
+/// yields no leaks rather than bricking sync on an odd repo state — but any leak
+/// found blocks the push.
+fn outgoing_secret_leaks(lib: &Path, range: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = ["log", "-p", "--no-color", "-U0"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    if let Some(r) = range {
+        args.push(r.to_string());
+    }
+    args.push("--".into());
+    args.push("servers".into());
+    let argrefs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let Ok(diff) = git_out(lib, &argrefs) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut commit = String::new();
+    let mut file = String::new();
+    for line in diff.lines() {
+        if let Some(h) = line.strip_prefix("commit ") {
+            commit = h.split_whitespace().next().unwrap_or(h).chars().take(8).collect();
+        } else if let Some(f) = line.strip_prefix("+++ b/") {
+            file = f.to_string();
+        } else if let Some(added) = line.strip_prefix('+') {
+            if added.starts_with("++") {
+                continue; // a `+++` header, already handled above
+            }
+            for key in secretish_keys_in_line(added) {
+                out.push(format!(
+                    "commit {commit} {file}: '{key}' has a literal value that looks like a secret — use ${{REF}} instead"
+                ));
+            }
+        }
+    }
+    out
 }
 
 fn require_skill_md(dir: &Path) -> Result<()> {

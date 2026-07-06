@@ -102,7 +102,7 @@ pub fn materialize(plan: &SkillPlan) -> Result<()> {
             SkillStrategy::Symlink => symlink_dir(source, &dest)
                 .with_context(|| format!("symlinking skill '{name}' → {}", dest.display()))?,
             SkillStrategy::Copy => {
-                copy_dir(source, &dest)
+                crate::util::fsx::copy_dir_all(source, &dest)
                     .with_context(|| format!("copying skill '{name}' → {}", dest.display()))?;
                 fs::write(dest.join(MARKER), b"agentstack\n").ok();
             }
@@ -151,21 +151,6 @@ fn symlink_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
 #[cfg(windows)]
 fn symlink_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::os::windows::fs::symlink_dir(src, dst)
-}
-
-fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir(&from, &to)?;
-        } else {
-            fs::copy(&from, &to)?;
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -322,5 +307,25 @@ mod tests {
         );
         materialize(&p2).unwrap();
         assert!(!skills_dir.join("a").exists());
+    }
+
+    #[test]
+    fn copy_strategy_never_carries_the_sources_git_dir() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let a = lib_skill(&tmp, "a");
+        tmp.child("lib/a/.git/HEAD")
+            .write_str("ref: refs/heads/main\n")
+            .unwrap();
+        let skills_dir = tmp.child("skills").path().to_path_buf();
+
+        let p = plan(
+            skills_dir.clone(),
+            SkillStrategy::Copy,
+            vec![("a".into(), a)],
+            &[],
+        );
+        materialize(&p).unwrap();
+        assert!(skills_dir.join("a").join("SKILL.md").exists());
+        assert!(!skills_dir.join("a").join(".git").exists());
     }
 }

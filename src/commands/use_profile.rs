@@ -140,17 +140,6 @@ pub fn activate(
         let key = target_key(id, scope, &ctx.dir);
         println!("\n{}", desc.display.bold());
 
-        // Managed .gitignore block: the manifest's declared project-scope
-        // artifacts, the SAME set `apply` emits. Hoisted above the skills-less
-        // `continue` below so config-only adapters (Cursor, VS Code, …) still
-        // contribute their config entry — otherwise the block would churn when
-        // apply and use alternate.
-        if scope == Scope::Project && args.write {
-            ignore_entries.extend(crate::render::gitignore::managed_entries(
-                manifest, desc, scope, &ctx.dir,
-            ));
-        }
-
         // --- servers ---
         let mut previously = state.managed_servers(&key);
         // Names an earlier guarded write kept on disk (state bookkeeping —
@@ -248,50 +237,73 @@ pub fn activate(
             }
         }
 
-        // --- skills ---
-        let Some(skills_dir) = desc.skills_dir_for(scope, &ctx.dir) else {
-            continue;
-        };
-        let strategy = desc.skills.as_ref().map(|s| s.strategy).unwrap_or_default();
-        let prev_skills = state.managed_skills(&key);
-        let plan = skills::plan(
-            skills_dir.clone(),
-            strategy,
-            active_skills.clone(),
-            &prev_skills,
-        );
-
-        for c in &plan.conflicts {
-            println!(
-                "  {} skill '{c}' already exists (not managed) — left as is",
-                "⚠".yellow()
+        // --- skills --- (config-only adapters have no skills dir; they still
+        // reach the managed .gitignore block below for their config entry).
+        if let Some(skills_dir) = desc.skills_dir_for(scope, &ctx.dir) {
+            let strategy = desc.skills.as_ref().map(|s| s.strategy).unwrap_or_default();
+            let prev_skills = state.managed_skills(&key);
+            let plan = skills::plan(
+                skills_dir.clone(),
+                strategy,
+                active_skills.clone(),
+                &prev_skills,
             );
-        }
-        for r in &plan.to_remove {
-            println!("  {} unlinking skill '{r}'", "−".yellow());
-        }
-        if plan.has_work() {
-            if args.write {
-                skills::materialize(&plan)?;
-                state.record_skills(&key, plan.managed_names());
-                crate::usage::bump(&plan.managed_names());
+
+            for c in &plan.conflicts {
                 println!(
-                    "  {} {} skill(s) → {}",
-                    "✓".green(),
-                    plan.managed_names().len(),
-                    skills_dir.display()
-                );
-            } else {
-                println!(
-                    "  {} {} skill(s) to {} into {}",
-                    "→".cyan(),
-                    plan.active.len(),
-                    strategy_word(strategy),
-                    skills_dir.display()
+                    "  {} skill '{c}' already exists (not managed) — left as is",
+                    "⚠".yellow()
                 );
             }
-        } else {
-            println!("  {} skills up to date", "✓".green());
+            for r in &plan.to_remove {
+                println!("  {} unlinking skill '{r}'", "−".yellow());
+            }
+            if plan.has_work() {
+                if args.write {
+                    skills::materialize(&plan)?;
+                    state.record_skills(&key, plan.managed_names());
+                    crate::usage::bump(&plan.managed_names());
+                    println!(
+                        "  {} {} skill(s) → {}",
+                        "✓".green(),
+                        plan.managed_names().len(),
+                        skills_dir.display()
+                    );
+                } else {
+                    println!(
+                        "  {} {} skill(s) to {} into {}",
+                        "→".cyan(),
+                        plan.active.len(),
+                        strategy_word(strategy),
+                        skills_dir.display()
+                    );
+                }
+            } else {
+                println!("  {} skills up to date", "✓".green());
+            }
+        }
+
+        // Managed .gitignore block: emit an entry only for an artifact this
+        // target manages now (after the write sections above). `use` never
+        // compiles instructions, so its instruction flag is the on-disk managed
+        // marker `apply` leaves — the record that keeps the two commands'
+        // blocks byte-identical.
+        if scope == Scope::Project && args.write {
+            let instr_path = desc
+                .instructions
+                .as_ref()
+                .and_then(|s| s.path_for(scope, &ctx.dir));
+            let managed = crate::render::gitignore::Managed {
+                config: !state.managed_servers(&key).is_empty()
+                    || !state.kept_foreign(&key).is_empty(),
+                skills: !state.managed_skills(&key).is_empty(),
+                instructions: instr_path
+                    .as_deref()
+                    .is_some_and(crate::render::instructions::manages_file),
+            };
+            ignore_entries.extend(crate::render::gitignore::managed_entries(
+                desc, scope, &ctx.dir, managed,
+            ));
         }
     }
 

@@ -54,14 +54,9 @@ pub fn plan_instructions(
     let mut missing: Vec<String> = Vec::new();
 
     for (name, instr) in &manifest.instructions {
-        if !instr.applies_to(&desc.id) {
-            continue;
-        }
-        // Fragments inherited from the machine-level manifest are personal:
-        // they compile into the global files only, never into a repo's
-        // project-scope CLAUDE.md / AGENTS.md (which `apply` treats as a
-        // generated artifact, gitignored by default).
-        if instr.from_user_layer && scope == Scope::Project {
+        // One predicate gates the compile (adapter match + personal fragments
+        // stay out of a repo's project file) — see [`Instruction::compiles_at`].
+        if !instr.compiles_at(&desc.id, scope) {
             continue;
         }
         let src = resolve(project_dir, &instr.path);
@@ -85,6 +80,16 @@ pub fn plan_instructions(
         fragments,
         missing,
     })
+}
+
+/// Whether the instruction file at `path` currently carries agentstack's
+/// managed region. This on-disk marker is the persistent record that we
+/// compiled (and therefore gitignore) this file: `use`, which never compiles
+/// instructions, reads it so its managed `.gitignore` block matches `apply`'s.
+pub fn manages_file(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .map(|t| t.contains(merge_md::START))
+        .unwrap_or(false)
 }
 
 fn resolve(dir: &Path, path: &str) -> PathBuf {

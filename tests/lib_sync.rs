@@ -174,6 +174,163 @@ fn sync_blocks_a_literal_secret_from_travelling() {
 }
 
 #[test]
+fn sync_blocks_a_secret_in_a_url_query_param() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    git_identity();
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let ashome = tmp.path().join("ashome");
+    let servers = ashome.join("lib/servers");
+    fs::create_dir_all(&servers).unwrap();
+    std::env::set_var("AGENTSTACK_HOME", &ashome);
+    fs::write(ashome.join("lib/library.toml"), "version = 1\nserver = []\n").unwrap();
+    fs::write(
+        servers.join("leaky.toml"),
+        "type = \"http\"\nurl = \"https://x/mcp?api_key=sk-REALSECRET\"\n",
+    )
+    .unwrap();
+
+    lib::run(&sync(true, None, false), None).unwrap();
+    let err = lib::run(&sync(false, None, false), None).unwrap_err();
+    assert!(
+        err.to_string().contains("literal secret"),
+        "a secretish url query param must block the push: {err}"
+    );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+#[test]
+fn sync_blocks_a_secret_in_args_and_allows_a_ref() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    git_identity();
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let ashome = tmp.path().join("ashome");
+    let servers = ashome.join("lib/servers");
+    fs::create_dir_all(&servers).unwrap();
+    std::env::set_var("AGENTSTACK_HOME", &ashome);
+    fs::write(ashome.join("lib/library.toml"), "version = 1\nserver = []\n").unwrap();
+    // A literal secret in the value following a secretish flag.
+    fs::write(
+        servers.join("leaky.toml"),
+        "type = \"stdio\"\ncommand = \"mcp\"\nargs = [\"--token\", \"sk-REALSECRET\"]\n",
+    )
+    .unwrap();
+
+    lib::run(&sync(true, None, false), None).unwrap();
+    let err = lib::run(&sync(false, None, false), None).unwrap_err();
+    assert!(
+        err.to_string().contains("literal secret"),
+        "a secretish flag value in args must block the push: {err}"
+    );
+
+    // The same shape with a ${REF} value must NOT block (url + args both exempt).
+    fs::write(
+        servers.join("leaky.toml"),
+        "type = \"stdio\"\ncommand = \"mcp\"\n\
+         url = \"https://x/mcp?api_key=${TOK}\"\nargs = [\"--token\", \"${TOK}\"]\n",
+    )
+    .unwrap();
+    // No remote, so sync stops before pushing but only after clearing the gate.
+    lib::run(&sync(false, None, false), None).unwrap();
+
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+#[test]
+fn sync_blocks_an_unparseable_server_definition() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    git_identity();
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let ashome = tmp.path().join("ashome");
+    let servers = ashome.join("lib/servers");
+    fs::create_dir_all(&servers).unwrap();
+    std::env::set_var("AGENTSTACK_HOME", &ashome);
+    fs::write(ashome.join("lib/library.toml"), "version = 1\nserver = []\n").unwrap();
+    // Hand-broken TOML (unterminated table header) carrying a plaintext secret.
+    fs::write(
+        servers.join("broken.toml"),
+        "type = \"http\"\n[headers\nAuthorization = \"Bearer sk-REALSECRET\"\n",
+    )
+    .unwrap();
+
+    lib::run(&sync(true, None, false), None).unwrap();
+    let err = lib::run(&sync(false, None, false), None).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("cannot be parsed"),
+        "an unparseable server def must fail closed: {msg}"
+    );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+#[test]
+fn sync_blocks_a_secret_left_in_outgoing_history() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    git_identity();
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let ashome = tmp.path().join("ashome");
+    let lib_home = ashome.join("lib");
+    let servers = lib_home.join("servers");
+    fs::create_dir_all(&servers).unwrap();
+    std::env::set_var("AGENTSTACK_HOME", &ashome);
+    fs::write(lib_home.join("library.toml"), "version = 1\nserver = []\n").unwrap();
+
+    let bare = tmp.path().join("remote.git");
+    git(&["init", "-q", "--bare", &bare.to_string_lossy()]);
+    let url = format!("file://{}", bare.display());
+
+    // init the local library repo (no remote yet).
+    lib::run(&sync(true, None, false), None).unwrap();
+
+    // Commit a leaky server def with PLAIN git, bypassing the sync gate.
+    let leaky = servers.join("leaky.toml");
+    fs::write(
+        &leaky,
+        "type = \"http\"\nurl = \"https://x/mcp\"\n\
+         [headers]\nAuthorization = \"Bearer sk-REALSECRET\"\n",
+    )
+    .unwrap();
+    let libp = lib_home.to_str().unwrap();
+    git(&["-C", libp, "add", "-A"]);
+    git(&["-C", libp, "commit", "-qm", "leaky"]);
+
+    // Edit the secret out; the working tree is now clean of it.
+    fs::write(
+        &leaky,
+        "type = \"http\"\nurl = \"https://x/mcp\"\n\
+         [headers]\nAuthorization = \"Bearer ${TOK}\"\n",
+    )
+    .unwrap();
+    git(&["-C", libp, "add", "-A"]);
+    git(&["-C", libp, "commit", "-qm", "redact"]);
+
+    // Point at the remote; sync must refuse — the secret is in an earlier commit.
+    let err = lib::run(&sync(false, Some(&url), false), None).unwrap_err();
+    assert!(
+        err.to_string().contains("outgoing history"),
+        "a secret in outgoing commits must block the push: {err}"
+    );
+
+    // --allow-secrets overrides and completes the push.
+    lib::run(
+        &LibArgs {
+            kind: LibKind::Sync(LibSyncArgs {
+                init: false,
+                remote: None,
+                status: false,
+                message: None,
+                allow_secrets: true,
+            }),
+        },
+        None,
+    )
+    .unwrap();
+
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+#[test]
 fn sync_without_a_repo_errors_with_guidance() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
