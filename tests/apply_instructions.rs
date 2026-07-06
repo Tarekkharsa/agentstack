@@ -358,3 +358,44 @@ fn standalone_instructions_write_blocks_on_missing_fragment_sources() {
     std::env::remove_var("AGENTSTACK_HOME");
     std::env::remove_var("HOME");
 }
+
+#[test]
+fn project_apply_gitignores_the_compiled_instruction_file() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("instructions")).unwrap();
+    // The managed .gitignore block is only written inside a git repo.
+    fs::create_dir_all(proj.join(".git")).unwrap();
+    fs::write(proj.join("instructions/house.md"), "House rule one.\n").unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [instructions.house]\npath = \"./instructions/house.md\"\n",
+    )
+    .unwrap();
+
+    // Apply at project scope with gitignore management ON (the default).
+    let mut a = args(true);
+    a.scope = Some(Scope::Project);
+    a.no_gitignore = false;
+    apply::run(&a, Some(&proj)).unwrap();
+
+    // The compiled instruction file lands in the repo...
+    assert!(fs::read_to_string(proj.join("CLAUDE.md"))
+        .unwrap()
+        .contains("House rule one."));
+    // ...and the managed block keeps it out of git — the repo tracks the
+    // .agentstack source (instructions/house.md), not the generated output.
+    let ignore = fs::read_to_string(proj.join(".gitignore")).unwrap();
+    assert!(
+        ignore.contains("/CLAUDE.md"),
+        "compiled instruction file should be gitignored: {ignore}"
+    );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}

@@ -429,6 +429,19 @@ fn render(
                         );
                     }
                 }
+
+                // The compiled instruction file (CLAUDE.md / AGENTS.md) is a
+                // generated artifact — feed it to the managed .gitignore block
+                // so the repo tracks only the .agentstack source, not the
+                // output. Safe even when the file also holds hand-written
+                // content: gitignore never hides an already-tracked file, and
+                // the region merge preserves that content on disk. --no-gitignore
+                // opts out for teams that commit their instruction files.
+                if scope == Scope::Project && will_write && !ip.fragments.is_empty() {
+                    if let Ok(rel) = ip.path.strip_prefix(&project_root) {
+                        ignore_entries.push(format!("/{}", rel.display()));
+                    }
+                }
             }
         }
     }

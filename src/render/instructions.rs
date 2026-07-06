@@ -59,7 +59,8 @@ pub fn plan_instructions(
         }
         // Fragments inherited from the machine-level manifest are personal:
         // they compile into the global files only, never into a repo's
-        // (typically committed) project-scope CLAUDE.md / AGENTS.md.
+        // project-scope CLAUDE.md / AGENTS.md (which `apply` treats as a
+        // generated artifact, gitignored by default).
         if instr.from_user_layer && scope == Scope::Project {
             continue;
         }

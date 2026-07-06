@@ -1,10 +1,12 @@
 //! Managed `.gitignore` block for generated project artifacts.
 //!
-//! Project-scope writes (`.mcp.json`, `.claude/skills/*` symlinks) are
-//! machine-local: symlinks carry absolute home paths and rendered configs can
-//! carry resolved secrets. By default they are kept out of git via a marked
-//! block this module owns — created and updated as the managed set changes,
-//! never touching the rest of the file. Callers pass **stable,
+//! Project-scope writes (`.mcp.json`, `.claude/skills/*` symlinks, and the
+//! compiled `CLAUDE.md` / `AGENTS.md` instruction files) are generated
+//! artifacts: symlinks carry absolute home paths, rendered configs can carry
+//! resolved secrets, and instruction files are compiled from the manifest's
+//! fragments. By default they are kept out of git via a marked block this
+//! module owns — created and updated as the managed set changes, never touching
+//! the rest of the file. Callers pass **stable,
 //! directory-level entries** (the managed config file, the skills dir with a
 //! trailing slash) so the block does not churn as profile membership changes,
 //! and an emptied managed set (deactivation) **leaves the block intact**:
