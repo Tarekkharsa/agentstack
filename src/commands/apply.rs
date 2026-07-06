@@ -139,6 +139,11 @@ fn render(
     let project_root = crate::manifest::project_root_of(&ctx.dir);
     let mut ignore_entries: Vec<String> = Vec::new();
     let mut touched_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // Per-target outcome for the write summary: `changed_count` tallies plans
+    // (a target can change servers + settings + hooks), so the summary counts
+    // targets — and only ones actually written, not ones a gate blocked.
+    let mut changed_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut blocked_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -234,10 +239,12 @@ fn render(
 
         if plan.changed() {
             changed_count += 1;
+            changed_targets.insert(desc.display.clone());
             if !quiet {
                 print!("{}", indent(&plan.diff()));
             }
             if will_write && blocked {
+                blocked_targets.insert(desc.display.clone());
                 println!(
                     "  {} not written — unresolved secret(s); set them or pass --allow-unresolved",
                     "✗".red()
@@ -303,6 +310,7 @@ fn render(
             }
             if sp.changed() {
                 changed_count += 1;
+                changed_targets.insert(desc.display.clone());
                 println!(
                     "  {} settings → {}",
                     "·".dimmed(),
@@ -312,6 +320,7 @@ fn render(
                     print!("{}", indent(&sp.diff()));
                 }
                 if will_write && sblocked {
+                    blocked_targets.insert(desc.display.clone());
                     println!(
                         "  {} settings not written — unresolved secret(s)",
                         "✗".red()
@@ -346,11 +355,13 @@ fn render(
             }
             if hp.changed() {
                 changed_count += 1;
+                changed_targets.insert(desc.display.clone());
                 println!("  {} hooks → {}", "·".dimmed(), hp.path.display());
                 if !quiet {
                     print!("{}", indent(&hp.diff()));
                 }
                 if will_write && hblocked {
+                    blocked_targets.insert(desc.display.clone());
                     println!("  {} hooks not written — unresolved secret(s)", "✗".red());
                 } else if will_write {
                     backups.push(crate::history::capture(
@@ -395,11 +406,13 @@ fn render(
                 }
                 if ip.changed() {
                     changed_count += 1;
+                    changed_targets.insert(desc.display.clone());
                     println!("  {} instructions → {}", "·".dimmed(), ip.path.display());
                     if !quiet {
                         print!("{}", indent(&ip.diff()));
                     }
                     if will_write && iblocked {
+                        blocked_targets.insert(desc.display.clone());
                         println!(
                             "  {} instructions not written — missing fragment source(s)",
                             "✗".red()
@@ -454,6 +467,7 @@ fn render(
         }
     }
 
+    let written_count = touched_targets.len();
     if will_write {
         state.save()?;
         // Record one undoable history entry for everything this apply wrote.
@@ -479,7 +493,19 @@ fn render(
 
     println!();
     if will_write {
-        println!("Applied to {changed_count} target(s).");
+        // Count targets actually written, not pending changes — a gate above
+        // (unresolved secret, missing fragment source) may have blocked some
+        // or all of the writes.
+        if blocked_targets.is_empty() {
+            println!("Applied to {written_count} target(s).");
+        } else {
+            println!(
+                "{written_count} of {} target(s) written — {} blocked by unresolved secret(s) or missing fragment source(s); see {} above.",
+                changed_targets.len(),
+                blocked_targets.len(),
+                "✗".red()
+            );
+        }
     } else if rerun_hint {
         println!(
             "{changed_count} target(s) would change. Re-run with {} to write.",

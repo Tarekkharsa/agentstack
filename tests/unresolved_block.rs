@@ -99,6 +99,59 @@ fn doctor_fix_refuses_unresolved_secret() {
     );
 }
 
+/// The `--write` summary must count targets actually written, not targets with
+/// pending changes: an apply fully blocked by unresolved secrets must not end
+/// with "Applied to N target(s)" while every write above it was refused.
+/// Runs the real binary (own HOME) so the printed summary itself is asserted.
+#[test]
+fn blocked_write_summary_counts_written_targets() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\", \"cursor\"]\n\
+         [servers.kibana]\ntype = \"http\"\nurl = \"https://k/mcp\"\n\
+         headers = { Authorization = \"Bearer ${SOME_UNSET_SECRET}\" }\n",
+    )
+    .unwrap();
+
+    let run = |args: &[&str]| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+            .args(args)
+            .current_dir(&proj)
+            .env("HOME", &home)
+            .env("AGENTSTACK_HOME", home.join(".agentstack"))
+            .env_remove("SOME_UNSET_SECRET")
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    let stdout = run(&["apply", "--write", "--no-gitignore"]);
+    assert!(
+        !stdout.contains("Applied to"),
+        "a fully blocked apply must not claim success:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("0 of 2 target(s) written"),
+        "summary should count only targets actually written:\n{stdout}"
+    );
+    assert!(
+        !home.join(".claude.json").exists(),
+        "blocked apply must not write the live config"
+    );
+
+    // Nothing was written, so a follow-up dry-run still shows both pending.
+    let dry = run(&["apply", "--dry-run"]);
+    assert!(
+        dry.contains("2 target(s) would change"),
+        "blocked targets must still show as pending:\n{dry}"
+    );
+}
+
 /// `use --write` with a blocked target must exit with an error (not a green
 /// "activated on 0 target(s)") so scripts can't mistake a blocked activation
 /// for success — and the live config must stay untouched.
