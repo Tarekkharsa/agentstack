@@ -65,6 +65,10 @@ pub struct LibrarySkill {
     /// Pinned git revision (git sources only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
+    /// For `source = "git"`: the skill's directory within the repo (subdir
+    /// layouts). `None`/absent means the repo root holds `SKILL.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subpath: Option<String>,
     /// SHA-256 of the skill content. Optional until the entry has been resolved
     /// and hashed; the resolver populates it and records it in project locks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -187,6 +191,7 @@ mod tests {
             path: Some(name.into()),
             git: None,
             rev: None,
+            subpath: None,
             checksum: None,
             version: None,
             provenance: Some("consolidated".into()),
@@ -225,6 +230,7 @@ mod tests {
             path: None,
             git: Some("https://example.com/skills.git".into()),
             rev: Some("abc123".into()),
+            subpath: None,
             checksum: Some("deadbeef".into()),
             version: Some("0.1.0".into()),
             provenance: Some("catalog:sql-pack".into()),

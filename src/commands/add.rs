@@ -204,6 +204,7 @@ fn skill_entry(skill: &SkillRef) -> Result<(Skill, Option<String>)> {
                 path: Some(format!("./{asset}")),
                 git: None,
                 rev: None,
+                subpath: None,
             },
             Some(asset.clone()),
         )),
@@ -212,6 +213,7 @@ fn skill_entry(skill: &SkillRef) -> Result<(Skill, Option<String>)> {
                 path: None,
                 git: skill.git.clone(),
                 rev: skill.rev.clone(),
+                subpath: None,
             },
             None,
         )),
@@ -407,6 +409,7 @@ fn add_pack(
             path: Some(dest.clone()),
             git: None,
             rev: None,
+            subpath: None,
         };
         text = build_manifest_with(
             &text,
@@ -705,6 +708,7 @@ fn add_skill(a: &AddSkillArgs, manifest_dir: Option<&Path>) -> Result<()> {
         path: Some(a.path.clone()),
         git: None,
         rev: None,
+        subpath: None,
     };
     write_manifest(
         &ctx,

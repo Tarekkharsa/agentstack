@@ -180,7 +180,9 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         .iter()
         .map(|(name, sk)| {
             let (kind, src) = match sk.source() {
-                Ok(SkillSource::Git { url, rev }) => ("git", json!({"git": url, "rev": rev})),
+                Ok(SkillSource::Git { url, rev, subpath }) => {
+                    ("git", json!({"git": url, "rev": rev, "subpath": subpath}))
+                }
                 Ok(SkillSource::Path(p)) => ("path", json!({"path": p})),
                 Err(_) => ("invalid", Value::Null),
             };

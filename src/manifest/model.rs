@@ -300,13 +300,23 @@ pub struct Skill {
     /// Pinned git revision (branch, tag, or commit). Latest if absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
+    /// For git sources: the skill's directory within the repo (the common
+    /// marketplace/monorepo layout, where `SKILL.md` lives in a subdir rather
+    /// than at the repo root). Ignored for path sources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subpath: Option<String>,
 }
 
 /// Where a skill's content comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkillSource {
     Path(String),
-    Git { url: String, rev: Option<String> },
+    Git {
+        url: String,
+        rev: Option<String>,
+        /// Directory within the repo holding the skill (`None` = repo root).
+        subpath: Option<String>,
+    },
 }
 
 impl Skill {
@@ -316,6 +326,7 @@ impl Skill {
             Ok(SkillSource::Git {
                 url: url.clone(),
                 rev: self.rev.clone(),
+                subpath: self.subpath.clone(),
             })
         } else if let Some(path) = &self.path {
             Ok(SkillSource::Path(path.clone()))

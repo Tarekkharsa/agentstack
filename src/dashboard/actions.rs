@@ -477,6 +477,7 @@ pub fn adopt_skill(manifest_dir: Option<&Path>, name: &str) -> Result<()> {
         path: Some(source.display().to_string()),
         git: None,
         rev: None,
+        subpath: None,
     };
     let manifest_path = ctx.loaded.manifest_path.clone();
     let original = std::fs::read_to_string(&manifest_path)
@@ -519,6 +520,7 @@ pub fn adopt_all_skills(manifest_dir: Option<&Path>) -> Result<usize> {
             path: Some(source.display().to_string()),
             git: None,
             rev: None,
+            subpath: None,
         };
         let body = serde_json::to_value(&skill)?;
         text = crate::commands::add::build_manifest_with(&text, "skills", &name, &body, None)?;
@@ -543,12 +545,14 @@ pub fn add_skill(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
             path: str_field(args, "path"),
             git: None,
             rev: None,
+            subpath: None,
         }
     } else {
         Skill {
             path: None,
             git: str_field(args, "git"),
             rev: str_field(args, "rev"),
+            subpath: str_field(args, "subpath"),
         }
     };
     match source {

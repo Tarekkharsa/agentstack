@@ -847,15 +847,23 @@ pub struct LibAddArgs {
     /// Add from a local skill directory (must contain SKILL.md).
     #[arg(long, conflicts_with = "git")]
     pub path: Option<String>,
-    /// Add from a git source URL.
+    /// Add from a git source URL. A subdir skill may be given inline as
+    /// `<url>#<subpath>` or via --subpath.
     #[arg(long, conflicts_with = "path")]
     pub git: Option<String>,
     /// Pin a git revision (branch, tag, or commit). Git sources only.
     #[arg(long, requires = "git")]
     pub rev: Option<String>,
+    /// Directory within the git repo holding the skill's SKILL.md — for
+    /// marketplace/monorepo layouts (e.g. skills/improve). Git sources only.
+    #[arg(long, requires = "git")]
+    pub subpath: Option<String>,
     /// Overwrite an existing library entry of the same name.
     #[arg(long)]
     pub replace: bool,
+    /// Add even if the content scan finds high-severity items (hidden Unicode).
+    #[arg(long)]
+    pub allow_flagged: bool,
     /// Write the change (else dry-run/preview).
     #[arg(long)]
     pub write: bool,

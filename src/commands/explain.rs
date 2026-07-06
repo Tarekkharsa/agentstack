@@ -318,6 +318,7 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
             path: entry.path.clone(),
             git: entry.git.clone(),
             rev: entry.rev.clone(),
+            subpath: entry.subpath.clone(),
         }
         .source()
         .ok()
@@ -337,12 +338,16 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
         kv(&mut o, "Source", "central library (`agentstack lib`)");
     } else {
         match &source {
-            Some(SkillSource::Git { url, rev }) => kv(
+            Some(SkillSource::Git { url, rev, subpath }) => kv(
                 &mut o,
                 "Source",
                 &format!(
-                    "git {url}{}",
-                    rev.as_ref().map(|r| format!(" @ {r}")).unwrap_or_default()
+                    "git {url}{}{}",
+                    rev.as_ref().map(|r| format!(" @ {r}")).unwrap_or_default(),
+                    subpath
+                        .as_ref()
+                        .map(|s| format!(" (subpath {s})"))
+                        .unwrap_or_default()
                 ),
             ),
             Some(SkillSource::Path(p)) => kv(&mut o, "Source", &format!("local path {p}")),

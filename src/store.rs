@@ -68,14 +68,26 @@ impl Store {
                     source_kind: "path",
                 })
             }
-            SkillSource::Git { url, rev } => {
+            SkillSource::Git { url, rev, subpath } => {
                 let want = pinned_rev.map(str::to_string).or(rev);
-                let dest = self.git_dir(&url);
-                let fetched = ensure_git(&url, want.as_deref(), &dest)?;
-                let resolved_rev = git_head(&dest)?;
-                let checksum = dir_digest_cached(&dest)?;
+                let clone = self.git_dir(&url);
+                let fetched = ensure_git(&url, want.as_deref(), &clone)?;
+                // HEAD is read from the clone root (`.git` lives there); the
+                // skill body — and thus the checksum — is the subpath dir.
+                let resolved_rev = git_head(&clone)?;
+                let content = git_content_dir(&clone, subpath.as_deref())?;
+                if let Some(sub) = subpath.as_deref() {
+                    if !content.exists() {
+                        bail!(
+                            "subpath '{sub}' does not exist in {url} at {} — \
+                             check the path within the repo",
+                            &resolved_rev[..resolved_rev.len().min(12)]
+                        );
+                    }
+                }
+                let checksum = dir_digest_cached(&content)?;
                 Ok(Resolved {
-                    path: dest,
+                    path: content,
                     rev: Some(resolved_rev),
                     checksum,
                     fetched,
@@ -107,15 +119,16 @@ impl Store {
                     source_kind: "path",
                 }))
             }
-            SkillSource::Git { url, .. } => {
-                let dest = self.git_dir(&url);
-                if !dest.exists() {
+            SkillSource::Git { url, subpath, .. } => {
+                let clone = self.git_dir(&url);
+                if !clone.exists() {
                     return Ok(None);
                 }
+                let content = git_content_dir(&clone, subpath.as_deref())?;
                 Ok(Some(Resolved {
-                    rev: git_head(&dest).ok(),
-                    checksum: dir_digest_cached(&dest)?,
-                    path: dest,
+                    rev: git_head(&clone).ok(),
+                    checksum: dir_digest_cached(&content)?,
+                    path: content,
                     fetched: false,
                     source_kind: "git",
                 }))
@@ -142,13 +155,13 @@ impl Store {
                 fetched: false,
                 source_kind: "path",
             })),
-            SkillSource::Git { url, .. } => {
-                let dest = self.git_dir(&url);
-                if !dest.exists() {
+            SkillSource::Git { url, subpath, .. } => {
+                let clone = self.git_dir(&url);
+                if !clone.exists() {
                     return Ok(None);
                 }
                 Ok(Some(Resolved {
-                    path: dest,
+                    path: git_content_dir(&clone, subpath.as_deref())?,
                     rev: None,
                     checksum: String::new(),
                     fetched: false,
@@ -171,11 +184,33 @@ pub fn local_source_dir(store: &Store, skill: &Skill, manifest_dir: &Path) -> Op
             let path = resolve_path(manifest_dir, &p);
             path.exists().then_some(path)
         }
-        SkillSource::Git { url, .. } => {
-            let dir = store.git_dir(&url);
-            dir.exists().then_some(dir)
+        SkillSource::Git { url, subpath, .. } => {
+            let clone = store.git_dir(&url);
+            if !clone.exists() {
+                return None;
+            }
+            let content = git_content_dir(&clone, subpath.as_deref()).ok()?;
+            content.exists().then_some(content)
         }
     }
+}
+
+/// Resolve a git skill's content directory: the clone root, or a validated
+/// subdirectory within it. The subpath must be a plain relative path — no
+/// absolute prefix and no `..` component — so a crafted library entry can never
+/// point the skill body outside its own clone.
+fn git_content_dir(clone: &Path, subpath: Option<&str>) -> Result<PathBuf> {
+    let Some(sub) = subpath.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(clone.to_path_buf());
+    };
+    let rel = Path::new(sub);
+    let safe = rel
+        .components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)));
+    if !safe {
+        bail!("git subpath '{sub}' must be a relative path inside the repo (no '..' or absolute path)");
+    }
+    Ok(clone.join(rel))
 }
 
 fn resolve_path(dir: &Path, p: &str) -> PathBuf {

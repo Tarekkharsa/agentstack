@@ -107,6 +107,7 @@ fn explain_library_only_skill() {
         LibSource::Path(&src),
         false,
         true,
+        false,
     )
     .unwrap();
 

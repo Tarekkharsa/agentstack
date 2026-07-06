@@ -19,6 +19,7 @@ use crate::cli::{
 };
 use crate::library::{Library, LibraryServer, LibrarySkill};
 use crate::manifest::{Server, Skill};
+use crate::scan::Severity;
 use crate::store::{dir_digest, dir_size, Store};
 use crate::util::paths;
 
@@ -42,7 +43,12 @@ pub enum LibSource<'a> {
     /// A local skill directory (copied into `lib/skills/<name>`).
     Path(&'a Path),
     /// A git source (resolved via the store; referenced, not copied).
-    Git { url: &'a str, rev: Option<&'a str> },
+    /// `subpath` selects the skill's directory within the repo (subdir layouts).
+    Git {
+        url: &'a str,
+        rev: Option<&'a str>,
+        subpath: Option<&'a str>,
+    },
 }
 
 /// The result of a library insertion (or a dry-run preview of one).
@@ -85,6 +91,7 @@ pub fn add_skill(
     source: LibSource,
     replace: bool,
     write: bool,
+    allow_flagged: bool,
 ) -> Result<AddOutcome> {
     if !valid_lib_name(name) {
         bail!("invalid library skill name '{name}' — must be non-empty and contain no path separators");
@@ -101,6 +108,9 @@ pub fn add_skill(
         LibSource::Path(src) => {
             let src = absolutize(src)?;
             require_skill_md(&src)?;
+            // Supply-chain gate: scan the source before any of it becomes the
+            // canonical library copy (plan §3).
+            scan_gate(name, &src, allow_flagged, &mut warnings)?;
             let dest = lib_home.join("skills").join(name);
             if same_dir(&src, &dest) {
                 bail!(
@@ -136,34 +146,50 @@ pub fn add_skill(
                 path: Some(name.to_string()),
                 git: None,
                 rev: None,
+                subpath: None,
                 checksum: Some(checksum.clone()),
                 version: None,
                 provenance: Some(format!("path:{}", src.display())),
             };
             (entry, Some(dest), checksum, "path", Some(src), total_bytes)
         }
-        LibSource::Git { url, rev } => {
+        LibSource::Git { url, rev, subpath } => {
             // Resolving fetches into the store (needed to learn rev + checksum and
             // to validate SKILL.md) — this touches the network even on a dry run.
             let store = Store::default_store();
+            let subpath = subpath.map(str::trim).filter(|s| !s.is_empty());
             let skill = Skill {
                 path: None,
                 git: Some(url.to_string()),
                 rev: rev.map(str::to_string),
+                subpath: subpath.map(str::to_string),
             };
+            // `resolved.path` is the subpath directory within the clone, so
+            // SKILL.md validation and the scan both cover the actual skill body.
             let resolved = store
                 .resolve(&skill, lib_home, rev)
                 .with_context(|| format!("resolving git source {url}"))?;
             require_skill_md(&resolved.path)?;
+            scan_gate(name, &resolved.path, allow_flagged, &mut warnings)?;
+            // Truthful provenance: url @ resolved rev, with the subpath fragment
+            // when the skill lives in a subdir (plan §6).
+            let mut provenance = format!("git:{url}");
+            if let Some(rev) = &resolved.rev {
+                provenance.push_str(&format!("@{rev}"));
+            }
+            if let Some(sub) = subpath {
+                provenance.push_str(&format!("#{sub}"));
+            }
             let entry = LibrarySkill {
                 name: name.to_string(),
                 source: "git".into(),
                 path: None,
                 git: Some(url.to_string()),
                 rev: resolved.rev.clone(),
+                subpath: subpath.map(str::to_string),
                 checksum: Some(resolved.checksum.clone()),
                 version: None,
-                provenance: Some(format!("git:{url}")),
+                provenance: Some(provenance),
             };
             let total_bytes = dir_size(&resolved.path);
             (entry, None, resolved.checksum, "git", None, total_bytes)
@@ -202,17 +228,44 @@ pub fn add_skill(
 
 fn add(args: &LibAddArgs) -> Result<()> {
     let lib_home = paths::lib_home();
-    let source = match (&args.path, &args.git) {
+    // A subdir may be given as `--subpath skills/foo` or folded into the URL as
+    // `--git <url>#skills/foo`. Accept either, but not two conflicting values.
+    let (git_url, url_frag) = match &args.git {
+        Some(g) => match g.split_once('#') {
+            Some((u, frag)) => (Some(u.to_string()), Some(frag.to_string())),
+            None => (Some(g.clone()), None),
+        },
+        None => (None, None),
+    };
+    let subpath = match (&args.subpath, &url_frag) {
+        (Some(a), Some(b)) if a != b => {
+            bail!("subpath given twice and they differ: --subpath '{a}' vs '#{b}' in --git")
+        }
+        (Some(s), _) | (_, Some(s)) => Some(s.clone()),
+        (None, None) => None,
+    };
+    if subpath.is_some() && git_url.is_none() {
+        bail!("--subpath applies to git sources only — pass it with --git <url>");
+    }
+    let source = match (&args.path, &git_url) {
         (Some(p), None) => LibSource::Path(Path::new(p)),
         (None, Some(url)) => LibSource::Git {
             url,
             rev: args.rev.as_deref(),
+            subpath: subpath.as_deref(),
         },
         (None, None) => bail!("specify a source: --path <dir> or --git <url>"),
         (Some(_), Some(_)) => bail!("--path and --git are mutually exclusive"),
     };
 
-    let outcome = add_skill(&lib_home, &args.name, source, args.replace, args.write)?;
+    let outcome = add_skill(
+        &lib_home,
+        &args.name,
+        source,
+        args.replace,
+        args.write,
+        args.allow_flagged,
+    )?;
 
     for w in &outcome.warnings {
         println!("  {} {w}", "⚠".yellow());
@@ -760,7 +813,9 @@ pub fn migrate_skills(
 
     let mut migrated = Vec::new();
     for (name, path) in &candidates {
-        add_skill(lib_home, name, LibSource::Path(path), replace, write)?;
+        // Migration adopts the user's own existing skills; scan findings are
+        // surfaced by audit/doctor, never a reason to block a move here.
+        add_skill(lib_home, name, LibSource::Path(path), replace, write, true)?;
         migrated.push(name.clone());
     }
 
@@ -975,6 +1030,42 @@ fn require_skill_md(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Supply-chain content gate for `lib add` (plan §3): scan the resolved skill
+/// dir before it becomes the canonical library copy. High findings (hidden
+/// Unicode) block the add — the same philosophy as unresolved secrets blocking
+/// writes — unless `allow_flagged` overrides. Warn findings (injection
+/// heuristics) are appended to `warnings` and never block. Pulls in the same
+/// scanner `agentstack audit`/`install` use, so the trust story is uniform.
+fn scan_gate(
+    name: &str,
+    dir: &Path,
+    allow_flagged: bool,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
+    let findings =
+        crate::scan::scan_tree(dir).with_context(|| format!("scanning {}", dir.display()))?;
+    let high: Vec<_> = findings
+        .iter()
+        .filter(|f| f.severity == Severity::High)
+        .collect();
+    if !high.is_empty() && !allow_flagged {
+        let list = high
+            .iter()
+            .map(|f| format!("    {}", f.describe()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        bail!(
+            "'{name}': {} high-severity content finding(s) — add blocked \
+             (pass --allow-flagged to add anyway):\n{list}",
+            high.len()
+        );
+    }
+    for f in &findings {
+        warnings.push(format!("[{}] {}", f.severity.label(), f.describe()));
+    }
+    Ok(())
+}
+
 /// Whether two paths point at the same directory (best-effort via canonicalize).
 fn same_dir(a: &Path, b: &Path) -> bool {
     match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
@@ -1020,7 +1111,15 @@ mod tests {
         let work = assert_fs::TempDir::new().unwrap();
         let src = src_skill(&work, "# body\n");
 
-        let out = add_skill(lib.path(), "sql-review", LibSource::Path(&src), false, true).unwrap();
+        let out = add_skill(
+            lib.path(),
+            "sql-review",
+            LibSource::Path(&src),
+            false,
+            true,
+            false,
+        )
+        .unwrap();
 
         assert!(out.written);
         assert_eq!(out.source_kind, "path");
@@ -1043,7 +1142,7 @@ mod tests {
         let work = assert_fs::TempDir::new().unwrap();
         let src = src_skill(&work, "# body\n");
 
-        let out = add_skill(lib.path(), "eph", LibSource::Path(&src), false, true).unwrap();
+        let out = add_skill(lib.path(), "eph", LibSource::Path(&src), false, true, false).unwrap();
 
         assert!(out.source_path.is_some(), "source path surfaced for output");
         assert!(
@@ -1075,9 +1174,17 @@ mod tests {
 
         // Preview and write both surface the size (the preview is where the
         // warning is most useful — before the copy happens).
-        let dry = add_skill(lib.path(), "big", LibSource::Path(&src), false, false).unwrap();
+        let dry = add_skill(
+            lib.path(),
+            "big",
+            LibSource::Path(&src),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
         assert!(dry.total_bytes >= 4096, "got {}", dry.total_bytes);
-        let wet = add_skill(lib.path(), "big", LibSource::Path(&src), false, true).unwrap();
+        let wet = add_skill(lib.path(), "big", LibSource::Path(&src), false, true, false).unwrap();
         assert_eq!(wet.total_bytes, dry.total_bytes);
     }
 
@@ -1099,7 +1206,15 @@ mod tests {
             .unwrap();
         let src = work.child("src").path().to_path_buf();
 
-        let out = add_skill(lib.path(), "huge", LibSource::Path(&src), false, false).unwrap();
+        let out = add_skill(
+            lib.path(),
+            "huge",
+            LibSource::Path(&src),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
         assert!(
             out.warnings.iter().any(|w| w.contains("full-library pass")),
             "size warning surfaced on the outcome: {:?}",
@@ -1113,7 +1228,7 @@ mod tests {
         let work = assert_fs::TempDir::new().unwrap();
         let src = src_skill(&work, "# body\n");
 
-        let out = add_skill(lib.path(), "x", LibSource::Path(&src), false, false).unwrap();
+        let out = add_skill(lib.path(), "x", LibSource::Path(&src), false, false, false).unwrap();
 
         assert!(!out.written);
         assert_eq!(out.checksum.len(), 64, "preview still digests the source");
@@ -1126,9 +1241,10 @@ mod tests {
         let lib = assert_fs::TempDir::new().unwrap();
         let work = assert_fs::TempDir::new().unwrap();
         let src = src_skill(&work, "# body\n");
-        add_skill(lib.path(), "x", LibSource::Path(&src), false, true).unwrap();
+        add_skill(lib.path(), "x", LibSource::Path(&src), false, true, false).unwrap();
 
-        let err = add_skill(lib.path(), "x", LibSource::Path(&src), false, true).unwrap_err();
+        let err =
+            add_skill(lib.path(), "x", LibSource::Path(&src), false, true, false).unwrap_err();
         assert!(err.to_string().contains("--replace"));
     }
 
@@ -1137,12 +1253,12 @@ mod tests {
         let lib = assert_fs::TempDir::new().unwrap();
         let work = assert_fs::TempDir::new().unwrap();
         let src1 = src_skill(&work, "# original\n");
-        let first = add_skill(lib.path(), "x", LibSource::Path(&src1), false, true).unwrap();
+        let first = add_skill(lib.path(), "x", LibSource::Path(&src1), false, true, false).unwrap();
 
         // A different source body under the same name, with --replace.
         let work2 = assert_fs::TempDir::new().unwrap();
         let src2 = src_skill(&work2, "# changed\n");
-        let second = add_skill(lib.path(), "x", LibSource::Path(&src2), true, true).unwrap();
+        let second = add_skill(lib.path(), "x", LibSource::Path(&src2), true, true, false).unwrap();
 
         assert!(second.replaced);
         assert_ne!(first.checksum, second.checksum);
@@ -1157,7 +1273,8 @@ mod tests {
         work.child("src/notes.txt").write_str("x").unwrap();
         let src = work.child("src").path().to_path_buf();
 
-        let err = add_skill(lib.path(), "x", LibSource::Path(&src), false, true).unwrap_err();
+        let err =
+            add_skill(lib.path(), "x", LibSource::Path(&src), false, true, false).unwrap_err();
         assert!(err.to_string().contains("SKILL.md"));
     }
 
@@ -1166,8 +1283,15 @@ mod tests {
         let lib = assert_fs::TempDir::new().unwrap();
         let work = assert_fs::TempDir::new().unwrap();
         let src = src_skill(&work, "# body\n");
-        let err =
-            add_skill(lib.path(), "../escape", LibSource::Path(&src), false, true).unwrap_err();
+        let err = add_skill(
+            lib.path(),
+            "../escape",
+            LibSource::Path(&src),
+            false,
+            true,
+            false,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("invalid library skill name"));
     }
 
@@ -1178,6 +1302,7 @@ mod tests {
             path: Some(name.into()),
             git: None,
             rev: None,
+            subpath: None,
             checksum: Some(checksum.into()),
             version: None,
             provenance: Some(format!("path:/src/{name}")),
@@ -1210,6 +1335,7 @@ mod tests {
             path: None,
             git: Some("https://example.com/x.git".into()),
             rev: Some("0123456789abcdef0123456789abcdef01234567".into()),
+            subpath: None,
             checksum: Some("feedface00001111".into()),
             version: None,
             provenance: Some("git:https://example.com/x.git".into()),
@@ -1270,9 +1396,11 @@ mod tests {
             LibSource::Git {
                 url: &url,
                 rev: None,
+                subpath: None,
             },
             false,
             true,
+            false,
         )
         .unwrap();
 
@@ -1287,6 +1415,112 @@ mod tests {
         std::env::remove_var("AGENTSTACK_HOME");
     }
 
+    #[test]
+    fn add_git_subpath_installs_subdir_skill() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        // A repo whose skill lives in a subdir (marketplace/monorepo layout),
+        // with NO SKILL.md at the root — the shape that blocked before.
+        let work = assert_fs::TempDir::new().unwrap();
+        let repo = work.child("repo");
+        repo.create_dir_all().unwrap();
+        let git = |a: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(repo.path())
+                .args(a)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {a:?} failed");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@e.st"]);
+        git(&["config", "user.name", "t"]);
+        repo.child("README.md").write_str("# monorepo\n").unwrap();
+        repo.child("skills/improve/SKILL.md")
+            .write_str("# improve\n")
+            .unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "init"]);
+
+        let lib_home = home.child("lib");
+        let url = format!("file://{}", repo.path().display());
+        let out = add_skill(
+            lib_home.path(),
+            "improve",
+            LibSource::Git {
+                url: &url,
+                rev: None,
+                subpath: Some("skills/improve"),
+            },
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(out.source_kind, "git");
+        let library = Library::load(lib_home.path()).unwrap();
+        let entry = library.get("improve").unwrap();
+        assert_eq!(entry.subpath.as_deref(), Some("skills/improve"));
+        // Truthful provenance: url @ rev # subpath (plan §6).
+        let prov = entry.provenance.as_deref().unwrap();
+        assert!(prov.starts_with("git:"), "{prov}");
+        assert!(prov.contains('@'), "records the resolved rev: {prov}");
+        assert!(prov.ends_with("#skills/improve"), "records subpath: {prov}");
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn add_blocks_on_hidden_unicode_unless_allowed() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let src = assert_fs::TempDir::new().unwrap();
+        // A zero-width space smuggled into the skill body — a high finding.
+        src.child("SKILL.md")
+            .write_str("# skill\nhidden\u{200B}payload\n")
+            .unwrap();
+
+        let blocked = add_skill(
+            lib.path(),
+            "sneaky",
+            LibSource::Path(src.path()),
+            false,
+            true,
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            blocked.to_string().contains("high-severity"),
+            "scan should block: {blocked}"
+        );
+        assert!(
+            Library::load(lib.path()).unwrap().get("sneaky").is_none(),
+            "nothing written when blocked"
+        );
+
+        // --allow-flagged (last arg) overrides the block.
+        let out = add_skill(
+            lib.path(),
+            "sneaky",
+            LibSource::Path(src.path()),
+            false,
+            true,
+            true,
+        )
+        .unwrap();
+        assert!(out.written);
+        assert!(
+            out.warnings.iter().any(|w| w.contains("hidden unicode")),
+            "finding still surfaced as a warning: {:?}",
+            out.warnings
+        );
+    }
+
     // ---------- remove ----------
 
     #[test]
@@ -1294,7 +1528,7 @@ mod tests {
         let lib = assert_fs::TempDir::new().unwrap();
         let work = assert_fs::TempDir::new().unwrap();
         let src = src_skill(&work, "# body\n");
-        add_skill(lib.path(), "x", LibSource::Path(&src), false, true).unwrap();
+        add_skill(lib.path(), "x", LibSource::Path(&src), false, true, false).unwrap();
 
         let out = remove_skill(lib.path(), "x", false).unwrap();
 
@@ -1311,7 +1545,7 @@ mod tests {
         let lib = assert_fs::TempDir::new().unwrap();
         let work = assert_fs::TempDir::new().unwrap();
         let src = src_skill(&work, "# body\n");
-        add_skill(lib.path(), "x", LibSource::Path(&src), false, true).unwrap();
+        add_skill(lib.path(), "x", LibSource::Path(&src), false, true, false).unwrap();
 
         let out = remove_skill(lib.path(), "x", true).unwrap();
 
@@ -1340,6 +1574,7 @@ mod tests {
             path: None,
             git: Some("https://example.com/x.git".into()),
             rev: Some("abc123".into()),
+            subpath: None,
             checksum: Some("deadbeef".into()),
             version: None,
             provenance: Some("git:https://example.com/x.git".into()),
@@ -1379,6 +1614,7 @@ mod tests {
             path: Some("../../../../../../../../etc".into()),
             git: None,
             rev: None,
+            subpath: None,
             checksum: Some("x".into()),
             version: None,
             provenance: None,
@@ -1458,7 +1694,7 @@ mod tests {
         let old = assert_fs::TempDir::new().unwrap();
         let work = assert_fs::TempDir::new().unwrap();
         let src = src_skill(&work, "# existing\n");
-        add_skill(lib.path(), "a", LibSource::Path(&src), false, true).unwrap();
+        add_skill(lib.path(), "a", LibSource::Path(&src), false, true, false).unwrap();
         old_skill(old.path(), "a", "# migrated\n");
 
         // Same name already in the library → hard error, nothing written.

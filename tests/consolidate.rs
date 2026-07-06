@@ -166,7 +166,15 @@ fn consolidate_collision_fails_without_replace() {
     let other = tmp.path().join("other");
     fs::create_dir_all(&other).unwrap();
     fs::write(other.join("SKILL.md"), "# a different figma\n").unwrap();
-    add_skill(&lib_home, "figma", LibSource::Path(&other), false, true).unwrap();
+    add_skill(
+        &lib_home,
+        "figma",
+        LibSource::Path(&other),
+        false,
+        true,
+        false,
+    )
+    .unwrap();
 
     let registry = Registry::load().unwrap();
     // Discovered figma differs from the library's → hard error without --replace.

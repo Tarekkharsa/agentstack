@@ -926,6 +926,7 @@ fn inspect_native_plugin(
                         path: Some(entry.path().display().to_string()),
                         git: None,
                         rev: None,
+                        subpath: None,
                     },
                 );
             }

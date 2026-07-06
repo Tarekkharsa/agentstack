@@ -469,6 +469,7 @@ fn build_upgraded_manifest(
             path: Some(format!("./{asset}")),
             git: None,
             rev: None,
+            subpath: None,
         };
         text = add::build_manifest_with(
             &text,
@@ -651,6 +652,7 @@ fn repin_lock(
             path: Some(format!("./{asset}")),
             git: None,
             rev: None,
+            subpath: None,
         };
         let resolved = store
             .resolve(&entry, &ctx.dir, None)

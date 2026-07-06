@@ -130,6 +130,7 @@ mod tests {
             path: Some("sql-review".into()),
             git: None,
             rev: None,
+            subpath: None,
             checksum: None,
             version: None,
             provenance: Some("consolidated".into()),

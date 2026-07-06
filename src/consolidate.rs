@@ -110,12 +110,16 @@ pub fn consolidate(
         let already_home =
             source_canon == target || library_has_same(&library, &name, &source_canon);
         if !already_home {
+            // Consolidation adopts the user's own already-present skills; scan
+            // findings are surfaced by audit/doctor, never a reason to block
+            // the adoption here (matching `lib migrate`).
             add_skill(
                 &lib_home,
                 &name,
                 LibSource::Path(&source_canon),
                 replace,
                 write,
+                true,
             )?;
         }
 
