@@ -275,6 +275,38 @@ default = ["claude-code", "codex"]</code></pre>
     </p>
   </section>
 
+  <section id="trust">
+    <p class="eyebrow">The trust gate</p>
+    <h2>Clone anything. Nothing runs until you say so.</h2>
+    <p class="muted">
+      Register the gateway once (<code>agentstack connect</code>) and every repo
+      you open brings its own servers — no files copied in. But a repo you
+      haven't reviewed is <strong>inert</strong>: none of its MCP servers are
+      spawned or contacted, no secrets resolved. You review what it declares,
+      <code>trust</code> it (pinned to a content digest, so any later edit
+      re-gates it), and from then on every brokered call is firewalled and audited.
+    </p>
+    <div class="term">
+      <div class="term-head" aria-hidden="true"><span></span><span></span><span></span><b>clone → inert → review → trust → firewalled → audited</b></div>
+      <pre><code><span class="p">$</span> git clone some-repo &amp;&amp; cd some-repo   <span class="c"># declares servers you've never seen</span>
+<span class="p">$</span> agentstack mcp --auto-project        <span class="c"># an agent asks: what can I touch here?</span>
+<span class="c">  ✗ untrusted — none of its servers are spawned or contacted</span>
+
+<span class="p">$</span> agentstack trust .
+<span class="c">  ▶ demo: runs `python3 ./server.py`   # you see exactly what it would run</span>
+<span class="ok">  ✓</span> trusted at sha256:945b4b…         <span class="c"># editing the manifest re-gates it</span>
+
+<span class="c">  agent → demo.echo         </span><span class="ok">✓ ok</span><span class="c">       brokered through the gateway, logged</span>
+<span class="c">  agent → demo.secret_read  ✗ denied   blocked by the manifest's [policy] firewall</span>
+<span class="c">  every call → ~/.agentstack/audit/calls.jsonl  (tool · outcome · latency)</span></code></pre>
+    </div>
+    <p class="small muted">
+      No vendor or agent framework tells this story: an untrusted repo's agents
+      can touch nothing you didn't review, and every capability call is
+      firewallable and audited.
+    </p>
+  </section>
+
   <section id="modes">
     <p class="eyebrow">Rendered files</p>
     <h2>Pick where artifacts live</h2>
@@ -284,17 +316,17 @@ default = ["claude-code", "codex"]</code></pre>
     </p>
     <dl class="modes">
       <dt>static <small>— the default</small></dt>
-      <dd>Artifacts sit on disk, kept out of git by a managed <code>.gitignore</code>
-          block. Works however you launch your tools.</dd>
+      <dd>Artifacts (<code>.mcp.json</code>, <code>.claude/skills/</code>, and the
+          compiled <code>CLAUDE.md</code>&nbsp;/&nbsp;<code>AGENTS.md</code>) sit on
+          disk, kept out of git by a managed <code>.gitignore</code> block — so a
+          repo tracks only your <code>.agentstack/</code> intent. Works however you
+          launch your tools.</dd>
       <dt>clean-at-rest</dt>
       <dd>Nothing generated exists between sessions. <code>agentstack run &lt;cli&gt; --profile &lt;p&gt;</code>
           injects on launch and reverts on exit; <code>git status</code> stays silent.</dd>
       <dt>zero files</dt>
-      <dd><code>agentstack connect</code> registers the gateway once per harness; every
-          <em>trusted</em> repo then brings its own servers through
-          <code>agentstack mcp --auto-project</code> — tool firewall and call audit log
-          included. Untrusted repos stay inert until you review and run
-          <code>agentstack trust .</code></dd>
+      <dd>Nothing generated at all — the gateway serves each repo's servers on the
+          fly, behind the <a href="#trust">trust gate</a> above.</dd>
     </dl>
   </section>
 
@@ -317,7 +349,16 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
       <li>
         <b><a href="library.html">Central library guide</a></b>
         <p>One managed home for skills and servers; projects select by name and stay
-           digest-pinned. The visual walkthrough.</p>
+           digest-pinned. Install from a local dir or straight from a git subdirectory
+           (<code>lib add --git &lt;url&gt; --subpath &lt;dir&gt;</code>), sync it across
+           machines (<code>lib sync</code>), and pull ready-made skills from the shipped
+           catalog. The visual walkthrough.</p>
+      </li>
+      <li>
+        <b>Usage insight</b>
+        <p><code>agentstack analyze</code> reports what you actually call (from the
+           runtime audit log) and flags library skills and servers you installed but
+           never use — read-only and local, so pruning is data-driven.</p>
       </li>
       <li>
         <b><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Feature reference</a></b>

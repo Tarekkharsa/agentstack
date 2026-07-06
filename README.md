@@ -162,6 +162,33 @@ steps:
   - uses: Tarekkharsa/agentstack@main   # or pin a release tag
 ```
 
+## The trust gate — clone anyone's repo, safely
+
+Register the gateway once (`agentstack connect`) and every repo you open brings
+its own MCP servers with **no files copied in**. But a repo you haven't reviewed
+is **inert** — none of its servers are spawned or contacted, no secrets resolved:
+
+```bash
+git clone <some-repo> && cd <some-repo>
+agentstack mcp --auto-project    # an agent asks what it can use here → nothing (untrusted)
+
+agentstack trust .               # you SEE what it declares before authorizing:
+#   ▶ demo: runs `python3 ./server.py`
+#   ✓ trusted at sha256:…        (editing the manifest re-gates it)
+```
+
+After that its servers are live through the gateway — and every brokered call is
+**firewalled** by the manifest's `[policy]` and **audited**:
+
+```text
+agent → demo.echo         ✓ ok        # brokered through the gateway, logged
+agent → demo.secret_read  ✗ denied    # blocked by [policy.tools]
+every call → ~/.agentstack/audit/calls.jsonl   (tool · outcome · latency)
+```
+
+No files in the repo, nothing an agent can touch that you didn't review. The
+whole thing is a runnable 60-second demo: [`docs/trust-gate-demo.sh`](docs/trust-gate-demo.sh).
+
 ## Where rendered files live — pick a mode
 
 You always commit the *intent* (`agentstack.toml` + `.lock`). The rendered
