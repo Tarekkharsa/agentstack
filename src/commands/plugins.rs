@@ -1009,7 +1009,13 @@ fn inspect_native_plugin(
         .unwrap_or("0.1.0")
         .to_string();
     let mut servers = IndexMap::new();
-    for (name, server) in read_native_mcp(source)? {
+    for (name, mut server) in read_native_mcp(source)? {
+        // Recipe-owned: the native plugin already provides this server on the
+        // adopted harness, and the generated plugin package carries it to any
+        // harness it gets installed on. `targets = []` keeps the definition
+        // out of the direct `[servers]` fan-out, or the same server would be
+        // configured twice everywhere the plugin is present.
+        server.targets = Vec::new();
         let key = unique_name(
             manifest.servers.keys(),
             servers.keys(),
@@ -1198,12 +1204,33 @@ fn server_from_native_value(value: &Value) -> Option<Server> {
                 .collect()
         })
         .unwrap_or_default();
-    let headers = obj
+    let mut headers = obj
         .get("headers")
         .or_else(|| obj.get("http_headers"))
         .and_then(Value::as_object)
         .map(string_map)
         .unwrap_or_default();
+    // Codex auth wiring: `bearer_token_env_var = "X"` means "send
+    // `Authorization: Bearer $X`, read from the environment at runtime".
+    // Carry it as a portable header with a `${X}` secret ref — dropping it
+    // adopts a server that fails auth anywhere it's installed, and the ref
+    // form makes `referenced_secrets`/doctor surface the required secret.
+    if let Some(var) = obj.get("bearer_token_env_var").and_then(Value::as_str) {
+        headers
+            .entry("Authorization".to_string())
+            .or_insert_with(|| format!("Bearer ${{{var}}}"));
+    }
+    // Same idea for Codex's per-header form: `env_http_headers = { Header =
+    // "ENV_VAR" }` becomes `Header = "${ENV_VAR}"`.
+    if let Some(env_headers) = obj.get("env_http_headers").and_then(Value::as_object) {
+        for (header, var) in env_headers {
+            if let Some(var) = var.as_str() {
+                headers
+                    .entry(header.clone())
+                    .or_insert_with(|| format!("${{{var}}}"));
+            }
+        }
+    }
     let env = obj
         .get("env")
         .and_then(Value::as_object)
@@ -1214,6 +1241,7 @@ fn server_from_native_value(value: &Value) -> Option<Server> {
         url,
         command,
         args,
+        targets: crate::manifest::model::all_targets(),
         headers,
         env,
         extra: Default::default(),
@@ -1556,6 +1584,99 @@ mod tests {
             adopted.recipe.source.as_deref(),
             Some("plugin:codex/local/play")
         );
+    }
+
+    /// The adopted-github case observed live: the native `.mcp.json` declares
+    /// auth via Codex's `bearer_token_env_var` (or `env_http_headers`), and
+    /// the plugin itself already provides the server on the adopted harness.
+    /// Adoption must (a) carry the auth through as a portable `${REF}` header
+    /// so the server works — and doctor demands the secret — anywhere it's
+    /// installed, and (b) keep the server out of the direct `[servers]`
+    /// fan-out (`targets = []`), or `apply --write` would configure the same
+    /// server a second time on every harness where the plugin is present.
+    #[test]
+    fn adopt_carries_bearer_auth_and_scopes_servers_out_of_the_fanout() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let plugin = tmp.child("cache/openai-curated/github/d6169bef");
+        plugin
+            .child(".codex-plugin/plugin.json")
+            .write_str(r#"{"name":"github","version":"0.1.0","description":"GitHub"}"#)
+            .unwrap();
+        plugin
+            .child(".mcp.json")
+            .write_str(
+                r#"{
+          "mcpServers": {
+            "github": {
+              "type": "http",
+              "url": "https://api.githubcopilot.com/mcp/",
+              "bearer_token_env_var": "GITHUB_PAT_TOKEN"
+            },
+            "cf": {
+              "type": "http",
+              "url": "https://mcp.cloudflare.com/mcp",
+              "env_http_headers": {"X-Auth-Key": "CF_API_KEY"}
+            }
+          }
+        }"#,
+            )
+            .unwrap();
+        let native = crate::plugins::Plugin {
+            harness: "codex".into(),
+            name: "github".into(),
+            marketplace: "openai-curated".into(),
+            scope: "available".into(),
+            projects: vec![],
+            version: Some("0.1.0".into()),
+            enabled: Some(true),
+            status: "installed".into(),
+            source: Some(plugin.path().display().to_string()),
+        };
+        let manifest: crate::manifest::Manifest = toml::from_str("version = 1\n").unwrap();
+        let adopted = inspect_native_plugin(
+            "github",
+            &native,
+            plugin.path(),
+            &manifest,
+            &Library::default(),
+        )
+        .unwrap();
+
+        // Auth wiring survives as portable secret-ref headers.
+        let github = &adopted.servers["github-github"];
+        assert_eq!(
+            github.headers.get("Authorization").map(String::as_str),
+            Some("Bearer ${GITHUB_PAT_TOKEN}")
+        );
+        let cf = &adopted.servers["github-cf"];
+        assert_eq!(
+            cf.headers.get("X-Auth-Key").map(String::as_str),
+            Some("${CF_API_KEY}")
+        );
+        // Recipe-owned: no direct fan-out for either server.
+        assert!(github.targets.is_empty());
+        assert!(cf.targets.is_empty());
+
+        // What adopt writes: the scoping round-trips through the manifest and
+        // referenced_secrets sees the carried auth refs, so doctor/apply gate
+        // on them everywhere the definition travels.
+        let mut text = "version = 1\n".to_string();
+        for (name, server) in &adopted.servers {
+            text = crate::commands::add::build_manifest_with(
+                &text,
+                "servers",
+                name,
+                &serde_json::to_value(server).unwrap(),
+                None,
+            )
+            .unwrap();
+        }
+        text = insert_plugin_recipe(&text, "github", &adopted.recipe).unwrap();
+        let parsed: crate::manifest::Manifest = toml::from_str(&text).unwrap();
+        assert!(parsed.servers["github-github"].targets.is_empty(), "{text}");
+        let secrets = parsed.referenced_secrets();
+        assert!(secrets.contains(&"GITHUB_PAT_TOKEN".to_string()), "{text}");
+        assert!(secrets.contains(&"CF_API_KEY".to_string()), "{text}");
     }
 
     /// The core adopt guarantee: skills found in a native harness's versioned

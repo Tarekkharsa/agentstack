@@ -617,6 +617,7 @@ pub fn add_server(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
                     .collect()
             })
             .unwrap_or_default(),
+        targets: crate::manifest::model::all_targets(),
         headers: obj_to_map(args.get("headers")),
         env: obj_to_map(args.get("env")),
         extra: Default::default(),

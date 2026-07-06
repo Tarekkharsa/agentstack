@@ -45,6 +45,9 @@ pub enum IssueKind {
     MissingTransportFields,
     UnknownTargetServer,
     UnknownPluginTarget,
+    /// A `[servers.X] targets` entry names an adapter id that isn't registered
+    /// — the server would silently render nowhere the author expected.
+    UnknownServerTarget,
     /// A `[servers.X.extra.<id>]` table names an adapter id that isn't
     /// registered — the extras would silently never render.
     UnknownExtraTarget,
@@ -66,6 +69,7 @@ impl IssueKind {
                 | IssueKind::MissingTransportFields
                 | IssueKind::UnknownTargetServer
                 | IssueKind::UnknownPluginTarget
+                | IssueKind::UnknownServerTarget
                 | IssueKind::UnknownExtraTarget
                 | IssueKind::InvalidPluginName
         )
@@ -143,6 +147,17 @@ fn run<'a>(
                     issues.push(Issue::new(
                         IssueKind::UnknownExtraTarget,
                         format!("server '{name}' has `extra.{target}` but no adapter '{target}' is registered"),
+                    ));
+                }
+            }
+            // Same for the fan-out scoping itself: a typo'd id in `targets`
+            // would silently render the server nowhere the author expected.
+            // (An explicit empty list is deliberate — recipe-owned servers.)
+            for target in &server.targets {
+                if target != "*" && !targets.contains(target) {
+                    issues.push(Issue::new(
+                        IssueKind::UnknownServerTarget,
+                        format!("server '{name}' references unknown target '{target}'"),
                     ));
                 }
             }
@@ -393,6 +408,48 @@ mod tests {
             "#,
         );
         assert!(validate_with_targets(&m, ["codex", "claude-code"]).is_empty());
+        // Without a target set, the check is skipped (registry-independent).
+        assert!(validate(&m).is_empty());
+    }
+
+    #[test]
+    fn flags_unknown_server_target_but_allows_wildcard_and_empty() {
+        let m = parse(
+            r#"
+            version = 1
+            [servers.typo]
+            type = "http"
+            url = "https://x"
+            targets = ["codx"]
+            [servers.scoped]
+            type = "http"
+            url = "https://x"
+            targets = ["codex"]
+            [servers.recipe-owned]
+            type = "http"
+            url = "https://x"
+            targets = []
+            [servers.wildcard]
+            type = "http"
+            url = "https://x"
+            targets = ["*"]
+            "#,
+        );
+        // With a known target set, only the typo'd id is flagged — the
+        // wildcard, a registered id, and the deliberate empty list are fine.
+        let issues = validate_with_targets(&m, ["codex", "claude-code"]);
+        assert_eq!(
+            issues
+                .iter()
+                .filter(|i| i.kind == IssueKind::UnknownServerTarget)
+                .count(),
+            1
+        );
+        assert!(issues
+            .iter()
+            .any(|i| i.kind == IssueKind::UnknownServerTarget
+                && i.message.contains("typo")
+                && i.message.contains("codx")));
         // Without a target set, the check is skipped (registry-independent).
         assert!(validate(&m).is_empty());
     }

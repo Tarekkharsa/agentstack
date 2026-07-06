@@ -57,6 +57,14 @@ hand-tuned native key round-trips instead of being dropped by the next
 `apply --write`. A typo'd adapter id under `extra.` is a validation error, not
 a silent no-op.
 
+A server can also scope which targets it renders to at all, mirroring
+instructions and hooks: `[servers.X] targets = ["claude-code"]` fans out to
+that adapter only, the `["*"]` default means every target, and an explicit
+`targets = []` opts out of the direct fan-out entirely (how adopted plugin
+servers are stored — the owning plugin delivers them instead). `apply`,
+`diff`, and `doctor` drift all share the one filter, and a typo'd id in
+`targets` is a validation error.
+
 ### State tracking
 
 `~/.agentstack/state.json` records what agentstack manages per target, so
@@ -395,6 +403,12 @@ agentstack plugins create play \
 # Bundled skills are copied into the central library and referenced by name
 # (with plugin provenance recorded), so the recipe survives native plugin
 # updates/uninstalls instead of path-pointing into a versioned plugin cache.
+# Bundled servers are written with `targets = []` — recipe-owned: the native
+# plugin already provides them on the adopted harness and the generated
+# package carries them elsewhere, so `apply` never configures them a second
+# time. Codex auth wiring (`bearer_token_env_var`, `env_http_headers`) is
+# carried through as `${REF}` headers, so doctor demands the secret and the
+# server authenticates wherever the definition travels.
 agentstack plugins adopt playwright --harness claude-code --write
 
 # Generate repo-local native plugin packages + marketplaces.
