@@ -392,6 +392,9 @@ agentstack plugins create play \
   --write
 
 # Lift an installed native plugin into [plugins.*] plus any bundled MCP/skills/hooks.
+# Bundled skills are copied into the central library and referenced by name
+# (with plugin provenance recorded), so the recipe survives native plugin
+# updates/uninstalls instead of path-pointing into a versioned plugin cache.
 agentstack plugins adopt playwright --harness claude-code --write
 
 # Generate repo-local native plugin packages + marketplaces.
