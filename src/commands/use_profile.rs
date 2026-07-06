@@ -140,6 +140,17 @@ pub fn activate(
         let key = target_key(id, scope, &ctx.dir);
         println!("\n{}", desc.display.bold());
 
+        // Managed .gitignore block: the manifest's declared project-scope
+        // artifacts, the SAME set `apply` emits. Hoisted above the skills-less
+        // `continue` below so config-only adapters (Cursor, VS Code, …) still
+        // contribute their config entry — otherwise the block would churn when
+        // apply and use alternate.
+        if scope == Scope::Project && args.write {
+            ignore_entries.extend(crate::render::gitignore::managed_entries(
+                manifest, desc, scope, &ctx.dir,
+            ));
+        }
+
         // --- servers ---
         let mut previously = state.managed_servers(&key);
         // Names an earlier guarded write kept on disk (state bookkeeping —
@@ -281,18 +292,6 @@ pub fn activate(
             }
         } else {
             println!("  {} skills up to date", "✓".green());
-        }
-
-        // A target that manages ANYTHING (servers or skills) emits its full
-        // stable entry pair — config file + skills dir — so switching between
-        // skills-only and server-only profiles can never churn the block (a
-        // stale-but-stable ignore line is harmless; a churning one dirties
-        // committed files). A fully-deactivated target emits nothing, and the
-        // keep-on-empty splice leaves any existing block intact.
-        if scope == Scope::Project && args.write {
-            ignore_entries.extend(crate::render::gitignore::managed_entries(
-                manifest, desc, scope, &ctx.dir,
-            ));
         }
     }
 

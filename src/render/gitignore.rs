@@ -68,8 +68,16 @@ pub fn managed_entries(
             push(&dir, true);
         }
     }
-    // Compiled instruction file — when the manifest declares any instructions.
-    if !manifest.instructions.is_empty() {
+    // Compiled instruction file — only when a fragment actually compiles at
+    // THIS scope for THIS target. Machine-layer fragments (from `init --global`,
+    // folded in by merge_user_layer) compile at global scope only, so a project
+    // carrying only those generates no project CLAUDE.md — and must not gitignore
+    // a hand-written one. Mirror plan_instructions' own filter.
+    let has_instructions = manifest
+        .instructions
+        .values()
+        .any(|i| i.applies_to(&desc.id) && !(scope == Scope::Project && i.from_user_layer));
+    if has_instructions {
         if let Some(p) = desc
             .instructions
             .as_ref()

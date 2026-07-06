@@ -360,6 +360,53 @@ fn standalone_instructions_write_blocks_on_missing_fragment_sources() {
 }
 
 #[test]
+fn machine_layer_instructions_do_not_gitignore_a_project_instruction_file() {
+    // A project that ran `init --global` inherits machine-level [instructions.*]
+    // (compiled at GLOBAL scope only). At project scope agentstack writes no
+    // CLAUDE.md there, so it must not gitignore one the user hand-wrote.
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let as_home = home.join(".agentstack");
+    fs::create_dir_all(as_home.join("instructions")).unwrap();
+    fs::write(
+        as_home.join("agentstack.toml"),
+        "version = 1\n[instructions.style]\npath = \"./instructions/style.md\"\n",
+    )
+    .unwrap();
+    fs::write(as_home.join("instructions/style.md"), "Machine style.\n").unwrap();
+
+    // A project with servers (so the block is written) but NO instructions.
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join(".git")).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.demo]\ntype = \"http\"\nurl = \"https://x/mcp\"\n",
+    )
+    .unwrap();
+
+    let mut a = args(true);
+    a.scope = Some(Scope::Project);
+    a.no_gitignore = false;
+    apply::run(&a, Some(&proj)).unwrap();
+
+    let ignore = fs::read_to_string(proj.join(".gitignore")).unwrap_or_default();
+    assert!(
+        ignore.contains("/.mcp.json"),
+        "config still ignored: {ignore}"
+    );
+    assert!(
+        !ignore.contains("/CLAUDE.md"),
+        "must NOT gitignore a CLAUDE.md the tool never generates here: {ignore}"
+    );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
+#[test]
 fn project_apply_gitignores_the_compiled_instruction_file() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();

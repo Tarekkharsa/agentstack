@@ -27,7 +27,7 @@ fn use_args(profile: &str) -> UseArgs {
 
 fn apply_args() -> ApplyArgs {
     ApplyArgs {
-        targets: vec!["claude-code".into()],
+        targets: vec!["claude-code".into(), "cursor".into()],
         profile: None,
         dry_run: false,
         write: true,
@@ -58,7 +58,7 @@ fn apply_and_use_emit_an_identical_block() {
     fs::write(proj.join("instr/house.md"), "Be concise.\n").unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[targets]\ndefault = [\"claude-code\", \"cursor\"]\n\
          [servers.demo]\ntype = \"http\"\nurl = \"https://x/mcp\"\n\
          [skills.local]\npath = \"./skills/local\"\n\
          [instructions.house]\npath = \"./instr/house.md\"\n\
@@ -75,7 +75,12 @@ fn apply_and_use_emit_an_identical_block() {
         after_apply, after_use,
         "apply and use must produce the same managed block — no churn"
     );
-    for entry in ["/.mcp.json", "/.claude/skills/", "/CLAUDE.md"] {
+    for entry in [
+        "/.mcp.json",
+        "/.claude/skills/",
+        "/CLAUDE.md",
+        "/.cursor/mcp.json", // config-only adapter must appear from BOTH commands
+    ] {
         assert!(
             after_use.contains(entry),
             "block missing {entry}: {after_use}"
