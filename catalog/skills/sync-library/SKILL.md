@@ -18,7 +18,10 @@ offline-friendly, no daemon, and it diffs cleanly.
 ## The built-in way (preferred)
 
 agentstack ships a wrapper that does the whole flow — and refuses to push if a
-server definition holds a literal secret:
+server definition holds a literal secret in **any** field (headers, env, url,
+args), can't be parsed (the gate fails closed rather than skipping it), or if
+one is still buried in an outgoing commit. `--allow-secrets` overrides,
+deliberately:
 
 ```bash
 # first machine — set it up and push:

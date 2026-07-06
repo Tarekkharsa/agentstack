@@ -130,8 +130,10 @@ Every add is content-scanned (hidden-unicode / prompt-injection) before it
 lands. agentstack ships a starter catalog — `run-codex`, `sync-library`,
 `analyze-usage`, `route-by-cost`, `using-agentstack`, and more.
 
-Keep the library consistent across machines by versioning it as a git repo —
-secrets never travel, since server definitions carry `${REF}` placeholders only:
+Keep the library consistent across machines by versioning it as a git repo.
+Secrets never travel — a fail-closed gate scans every server field (headers,
+env, url, args) **and the outgoing commits** before anything is pushed, and a
+definition it can't parse blocks the sync rather than slipping through:
 
 ```bash
 agentstack lib sync --init --remote git@github.com:you/agent-lib.git
@@ -201,8 +203,10 @@ artifacts (`.mcp.json`, `.claude/skills/`, and the compiled `CLAUDE.md` /
 `AGENTS.md`) are a per-project choice:
 
 - **Static** (default) — artifacts sit on disk, kept out of git by a managed
-  `.gitignore` block, so a repo tracks only your `.agentstack/` intent. Works
-  however you launch your tools. (Pass `--no-gitignore` to commit them instead.)
+  `.gitignore` block, so a repo tracks only your `.agentstack/` intent. The
+  block only ever covers files agentstack actually wrote — a hand-maintained
+  `.mcp.json` or `CLAUDE.md` is never hidden from `git status`. Works however
+  you launch your tools. (Pass `--no-gitignore` to commit them instead.)
 - **Clean-at-rest** — nothing generated exists between sessions; profiles are
   injected by `agentstack run` / `session start` and reverted on exit.
   `git status` stays silent.
@@ -211,7 +215,7 @@ artifacts (`.mcp.json`, `.claude/skills/`, and the compiled `CLAUDE.md` /
   `agentstack mcp --auto-project`, with a tool firewall and call audit log
   included. Untrusted repos are inert until you review and `agentstack trust .`
 
-Details and trade-offs: [feature reference → three modes](docs/reference.md).
+Details and trade-offs: [feature reference → three modes](docs/reference.md#where-rendered-files-live-three-modes).
 
 ## Going further
 

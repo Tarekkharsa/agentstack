@@ -322,9 +322,10 @@ default = ["claude-code", "codex"]</code></pre>
       <dt>static <small>— the default</small></dt>
       <dd>Artifacts (<code>.mcp.json</code>, <code>.claude/skills/</code>, and the
           compiled <code>CLAUDE.md</code>&nbsp;/&nbsp;<code>AGENTS.md</code>) sit on
-          disk, kept out of git by a managed <code>.gitignore</code> block — so a
-          repo tracks only your <code>.agentstack/</code> intent. Works however you
-          launch your tools.</dd>
+          disk, kept out of git by a managed <code>.gitignore</code> block that only
+          ever covers files agentstack itself wrote — so a repo tracks only your
+          <code>.agentstack/</code> intent and a hand-maintained file is never
+          hidden. Works however you launch your tools.</dd>
       <dt>clean-at-rest</dt>
       <dd>Nothing generated exists between sessions. <code>agentstack run &lt;cli&gt; --profile &lt;p&gt;</code>
           injects on launch and reverts on exit; <code>git status</code> stays silent.</dd>

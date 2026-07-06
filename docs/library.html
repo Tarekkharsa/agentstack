@@ -355,7 +355,7 @@ skills  = ["sql-review"]</code></pre>
       <tbody>
         <tr><td><code>lib add &lt;name&gt; --path|--git</code></td><td class="muted">Copy a skill into the library (<code>--replace</code> to update). From a git repo, <code>--subpath &lt;dir&gt;</code> (or <code>--git &lt;url&gt;#&lt;dir&gt;</code>) installs a skill living in a subdirectory — marketplace/monorepo layouts. Content-scanned before it lands; warns on temp-dir sources and skills over ~10&nbsp;MiB.</td></tr>
         <tr><td><code>lib add-server &lt;name&gt; --file|--from-manifest</code></td><td class="muted">Store a reusable server definition — <code>${REF}</code>s intact.</td></tr>
-        <tr><td><code>lib sync</code></td><td class="muted">Version the whole library as a git repo across machines (<code>--init --remote</code> to set up or clone, then commit + pull + push). The store cache stays local; a pre-push scan blocks a literal secret from travelling.</td></tr>
+        <tr><td><code>lib sync</code></td><td class="muted">Version the whole library as a git repo across machines (<code>--init --remote</code> to set up or clone, then commit + pull + push). The store cache stays local; a fail-closed gate blocks a literal secret in any server field — or in the outgoing commits — from travelling.</td></tr>
         <tr><td><code>lib list</code> / <code>lib remove</code></td><td class="muted">See or drop entries; provenance and checksums included.</td></tr>
         <tr><td><code>search</code> / <code>add from &lt;id&gt;</code></td><td class="muted">Find shipped skills + registry servers and install them; the bundled catalog ships <code>run-codex</code>, <code>sync-library</code>, <code>analyze-usage</code>, <code>route-by-cost</code>, <code>using-agentstack</code>, and more.</td></tr>
         <tr><td><code>consolidate</code></td><td class="muted">Sweep skills from every CLI's folder into the library, symlinking originals back. Preview first.</td></tr>
@@ -384,10 +384,13 @@ Authorization = "Bearer ${KIBANA_TOKEN}"</code></pre>
         <pre><code>[headers]
 Authorization = "Bearer real-token-value"</code></pre>
         <p><code>lib add-server</code> warns on literal secrets, and <code>lib sync</code>
-           blocks a push that would carry one. Skill content is scanned on every
-           <code>lib add</code> before the copy becomes canonical — hidden Unicode
-           blocks, injection heuristics warn; <code>install</code>/<code>audit</code>
-           re-scan everything materialized.</p>
+           blocks a push that would carry one — in any field (headers, env, url,
+           args), in a definition it can't parse (fail closed), or buried in an
+           outgoing commit the working tree no longer shows. Skill content is
+           scanned on every <code>lib add</code> before the copy becomes
+           canonical — hidden Unicode blocks, injection heuristics warn;
+           <code>install</code>/<code>audit</code> re-scan everything
+           materialized.</p>
       </div>
     </div>
     <table>
@@ -490,7 +493,7 @@ Authorization = "Bearer real-token-value"</code></pre>
       <li><b class="done">Machine-level instructions</b>
         <p><code>init --global</code> + a user layer that merges personal instruction fragments beneath every project — global scope only, never a repo's committed files.</p></li>
       <li><b class="done">Cross-machine library sync</b>
-        <p><code>lib sync</code> versions <code>~/.agentstack/lib</code> as a git repo, so one machine's library reaches every other — store cache stays local, a pre-push scan blocks literal secrets.</p></li>
+        <p><code>lib sync</code> versions <code>~/.agentstack/lib</code> as a git repo, so one machine's library reaches every other — store cache stays local, and a fail-closed gate keeps literal secrets out of every server field and out of the pushed history. Pulled skills pass the supply-chain scan, incrementally: only what the pull changed is re-scanned.</p></li>
       <li><b class="next">Library-backed hooks and instruction fragments</b>
         <p>Name-refs for <code>lib/hooks/</code> and shared instruction sets, riding the same resolve/lock pipeline.</p></li>
       <li><b class="next">SBOM export</b>

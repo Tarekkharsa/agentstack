@@ -3,206 +3,342 @@
 The complete, implemented-and-tested feature inventory. The
 [README](../README.md) is the tour; this is the map.
 
+**Contents:** [Core engine](#core-engine) ·
+[Where rendered files live](#where-rendered-files-live-three-modes) ·
+[Secrets and trust](#secrets-and-trust) ·
+[The central library](#the-central-library) ·
+[Capabilities](#capabilities) ·
+[Drift](#drift-adopt-or-apply) ·
+[Plugin recipes](#managed-plugin-recipes) · [Dashboard](#dashboard) ·
+[Live runs](#live-runs-agentstack-run) ·
+[Agent-operable](#agent-operable-agentstack-mcp) ·
+[Optimize](#optimize-agentstack-optimize) · [All commands](#all-commands)
+
 ## Core engine
 
-- **Manifest model** with layered load (preferred
-  `.agentstack/agentstack.toml` + a gitignored `agentstack.local.toml` overlay;
-  legacy root `agentstack.toml` remains supported) and static validation.
-- **Data-driven adapters** — Claude Code, Claude Desktop, Codex, Cursor,
-  Windsurf, Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode, Antigravity,
-  Junie, Kiro, and Pi (one YAML descriptor each, embedded in the binary; user
-  overrides/additions from `~/.agentstack/adapters/`). Each CLI's quirks are
-  encoded in data, not code: Claude's `type:"http"`, Codex's `http_headers`
-  subtable, Windsurf's and Antigravity's `serverUrl`, Gemini's `httpUrl`, VS
-  Code's `servers` key, OpenCode's combined-`command` array and `mcp` key, and
-  Copilot CLI's `type:"local"` stdio tag.
-  Per-OS config paths (`{config}/…`) resolve correctly on macOS/Linux/Windows.
-- **Generic renderer** that applies field renames, transport tags, header
-  nesting, and secret substitution — and its **inverse** (`init` imports
-  existing configs back into a manifest).
-- **Non-destructive mergers** — JSON splices only the managed section (untouched
-  bytes, including floats, preserved exactly); TOML uses `toml_edit` to keep
-  comments and formatting.
-- **State tracking** (`~/.agentstack/state.json`) so `apply` prunes entries we
-  own that left the manifest, and `doctor`/`diff` detect hand-edits — see
-  [drift: adopt or apply?](#drift-adopt-or-apply) for which fix to run.
-- **Global vs project scope** (`--scope`): writes default to **global** (each
-  CLI's `~/.claude.json`, `~/.claude/skills`); pass `--scope project` to write a
-  repo's project locations (`.mcp.json`, `.claude/skills/`) so any agent opening
-  the repo inherits the setup.
+### The manifest
+
+Layered load: the preferred `.agentstack/agentstack.toml` plus a gitignored
+`agentstack.local.toml` overlay (legacy root `agentstack.toml` remains
+supported), with static validation before anything renders.
+
+### Data-driven adapters
+
+Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS Code,
+GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro, and Pi — one YAML
+descriptor each, embedded in the binary, with user overrides and additions
+loaded from `~/.agentstack/adapters/`. Each CLI's quirks are encoded in data,
+not code: Claude's `type:"http"`, Codex's `http_headers` subtable, Windsurf's
+and Antigravity's `serverUrl`, Gemini's `httpUrl`, VS Code's `servers` key,
+OpenCode's combined-`command` array and `mcp` key, Copilot CLI's
+`type:"local"` stdio tag. Per-OS config paths (`{config}/…`) resolve correctly
+on macOS/Linux/Windows.
+
+### Rendering and merging
+
+A generic renderer applies field renames, transport tags, header nesting, and
+secret substitution — and its **inverse** powers `init`, which imports
+existing configs back into a manifest. Mergers are non-destructive: JSON
+splices only the managed section (untouched bytes, including floats, preserved
+exactly); TOML uses `toml_edit` to keep comments and formatting.
+
+### State tracking
+
+`~/.agentstack/state.json` records what agentstack manages per target, so
+`apply` prunes entries we own that left the manifest and `doctor`/`diff`
+detect hand-edits — see [drift: adopt or apply?](#drift-adopt-or-apply) for
+which fix to run.
+
+### Scopes
+
+Writes default to **global** (each CLI's `~/.claude.json`,
+`~/.claude/skills`); pass `--scope project` to write a repo's project
+locations (`.mcp.json`, `.claude/skills/`) so any agent opening the repo
+inherits the setup.
+
+## Where rendered files live (three modes)
+
+You always commit the *intent* (`agentstack.toml` + `agentstack.lock`). The
+rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled `CLAUDE.md`
+/ `AGENTS.md` — are a per-project choice:
+
+- **Static** (default) — artifacts sit on disk, kept out of git by a managed
+  `.gitignore` block. Works however you launch your tools; pass
+  `--no-gitignore` to commit the artifacts instead.
+- **Clean-at-rest** — nothing generated exists between sessions. Profiles are
+  injected by `agentstack run` / `session start` and reverted on exit;
+  `agentstack lock` pins name refs without rendering, so `git status` stays
+  silent.
+- **Zero files** — nothing generated at all. `agentstack connect` registers
+  the gateway once per harness and every **trusted** repo serves its own stack
+  at session start — see [the zero-copy bridge](#the-zero-copy-bridge---auto-project--trust).
+
+The managed `.gitignore` block is anchored to **outcomes, not declarations**:
+an entry exists only for a file agentstack actually wrote or still manages
+(tracked in state, or carrying the managed instruction region on disk). A run
+whose writes were blocked — unresolved secrets, say — contributes nothing, so
+a hand-maintained `.mcp.json` or `CLAUDE.md` is never hidden from
+`git status`; and a managed config that still holds resolved secrets stays
+ignored until agentstack itself removes it. `apply` and `use` derive the block
+from the same records, so alternating them never churns a committed
+`.gitignore`.
 
 ## Secrets and trust
 
-- **Secret resolution** chain: process env → **varlock** → **OS keychain** →
-  project `.env`. Unresolved `${REF}`s are reported, never silently blanked.
-- **Unresolved secrets block writes** — if a `${REF}` doesn't resolve on this
-  machine, `apply`/`use`/dashboard writes are refused for that target (never a
-  `${TOKEN}` placeholder in live config); override with `--allow-unresolved`.
-  Structural manifest validation errors block `--write` too.
-- **Governance (`[policy]`)** — `require`/`forbid` capabilities and an
-  `allowed_sources` glob allowlist (e.g. `git:github.com/acme/*`), enforced by
-  `doctor --ci`. Cross-source trust gating for executable-intent skills/MCPs.
-- **MCP firewall (`[policy.tools]`)** — per-server tool rules enforced at the
-  runtime gateway: `github = ["get_*", "list_*", "!list_secrets"]` (plain
-  globs allow, `!` denies; allow patterns make the list an allowlist). A
-  denied tool is **invisible** — filtered from `tools_search` and code-mode
-  bindings — and refused with the rule named if called anyway. `doctor`
-  errors on rules naming unknown servers; `explain <server>` shows the
-  effective policy.
-- **Call audit log** — every tool call the gateway brokers (MCP proxy and
-  code-mode alike) appends to `~/.agentstack/audit/calls.jsonl`: timestamp,
-  run id (when launched via `agentstack run`), server, tool, **argument
-  digest** (never values), outcome (`ok`/`error`/`denied`), latency.
-  Summarize with `agentstack audit --calls [--since <days>] [--json]`; the
-  dashboard's Runs panel shows each run's trust footprint (Calls button) and
-  an all-runs view. Best-effort and size-rotated; logging can never fail a
-  call.
-- **Content scanning + `audit`** — every `install` scans skill content for
-  hidden Unicode (zero-width characters, bidi overrides, tag characters) and
-  prompt-injection heuristics. Hidden-Unicode findings **block the install**
-  (override with `--allow-flagged`); injection heuristics warn. `agentstack
-  audit` (`--json`) re-scans everything materialized — skills and instruction
-  files — and `doctor --ci` fails on high-severity findings, so a poisoned
-  skill can't slide into CI unnoticed. Everyday `doctor` skips this scan (it
-  reads every skill body); opt in with `doctor --deep` — `--ci` always
-  includes it, and the dashboard's Doctor pane runs it too.
-- **`doctor --live`** — real MCP `initialize` handshake over HTTP; reports
-  server name + tool count, or classifies the error (auth / http / connect).
+### Secret resolution
+
+The chain: process env → **varlock** → **OS keychain** → project `.env`.
+Unresolved `${REF}`s are reported, never silently blanked.
+
+### Unresolved secrets block writes
+
+If a `${REF}` doesn't resolve on this machine, `apply`/`use`/dashboard writes
+are refused for that target — never a `${TOKEN}` placeholder in live config.
+Override with `--allow-unresolved`. Structural manifest validation errors
+block `--write` too.
+
+### Governance (`[policy]`)
+
+`require`/`forbid` capabilities and an `allowed_sources` glob allowlist (e.g.
+`git:github.com/acme/*`), enforced by `doctor --ci`. Cross-source trust gating
+for executable-intent skills and MCPs.
+
+### MCP firewall (`[policy.tools]`)
+
+Per-server tool rules enforced at the runtime gateway:
+`github = ["get_*", "list_*", "!list_secrets"]` — plain globs allow, `!`
+denies; any allow pattern makes the list an allowlist. A denied tool is
+**invisible** — filtered from `tools_search` and code-mode bindings — and
+refused with the rule named if called anyway. `doctor` errors on rules naming
+unknown servers; `explain <server>` shows the effective policy.
+
+### Call audit log
+
+Every tool call the gateway brokers (MCP proxy and code-mode alike) appends to
+`~/.agentstack/audit/calls.jsonl`: timestamp, run id (when launched via
+`agentstack run`), server, tool, **argument digest** (never values), outcome
+(`ok`/`error`/`denied`), latency. Summarize with `agentstack audit --calls
+[--since <days>] [--json]`; the dashboard's Runs panel shows each run's trust
+footprint and an all-runs view. Best-effort and size-rotated; logging can
+never fail a call.
+
+### Content scanning and `audit`
+
+Every `install` scans skill content for hidden Unicode (zero-width
+characters, bidi overrides, tag characters) and prompt-injection heuristics.
+Hidden-Unicode findings **block the install** (override with
+`--allow-flagged`); injection heuristics warn. `agentstack audit` (`--json`)
+re-scans everything materialized — skills and instruction files — and
+`doctor --ci` fails on high-severity findings, so a poisoned skill can't slide
+into CI unnoticed. Everyday `doctor` skips this scan (it reads every skill
+body); opt in with `doctor --deep` — `--ci` always includes it, and the
+dashboard's Doctor pane runs it too.
+
+### `doctor --live`
+
+Real MCP `initialize` handshake over HTTP; reports server name + tool count,
+or classifies the error (auth / http / connect).
+
+## The central library
+
+One managed home — `~/.agentstack/lib/` — that projects reference **by name**
+instead of copying files between repos.
+
+### Layout and name resolution
+
+Skill dirs (`lib/skills/`) and MCP server definitions (`lib/servers/*.toml`)
+are indexed in `library.toml`. A profile's `skills = ["sql-review"]` /
+`servers = ["kibana"]` resolve from there; an inline `[skills.*]` /
+`[servers.*]` table always overrides the library. Provider folders are never
+owned — only their skills and MCP entries are managed.
+
+### Pinning and provenance
+
+Name refs are pinned by digest in `agentstack.lock` — servers pin the
+**definition** digest only; secret values stay `${REF}` and resolve at
+render/gateway time, never in the library or the lock. `doctor`/`explain`
+flag drift and show each item's origin and provenance. Profile resolution is
+offline by default (dry-run `use`, `doctor`, `explain` never fetch);
+`use --write` fetches git-backed skills when activation needs them.
+`agentstack lock [--profile <name>]` pins every profile's name refs
+**without** rendering configs or materializing skills — the lock-only path for
+clean-at-rest repos.
+
+### Adding capabilities
+
+`lib add <name> --path <dir>` **copies** the source into
+`lib/skills/<name>` — the library copy is canonical from then on (edits to
+the source have no effect), provenance records the original path for
+`lib list`/`explain`, and a temp-dir source gets a warning since that recorded
+path will dangle. `lib add <name> --git <url> --subpath <dir>` (or
+`--git <url>#<dir>`) installs a skill living in a repo subdirectory — the
+marketplace/monorepo layout — recording truthful `git:<url>@<rev>#<dir>`
+provenance. `lib add-server` stores a reusable server definition with its
+`${REF}`s intact.
+
+Every `lib add` runs the same hidden-unicode / prompt-injection content scan
+as `install`/`audit` before the copy becomes canonical (high findings block
+unless `--allow-flagged`), and warns when a skill exceeds ~10 MiB — vendored
+dependencies make every full-library pass pay to read them.
+
+### Syncing across machines (`lib sync`)
+
+`lib sync` versions the library as a git repo (init/clone/pull/commit/push,
+`--status` to preview); the content-store cache stays local. Its promise —
+**secrets never travel** — is enforced by a gate that fails closed:
+
+- Before anything is committed, every `lib/servers/*.toml` is scanned for
+  literal (non-`${REF}`) secrets across **every field a credential could hide
+  in** — headers, env, the `url` (userinfo passwords, secretish query
+  params), and `args`.
+- A server file that can't be read or parsed **blocks the sync** rather than
+  slipping through unscanned — with any secret-looking line in it named.
+- Before pushing, the **outgoing commits** are scanned too, so a secret
+  committed once and later edited out of the file can't ride along in
+  history. The message names the commit and file.
+- `--allow-secrets` overrides all three, deliberately and loudly.
+
+Pulled content passes the same supply-chain scan as `lib add` — warn-only,
+since blocking a completed pull would strand the tree — and the scan is
+incremental: a no-op pull scans nothing, and a real pull scans only the
+skills it changed, so long-accepted content isn't re-flagged on every sync.
+
+### Sweeping in what you already have
+
+`consolidate` moves scattered skills from every CLI's folder into the library
+and symlinks the originals back — preview first. `lib migrate` copies a
+legacy `~/.agentstack/skills/` home in, preview-first and reversible. Manage
+the rest with `lib list` / `remove` / `remove-server`.
 
 ## Capabilities
 
-- **Package manager** — skills declare a source (`path` or `git`);
-  `install` fetches them into `~/.agentstack/store/` and writes a SHA-256
-  `agentstack.lock`; `install --locked` is reproducible (CI-safe); `update`
-  re-resolves git skills; `remove` drops a capability from manifest + lock.
-  `install` is profile-aware: skills a profile references by name (resolved
-  from the central library, no inline `[skills.*]` entry) keep their lock
-  pins through the reconcile pass — pin or refresh those with
-  `agentstack lock`.
-  Repeat digests are served from a stat-fingerprint cache
-  (`~/.agentstack/digest-cache.json`: file count + total size + max mtime +
-  a hash of the sorted relative paths, each with its file's size and mtime) —
-  any mismatch falls back to the full read+hash, so `doctor`/`use` over
-  a large library cost stat calls, not a re-hash of every byte. Delete the file
-  to force full re-hashing.
-- **Central capability library (`agentstack lib`)** — one managed home
-  (`~/.agentstack/lib/`) that projects reference **by name** instead of copying
-  files. Skill dirs (`lib/skills/`) and MCP server definitions
-  (`lib/servers/*.toml`) are indexed in `library.toml`; a profile's
-  `skills = ["sql-review"]` / `servers = ["kibana"]` resolve from there, and an
-  inline `[skills.*]` / `[servers.*]` always overrides the library. Name refs are
-  pinned by digest in `agentstack.lock` (servers pin the **definition** digest
-  only — secret values stay `${REF}` and resolve at render/gateway time, never in
-  the library or lock), and `doctor`/`explain` flag drift and show each item's
-  origin + provenance. Profile resolution is offline by default (dry-run `use`,
-  `doctor`, `explain` never fetch); `use --write` fetches git-backed skills when
-  activation needs them. `agentstack lock [--profile <name>]` pins every
-  profile's name refs in `agentstack.lock` **without** rendering configs or
-  materializing skills — the lock-only path for clean-at-rest repos that keep
-  no generated files. Manage it with `lib add` / `add-server` / `list` /
-  `remove` / `remove-server` / `sync`. `lib add --path` **copies** the source
-  into `lib/skills/<name>` — the library copy is canonical from then on (edits
-  to the source have no effect), provenance records the original path for
-  `lib list`/`explain`, and a temp-dir source gets a warning since that
-  recorded path will dangle after cleanup. `lib add --git <url> --subpath <dir>`
-  (or `--git <url>#<dir>`) installs a skill that lives in a repo subdirectory —
-  the marketplace/monorepo layout — recording truthful `git:<url>@<rev>#<dir>`
-  provenance. Every `lib add` runs the same hidden-unicode / prompt-injection
-  content scan as `install`/`audit` before the copy becomes canonical (high
-  findings block unless `--allow-flagged`), and warns when a skill exceeds
-  ~10 MiB — vendored dependencies (node_modules and friends) make every
-  full-library pass pay to read them. `lib sync` versions the library as a git
-  repo across machines (init/clone/pull/commit/push, `--status` to preview);
-  the content-store cache stays local, and a pre-push scan **blocks** a server
-  definition carrying a literal secret (override with `--allow-secrets`), so
-  `${REF}` placeholders travel but values never do;
-  `consolidate` sweeps scattered skills from every CLI into the library and
-  symlinks the originals back; `lib migrate` copies a legacy
-  `~/.agentstack/skills/` home in, preview-first and reversible. Provider folders
-  are never owned — only their skills and MCP entries are managed.
-- **Selective skills** via profiles — `use <profile>` materializes only that
-  profile's skills (symlink, with copy fallback), pruning the rest it owns and
-  never clobbering hand-made skill dirs. When a prune empties the managed
-  skills dir (deactivation, `session end`), the dir itself is removed too —
-  rmdir semantics, so a dir holding any user content always survives.
-- **Instruction files** — compile shared + harness-specific `[instructions.*]`
-  fragments into each CLI's `CLAUDE.md` / `AGENTS.md`, inside a managed
-  `<!-- agentstack -->` region that preserves all surrounding hand-written
-  prose (`agentstack instructions`; dry-run by default, `--write` applies).
-  Part of the mainstream lifecycle: `apply` (and therefore `setup`) compiles
-  the region alongside servers/settings/hooks behind the same `--write` gate —
-  a manifest with no `[instructions.*]` never touches a region another layer
-  owns — and `doctor` flags a stale managed region (warn ↳ `instructions
-  --write`) or a missing fragment source (error, gates `--ci`). Installing a
-  pack's house rules prints the exact compile command as the next step.
-- **Machine-level manifest (`init --global`)** — seeds
-  `~/.agentstack/agentstack.toml` plus an `instructions/` dir: a first-class
-  home for *personal*, cross-project instruction fragments (the operational
-  knowledge you'd otherwise re-teach each agent). Compile them with
-  `agentstack instructions --manifest-dir ~ --write`. The zero-files bridge
-  deliberately never discovers this layer as a project — it cannot be
-  `trust`ed or activated by `mcp --auto-project`.
-- **User layer beneath every project** — the machine manifest's
-  `[instructions]` (and only those) merge in beneath each project load, order
-  user → project → project-local; a project fragment of the same name wins
-  outright. Inherited fragments compile at **global scope only** (personal
-  rules never land in a repo's committed `CLAUDE.md`), and servers/skills/
-  settings deliberately do **not** inherit — personal capabilities never
-  auto-inject into a team project, and the trust digest is unaffected.
-  Provenance is visible everywhere: `instructions` labels inherited fragments
-  `(machine)`, `doctor` counts them, and `explain <fragment>` names the layer.
-- **agentstack house rules** — a bundled instruction fragment
-  (`[instructions.agentstack]`) that teaches every agent the manifest-first
-  workflow: never edit rendered configs, the three artifact modes (a
-  clean-at-rest project's missing `.mcp.json` is intentional), re-lock after
-  editing profiles, and the drift decision rule (keep a hand-added server →
-  `adopt`; manifest is truth → `apply --write`). `init --global` and `setup`
-  offer to install it into the machine manifest (opt-in, like pack
-  instructions).
-- **Native settings** — manage each CLI's own settings file (Claude Code
-  `~/.claude/settings.json` permissions/feature flags, Codex `config.toml`) from
-  one `[settings.<cli>]` block. `apply` merges only the keys you declare into the
-  real file (top-level ownership), resolves `${REF}`s, preserves hand-set keys,
-  and prunes keys that leave the manifest. Editable from the dashboard.
-- **Lifecycle hooks** — declare `[hooks.*]` once (event + optional matcher +
-  command) and `apply` compiles them into each harness's native hooks config
-  (Claude Code `settings.json`, Codex `config.toml`), resolving secrets and
-  pruning hooks that leave the manifest. Add/list from the dashboard Hooks pane.
-- **`search` across providers** — the embedded catalog **and the official MCP
-  Registry** (`registry.modelcontextprotocol.io`). `agentstack add from <id>`
-  resolves a registry/catalog server, lifts its secrets to `${REF}`s, and (on
-  `apply`) renders it to **all your CLIs at once**. agentstack is the cross-CLI
-  *client* over the registry + marketplaces, not another registry.
-- **Git-hosted versioned packs** — any repo with a `pack.toml` installs as a
-  pack from any git host, pinned to a version tag:
-  `add from git:<host>/<repo>[@<tag>][#subdir]` (no tag → newest
-  version-shaped tag; a repo with no version tags is an error, never a
-  floating install). The ledger records `source`/`version`/`rev` (the
-  resolved commit); extracted skills are digest-pinned in the lock so
-  `install --locked` reproduces. `upgrade <pack>` lists remote tags, resolves
-  the newest (never downgrades), previews the member diff, and re-pins on
-  `--write`. `[policy] allowed_sources` is enforced **before** any fetch, and
-  the clone's content passes the install scan gate. `agentstack pack init`
-  scaffolds a publishable pack; the dashboard's Discover pane installs from a
-  git URL with the same gates. (Semver ranges and transitive pack
-  dependencies are deliberately not in v1.)
-- **`adopt`** — the reverse of `apply`: pull a hand-added server from a target
-  config back into the manifest, lifting its inline secret, preserving
-  comments. The keep-side of every drift decision — see
-  [drift: adopt or apply?](#drift-adopt-or-apply).
-- **`add`** — flag-driven (scriptable / agent-operable) add of a server or skill
-  to the manifest, optionally into a profile; comments preserved.
-- **`stats`** — local usage analytics: activation counts + per-capability
-  footprint (which target/scope slots it's live in) + **context cost**.
-  `stats --live` measures each server's `tools/list` token footprint through
-  the gateway (HTTP + stdio) and caches it (`~/.agentstack/footprint.json`);
-  `stats`, `explain`, and the dashboard's Servers matrix then show what each
-  server taxes every session offline, and `stats` flags dead weight
-  (high-cost, never-activated servers) with the exact `remove` command.
-- **`export`/`import`** — age-encrypted bundle (manifest + lock + optionally
-  secrets) for moving a setup to a new machine; passphrase-protected.
+### Package manager
 
-### Drift: adopt or apply?
+Skills declare a source (`path` or `git`); `install` fetches them into
+`~/.agentstack/store/` and writes a SHA-256 `agentstack.lock`;
+`install --locked` is reproducible (CI-safe); `update` re-resolves git skills;
+`remove` drops a capability from manifest + lock. `install` is profile-aware:
+skills a profile references by name (resolved from the central library, no
+inline `[skills.*]` entry) keep their lock pins through the reconcile pass —
+pin or refresh those with `agentstack lock`.
+
+Repeat digests are served from a stat-fingerprint cache
+(`~/.agentstack/digest-cache.json`: file count + total size + max mtime + a
+hash of the sorted relative paths with each file's size and mtime). Any
+mismatch falls back to the full read+hash, so `doctor`/`use` over a large
+library cost stat calls, not a re-hash of every byte. Delete the file to
+force full re-hashing.
+
+### Selective skills via profiles
+
+`use <profile>` materializes only that profile's skills (symlink, with copy
+fallback), pruning the rest it owns and never clobbering hand-made skill
+dirs. When a prune empties the managed skills dir (deactivation,
+`session end`), the dir itself is removed too — rmdir semantics, so a dir
+holding any user content always survives.
+
+### Instruction files
+
+Compile shared + harness-specific `[instructions.*]` fragments into each
+CLI's `CLAUDE.md` / `AGENTS.md`, inside a managed `<!-- agentstack -->` region
+that preserves all surrounding hand-written prose (`agentstack instructions`;
+dry-run by default, `--write` applies). Part of the mainstream lifecycle:
+`apply` (and therefore `setup`) compiles the region alongside
+servers/settings/hooks behind the same `--write` gate — a manifest with no
+`[instructions.*]` never touches a region another layer owns — and `doctor`
+flags a stale managed region (warn ↳ `instructions --write`) or a missing
+fragment source (error, gates `--ci`). Installing a pack's house rules prints
+the exact compile command as the next step.
+
+### The machine layer
+
+**`init --global`** seeds `~/.agentstack/agentstack.toml` plus an
+`instructions/` dir: a first-class home for *personal*, cross-project
+instruction fragments — the operational knowledge you'd otherwise re-teach
+each agent. Compile them with `agentstack instructions --manifest-dir ~
+--write`. The zero-files bridge deliberately never discovers this layer as a
+project — it cannot be `trust`ed or activated by `mcp --auto-project`.
+
+**The user layer** merges the machine manifest's `[instructions]` (and only
+those) in beneath each project load, order user → project → project-local; a
+project fragment of the same name wins outright. Inherited fragments compile
+at **global scope only** — personal rules never land in a repo's committed
+`CLAUDE.md` — and servers/skills/settings deliberately do **not** inherit:
+personal capabilities never auto-inject into a team project, and the trust
+digest is unaffected. Provenance is visible everywhere: `instructions` labels
+inherited fragments `(machine)`, `doctor` counts them, and
+`explain <fragment>` names the layer.
+
+**agentstack house rules** — a bundled fragment (`[instructions.agentstack]`)
+that teaches every agent the manifest-first workflow: never edit rendered
+configs, the three artifact modes (a clean-at-rest project's missing
+`.mcp.json` is intentional), re-lock after editing profiles, and the drift
+decision rule (keep a hand-added server → `adopt`; manifest is truth →
+`apply --write`). `init --global` and `setup` offer to install it into the
+machine manifest — opt-in, like pack instructions.
+
+### Native settings
+
+Manage each CLI's own settings file (Claude Code `~/.claude/settings.json`
+permissions/feature flags, Codex `config.toml`) from one `[settings.<cli>]`
+block. `apply` merges only the keys you declare into the real file (top-level
+ownership), resolves `${REF}`s, preserves hand-set keys, and prunes keys that
+leave the manifest. Editable from the dashboard.
+
+### Lifecycle hooks
+
+Declare `[hooks.*]` once (event + optional matcher + command) and `apply`
+compiles them into each harness's native hooks config (Claude Code
+`settings.json`, Codex `config.toml`), resolving secrets and pruning hooks
+that leave the manifest. Add/list from the dashboard Hooks pane.
+
+### Search across providers
+
+`search` queries the embedded catalog **and the official MCP Registry**
+(`registry.modelcontextprotocol.io`). `agentstack add from <id>` resolves a
+registry/catalog server, lifts its secrets to `${REF}`s, and (on `apply`)
+renders it to **all your CLIs at once**. agentstack is the cross-CLI *client*
+over the registry + marketplaces, not another registry.
+
+### Git-hosted versioned packs
+
+Any repo with a `pack.toml` installs as a pack from any git host, pinned to a
+version tag: `add from git:<host>/<repo>[@<tag>][#subdir]` (no tag → newest
+version-shaped tag; a repo with no version tags is an error, never a floating
+install). The ledger records `source`/`version`/`rev` (the resolved commit);
+extracted skills are digest-pinned in the lock so `install --locked`
+reproduces. `upgrade <pack>` lists remote tags, resolves the newest (never
+downgrades), previews the member diff, and re-pins on `--write`.
+`[policy] allowed_sources` is enforced **before** any fetch, and the clone's
+content passes the install scan gate. `agentstack pack init` scaffolds a
+publishable pack; the dashboard's Discover pane installs from a git URL with
+the same gates. (Semver ranges and transitive pack dependencies are
+deliberately not in v1.)
+
+### `adopt` and `add`
+
+`adopt` is the reverse of `apply`: pull a hand-added server from a target
+config back into the manifest, lifting its inline secret, preserving
+comments — the keep-side of every [drift decision](#drift-adopt-or-apply).
+`add` is the flag-driven (scriptable / agent-operable) way to add a server or
+skill to the manifest, optionally into a profile; comments preserved.
+
+### `stats`
+
+Local usage analytics: activation counts + per-capability footprint (which
+target/scope slots it's live in) + **context cost**. `stats --live` measures
+each server's `tools/list` token footprint through the gateway (HTTP + stdio)
+and caches it (`~/.agentstack/footprint.json`); `stats`, `explain`, and the
+dashboard's Servers matrix then show what each server taxes every session
+offline, and `stats` flags dead weight — high-cost, never-activated servers —
+with the exact `remove` command.
+
+### `export` / `import`
+
+An age-encrypted bundle (manifest + lock + optionally secrets) for moving a
+setup to a new machine; passphrase-protected.
+
+## Drift: adopt or apply?
 
 `doctor` flags drift in both directions, and the fixes are opposites — pick
 by which side holds the truth:
@@ -429,7 +565,8 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 `--prune-foreign`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
 `lib add|add-server|list|remove|remove-server|migrate|sync`
-(`lib add`: `--path`, `--git`/`--subpath`, `--allow-flagged`), `restore`,
+(`lib add`: `--path`, `--git`/`--subpath`, `--allow-flagged`; `lib sync`:
+`--init`, `--remote`, `--status`, `--allow-secrets`), `restore`,
 `doctor` (`--ci`, `--live`, `--fix`, `--deep`), `audit` (`--json`, `--calls`,
 `--since`), `optimize` (`--json`, `--write`, `--since`), `analyze` (`--json`),
 `search`, `stats` (`--live`),
@@ -455,4 +592,5 @@ native Claude Code/Codex packages + marketplaces) · atomic writes + backups ·
 (`run`/`runs`/`kill` + dashboard Runs panel) · GitHub Action trust gate ·
 nightly adapter-conformance CI · zero-copy bridge (`connect` + `mcp
 --auto-project` + digest-pinned `trust`) · `optimize` (evidence-backed
-recommendations from usage/audit/cost signals, safe-class `--write`).
+recommendations from usage/audit/cost signals, safe-class `--write`) ·
+fail-closed `lib sync` secret gate (all server fields + outgoing history).
