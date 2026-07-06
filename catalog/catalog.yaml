@@ -144,3 +144,35 @@
   homepage: https://github.com
   tags: [pr, review, github, triage]
   path: skills/pr-triage
+
+- kind: skill
+  name: run-codex
+  display: Run Codex (gpt-5.5)
+  description: "Delegate clear-spec, bulk, or mechanical work — migrations, codemods, log digs, and independent review — to gpt-5.5 via the Codex CLI, with quota-aware fallback (unofficial, agentstack-authored)"
+  homepage: https://github.com/Tarekkharsa/agentstack
+  tags: [codex, gpt, delegation, review, automation, bulk]
+  path: skills/run-codex
+
+- kind: skill
+  name: sync-library
+  display: Sync the central library
+  description: "Keep your agentstack central library consistent across machines by versioning ~/.agentstack/lib as a git repo — commit the index + path skills, exclude cache and secrets (unofficial, agentstack-authored)"
+  homepage: https://github.com/Tarekkharsa/agentstack
+  tags: [library, sync, git, multi-device, backup]
+  path: skills/sync-library
+
+- kind: skill
+  name: analyze-usage
+  display: Analyze usage
+  description: "Report your own token burn from Claude Code transcripts and flag installed-but-unused skills/servers — local, read-only (unofficial, agentstack-authored)"
+  homepage: https://github.com/Tarekkharsa/agentstack
+  tags: [analytics, usage, tokens, cleanup, transcripts]
+  path: skills/analyze-usage
+
+- kind: skill
+  name: route-by-cost
+  display: Route by cost
+  description: "Pick the right model for each job — bulk work to cheap models, judgment and final review to the strongest — and escalate when output misses the bar (unofficial, agentstack-authored)"
+  homepage: https://github.com/Tarekkharsa/agentstack
+  tags: [models, routing, cost, orchestration, delegation]
+  path: skills/route-by-cost
