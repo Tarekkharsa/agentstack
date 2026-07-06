@@ -113,7 +113,9 @@ The complete, implemented-and-tested feature inventory. The
   ~10 MiB — vendored dependencies (node_modules and friends) make every
   full-library pass pay to read them. `lib sync` versions the library as a git
   repo across machines (init/clone/pull/commit/push, `--status` to preview);
-  the content-store cache stays local and `${REF}` secrets never travel;
+  the content-store cache stays local, and a pre-push scan **blocks** a server
+  definition carrying a literal secret (override with `--allow-secrets`), so
+  `${REF}` placeholders travel but values never do;
   `consolidate` sweeps scattered skills from every CLI into the library and
   symlinks the originals back; `lib migrate` copies a legacy
   `~/.agentstack/skills/` home in, preview-first and reversible. Provider folders

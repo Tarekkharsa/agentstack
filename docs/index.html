@@ -387,6 +387,14 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
            instructions a home; they merge beneath every project and never land in a
            repo's committed files.</p>
       </li>
+      <li>
+        <b>Support any CLI, no rebuild</b>
+        <p>Each of the 13 agents is one data-driven YAML descriptor. Drop your own
+           into <code>~/.agentstack/adapters/</code> to add or override a harness —
+           <code>agentstack adapters validate &lt;file&gt;</code> checks it first, and
+           <code>adapters list</code> marks which are yours. A broken drop-in is
+           skipped with a warning, never fatal.</p>
+      </li>
     </ul>
     <figure>
       <img src="closed-loop.gif" alt="Terminal recording: install a versioned pack, apply everywhere, firewall a tool, watch the audited refusal, upgrade" loading="lazy">
