@@ -17,6 +17,17 @@ fn project_root(project_dir: &Path) -> PathBuf {
     crate::manifest::project_root_of(project_dir)
 }
 
+/// Where an adapter descriptor was loaded from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum AdapterSource {
+    /// Shipped inside the binary.
+    #[default]
+    BuiltIn,
+    /// A user-supplied file under `~/.agentstack/adapters/` (may override a
+    /// built-in id).
+    User(PathBuf),
+}
+
 /// One CLI's full descriptor, deserialized from `adapters/<id>.yaml`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AdapterDescriptor {
@@ -49,6 +60,10 @@ pub struct AdapterDescriptor {
     /// `~/.pi/agent/extensions`). Discovered read-only.
     #[serde(default)]
     pub extensions: Option<ExtensionsSpec>,
+    /// Where this descriptor was loaded from — set by the registry, not parsed
+    /// from the file.
+    #[serde(skip)]
+    pub source: AdapterSource,
 }
 
 impl AdapterDescriptor {

@@ -1049,6 +1049,12 @@ pub enum AdaptersCommand {
         /// Adapter id, e.g. `claude-code`.
         id: String,
     },
+    /// Validate a user adapter descriptor file (parse + basic checks) before
+    /// dropping it into `~/.agentstack/adapters/`.
+    Validate {
+        /// Path to a `.yaml` adapter descriptor.
+        file: String,
+    },
 }
 
 #[derive(Args, Debug)]

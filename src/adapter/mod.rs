@@ -6,7 +6,7 @@ pub mod import;
 pub mod registry;
 pub mod render;
 
-pub use descriptor::{AdapterDescriptor, Format};
+pub use descriptor::{AdapterDescriptor, AdapterSource, Format};
 pub use import::{extract_servers, extract_settings};
 pub use registry::Registry;
 pub use render::{render_server, Rendered};
