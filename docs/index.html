@@ -300,6 +300,10 @@ default = ["claude-code", "codex"]</code></pre>
 <span class="c">  agent → demo.secret_read  ✗ denied   blocked by the manifest's [policy] firewall</span>
 <span class="c">  every call → ~/.agentstack/audit/calls.jsonl  (tool · outcome · latency)</span></code></pre>
     </div>
+    <figure>
+      <img src="trust-gate.gif" alt="Terminal recording: an untrusted repo is inert, you review and trust it, its tool is brokered and logged, and a firewalled tool is refused" loading="lazy">
+      <figcaption>Clone → inert → review → trust → brokered → firewalled → audited. Runnable: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/trust-gate-demo.sh"><code>docs/trust-gate-demo.sh</code></a>.</figcaption>
+    </figure>
     <p class="small muted">
       No vendor or agent framework tells this story: an untrusted repo's agents
       can touch nothing you didn't review, and every capability call is

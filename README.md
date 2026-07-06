@@ -164,6 +164,11 @@ steps:
 
 ## The trust gate — clone anyone's repo, safely
 
+Clone any repo and its agents can touch **nothing** until you review and trust
+it — every call after that is firewalled and audited.
+
+![The trust gate: clone → inert → review → trust → firewalled → audited](docs/trust-gate.gif)
+
 Register the gateway once (`agentstack connect`) and every repo you open brings
 its own MCP servers with **no files copied in**. But a repo you haven't reviewed
 is **inert** — none of its servers are spawned or contacted, no secrets resolved:

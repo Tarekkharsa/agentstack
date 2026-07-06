@@ -19,6 +19,7 @@ note() { printf '  \033[2m%s\033[0m\n' "$*"; }
 # ── isolated sandbox (nothing touches your real config) ──────────────────────
 SBX="$(mktemp -d)"; export AGENTSTACK_HOME="$SBX/home"; export HOME="$SBX/fakehome"
 mkdir -p "$AGENTSTACK_HOME" "$HOME"
+SBXC="$(cd "$SBX" && pwd -P)"        # canonical form (macOS: /var → /private/var)
 trap 'rm -rf "$SBX"' EXIT
 
 # a tiny zero-dependency stdio MCP server standing in for "some repo's server".
@@ -64,24 +65,30 @@ init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 search() { printf '%s\n%s\n' "$init" '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"tools_search","arguments":{"query":"echo"}}}' | mcp | pick 9; }
 callecho() { printf '%s\n%s\n' "$init" '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"demo__echo","arguments":{"msg":"hi from a trusted repo"}}}' | mcp | pick 9; }
 callsecret() { printf '%s\n%s\n' "$init" '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"demo__secret_read","arguments":{}}}' | mcp | pick 9; }
+# prettify: swap the sandbox's temp paths (raw + canonical) for friendly names
+clean() { sed -e "s#$SBXC/some-cloned-repo#the-repo#g" -e "s#$SBX/some-cloned-repo#the-repo#g" -e "s#$SBXC#/tmp/sandbox#g" -e "s#$SBX#/tmp/sandbox#g"; }
 pick() { python3 -c "
 import json,sys
+subs=sys.argv[2:]
 for l in sys.stdin:
     try: o=json.loads(l)
     except: continue
     if o.get('id')==int(sys.argv[1]):
         r=o.get('result') or o.get('error') or {}
-        c=r.get('content'); print('  '+(''.join(x.get('text','') for x in c) if isinstance(c,list) else json.dumps(r)).replace(chr(10),' ')[:220])
-" "$1"; }
+        c=r.get('content'); m=(''.join(x.get('text','') for x in c) if isinstance(c,list) else json.dumps(r)).replace(chr(10),' ')
+        for s in subs:
+            if s: m=m.replace(s+'/some-cloned-repo','the-repo').replace(s,'/tmp/sandbox')
+        print('  '+m[:180])
+" "$1" "$SBXC" "$SBX"; }
 
-clear
+printf '\033[1;36m  agentstack — the zero-copy trust gate\033[0m\n'
 say "You just cloned some repo. It declares MCP servers. What can its agent touch?"
 run "agentstack mcp --auto-project   # (an agent asks the gateway what tools exist)"
 note "→ untrusted, so:"; search
 
 say "Nothing. Until YOU review it, none of its servers are spawned or even contacted."
 run "agentstack trust ."
-echo y | "$AS" trust . 2>&1 | sed 's/^/  /' | grep -E "runs|trusted at|Withdraw" || true
+echo y | "$AS" trust . 2>&1 | clean | sed 's/^/  /' | grep -E "runs|trusted at|Withdraw" || true
 
 say "You saw exactly what it would run, and trusted it (pinned to a content digest)."
 run "agentstack mcp --auto-project   # ask again, now trusted"
