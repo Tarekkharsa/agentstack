@@ -22,7 +22,9 @@ Nothing touches disk without `--write`.
 ## The three artifact modes (recognize which one a project uses)
 
 1. **Static** — `.mcp.json` / `.claude/skills/` exist on disk, gitignored via a
-   managed block. Activate with `agentstack use <profile> --scope project --write`.
+   managed block (it only ever covers files agentstack itself wrote — a
+   hand-written `.mcp.json` or `CLAUDE.md` is never hidden from git). Activate
+   with `agentstack use <profile> --scope project --write`.
 2. **Clean-at-rest** — nothing generated exists between sessions (the manifest
    has an empty `[profiles.off]`). Capabilities appear only during
    `agentstack run <cli> --profile <p>` or between
@@ -43,6 +45,7 @@ agentstack use <profile> --scope project --write   # activate
 agentstack search <query>        # catalog + official MCP Registry
 agentstack add from <id>         # add a found server to the manifest (not applied)
 agentstack lib list              # what the central library holds
+agentstack lib sync              # commit/pull/push the library across machines (secret gate enforced)
 agentstack explain <name>        # provenance, secrets, footprint of a capability
 agentstack doctor --ci           # the full trust gate (validation, lock, policy, content scan)
 agentstack audit --json          # re-scan skills/instructions for hidden-unicode/injection
@@ -58,7 +61,10 @@ agentstack restore <target>      # undo a write from its pre-write backup
 - **Never hand-edit generated files** (`.mcp.json`, `.claude/skills/`
   symlinks, native CLI configs' managed sections). Change the manifest instead.
 - **Never write a secret value into the manifest or library** — use `${REF}`
-  and tell the user to run `agentstack secret set REF`.
+  and tell the user to run `agentstack secret set REF`. `lib sync` enforces
+  this with a fail-closed gate (every server field, plus the outgoing
+  commits); if it refuses, fix the definition — **never pass
+  `--allow-secrets`** unless the user explicitly says so.
 - A blocked write ("unresolved secret") is a feature, not an error to work
   around: surface which `${REF}` is missing.
 - To give a project a new skill that exists in the library: add its name to the
