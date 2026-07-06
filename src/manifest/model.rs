@@ -163,8 +163,14 @@ pub struct Instruction {
     pub from_user_layer: bool,
 }
 
-fn all_targets() -> Vec<String> {
+pub(crate) fn all_targets() -> Vec<String> {
     vec!["*".to_string()]
+}
+
+/// Serialization guard: the `["*"]` default stays implicit so existing
+/// manifests and freshly added servers don't grow a `targets` line.
+fn is_all_targets(targets: &[String]) -> bool {
+    targets.len() == 1 && targets[0] == "*"
 }
 
 /// One lifecycle hook: run `command` on a harness `event` (optionally filtered
@@ -293,6 +299,14 @@ pub struct Server {
     pub command: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
+    /// Adapter ids `apply` renders this server to; `["*"]` (the default) = all
+    /// targets. An explicit empty list opts the server out of the direct
+    /// `[servers]` fan-out entirely — how adopted plugin servers are stored:
+    /// the native plugin already provides the server on its own harness and
+    /// the generated plugin package carries it anywhere else it's installed,
+    /// so a direct render would configure the same server twice.
+    #[serde(default = "all_targets", skip_serializing_if = "is_all_targets")]
+    pub targets: Vec<String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub headers: IndexMap<String, String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
@@ -311,6 +325,14 @@ pub struct Server {
     /// being dropped on the next `apply`.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub extra: IndexMap<String, IndexMap<String, serde_json::Value>>,
+}
+
+impl Server {
+    /// Whether `apply` renders this server to adapter `id` (same contract as
+    /// [`Instruction::applies_to`]; an empty list applies nowhere).
+    pub fn applies_to(&self, id: &str) -> bool {
+        self.targets.iter().any(|t| t == "*" || t == id)
+    }
 }
 
 /// A skill: a portable directory containing a `SKILL.md`.
@@ -515,6 +537,47 @@ mod tests {
             .referenced_secrets()
             .contains(&"LINEAR_PACK_TOKEN".to_string()));
         assert!(m.skills.contains_key("linear_breakdown"));
+    }
+
+    #[test]
+    fn server_targets_default_scope_and_empty_list_round_trip() {
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [servers.default]
+            type = "http"
+            url = "https://x"
+
+            [servers.scoped]
+            type = "http"
+            url = "https://x"
+            targets = ["codex"]
+
+            [servers.recipe-owned]
+            type = "http"
+            url = "https://x"
+            targets = []
+            "#,
+        )
+        .unwrap();
+        // No `targets` → applies everywhere (back-compat for every existing
+        // manifest and library server definition).
+        assert!(m.servers["default"].applies_to("codex"));
+        assert!(m.servers["default"].applies_to("claude-code"));
+        // Explicit list scopes the fan-out.
+        assert!(m.servers["scoped"].applies_to("codex"));
+        assert!(!m.servers["scoped"].applies_to("claude-code"));
+        // Empty list = direct fan-out nowhere (adopted plugin servers).
+        assert!(!m.servers["recipe-owned"].applies_to("codex"));
+
+        let out = toml::to_string(&m).unwrap();
+        let back: Manifest = toml::from_str(&out).unwrap();
+        assert_eq!(back, m);
+        // The all-targets default stays implicit; the deliberate empty list
+        // must survive serialization (it is NOT the default).
+        assert!(!out.contains("targets = [\"*\"]"), "{out}");
+        assert!(out.contains("targets = []"), "{out}");
     }
 
     #[test]

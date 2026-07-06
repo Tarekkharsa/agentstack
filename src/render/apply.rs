@@ -194,6 +194,14 @@ pub fn plan_target_with_servers(
     let mut managed: Vec<String> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
     for (name, server) in servers {
+        // Definition-level target scoping (`[servers.X] targets = [...]`).
+        // Every plan — apply, diff, doctor drift, use, dashboard — flows
+        // through here, so the scoping can't disagree between commands. A
+        // previously managed server that no longer applies falls into the
+        // prune set below, like any other deselection.
+        if !server.applies_to(&desc.id) {
+            continue;
+        }
         let rendered = render_server(desc, server, resolver);
         // The adapter's format can't express this transport — skip it rather
         // than emit an empty `{}` entry into a real config file.
@@ -582,6 +590,79 @@ mod tests {
         }
         assert_eq!(calls.get(), 1, "one store read per distinct ref per run");
         std::env::remove_var("HOME");
+    }
+
+    #[test]
+    fn server_targets_scope_the_fanout_and_prune_stale_entries() {
+        // The adopted-plugin duplication bug: recipe-owned servers (adopted
+        // from a native plugin, `targets = []`) fanned out to every target,
+        // configuring the same server twice on the harness whose plugin
+        // already provides it. The `targets` field scopes the fan-out inside
+        // plan_target_with_servers, so apply/diff/doctor/use all agree.
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [servers.everywhere]
+            type = "http"
+            url = "https://x/mcp"
+
+            [servers.claude-scoped]
+            type = "http"
+            url = "https://y/mcp"
+            targets = ["claude-code"]
+
+            [servers.github-github]
+            type = "http"
+            url = "https://api.githubcopilot.com/mcp/"
+            targets = []
+            "#,
+        )
+        .unwrap();
+        let servers: IndexMap<String, Server> = manifest.servers.clone();
+
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        let reg = Registry::load().unwrap();
+        let proj = assert_fs::TempDir::new().unwrap();
+        let resolver = MapResolver::default();
+
+        // claude-code gets the wildcard server and the one scoped to it.
+        let claude = plan_target_with_servers(
+            reg.get("claude-code").unwrap(),
+            &resolver,
+            &servers,
+            &[],
+            Scope::Global,
+            proj.path(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(claude.managed, vec!["everywhere", "claude-scoped"]);
+
+        // codex gets only the wildcard server; the recipe-owned entry a
+        // pre-scoping apply wrote there is pruned like any deselection.
+        let codex = plan_target_with_servers(
+            reg.get("codex").unwrap(),
+            &resolver,
+            &servers,
+            &["github-github".to_string()],
+            Scope::Global,
+            proj.path(),
+        )
+        .unwrap()
+        .unwrap();
+        std::env::remove_var("HOME");
+        assert_eq!(codex.managed, vec!["everywhere"]);
+        assert_eq!(codex.removed, vec!["github-github"]);
+        assert!(
+            !codex.proposed.contains("githubcopilot"),
+            "{}",
+            codex.proposed
+        );
     }
 
     #[test]
