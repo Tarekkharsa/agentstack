@@ -368,17 +368,36 @@ fn collect_hook_refs(hook: &Hook, refs: &mut Vec<String>) {
     }
 }
 
-fn missing_recipe_skills(recipe: &PluginRecipe, manifest: &Manifest, dir: &Path) -> Vec<String> {
+/// Locate a recipe skill's body on disk: inline manifest skills first, then
+/// the central library — the same order profiles resolve in (how `plugins
+/// adopt` references lifted skills). `None` when the name resolves nowhere or
+/// the body is not available locally yet.
+fn recipe_skill_dir(manifest: &Manifest, dir: &Path, name: &str) -> Option<PathBuf> {
     let store = Store::default_store();
+    if let Some(skill) = manifest.skills.get(name) {
+        return local_source_dir(&store, skill, dir);
+    }
+    let lib_home = crate::util::paths::lib_home();
+    let library = crate::library::Library::load(&lib_home).unwrap_or_default();
+    let resolved = crate::resolve::resolve_skill(
+        manifest,
+        dir,
+        &library,
+        &lib_home,
+        &store,
+        name,
+        crate::resolve::ResolveMode::PathOnly,
+    )
+    .ok()?;
+    resolved.path.is_dir().then_some(resolved.path)
+}
+
+fn missing_recipe_skills(recipe: &PluginRecipe, manifest: &Manifest, dir: &Path) -> Vec<String> {
     recipe
         .skills
         .iter()
-        .filter_map(|name| {
-            let skill = manifest.skills.get(name)?;
-            local_source_dir(&store, skill, dir)
-                .is_none()
-                .then(|| name.clone())
-        })
+        .filter(|name| recipe_skill_dir(manifest, dir, name).is_none())
+        .cloned()
         .collect()
 }
 
@@ -670,10 +689,7 @@ fn render_package(
     }
 
     for skill_name in &recipe.skills {
-        let Some(skill) = manifest.skills.get(skill_name) else {
-            continue;
-        };
-        let Some(source) = local_source_dir(&Store::default_store(), skill, dir) else {
+        let Some(source) = recipe_skill_dir(manifest, dir, skill_name) else {
             continue;
         };
         collect_copy_files(
@@ -1100,6 +1116,71 @@ mod tests {
         assert!(mcp.contains("${PLAY_TOKEN}"));
         assert!(tmp.path().join(".agents/plugins/marketplace.json").exists());
         assert!(tmp.path().join(".claude-plugin/marketplace.json").exists());
+    }
+
+    /// A recipe may reference a skill that lives only in the central library
+    /// (how `plugins adopt` records lifted skills) — sync must resolve it and
+    /// copy the library body into the generated package.
+    #[test]
+    fn library_backed_recipe_skill_renders_into_package() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let lib_home = home.path().join("lib");
+        home.child("lib/skills/play-run/SKILL.md")
+            .write_str("# Run\n")
+            .unwrap();
+        let mut library = crate::library::Library::default();
+        library.upsert(crate::library::LibrarySkill {
+            name: "play-run".into(),
+            source: "path".into(),
+            path: Some("play-run".into()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: None,
+            version: None,
+            provenance: Some("plugin:codex/local/play@1.0.0#skills/run".into()),
+        });
+        library.save(&lib_home).unwrap();
+
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [plugins.play]
+            version = "1.0.0"
+            description = "Play plugin"
+            targets = ["codex"]
+            skills = ["play-run"]
+            "#,
+        )
+        .unwrap();
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let report = sync(
+            &m,
+            &Registry::load().unwrap(),
+            tmp.path(),
+            &SyncOptions {
+                targets: vec![],
+                write: true,
+            },
+        )
+        .unwrap();
+        std::env::remove_var("AGENTSTACK_HOME");
+
+        ensure_no_sync_errors(&report).unwrap();
+        assert_eq!(
+            fs::read_to_string(
+                tmp.path()
+                    .join("plugins/agentstack/play/skills/play-run/SKILL.md")
+            )
+            .unwrap(),
+            "# Run\n"
+        );
     }
 
     #[test]

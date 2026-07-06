@@ -10,11 +10,13 @@ use indexmap::IndexMap;
 use owo_colors::OwoColorize;
 use serde_json::{json, Value};
 
+use super::lib::{add_skill_with_provenance, LibSource};
 use crate::cli::{
     PluginsAdoptArgs, PluginsArgs, PluginsCommand, PluginsCreateArgs, PluginsNativeArgs,
     PluginsStatusArgs, PluginsSyncArgs,
 };
-use crate::manifest::{validate_with_targets, Hook, PluginRecipe, Server, ServerType, Skill};
+use crate::library::{Library, LibrarySkill};
+use crate::manifest::{validate_with_context, Hook, PluginRecipe, Server, ServerType, ValidateCtx};
 use crate::plugin_recipes::{self, SyncOptions};
 use crate::util::diff;
 
@@ -175,7 +177,8 @@ fn create(args: &PluginsCreateArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let original = fs::read_to_string(&ctx.loaded.manifest_path)
         .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
     let new_text = insert_plugin_recipe(&original, &args.name, &recipe)?;
-    validate_manifest_text(&new_text, &ctx)?;
+    let libctx = ctx.library_ctx();
+    validate_manifest_text(&new_text, &ctx, &libctx.library, &libctx.lib_home)?;
     print_manifest_change(
         "create plugin recipe",
         &args.name,
@@ -240,7 +243,57 @@ fn adopt(args: &PluginsAdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         anyhow::bail!("plugin recipe '{}' already exists", recipe_name);
     }
 
-    let adopted = inspect_native_plugin(&recipe_name, native, &source, &ctx.loaded.manifest)?;
+    let lib_home = crate::util::paths::lib_home();
+    let library = Library::load(&lib_home)?;
+    let adopted = inspect_native_plugin(
+        &recipe_name,
+        native,
+        &source,
+        &ctx.loaded.manifest,
+        &library,
+    )?;
+
+    // Skill bodies are copied into the central library and referenced by name,
+    // never path-referenced into the native plugin cache: cache dirs are
+    // versioned per plugin release and vanish on update/uninstall, which would
+    // silently break every adopted skill.
+    let mut lib_lines = Vec::new();
+    for skill in &adopted.skills {
+        if skill.reused {
+            lib_lines.push(format!(
+                "{} skill '{}' is already in the central library (same content) — reusing it",
+                "·".dimmed(),
+                skill.name
+            ));
+            continue;
+        }
+        let outcome = add_skill_with_provenance(
+            &lib_home,
+            &skill.name,
+            LibSource::Path(&skill.source_dir),
+            false,
+            args.write,
+            args.allow_flagged,
+            &skill.provenance,
+        )?;
+        for w in &outcome.warnings {
+            lib_lines.push(format!("{} {w}", "⚠".yellow()));
+        }
+        if outcome.written {
+            lib_lines.push(format!(
+                "{} copied skill '{}' into the central library",
+                "✓".green(),
+                skill.name
+            ));
+        } else {
+            lib_lines.push(format!(
+                "{} would copy skill '{}' into the central library",
+                "→".cyan(),
+                skill.name
+            ));
+        }
+    }
+
     let original = fs::read_to_string(&ctx.loaded.manifest_path)
         .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
     let mut new_text = original.clone();
@@ -250,15 +303,6 @@ fn adopt(args: &PluginsAdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
             "servers",
             name,
             &serde_json::to_value(server)?,
-            None,
-        )?;
-    }
-    for (name, skill) in &adopted.skills {
-        new_text = crate::commands::add::build_manifest_with(
-            &new_text,
-            "skills",
-            name,
-            &serde_json::to_value(skill)?,
             None,
         )?;
     }
@@ -272,7 +316,24 @@ fn adopt(args: &PluginsAdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         )?;
     }
     new_text = insert_plugin_recipe(&new_text, &recipe_name, &adopted.recipe)?;
-    validate_manifest_text(&new_text, &ctx)?;
+
+    // Validate against a library view that already contains the lifted skills,
+    // so the recipe's name-only refs resolve on dry runs too.
+    let mut lib_view = library.clone();
+    for skill in adopted.skills.iter().filter(|s| !s.reused) {
+        lib_view.upsert(LibrarySkill {
+            name: skill.name.clone(),
+            source: "path".into(),
+            path: Some(skill.name.clone()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: None,
+            version: None,
+            provenance: None,
+        });
+    }
+    validate_manifest_text(&new_text, &ctx, &lib_view, &lib_home)?;
 
     print_manifest_change(
         "adopt native plugin",
@@ -291,6 +352,9 @@ fn adopt(args: &PluginsAdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         adopted.hooks.len(),
         source.display()
     );
+    for line in &lib_lines {
+        println!("  {line}");
+    }
     if args.write {
         crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
@@ -312,8 +376,12 @@ fn sync(args: &PluginsSyncArgs, manifest_dir: Option<&Path>) -> Result<()> {
             anyhow::bail!("target '{target}' does not support managed plugin recipes in v1");
         }
     }
+    // Library-aware validation: adopted recipes reference their skills by
+    // central-library name, with no inline [skills.*] entry.
+    let libctx = ctx.library_ctx();
+    let vctx = libctx.validate_ctx(&ctx.dir);
     let valid_targets: Vec<&str> = ctx.registry.ids().collect();
-    let issues = validate_with_targets(&ctx.loaded.manifest, valid_targets);
+    let issues = validate_with_context(&ctx.loaded.manifest, valid_targets, &vctx);
     let mut has_errors = false;
     for issue in issues {
         if issue.kind.is_error() {
@@ -855,11 +923,23 @@ fn insert_plugin_recipe(original: &str, name: &str, recipe: &PluginRecipe) -> Re
     )
 }
 
-fn validate_manifest_text(text: &str, ctx: &crate::commands::Context) -> Result<()> {
+fn validate_manifest_text(
+    text: &str,
+    ctx: &crate::commands::Context,
+    library: &Library,
+    lib_home: &Path,
+) -> Result<()> {
     let manifest: crate::manifest::Manifest =
         toml::from_str(text).context("parsing updated manifest")?;
     let valid_targets: Vec<&str> = ctx.registry.ids().collect();
-    let issues = validate_with_targets(&manifest, valid_targets);
+    let store = crate::store::Store::default_store();
+    let vctx = ValidateCtx {
+        manifest_dir: &ctx.dir,
+        library,
+        lib_home,
+        store: &store,
+    };
+    let issues = validate_with_context(&manifest, valid_targets, &vctx);
     if let Some(issue) = issues.into_iter().find(|i| i.kind.is_error()) {
         anyhow::bail!(issue.message);
     }
@@ -888,8 +968,30 @@ fn print_sync_guidance() {
 struct AdoptedPlugin {
     recipe: PluginRecipe,
     servers: IndexMap<String, Server>,
-    skills: IndexMap<String, Skill>,
+    skills: Vec<AdoptedSkill>,
     hooks: IndexMap<String, Hook>,
+}
+
+/// One native plugin skill queued for adoption into the central library.
+struct AdoptedSkill {
+    /// Library entry name — also how the recipe references the skill.
+    name: String,
+    /// The skill body inside the native plugin package.
+    source_dir: PathBuf,
+    /// Provenance recorded on the library entry (marketplace/plugin/version).
+    provenance: String,
+    /// The library already holds this exact content under this name, so
+    /// nothing needs copying.
+    reused: bool,
+}
+
+/// The versioned segment of the native cache path (e.g. Codex caches plugin
+/// packages at `<marketplace>/<name>/<hash>`), recorded as recipe `rev` so a
+/// later pass can tell the native plugin was updated since adoption. `None`
+/// when the package dir is just the plugin name (no versioned segment).
+fn native_cache_rev(source: &Path, plugin_name: &str) -> Option<String> {
+    let base = source.file_name()?.to_string_lossy().to_string();
+    (base != plugin_name).then_some(base)
 }
 
 fn inspect_native_plugin(
@@ -897,8 +999,15 @@ fn inspect_native_plugin(
     native: &crate::plugins::Plugin,
     source: &Path,
     manifest: &crate::manifest::Manifest,
+    library: &Library,
 ) -> Result<AdoptedPlugin> {
     let meta = read_native_plugin_meta(source)?;
+    let version = meta
+        .get("version")
+        .and_then(Value::as_str)
+        .or(native.version.as_deref())
+        .unwrap_or("0.1.0")
+        .to_string();
     let mut servers = IndexMap::new();
     for (name, server) in read_native_mcp(source)? {
         let key = unique_name(
@@ -909,27 +1018,61 @@ fn inspect_native_plugin(
         servers.insert(key, server);
     }
 
-    let mut skills = IndexMap::new();
+    let mut skills: Vec<AdoptedSkill> = Vec::new();
     let skills_dir = source.join("skills");
     if let Ok(entries) = fs::read_dir(&skills_dir) {
-        for entry in entries.flatten() {
-            if entry.path().join("SKILL.md").is_file() {
-                let native_name = entry.file_name().to_string_lossy().to_string();
-                let key = unique_name(
-                    manifest.skills.keys(),
-                    skills.keys(),
-                    &format!("{recipe_name}-{native_name}"),
-                );
-                skills.insert(
-                    key,
-                    Skill {
-                        path: Some(entry.path().display().to_string()),
-                        git: None,
-                        rev: None,
-                        subpath: None,
-                    },
-                );
+        let mut dirs: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.join("SKILL.md").is_file())
+            .collect();
+        dirs.sort();
+        for dir in dirs {
+            let native_name = dir
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let mut provenance = format!(
+                "plugin:{}/{}/{}@{version}",
+                native.harness, native.marketplace, native.name
+            );
+            if let Some(cache_rev) = native_cache_rev(source, &native.name) {
+                provenance.push_str(&format!("+{cache_rev}"));
             }
+            provenance.push_str(&format!("#skills/{native_name}"));
+
+            // Re-adopting the same content (after removing the recipe, or for
+            // a second harness) reuses the existing library entry instead of
+            // duplicating it under a suffixed name.
+            let desired = format!("{recipe_name}-{native_name}");
+            let desired_id = sanitize_id(&desired);
+            let existing_same = library
+                .get(&desired_id)
+                .and_then(|e| e.checksum.clone())
+                .zip(crate::store::dir_digest(&dir).ok())
+                .map(|(have, want)| have == want)
+                .unwrap_or(false);
+            let (name, reused) = if existing_same {
+                (desired_id, true)
+            } else {
+                (
+                    unique_name(
+                        manifest
+                            .skills
+                            .keys()
+                            .chain(library.skills.iter().map(|s| &s.name)),
+                        skills.iter().map(|s| &s.name),
+                        &desired,
+                    ),
+                    false,
+                )
+            };
+            skills.push(AdoptedSkill {
+                name,
+                source_dir: dir,
+                provenance,
+                reused,
+            });
         }
     }
 
@@ -941,15 +1084,13 @@ fn inspect_native_plugin(
 
     let recipe = PluginRecipe {
         kind: None,
-        rev: None,
-        source: None,
+        rev: native_cache_rev(source, &native.name),
+        source: Some(format!(
+            "plugin:{}/{}/{}",
+            native.harness, native.marketplace, native.name
+        )),
         instructions: Vec::new(),
-        version: meta
-            .get("version")
-            .and_then(Value::as_str)
-            .or(native.version.as_deref())
-            .unwrap_or("0.1.0")
-            .to_string(),
+        version,
         description: meta
             .get("description")
             .and_then(Value::as_str)
@@ -969,7 +1110,7 @@ fn inspect_native_plugin(
         targets: vec![native.harness.clone()],
         default_enabled: None,
         servers: servers.keys().cloned().collect(),
-        skills: skills.keys().cloned().collect(),
+        skills: skills.iter().map(|s| s.name.clone()).collect(),
         hooks: hooks.keys().cloned().collect(),
         homepage: meta
             .get("homepage")
@@ -1391,12 +1532,118 @@ mod tests {
             source: Some(plugin.path().display().to_string()),
         };
         let manifest: crate::manifest::Manifest = toml::from_str("version = 1\n").unwrap();
-        let adopted = inspect_native_plugin("play", &native, plugin.path(), &manifest).unwrap();
+        let adopted = inspect_native_plugin(
+            "play",
+            &native,
+            plugin.path(),
+            &manifest,
+            &Library::default(),
+        )
+        .unwrap();
         assert_eq!(adopted.recipe.version, "1.2.3");
         assert_eq!(adopted.recipe.targets, vec!["codex"]);
         assert_eq!(adopted.servers.len(), 1);
         assert_eq!(adopted.skills.len(), 1);
         assert_eq!(adopted.hooks.len(), 1);
         assert!(adopted.recipe.servers.contains(&"play-play".to_string()));
+        // Skills are queued for the central library, referenced by name in the
+        // recipe — never path-referenced into the native package.
+        assert_eq!(adopted.skills[0].name, "play-run");
+        assert!(adopted.skills[0].source_dir.ends_with("skills/run"));
+        assert!(!adopted.skills[0].reused);
+        assert_eq!(adopted.recipe.skills, vec!["play-run"]);
+        assert_eq!(
+            adopted.recipe.source.as_deref(),
+            Some("plugin:codex/local/play")
+        );
+    }
+
+    /// The core adopt guarantee: skills found in a native harness's versioned
+    /// plugin cache are copied into the central library (with plugin
+    /// provenance) and the manifest references them by name — no path into the
+    /// cache survives, so a plugin update or uninstall can't break them.
+    #[test]
+    fn adopt_lifts_cache_skills_into_the_library_not_cache_paths() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        // Codex-style versioned cache: <marketplace>/<plugin>/<hash>/skills/...
+        let plugin = tmp.child("cache/openai-curated/cloudflare/d6169bef");
+        plugin
+            .child(".codex-plugin/plugin.json")
+            .write_str(r#"{"name":"cloudflare","version":"1.2.3","description":"Cloudflare"}"#)
+            .unwrap();
+        plugin
+            .child("skills/wrangler/SKILL.md")
+            .write_str("# Wrangler\n")
+            .unwrap();
+        let native = crate::plugins::Plugin {
+            harness: "codex".into(),
+            name: "cloudflare".into(),
+            marketplace: "openai-curated".into(),
+            scope: "available".into(),
+            projects: vec![],
+            version: Some("1.2.3".into()),
+            enabled: Some(true),
+            status: "installed".into(),
+            source: Some(plugin.path().display().to_string()),
+        };
+        let manifest: crate::manifest::Manifest = toml::from_str("version = 1\n").unwrap();
+        let lib_home = tmp.child("lib");
+
+        let library = Library::load(lib_home.path()).unwrap();
+        let adopted =
+            inspect_native_plugin("cloudflare", &native, plugin.path(), &manifest, &library)
+                .unwrap();
+        // The cache's version-hash segment is provenance for upgrade detection.
+        assert_eq!(adopted.recipe.rev.as_deref(), Some("d6169bef"));
+        assert_eq!(
+            adopted.recipe.source.as_deref(),
+            Some("plugin:codex/openai-curated/cloudflare")
+        );
+        assert_eq!(adopted.recipe.skills, vec!["cloudflare-wrangler"]);
+
+        // What `adopt --write` does per skill: copy the body into the library.
+        for skill in &adopted.skills {
+            assert!(!skill.reused);
+            add_skill_with_provenance(
+                lib_home.path(),
+                &skill.name,
+                LibSource::Path(&skill.source_dir),
+                false,
+                true,
+                false,
+                &skill.provenance,
+            )
+            .unwrap();
+        }
+        assert!(lib_home
+            .path()
+            .join("skills/cloudflare-wrangler/SKILL.md")
+            .is_file());
+        let library = Library::load(lib_home.path()).unwrap();
+        let entry = library.get("cloudflare-wrangler").unwrap();
+        // Library-relative body, never the cache path.
+        assert_eq!(entry.source, "path");
+        assert_eq!(entry.path.as_deref(), Some("cloudflare-wrangler"));
+        assert!(entry.checksum.is_some());
+        assert_eq!(
+            entry.provenance.as_deref(),
+            Some("plugin:codex/openai-curated/cloudflare@1.2.3+d6169bef#skills/wrangler")
+        );
+
+        // The manifest gains only the recipe with name refs — the cache path
+        // appears nowhere in it.
+        let text = insert_plugin_recipe("version = 1\n", "cloudflare", &adopted.recipe).unwrap();
+        assert!(text.contains("cloudflare-wrangler"));
+        assert!(!text.contains("cache/openai-curated"));
+        let parsed: crate::manifest::Manifest = toml::from_str(&text).unwrap();
+        assert!(parsed.skills.is_empty(), "no inline [skills.*] entries");
+
+        // Re-adopting the same content reuses the library entry byte-for-byte
+        // instead of duplicating it under a suffixed name.
+        let readopted =
+            inspect_native_plugin("cloudflare", &native, plugin.path(), &manifest, &library)
+                .unwrap();
+        assert_eq!(readopted.skills[0].name, "cloudflare-wrangler");
+        assert!(readopted.skills[0].reused);
     }
 }

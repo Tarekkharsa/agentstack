@@ -232,11 +232,38 @@ fn run<'a>(
             }
         }
         for kref in &plugin.skills {
-            if !manifest.skills.contains_key(kref) {
-                issues.push(Issue::new(
+            // Same contract as profile skill refs: inline definitions validate
+            // directly; non-inline names may resolve from the central library
+            // when ctx is given (how `plugins adopt` references lifted skills).
+            if manifest.skills.contains_key(kref) {
+                continue;
+            }
+            match ctx {
+                Some(cx) => match resolve_skill(
+                    manifest,
+                    cx.manifest_dir,
+                    cx.library,
+                    cx.lib_home,
+                    cx.store,
+                    kref,
+                    ResolveMode::NoFetch,
+                ) {
+                    Ok(_) | Err(ResolveError::NotAvailableOffline { .. }) => {}
+                    Err(ResolveError::Unresolved { .. }) => issues.push(Issue::new(
+                        IssueKind::UnknownSkillRef,
+                        format!("plugin recipe '{plugin_name}' references unknown skill '{kref}'"),
+                    )),
+                    Err(ResolveError::Source(e)) => issues.push(Issue::new(
+                        IssueKind::UnresolvableSkillRef,
+                        format!(
+                            "plugin recipe '{plugin_name}' skill '{kref}' failed to resolve: {e}"
+                        ),
+                    )),
+                },
+                None => issues.push(Issue::new(
                     IssueKind::UnknownSkillRef,
                     format!("plugin recipe '{plugin_name}' references unknown skill '{kref}'"),
-                ));
+                )),
             }
         }
         for href in &plugin.hooks {
@@ -464,6 +491,56 @@ mod tests {
             .any(|i| i.kind == IssueKind::UnknownSkillRef));
         // With context, it resolves and validation is clean.
         assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx).is_empty());
+    }
+
+    // A plugin recipe that references a skill only present in the central
+    // library — how `plugins adopt` records lifted skills.
+    const RECIPE_REFS_LIBRARY: &str = r#"
+        version = 1
+        [plugins.cloudflare]
+        version = "1.0.0"
+        description = "Adopted plugin"
+        skills = ["cloudflare-wrangler"]
+    "#;
+
+    #[test]
+    fn plugin_recipe_library_skill_ref_validates_with_context() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let library = library_with_skill(&lib_home, "cloudflare-wrangler");
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(RECIPE_REFS_LIBRARY);
+        // Without context, the library-only ref is unknown (inline-only view).
+        assert!(validate(&m)
+            .iter()
+            .any(|i| i.kind == IssueKind::UnknownSkillRef));
+        // With context, it resolves and validation is clean.
+        assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx).is_empty());
+    }
+
+    #[test]
+    fn plugin_recipe_unknown_skill_ref_still_fails_with_context() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let library = Library::default(); // empty — the ref resolves nowhere
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+
+        let m = parse(RECIPE_REFS_LIBRARY);
+        let issues = validate_with_context(&m, std::iter::empty::<&str>(), &ctx);
+        assert!(issues.iter().any(|i| i.kind == IssueKind::UnknownSkillRef));
     }
 
     #[test]

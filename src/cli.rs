@@ -1153,6 +1153,10 @@ pub struct PluginsAdoptArgs {
     /// Override the AgentStack recipe name.
     #[arg(long)]
     pub as_name: Option<String>,
+    /// Copy skills into the central library even if the content scan finds
+    /// high-severity items (hidden Unicode). Findings still print as warnings.
+    #[arg(long)]
+    pub allow_flagged: bool,
     /// Actually update agentstack.toml (else dry-run).
     #[arg(long)]
     pub write: bool,

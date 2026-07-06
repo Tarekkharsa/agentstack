@@ -94,6 +94,43 @@ pub fn add_skill(
     write: bool,
     allow_flagged: bool,
 ) -> Result<AddOutcome> {
+    add_skill_inner(lib_home, name, source, replace, write, allow_flagged, None)
+}
+
+/// [`add_skill`] with an explicit provenance string, for callers whose true
+/// origin is richer than the copied path — e.g. `plugins adopt` lifting skill
+/// bodies out of a native plugin cache records the marketplace, plugin, and
+/// version instead of a cache path that dies on the next plugin update.
+pub fn add_skill_with_provenance(
+    lib_home: &Path,
+    name: &str,
+    source: LibSource,
+    replace: bool,
+    write: bool,
+    allow_flagged: bool,
+    provenance: &str,
+) -> Result<AddOutcome> {
+    add_skill_inner(
+        lib_home,
+        name,
+        source,
+        replace,
+        write,
+        allow_flagged,
+        Some(provenance),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_skill_inner(
+    lib_home: &Path,
+    name: &str,
+    source: LibSource,
+    replace: bool,
+    write: bool,
+    allow_flagged: bool,
+    provenance_override: Option<&str>,
+) -> Result<AddOutcome> {
     if !valid_lib_name(name) {
         bail!("invalid library skill name '{name}' — must be non-empty and contain no path separators");
     }
@@ -150,7 +187,11 @@ pub fn add_skill(
                 subpath: None,
                 checksum: Some(checksum.clone()),
                 version: None,
-                provenance: Some(format!("path:{}", src.display())),
+                provenance: Some(
+                    provenance_override
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("path:{}", src.display())),
+                ),
             };
             (entry, Some(dest), checksum, "path", Some(src), total_bytes)
         }
@@ -190,7 +231,11 @@ pub fn add_skill(
                 subpath: subpath.map(str::to_string),
                 checksum: Some(resolved.checksum.clone()),
                 version: None,
-                provenance: Some(provenance),
+                provenance: Some(
+                    provenance_override
+                        .map(str::to_string)
+                        .unwrap_or(provenance),
+                ),
             };
             let total_bytes = dir_size(&resolved.path);
             (entry, None, resolved.checksum, "git", None, total_bytes)
