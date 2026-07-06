@@ -11,48 +11,52 @@ fresh box).
 
 ## The idea
 
-The library lives at `~/.agentstack/lib/`. Make that directory a git repo and
-push/pull it. git is the right tool here: versioned, offline-friendly, no
-daemon, and it diffs cleanly.
+The library lives at `~/.agentstack/lib/`. Version it as a git repo and
+push/pull it across machines. git is the right tool here: versioned,
+offline-friendly, no daemon, and it diffs cleanly.
 
-## What to commit vs. exclude
+## The built-in way (preferred)
 
-Commit:
+agentstack ships a wrapper that does the whole flow — and refuses to push if a
+server definition holds a literal secret:
 
-- `library.toml` — the index (names, provenance, checksums)
-- `skills/` — path-source skill bodies (the files you installed by name)
-- `servers/` — server definitions (`${REF}` placeholders only, never resolved
-  secret values)
+```bash
+# first machine — set it up and push:
+agentstack lib sync --init --remote <your-remote>
+agentstack lib sync                     # commit local changes, pull, push
 
-Exclude (put in the repo's `.gitignore`):
+# a fresh machine — clone the library into place:
+agentstack lib sync --init --remote <your-remote>
 
-- the content **store / cache** (git-source clones) — large and re-fetchable
-- anything holding a resolved secret value
+agentstack lib sync --status            # working-tree changes + ahead/behind
+```
+
+## What travels vs. what doesn't
+
+- **Travels:** `library.toml` (the index), `skills/` (path-source bodies),
+  `servers/` (definitions with `${REF}` placeholders only).
+- **Stays local:** the content **store / cache** lives *outside* the library
+  (`~/.agentstack/store`), so it never travels; resolved secret values are never
+  in the library at all.
 
 Git-source skills carry `git:<url>@<rev>#<subpath>` provenance, so they
-re-resolve identically on any machine — only path-source content actually needs
-to travel.
+re-resolve identically on any machine — only path-source content needs to move.
 
-## First-time setup
+## Doing it by hand (equivalent)
+
+If you'd rather run git yourself:
 
 ```bash
 cd ~/.agentstack/lib
-printf 'store/\n*.local\n' >> .gitignore
-git init && git add library.toml skills servers .gitignore
+git init && git add library.toml skills servers
 git commit -m "library snapshot"
 git remote add origin <your-remote>
 git push -u origin main
+# other machines: git clone <your-remote> ~/.agentstack/lib   (or `git pull`)
 ```
 
-## On another machine
-
-```bash
-# fresh machine:
-git clone <your-remote> ~/.agentstack/lib
-
-# existing machine, pull latest:
-cd ~/.agentstack/lib && git pull
-```
+Nothing extra to `.gitignore` — the store cache is already a sibling directory,
+not inside the repo.
 
 ## Secrets stay per-machine
 

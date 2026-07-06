@@ -814,6 +814,10 @@ pub struct LibSyncArgs {
     /// Commit message for local changes (default: a snapshot line).
     #[arg(long)]
     pub message: Option<String>,
+    /// Push even if a server definition contains a literal secret (normally the
+    /// sync is blocked — secrets should be `${REF}` placeholders).
+    #[arg(long)]
+    pub allow_secrets: bool,
 }
 
 #[derive(Args, Debug)]

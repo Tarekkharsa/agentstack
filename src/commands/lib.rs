@@ -1083,7 +1083,7 @@ fn sync(args: &LibSyncArgs) -> Result<()> {
     if args.status {
         return sync_status(&lib);
     }
-    sync_now(&lib, args.message.as_deref())
+    sync_now(&lib, args.message.as_deref(), args.allow_secrets)
 }
 
 /// First-time setup. With a remote and an empty/absent library, clone it (fresh
@@ -1192,45 +1192,151 @@ fn sync_status(lib: &Path) -> Result<()> {
 }
 
 /// Commit local changes, then pull + push if a remote is configured.
-fn sync_now(lib: &Path, message: Option<&str>) -> Result<()> {
+fn sync_now(lib: &Path, message: Option<&str>, allow_secrets: bool) -> Result<()> {
+    // A half-finished rebase must be resolved first: committing on top of one
+    // and re-pulling loops forever, so don't send the user in a circle.
+    if lib.join(".git/rebase-merge").exists() || lib.join(".git/rebase-apply").exists() {
+        let d = lib.display();
+        bail!(
+            "a rebase is already in progress in {d} — finish it first:\n  \
+             git -C {d} rebase --continue   (after resolving conflicts)\n  \
+             git -C {d} rebase --abort      (to back out)"
+        );
+    }
+
+    // The library's core promise is that secrets never travel. Enforce it: a
+    // server definition with a literal (non-`${REF}`) secret blocks the push.
+    // Server bodies are the only place a value could hide — skills are prose.
+    let leaks = library_secret_leaks(lib);
+    if !leaks.is_empty() && !allow_secrets {
+        let list = leaks
+            .iter()
+            .map(|l| format!("    {l}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        bail!(
+            "refusing to sync — a server definition holds a literal secret (use ${{REF}} \
+             instead, or pass --allow-secrets to override):\n{list}"
+        );
+    }
+
+    // Commit any local changes.
     let dirty = git_out(lib, &["status", "--short"])?;
     if dirty.is_empty() {
         println!("{} no local changes", "·".dimmed());
     } else {
         git_out(lib, &["add", "-A"])?;
-        let msg = message.unwrap_or("agentstack library sync");
-        git_out(lib, &["commit", "-m", msg])?;
+        git_out(
+            lib,
+            &["commit", "-m", message.unwrap_or("agentstack library sync")],
+        )?;
         println!("{} committed local changes", "✓".green());
     }
 
+    // Nothing committed yet (a fresh clone of an empty remote, no local changes).
+    if !git_ok(lib, &["rev-parse", "--verify", "HEAD"]) {
+        println!("  nothing to push yet — add a skill/server first");
+        return Ok(());
+    }
     if !git_ok(lib, &["remote", "get-url", "origin"]) {
         println!("  no remote configured — run `agentstack lib sync --remote <url>` to set one");
         return Ok(());
     }
     let branch = git_out(lib, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    if git_ok(lib, &["rev-parse", "--abbrev-ref", "@{u}"]) {
-        // A rebase pull keeps history linear; surface conflicts for the user to
-        // resolve rather than leaving a half-finished merge.
+
+    // Bring the remote in before pushing. Three cases: an upstream is set
+    // (normal), no upstream but the remote branch already exists (a second
+    // machine that ran --init locally), or an empty remote (first push).
+    let has_upstream = git_ok(lib, &["rev-parse", "--abbrev-ref", "@{u}"]);
+    let _ = std::process::Command::new("git")
+        .arg("-C")
+        .arg(lib)
+        .args(["fetch", "origin", "--quiet"])
+        .output();
+    let remote_has_branch = git_ok(lib, &["rev-parse", "--verify", &format!("origin/{branch}")]);
+
+    if has_upstream || remote_has_branch {
+        let mut pull = vec!["pull", "--rebase"];
+        if !has_upstream {
+            pull.extend(["origin", branch.as_str()]);
+        }
         let out = std::process::Command::new("git")
             .arg("-C")
             .arg(lib)
-            .args(["pull", "--rebase"])
+            .args(&pull)
             .output()
             .context("running git pull")?;
         if !out.status.success() {
-            bail!(
-                "git pull --rebase failed: {}\nresolve in {} then re-run `agentstack lib sync`",
-                String::from_utf8_lossy(&out.stderr).trim(),
-                lib.display()
-            );
+            let err = String::from_utf8_lossy(&out.stderr);
+            let d = lib.display();
+            let hint = if err.contains("unrelated histories") {
+                format!(
+                    "\nthe local and remote libraries have separate histories — back up {d} and \
+                     re-clone with `agentstack lib sync --init --remote <url>` into an empty \
+                     library, or reconcile manually: \
+                     `git -C {d} pull --rebase --allow-unrelated-histories origin {branch}`"
+                )
+            } else {
+                format!(
+                    "\nresolve conflicts in {d}, then `git -C {d} rebase --continue` and re-run"
+                )
+            };
+            bail!("git pull --rebase failed: {}{hint}", err.trim());
         }
         println!("{} pulled from remote", "✓".green());
+        // The same supply-chain gate as `lib add`, applied to pulled content —
+        // warn-only, since blocking a completed pull would strand the working tree.
+        scan_pulled_skills(lib);
+    }
+
+    if has_upstream {
         git_out(lib, &["push"])?;
     } else {
         git_out(lib, &["push", "-u", "origin", &branch])?;
     }
     println!("{} pushed to remote", "✓".green());
     Ok(())
+}
+
+/// Server definitions in the library that carry a literal (non-`${REF}`) secret
+/// — the only place in the library a real value could hide before a sync push.
+fn library_secret_leaks(lib: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(lib.join("servers")) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(server) = toml::from_str::<Server>(&text) else {
+            continue;
+        };
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+        for w in suspicious_secrets(&server) {
+            out.push(format!("{name}: {w}"));
+        }
+    }
+    out
+}
+
+/// Best-effort content scan of pulled skills (warn-only — a compromised or
+/// shared remote is an ingestion path, but blocking a finished pull strands the
+/// tree, so surface findings for review rather than failing).
+fn scan_pulled_skills(lib: &Path) {
+    let skills = lib.join("skills");
+    if !skills.exists() {
+        return;
+    }
+    if let Ok(findings) = crate::scan::scan_tree(&skills) {
+        for f in &findings {
+            println!("  {} pulled content: {}", "⚠".yellow(), f.describe());
+        }
+    }
 }
 
 fn require_skill_md(dir: &Path) -> Result<()> {

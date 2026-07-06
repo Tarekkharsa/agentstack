@@ -25,6 +25,7 @@ fn sync(init: bool, remote: Option<&str>, status: bool) -> LibArgs {
             remote: remote.map(str::to_string),
             status,
             message: None,
+            allow_secrets: false,
         }),
     }
 }
@@ -136,6 +137,38 @@ fn init_with_remote_clones_into_an_empty_library() {
     let lib_home = ashome.join("lib");
     assert!(lib_home.join("library.toml").is_file(), "library cloned");
     assert!(lib_home.join("skills/demo/SKILL.md").is_file());
+
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+#[test]
+fn sync_blocks_a_literal_secret_from_travelling() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    git_identity();
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let ashome = tmp.path().join("ashome");
+    let servers = ashome.join("lib/servers");
+    fs::create_dir_all(&servers).unwrap();
+    std::env::set_var("AGENTSTACK_HOME", &ashome);
+    fs::write(
+        ashome.join("lib/library.toml"),
+        "version = 1\nserver = []\n",
+    )
+    .unwrap();
+    // A server definition with a plaintext token instead of a ${REF}.
+    fs::write(
+        servers.join("leaky.toml"),
+        "type = \"http\"\nurl = \"https://x/mcp\"\n\
+         [headers]\nAuthorization = \"Bearer sk-REALSECRET\"\n",
+    )
+    .unwrap();
+
+    lib::run(&sync(true, None, false), None).unwrap(); // init
+    let err = lib::run(&sync(false, None, false), None).unwrap_err();
+    assert!(
+        err.to_string().contains("literal secret"),
+        "sync must refuse to push a plaintext secret: {err}"
+    );
 
     std::env::remove_var("AGENTSTACK_HOME");
 }

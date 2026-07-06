@@ -18,6 +18,7 @@ pub struct Store {
 }
 
 /// The resolved local location of a skill's content.
+#[derive(Debug)]
 pub struct Resolved {
     pub path: PathBuf,
     /// Resolved git commit (git sources only).
@@ -210,7 +211,19 @@ fn git_content_dir(clone: &Path, subpath: Option<&str>) -> Result<PathBuf> {
     if !safe {
         bail!("git subpath '{sub}' must be a relative path inside the repo (no '..' or absolute path)");
     }
-    Ok(clone.join(rel))
+    let content = clone.join(rel);
+    // A `Normal`-only subpath still escapes if a component is a *symlink* the
+    // repo shipped (e.g. `skills/x` → `~/.ssh`; git checks out symlinks). When
+    // the target exists, resolve it and require it stay inside the clone —
+    // otherwise dir_digest/scan/copy would read and vendor files outside the repo.
+    if let (Ok(real_content), Ok(real_clone)) =
+        (fs::canonicalize(&content), fs::canonicalize(clone))
+    {
+        if !real_content.starts_with(&real_clone) {
+            bail!("git subpath '{sub}' resolves outside the repo (symlinked escape) — refusing");
+        }
+    }
+    Ok(content)
 }
 
 fn resolve_path(dir: &Path, p: &str) -> PathBuf {
@@ -730,5 +743,49 @@ mod tests {
         assert_eq!(r.source_kind, "git");
         assert!(r.rev.is_some());
         assert!(r.path.join("SKILL.md").exists());
+    }
+
+    /// A git source with a subpath resolves to the subdir; a `..`/symlink escape
+    /// is refused (the supply-chain boundary the subpath feature must hold).
+    #[test]
+    fn git_subpath_resolves_subdir_and_rejects_escapes() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let repo = tmp.child("repo");
+        repo.create_dir_all().unwrap();
+        let git = |args: &[&str]| {
+            super::run_git(args, Some(repo.path())).unwrap();
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@e.st"]);
+        git(&["config", "user.name", "t"]);
+        repo.child("skills/improve/SKILL.md")
+            .write_str("# improve\n")
+            .unwrap();
+        // A symlink that points outside the repo.
+        std::os::unix::fs::symlink("/etc", repo.path().join("evil")).unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "init"]);
+
+        let store = Store::with_root(tmp.child("store").path().to_path_buf());
+        let url = format!("file://{}", repo.path().display());
+
+        // Good subpath → the subdir's SKILL.md.
+        let ok: Skill =
+            toml::from_str(&format!("git = \"{url}\"\nsubpath = \"skills/improve\"")).unwrap();
+        let r = store.resolve(&ok, tmp.path(), None).unwrap();
+        assert!(r.path.ends_with("skills/improve"));
+        assert!(r.path.join("SKILL.md").exists());
+
+        // `..` component → rejected before any read.
+        let dots: Skill = toml::from_str(&format!("git = \"{url}\"\nsubpath = \"../x\"")).unwrap();
+        assert!(store.resolve(&dots, tmp.path(), None).is_err());
+
+        // Symlink escape → rejected.
+        let evil: Skill = toml::from_str(&format!("git = \"{url}\"\nsubpath = \"evil\"")).unwrap();
+        let err = store.resolve(&evil, tmp.path(), None).unwrap_err();
+        assert!(
+            err.to_string().contains("outside the repo"),
+            "symlink escape must be refused: {err}"
+        );
     }
 }

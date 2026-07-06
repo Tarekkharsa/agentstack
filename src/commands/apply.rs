@@ -148,6 +148,17 @@ fn render(
         };
 
         let key = target_key(id, scope, &ctx.dir);
+
+        // Managed .gitignore block: the manifest's declared project-scope
+        // artifacts (config, skills dir, compiled instruction file). Derived
+        // from the manifest — the same set `use` emits — so the block never
+        // churns as you alternate the two commands.
+        if scope == Scope::Project && will_write {
+            ignore_entries.extend(crate::render::gitignore::managed_entries(
+                manifest, desc, scope, &ctx.dir,
+            ));
+        }
+
         let mut previously = state.managed_servers(&key);
         // Names an earlier guarded write kept on disk (state bookkeeping —
         // they left `managed_servers` when this manifest recorded its own
@@ -270,15 +281,6 @@ fn render(
                 state.record_kept_foreign(&key, foreign.clone());
             }
             println!("  {} up to date", "✓".green());
-        }
-
-        // The rendered project config is machine-local (resolved values) —
-        // feed the managed .gitignore block (up-to-date targets included, so
-        // idempotent re-runs keep the block stable).
-        if scope == Scope::Project && will_write && !state.managed_servers(&key).is_empty() {
-            if let Ok(rel) = plan.config_path.strip_prefix(&project_root) {
-                ignore_entries.push(format!("/{}", rel.display()));
-            }
         }
 
         // Native settings file (permissions, feature flags) — a separate file
@@ -427,19 +429,6 @@ fn render(
                             "→".cyan(),
                             ip.fragments.len()
                         );
-                    }
-                }
-
-                // The compiled instruction file (CLAUDE.md / AGENTS.md) is a
-                // generated artifact — feed it to the managed .gitignore block
-                // so the repo tracks only the .agentstack source, not the
-                // output. Safe even when the file also holds hand-written
-                // content: gitignore never hides an already-tracked file, and
-                // the region merge preserves that content on disk. --no-gitignore
-                // opts out for teams that commit their instruction files.
-                if scope == Scope::Project && will_write && !ip.fragments.is_empty() {
-                    if let Ok(rel) = ip.path.strip_prefix(&project_root) {
-                        ignore_entries.push(format!("/{}", rel.display()));
                     }
                 }
             }

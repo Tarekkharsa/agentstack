@@ -205,6 +205,12 @@ pub(crate) fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst).with_context(|| format!("creating {}", dst.display()))?;
     for entry in fs::read_dir(src).with_context(|| format!("reading {}", src.display()))? {
         let entry = entry?;
+        // Never carry a source's `.git` into the library copy: it bloats the
+        // skill and, once the library is itself a git repo (`lib sync`), a
+        // nested `.git` is recorded as a gitlink and the body vanishes on clone.
+        if entry.file_name() == ".git" {
+            continue;
+        }
         let from = entry.path();
         let to = dst.join(entry.file_name());
         let ft = entry.file_type()?;

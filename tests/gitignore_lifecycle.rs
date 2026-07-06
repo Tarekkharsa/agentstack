@@ -5,10 +5,13 @@
 //! Serialized-by-design: one test, phases in order (mutates process HOME).
 
 use std::fs;
+use std::sync::Mutex;
 
-use agentstack::cli::UseArgs;
-use agentstack::commands::use_profile;
+use agentstack::cli::{ApplyArgs, UseArgs};
+use agentstack::commands::{apply, use_profile};
 use agentstack::scope::Scope;
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn use_args(profile: &str) -> UseArgs {
     UseArgs {
@@ -22,8 +25,70 @@ fn use_args(profile: &str) -> UseArgs {
     }
 }
 
+fn apply_args() -> ApplyArgs {
+    ApplyArgs {
+        targets: vec!["claude-code".into()],
+        profile: None,
+        dry_run: false,
+        write: true,
+        scope: Some(Scope::Project),
+        allow_unresolved: false,
+        no_gitignore: false,
+        prune_foreign: false,
+    }
+}
+
+/// `apply` and `use` must emit the SAME managed block — otherwise alternating
+/// them rewrites a possibly-committed `.gitignore` (and un-ignores whichever
+/// artifact the other command doesn't know about).
+#[test]
+fn apply_and_use_emit_an_identical_block() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join(".git")).unwrap();
+    fs::create_dir_all(proj.join("skills/local")).unwrap();
+    fs::write(proj.join("skills/local/SKILL.md"), "# local\n").unwrap();
+    fs::create_dir_all(proj.join("instr")).unwrap();
+    fs::write(proj.join("instr/house.md"), "Be concise.\n").unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.demo]\ntype = \"http\"\nurl = \"https://x/mcp\"\n\
+         [skills.local]\npath = \"./skills/local\"\n\
+         [instructions.house]\npath = \"./instr/house.md\"\n\
+         [profiles.default]\nservers = [\"demo\"]\nskills = [\"local\"]\n",
+    )
+    .unwrap();
+
+    apply::run(&apply_args(), Some(&proj)).unwrap();
+    let after_apply = fs::read_to_string(proj.join(".gitignore")).unwrap();
+    use_profile::run(&use_args("default"), Some(&proj)).unwrap();
+    let after_use = fs::read_to_string(proj.join(".gitignore")).unwrap();
+
+    assert_eq!(
+        after_apply, after_use,
+        "apply and use must produce the same managed block — no churn"
+    );
+    for entry in ["/.mcp.json", "/.claude/skills/", "/CLAUDE.md"] {
+        assert!(
+            after_use.contains(entry),
+            "block missing {entry}: {after_use}"
+        );
+    }
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
 #[test]
 fn activation_writes_stable_entries_and_deactivation_keeps_the_block() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
     let home = tmp.path().join("home");
     fs::create_dir_all(&home).unwrap();

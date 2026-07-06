@@ -131,12 +131,6 @@ pub fn activate(
     // profile membership changes.
     let project_root = crate::manifest::project_root_of(&ctx.dir);
     let mut ignore_entries: Vec<String> = Vec::new();
-    let mut ignorable = |path: &Path, is_dir: bool| {
-        if let Ok(rel) = path.strip_prefix(&project_root) {
-            let suffix = if is_dir { "/" } else { "" };
-            ignore_entries.push(format!("/{}{suffix}", rel.display()));
-        }
-    };
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -296,14 +290,9 @@ pub fn activate(
         // committed files). A fully-deactivated target emits nothing, and the
         // keep-on-empty splice leaves any existing block intact.
         if scope == Scope::Project && args.write {
-            let manages_anything =
-                !state.managed_servers(&key).is_empty() || !state.managed_skills(&key).is_empty();
-            if manages_anything {
-                if let Some((cfg, _)) = desc.config_for(scope, &ctx.dir) {
-                    ignorable(&cfg, false);
-                }
-                ignorable(&skills_dir, true);
-            }
+            ignore_entries.extend(crate::render::gitignore::managed_entries(
+                manifest, desc, scope, &ctx.dir,
+            ));
         }
     }
 

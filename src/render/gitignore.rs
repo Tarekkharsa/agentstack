@@ -20,8 +20,66 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+use crate::adapter::AdapterDescriptor;
+use crate::manifest::Manifest;
+use crate::scope::Scope;
+
 const BEGIN: &str = "# >>> agentstack — generated project artifacts (machine-local) >>>";
 const END: &str = "# <<< agentstack >>>";
+
+/// The stable, directory-level ignore entries for one target's generated
+/// project-scope artifacts, derived from what the manifest **declares** — not
+/// from what any single command happens to write this run. `use` and `apply`
+/// both emit this set, so the managed block is identical whichever you run (no
+/// churn on a possibly-committed `.gitignore`). Entries are project-root
+/// relative and `/`-prefixed (dirs get a trailing `/`). Being generous is safe:
+/// ignoring a path that isn't generated yet is a no-op, whereas failing to
+/// ignore a generated file is the bug this prevents.
+pub fn managed_entries(
+    manifest: &Manifest,
+    desc: &AdapterDescriptor,
+    scope: Scope,
+    manifest_dir: &Path,
+) -> Vec<String> {
+    let project_root = crate::manifest::project_root_of(manifest_dir);
+    let mut out = Vec::new();
+    let mut push = |path: &Path, is_dir: bool| {
+        if let Ok(rel) = path.strip_prefix(&project_root) {
+            out.push(format!(
+                "/{}{}",
+                rel.display(),
+                if is_dir { "/" } else { "" }
+            ));
+        }
+    };
+
+    // MCP config file — when the manifest declares any servers.
+    if !manifest.servers.is_empty() {
+        if let Some((cfg, _)) = desc.config_for(scope, manifest_dir) {
+            push(&cfg, false);
+        }
+    }
+    // Skills directory — when any skill can be materialized (inline, or via a
+    // profile that references library skills).
+    let has_skills =
+        !manifest.skills.is_empty() || manifest.profiles.values().any(|p| !p.skills.is_empty());
+    if has_skills {
+        if let Some(dir) = desc.skills_dir_for(scope, manifest_dir) {
+            push(&dir, true);
+        }
+    }
+    // Compiled instruction file — when the manifest declares any instructions.
+    if !manifest.instructions.is_empty() {
+        if let Some(p) = desc
+            .instructions
+            .as_ref()
+            .and_then(|s| s.path_for(scope, manifest_dir))
+        {
+            push(&p, false);
+        }
+    }
+    out
+}
 
 /// Ensure the project's `.gitignore` contains exactly `entries` inside the
 /// managed block. No-op (Ok(false)) when the project root is not a git repo
