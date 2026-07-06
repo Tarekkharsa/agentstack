@@ -63,7 +63,9 @@ mod tests {
         let tmp = assert_fs::TempDir::new().unwrap();
         let src = tmp.child("src");
         src.child("SKILL.md").write_str("# skill\n").unwrap();
-        src.child(".git/HEAD").write_str("ref: refs/heads/main\n").unwrap();
+        src.child(".git/HEAD")
+            .write_str("ref: refs/heads/main\n")
+            .unwrap();
         let dst = tmp.child("dst").path().to_path_buf();
 
         copy_dir_all(src.path(), &dst).unwrap();
@@ -78,7 +80,9 @@ mod tests {
         let tmp = assert_fs::TempDir::new().unwrap();
         let real = tmp.child("real");
         real.child("SKILL.md").write_str("# skill\n").unwrap();
-        real.child(".git/HEAD").write_str("ref: refs/heads/main\n").unwrap();
+        real.child(".git/HEAD")
+            .write_str("ref: refs/heads/main\n")
+            .unwrap();
 
         let src = tmp.child("src");
         src.create_dir_all().unwrap();

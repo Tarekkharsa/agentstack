@@ -182,7 +182,11 @@ fn sync_blocks_a_secret_in_a_url_query_param() {
     let servers = ashome.join("lib/servers");
     fs::create_dir_all(&servers).unwrap();
     std::env::set_var("AGENTSTACK_HOME", &ashome);
-    fs::write(ashome.join("lib/library.toml"), "version = 1\nserver = []\n").unwrap();
+    fs::write(
+        ashome.join("lib/library.toml"),
+        "version = 1\nserver = []\n",
+    )
+    .unwrap();
     fs::write(
         servers.join("leaky.toml"),
         "type = \"http\"\nurl = \"https://x/mcp?api_key=sk-REALSECRET\"\n",
@@ -208,7 +212,11 @@ fn sync_blocks_a_secret_in_args_and_allows_a_ref() {
     let servers = ashome.join("lib/servers");
     fs::create_dir_all(&servers).unwrap();
     std::env::set_var("AGENTSTACK_HOME", &ashome);
-    fs::write(ashome.join("lib/library.toml"), "version = 1\nserver = []\n").unwrap();
+    fs::write(
+        ashome.join("lib/library.toml"),
+        "version = 1\nserver = []\n",
+    )
+    .unwrap();
     // A literal secret in the value following a secretish flag.
     fs::write(
         servers.join("leaky.toml"),
@@ -245,7 +253,11 @@ fn sync_blocks_an_unparseable_server_definition() {
     let servers = ashome.join("lib/servers");
     fs::create_dir_all(&servers).unwrap();
     std::env::set_var("AGENTSTACK_HOME", &ashome);
-    fs::write(ashome.join("lib/library.toml"), "version = 1\nserver = []\n").unwrap();
+    fs::write(
+        ashome.join("lib/library.toml"),
+        "version = 1\nserver = []\n",
+    )
+    .unwrap();
     // Hand-broken TOML (unterminated table header) carrying a plaintext secret.
     fs::write(
         servers.join("broken.toml"),

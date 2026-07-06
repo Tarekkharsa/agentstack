@@ -522,7 +522,9 @@ fn url_secrets(url: &str) -> Vec<String> {
         // A password (the part after ':') is a credential by construction.
         if let Some((_user, pass)) = userinfo.split_once(':') {
             if !pass.is_empty() && !pass.contains("${") {
-                out.push("url embeds a literal password in its userinfo — use ${REF} instead".into());
+                out.push(
+                    "url embeds a literal password in its userinfo — use ${REF} instead".into(),
+                );
             }
         }
     }
@@ -598,7 +600,8 @@ fn key_is_secretish(key: &str) -> bool {
 /// won't parse (F3) and when scanning outgoing commits (F6).
 fn secretish_keys_in_line(line: &str) -> Vec<String> {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| regex::Regex::new(r#"([A-Za-z0-9_.-]+)\s*[=:]\s*"([^"]*)""#).unwrap());
+    let re =
+        RE.get_or_init(|| regex::Regex::new(r#"([A-Za-z0-9_.-]+)\s*[=:]\s*"([^"]*)""#).unwrap());
     re.captures_iter(line)
         .filter_map(|c| {
             let key = c.get(1)?.as_str();
@@ -1347,8 +1350,7 @@ fn sync_now(lib: &Path, message: Option<&str>, allow_secrets: bool) -> Result<()
             .arg(lib)
             .args(["fetch", "origin", "--quiet"])
             .output();
-        remote_has_branch =
-            git_ok(lib, &["rev-parse", "--verify", &format!("origin/{branch}")]);
+        remote_has_branch = git_ok(lib, &["rev-parse", "--verify", &format!("origin/{branch}")]);
     }
 
     if has_upstream || remote_has_branch {
@@ -1562,7 +1564,13 @@ fn outgoing_secret_leaks(lib: &Path, range: Option<&str>) -> Vec<String> {
     let mut file = String::new();
     for line in diff.lines() {
         if let Some(h) = line.strip_prefix("commit ") {
-            commit = h.split_whitespace().next().unwrap_or(h).chars().take(8).collect();
+            commit = h
+                .split_whitespace()
+                .next()
+                .unwrap_or(h)
+                .chars()
+                .take(8)
+                .collect();
         } else if let Some(f) = line.strip_prefix("+++ b/") {
             file = f.to_string();
         } else if let Some(added) = line.strip_prefix('+') {
