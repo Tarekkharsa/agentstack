@@ -184,6 +184,7 @@ impl Install {
                     args: vec![],
                     headers,
                     env: IndexMap::new(),
+                    extra: IndexMap::new(),
                 }
             }
             Install::Stdio {
@@ -202,6 +203,7 @@ impl Install {
                     args: args.clone(),
                     headers: IndexMap::new(),
                     env,
+                    extra: IndexMap::new(),
                 }
             }
         }

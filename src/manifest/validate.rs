@@ -45,6 +45,9 @@ pub enum IssueKind {
     MissingTransportFields,
     UnknownTargetServer,
     UnknownPluginTarget,
+    /// A `[servers.X.extra.<id>]` table names an adapter id that isn't
+    /// registered — the extras would silently never render.
+    UnknownExtraTarget,
     InvalidPluginName,
 }
 
@@ -63,6 +66,7 @@ impl IssueKind {
                 | IssueKind::MissingTransportFields
                 | IssueKind::UnknownTargetServer
                 | IssueKind::UnknownPluginTarget
+                | IssueKind::UnknownExtraTarget
                 | IssueKind::InvalidPluginName
         )
     }
@@ -127,6 +131,18 @@ fn run<'a>(
                     issues.push(Issue::new(
                         IssueKind::MissingTransportFields,
                         format!("server '{name}' is type=stdio but has no `command`"),
+                    ));
+                }
+            }
+        }
+        // Extras keyed by an unregistered adapter id would silently never
+        // render — a typo like `extra.codx` must not eat the keys it guards.
+        if !targets.is_empty() {
+            for target in server.extra.keys() {
+                if !targets.contains(target) {
+                    issues.push(Issue::new(
+                        IssueKind::UnknownExtraTarget,
+                        format!("server '{name}' has `extra.{target}` but no adapter '{target}' is registered"),
                     ));
                 }
             }
@@ -319,6 +335,39 @@ mod tests {
         );
         let issues = validate(&m);
         assert_eq!(issues[0].kind, IssueKind::MissingTransportFields);
+    }
+
+    #[test]
+    fn flags_extras_for_unknown_adapter_id() {
+        let m = parse(
+            r#"
+            version = 1
+            [servers.miro]
+            type = "stdio"
+            command = "npx"
+            [servers.miro.extra.codx]
+            startup_timeout_sec = 20
+            "#,
+        );
+        // With a known target set, the typo'd adapter id is flagged…
+        let issues = validate_with_targets(&m, ["codex", "claude-code"]);
+        assert!(issues
+            .iter()
+            .any(|i| i.kind == IssueKind::UnknownExtraTarget && i.message.contains("codx")));
+        // …and a correct id validates clean.
+        let m = parse(
+            r#"
+            version = 1
+            [servers.miro]
+            type = "stdio"
+            command = "npx"
+            [servers.miro.extra.codex]
+            startup_timeout_sec = 20
+            "#,
+        );
+        assert!(validate_with_targets(&m, ["codex", "claude-code"]).is_empty());
+        // Without a target set, the check is skipped (registry-independent).
+        assert!(validate(&m).is_empty());
     }
 
     #[test]

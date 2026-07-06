@@ -245,6 +245,7 @@ fn bridge_server(command: &str) -> Server {
         args: vec!["mcp".to_string(), "--auto-project".to_string()],
         headers: Default::default(),
         env: Default::default(),
+        extra: Default::default(),
     }
 }
 

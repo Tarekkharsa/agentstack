@@ -678,6 +678,7 @@ fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
         args: a.args.clone(),
         headers: parse_kv(&a.headers)?,
         env: parse_kv(&a.env)?,
+        extra: Default::default(),
     };
     match a.transport {
         ServerType::Http if server.url.is_none() => {

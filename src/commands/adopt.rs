@@ -53,9 +53,30 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
             },
         };
         for (name, server) in extract_servers(desc, &value) {
-            if !manifest.servers.contains_key(&name) && !collected.contains_key(&name) {
-                println!("  {} {name} (from {})", "+".green(), desc.display);
-                collected.insert(name, server);
+            match manifest.servers.get(&name) {
+                None => {
+                    if !collected.contains_key(&name) {
+                        println!("  {} {name} (from {})", "+".green(), desc.display);
+                        collected.insert(name, server);
+                    }
+                }
+                // Already managed: adopt hand-added native keys (per-target
+                // extras) the manifest doesn't carry yet. Surgical — canonical
+                // fields keep the manifest as their source of truth.
+                Some(existing) => {
+                    for (target, new_keys) in new_extras(existing, server) {
+                        println!(
+                            "  {} {name}: extra.{target} {{{}}} (from {})",
+                            "~".yellow(),
+                            new_keys.keys().cloned().collect::<Vec<_>>().join(", "),
+                            desc.display
+                        );
+                        let merged = collected
+                            .entry(name.clone())
+                            .or_insert_with(|| existing.clone());
+                        merged.extra.entry(target).or_default().extend(new_keys);
+                    }
+                }
             }
         }
     }
@@ -112,4 +133,62 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// The per-target extras in `imported` (a server extracted from a live config)
+/// that `existing` (the manifest entry) doesn't carry yet — the adoptable
+/// delta for an already-managed server.
+fn new_extras(existing: &Server, imported: Server) -> IndexMap<String, IndexMap<String, Value>> {
+    imported
+        .extra
+        .into_iter()
+        .filter_map(|(target, fields)| {
+            let have = existing.extra.get(&target);
+            let fresh: IndexMap<String, Value> = fields
+                .into_iter()
+                .filter(|(k, _)| have.map_or(true, |h| !h.contains_key(k)))
+                .collect();
+            (!fresh.is_empty()).then_some((target, fresh))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn server(toml_str: &str) -> Server {
+        toml::from_str(toml_str).unwrap()
+    }
+
+    #[test]
+    fn new_extras_reports_only_missing_keys() {
+        // Manifest entry already carries one codex extra; the live config adds
+        // startup_timeout_sec (hand-tuned) and repeats the one we have.
+        let existing = server("type = \"stdio\"\ncommand = \"npx\"\n[extra.codex]\nnote = \"x\"");
+        let imported = server(
+            "type = \"stdio\"\ncommand = \"npx\"\n\
+             [extra.codex]\nnote = \"x\"\nstartup_timeout_sec = 20",
+        );
+        let delta = new_extras(&existing, imported);
+        assert_eq!(delta.len(), 1);
+        assert_eq!(delta["codex"].len(), 1);
+        assert_eq!(delta["codex"]["startup_timeout_sec"], serde_json::json!(20));
+
+        // Nothing new → empty delta (adopt stays a no-op).
+        let same = server("type = \"stdio\"\ncommand = \"npx\"\n[extra.codex]\nnote = \"x\"");
+        assert!(new_extras(&existing, same).is_empty());
+    }
+
+    #[test]
+    fn new_extras_never_touches_existing_values() {
+        // A key present in both keeps the manifest's value: it is not part of
+        // the delta even when the live config disagrees (that's canonical
+        // drift, resolved by apply — not silently adopted).
+        let existing =
+            server("type = \"stdio\"\ncommand = \"npx\"\n[extra.codex]\nstartup_timeout_sec = 120");
+        let imported =
+            server("type = \"stdio\"\ncommand = \"npx\"\n[extra.codex]\nstartup_timeout_sec = 20");
+        assert!(new_extras(&existing, imported).is_empty());
+    }
 }

@@ -69,3 +69,7 @@ agentstack restore <target>      # undo a write from its pre-write backup
   around: surface which `${REF}` is missing.
 - To give a project a new skill that exists in the library: add its name to the
   profile's `skills = [...]` list — no file copying.
+- A native config key one CLI needs but the manifest schema doesn't model
+  (e.g. Codex's `startup_timeout_sec`) goes under that server's per-target
+  extras — `[servers.<name>.extra.<adapter-id>]` — not into the native config
+  by hand; the adapter passes it through verbatim and it survives `apply`.

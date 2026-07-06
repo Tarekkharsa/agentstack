@@ -297,6 +297,20 @@ pub struct Server {
     pub headers: IndexMap<String, String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub env: IndexMap<String, String>,
+    /// Target-specific keys with no transport-neutral equivalent, keyed by
+    /// adapter id then native field name:
+    ///
+    /// ```toml
+    /// [servers.miro.extra.codex]
+    /// startup_timeout_sec = 20
+    /// ```
+    ///
+    /// That adapter's renderer passes them through verbatim (string values
+    /// still get `${REF}` substitution) and `init`/`adopt` lift unknown config
+    /// keys back into here, so hand-tuned target keys round-trip instead of
+    /// being dropped on the next `apply`.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub extra: IndexMap<String, IndexMap<String, serde_json::Value>>,
 }
 
 /// A skill: a portable directory containing a `SKILL.md`.
@@ -399,6 +413,13 @@ impl Manifest {
             for v in server.env.values() {
                 push(v);
             }
+            for fields in server.extra.values() {
+                for v in fields.values() {
+                    for s in json_strings(v) {
+                        push(s);
+                    }
+                }
+            }
         }
         for hook in self.hooks.values() {
             push(&hook.command);
@@ -408,6 +429,16 @@ impl Manifest {
         }
         refs.sort();
         refs
+    }
+}
+
+/// Every string leaf in a JSON value, depth-first (extras may nest).
+fn json_strings(v: &serde_json::Value) -> Vec<&str> {
+    match v {
+        serde_json::Value::String(s) => vec![s.as_str()],
+        serde_json::Value::Array(a) => a.iter().flat_map(json_strings).collect(),
+        serde_json::Value::Object(o) => o.values().flat_map(json_strings).collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -484,6 +515,51 @@ mod tests {
             .referenced_secrets()
             .contains(&"LINEAR_PACK_TOKEN".to_string()));
         assert!(m.skills.contains_key("linear_breakdown"));
+    }
+
+    #[test]
+    fn server_extras_round_trip_through_toml() {
+        let src = r#"
+            version = 1
+
+            [servers.miro]
+            type = "stdio"
+            command = "npx"
+            args = ["-y", "@mirohq/mcp-server"]
+
+            [servers.miro.extra.codex]
+            startup_timeout_sec = 20
+            "#;
+        let m: Manifest = toml::from_str(src).unwrap();
+        let miro = &m.servers["miro"];
+        assert_eq!(
+            miro.extra["codex"]["startup_timeout_sec"],
+            serde_json::json!(20)
+        );
+        // Serializes back to TOML with the extras intact.
+        let out = toml::to_string(&m).unwrap();
+        let back: Manifest = toml::from_str(&out).unwrap();
+        assert_eq!(back, m);
+        assert!(out.contains("[servers.miro.extra.codex]"), "{out}");
+    }
+
+    #[test]
+    fn referenced_secrets_sees_refs_in_extras_but_not_shell_syntax() {
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [servers.s]
+            type = "stdio"
+            command = "zsh"
+            args = ["-lc", "x=${MIRO_ACCESS_TOKEN:-$MIRO_OAUTH_TOKEN} run"]
+
+            [servers.s.extra.codex]
+            note = "${EXTRA_TOKEN}"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(m.referenced_secrets(), vec!["EXTRA_TOKEN".to_string()]);
     }
 
     #[test]

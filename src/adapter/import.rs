@@ -93,6 +93,31 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
             continue;
         }
 
+        // Keys the descriptor maps (plus the transport tag) are canonical;
+        // anything else is a hand-tuned native key (e.g. Codex
+        // `startup_timeout_sec`) that must round-trip rather than be dropped
+        // on the next apply — keep it under `extra.<adapter id>`.
+        let known: Vec<&str> = [
+            mcp.fields.url.as_deref(),
+            mcp.fields.command.as_deref(),
+            mcp.fields.args.as_deref(),
+            mcp.fields.headers.as_deref(),
+            mcp.fields.env.as_deref(),
+            mcp.transport.as_ref().map(|t| t.key.as_str()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let unknown: IndexMap<String, Value> = obj
+            .iter()
+            .filter(|(k, _)| !known.contains(&k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let mut extra = IndexMap::new();
+        if !unknown.is_empty() {
+            extra.insert(desc.id.clone(), unknown);
+        }
+
         out.push((
             name.clone(),
             Server {
@@ -102,6 +127,7 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
                 args,
                 headers,
                 env,
+                extra,
             },
         ));
     }
@@ -193,6 +219,43 @@ mod tests {
         assert!(perms.contains_key("defaultMode"));
         assert!(perms.contains_key("allow"));
         assert!(perms.contains_key("deny"));
+    }
+
+    #[test]
+    fn unknown_keys_are_kept_as_per_target_extras() {
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("codex").unwrap();
+        let root = json!({
+            "mcp_servers": {
+                "miro": {
+                    "command": "npx",
+                    "args": ["-y", "@mirohq/mcp-server"],
+                    "startup_timeout_sec": 20
+                },
+                "figma": { "url": "https://mcp.figma.com/mcp" }
+            }
+        });
+        let servers = extract_servers(desc, &root);
+        let miro = &servers.iter().find(|(n, _)| n == "miro").unwrap().1;
+        assert_eq!(miro.extra["codex"]["startup_timeout_sec"], json!(20));
+        assert_eq!(miro.extra["codex"].len(), 1, "mapped keys stay canonical");
+        let figma = &servers.iter().find(|(n, _)| n == "figma").unwrap().1;
+        assert!(figma.extra.is_empty(), "no extras → no extra table");
+    }
+
+    #[test]
+    fn transport_tag_is_not_lifted_into_extras() {
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("claude-code").unwrap();
+        let root = json!({
+            "mcpServers": {
+                "k": { "type": "http", "url": "https://k", "custom_key": true }
+            }
+        });
+        let servers = extract_servers(desc, &root);
+        let k = &servers[0].1;
+        assert_eq!(k.extra["claude-code"]["custom_key"], json!(true));
+        assert!(!k.extra["claude-code"].contains_key("type"));
     }
 
     #[test]

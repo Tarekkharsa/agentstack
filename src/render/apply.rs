@@ -504,6 +504,71 @@ mod tests {
     }
 
     #[test]
+    fn codex_extras_survive_apply_and_match_hand_edited_config() {
+        // The exact loss this guards against: a hand-added startup_timeout_sec
+        // on a Codex npx server used to be dropped by every `apply --write`.
+        let existing = r#"model = "gpt-5.5"
+
+[mcp_servers.miro]
+command = "npx"
+args = ["-y", "@mirohq/mcp-server"]
+# npx fetches from the registry on cold cache — must not block CLI startup
+startup_timeout_sec = 20
+"#;
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [servers.miro]
+            type = "stdio"
+            command = "npx"
+            args = ["-y", "@mirohq/mcp-server"]
+
+            [servers.miro.extra.codex]
+            startup_timeout_sec = 20
+            "#,
+        )
+        .unwrap();
+
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        home.child(".codex/config.toml")
+            .write_str(existing)
+            .unwrap();
+
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("codex").unwrap();
+        let servers: IndexMap<String, Server> = manifest.servers.clone();
+        let proj = assert_fs::TempDir::new().unwrap();
+        let plan = plan_target_with_servers(
+            desc,
+            &MapResolver::default(),
+            &servers,
+            &[],
+            Scope::Global,
+            proj.path(),
+        )
+        .unwrap()
+        .unwrap();
+        std::env::remove_var("HOME");
+
+        // The rendered entry carries the extra key…
+        assert!(
+            plan.proposed.contains("startup_timeout_sec = 20"),
+            "{}",
+            plan.proposed
+        );
+        // …and re-parses to the same server table as the hand-edited config
+        // (comments inside a managed table are rewritten; the key is not lost).
+        let a: toml::Value = plan.proposed.parse().unwrap();
+        let b: toml::Value = existing.parse().unwrap();
+        assert_eq!(a["mcp_servers"]["miro"], b["mcp_servers"]["miro"]);
+    }
+
+    #[test]
     fn empty_shell_detection() {
         // Pure husk → empty shell.
         assert!(is_empty_shell(

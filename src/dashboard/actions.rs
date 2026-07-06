@@ -612,6 +612,7 @@ pub fn add_server(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
             .unwrap_or_default(),
         headers: obj_to_map(args.get("headers")),
         env: obj_to_map(args.get("env")),
+        extra: Default::default(),
     };
     match server.server_type {
         ServerType::Http if server.url.is_none() => anyhow::bail!("http server needs a url"),

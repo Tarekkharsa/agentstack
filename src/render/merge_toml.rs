@@ -126,7 +126,12 @@ fn value_to_item(value: &Value, nested_as_subtable: bool) -> Result<Item> {
         }
         Value::Object(_) => {
             if nested_as_subtable {
-                Item::Table(value_to_table(value, nested_as_subtable)?)
+                let mut t = value_to_table(value, nested_as_subtable)?;
+                // Pure-parent tables (only subtables, no direct keys — e.g. a
+                // server's `extra` holding `[….extra.codex]`) render header-less;
+                // toml_edit ignores the flag for tables with key-values.
+                t.set_implicit(true);
+                Item::Table(t)
             } else {
                 Item::Value(toml_edit::Value::InlineTable(value_to_inline(value)?))
             }

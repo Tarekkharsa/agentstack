@@ -17,22 +17,40 @@ pub struct Lifted {
 
 /// Merge `incoming` servers (from one target) into `acc`. First definition of a
 /// name wins; a later, structurally-different definition is reported as a
-/// conflict (name returned) and dropped.
+/// conflict (name returned) and dropped. Per-target `extra` keys are unioned
+/// rather than compared — each CLI contributes its own extras (Codex's
+/// `startup_timeout_sec` must not make the Codex copy "conflict" with the
+/// otherwise-identical Claude copy).
 pub fn merge_servers(
     acc: &mut IndexMap<String, Server>,
     incoming: Vec<(String, Server)>,
 ) -> Vec<String> {
     let mut conflicts = Vec::new();
     for (name, server) in incoming {
-        match acc.get(&name) {
-            Some(existing) if existing != &server => conflicts.push(name),
-            Some(_) => {}
+        match acc.get_mut(&name) {
+            Some(existing) if !same_ignoring_extra(existing, &server) => conflicts.push(name),
+            Some(existing) => {
+                for (target, fields) in server.extra {
+                    existing.extra.entry(target).or_insert(fields);
+                }
+            }
             None => {
                 acc.insert(name, server);
             }
         }
     }
     conflicts
+}
+
+/// Structural equality over the transport-neutral fields (everything but
+/// `extra`).
+fn same_ignoring_extra(a: &Server, b: &Server) -> bool {
+    a.server_type == b.server_type
+        && a.url == b.url
+        && a.command == b.command
+        && a.args == b.args
+        && a.headers == b.headers
+        && a.env == b.env
 }
 
 /// Replace inline secret literals in `servers` with `${REF}` references,
@@ -209,6 +227,25 @@ mod tests {
             http_server(&[("Authorization", "Bearer ${KIBANA_TOKEN}")]),
         );
         assert!(lift_secrets(&mut servers).is_empty());
+    }
+
+    #[test]
+    fn merge_unions_extras_instead_of_conflicting() {
+        // The same server imported from Claude (no extras) and Codex (with
+        // startup_timeout_sec) is one definition, not a conflict.
+        let plain: Server = toml::from_str("type = \"stdio\"\ncommand = \"npx\"").unwrap();
+        let with_extra: Server = toml::from_str(
+            "type = \"stdio\"\ncommand = \"npx\"\n[extra.codex]\nstartup_timeout_sec = 20",
+        )
+        .unwrap();
+
+        let mut acc = IndexMap::new();
+        assert!(merge_servers(&mut acc, vec![("miro".into(), plain)]).is_empty());
+        assert!(merge_servers(&mut acc, vec![("miro".into(), with_extra)]).is_empty());
+        assert_eq!(
+            acc["miro"].extra["codex"]["startup_timeout_sec"],
+            serde_json::json!(20)
+        );
     }
 
     #[test]

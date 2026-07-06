@@ -1075,6 +1075,7 @@ fn server_from_native_value(value: &Value) -> Option<Server> {
         args,
         headers,
         env,
+        extra: Default::default(),
     })
 }
 

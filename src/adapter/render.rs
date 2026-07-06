@@ -111,6 +111,18 @@ pub fn render_server(
         }
     }
 
+    // 7. Per-target extras: native keys with no transport-neutral equivalent
+    // (e.g. Codex `startup_timeout_sec`), passed through verbatim. Rendered
+    // last so a deliberate extra can override a canonical field.
+    if let Some(extra) = server.extra.get(&desc.id) {
+        for (k, v) in extra {
+            body.insert(
+                k.clone(),
+                substitute_value(v, resolver, passthrough, &mut unresolved),
+            );
+        }
+    }
+
     // De-duplicate unresolved refs while keeping first-seen order.
     unresolved.dedup();
 
@@ -121,9 +133,39 @@ pub fn render_server(
     }
 }
 
+/// Substitute `${NAME}` refs in every string leaf of an extras value; numbers,
+/// bools, and arrays pass through untouched.
+fn substitute_value(
+    v: &Value,
+    resolver: &dyn Resolver,
+    passthrough: bool,
+    unresolved: &mut Vec<String>,
+) -> Value {
+    match v {
+        Value::String(s) => Value::String(substitute(s, resolver, passthrough, unresolved)),
+        Value::Array(a) => Value::Array(
+            a.iter()
+                .map(|el| substitute_value(el, resolver, passthrough, unresolved))
+                .collect(),
+        ),
+        Value::Object(o) => Value::Object(
+            o.iter()
+                .map(|(k, el)| {
+                    (
+                        k.clone(),
+                        substitute_value(el, resolver, passthrough, unresolved),
+                    )
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 /// Replace every `${NAME}` token in `s`. In passthrough mode the token is left
 /// verbatim. Otherwise it is resolved; unresolved tokens are recorded and left
-/// in place (never silently blanked).
+/// in place (never silently blanked). Spans that are not valid reference names
+/// (shell syntax like `${VAR:-fallback}`) are left verbatim and not recorded.
 pub(crate) fn substitute(
     s: &str,
     resolver: &dyn Resolver,
@@ -134,25 +176,33 @@ pub(crate) fn substitute(
         return s.to_string();
     }
     let mut out = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
     let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
-            if let Some(end) = s[i + 2..].find('}') {
-                let name = &s[i + 2..i + 2 + end];
-                match resolver.resolve(name) {
-                    Some(val) => out.push_str(&val),
-                    None => {
-                        unresolved.push(name.to_string());
-                        out.push_str(&s[i..i + 2 + end + 1]); // keep `${NAME}`
+    while i < s.len() {
+        let rest = &s[i..];
+        if let Some(inner) = rest.strip_prefix("${") {
+            if let Some(end) = inner.find('}') {
+                let name = &inner[..end];
+                if crate::secret::is_ref_name(name) {
+                    match resolver.resolve(name) {
+                        Some(val) => out.push_str(&val),
+                        None => {
+                            unresolved.push(name.to_string());
+                            out.push_str(&rest[..2 + end + 1]); // keep `${NAME}`
+                        }
                     }
+                    i += 2 + end + 1;
+                    continue;
                 }
-                i = i + 2 + end + 1;
-                continue;
             }
+            // Shell syntax, not a reference — emit `${` and keep scanning the
+            // interior (so `${A:-${B}}` still resolves `B`).
+            out.push_str("${");
+            i += 2;
+            continue;
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        let c = rest.chars().next().expect("i is on a char boundary");
+        out.push(c);
+        i += c.len_utf8();
     }
     out
 }
@@ -244,6 +294,80 @@ mod tests {
         let stdio = server("type = \"stdio\"\ncommand = \"npx\"\n");
         let r = render_server(desc, &stdio, &resolver);
         assert!(r.representable, "stdio server is representable");
+    }
+
+    #[test]
+    fn extras_render_only_for_their_adapter_and_substitute_strings() {
+        let reg = Registry::load().unwrap();
+        let s = server(
+            r#"
+            type = "stdio"
+            command = "npx"
+            args = ["-y", "some-mcp"]
+
+            [extra.codex]
+            startup_timeout_sec = 20
+            note = "token ${TOK}"
+
+            [extra.claude-code]
+            timeout = 5
+            "#,
+        );
+        let resolver = MapResolver::from([("TOK", "v")]);
+
+        let codex = render_server(reg.get("codex").unwrap(), &s, &resolver);
+        assert_eq!(codex.value["startup_timeout_sec"], 20);
+        assert_eq!(codex.value["note"], "token v");
+        assert!(codex.value.get("timeout").is_none(), "not codex's extra");
+
+        let claude = render_server(reg.get("claude-code").unwrap(), &s, &resolver);
+        assert_eq!(claude.value["timeout"], 5);
+        assert!(claude.value.get("startup_timeout_sec").is_none());
+    }
+
+    #[test]
+    fn shell_fallback_syntax_is_not_a_secret_ref() {
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("codex").unwrap();
+        let s = server(
+            r#"
+            type = "stdio"
+            command = "zsh"
+            args = ["-lc", "MIRO_TOKEN=${MIRO_ACCESS_TOKEN:-$MIRO_OAUTH_TOKEN} exec server"]
+            "#,
+        );
+        let r = render_server(desc, &s, &MapResolver::default());
+        // The shell expression is left verbatim and NOT reported unresolved.
+        assert_eq!(
+            r.value["args"][1],
+            "MIRO_TOKEN=${MIRO_ACCESS_TOKEN:-$MIRO_OAUTH_TOKEN} exec server"
+        );
+        assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+    }
+
+    #[test]
+    fn nested_ref_inside_shell_fallback_still_resolves() {
+        let mut unresolved = Vec::new();
+        let resolver = MapResolver::from([("B", "vb")]);
+        let out = substitute("${A:-${B}}", &resolver, false, &mut unresolved);
+        assert_eq!(out, "${A:-vb}");
+        assert!(unresolved.is_empty());
+    }
+
+    #[test]
+    fn substitute_is_utf8_safe() {
+        let mut unresolved = Vec::new();
+        let resolver = MapResolver::from([("TOK", "v")]);
+        // Multibyte chars survive both outside refs and inside a skipped
+        // shell-syntax span.
+        let out = substitute(
+            "héllo ${TOK} Ω=${GREETING:-héllo}",
+            &resolver,
+            false,
+            &mut unresolved,
+        );
+        assert_eq!(out, "héllo v Ω=${GREETING:-héllo}");
+        assert!(unresolved.is_empty());
     }
 
     #[test]

@@ -42,6 +42,21 @@ existing configs back into a manifest. Mergers are non-destructive: JSON
 splices only the managed section (untouched bytes, including floats, preserved
 exactly); TOML uses `toml_edit` to keep comments and formatting.
 
+Native keys with no transport-neutral equivalent — Codex's
+`startup_timeout_sec`, say — live under a per-target `extra` table and are
+passed through verbatim by that one adapter (string values still get `${REF}`
+substitution):
+
+```toml
+[servers.miro.extra.codex]
+startup_timeout_sec = 20   # npx cold-cache fetch must not block CLI startup
+```
+
+`init` and `adopt` lift unknown config keys back into `extra.<adapter>`, so a
+hand-tuned native key round-trips instead of being dropped by the next
+`apply --write`. A typo'd adapter id under `extra.` is a validation error, not
+a silent no-op.
+
 ### State tracking
 
 `~/.agentstack/state.json` records what agentstack manages per target, so
