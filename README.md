@@ -78,6 +78,9 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 env = { GITHUB_TOKEN = "${GH_PAT}" }        # resolved per machine, never stored
 
+[servers.github.extra.codex]                 # native keys one CLI needs pass
+startup_timeout_sec = 20                     # through verbatim, per adapter
+
 [servers.kibana]
 type = "http"
 url = "https://kibana-mcp.example.com/mcp"
@@ -139,6 +142,24 @@ definition it can't parse blocks the sync rather than slipping through:
 agentstack lib sync --init --remote git@github.com:you/agent-lib.git
 agentstack lib sync                        # commit local changes, pull, push
 ```
+
+## Take one CLI's plugins everywhere
+
+A plugin you installed in one CLI shouldn't lock its capabilities to that CLI.
+`plugins adopt` lifts an installed native plugin (Claude Code or Codex) into
+the manifest: its skills are **copied into the central library** with
+provenance recorded, and its MCP servers — auth wiring included, as `${REF}`s —
+travel with the recipe:
+
+```bash
+agentstack plugins adopt cloudflare --harness codex --write     # skills → library, recipe → manifest
+agentstack plugins sync --write                                 # generate native packages + marketplaces
+agentstack plugins install cloudflare --target claude-code --write
+```
+
+The harness you adopted *from* stays satisfied by its native install —
+`status`/`doctor` report it as up to date at the adopted version and flag
+drift when the native plugin moves ahead, instead of ever double-installing.
 
 ## Share it with a team
 
@@ -232,6 +253,10 @@ Details and trade-offs: [feature reference → three modes](docs/reference.md#wh
 - **Personal layer** — `agentstack init --global` gives your machine-wide
   instructions a home; they merge beneath every project without ever landing
   in a repo's committed files.
+- **App-managed servers** — `[servers.X] owner = "codex"` makes the owning
+  app's config the source of truth: when the app rewrites its own entry (a
+  self-update, say), `apply` refreshes the manifest and fans the fresh values
+  out to every other CLI — instead of reverting the app.
 - **Usage insight** — `agentstack analyze` reports what you actually call (from
   the runtime audit log) and flags library capabilities you installed but never
   use, so pruning is data-driven. Read-only and local.

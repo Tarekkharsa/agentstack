@@ -149,6 +149,16 @@ from the same records, so alternating them never churns a committed
 The chain: process env → **varlock** → **OS keychain** → project `.env`.
 Unresolved `${REF}`s are reported, never silently blanked.
 
+A ref is a strict `${IDENTIFIER}`. Shell fallback syntax
+(`${VAR:-fallback}` inside a command arg) and prompt-style placeholders
+(`${input:key}`) pass through verbatim and are never counted as manifest
+secrets — so `doctor` doesn't demand a "secret" the shell resolves at
+runtime. Each distinct ref is resolved **once per run**; a transient
+keychain read is retried, and a persistent failure is reported as
+*keychain read failed* — an error distinct from *not found*, so a flaky
+keychain daemon never blocks a write by claiming a stored secret is
+missing.
+
 ### Unresolved secrets block writes
 
 If a `${REF}` doesn't resolve on this machine, `apply`/`use`/dashboard writes
@@ -458,6 +468,17 @@ agentstack plugins install play --target codex
 agentstack plugins install play --target codex --write
 agentstack plugins remove play --target codex --write
 ```
+
+The harness a recipe was adopted **from** is satisfied by its still-installed
+native plugin: `plugins status` and `doctor` report *satisfied natively* at
+the installed version + rev, and surface drift when the native plugin moves
+ahead of the adopted recipe (re-adopt to catch up) — they never suggest
+installing the agentstack copy alongside the original.
+
+Generated Claude Code packages never reference `hooks/hooks.json` from
+`plugin.json` — Claude Code auto-loads that path, and naming it again is a
+duplicate-hooks load error that breaks the whole plugin. Hook-less recipes
+ship no hooks file at all; the Codex manifest keeps its explicit reference.
 
 ## Dashboard
 

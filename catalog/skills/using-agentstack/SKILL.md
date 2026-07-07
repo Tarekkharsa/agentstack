@@ -73,3 +73,12 @@ agentstack restore <target>      # undo a write from its pre-write backup
   (e.g. Codex's `startup_timeout_sec`) goes under that server's per-target
   extras — `[servers.<name>.extra.<adapter-id>]` — not into the native config
   by hand; the adapter passes it through verbatim and it survives `apply`.
+- A server whose owning app rewrites its own config entry (a bundled runtime
+  the app updates with itself) gets `owner = "<adapter-id>"` — never hand-sync
+  its values into the manifest. `apply` then treats the owner's on-disk config
+  as the source of truth: it refreshes the manifest and fans the fresh values
+  to the other CLIs instead of proposing a downgrade.
+- To reuse one CLI's installed plugin elsewhere, don't copy its files:
+  `agentstack plugins adopt <name> --harness <id> --write` lifts it into the
+  manifest (skills into the library, servers recipe-owned), then
+  `plugins sync --write` + `plugins install <name> --target <other> --write`.
