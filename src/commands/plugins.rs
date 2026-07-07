@@ -1297,6 +1297,7 @@ fn server_from_native_value(value: &Value) -> Option<Server> {
         command,
         args,
         targets: crate::manifest::model::all_targets(),
+        owner: None,
         headers,
         env,
         extra: Default::default(),

@@ -38,7 +38,22 @@ pub fn report(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<Outcome> {
     // Library-aware effective server set (inline-first, then central library),
     // shared across targets so diff sees the same servers render/apply will.
     let libctx = ctx.library_ctx();
-    let server_map = effective_servers(manifest, &libctx.library, &libctx.lib_home, &selection)?;
+    let mut server_map =
+        effective_servers(manifest, &libctx.library, &libctx.lib_home, &selection)?;
+    // Owner-refreshed servers: diff against the owning app's on-disk values,
+    // so drift on an owned server reads "refresh manifest + re-fan out",
+    // never a proposed downgrade of what the app wrote (see render::owned).
+    let owned =
+        crate::render::refresh_owned_servers(&mut server_map, &ctx.registry, scope, &ctx.dir);
+    for o in owned.iter().filter(|o| o.stale) {
+        println!(
+            "{} {}: changed in {} (owner) — manifest entry is stale ↳ refresh + re-fan out: \
+             agentstack apply --write",
+            "↻".cyan(),
+            o.name,
+            o.owner_display
+        );
+    }
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     let state = State::load()?;

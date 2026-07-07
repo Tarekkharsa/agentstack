@@ -71,10 +71,18 @@ pub fn prepare(
         &libctx.lib_home,
         &selection,
     )?;
-    let server_map: IndexMap<String, crate::manifest::Server> = resolved_servers
+    let mut server_map: IndexMap<String, crate::manifest::Server> = resolved_servers
         .iter()
         .map(|r| (r.name.clone(), r.server.clone()))
         .collect();
+    // Owner-refreshed servers: fan out the owning app's on-disk values, never
+    // the stale manifest ones (see render::owned).
+    crate::render::refresh_owned_servers(
+        &mut server_map,
+        &ctx.registry,
+        args.scope.unwrap_or(Scope::Global),
+        &ctx.dir,
+    );
 
     Ok(Prepared {
         resolved_skills,

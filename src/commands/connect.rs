@@ -244,6 +244,7 @@ fn bridge_server(command: &str) -> Server {
         command: Some(command.to_string()),
         args: vec!["mcp".to_string(), "--auto-project".to_string()],
         targets: crate::manifest::model::all_targets(),
+        owner: None,
         headers: Default::default(),
         env: Default::default(),
         extra: Default::default(),

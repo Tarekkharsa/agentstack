@@ -126,6 +126,7 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
                 command,
                 args,
                 targets: crate::manifest::model::all_targets(),
+                owner: None,
                 headers,
                 env,
                 extra,

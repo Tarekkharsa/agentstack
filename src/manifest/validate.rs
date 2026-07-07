@@ -51,6 +51,10 @@ pub enum IssueKind {
     /// A `[servers.X.extra.<id>]` table names an adapter id that isn't
     /// registered — the extras would silently never render.
     UnknownExtraTarget,
+    /// A `[servers.X] owner` names an adapter id that isn't registered — the
+    /// refresh-from-disk would silently never happen and the stale manifest
+    /// values would fan out (the exact downgrade `owner` exists to prevent).
+    UnknownServerOwner,
     InvalidPluginName,
 }
 
@@ -71,6 +75,7 @@ impl IssueKind {
                 | IssueKind::UnknownPluginTarget
                 | IssueKind::UnknownServerTarget
                 | IssueKind::UnknownExtraTarget
+                | IssueKind::UnknownServerOwner
                 | IssueKind::InvalidPluginName
         )
     }
@@ -158,6 +163,16 @@ fn run<'a>(
                     issues.push(Issue::new(
                         IssueKind::UnknownServerTarget,
                         format!("server '{name}' references unknown target '{target}'"),
+                    ));
+                }
+            }
+            // An owner that resolves to no adapter means the refresh-from-disk
+            // silently never runs — stale values would fan out again.
+            if let Some(owner) = &server.owner {
+                if !targets.contains(owner) {
+                    issues.push(Issue::new(
+                        IssueKind::UnknownServerOwner,
+                        format!("server '{name}' has `owner = \"{owner}\"` but no adapter '{owner}' is registered"),
                     ));
                 }
             }
@@ -448,6 +463,40 @@ mod tests {
         assert!(issues
             .iter()
             .any(|i| i.kind == IssueKind::UnknownServerTarget
+                && i.message.contains("typo")
+                && i.message.contains("codx")));
+        // Without a target set, the check is skipped (registry-independent).
+        assert!(validate(&m).is_empty());
+    }
+
+    #[test]
+    fn flags_unknown_server_owner() {
+        let m = parse(
+            r#"
+            version = 1
+            [servers.owned]
+            type = "stdio"
+            command = "node"
+            owner = "codex"
+            [servers.typo]
+            type = "stdio"
+            command = "node"
+            owner = "codx"
+            "#,
+        );
+        // A registered owner id is fine; a typo'd one would silently disable
+        // the refresh-from-disk and let stale values fan out again.
+        let issues = validate_with_targets(&m, ["codex", "claude-code"]);
+        assert_eq!(
+            issues
+                .iter()
+                .filter(|i| i.kind == IssueKind::UnknownServerOwner)
+                .count(),
+            1
+        );
+        assert!(issues
+            .iter()
+            .any(|i| i.kind == IssueKind::UnknownServerOwner
                 && i.message.contains("typo")
                 && i.message.contains("codx")));
         // Without a target set, the check is skipped (registry-independent).

@@ -307,6 +307,19 @@ pub struct Server {
     /// so a direct render would configure the same server twice.
     #[serde(default = "all_targets", skip_serializing_if = "is_all_targets")]
     pub targets: Vec<String>,
+    /// Adapter id whose live config is the source of truth for this server
+    /// (`owner = "codex"`). Some harness apps rewrite their own server entries
+    /// (e.g. the Codex desktop app refreshes env values on every self-update);
+    /// without this, the manifest goes stale and a blind `apply --write` would
+    /// downgrade the app's fresh values. With an owner set, every plan
+    /// (apply/diff/doctor) refreshes the definition from the owner's on-disk
+    /// config before rendering, so drift on the owner's config never proposes
+    /// a revert — it proposes refreshing the manifest and re-fanning the fresh
+    /// values out to the other targets. Keys whose manifest value carries a
+    /// `${REF}` stay manifest-canonical (secret hygiene); everything else
+    /// follows the owner's disk, including keys the owner adds or removes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub headers: IndexMap<String, String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
@@ -578,6 +591,32 @@ mod tests {
         // must survive serialization (it is NOT the default).
         assert!(!out.contains("targets = [\"*\"]"), "{out}");
         assert!(out.contains("targets = []"), "{out}");
+    }
+
+    #[test]
+    fn server_owner_round_trips_and_defaults_to_none() {
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [servers.node_repl]
+            type = "stdio"
+            command = "node"
+            owner = "codex"
+
+            [servers.plain]
+            type = "http"
+            url = "https://x"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(m.servers["node_repl"].owner.as_deref(), Some("codex"));
+        assert_eq!(m.servers["plain"].owner, None);
+
+        let out = toml::to_string(&m).unwrap();
+        let back: Manifest = toml::from_str(&out).unwrap();
+        assert_eq!(back, m);
+        assert!(out.contains("owner = \"codex\""), "{out}");
     }
 
     #[test]

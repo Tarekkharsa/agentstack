@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
 
 use crate::cli::ApplyArgs;
@@ -99,7 +99,23 @@ fn render(
     let vctx = libctx.validate_ctx(&ctx.dir);
     let target_ids_for_validation: Vec<&str> = ctx.registry.ids().collect();
     let has_errors = print_validation(manifest, target_ids_for_validation, &vctx, quiet);
-    let server_map = effective_servers(manifest, &libctx.library, &libctx.lib_home, &selection)?;
+    let mut server_map =
+        effective_servers(manifest, &libctx.library, &libctx.lib_home, &selection)?;
+    // Owner-refreshed servers: the owning app's on-disk config is the source
+    // of truth, so the fan-out below uses ITS values — never a downgrade back
+    // to a stale manifest (see render::owned). Stale entries get their
+    // manifest table rewritten on write.
+    let owned =
+        crate::render::refresh_owned_servers(&mut server_map, &ctx.registry, scope, &ctx.dir);
+    let manifest_refresh = plan_owned_manifest_refresh(&ctx.loaded, &owned);
+    for o in owned.iter().filter(|o| o.stale) {
+        println!(
+            "{} {}: {} (owner) updated its own entry — fanning out the on-disk values",
+            "↻".cyan(),
+            o.name,
+            o.owner_display
+        );
+    }
 
     let mut will_write = want_write;
 
@@ -482,6 +498,69 @@ fn render(
         }
     }
 
+    // Owned-server manifest refresh: rewrite the stale `[servers.X]` tables in
+    // whichever manifest layer declares them, so the manifest catches up with
+    // the owning app instead of fighting it. Never the other way around — the
+    // fan-out above already used the on-disk values.
+    let (refresh_files, refresh_elsewhere) = manifest_refresh;
+    for name in &refresh_elsewhere {
+        println!(
+            "\n{} {name}: owned definition is declared outside this manifest (central library \
+             or inherited layer) — the fresh values still fan out, but refresh the declaring \
+             file to clear the stale definition",
+            "⚠".yellow()
+        );
+    }
+    for (path, entries) in &refresh_files {
+        let names: Vec<&str> = entries.iter().map(|(n, _)| n.as_str()).collect();
+        changed_count += 1;
+        if !will_write {
+            println!(
+                "\n{} manifest refresh pending for owned server(s) {} → {}",
+                "→".cyan(),
+                names.join(", "),
+                path.display()
+            );
+            continue;
+        }
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let json_entries: Vec<(String, serde_json::Value)> = entries
+            .iter()
+            .map(|(n, s)| (n.clone(), serde_json::to_value(s).unwrap()))
+            .collect();
+        let new_text = crate::render::merge_toml::merge(&text, "servers", &json_entries, true)?;
+        if new_text == text {
+            continue;
+        }
+        // Rewriting the manifest changes its trust digest. This change is
+        // machine-derived from a config the owner harness already executes —
+        // nothing new is being authorized — so trust that was VALID before the
+        // rewrite is re-pinned to the new digest. Trust that was already
+        // Changed/Untrusted is left alone: pending human review stays pending.
+        let base = crate::manifest::project_root_of(&ctx.dir);
+        let was_trusted = crate::trust::check(&base) == crate::trust::TrustState::Trusted;
+        backups.push(crate::history::capture(
+            path,
+            "manifest · owned-server refresh",
+        ));
+        crate::util::atomic::write(path, &new_text)
+            .with_context(|| format!("writing {}", path.display()))?;
+        println!(
+            "\n{} refreshed owned server(s) {} in {}",
+            "✓".green(),
+            names.join(", "),
+            path.display()
+        );
+        if was_trusted {
+            crate::trust::trust(&base)?;
+            println!(
+                "  {} trust re-pinned — the refreshed values came from the owner's own config",
+                "·".dimmed()
+            );
+        }
+    }
+
     let written_count = touched_targets.len();
     if will_write {
         state.save()?;
@@ -570,4 +649,46 @@ fn print_validation(
 
 fn indent(s: &str) -> String {
     s.lines().map(|l| format!("  {l}\n")).collect::<String>()
+}
+
+/// Owned-server entries to rewrite, grouped by manifest layer file.
+type OwnedRefreshByFile = Vec<(std::path::PathBuf, Vec<(String, crate::manifest::Server)>)>;
+
+/// Group the stale owned servers by the manifest layer file that declares
+/// them — the local overlay wins (it overrides at load time), then the
+/// manifest itself. Servers declared elsewhere (central library, inherited
+/// user layer) come back separately: this apply can't refresh those files,
+/// only report them.
+fn plan_owned_manifest_refresh(
+    loaded: &crate::manifest::LoadedManifest,
+    owned: &[crate::render::OwnedStatus],
+) -> (OwnedRefreshByFile, Vec<String>) {
+    let declares = |path: &Path, name: &str| -> bool {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return false;
+        };
+        let Ok(v) = text.parse::<toml::Value>() else {
+            return false;
+        };
+        v.get("servers").and_then(|s| s.get(name)).is_some()
+    };
+    let mut by_file: OwnedRefreshByFile = Vec::new();
+    let mut elsewhere: Vec<String> = Vec::new();
+    for o in owned.iter().filter(|o| o.stale) {
+        let file = loaded
+            .local_path
+            .as_deref()
+            .filter(|p| declares(p, &o.name))
+            .or_else(|| {
+                declares(&loaded.manifest_path, &o.name).then_some(loaded.manifest_path.as_path())
+            });
+        match file {
+            Some(f) => match by_file.iter_mut().find(|(p, _)| p == f) {
+                Some((_, entries)) => entries.push((o.name.clone(), o.server.clone())),
+                None => by_file.push((f.to_path_buf(), vec![(o.name.clone(), o.server.clone())])),
+            },
+            None => elsewhere.push(o.name.clone()),
+        }
+    }
+    (by_file, elsewhere)
 }
