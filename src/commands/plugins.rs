@@ -114,6 +114,15 @@ fn status(args: &PluginsStatusArgs, manifest_dir: Option<&Path>) -> Result<()> {
             let install = recipe.installs.iter().find(|i| &i.target == target);
             let guidance = recipe.guidance.iter().find(|g| &g.target == target);
             println!("  {target}:");
+            // Adopted-from native plugin still installed here: the agentstack
+            // marketplace/package lines don't apply to this target.
+            if let Some(native) = install.and_then(|i| i.native.as_ref()) {
+                println!("    native install: {}", native_satisfaction_label(native));
+                if let Some(g) = guidance {
+                    println!("    next: {}", g.next_action);
+                }
+                continue;
+            }
             if let Some(m) = marketplace {
                 println!(
                     "    marketplace: {} ({})",
@@ -645,6 +654,19 @@ fn native_install_plan(recipe: &plugin_recipes::RecipeStatus, target: &str) -> N
             commands,
         };
     }
+    // Adopted-from native plugin still installed here — installing from the
+    // agentstack marketplace would configure the same plugin twice.
+    if let Some(native) = install.and_then(|i| i.native.as_ref()) {
+        notes.push(format!(
+            "already satisfied natively by {}@{} on this harness; nothing to install",
+            native.plugin, native.marketplace
+        ));
+        return NativeCommandPlan {
+            target: target.into(),
+            notes,
+            commands,
+        };
+    }
     if !recipe.generated || recipe.stale {
         notes.push("blocked: run agentstack plugins sync --write before native install".into());
         return NativeCommandPlan {
@@ -858,10 +880,21 @@ fn shell_display(command: &[String]) -> String {
 }
 
 fn recipe_state_label(recipe: &plugin_recipes::RecipeStatus) -> String {
+    let all_native = !recipe.targets.is_empty()
+        && recipe.targets.iter().all(|t| {
+            recipe
+                .installs
+                .iter()
+                .any(|i| &i.target == t && i.native.is_some())
+        });
     if recipe.conflict.is_some() {
         "conflict".red().to_string()
     } else if !recipe.missing_skills.is_empty() {
         "missing skill".yellow().to_string()
+    } else if all_native {
+        // Every target is served by the adopted-from native plugin; no
+        // generated package is needed.
+        "satisfied natively".green().to_string()
     } else if !recipe.generated {
         "not generated".yellow().to_string()
     } else if recipe.stale {
@@ -876,6 +909,31 @@ fn marketplace_label(present: bool, stale: bool) -> String {
         (true, false) => "present".green().to_string(),
         (true, true) => "stale".yellow().to_string(),
         (false, _) => "missing".yellow().to_string(),
+    }
+}
+
+fn native_satisfaction_label(native: &plugin_recipes::NativeSatisfaction) -> String {
+    let at = match (&native.version, &native.rev) {
+        (Some(v), Some(r)) => format!(" @ {v}+{r}"),
+        (Some(v), None) => format!(" @ {v}"),
+        (None, Some(r)) => format!(" @ rev {r}"),
+        (None, None) => String::new(),
+    };
+    if let Some(drift) = &native.drift {
+        return format!(
+            "native install {} ({drift} since adoption)",
+            native.marketplace
+        )
+        .yellow()
+        .to_string();
+    }
+    match native.enabled {
+        Some(false) => format!("native install {}{at}, disabled", native.marketplace)
+            .yellow()
+            .to_string(),
+        _ => format!("native install {} ✓, up to date{at}", native.marketplace)
+            .green()
+            .to_string(),
     }
 }
 
@@ -985,13 +1043,10 @@ struct AdoptedSkill {
     reused: bool,
 }
 
-/// The versioned segment of the native cache path (e.g. Codex caches plugin
-/// packages at `<marketplace>/<name>/<hash>`), recorded as recipe `rev` so a
-/// later pass can tell the native plugin was updated since adoption. `None`
-/// when the package dir is just the plugin name (no versioned segment).
+/// The versioned segment of the native cache path, recorded as recipe `rev`
+/// so a later pass can tell the native plugin was updated since adoption.
 fn native_cache_rev(source: &Path, plugin_name: &str) -> Option<String> {
-    let base = source.file_name()?.to_string_lossy().to_string();
-    (base != plugin_name).then_some(base)
+    crate::plugins::cache_rev(source, plugin_name)
 }
 
 fn inspect_native_plugin(
@@ -1406,12 +1461,14 @@ mod tests {
                     installed: false,
                     enabled: None,
                     status: None,
+                    native: None,
                 },
                 plugin_recipes::TargetInstallStatus {
                     target: "claude-code".into(),
                     installed: true,
                     enabled: None,
                     status: Some("installed".into()),
+                    native: None,
                 },
             ],
             guidance: vec![],

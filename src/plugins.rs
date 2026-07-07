@@ -9,6 +9,7 @@
 //! step we took for skills).
 
 use serde_json::Value;
+use std::path::Path;
 use std::process::Command;
 
 use crate::util::paths::expand_tilde;
@@ -267,9 +268,16 @@ fn codex_marketplaces_from_cli() -> Option<Vec<Marketplace>> {
 }
 
 fn codex_plugins_from_cache() -> Vec<Plugin> {
-    let cache = expand_tilde("~/.codex/plugins/cache");
+    codex_plugins_from_cache_at(&expand_tilde("~/.codex"))
+}
+
+/// Cache-walk fallback rooted at a Codex home dir. Enabled state comes from
+/// `config.toml`'s `[plugins."name@marketplace"]` entries — a cached package
+/// with no config entry is present on disk but not installed.
+pub(crate) fn codex_plugins_from_cache_at(codex_home: &Path) -> Vec<Plugin> {
+    let enabled_map = codex_config_plugins(&codex_home.join("config.toml"));
     let mut out = Vec::new();
-    let Ok(marketplaces) = std::fs::read_dir(cache) else {
+    let Ok(marketplaces) = std::fs::read_dir(codex_home.join("plugins/cache")) else {
         return out;
     };
     for mp in marketplaces.flatten() {
@@ -293,18 +301,26 @@ fn codex_plugins_from_cache() -> Vec<Plugin> {
                 if name.is_empty() {
                     continue;
                 }
+                let marketplace = mp.file_name().to_string_lossy().to_string();
+                let enabled = enabled_map.get(&format!("{name}@{marketplace}")).copied();
+                let status = match enabled {
+                    Some(true) => "installed, enabled",
+                    Some(false) => "installed, disabled",
+                    None => "cached",
+                }
+                .to_string();
                 out.push(Plugin {
                     harness: "codex".into(),
                     name,
-                    marketplace: mp.file_name().to_string_lossy().to_string(),
+                    marketplace,
                     scope: "cache".into(),
                     projects: Vec::new(),
                     version: root
                         .get("version")
                         .and_then(Value::as_str)
                         .map(str::to_string),
-                    enabled: None,
-                    status: "cached".into(),
+                    enabled,
+                    status,
                     source: Some(version_dir.path().display().to_string()),
                 });
             }
@@ -312,6 +328,38 @@ fn codex_plugins_from_cache() -> Vec<Plugin> {
     }
     out.sort_by(|a, b| a.marketplace.cmp(&b.marketplace).then(a.name.cmp(&b.name)));
     out
+}
+
+/// `"name@marketplace"` → enabled, from Codex `config.toml` `[plugins]` tables.
+fn codex_config_plugins(path: &Path) -> std::collections::BTreeMap<String, bool> {
+    let mut out = std::collections::BTreeMap::new();
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return out;
+    };
+    let Ok(root) = text.parse::<toml::Value>() else {
+        return out;
+    };
+    let Some(plugins) = root.get("plugins").and_then(toml::Value::as_table) else {
+        return out;
+    };
+    for (key, entry) in plugins {
+        let enabled = entry
+            .get("enabled")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(true);
+        out.insert(key.clone(), enabled);
+    }
+    out
+}
+
+/// The versioned segment of a native plugin cache path (Codex caches packages
+/// at `<marketplace>/<name>/<hash>`) — `None` when the package dir is just the
+/// plugin name (no versioned segment). `plugins adopt` records this as recipe
+/// `rev`; comparing it against the live cache tells whether the native plugin
+/// moved since adoption.
+pub fn cache_rev(source: &Path, plugin_name: &str) -> Option<String> {
+    let base = source.file_name()?.to_string_lossy().to_string();
+    (base != plugin_name).then_some(base)
 }
 
 fn codex_json(args: &[&str]) -> Option<Value> {
@@ -331,6 +379,61 @@ fn read_json(path: &std::path::Path) -> Option<Value> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Without the Codex CLI, discovery walks the plugin cache and reads
+    /// enabled state from `config.toml` `[plugins."name@marketplace"]` — a
+    /// natively installed plugin must not surface as merely "cached".
+    #[test]
+    fn cache_fallback_reads_config_toml_enabled_state() {
+        use assert_fs::prelude::*;
+        let home = assert_fs::TempDir::new().unwrap();
+        home.child("plugins/cache/openai-curated/cloudflare/d6169bef/.codex-plugin/plugin.json")
+            .write_str(r#"{"name":"cloudflare","version":"1.2.3"}"#)
+            .unwrap();
+        home.child("plugins/cache/openai-curated/gmail/aa11bb22/.codex-plugin/plugin.json")
+            .write_str(r#"{"name":"gmail","version":"0.9.0"}"#)
+            .unwrap();
+        home.child("plugins/cache/openai-curated/orphan/cc33dd44/.codex-plugin/plugin.json")
+            .write_str(r#"{"name":"orphan","version":"0.1.0"}"#)
+            .unwrap();
+        home.child("config.toml")
+            .write_str(
+                r#"
+                [plugins."cloudflare@openai-curated"]
+                enabled = true
+
+                [plugins."gmail@openai-curated"]
+                enabled = false
+                "#,
+            )
+            .unwrap();
+
+        let plugins = codex_plugins_from_cache_at(home.path());
+        let get = |name: &str| plugins.iter().find(|p| p.name == name).unwrap();
+        let cf = get("cloudflare");
+        assert_eq!(cf.enabled, Some(true));
+        assert_eq!(cf.status, "installed, enabled");
+        assert_eq!(cf.marketplace, "openai-curated");
+        assert_eq!(cf.version.as_deref(), Some("1.2.3"));
+        assert!(cf.source.as_deref().unwrap().ends_with("d6169bef"));
+        assert_eq!(get("gmail").enabled, Some(false));
+        assert_eq!(get("gmail").status, "installed, disabled");
+        // Cached on disk but absent from config.toml: not installed.
+        assert_eq!(get("orphan").enabled, None);
+        assert_eq!(get("orphan").status, "cached");
+    }
+
+    #[test]
+    fn cache_rev_is_the_versioned_path_segment() {
+        assert_eq!(
+            cache_rev(Path::new("/c/openai-curated/cloudflare/d6169bef"), "cloudflare").as_deref(),
+            Some("d6169bef")
+        );
+        assert_eq!(
+            cache_rev(Path::new("/plugins/cloudflare"), "cloudflare"),
+            None
+        );
+    }
 
     #[test]
     fn parses_codex_plugin_json_entry() {
