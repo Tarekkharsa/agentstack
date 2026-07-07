@@ -777,10 +777,14 @@ fn render_package(
         readme(name, recipe, manifest).into_bytes(),
     ));
     files.push((PathBuf::from(".mcp.json"), mcp_json(recipe, manifest)?));
-    files.push((
-        PathBuf::from("hooks/hooks.json"),
-        hooks_json(recipe, manifest)?,
-    ));
+    // hooks/hooks.json is a standard path both harnesses load automatically;
+    // emitting it for a hook-less recipe would just ship an empty hooks file.
+    if !recipe.hooks.is_empty() {
+        files.push((
+            PathBuf::from("hooks/hooks.json"),
+            hooks_json(recipe, manifest)?,
+        ));
+    }
 
     if targets.iter().any(|t| t == "codex") {
         files.push((
@@ -832,7 +836,9 @@ fn codex_manifest(name: &str, recipe: &PluginRecipe) -> Value {
     }
     obj.insert("skills".into(), json!("./skills/"));
     obj.insert("mcpServers".into(), json!("./.mcp.json"));
-    obj.insert("hooks".into(), json!("./hooks/hooks.json"));
+    if !recipe.hooks.is_empty() {
+        obj.insert("hooks".into(), json!("./hooks/hooks.json"));
+    }
     obj.insert(
         "interface".into(),
         json!({
@@ -860,7 +866,9 @@ fn claude_manifest(name: &str, recipe: &PluginRecipe) -> Value {
     }
     obj.insert("skills".into(), json!("./skills/"));
     obj.insert("mcpServers".into(), json!("./.mcp.json"));
-    obj.insert("hooks".into(), json!("./hooks/hooks.json"));
+    // Never reference the standard hooks path here: Claude Code auto-loads
+    // hooks/hooks.json, and listing it again in the manifest is a duplicate-
+    // hooks load error that breaks the whole plugin.
     Value::Object(obj)
 }
 
@@ -1223,6 +1231,56 @@ mod tests {
         assert!(mcp.contains("${PLAY_TOKEN}"));
         assert!(tmp.path().join(".agents/plugins/marketplace.json").exists());
         assert!(tmp.path().join(".claude-plugin/marketplace.json").exists());
+
+        // Claude Code auto-loads hooks/hooks.json; naming it in the manifest
+        // is a duplicate-hooks load error that breaks the whole plugin. The
+        // codex manifest keeps the explicit reference.
+        assert!(package.join("hooks/hooks.json").exists());
+        let claude = fs::read_to_string(package.join(".claude-plugin/plugin.json")).unwrap();
+        assert!(!claude.contains("\"hooks\""), "{claude}");
+        let codex = fs::read_to_string(package.join(".codex-plugin/plugin.json")).unwrap();
+        assert!(codex.contains("./hooks/hooks.json"), "{codex}");
+    }
+
+    /// A hook-less recipe (every adopted plugin so far) must not emit an empty
+    /// hooks/hooks.json nor reference one from either native manifest.
+    #[test]
+    fn hookless_recipe_emits_no_hooks_file_or_manifest_refs() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [servers.play]
+            type = "http"
+            url = "https://play.example/mcp"
+
+            [plugins.play]
+            version = "1.0.0"
+            description = "Play"
+            targets = ["codex", "claude-code"]
+            servers = ["play"]
+            "#,
+        )
+        .unwrap();
+        let reg = Registry::load().unwrap();
+        let written = sync(
+            &m,
+            &reg,
+            tmp.path(),
+            &SyncOptions {
+                targets: vec![],
+                write: true,
+            },
+        )
+        .unwrap();
+        ensure_no_sync_errors(&written).unwrap();
+        let package = tmp.path().join("plugins/agentstack/play");
+        assert!(!package.join("hooks/hooks.json").exists());
+        let claude = fs::read_to_string(package.join(".claude-plugin/plugin.json")).unwrap();
+        assert!(!claude.contains("\"hooks\""), "{claude}");
+        let codex = fs::read_to_string(package.join(".codex-plugin/plugin.json")).unwrap();
+        assert!(!codex.contains("hooks"), "{codex}");
     }
 
     /// A recipe may reference a skill that lives only in the central library
