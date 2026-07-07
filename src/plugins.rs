@@ -426,7 +426,11 @@ mod tests {
     #[test]
     fn cache_rev_is_the_versioned_path_segment() {
         assert_eq!(
-            cache_rev(Path::new("/c/openai-curated/cloudflare/d6169bef"), "cloudflare").as_deref(),
+            cache_rev(
+                Path::new("/c/openai-curated/cloudflare/d6169bef"),
+                "cloudflare"
+            )
+            .as_deref(),
             Some("d6169bef")
         );
         assert_eq!(

@@ -1592,7 +1592,10 @@ mod tests {
         );
         let next = &status.guidance[0].next_action;
         assert!(next.contains("moved since adoption"), "{next}");
-        assert!(next.contains("agentstack plugins adopt cloudflare"), "{next}");
+        assert!(
+            next.contains("agentstack plugins adopt cloudflare"),
+            "{next}"
+        );
     }
 
     /// Provenance only satisfies the harness it was adopted from; other
