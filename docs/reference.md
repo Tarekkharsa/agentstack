@@ -65,6 +65,42 @@ servers are stored — the owning plugin delivers them instead). `apply`,
 `diff`, and `doctor` drift all share the one filter, and a typo'd id in
 `targets` is a validation error.
 
+### Owned servers (`owner = "codex"`)
+
+Some harness apps rewrite their own server entries — the Codex desktop app,
+for one, refreshes `node_repl` env values on every self-update. Left alone,
+the manifest goes stale, `doctor` flags drift, and a blind `apply --write`
+would *downgrade* the app's fresh values. Marking the server as owned flips
+the source of truth:
+
+```toml
+[servers.node_repl]
+type = "stdio"
+command = "node"
+owner = "codex"   # codex's own config is the source of truth
+```
+
+Every plan (`apply`, `diff`, `doctor`, `use`) refreshes the definition from
+the owner's on-disk config before rendering, so the owner's config is never
+reverted, and every *other* target fans out with the fresh values. Drift on an
+owned server reads "refresh the manifest + re-fan out: `apply --write`", never
+a proposed downgrade; `apply --write` rewrites the stale `[servers.X]` table
+in whichever manifest layer declares it (local overlay first).
+
+Per key: a manifest value carrying a `${REF}` stays manifest-canonical — the
+disk literal is just that ref's resolved form, and copying it back would leak
+the secret into the manifest. Everything else follows the owner's disk,
+including keys the owner app adds or removes. `targets`, `owner`, and other
+adapters' `extra.*` are manifest bookkeeping and always kept. An `owner` id
+that isn't a registered adapter is a validation error.
+
+Trust interaction: the auto-refresh rewrites the manifest, which changes its
+trust digest. Trust that was **valid** immediately before the rewrite is
+re-pinned to the new digest (the change is machine-derived from a config the
+owner harness already executes — nothing new is being authorized). Trust that
+was already broken or absent is left untouched: pending human review stays
+pending, and the refresh never mints trust.
+
 ### State tracking
 
 `~/.agentstack/state.json` records what agentstack manages per target, so

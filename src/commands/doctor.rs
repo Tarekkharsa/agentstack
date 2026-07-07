@@ -11,7 +11,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::DoctorArgs;
 use crate::manifest::{validate_with_context, Manifest, ServerType};
-use crate::render::{plan_target, resolve_targets, Selection};
+use crate::render::{plan_target_with_servers, resolve_targets};
 use crate::scope::Scope;
 use crate::secret::Resolver;
 use crate::state::{self, target_key, State};
@@ -294,6 +294,29 @@ fn run_checks(
     report.section("Drift");
     let mut any_drift = false;
     let identity = state::manifest_identity(&ctx.dir);
+    // Owner-refreshed servers: the drift check renders with the owning app's
+    // on-disk values, so an owned server that changed on disk is reported as
+    // "refresh the manifest", never as a pending revert of what the app wrote
+    // (see render::owned).
+    let mut server_map: indexmap::IndexMap<String, crate::manifest::Server> =
+        manifest.servers.clone();
+    let owned = crate::render::refresh_owned_servers(
+        &mut server_map,
+        &ctx.registry,
+        Scope::Global,
+        &ctx.dir,
+    );
+    for o in owned.iter().filter(|o| o.stale) {
+        any_drift = true;
+        report.line(
+            Level::Warn,
+            format!(
+                "{:<14} changed in {} (owner) ↳ refresh manifest + re-fan out: \
+                 agentstack apply --write",
+                o.name, o.owner_display
+            ),
+        );
+    }
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
@@ -309,7 +332,7 @@ fn run_checks(
         let mut previously = state.managed_servers(&key);
         let kept = if args.fix {
             state.foreign_prunes(&key, Scope::Global, &ctx.dir, &mut previously, |n| {
-                manifest.servers.contains_key(n)
+                server_map.contains_key(n)
             })
         } else {
             Vec::new()
@@ -321,18 +344,17 @@ fn run_checks(
         let mut kept_report: Vec<String> = state
             .kept_foreign(&key)
             .into_iter()
-            .filter(|n| !manifest.servers.contains_key(n))
+            .filter(|n| !server_map.contains_key(n))
             .collect();
         for k in &kept {
             if !kept_report.contains(k) {
                 kept_report.push(k.clone());
             }
         }
-        let Some(plan) = plan_target(
-            manifest,
+        let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
-            &Selection::All,
+            &server_map,
             &previously,
             Scope::Global,
             &ctx.dir,
@@ -358,15 +380,33 @@ fn run_checks(
             if !ts.last_hash.is_empty() {
                 let on_disk = state::hash(&plan.existing);
                 if on_disk != ts.last_hash {
-                    any_drift = true;
-                    report.line(
-                        Level::Warn,
-                        format!(
-                            "{:<14} edited on disk since last apply ↳ review: agentstack diff · \
-                             keep the hand-edit: agentstack adopt",
-                            desc.display
-                        ),
-                    );
+                    // The owner of an owned server rewrites its own config by
+                    // design. When the mismatch is fully explained — this
+                    // target owns a refreshed server and the owner-refreshed
+                    // render proposes no change — it's app churn, not a
+                    // hand-edit to review.
+                    let owner_churn =
+                        !plan.changed() && owned.iter().any(|o| o.stale && o.owner == **id);
+                    if owner_churn {
+                        report.line(
+                            Level::Ok,
+                            format!(
+                                "{:<14} rewritten by the app itself (owned server) — \
+                                 refresh the manifest: agentstack apply --write",
+                                desc.display
+                            ),
+                        );
+                    } else {
+                        any_drift = true;
+                        report.line(
+                            Level::Warn,
+                            format!(
+                                "{:<14} edited on disk since last apply ↳ review: agentstack diff · \
+                                 keep the hand-edit: agentstack adopt",
+                                desc.display
+                            ),
+                        );
+                    }
                 }
             }
         }
