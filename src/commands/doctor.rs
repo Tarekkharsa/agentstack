@@ -10,7 +10,7 @@ use anyhow::Result;
 use owo_colors::OwoColorize;
 
 use crate::cli::DoctorArgs;
-use crate::manifest::{validate_with_context, Manifest, ServerType};
+use crate::manifest::{validate_with_context, Manifest, Server, ServerType};
 use crate::render::{plan_target_with_servers, resolve_targets};
 use crate::scope::Scope;
 use crate::secret::Resolver;
@@ -1060,10 +1060,53 @@ fn git_host_path(url: &str) -> String {
     u.to_string()
 }
 
+/// Interpreter/launcher commands that resolve through `PATH` and typically live
+/// only under a version-manager dir the login shell adds (nvm, pyenv, …). A
+/// GUI-launched harness (Claude Code.app, Claude Desktop, VS Code) inherits a
+/// minimal `PATH` that may not contain them at all — or resolves them to the
+/// wrong runtime version — so a bare invocation can fail to spawn.
+const PATH_DEPENDENT_LAUNCHERS: &[&str] = &[
+    "npx", "node", "uvx", "uv", "bunx", "bun", "deno", "python", "python3", "pipx", "pip", "ruby",
+    "pnpm", "yarn", "npm",
+];
+
+/// POSIX/login shells. `command = "zsh", args = ["-lc", "exec … "]` is the
+/// *recommended* fix (the login shell sources the version manager and repairs
+/// `PATH`), so a shell command is never itself the fragile case.
+const SHELL_COMMANDS: &[&str] = &["zsh", "bash", "sh", "fish"];
+
+/// Flag a stdio server whose `command` is a bare, `PATH`-dependent launcher — no
+/// path separator, not a tilde path, and in [`PATH_DEPENDENT_LAUNCHERS`]. We
+/// only warn for that known set (not every bare command) so intentional `PATH`
+/// binaries with a stable install location don't produce false positives.
+fn bare_launcher_quirk(name: &str, server: &Server) -> Option<String> {
+    if server.server_type != ServerType::Stdio {
+        return None;
+    }
+    let cmd = server.command.as_deref()?;
+    // An explicit path (`/usr/local/bin/node`, `./bin/x`, `~/bin/x`) already
+    // pins the binary, and a login shell is the recommended wrapper, not a bug.
+    if cmd.contains('/') || cmd.starts_with('~') || SHELL_COMMANDS.contains(&cmd) {
+        return None;
+    }
+    if !PATH_DEPENDENT_LAUNCHERS.contains(&cmd) {
+        return None;
+    }
+    Some(format!(
+        "server '{name}': bare launcher `{cmd}` resolves via PATH; a GUI-launched harness \
+         (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail to spawn \
+         it. Use an absolute path (e.g. an absolute {cmd} under the intended version) or a \
+         login-shell wrapper: command = \"zsh\", args = [\"-lc\", \"exec {cmd} …\"]"
+    ))
+}
+
 /// Detect per-target syntax a CLI can't handle, before it breaks at runtime.
 fn check_quirks(manifest: &Manifest) -> Vec<String> {
     let mut out = Vec::new();
     for (name, server) in &manifest.servers {
+        if let Some(msg) = bare_launcher_quirk(name, server) {
+            out.push(msg);
+        }
         // Codex has no ${VAR:-default} expansion; flag it generally since the
         // manifest is meant to render to every target.
         for val in server
@@ -1139,5 +1182,78 @@ mod tests {
 
         std::env::remove_var("AGENTSTACK_HOME");
         std::env::remove_var("HOME");
+    }
+
+    /// Build a one-server manifest from a TOML server body for quirk tests.
+    fn manifest_with_server(toml_body: &str) -> Manifest {
+        let src = format!("version = 1\n[servers.s]\n{toml_body}\n");
+        toml::from_str(&src).expect("valid manifest toml")
+    }
+
+    fn quirks_for(toml_body: &str) -> Vec<String> {
+        check_quirks(&manifest_with_server(toml_body))
+    }
+
+    fn is_bare_launcher_warning(q: &str) -> bool {
+        q.contains("bare launcher") && q.contains("resolves via PATH")
+    }
+
+    #[test]
+    fn bare_npx_launcher_is_flagged() {
+        let quirks = quirks_for(
+            "type = \"stdio\"\ncommand = \"npx\"\nargs = [\"chrome-devtools-mcp@latest\"]",
+        );
+        assert!(
+            quirks.iter().any(|q| is_bare_launcher_warning(q)),
+            "expected a bare-launcher warning, got {quirks:?}"
+        );
+    }
+
+    #[test]
+    fn bare_node_launcher_is_flagged() {
+        let quirks = quirks_for("type = \"stdio\"\ncommand = \"node\"\nargs = [\"server.js\"]");
+        assert!(quirks.iter().any(|q| is_bare_launcher_warning(q)));
+    }
+
+    #[test]
+    fn absolute_path_command_is_not_flagged() {
+        let quirks = quirks_for(
+            "type = \"stdio\"\ncommand = \"/usr/local/bin/node\"\nargs = [\"server.js\"]",
+        );
+        assert!(
+            !quirks.iter().any(|q| is_bare_launcher_warning(q)),
+            "{quirks:?}"
+        );
+    }
+
+    #[test]
+    fn login_shell_wrapper_is_not_flagged() {
+        let quirks = quirks_for(
+            "type = \"stdio\"\ncommand = \"zsh\"\nargs = [\"-lc\", \"exec npx chrome-devtools-mcp@latest\"]",
+        );
+        assert!(
+            !quirks.iter().any(|q| is_bare_launcher_warning(q)),
+            "{quirks:?}"
+        );
+    }
+
+    #[test]
+    fn http_server_is_not_flagged() {
+        let quirks = quirks_for("type = \"http\"\nurl = \"https://example.com/mcp\"");
+        assert!(
+            !quirks.iter().any(|q| is_bare_launcher_warning(q)),
+            "{quirks:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_bare_command_is_not_flagged() {
+        // A custom binary name outside the known launcher set is assumed to have
+        // a stable install location; we don't want false positives on it.
+        let quirks = quirks_for("type = \"stdio\"\ncommand = \"my-mcp-server\"\nargs = []");
+        assert!(
+            !quirks.iter().any(|q| is_bare_launcher_warning(q)),
+            "{quirks:?}"
+        );
     }
 }
