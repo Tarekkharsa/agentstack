@@ -71,6 +71,26 @@ pub struct TargetInstallStatus {
     pub installed: bool,
     pub enabled: Option<bool>,
     pub status: Option<String>,
+    /// Set when the recipe was adopted from a native plugin on this target
+    /// (`source = "plugin:<harness>/<marketplace>/<name>"`) and that plugin is
+    /// still installed there: the target is satisfied without an
+    /// agentstack-generated package/marketplace/install.
+    pub native: Option<NativeSatisfaction>,
+}
+
+/// The adopted-from native plugin as it exists on the harness right now.
+#[derive(Debug, Clone)]
+pub struct NativeSatisfaction {
+    /// Native plugin name (may differ from the recipe name via `--as`).
+    pub plugin: String,
+    pub marketplace: String,
+    pub version: Option<String>,
+    /// Versioned cache-path segment, comparable to the recipe's `rev`.
+    pub rev: Option<String>,
+    pub enabled: Option<bool>,
+    /// Human summary of how the native plugin moved since adoption
+    /// (version/rev changed), i.e. the recipe is behind and worth re-adopting.
+    pub drift: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -277,7 +297,7 @@ fn recipe_status(
         && package_is_stale(name, recipe, manifest, dir, targets).unwrap_or(true);
     let marketplaces =
         marketplace_statuses(name, recipe, dir, targets, native_marketplaces).unwrap_or_default();
-    let installs = install_statuses(name, targets, native_plugins);
+    let installs = install_statuses(name, recipe, targets, native_plugins);
     let guidance = target_guidance(RecipeGuidanceContext {
         name,
         dir,
@@ -477,6 +497,7 @@ fn marketplace_recipe_entry(path: &Path, name: &str) -> Option<Value> {
 
 fn install_statuses(
     name: &str,
+    recipe: &PluginRecipe,
     targets: &[String],
     native_plugins: &[crate::plugins::Plugin],
 ) -> Vec<TargetInstallStatus> {
@@ -491,9 +512,68 @@ fn install_statuses(
                 installed: plugin.is_some(),
                 enabled: plugin.and_then(|p| p.enabled),
                 status: plugin.map(|p| p.status.clone()),
+                native: native_satisfaction(recipe, target, native_plugins),
             }
         })
         .collect()
+}
+
+/// Parse recipe provenance `plugin:<harness>/<marketplace>/<name>` (written by
+/// `plugins adopt`).
+fn plugin_provenance(recipe: &PluginRecipe) -> Option<(&str, &str, &str)> {
+    let rest = recipe.source.as_deref()?.strip_prefix("plugin:")?;
+    let mut parts = rest.splitn(3, '/');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(harness), Some(marketplace), Some(name))
+            if !harness.is_empty() && !marketplace.is_empty() && !name.is_empty() =>
+        {
+            Some((harness, marketplace, name))
+        }
+        _ => None,
+    }
+}
+
+/// The adopted-from native plugin, if it is still installed on `target`. This
+/// is what makes an adopted recipe satisfied without the agentstack
+/// marketplace — installing there too would configure the plugin twice.
+fn native_satisfaction(
+    recipe: &PluginRecipe,
+    target: &str,
+    native_plugins: &[crate::plugins::Plugin],
+) -> Option<NativeSatisfaction> {
+    let (harness, marketplace, plugin_name) = plugin_provenance(recipe)?;
+    if harness != target {
+        return None;
+    }
+    let plugin = native_plugins.iter().find(|p| {
+        p.harness == target
+            && p.marketplace == marketplace
+            && p.name == plugin_name
+            && p.status != "not installed"
+    })?;
+    let rev = plugin
+        .source
+        .as_deref()
+        .and_then(|s| crate::plugins::cache_rev(Path::new(s), &plugin.name));
+    let mut moved = Vec::new();
+    if let Some(native_version) = &plugin.version {
+        if *native_version != recipe.version {
+            moved.push(format!("version {} → {native_version}", recipe.version));
+        }
+    }
+    if let (Some(adopted_rev), Some(native_rev)) = (&recipe.rev, &rev) {
+        if adopted_rev != native_rev {
+            moved.push(format!("rev {adopted_rev} → {native_rev}"));
+        }
+    }
+    Some(NativeSatisfaction {
+        plugin: plugin.name.clone(),
+        marketplace: plugin.marketplace.clone(),
+        version: plugin.version.clone(),
+        rev,
+        enabled: plugin.enabled,
+        drift: (!moved.is_empty()).then(|| moved.join(", ")),
+    })
 }
 
 struct RecipeGuidanceContext<'a> {
@@ -531,6 +611,7 @@ fn target_guidance(ctx: RecipeGuidanceContext<'_>) -> Vec<TargetGuidance> {
                         .unwrap_or(false),
                     installed: install.map(|i| i.installed).unwrap_or(false),
                     enabled: install.and_then(|i| i.enabled),
+                    native: install.and_then(|i| i.native.as_ref()),
                 }),
             }
         })
@@ -550,6 +631,7 @@ struct NextActionContext<'a> {
     native_marketplace_visible: bool,
     installed: bool,
     enabled: Option<bool>,
+    native: Option<&'a NativeSatisfaction>,
 }
 
 fn next_action(ctx: NextActionContext<'_>) -> String {
@@ -563,6 +645,12 @@ fn next_action(ctx: NextActionContext<'_>) -> String {
             "Install missing skill source(s) with agentstack install, then run agentstack plugins sync --write: {}.",
             ctx.missing_skills.join(", ")
         );
+    }
+    // Adopted-from native plugin still installed on this harness: the target
+    // is satisfied without a generated package — nagging to sync/install here
+    // would install the same plugin a second time.
+    if let Some(native) = ctx.native {
+        return native_satisfaction_action(native);
     }
     if !ctx.generated {
         return "Run agentstack plugins sync --write to generate the package and marketplaces."
@@ -582,6 +670,25 @@ fn next_action(ctx: NextActionContext<'_>) -> String {
         Some(true) => "Installed and enabled; no action needed.".to_string(),
         Some(false) => native_enable_action(ctx.target),
         None => native_check_action(ctx.target),
+    }
+}
+
+fn native_satisfaction_action(native: &NativeSatisfaction) -> String {
+    if let Some(drift) = &native.drift {
+        return format!(
+            "Native {}@{} moved since adoption ({drift}); re-adopt to refresh the recipe (remove it, then agentstack plugins adopt {} --write).",
+            native.plugin, native.marketplace, native.plugin
+        );
+    }
+    match native.enabled {
+        Some(false) => format!(
+            "Satisfied by native install {}@{}, but it is disabled; enable it in the harness's plugin UI/CLI.",
+            native.plugin, native.marketplace
+        ),
+        _ => format!(
+            "Satisfied natively by {}@{}; no action needed.",
+            native.plugin, native.marketplace
+        ),
     }
 }
 
@@ -1316,6 +1423,161 @@ mod tests {
         assert!(!tmp.path().join("plugins/agentstack/linear-pack").exists());
     }
 
+    /// The adopted-plugin loop observed live: a recipe adopted FROM codex
+    /// (`source = "plugin:codex/openai-curated/cloudflare"`) must not nag to
+    /// sync/install on codex while the native plugin is still installed and
+    /// enabled there — following that guidance would install the plugin a
+    /// second time from the agentstack marketplace. Native state comes from a
+    /// fake codex plugin cache plus a `config.toml` `[plugins]` entry, exactly
+    /// what discovery reads on a real machine.
+    #[test]
+    fn adopted_recipe_is_satisfied_natively_while_the_source_plugin_is_installed() {
+        use assert_fs::prelude::*;
+        let codex_home = assert_fs::TempDir::new().unwrap();
+        codex_home
+            .child("plugins/cache/openai-curated/cloudflare/d6169bef/.codex-plugin/plugin.json")
+            .write_str(r#"{"name":"cloudflare","version":"1.2.3"}"#)
+            .unwrap();
+        codex_home
+            .child("config.toml")
+            .write_str("[plugins.\"cloudflare@openai-curated\"]\nenabled = true\n")
+            .unwrap();
+        let native_plugins = crate::plugins::codex_plugins_from_cache_at(codex_home.path());
+
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [plugins.cloudflare]
+            version = "1.2.3"
+            description = "Cloudflare"
+            source = "plugin:codex/openai-curated/cloudflare"
+            rev = "d6169bef"
+            targets = ["codex"]
+            "#,
+        )
+        .unwrap();
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let status = recipe_status(
+            "cloudflare",
+            &m.plugins["cloudflare"],
+            &m,
+            tmp.path(),
+            &["codex".to_string()],
+            &native_plugins,
+            &[],
+        );
+
+        let install = &status.installs[0];
+        let native = install.native.as_ref().expect("satisfied natively");
+        assert_eq!(native.marketplace, "openai-curated");
+        assert_eq!(native.version.as_deref(), Some("1.2.3"));
+        assert_eq!(native.rev.as_deref(), Some("d6169bef"));
+        assert_eq!(native.enabled, Some(true));
+        assert_eq!(native.drift, None);
+        // Nothing is generated/installed via agentstack, yet the guidance must
+        // not point at sync --write.
+        assert!(!status.generated);
+        assert!(!install.installed);
+        let next = &status.guidance[0].next_action;
+        assert_eq!(
+            next,
+            "Satisfied natively by cloudflare@openai-curated; no action needed."
+        );
+    }
+
+    /// When the native plugin moves ahead of the adopted recipe (new version /
+    /// cache rev), the recipe is behind — surface an upgrade hint instead of
+    /// "no action needed" (and still no sync/install nag).
+    #[test]
+    fn adopted_recipe_surfaces_drift_when_the_native_plugin_moves() {
+        use assert_fs::prelude::*;
+        let codex_home = assert_fs::TempDir::new().unwrap();
+        codex_home
+            .child("plugins/cache/openai-curated/cloudflare/aa11bb22/.codex-plugin/plugin.json")
+            .write_str(r#"{"name":"cloudflare","version":"1.3.0"}"#)
+            .unwrap();
+        codex_home
+            .child("config.toml")
+            .write_str("[plugins.\"cloudflare@openai-curated\"]\nenabled = true\n")
+            .unwrap();
+        let native_plugins = crate::plugins::codex_plugins_from_cache_at(codex_home.path());
+
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [plugins.cloudflare]
+            version = "1.2.3"
+            description = "Cloudflare"
+            source = "plugin:codex/openai-curated/cloudflare"
+            rev = "d6169bef"
+            targets = ["codex"]
+            "#,
+        )
+        .unwrap();
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let status = recipe_status(
+            "cloudflare",
+            &m.plugins["cloudflare"],
+            &m,
+            tmp.path(),
+            &["codex".to_string()],
+            &native_plugins,
+            &[],
+        );
+
+        let native = status.installs[0].native.as_ref().unwrap();
+        assert_eq!(
+            native.drift.as_deref(),
+            Some("version 1.2.3 → 1.3.0, rev d6169bef → aa11bb22")
+        );
+        let next = &status.guidance[0].next_action;
+        assert!(next.contains("moved since adoption"), "{next}");
+        assert!(next.contains("agentstack plugins adopt cloudflare"), "{next}");
+    }
+
+    /// Provenance only satisfies the harness it was adopted from; other
+    /// targets (and recipes whose native plugin was uninstalled) keep the
+    /// normal generate/install guidance.
+    #[test]
+    fn native_satisfaction_is_scoped_to_the_adopted_harness_and_live_install() {
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [plugins.cloudflare]
+            version = "1.2.3"
+            description = "Cloudflare"
+            source = "plugin:codex/openai-curated/cloudflare"
+            targets = ["codex", "claude-code"]
+            "#,
+        )
+        .unwrap();
+        let recipe = &m.plugins["cloudflare"];
+        let native = crate::plugins::Plugin {
+            harness: "codex".into(),
+            name: "cloudflare".into(),
+            marketplace: "openai-curated".into(),
+            scope: "available".into(),
+            projects: vec![],
+            version: Some("1.2.3".into()),
+            enabled: Some(true),
+            status: "installed, enabled".into(),
+            source: None,
+        };
+        let plugins = vec![native];
+        assert!(native_satisfaction(recipe, "codex", &plugins).is_some());
+        // claude-code was not the adopted harness — not satisfied there.
+        assert!(native_satisfaction(recipe, "claude-code", &plugins).is_none());
+        // Native plugin gone: back to normal guidance.
+        assert!(native_satisfaction(recipe, "codex", &[]).is_none());
+        // Codex CLI reporting the plugin uninstalled doesn't satisfy either.
+        let mut uninstalled = plugins.clone();
+        uninstalled[0].status = "not installed".into();
+        assert!(native_satisfaction(recipe, "codex", &uninstalled).is_none());
+    }
+
     #[test]
     fn next_action_prioritizes_generation_before_native_install() {
         let tmp = assert_fs::TempDir::new().unwrap();
@@ -1332,6 +1594,7 @@ mod tests {
             native_marketplace_visible: false,
             installed: false,
             enabled: None,
+            native: None,
         });
         assert_eq!(
             action,
@@ -1355,6 +1618,7 @@ mod tests {
             native_marketplace_visible: false,
             installed: false,
             enabled: None,
+            native: None,
         });
         assert!(action.contains("claude plugin marketplace add --scope local"));
         assert!(action.contains("claude plugin install play@agentstack --scope local"));
@@ -1376,6 +1640,7 @@ mod tests {
             native_marketplace_visible: true,
             installed: true,
             enabled: None,
+            native: None,
         });
         assert_eq!(
             action,

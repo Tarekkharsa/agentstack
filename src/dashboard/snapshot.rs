@@ -454,6 +454,14 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                         "installed": i.installed,
                         "enabled": i.enabled,
                         "status": i.status,
+                        "native": i.native.as_ref().map(|n| json!({
+                            "plugin": n.plugin,
+                            "marketplace": n.marketplace,
+                            "version": n.version,
+                            "rev": n.rev,
+                            "enabled": n.enabled,
+                            "drift": n.drift,
+                        })),
                     })).collect::<Vec<_>>(),
                     "guidance": r.guidance.iter().map(|g| json!({
                         "target": g.target,
@@ -901,36 +909,61 @@ fn next_actions(
             .get("stale")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let marketplace_needs_sync = recipe
-            .get("marketplaces")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items.iter().any(|m| {
-                    !m.get("present").and_then(Value::as_bool).unwrap_or(false)
-                        || m.get("stale").and_then(Value::as_bool).unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-        let marketplace_hidden = recipe
-            .get("marketplaces")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items.iter().any(|m| {
-                    !m.get("nativeVisible")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-        let install_missing = recipe
+        // Targets satisfied by the adopted-from native plugin need no
+        // agentstack marketplace/package/install — exclude them from every
+        // nag below (installing there would duplicate the plugin).
+        let installs = recipe
             .get("installs")
             .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .any(|i| !i.get("installed").and_then(Value::as_bool).unwrap_or(false))
-            })
-            .unwrap_or(false);
+            .cloned()
+            .unwrap_or_default();
+        let native_targets: Vec<&str> = installs
+            .iter()
+            .filter(|i| i.get("native").map(|n| !n.is_null()).unwrap_or(false))
+            .filter_map(|i| i.get("target").and_then(Value::as_str))
+            .collect();
+        let targets = recipe
+            .get("targets")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let all_native = !targets.is_empty()
+            && targets
+                .iter()
+                .filter_map(Value::as_str)
+                .all(|t| native_targets.contains(&t));
+        let native_drift = installs.iter().any(|i| {
+            i.get("native")
+                .and_then(|n| n.get("drift"))
+                .and_then(Value::as_str)
+                .is_some()
+        });
+        let non_native_marketplaces = || {
+            recipe
+                .get("marketplaces")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|m| {
+                    m.get("target")
+                        .and_then(Value::as_str)
+                        .map(|t| !native_targets.contains(&t))
+                        .unwrap_or(true)
+                })
+        };
+        let marketplace_needs_sync = non_native_marketplaces().any(|m| {
+            !m.get("present").and_then(Value::as_bool).unwrap_or(false)
+                || m.get("stale").and_then(Value::as_bool).unwrap_or(false)
+        });
+        let marketplace_hidden = non_native_marketplaces().any(|m| {
+            !m.get("nativeVisible")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        });
+        let install_missing = installs.iter().any(|i| {
+            !i.get("installed").and_then(Value::as_bool).unwrap_or(false)
+                && i.get("native").map(Value::is_null).unwrap_or(true)
+        });
 
         if let Some(conflict) = conflict {
             out.push(command_action(
@@ -955,7 +988,17 @@ fn next_actions(
                 "Install skills",
                 json!({ "type": "post", "path": "/api/install", "label": "Install" }),
             ));
-        } else if !generated || stale || marketplace_needs_sync {
+        } else if native_drift {
+            out.push(command_action(
+                format!("plugin:{name}:native-drift"),
+                "warn",
+                format!("{name} native plugin moved since adoption"),
+                "The native plugin was updated; re-adopt to refresh the recipe.".to_string(),
+                "plugins",
+                "Open Plugins",
+                json!({ "type": "section", "section": "plugins" }),
+            ));
+        } else if (!all_native && (!generated || stale)) || marketplace_needs_sync {
             out.push(command_action(
                 format!("plugin:{name}:sync"),
                 "warn",

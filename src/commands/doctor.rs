@@ -624,7 +624,30 @@ fn run_checks(
             );
             continue;
         }
-        if !recipe.generated {
+        // Targets whose adopted-from native plugin is still installed need no
+        // generated package/marketplace/install — nagging sync+install there
+        // would install the same plugin a second time.
+        let native_targets: Vec<&str> = recipe
+            .installs
+            .iter()
+            .filter(|i| i.native.is_some())
+            .map(|i| i.target.as_str())
+            .collect();
+        let all_native = !recipe.targets.is_empty()
+            && recipe
+                .targets
+                .iter()
+                .all(|t| native_targets.contains(&t.as_str()));
+        if all_native {
+            report.line(
+                Level::Ok,
+                format!(
+                    "{:<20} satisfied natively ({}) — no generated package needed",
+                    recipe.name,
+                    native_targets.join(", ")
+                ),
+            );
+        } else if !recipe.generated {
             report.line(
                 Level::Warn,
                 format!(
@@ -644,6 +667,9 @@ fn run_checks(
             report.line(Level::Ok, format!("{:<20} package generated", recipe.name));
         }
         for market in &recipe.marketplaces {
+            if native_targets.contains(&market.target.as_str()) {
+                continue;
+            }
             if !market.present {
                 report.line(
                     Level::Warn,
@@ -663,6 +689,40 @@ fn run_checks(
             }
         }
         for install in &recipe.installs {
+            if let Some(native) = &install.native {
+                if let Some(drift) = &native.drift {
+                    report.line(
+                        Level::Warn,
+                        format!(
+                            "{:<20} {}: native {}@{} moved since adoption ({drift}) ↳ re-adopt to refresh",
+                            recipe.name, install.target, native.plugin, native.marketplace
+                        ),
+                    );
+                } else if native.enabled == Some(false) {
+                    report.line(
+                        Level::Warn,
+                        format!(
+                            "{:<20} {}: native install {}@{} is disabled ↳ enable it in the harness",
+                            recipe.name, install.target, native.plugin, native.marketplace
+                        ),
+                    );
+                } else {
+                    let at = match (&native.version, &native.rev) {
+                        (Some(v), Some(r)) => format!(", up to date @ {v}+{r}"),
+                        (Some(v), None) => format!(", up to date @ {v}"),
+                        (None, Some(r)) => format!(", up to date @ rev {r}"),
+                        (None, None) => String::new(),
+                    };
+                    report.line(
+                        Level::Ok,
+                        format!(
+                            "{:<20} {}: native install {} ✓{at}",
+                            recipe.name, install.target, native.marketplace
+                        ),
+                    );
+                }
+                continue;
+            }
             if !install.installed {
                 report.line(
                     Level::Warn,
