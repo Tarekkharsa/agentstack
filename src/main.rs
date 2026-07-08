@@ -49,6 +49,7 @@ fn run() -> Result<()> {
         Command::Pack(cmd) => commands::pack::run(cmd),
         Command::Plugins(args) => commands::plugins::run(args, dir),
         Command::Secret(args) => commands::secret::run(args, dir),
+        Command::Settings(args) => commands::settings::run(args, dir),
         Command::Export(args) => commands::bundle::run_export(args, dir),
         Command::Import(args) => commands::bundle::run_import(args, dir),
         Command::Dashboard(args) => agentstack::dashboard::serve(args, dir),
