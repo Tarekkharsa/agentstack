@@ -45,6 +45,12 @@ pub struct TargetPlan {
     /// render rather than written as an empty entry; surfaced so the user knows
     /// to wire them up by the harness's other mechanism (e.g. in-app Connectors).
     pub skipped: Vec<String>,
+    /// Non-blocking notices about servers that DID render but lost a
+    /// transport-neutral attribute this target can't express — today, a `cwd`
+    /// dropped because the CLI's config has no working-directory key. Surfaced
+    /// so the user knows the server may need a shell wrapper on that harness,
+    /// rather than the field vanishing silently.
+    pub warnings: Vec<String>,
 }
 
 impl TargetPlan {
@@ -193,6 +199,7 @@ pub fn plan_target_with_servers(
     let mut failed: Vec<String> = Vec::new();
     let mut managed: Vec<String> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
     for (name, server) in servers {
         // Definition-level target scoping (`[servers.X] targets = [...]`).
         // Every plan — apply, diff, doctor drift, use, dashboard — flows
@@ -214,6 +221,14 @@ pub fn plan_target_with_servers(
         }
         for (f, why) in rendered.failed {
             failed.push(format!("{f} (server '{name}') — {why}"));
+        }
+        // A stdio `cwd` this target's config can't express is dropped by the
+        // renderer; flag it so it doesn't disappear without a trace.
+        if server.server_type == crate::manifest::ServerType::Stdio
+            && server.cwd.is_some()
+            && mcp.fields.cwd.is_none()
+        {
+            warnings.push(name.clone());
         }
         entries.push((name.clone(), rendered.value));
         managed.push(name.clone());
@@ -262,6 +277,7 @@ pub fn plan_target_with_servers(
         unresolved,
         failed,
         skipped,
+        warnings,
     }))
 }
 
@@ -663,6 +679,63 @@ mod tests {
             "{}",
             codex.proposed
         );
+    }
+
+    #[test]
+    fn cwd_renders_for_capable_target_and_warns_for_incapable_one() {
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [servers.tldraw]
+            type = "stdio"
+            command = "node"
+            args = ["dist/index.js"]
+            cwd = "/srv/tldraw"
+            "#,
+        )
+        .unwrap();
+        let servers: IndexMap<String, Server> = manifest.servers.clone();
+
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        let reg = Registry::load().unwrap();
+        let proj = assert_fs::TempDir::new().unwrap();
+        let resolver = MapResolver::default();
+
+        // Codex expresses cwd natively: it lands in the config, no warning.
+        let codex = plan_target_with_servers(
+            reg.get("codex").unwrap(),
+            &resolver,
+            &servers,
+            &[],
+            Scope::Global,
+            proj.path(),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(codex.proposed.contains("/srv/tldraw"), "{}", codex.proposed);
+        assert!(codex.warnings.is_empty());
+
+        // Claude Code has no cwd key: the server still renders, but the dropped
+        // cwd is surfaced as a warning rather than vanishing silently.
+        let claude = plan_target_with_servers(
+            reg.get("claude-code").unwrap(),
+            &resolver,
+            &servers,
+            &[],
+            Scope::Global,
+            proj.path(),
+        )
+        .unwrap()
+        .unwrap();
+        std::env::remove_var("HOME");
+        assert_eq!(claude.managed, vec!["tldraw"]);
+        assert!(!claude.proposed.contains("/srv/tldraw"), "{}", claude.proposed);
+        assert_eq!(claude.warnings, vec!["tldraw".to_string()]);
     }
 
     #[test]

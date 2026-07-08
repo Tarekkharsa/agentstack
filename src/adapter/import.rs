@@ -83,6 +83,7 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
                     .collect()
             })
             .unwrap_or_default();
+        let cwd = get_str(&mcp.fields.cwd);
         let headers = get_map(&mcp.fields.headers);
         let env = get_map(&mcp.fields.env);
 
@@ -101,6 +102,7 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
             mcp.fields.url.as_deref(),
             mcp.fields.command.as_deref(),
             mcp.fields.args.as_deref(),
+            mcp.fields.cwd.as_deref(),
             mcp.fields.headers.as_deref(),
             mcp.fields.env.as_deref(),
             mcp.transport.as_ref().map(|t| t.key.as_str()),
@@ -125,6 +127,7 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
                 url,
                 command,
                 args,
+                cwd,
                 targets: crate::manifest::model::all_targets(),
                 owner: None,
                 headers,
@@ -221,6 +224,27 @@ mod tests {
         assert!(perms.contains_key("defaultMode"));
         assert!(perms.contains_key("allow"));
         assert!(perms.contains_key("deny"));
+    }
+
+    #[test]
+    fn cwd_round_trips_and_is_not_lifted_into_extras() {
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("codex").unwrap();
+        let root = json!({
+            "mcp_servers": {
+                "tldraw": {
+                    "command": "node",
+                    "args": ["dist/index.js"],
+                    "cwd": "/srv/tldraw"
+                }
+            }
+        });
+        let servers = extract_servers(desc, &root);
+        let tldraw = &servers.iter().find(|(n, _)| n == "tldraw").unwrap().1;
+        assert_eq!(tldraw.cwd.as_deref(), Some("/srv/tldraw"));
+        // `cwd` is a mapped field, not a hand-tuned native key: it must not be
+        // duplicated into extras.
+        assert!(tldraw.extra.is_empty(), "cwd should not become an extra");
     }
 
     #[test]
