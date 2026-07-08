@@ -45,6 +45,10 @@ pub struct TargetPlan {
     /// render rather than written as an empty entry; surfaced so the user knows
     /// to wire them up by the harness's other mechanism (e.g. in-app Connectors).
     pub skipped: Vec<String>,
+    /// Every `${REF}` resolved into this render, as `(ref-name, value)`. Used
+    /// ONLY to redact the human-facing diff/apply preview — `proposed` still
+    /// holds the real resolved values, and that is what `write` persists.
+    pub secrets: Vec<(String, String)>,
 }
 
 impl TargetPlan {
@@ -52,8 +56,18 @@ impl TargetPlan {
         diff::differs(&self.existing, &self.proposed)
     }
 
+    /// Colored diff for the terminal, with resolved secret values redacted to
+    /// their `${REF}` name so a preview never prints a credential in cleartext.
     pub fn diff(&self) -> String {
-        diff::render(&self.existing, &self.proposed)
+        diff::mask_secrets(&diff::render(&self.existing, &self.proposed), &self.secrets)
+    }
+
+    /// Plain (uncolored) diff for the web dashboard — same secret redaction.
+    pub fn diff_plain(&self) -> String {
+        diff::mask_secrets(
+            &diff::render_plain(&self.existing, &self.proposed),
+            &self.secrets,
+        )
     }
 
     /// Hash of the content we would write (for state tracking / drift checks).
@@ -193,6 +207,7 @@ pub fn plan_target_with_servers(
     let mut failed: Vec<String> = Vec::new();
     let mut managed: Vec<String> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
+    let mut secrets: Vec<(String, String)> = Vec::new();
     for (name, server) in servers {
         // Definition-level target scoping (`[servers.X] targets = [...]`).
         // Every plan — apply, diff, doctor drift, use, dashboard — flows
@@ -215,9 +230,11 @@ pub fn plan_target_with_servers(
         for (f, why) in rendered.failed {
             failed.push(format!("{f} (server '{name}') — {why}"));
         }
+        secrets.extend(rendered.secrets);
         entries.push((name.clone(), rendered.value));
         managed.push(name.clone());
     }
+    secrets.dedup();
 
     // Prune entries we used to own but no longer select.
     let removed: Vec<String> = previously_managed
@@ -262,6 +279,7 @@ pub fn plan_target_with_servers(
         unresolved,
         failed,
         skipped,
+        secrets,
     }))
 }
 

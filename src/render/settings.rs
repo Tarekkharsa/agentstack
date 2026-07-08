@@ -36,6 +36,9 @@ pub struct SettingsPlan {
     pub removed: Vec<String>,
     /// `${REF}`s that did not resolve on this machine.
     pub unresolved: Vec<String>,
+    /// Resolved secret values (`(ref-name, value)`) to redact from the diff
+    /// preview. The real values stay in `proposed` and are what `write` persists.
+    pub secrets: Vec<(String, String)>,
 }
 
 impl SettingsPlan {
@@ -43,7 +46,7 @@ impl SettingsPlan {
         diff::differs(&self.existing, &self.proposed)
     }
     pub fn diff(&self) -> String {
-        diff::render(&self.existing, &self.proposed)
+        diff::mask_secrets(&diff::render(&self.existing, &self.proposed), &self.secrets)
     }
     pub fn write(&self) -> Result<()> {
         crate::util::atomic::write(&self.settings_path, &self.proposed)
@@ -72,15 +75,17 @@ pub fn plan_settings(
     }
 
     let mut unresolved: Vec<String> = Vec::new();
+    let mut secrets: Vec<(String, String)> = Vec::new();
     let mut entries: Vec<(String, Value)> = Vec::new();
     let mut managed: Vec<String> = Vec::new();
     if let Some(Value::Object(obj)) = declared {
         for (k, v) in obj {
-            let resolved = resolve_value(v, resolver, &mut unresolved);
+            let resolved = resolve_value(v, resolver, &mut unresolved, &mut secrets);
             entries.push((k.clone(), resolved));
             managed.push(k.clone());
         }
     }
+    secrets.dedup();
 
     let removed: Vec<String> = previously_managed
         .iter()
@@ -104,22 +109,28 @@ pub fn plan_settings(
         managed,
         removed,
         unresolved,
+        secrets,
     }))
 }
 
 /// Recursively resolve `${REF}`s in any string leaf of a settings value.
-fn resolve_value(v: &Value, resolver: &dyn Resolver, unresolved: &mut Vec<String>) -> Value {
+fn resolve_value(
+    v: &Value,
+    resolver: &dyn Resolver,
+    unresolved: &mut Vec<String>,
+    secrets: &mut Vec<(String, String)>,
+) -> Value {
     match v {
-        Value::String(s) => Value::String(substitute(s, resolver, false, unresolved)),
+        Value::String(s) => Value::String(substitute(s, resolver, false, unresolved, secrets)),
         Value::Array(arr) => Value::Array(
             arr.iter()
-                .map(|e| resolve_value(e, resolver, unresolved))
+                .map(|e| resolve_value(e, resolver, unresolved, secrets))
                 .collect(),
         ),
         Value::Object(obj) => {
             let mut out = Map::new();
             for (k, val) in obj {
-                out.insert(k.clone(), resolve_value(val, resolver, unresolved));
+                out.insert(k.clone(), resolve_value(val, resolver, unresolved, secrets));
             }
             Value::Object(out)
         }

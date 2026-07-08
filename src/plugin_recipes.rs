@@ -896,8 +896,10 @@ fn hooks_json(recipe: &PluginRecipe, manifest: &Manifest) -> Result<Vec<u8>> {
         .filter_map(|name| manifest.hooks.get_key_value(name))
         .collect();
     let mut unresolved = Vec::new();
+    let mut secrets = Vec::new();
     let resolver = MapResolver::default();
-    let hooks = crate::render::hooks::build_claude_hooks(&selected, &resolver, &mut unresolved);
+    let hooks =
+        crate::render::hooks::build_claude_hooks(&selected, &resolver, &mut unresolved, &mut secrets);
     serde_json::to_vec_pretty(&json!({ "hooks": hooks })).map_err(Into::into)
 }
 
