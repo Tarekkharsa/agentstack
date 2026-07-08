@@ -74,9 +74,7 @@ fn plugin_skill_from_central_library_does_not_block_setup() {
     let vctx = libctx.validate_ctx(&ctx.dir);
     let issues = validate_with_context(manifest, ctx.registry.ids(), &vctx);
     assert!(
-        !issues
-            .iter()
-            .any(|i| i.kind == IssueKind::UnknownSkillRef),
+        !issues.iter().any(|i| i.kind == IssueKind::UnknownSkillRef),
         "plugin skill present in the central library must not be flagged unknown: {issues:?}"
     );
 
