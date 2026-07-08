@@ -111,6 +111,29 @@ default = ["claude-code", "codex"]
 
 The [feature reference](docs/reference.md) has the complete command list.
 
+## See what your tools cost on the wire
+
+Every tool, server, and skill you load is re-billed as input tokens on *every*
+turn — [one measurement](https://www.aihero.dev/how-to-kill-the-bloat-in-claude-codes-system-prompt)
+clocked ~155 KB across 69 tools before a single word of your prompt. agentstack
+gives you that visibility built in: point a harness at `agentstack proxy start`
+and it relays every request verbatim (observe only — nothing injected, the
+prompt cache stays warm) while ranking what each capability actually costs your
+agent per turn.
+
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+agentstack proxy start        # in one shell
+agentstack proxy report       # after some real usage
+```
+
+`report` ranks per-capability tokens/turn against how often each tool was
+actually called — so a server that's expensive but never used is flagged
+`drop / lazy`. Because those are the same servers and profiles agentstack
+manages, that on-wire evidence closes the loop with the static `stats` /
+`doctor` lenses. Telemetry is privacy-preserving: counts, capability names, and
+token estimates only — never prompt bodies or secrets.
+
 ## A shared library of skills & servers
 
 Install a capability once into your machine-wide **central library**

@@ -27,6 +27,7 @@ pub mod pi_packages;
 pub mod plugin_recipes;
 pub mod plugins;
 pub mod provider;
+pub mod proxy;
 pub mod render;
 pub mod resolve;
 pub mod runs;

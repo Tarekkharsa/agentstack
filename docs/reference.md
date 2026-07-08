@@ -402,6 +402,65 @@ dashboard's Servers matrix then show what each server taxes every session
 offline, and `stats` flags dead weight — high-cost, never-activated servers —
 with the exact `remove` command.
 
+### Wire proxy (`proxy`)
+
+Where `stats --live` gives you a **static** estimate — what a server's
+`tools/list` *would* cost — the wire proxy gives you **runtime ground truth**:
+what the `tools` block actually costs, in input tokens, on every real turn your
+harness sends. It's the on-wire complement to `src/footprint.rs`'s static
+counter, and it's the built-in version of the hand-rolled logging proxy from
+[*How to kill the bloat in Claude Code's system
+prompt*](https://www.aihero.dev/how-to-kill-the-bloat-in-claude-codes-system-prompt).
+
+**Point a harness at it.** `agentstack proxy start` stands up a loopback proxy
+(default `127.0.0.1:8787`; `--port`, `--upstream` to override) that relays every
+request VERBATIM to the Anthropic API. Set the harness's base URL and use it
+normally:
+
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+agentstack proxy start        # blocks, serving, in one shell
+# …drive Claude Code (or any Anthropic-API harness) as usual…
+agentstack proxy report       # --json for the raw aggregate
+```
+
+**What `proxy start` does.** For each `/v1/messages` request it walks the
+`tools` array and buckets every tool into its capability — `mcp__<server>__<tool>`
+→ `<server>`, everything else (`Read`, `Bash`, `Task`, …) → `builtin` — summing
+each bucket's estimated per-turn token cost (same `estimate_tokens` heuristic as
+the static footprint). Off the response it captures best-effort usage numbers
+and the tool NAMES the model actually called, for both non-streamed JSON and
+streamed (SSE) responses. The SSE path tees the stream through a pass-through
+reader: bytes reach the client unchanged and undelayed while a side buffer
+absorbs `tool_use` names and usage — so streamed turns now report real `calls`
+(previously always 0 under streaming).
+
+**Telemetry file.** Records append to `~/.agentstack/proxy/requests.jsonl`
+(size-rotated, at most two ~5 MB generations, same contract as the call log). It
+is **content-free by construction**: counts, capability/tool names, token
+estimates, the model id, and best-effort usage numbers — never prompt or message
+bodies, tool arguments, secrets, or header values.
+
+**What `proxy report` shows.** It aggregates the log into a ranked,
+per-capability table: `tools` (typical per-turn tool count), `avg tokens/turn`,
+`calls` (how many times any of that capability's tools appeared in a
+`tool_use`), and a loaded-vs-called `hint`. Headline tools/tokens are the max
+seen in a single turn — a turn re-sends the whole block, so summing across turns
+would inflate it. The hint is a modest ranking signal, not a verdict: a
+capability called at least once is `keep`; the costliest never-called one is a
+`drop / lazy` candidate (demote to a lazy server or drop it from the profile);
+the cheap-and-unused rest is `watch`. Those names are the same servers and
+profiles agentstack already manages, so the report closes the loop with the
+static `footprint` / `stats` / `doctor` lenses using on-wire evidence.
+
+**Phase-1 guardrails.** The proxy is **observe-only** (it never injects or
+mutates the tools/system block, so the prompt-prefix cache stays warm), all
+accounting is **best-effort and fail-open** (a parse hiccup never delays or
+fails the proxied request — a forwarding error returns a 502 but keeps the
+accept loop alive), and auth headers pass through untouched. Each request is
+handled on its own thread so a long-lived SSE stream can't block concurrent
+calls from parallel subagents or background token-count/compaction requests.
+
 ### `export` / `import`
 
 An age-encrypted bundle (manifest + lock + optionally secrets) for moving a
@@ -658,7 +717,8 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 `--init`, `--remote`, `--status`, `--allow-secrets`), `restore`,
 `doctor` (`--ci`, `--live`, `--fix`, `--deep`), `audit` (`--json`, `--calls`,
 `--since`), `optimize` (`--json`, `--write`, `--since`), `analyze` (`--json`),
-`search`, `stats` (`--live`),
+`search`, `stats` (`--live`), `proxy start|report` (`start`: `--port`,
+`--upstream`; `report`: `--json`),
 `secret set|get|rm|list`, `export`/`import`, `adapters` (`list|show|validate`),
 `pack init`, `plugins`,
 `dashboard`, `mcp` (`--auto-project`), `connect`/`disconnect`,
