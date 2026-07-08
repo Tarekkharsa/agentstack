@@ -25,6 +25,7 @@ mcp:
     url: url
     headers: headers
     command: command
+    cwd: cwd
     env: environment
   transport:
     key: type

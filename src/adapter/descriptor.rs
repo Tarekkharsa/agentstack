@@ -219,6 +219,11 @@ pub struct Fields {
     pub command: Option<String>,
     #[serde(default)]
     pub args: Option<String>,
+    /// Native working-directory key for stdio servers (e.g. `cwd`). `None` when
+    /// the CLI's config has no such field — the manifest `cwd` is then dropped
+    /// for this target.
+    #[serde(default)]
+    pub cwd: Option<String>,
     #[serde(default)]
     pub headers: Option<String>,
     #[serde(default)]

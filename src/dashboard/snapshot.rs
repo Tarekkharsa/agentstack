@@ -162,6 +162,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 "url": s.url,
                 "command": s.command,
                 "args": s.args,
+                "cwd": s.cwd,
                 "headers": s.headers.iter().map(|(k, v)| json!({"key": k, "value": v})).collect::<Vec<_>>(),
                 "env": s.env.iter().map(|(k, v)| json!({"key": k, "value": v})).collect::<Vec<_>>(),
                 "cells": cells,

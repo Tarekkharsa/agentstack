@@ -952,6 +952,7 @@ fn add_server(args: &Value, dir: Option<&Path>) -> Result<String> {
                     .collect()
             })
             .unwrap_or_default(),
+        cwd: str_field(args, "cwd"),
         targets: crate::manifest::model::all_targets(),
         owner: None,
         headers: obj_to_map(args.get("headers")),

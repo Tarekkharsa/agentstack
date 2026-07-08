@@ -676,6 +676,7 @@ fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
         url: a.url.clone(),
         command: a.command.clone(),
         args: a.args.clone(),
+        cwd: a.cwd.clone(),
         targets: crate::manifest::model::all_targets(),
         owner: None,
         headers: parse_kv(&a.headers)?,

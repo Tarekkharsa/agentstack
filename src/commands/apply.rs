@@ -243,6 +243,14 @@ fn render(
                 plan.display
             );
         }
+        for w in &plan.warnings {
+            println!(
+                "  {} '{w}' has a cwd that {} can't express — it renders without one \
+                 (wrap the command in a shell that cd's if the server needs it)",
+                "⚠".yellow(),
+                plan.display
+            );
+        }
         for u in &plan.unresolved {
             println!("  {} unresolved secret {}", "✗".red(), u);
             error_count += 1;

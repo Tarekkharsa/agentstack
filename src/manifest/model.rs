@@ -299,6 +299,15 @@ pub struct Server {
     pub command: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
+    /// Working directory a stdio server is launched from. Some servers only
+    /// start correctly when spawned from their own directory (e.g. relative
+    /// dynamic `import()`s that resolve against `process.cwd()`); a harness
+    /// otherwise inherits its own project cwd. Rendered to each adapter's
+    /// native working-directory key where one exists; adapters whose config
+    /// format has no such key drop it (the server may still need a shell
+    /// wrapper there). Supports `${REF}`/path expansion like other fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
     /// Adapter ids `apply` renders this server to; `["*"]` (the default) = all
     /// targets. An explicit empty list opts the server out of the direct
     /// `[servers]` fan-out entirely — how adopted plugin servers are stored:
@@ -441,6 +450,9 @@ impl Manifest {
             }
             for a in &server.args {
                 push(a);
+            }
+            if let Some(cwd) = &server.cwd {
+                push(cwd);
             }
             for v in server.headers.values() {
                 push(v);
@@ -591,6 +603,40 @@ mod tests {
         // must survive serialization (it is NOT the default).
         assert!(!out.contains("targets = [\"*\"]"), "{out}");
         assert!(out.contains("targets = []"), "{out}");
+    }
+
+    #[test]
+    fn server_cwd_round_trips_and_is_a_referenced_secret_source() {
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+
+            [servers.tldraw]
+            type = "stdio"
+            command = "node"
+            args = ["dist/index.js"]
+            cwd = "${TLDRAW_HOME}/server"
+
+            [servers.plain]
+            type = "http"
+            url = "https://x"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            m.servers["tldraw"].cwd.as_deref(),
+            Some("${TLDRAW_HOME}/server")
+        );
+        assert_eq!(m.servers["plain"].cwd, None);
+        // `${REF}`s inside cwd are surfaced like any other field.
+        assert!(m.referenced_secrets().contains(&"TLDRAW_HOME".to_string()));
+
+        let out = toml::to_string(&m).unwrap();
+        let back: Manifest = toml::from_str(&out).unwrap();
+        assert_eq!(back, m);
+        assert!(out.contains("cwd = \"${TLDRAW_HOME}/server\""), "{out}");
+        // Absent cwd stays implicit.
+        assert!(!out.contains("[servers.plain]\ncwd"), "{out}");
     }
 
     #[test]

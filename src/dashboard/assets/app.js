@@ -797,7 +797,7 @@ function saveServer() {
   const body = { name: g("f-name").trim(), transport };
   if (!body.name) return toast("Name is required", false);
   if (transport === "http") body.url = g("f-url").trim();
-  else { body.command = g("f-command").trim(); body.args = g("f-args").trim().split(/\s+/).filter(Boolean); }
+  else { body.command = g("f-command").trim(); body.args = g("f-args").trim().split(/\s+/).filter(Boolean); const cwd = g("f-cwd").trim(); if (cwd) body.cwd = cwd; }
   const hdr = g("f-header").trim();
   if (hdr.includes("=")) { const [k, ...v] = hdr.split("="); body.headers = { [k.trim()]: v.join("=") }; }
   const env = g("f-env").trim();
@@ -821,6 +821,7 @@ function addServerCard() {
     document.getElementById("row-url").style.display = transport.value === "http" ? "" : "none";
     document.getElementById("row-cmd").style.display = transport.value === "stdio" ? "" : "none";
     document.getElementById("row-args").style.display = transport.value === "stdio" ? "" : "none";
+    document.getElementById("row-cwd").style.display = transport.value === "stdio" ? "" : "none";
   } }, [el("option", { value: "http" }, ["http"]), el("option", { value: "stdio" }, ["stdio"])]);
   return el("div", { class: "card", style: "margin-bottom:16px" }, [
     el("div", { class: "hd" }, ["Add MCP server", el("small", null, ["added to the manifest; enable it per CLI in the matrix"])]),
@@ -830,6 +831,7 @@ function addServerCard() {
       el("div", { id: "row-url" }, [row("url", el("input", { id: "f-url", class: "inp", placeholder: "https://…/mcp", style: "width:300px" }))]),
       el("div", { id: "row-cmd", style: "display:none" }, [row("command", el("input", { id: "f-command", class: "inp", placeholder: "npx", style: "width:300px" }))]),
       el("div", { id: "row-args", style: "display:none" }, [row("args", el("input", { id: "f-args", class: "inp", placeholder: "-y @scope/server", style: "width:300px" }))]),
+      el("div", { id: "row-cwd", style: "display:none" }, [row("cwd", el("input", { id: "f-cwd", class: "inp", placeholder: "/path/to/server (optional)", style: "width:300px" }))]),
       row("header", el("input", { id: "f-header", class: "inp", placeholder: "Authorization=Bearer ${TOKEN}", style: "width:300px" })),
       row("env", el("input", { id: "f-env", class: "inp", placeholder: "API_KEY=${API_KEY}", style: "width:300px" })),
       el("div", { class: "toolbar", style: "margin-top:6px" }, [btn("Save", saveServer, "primary"), btn("Cancel", () => { ADD_FORM = false; show("servers"); })]),
@@ -960,6 +962,7 @@ function serverDetail(s, span) {
   if (s.url) add("url", s.url);
   if (s.command) add("command", s.command);
   if (s.args && s.args.length) add("args", s.args.join(" "));
+  if (s.cwd) add("cwd", s.cwd);
   (s.headers || []).forEach((h) => add("header." + h.key, h.value));
   (s.env || []).forEach((e) => add("env." + e.key, e.value));
   return el("tr", { class: "detail" }, [el("td", { colspan: span }, [el("div", { class: "bd" }, [

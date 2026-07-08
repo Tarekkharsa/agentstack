@@ -13,7 +13,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::{ApplyArgs, BootstrapArgs, DoctorArgs, InstallArgs};
 use crate::lock::Lock;
-use crate::manifest::{validate_with_targets, Manifest};
+use crate::manifest::{validate_with_context, Manifest};
 use crate::render::resolve_targets;
 use crate::scope::Scope;
 use crate::secret::SecretSources;
@@ -122,7 +122,7 @@ pub(crate) struct Preflight {
 /// Read-only — touches no config.
 pub(crate) fn preflight(ctx: &super::Context, target_ids: &[String]) -> Result<Preflight> {
     let manifest = &ctx.loaded.manifest;
-    let validation_errors = print_validation(manifest, ctx.registry.ids().collect());
+    let validation_errors = print_validation(ctx);
     print_adapters(ctx, target_ids);
     let skill_issues = print_skills(ctx)?;
     let missing_secrets = print_secrets(manifest, &ctx.dir);
@@ -146,8 +146,15 @@ fn apply_args(args: &BootstrapArgs, write: bool, scope: Scope) -> ApplyArgs {
     }
 }
 
-fn print_validation(manifest: &Manifest, target_ids: Vec<&str>) -> bool {
-    let issues = validate_with_targets(manifest, target_ids);
+fn print_validation(ctx: &super::Context) -> bool {
+    let manifest = &ctx.loaded.manifest;
+    // Library-aware, mirroring `doctor`/`apply`: a profile or plugin-recipe ref
+    // to a central-library skill/server resolves here too, so it is not flagged
+    // as unknown the way an inline-only view would flag it.
+    let libctx = ctx.library_ctx();
+    let vctx = libctx.validate_ctx(&ctx.dir);
+    let target_ids: Vec<&str> = ctx.registry.ids().collect();
+    let issues = validate_with_context(manifest, target_ids, &vctx);
     if issues.is_empty() {
         println!("\n{} {}", "✓".green(), "Manifest validates".bold());
         return false;

@@ -1291,11 +1291,13 @@ fn server_from_native_value(value: &Value) -> Option<Server> {
         .and_then(Value::as_object)
         .map(string_map)
         .unwrap_or_default();
+    let cwd = obj.get("cwd").and_then(Value::as_str).map(str::to_string);
     Some(Server {
         server_type,
         url,
         command,
         args,
+        cwd,
         targets: crate::manifest::model::all_targets(),
         owner: None,
         headers,

@@ -27,7 +27,7 @@ run `agentstack <command> --help` for any of them:
   Capabilities & library   remove · install · update · lock · upgrade · lib · consolidate · adopt
   Activate & run           use · session · run · runs · kill · hook
   Zero-files bridge        connect · trust · disconnect · mcp · codemode
-  Inspect & tune           diff · explain · audit · analyze · proxy · stats · restore · secret
+  Inspect & tune           diff · explain · audit · analyze · proxy · stats · restore · secret · settings
   Share & extend           export · import · pack · plugins · adapters · self"
 )]
 pub struct Cli {
@@ -228,6 +228,12 @@ pub enum Command {
     /// Manage secrets in the OS keychain.
     #[command(hide = true)]
     Secret(SecretArgs),
+
+    /// Edit a target's native `[settings.<target>]` entries (e.g. Claude Code
+    /// `model`) instead of hand-editing the manifest. Dry-run by default;
+    /// `--write` applies.
+    #[command(hide = true)]
+    Settings(SettingsArgs),
 
     // ── Share & extend ───────────────────────────────────────────────────
     /// Export the manifest (+ lock, + optionally secrets) as an encrypted bundle.
@@ -559,6 +565,9 @@ pub struct AddServerArgs {
     /// stdio arg (repeatable). Accepts leading-dash values (e.g. `--arg -y`).
     #[arg(long = "arg", value_name = "ARG", allow_hyphen_values = true)]
     pub args: Vec<String>,
+    /// Working directory the stdio server is launched from; may contain `${REF}`.
+    #[arg(long)]
+    pub cwd: Option<String>,
     /// Env `Key=Value` (repeatable).
     #[arg(long = "env", value_name = "K=V")]
     pub env: Vec<String>,
@@ -579,6 +588,47 @@ pub struct AddSkillArgs {
     /// Also add to this profile's skill list.
     #[arg(long)]
     pub profile: Option<String>,
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct SettingsArgs {
+    #[command(subcommand)]
+    pub kind: SettingsKind,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SettingsKind {
+    /// Set a `[settings.<target>]` key (dotted paths like
+    /// `permissions.defaultMode` are supported).
+    Set(SettingsSetArgs),
+    /// Remove a `[settings.<target>]` key.
+    Unset(SettingsUnsetArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct SettingsSetArgs {
+    /// Adapter id whose settings to edit (e.g. `claude-code`, `codex`).
+    pub target: String,
+    /// Setting key; a dotted path descends into nested tables
+    /// (e.g. `permissions.defaultMode`).
+    pub key: String,
+    /// Value; coerced to bool/number/enum for keys in the adapter's catalog,
+    /// stored as a string otherwise.
+    pub value: String,
+    /// Write the change (else dry-run).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct SettingsUnsetArgs {
+    /// Adapter id whose settings to edit (e.g. `claude-code`, `codex`).
+    pub target: String,
+    /// Setting key to remove (dotted paths supported).
+    pub key: String,
+    /// Write the change (else dry-run).
     #[arg(long)]
     pub write: bool,
 }
