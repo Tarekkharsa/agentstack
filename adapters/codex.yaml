@@ -16,6 +16,7 @@ mcp:
     url: url
     command: command
     args: args
+    cwd: cwd
     headers: http_headers
     env: env
   # Codex does not tag transport with a type key; presence of url vs command implies it.

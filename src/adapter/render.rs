@@ -95,7 +95,15 @@ pub fn render_server(
         }
     }
 
-    // 5. headers (nested object)
+    // 5. cwd (working directory). Only meaningful for stdio servers; rendered
+    // to the adapter's native key where one exists, dropped where it doesn't.
+    if server.server_type == ServerType::Stdio {
+        if let (Some(field), Some(cwd)) = (&mcp.fields.cwd, &server.cwd) {
+            body.insert(field.clone(), Value::String(sub(cwd)));
+        }
+    }
+
+    // 6. headers (nested object)
     if let Some(field) = &mcp.fields.headers {
         if !server.headers.is_empty() {
             let mut h = Map::new();
@@ -106,7 +114,7 @@ pub fn render_server(
         }
     }
 
-    // 6. env (nested object)
+    // 7. env (nested object)
     if let Some(field) = &mcp.fields.env {
         if !server.env.is_empty() {
             let mut e = Map::new();
@@ -117,7 +125,7 @@ pub fn render_server(
         }
     }
 
-    // 7. Per-target extras: native keys with no transport-neutral equivalent
+    // 8. Per-target extras: native keys with no transport-neutral equivalent
     // (e.g. Codex `startup_timeout_sec`), passed through verbatim. Rendered
     // last so a deliberate extra can override a canonical field.
     if let Some(extra) = server.extra.get(&desc.id) {
@@ -363,6 +371,45 @@ mod tests {
         let claude = render_server(reg.get("claude-code").unwrap(), &s, &resolver);
         assert_eq!(claude.value["timeout"], 5);
         assert!(claude.value.get("startup_timeout_sec").is_none());
+    }
+
+    #[test]
+    fn cwd_renders_to_native_key_for_supporting_adapter_and_drops_otherwise() {
+        let reg = Registry::load().unwrap();
+        let s = server(
+            r#"
+            type = "stdio"
+            command = "node"
+            args = ["dist/index.js"]
+            cwd = "/srv/tldraw"
+            "#,
+        );
+        let resolver = MapResolver::default();
+
+        // Codex maps `cwd` → native `cwd`.
+        let codex = render_server(reg.get("codex").unwrap(), &s, &resolver);
+        assert_eq!(codex.value["cwd"], "/srv/tldraw");
+
+        // Claude Code's config format has no working-directory key: dropped, and
+        // the rest of the server still renders.
+        let claude = render_server(reg.get("claude-code").unwrap(), &s, &resolver);
+        assert!(claude.value.get("cwd").is_none());
+        assert_eq!(claude.value["command"], "node");
+    }
+
+    #[test]
+    fn cwd_substitutes_refs_and_is_omitted_for_http() {
+        let reg = Registry::load().unwrap();
+        let resolver = MapResolver::from([("HOME_DIR", "/home/me")]);
+
+        let stdio = server("type = \"stdio\"\ncommand = \"node\"\ncwd = \"${HOME_DIR}/server\"\n");
+        let r = render_server(reg.get("codex").unwrap(), &stdio, &resolver);
+        assert_eq!(r.value["cwd"], "/home/me/server");
+
+        // cwd is meaningless for a remote transport and must never render.
+        let http = server("type = \"http\"\nurl = \"https://x\"\ncwd = \"/nope\"\n");
+        let r = render_server(reg.get("codex").unwrap(), &http, &resolver);
+        assert!(r.value.get("cwd").is_none());
     }
 
     #[test]

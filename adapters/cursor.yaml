@@ -20,5 +20,6 @@ mcp:
     headers: headers
     command: command
     args: args
+    cwd: cwd
     env: env
   secret_mode: literal

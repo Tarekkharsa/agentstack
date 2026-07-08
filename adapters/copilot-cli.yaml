@@ -27,6 +27,7 @@ mcp:
     headers: headers
     command: command
     args: args
+    cwd: cwd
     env: env
   # Copilot CLI tags transport with a `type` key. Stdio servers use "local";
   # remote streamable-HTTP servers use "http" (SSE servers use "sse").

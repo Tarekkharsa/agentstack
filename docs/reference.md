@@ -57,6 +57,25 @@ hand-tuned native key round-trips instead of being dropped by the next
 `apply --write`. A typo'd adapter id under `extra.` is a validation error, not
 a silent no-op.
 
+A stdio server can declare a `cwd` — the working directory it launches from —
+for servers that only start correctly when spawned from their own directory
+(e.g. relative dynamic `import()`s that resolve against `process.cwd()`):
+
+```toml
+[servers.tldraw]
+type = "stdio"
+command = "node"
+args = ["dist/index.js"]
+cwd = "/path/to/tldraw-mcp-server"   # supports ${REF}/path expansion
+```
+
+It renders to each adapter's native working-directory key (`cwd` on Codex,
+Cursor, Gemini CLI, OpenCode, and Copilot CLI) and round-trips through
+`init`/`adopt`. Adapters whose config has no such key (Claude Code, VS Code,
+Windsurf, Kiro, Claude Desktop, …) render the server without it and `apply`
+prints a warning — the server may need a shell wrapper that `cd`s first on
+those harnesses.
+
 A server can also scope which targets it renders to at all, mirroring
 instructions and hooks: `[servers.X] targets = ["claude-code"]` fans out to
 that adapter only, the `["*"]` default means every target, and an explicit

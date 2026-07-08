@@ -21,6 +21,7 @@ mcp:
     headers: headers
     command: command
     args: args
+    cwd: cwd
     env: env
   secret_mode: literal
 # Gemini CLI reads skills from ~/.gemini/skills (global) and <repo>/.gemini/skills.

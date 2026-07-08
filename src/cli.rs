@@ -565,6 +565,9 @@ pub struct AddServerArgs {
     /// stdio arg (repeatable). Accepts leading-dash values (e.g. `--arg -y`).
     #[arg(long = "arg", value_name = "ARG", allow_hyphen_values = true)]
     pub args: Vec<String>,
+    /// Working directory the stdio server is launched from; may contain `${REF}`.
+    #[arg(long)]
+    pub cwd: Option<String>,
     /// Env `Key=Value` (repeatable).
     #[arg(long = "env", value_name = "K=V")]
     pub env: Vec<String>,
