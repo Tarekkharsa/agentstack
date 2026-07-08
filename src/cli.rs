@@ -27,7 +27,7 @@ run `agentstack <command> --help` for any of them:
   Capabilities & library   remove · install · update · lock · upgrade · lib · consolidate · adopt
   Activate & run           use · session · run · runs · kill · hook
   Zero-files bridge        connect · trust · disconnect · mcp · codemode
-  Inspect & tune           diff · explain · audit · analyze · stats · restore · secret
+  Inspect & tune           diff · explain · audit · analyze · proxy · stats · restore · secret
   Share & extend           export · import · pack · plugins · adapters · self"
 )]
 pub struct Cli {
@@ -213,6 +213,13 @@ pub enum Command {
     /// Report brokered call activity (from the audit log) and library-wide dead
     /// weight — capabilities installed but never used. Read-only, local.
     Analyze(AnalyzeArgs),
+
+    /// Watch — and rank — what every tool, server, and skill costs your agent
+    /// per turn on the wire. A localhost proxy in front of the Anthropic API
+    /// that relays requests verbatim (observe only) and accounts the tools
+    /// block's per-turn token cost, then ties it back to loaded-vs-called.
+    #[command(subcommand, hide = true)]
+    Proxy(ProxyCmd),
 
     /// Restore a CLI config from its pre-write backup (undo an apply).
     #[command(hide = true)]
@@ -973,6 +980,36 @@ pub struct StatsArgs {
 #[derive(Args, Debug)]
 pub struct AnalyzeArgs {
     /// Emit the report as JSON (for the dashboard or further processing).
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProxyCmd {
+    /// Start the wire proxy on a loopback port and relay to the Anthropic API
+    /// verbatim, accounting each turn's tools-block token cost as it flows.
+    /// Point your harness at it with `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`.
+    Start(ProxyStartArgs),
+
+    /// Rank what's been observed on the wire: per-capability tokens/turn, how
+    /// many turns each tool was actually called, and a loaded-vs-called hint.
+    Report(ProxyReportArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ProxyStartArgs {
+    /// Loopback port to listen on.
+    #[arg(long, default_value_t = crate::proxy::DEFAULT_PORT)]
+    pub port: u16,
+
+    /// Upstream API base URL to relay to.
+    #[arg(long, default_value = crate::proxy::DEFAULT_UPSTREAM)]
+    pub upstream: String,
+}
+
+#[derive(Args, Debug)]
+pub struct ProxyReportArgs {
+    /// Emit the aggregate as JSON instead of the ranked table.
     #[arg(long)]
     pub json: bool,
 }

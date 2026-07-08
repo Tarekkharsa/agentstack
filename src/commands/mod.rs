@@ -24,6 +24,7 @@ pub mod optimize;
 pub mod overview;
 pub mod pack;
 pub mod plugins;
+pub mod proxy;
 pub mod remove;
 pub mod restore;
 pub mod runs;

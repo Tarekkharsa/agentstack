@@ -43,6 +43,7 @@ fn run() -> Result<()> {
         Command::Search(args) => commands::search::run(args, dir),
         Command::Stats(args) => commands::stats::run(args, dir),
         Command::Analyze(args) => commands::analyze::run(args),
+        Command::Proxy(cmd) => commands::proxy::run(cmd, dir),
         Command::Optimize(args) => commands::optimize::run(args, dir),
         Command::Adapters(args) => commands::adapters::run(args),
         Command::Pack(cmd) => commands::pack::run(cmd),
