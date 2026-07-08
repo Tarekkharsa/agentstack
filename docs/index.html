@@ -5,32 +5,60 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>agentstack — one manifest, every agent CLI</title>
 <meta name="description" content="Define MCP servers, skills, and instructions once; agentstack renders them into the native config of 13 agent CLIs. Secrets stay references. Setups travel.">
+<meta name="color-scheme" content="light dark">
+<meta property="og:title" content="agentstack — one manifest, every agent CLI">
+<meta property="og:description" content="Define MCP servers, skills, and instructions once. agentstack renders them into 13 agent CLIs. Secrets stay references. Setups travel.">
+<meta property="og:type" content="website">
 <style>
   :root {
     --paper: #FBFAF7;
-    --ink: #1C2024;
+    --surface: #FFFFFF;
+    --ink: #1B1F24;
     --muted: #5B6570;
+    --faint: #8A929B;
     --accent: #B4540A;
-    --line: #E4E0D8;
+    --accent-ink: #FFFFFF;
+    --accent-soft: rgba(180, 84, 10, 0.10);
+    --accent-line: rgba(180, 84, 10, 0.28);
+    --line: #E7E2D9;
+    --line-soft: #EFEBE3;
     --term: #14181C;
     --term-ink: #D7DEE4;
     --term-dim: #6B7683;
     --term-green: #7CC08B;
-    --code-bg: #F2EFE9;
+    --term-red: #E5786B;
+    --term-amber: #E0B04A;
+    --code-bg: #F3F0EA;
+    --shadow-sm: 0 1px 2px rgba(20,24,28,0.05), 0 1px 1px rgba(20,24,28,0.03);
+    --shadow-md: 0 4px 14px rgba(20,24,28,0.07), 0 1px 3px rgba(20,24,28,0.05);
+    --shadow-lg: 0 24px 60px -18px rgba(16,22,30,0.28), 0 8px 22px -12px rgba(16,22,30,0.20);
+    --radius: 14px;
+    --radius-sm: 9px;
     --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --wrap: 54rem;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --paper: #16191D;
-      --ink: #E8E6E1;
+      --paper: #14171B;
+      --surface: #1A1E23;
+      --ink: #E9E7E2;
       --muted: #9AA3AC;
-      --accent: #E08843;
-      --line: #2A2F35;
-      --code-bg: #1E2227;
+      --faint: #737C85;
+      --accent: #F0975A;
+      --accent-ink: #1A1206;
+      --accent-soft: rgba(240,151,90,0.12);
+      --accent-line: rgba(240,151,90,0.30);
+      --line: #292E34;
+      --line-soft: #23282E;
+      --code-bg: #1E2329;
       --term: #0E1114;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.30);
+      --shadow-md: 0 6px 18px rgba(0,0,0,0.32);
+      --shadow-lg: 0 30px 70px -20px rgba(0,0,0,0.60), 0 10px 24px -12px rgba(0,0,0,0.45);
     }
   }
+
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
@@ -40,155 +68,276 @@
     color: var(--ink);
     font: 17px/1.65 var(--sans);
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover, a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  ::selection { background: var(--accent-soft); }
 
-  header { border-bottom: 1px solid var(--line); }
-  .bar {
-    max-width: 46rem; margin: 0 auto; padding: 0.9rem 1.25rem;
-    display: flex; align-items: baseline; gap: 1.25rem; flex-wrap: wrap;
+  /* ---------- sticky nav ---------- */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--paper) 78%, transparent);
+    -webkit-backdrop-filter: saturate(1.4) blur(12px);
+    backdrop-filter: saturate(1.4) blur(12px);
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
-  .wordmark { font-family: var(--mono); font-weight: 700; font-size: 1rem; color: var(--ink); }
+  header.scrolled { border-bottom-color: var(--line); box-shadow: var(--shadow-sm); }
+  .bar {
+    max-width: var(--wrap); margin: 0 auto; padding: 0.8rem 1.35rem;
+    display: flex; align-items: center; gap: 1.1rem;
+  }
+  .wordmark {
+    font-family: var(--mono); font-weight: 700; font-size: 1.02rem; color: var(--ink);
+    display: inline-flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em;
+  }
   .wordmark:hover { text-decoration: none; }
-  nav { margin-left: auto; display: flex; gap: 1.1rem; flex-wrap: wrap; }
-  nav a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
-  nav a:hover { color: var(--accent); }
+  .glyph {
+    width: 22px; height: 22px; border-radius: 6px; flex: none;
+    background: var(--accent); color: var(--accent-ink);
+    display: grid; place-items: center; font-size: 0.72rem; font-weight: 700;
+    box-shadow: var(--shadow-sm);
+  }
+  nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.15rem; flex-wrap: wrap; }
+  nav.top a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+  nav.top a:hover { color: var(--accent); text-decoration: none; }
+  nav.top .ghost {
+    padding: 0.34rem 0.7rem; border: 1px solid var(--line); border-radius: 7px;
+    color: var(--ink);
+  }
+  nav.top .ghost:hover { border-color: var(--accent-line); background: var(--accent-soft); }
 
-  main { max-width: 46rem; margin: 0 auto; padding: 0 1.25rem 5rem; }
-  section { margin-top: 4.25rem; }
+  /* ---------- layout ---------- */
+  main { max-width: var(--wrap); margin: 0 auto; padding: 0 1.35rem 6rem; }
+  section { margin-top: 5rem; scroll-margin-top: 5rem; }
 
   .eyebrow {
     font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
-    letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
-    margin: 0 0 0.6rem;
+    letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent);
+    margin: 0 0 0.7rem; display: inline-flex; align-items: center; gap: 0.55rem;
+  }
+  .eyebrow::before {
+    content: ""; width: 1.6rem; height: 1px; background: var(--accent-line);
   }
   h1 {
     font-family: var(--mono);
-    font-size: clamp(1.6rem, 4.5vw, 2.3rem);
-    line-height: 1.25; letter-spacing: -0.02em;
-    margin: 2.75rem 0 1rem;
+    font-size: clamp(1.9rem, 5.6vw, 3rem);
+    line-height: 1.12; letter-spacing: -0.03em; font-weight: 700;
+    margin: 1.1rem 0 1.1rem;
   }
   h1 .accent { color: var(--accent); }
+  .cursor {
+    display: inline-block; width: 0.58ch; height: 1.05em; vertical-align: -0.14em;
+    background: var(--accent); margin-left: 0.08em; border-radius: 1px;
+    animation: blink 1.15s steps(2, start) infinite;
+  }
+  @keyframes blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
   h2 {
-    font-family: var(--mono); font-size: 1.15rem; letter-spacing: -0.01em;
+    font-family: var(--mono); font-size: 1.28rem; letter-spacing: -0.015em; font-weight: 700;
     margin: 0 0 0.9rem;
   }
   p { margin: 0 0 1rem; }
-  .lede { font-size: 1.05rem; color: var(--muted); max-width: 40rem; }
+  .lede { font-size: 1.16rem; line-height: 1.6; color: var(--muted); max-width: 42rem; }
+  .lede strong { color: var(--ink); font-weight: 600; }
   .muted { color: var(--muted); }
-  .small { font-size: 0.85rem; }
+  .small { font-size: 0.86rem; }
 
+  /* ---------- buttons ---------- */
+  .cta { display: flex; gap: 0.7rem; flex-wrap: wrap; margin: 1.6rem 0 0; }
+  .btn {
+    font-family: var(--mono); font-size: 0.85rem; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.62rem 1.05rem; border-radius: 9px; cursor: pointer;
+    border: 1px solid transparent; transition: transform 0.12s ease, box-shadow 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+  }
+  .btn:hover { text-decoration: none; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-md); }
+  .btn.primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-lg); }
+  .btn.secondary { background: var(--surface); color: var(--ink); border-color: var(--line); box-shadow: var(--shadow-sm); }
+  .btn.secondary:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+
+  /* ---------- code + terminal ---------- */
   code {
     font-family: var(--mono); font-size: 0.86em;
-    background: var(--code-bg); padding: 0.12em 0.35em; border-radius: 4px;
+    background: var(--code-bg); padding: 0.12em 0.36em; border-radius: 5px;
+    border: 1px solid var(--line-soft);
   }
   pre {
-    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
-    padding: 1rem 1.1rem; overflow-x: auto; margin: 0 0 1rem;
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 1rem 1.15rem; overflow-x: auto; margin: 0 0 1rem;
     font: 0.84rem/1.6 var(--mono);
   }
-  pre code { background: none; padding: 0; font-size: 1em; }
+  pre code { background: none; padding: 0; border: 0; font-size: 1em; }
 
-  /* The signature: a terminal you can read top to bottom and copy from. */
   .term {
     background: var(--term); color: var(--term-ink);
-    border-radius: 10px; margin: 1.75rem 0 0.5rem;
-    box-shadow: 0 12px 32px rgba(10, 14, 18, 0.18);
+    border-radius: var(--radius); margin: 1.75rem 0 0.5rem;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid rgba(255,255,255,0.06);
+    overflow: hidden;
   }
   .term-head {
     display: flex; align-items: center; gap: 0.5rem;
-    padding: 0.65rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.07);
+    padding: 0.7rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.015);
   }
-  .term-head span { width: 10px; height: 10px; border-radius: 50%; background: var(--term-dim); opacity: 0.45; }
+  .term-head i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .term-head .r { background: var(--term-red); }
+  .term-head .y { background: var(--term-amber); }
+  .term-head .g { background: var(--term-green); }
   .term-head b {
-    margin-left: auto; font: 500 0.7rem var(--mono); color: var(--term-dim); letter-spacing: 0.08em;
+    margin-left: auto; font: 600 0.7rem var(--mono); color: var(--term-dim); letter-spacing: 0.06em;
   }
   .term pre {
-    background: none; border: 0; margin: 0; padding: 1.1rem 1.25rem 1.25rem;
-    color: inherit; font-size: 0.86rem;
+    background: none; border: 0; margin: 0; padding: 1.15rem 1.3rem 1.35rem;
+    color: inherit; font-size: 0.865rem; line-height: 1.62;
   }
-  .term .p { color: var(--term-dim); user-select: none; }
+  .term .p { color: var(--accent); user-select: none; font-weight: 600; }
   .term .c { color: var(--term-dim); }
   .term .ok { color: var(--term-green); }
+  .term .no { color: var(--term-red); }
 
   .copywrap { position: relative; }
   .copybtn {
-    position: absolute; top: 0.55rem; right: 0.55rem;
-    font: 600 0.7rem var(--mono); letter-spacing: 0.05em;
-    color: var(--muted); background: var(--paper);
-    border: 1px solid var(--line); border-radius: 6px;
-    padding: 0.25rem 0.55rem; cursor: pointer;
+    position: absolute; top: 0.5rem; right: 0.5rem;
+    font: 600 0.68rem var(--mono); letter-spacing: 0.04em;
+    color: var(--muted); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 0.28rem 0.6rem; cursor: pointer; transition: color 0.14s, border-color 0.14s;
   }
-  .copybtn:hover { color: var(--accent); border-color: var(--accent); }
+  .copybtn:hover { color: var(--accent); border-color: var(--accent-line); }
 
-  .steps { margin: 1.25rem 0 0; padding: 0; list-style: none; counter-reset: step; }
+  /* ---------- CLI chips ---------- */
+  .clis { margin: 2.25rem 0 0; }
+  .clis .lbl {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--faint); margin: 0 0 0.75rem;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .chip {
+    font-family: var(--mono); font-size: 0.78rem; color: var(--muted);
+    padding: 0.34rem 0.7rem; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--surface); box-shadow: var(--shadow-sm); white-space: nowrap;
+    transition: color 0.14s, border-color 0.14s, transform 0.14s;
+  }
+  .chip:hover { color: var(--accent); border-color: var(--accent-line); transform: translateY(-1px); }
+
+  /* ---------- steps ---------- */
+  .steps { margin: 1.5rem 0 0; padding: 0; list-style: none; counter-reset: step; }
   .steps li {
     counter-increment: step;
-    padding: 0.85rem 0; border-top: 1px solid var(--line);
-    display: grid; grid-template-columns: 2.4rem 1fr; gap: 0.4rem 0.9rem; align-items: baseline;
+    padding: 1rem 0; border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: 2.6rem 1fr; gap: 0.35rem 1rem; align-items: baseline;
   }
   .steps li::before {
-    content: counter(step);
-    font: 700 0.85rem var(--mono); color: var(--accent);
+    content: counter(step, decimal-leading-zero);
+    font: 700 0.82rem var(--mono); color: var(--accent);
+    letter-spacing: -0.02em;
   }
-  .steps b { font-family: var(--mono); font-size: 0.92rem; }
-  .steps p { margin: 0; color: var(--muted); font-size: 0.95rem; grid-column: 2; }
+  .steps b { font-family: var(--mono); font-size: 0.95rem; }
+  .steps p { margin: 0; color: var(--muted); font-size: 0.96rem; grid-column: 2; }
 
-  dl.modes { margin: 1.25rem 0 0; }
+  /* ---------- mode list ---------- */
+  dl.modes { margin: 1.5rem 0 0; display: grid; gap: 0.9rem; }
+  dl.modes > div {
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    background: var(--surface); padding: 1.05rem 1.2rem; box-shadow: var(--shadow-sm);
+  }
   dl.modes dt {
-    font-family: var(--mono); font-size: 0.95rem; font-weight: 700; margin-top: 1.4rem;
+    font-family: var(--mono); font-size: 0.98rem; font-weight: 700;
+    display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
   }
-  dl.modes dt small { color: var(--muted); font-weight: 400; font-family: var(--sans); }
-  dl.modes dd { margin: 0.35rem 0 0; color: var(--muted); }
+  dl.modes dt small {
+    color: var(--accent); font-weight: 600; font-size: 0.72rem; font-family: var(--mono);
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  dl.modes dd { margin: 0.45rem 0 0; color: var(--muted); font-size: 0.96rem; }
 
-  figure { margin: 1.5rem 0; }
-  figure img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); }
-  figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; }
+  /* ---------- figures ---------- */
+  figure { margin: 1.75rem 0 0; }
+  figure img {
+    max-width: 100%; border-radius: var(--radius); border: 1px solid var(--line);
+    box-shadow: var(--shadow-md); display: block;
+  }
+  figcaption { font-size: 0.86rem; color: var(--muted); margin-top: 0.7rem; }
 
-  ul.links { list-style: none; margin: 1.25rem 0 0; padding: 0; }
-  ul.links li { padding: 0.7rem 0; border-top: 1px solid var(--line); }
-  ul.links b { font-family: var(--mono); font-size: 0.95rem; }
-  ul.links p { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.95rem; }
+  /* ---------- feature card grid ---------- */
+  .cards { margin: 1.6rem 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
+  .fcard {
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+    padding: 1.2rem 1.25rem; box-shadow: var(--shadow-sm);
+    transition: transform 0.14s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+    display: flex; flex-direction: column;
+  }
+  .fcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--accent-line); }
+  .fcard h3 { margin: 0 0 0.5rem; font-family: var(--mono); font-size: 0.98rem; font-weight: 700; letter-spacing: -0.01em; }
+  .fcard h3 a { color: var(--ink); }
+  .fcard h3 a:hover { color: var(--accent); }
+  .fcard p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.55; }
+  .fcard .tag {
+    margin-top: 0.85rem; font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--accent); align-self: flex-start;
+    display: inline-flex; align-items: center; gap: 0.35rem;
+  }
+  .fcard a.tag::after { content: "→"; transition: transform 0.14s ease; }
+  .fcard:hover a.tag::after { transform: translateX(3px); }
 
-  footer { border-top: 1px solid var(--line); margin-top: 5rem; }
-  footer .bar { padding: 1.4rem 1.25rem; font-size: 0.85rem; color: var(--muted); }
+  /* ---------- footer ---------- */
+  footer { border-top: 1px solid var(--line); margin-top: 6rem; background: var(--line-soft); }
+  footer .bar { padding: 1.6rem 1.35rem; font-size: 0.85rem; color: var(--muted); }
+  footer nav { margin-left: auto; display: flex; gap: 1.1rem; }
+  footer nav a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+  footer nav a:hover { color: var(--accent); }
 
-  @media (max-width: 560px) {
+  /* ---------- scroll reveal ---------- */
+  .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.6s ease, transform 0.6s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
+
+  @media (max-width: 620px) {
     body { font-size: 16px; }
-    .steps li { grid-template-columns: 1.6rem 1fr; }
-    nav { gap: 0.8rem; }
+    .cards { grid-template-columns: 1fr; }
+    .steps li { grid-template-columns: 1.9rem 1fr; }
+    nav.top { gap: 0.85rem; }
+    nav.top .refline { display: none; }
+    section { margin-top: 4rem; }
   }
 </style>
 </head>
 <body>
 
-<header>
+<header id="site-header">
   <div class="bar">
-    <a class="wordmark" href="./">agentstack</a>
-    <nav aria-label="Project links">
-      <a href="https://github.com/Tarekkharsa/agentstack">github</a>
-      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">reference</a>
+    <a class="wordmark" href="./"><span class="glyph" aria-hidden="true">as</span>agentstack</a>
+    <nav class="top" aria-label="Project links">
+      <a class="refline" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">reference</a>
       <a href="library.html">library&nbsp;guide</a>
-      <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
+      <a class="ghost" href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
     </nav>
   </div>
 </header>
 
 <main>
 
-  <h1>One manifest.<br>Every agent CLI.<span class="accent">_</span></h1>
-  <p class="lede">
-    Define your MCP servers, skills, and instructions once in
-    <code>.agentstack/agentstack.toml</code>. agentstack renders them into the
-    native config of 13 agent CLIs — Claude Code, Codex, Cursor, Windsurf,
-    Gemini CLI, VS Code, and more. Secrets stay references. Setups travel.
-  </p>
+  <section id="hero" style="margin-top:3.5rem">
+    <p class="eyebrow">One binary · 13 agent CLIs</p>
+    <h1>One manifest.<br>Every agent CLI.<span class="cursor" aria-hidden="true"></span></h1>
+    <p class="lede">
+      Define your MCP servers, skills, and instructions once in
+      <code>.agentstack/agentstack.toml</code>. agentstack renders them into the
+      native config of 13 agent CLIs. <strong>Secrets stay references. Setups travel.</strong>
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="#install">Install agentstack</a>
+      <a class="btn secondary" href="https://github.com/Tarekkharsa/agentstack">Star on GitHub</a>
+    </div>
 
-  <div class="term">
-    <div class="term-head" aria-hidden="true"><span></span><span></span><span></span><b>the everyday loop</b></div>
-    <pre><code><span class="p">$</span> agentstack init
+    <div class="term">
+      <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>the everyday loop</b></div>
+      <pre><code><span class="p">$</span> agentstack init
 <span class="ok">✓</span> imported 4 servers + 2 skills from your existing CLI configs
 <span class="ok">✓</span> lifted 2 inline tokens into ${REF}s <span class="c"># stored in your OS keychain</span>
 
@@ -199,13 +348,33 @@
 <span class="p">$</span> agentstack apply
 <span class="c">→ preview of every CLI's config changes … confirm to write</span>
 <span class="ok">✓</span> rendered to claude-code, codex — backups taken, state tracked</code></pre>
-  </div>
-  <p class="small muted">
-    Lost? Run <code>agentstack</code> with no arguments — it names the one next
-    step for the directory you're in.
-  </p>
+    </div>
+    <p class="small muted">
+      Lost? Run <code>agentstack</code> with no arguments — it names the one next
+      step for the directory you're in.
+    </p>
 
-  <section id="install">
+    <div class="clis">
+      <p class="lbl">Renders into the native config of</p>
+      <div class="chips">
+        <span class="chip">Claude Code</span>
+        <span class="chip">Codex CLI</span>
+        <span class="chip">Cursor</span>
+        <span class="chip">Windsurf</span>
+        <span class="chip">Gemini CLI</span>
+        <span class="chip">VS Code</span>
+        <span class="chip">GitHub Copilot CLI</span>
+        <span class="chip">Claude Desktop</span>
+        <span class="chip">OpenCode</span>
+        <span class="chip">Antigravity</span>
+        <span class="chip">Junie</span>
+        <span class="chip">Kiro</span>
+        <span class="chip">Pi</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="install" class="reveal">
     <p class="eyebrow">Install</p>
     <div class="copywrap">
       <pre><code>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</code></pre>
@@ -213,11 +382,11 @@
     </div>
     <p class="small muted">
       One static binary, no runtime dependencies. From a checkout:
-      <code>cargo build --release && target/release/agentstack self link</code>.
+      <code>cargo build --release &amp;&amp; target/release/agentstack self link</code>.
     </p>
   </section>
 
-  <section id="start">
+  <section id="start" class="reveal">
     <p class="eyebrow">Getting started</p>
     <h2>From your current setup to every CLI</h2>
     <p>
@@ -249,7 +418,7 @@
     </figure>
   </section>
 
-  <section id="manifest">
+  <section id="manifest" class="reveal">
     <p class="eyebrow">The manifest</p>
     <h2>One file, reviewed like code</h2>
     <pre><code>version = 1
@@ -275,7 +444,7 @@ default = ["claude-code", "codex"]</code></pre>
     </p>
   </section>
 
-  <section id="trust">
+  <section id="trust" class="reveal">
     <p class="eyebrow">The trust gate</p>
     <h2>Clone anything. Nothing runs until you say so.</h2>
     <p class="muted">
@@ -287,17 +456,17 @@ default = ["claude-code", "codex"]</code></pre>
       re-gates it), and from then on every brokered call is firewalled and audited.
     </p>
     <div class="term">
-      <div class="term-head" aria-hidden="true"><span></span><span></span><span></span><b>clone → inert → review → trust → firewalled → audited</b></div>
+      <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → review → trust → firewalled → audited</b></div>
       <pre><code><span class="p">$</span> git clone some-repo &amp;&amp; cd some-repo   <span class="c"># declares servers you've never seen</span>
 <span class="p">$</span> agentstack mcp --auto-project        <span class="c"># an agent asks: what can I touch here?</span>
-<span class="c">  ✗ untrusted — none of its servers are spawned or contacted</span>
+<span class="no">  ✗ untrusted — none of its servers are spawned or contacted</span>
 
 <span class="p">$</span> agentstack trust .
 <span class="c">  ▶ demo: runs `python3 ./server.py`   # you see exactly what it would run</span>
 <span class="ok">  ✓</span> trusted at sha256:945b4b…         <span class="c"># editing the manifest re-gates it</span>
 
 <span class="c">  agent → demo.echo         </span><span class="ok">✓ ok</span><span class="c">       brokered through the gateway, logged</span>
-<span class="c">  agent → demo.secret_read  ✗ denied   blocked by the manifest's [policy] firewall</span>
+<span class="c">  agent → demo.secret_read  </span><span class="no">✗ denied</span><span class="c">   blocked by the manifest's [policy] firewall</span>
 <span class="c">  every call → ~/.agentstack/audit/calls.jsonl  (tool · outcome · latency)</span></code></pre>
     </div>
     <figure>
@@ -311,7 +480,7 @@ default = ["claude-code", "codex"]</code></pre>
     </p>
   </section>
 
-  <section id="modes">
+  <section id="modes" class="reveal">
     <p class="eyebrow">Rendered files</p>
     <h2>Pick where artifacts live</h2>
     <p class="muted">
@@ -319,23 +488,29 @@ default = ["claude-code", "codex"]</code></pre>
       (<code>.mcp.json</code>, <code>.claude/skills/</code>) are a per-project choice:
     </p>
     <dl class="modes">
-      <dt>static <small>— the default</small></dt>
-      <dd>Artifacts (<code>.mcp.json</code>, <code>.claude/skills/</code>, and the
-          compiled <code>CLAUDE.md</code>&nbsp;/&nbsp;<code>AGENTS.md</code>) sit on
-          disk, kept out of git by a managed <code>.gitignore</code> block that only
-          ever covers files agentstack itself wrote — so a repo tracks only your
-          <code>.agentstack/</code> intent and a hand-maintained file is never
-          hidden. Works however you launch your tools.</dd>
-      <dt>clean-at-rest</dt>
-      <dd>Nothing generated exists between sessions. <code>agentstack run &lt;cli&gt; --profile &lt;p&gt;</code>
-          injects on launch and reverts on exit; <code>git status</code> stays silent.</dd>
-      <dt>zero files</dt>
-      <dd>Nothing generated at all — the gateway serves each repo's servers on the
-          fly, behind the <a href="#trust">trust gate</a> above.</dd>
+      <div>
+        <dt>static <small>default</small></dt>
+        <dd>Artifacts (<code>.mcp.json</code>, <code>.claude/skills/</code>, and the
+            compiled <code>CLAUDE.md</code>&nbsp;/&nbsp;<code>AGENTS.md</code>) sit on
+            disk, kept out of git by a managed <code>.gitignore</code> block that only
+            ever covers files agentstack itself wrote — so a repo tracks only your
+            <code>.agentstack/</code> intent and a hand-maintained file is never
+            hidden. Works however you launch your tools.</dd>
+      </div>
+      <div>
+        <dt>clean-at-rest</dt>
+        <dd>Nothing generated exists between sessions. <code>agentstack run &lt;cli&gt; --profile &lt;p&gt;</code>
+            injects on launch and reverts on exit; <code>git status</code> stays silent.</dd>
+      </div>
+      <div>
+        <dt>zero files</dt>
+        <dd>Nothing generated at all — the gateway serves each repo's servers on the
+            fly, behind the <a href="#trust">trust gate</a> above.</dd>
+      </div>
     </dl>
   </section>
 
-  <section id="team">
+  <section id="team" class="reveal">
     <p class="eyebrow">Teams &amp; CI</p>
     <h2>Clone, bootstrap, done</h2>
     <pre><code>git clone &lt;repo&gt;
@@ -347,56 +522,52 @@ agentstack apply --write</code></pre>
 agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</code></pre>
   </section>
 
-  <section id="more">
+  <section id="more" class="reveal">
     <p class="eyebrow">Going further</p>
     <h2>When you want more than the loop</h2>
-    <ul class="links">
-      <li>
-        <b><a href="library.html">Central library guide</a></b>
+    <div class="cards">
+      <div class="fcard">
+        <h3><a href="library.html">Central library</a></h3>
         <p>One managed home for skills and servers; projects select by name and stay
-           digest-pinned. Install from a local dir or straight from a git subdirectory
-           (<code>lib add --git &lt;url&gt; --subpath &lt;dir&gt;</code>), sync it across
-           machines (<code>lib sync</code>), and pull ready-made skills from the shipped
-           catalog. The visual walkthrough.</p>
-      </li>
-      <li>
-        <b>Usage insight</b>
-        <p><code>agentstack analyze</code> reports what you actually call (from the
-           runtime audit log) and flags library skills and servers you installed but
+           digest-pinned. Install from a local dir or a git subdirectory, sync across
+           machines, and pull ready-made skills from the shipped catalog.</p>
+        <a class="tag" href="library.html">Visual walkthrough</a>
+      </div>
+      <div class="fcard">
+        <h3>Usage insight</h3>
+        <p><code>agentstack analyze</code> reports what you actually call, from the
+           runtime audit log, and flags library skills and servers you installed but
            never use — read-only and local, so pruning is data-driven.</p>
-      </li>
-      <li>
-        <b><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Feature reference</a></b>
+        <span class="tag" style="color:var(--faint)">Read-only &amp; local</span>
+      </div>
+      <div class="fcard">
+        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Feature reference</a></h3>
         <p>The complete tested inventory: vendor packs, MCP firewall, call audit log,
            <code>optimize</code>, plugin recipes, live runs, code mode, and the full
            command list.</p>
-      </li>
-      <li>
-        <b><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">The no-terminal path</a></b>
+        <a class="tag" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Full reference</a>
+      </div>
+      <div class="fcard">
+        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">The no-terminal path</a></h3>
         <p>The whole lifecycle — discover, add, secrets, apply, verify, undo — from a
-           local, token-gated dashboard.</p>
-      </li>
-      <li>
-        <b>Vendor packs</b>
+           local, token-gated dashboard, with read-only Proxy and Insights panels.</p>
+        <a class="tag" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">Dashboard guide</a>
+      </div>
+      <div class="fcard">
+        <h3>Vendor packs</h3>
         <p><code>agentstack add from git:github.com/acme/pack@v1.2.0</code> installs a
            versioned MCP + skills + house-rules bundle — policy-gated and
            content-scanned before anything is written.</p>
-      </li>
-      <li>
-        <b>Personal layer</b>
-        <p><code>agentstack init --global</code> gives your machine-wide agent
-           instructions a home; they merge beneath every project and never land in a
-           repo's committed files.</p>
-      </li>
-      <li>
-        <b>Support any CLI, no rebuild</b>
-        <p>Each of the 13 agents is one data-driven YAML descriptor. Drop your own
-           into <code>~/.agentstack/adapters/</code> to add or override a harness —
-           <code>agentstack adapters validate &lt;file&gt;</code> checks it first, and
-           <code>adapters list</code> marks which are yours. A broken drop-in is
-           skipped with a warning, never fatal.</p>
-      </li>
-    </ul>
+        <span class="tag" style="color:var(--faint)">Versioned by tag</span>
+      </div>
+      <div class="fcard">
+        <h3>Support any CLI, no rebuild</h3>
+        <p>Each of the 13 agents is one data-driven YAML descriptor. Drop your own into
+           <code>~/.agentstack/adapters/</code> to add or override a harness — validated
+           first, and a broken drop-in is skipped with a warning, never fatal.</p>
+        <span class="tag" style="color:var(--faint)">Data-driven adapters</span>
+      </div>
+    </div>
     <figure>
       <img src="closed-loop.gif" alt="Terminal recording: install a versioned pack, apply everywhere, firewall a tool, watch the audited refusal, upgrade" loading="lazy">
       <figcaption>The closed loop in under a minute — pack install → apply → firewall → audited refusal → upgrade.</figcaption>
@@ -408,14 +579,16 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
 <footer>
   <div class="bar">
     <span>MIT or Apache-2.0, at your option.</span>
-    <nav aria-label="Footer links" style="margin-left:auto">
+    <nav aria-label="Footer links">
       <a href="https://github.com/Tarekkharsa/agentstack">source</a>
       <a href="https://github.com/Tarekkharsa/agentstack/issues">issues</a>
+      <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
     </nav>
   </div>
 </footer>
 
 <script>
+  // Copy buttons.
   for (const btn of document.querySelectorAll(".copybtn")) {
     btn.addEventListener("click", async () => {
       try {
@@ -424,6 +597,26 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
         setTimeout(() => (btn.textContent = "copy"), 1600);
       } catch { btn.textContent = "select + copy"; }
     });
+  }
+
+  // Header border appears once you scroll past the hero top.
+  const header = document.getElementById("site-header");
+  const onScroll = () => header.classList.toggle("scrolled", window.scrollY > 8);
+  addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  // Gentle scroll-reveal, disabled under reduced-motion.
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reveals = document.querySelectorAll(".reveal");
+  if (reduce || !("IntersectionObserver" in window)) {
+    reveals.forEach((el) => el.classList.add("in"));
+  } else {
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      }
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.06 });
+    reveals.forEach((el) => io.observe(el));
   }
 </script>
 
