@@ -238,11 +238,16 @@ pub fn plan_target_with_servers(
             failed.push(format!("{f} (server '{name}') — {why}"));
         }
         secrets.extend(rendered.secrets);
-        // A stdio `cwd` this target's config can't express is dropped by the
-        // renderer; flag it so it doesn't disappear without a trace.
+        // A stdio `cwd` this target's config can't express natively is instead
+        // auto-wrapped by the renderer into a shell that `cd`s there (see
+        // `render_server`), so it's no longer dropped and needs no warning.
+        // The only remaining gap is the (practically unreachable) case where
+        // the manifest has no `command` to wrap around — nothing to rewrite,
+        // so cwd really is dropped and the user still needs to know.
         if server.server_type == crate::manifest::ServerType::Stdio
             && server.cwd.is_some()
             && mcp.fields.cwd.is_none()
+            && !(mcp.fields.command.is_some() && server.command.is_some())
         {
             warnings.push(name.clone());
         }
@@ -700,7 +705,7 @@ mod tests {
     }
 
     #[test]
-    fn cwd_renders_for_capable_target_and_warns_for_incapable_one() {
+    fn cwd_renders_for_capable_target_and_auto_wraps_for_incapable_one() {
         let manifest: Manifest = toml::from_str(
             r#"
             version = 1
@@ -738,8 +743,9 @@ mod tests {
         assert!(codex.proposed.contains("/srv/tldraw"), "{}", codex.proposed);
         assert!(codex.warnings.is_empty());
 
-        // Claude Code has no cwd key: the server still renders, but the dropped
-        // cwd is surfaced as a warning rather than vanishing silently.
+        // Claude Code has no cwd key: instead of dropping it, the server is
+        // auto-wrapped in a shell that `cd`s there first — no warning needed
+        // since the cwd is still honored.
         let claude = plan_target_with_servers(
             reg.get("claude-code").unwrap(),
             &resolver,
@@ -753,11 +759,12 @@ mod tests {
         std::env::remove_var("HOME");
         assert_eq!(claude.managed, vec!["tldraw"]);
         assert!(
-            !claude.proposed.contains("/srv/tldraw"),
+            claude.proposed.contains("/srv/tldraw"),
             "{}",
             claude.proposed
         );
-        assert_eq!(claude.warnings, vec!["tldraw".to_string()]);
+        assert!(claude.proposed.contains("\"sh\""), "{}", claude.proposed);
+        assert!(claude.warnings.is_empty(), "{:?}", claude.warnings);
     }
 
     #[test]

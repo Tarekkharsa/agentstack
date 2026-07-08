@@ -92,30 +92,94 @@ pub fn render_server(
 
     // 3. command (+ args). Some CLIs (e.g. OpenCode) want a single combined
     // array under `command`; others want a command string + separate args array.
+    // The resolved (post-substitution) command/args are kept aside so step 5b
+    // can rebuild them into a shell wrapper if this adapter can't express `cwd`.
+    let mut resolved_command: Option<String> = None;
+    let mut resolved_args: Vec<String> = Vec::new();
     if mcp.command_array {
         if let (Some(field), Some(cmd)) = (&mcp.fields.command, &server.command) {
-            let mut arr = vec![Value::String(sub(cmd))];
-            arr.extend(server.args.iter().map(|a| Value::String(sub(a))));
+            let cmd_s = sub(cmd);
+            let args_s: Vec<String> = server.args.iter().map(|a| sub(a)).collect();
+            let mut arr = vec![Value::String(cmd_s.clone())];
+            arr.extend(args_s.iter().cloned().map(Value::String));
             body.insert(field.clone(), Value::Array(arr));
+            resolved_command = Some(cmd_s);
+            resolved_args = args_s;
         }
     } else {
         if let (Some(field), Some(cmd)) = (&mcp.fields.command, &server.command) {
-            body.insert(field.clone(), Value::String(sub(cmd)));
+            let cmd_s = sub(cmd);
+            body.insert(field.clone(), Value::String(cmd_s.clone()));
+            resolved_command = Some(cmd_s);
         }
         // 4. args
         if let Some(field) = &mcp.fields.args {
             if !server.args.is_empty() {
-                let arr = server.args.iter().map(|a| Value::String(sub(a))).collect();
+                let args_s: Vec<String> = server.args.iter().map(|a| sub(a)).collect();
+                let arr = args_s.iter().cloned().map(Value::String).collect();
                 body.insert(field.clone(), Value::Array(arr));
+                resolved_args = args_s;
             }
         }
     }
 
     // 5. cwd (working directory). Only meaningful for stdio servers; rendered
-    // to the adapter's native key where one exists, dropped where it doesn't.
+    // to the adapter's native key where one exists.
+    let mut cwd_rendered_natively = false;
     if server.server_type == ServerType::Stdio {
         if let (Some(field), Some(cwd)) = (&mcp.fields.cwd, &server.cwd) {
             body.insert(field.clone(), Value::String(sub(cwd)));
+            cwd_rendered_natively = true;
+        }
+    }
+
+    // 5b. Auto-wrap: this adapter has no native `cwd` key, but the server
+    // needs one. Rather than silently dropping it, rewrite command/args into
+    // a POSIX shell invocation that `cd`s there first — `sh -c "cd <dir> &&
+    // exec <cmd> <args...>"` — so the working directory is still honored.
+    // Requires an actual resolved command to wrap around; if the manifest
+    // somehow lacks one, there is nothing to wrap and cwd is simply dropped.
+    if server.server_type == ServerType::Stdio
+        && !cwd_rendered_natively
+        && mcp.fields.cwd.is_none()
+        && server.cwd.is_some()
+    {
+        if let Some(cmd) = &resolved_command {
+            let cwd_s = sub(server.cwd.as_deref().unwrap_or_default());
+            let mut shell_cmd = format!(
+                "cd {} && exec {}",
+                posix_shell_quote(&cwd_s),
+                posix_shell_quote(cmd)
+            );
+            for a in &resolved_args {
+                shell_cmd.push(' ');
+                shell_cmd.push_str(&posix_shell_quote(a));
+            }
+            if mcp.command_array {
+                if let Some(field) = &mcp.fields.command {
+                    body.insert(
+                        field.clone(),
+                        Value::Array(vec![
+                            Value::String("sh".to_string()),
+                            Value::String("-c".to_string()),
+                            Value::String(shell_cmd),
+                        ]),
+                    );
+                }
+            } else {
+                if let Some(field) = &mcp.fields.command {
+                    body.insert(field.clone(), Value::String("sh".to_string()));
+                }
+                if let Some(field) = &mcp.fields.args {
+                    body.insert(
+                        field.clone(),
+                        Value::Array(vec![
+                            Value::String("-c".to_string()),
+                            Value::String(shell_cmd),
+                        ]),
+                    );
+                }
+            }
         }
     }
 
@@ -172,6 +236,25 @@ pub fn render_server(
         representable,
         secrets,
     }
+}
+
+/// POSIX single-quote a string for safe use inside a `sh -c "..."` argument:
+/// wrap it in single quotes, escaping any embedded `'` as `'\''` (close the
+/// quote, emit an escaped literal quote, reopen the quote). Every other
+/// character — spaces, `$`, `&&`, etc. — is inert inside single quotes, so no
+/// further escaping is needed.
+fn posix_shell_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        if c == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(c);
+        }
+    }
+    out.push('\'');
+    out
 }
 
 /// Substitute `${NAME}` refs in every string leaf of an extras value; numbers,
@@ -412,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn cwd_renders_to_native_key_for_supporting_adapter_and_drops_otherwise() {
+    fn cwd_renders_to_native_key_for_supporting_adapter_and_wraps_otherwise() {
         let reg = Registry::load().unwrap();
         let s = server(
             r#"
@@ -424,15 +507,74 @@ mod tests {
         );
         let resolver = MapResolver::default();
 
-        // Codex maps `cwd` → native `cwd`.
+        // Codex maps `cwd` → native `cwd`; command/args are untouched.
         let codex = render_server(reg.get("codex").unwrap(), &s, &resolver);
         assert_eq!(codex.value["cwd"], "/srv/tldraw");
+        assert_eq!(codex.value["command"], "node");
 
-        // Claude Code's config format has no working-directory key: dropped, and
-        // the rest of the server still renders.
+        // Claude Code's config format has no working-directory key: instead of
+        // dropping cwd, the command is auto-wrapped in a shell that `cd`s there
+        // first.
         let claude = render_server(reg.get("claude-code").unwrap(), &s, &resolver);
         assert!(claude.value.get("cwd").is_none());
+        assert_eq!(claude.value["command"], "sh");
+        assert_eq!(
+            claude.value["args"],
+            serde_json::json!(["-c", "cd '/srv/tldraw' && exec 'node' 'dist/index.js'"])
+        );
+    }
+
+    #[test]
+    fn cwd_without_wrap_leaves_command_and_args_unchanged() {
+        // A stdio server with no cwd at all must never be wrapped, regardless
+        // of whether the target adapter can express cwd natively.
+        let reg = Registry::load().unwrap();
+        let s = server(
+            r#"
+            type = "stdio"
+            command = "node"
+            args = ["dist/index.js"]
+            "#,
+        );
+        let resolver = MapResolver::default();
+
+        let claude = render_server(reg.get("claude-code").unwrap(), &s, &resolver);
         assert_eq!(claude.value["command"], "node");
+        assert_eq!(claude.value["args"], serde_json::json!(["dist/index.js"]));
+        assert!(claude.value.get("cwd").is_none());
+    }
+
+    #[test]
+    fn wrapped_cwd_server_preserves_env_and_transport_tag() {
+        let reg = Registry::load().unwrap();
+        let s = server(
+            r#"
+            type = "stdio"
+            command = "/abs/node"
+            args = ["/abs/x.js"]
+            cwd = "/srv dir"
+            env = { K = "v" }
+            "#,
+        );
+        let resolver = MapResolver::default();
+        let r = render_server(reg.get("claude-code").unwrap(), &s, &resolver);
+
+        assert_eq!(r.value["type"], "stdio");
+        assert_eq!(r.value["command"], "sh");
+        assert_eq!(
+            r.value["args"],
+            serde_json::json!(["-c", "cd '/srv dir' && exec '/abs/node' '/abs/x.js'"])
+        );
+        assert_eq!(r.value["env"]["K"], "v");
+        assert!(r.value.get("cwd").is_none());
+    }
+
+    #[test]
+    fn posix_shell_quote_escapes_correctly() {
+        assert_eq!(posix_shell_quote("plain"), "'plain'");
+        assert_eq!(posix_shell_quote("/srv dir"), "'/srv dir'");
+        assert_eq!(posix_shell_quote("a'b"), "'a'\\''b'");
+        assert_eq!(posix_shell_quote("$HOME && rm -rf"), "'$HOME && rm -rf'");
     }
 
     #[test]
