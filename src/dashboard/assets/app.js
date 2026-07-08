@@ -27,6 +27,8 @@ const SECTIONS = [
   { id: "instructions", label: "Instructions", count: (d) => d.instructions.length },
   { id: "secrets", label: "Secrets", count: (d) => d.secrets.length },
   { id: "activity", label: "Activity" },
+  { id: "proxy", label: "Proxy", count: (d) => ((d.proxy || {}).capabilities || []).length },
+  { id: "insights", label: "Insights", count: (d) => ((d.optimize || {}).recommendations || []).length },
   { id: "health", label: "Health" },
 ];
 
@@ -102,7 +104,7 @@ function renderNav() {
     );
   });
 }
-const VIEWS = { overview, runs, discover, servers, skills, settings, hooks, plugins, instructions, secrets, activity, health };
+const VIEWS = { overview, runs, discover, servers, skills, settings, hooks, plugins, instructions, secrets, activity, proxy: proxyPanel, insights, health };
 function show(id) {
   if (!VIEWS[id]) id = "overview";
   SECTION = id;
@@ -1695,6 +1697,210 @@ function runDoctor() {
       });
     })
     .catch((e) => { out.innerHTML = ""; toast("Doctor: " + e.message, false); });
+}
+
+/* ---------- proxy (wire-cost report) ---------- */
+// Right-aligned numeric cell/header — this is a metrics report, not a matrix,
+// so the numbers line up on the right the way the CLI table does.
+const numTh = (t, title) => el("th", { style: "text-align:right", title: title || null }, [t]);
+const numTd = (t) => el("td", { style: "text-align:right" }, [typeof t === "string" ? t : String(t)]);
+
+function proxyPanel(c) {
+  c.appendChild(pageHead("Proxy", "The wire lens — what your loaded tools cost per turn, measured from real API traffic. Observe-only; nothing is injected."));
+  const p = DATA.proxy || {};
+  const caps = p.capabilities || [];
+  if (!p.requests) {
+    c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, [
+      "No wire activity observed yet — start ",
+      el("span", { class: "mono" }, ["agentstack proxy start"]),
+      " and point a harness at ",
+      el("span", { class: "mono" }, ["ANTHROPIC_BASE_URL=http://127.0.0.1:8787"]),
+      ", then reload.",
+    ])])]));
+    return;
+  }
+
+  c.appendChild(el("div", { class: "grid cols-3" }, [
+    statCard("Tools / turn", p.totalTools || 0, "peak seen in one request"),
+    statCard("Tokens / turn", p.totalLabel || "0", "weight of the tools block"),
+    statCard("Requests", p.requests || 0, "observed on the wire"),
+  ]));
+
+  const head = el("tr", null, [
+    el("th", null, ["capability"]),
+    numTh("tools"),
+    numTh("avg tokens/turn"),
+    numTh("calls"),
+    el("th", null, ["hint"]),
+  ]);
+  const body = el("tbody");
+  caps.forEach((cap) => {
+    const kind = cap.hint === "keep" ? "green" : cap.hint === "drop / lazy" ? "amber" : "";
+    body.appendChild(el("tr", null, [
+      el("td", null, [el("span", { class: "name" }, [cap.capability])]),
+      numTd(cap.tools),
+      numTd(cap.avgLabel),
+      numTd(cap.calls),
+      el("td", null, [badge(cap.hint, kind)]),
+    ]));
+  });
+  c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
+    el("div", { class: "bd", style: "padding:6px 8px" }, [el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])])]),
+  ]));
+  c.appendChild(el("div", { class: "muted", style: "font-size:12px;margin-top:10px" }, [
+    "Loaded vs called — a capability whose tools cost the most tokens/turn but were never called this window is the first candidate to drop or make lazy.",
+  ]));
+}
+
+/* ---------- insights (analyze + optimize + stats, stacked) ---------- */
+function insights(c) {
+  c.appendChild(pageHead("Insights", "Read-only analysis of your stack. Mirrors `agentstack optimize`, `analyze`, and `stats` — recommendations, runtime call activity, and per-capability usage."));
+  c.appendChild(el("div", { class: "section-title" }, ["Optimize"]));
+  c.appendChild(optimizeCard());
+  c.appendChild(el("div", { class: "section-title" }, ["Analyze"]));
+  c.appendChild(analyzeCard());
+  c.appendChild(el("div", { class: "section-title" }, ["Stats"]));
+  c.appendChild(statsCard());
+}
+
+function optimizeCard() {
+  const o = DATA.optimize || {};
+  const recs = o.recommendations || [];
+  const body = [];
+  if (o.gatewayCalls === 0) {
+    body.push(el("div", { class: "callout amber" }, [
+      "The audit log is empty — recommendations are limited to static signals. Use the gateway (zero-files bridge or `agentstack run`) to collect runtime evidence.",
+    ]));
+  }
+  if (!recs.length) {
+    body.push(el("div", { class: "empty" }, ["Nothing to recommend — your stack looks lean."]));
+  } else {
+    recs.forEach((r) => body.push(optimizeRow(r)));
+  }
+  const safe = recs.filter((r) => r.safe_auto).length;
+  const sub = recs.length
+    ? plural(recs.length, "recommendation") + " · " + safe + " safe to auto-apply"
+    : "no recommendations";
+  return el("div", { class: "card" }, [
+    el("div", { class: "hd" }, ["Recommendations", el("small", null, [sub])]),
+    el("div", { class: "bd" }, body),
+  ]);
+}
+
+function optimizeRow(r) {
+  const kind = r.impact === "high" ? "red" : r.impact === "medium" ? "amber" : "";
+  return el("div", { class: "list-row", style: "flex-direction:column;align-items:stretch;gap:4px" }, [
+    el("div", { style: "display:flex;align-items:center;gap:8px" }, [
+      badge(r.impact || "low", kind),
+      el("span", { class: "k", style: "margin-left:0" }, [r.kind]),
+      el("span", { class: "name" }, [r.title || r.kind]),
+    ]),
+    ...(r.evidence || []).map((e) => el("div", { class: "muted", style: "font-size:12px" }, ["• " + e])),
+    r.action ? el("div", { class: "mono", style: "font-size:12px;white-space:pre-wrap;margin-top:2px;color:hsl(var(--foreground))" }, [r.action]) : null,
+    el("div", { class: "muted", style: "font-size:12px" }, [
+      (r.safe_auto ? "safe with --write — " : "needs review — ") + (r.safety || ""),
+    ]),
+  ]);
+}
+
+function analyzeCard() {
+  const a = DATA.analyze || {};
+  const calls = a.calls || {};
+  const dw = a.dead_weight || {};
+  const subLabel = (t) => el("div", { class: "muted", style: "margin:14px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em" }, [t]);
+  const body = [];
+
+  // Call activity — brokered gateway calls from the runtime audit log.
+  if (!calls.total) {
+    body.push(el("div", { class: "empty" }, ["No brokered calls recorded yet — the runtime gateway logs them when you use `agentstack run` / `agentstack mcp`."]));
+  } else {
+    body.push(el("div", { class: "row-actions" }, [
+      badge(plural(calls.total, "call"), "solid"),
+      badge("ok " + (calls.ok || 0), "green"),
+      calls.error ? badge("error " + calls.error, "red") : null,
+      calls.denied ? badge("denied " + calls.denied, "amber") : null,
+      el("span", { class: "muted", style: "font-size:12px" }, ["over " + (calls.span_days ? calls.span_days + "d" : "today")]),
+    ]));
+    const servers = calls.by_server || [];
+    const tools = calls.by_tool || [];
+    if (servers.length) {
+      body.push(subLabel("Top servers"));
+      servers.forEach((s) => body.push(el("div", { class: "list-row" }, [
+        el("span", { class: "name" }, [s.server]),
+        el("span", { class: "row-actions" }, [
+          s.errors ? badge(plural(s.errors, "error/denied", "error/denied"), "amber") : null,
+          el("span", { class: "muted" }, [plural(s.calls, "call")]),
+        ]),
+      ])));
+    }
+    if (tools.length) {
+      body.push(subLabel("Top tools"));
+      tools.forEach((t) => body.push(el("div", { class: "list-row" }, [
+        el("span", { class: "mono", style: "font-size:12px" }, [t.tool]),
+        el("span", { class: "muted" }, [plural(t.calls, "call")]),
+      ])));
+    }
+  }
+
+  // Library dead weight — capabilities carried but never used anywhere.
+  const skills = dw.skills || [];
+  const servers = dw.servers || [];
+  body.push(subLabel("Library dead weight"));
+  if (!skills.length && !servers.length) {
+    body.push(el("div", { class: "empty compact" }, ["Nothing unused — or nothing installed in the central library yet."]));
+  } else {
+    skills.forEach((s) => body.push(el("div", { class: "list-row" }, [
+      el("span", { class: "name" }, [s.name]),
+      badge("skill · never activated", ""),
+    ])));
+    servers.forEach((s) => body.push(el("div", { class: "list-row" }, [
+      el("span", null, [
+        el("span", { class: "name" }, [s.name]),
+        s.est_tokens != null ? el("span", { class: "k" }, ["~" + s.est_tokens + " tok/session"]) : null,
+      ]),
+      badge("server · never called", "amber"),
+    ])));
+  }
+
+  return el("div", { class: "card" }, [
+    el("div", { class: "hd" }, ["Call activity & dead weight", el("small", null, ["runtime gateway audit log + library"])]),
+    el("div", { class: "bd" }, body),
+  ]);
+}
+
+function statsCard() {
+  const s = DATA.statsReport || {};
+  const caps = s.capabilities || [];
+  if (!caps.length) {
+    return el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, ["No usage recorded yet. Apply changes or start a profile to record activations."])])]);
+  }
+  const max = Math.max(1, ...caps.map((x) => x.activations || 0));
+  const head = el("tr", null, [
+    el("th", null, ["capability"]),
+    numTh("activations"),
+    el("th", null, ["context cost"]),
+    numTh("live in", "how many target/scope slots it's rendered into"),
+  ]);
+  const body = el("tbody");
+  caps.forEach((x) => {
+    const cost = x.costLabel ? x.costLabel + " (" + (x.tools || 0) + " tools)" : "—";
+    body.appendChild(el("tr", null, [
+      el("td", null, [el("span", { class: "name" }, [x.name]), x.deadWeight ? badge("dead weight", "amber") : null]),
+      el("td", { style: "text-align:right" }, [el("div", { style: "display:flex;align-items:center;gap:8px;justify-content:flex-end" }, [
+        el("div", { class: "bar-track", style: "max-width:80px;margin:0" }, [el("div", { class: "bar", style: `width:${Math.round(((x.activations || 0) / max) * 100)}%` })]),
+        el("span", { class: "muted" }, [String(x.activations || 0)]),
+      ])]),
+      x.costLabel ? el("td", null, [el("span", { class: "k", style: "margin-left:0" }, [cost])]) : el("td", null, [el("span", { class: "off" }, ["—"])]),
+      numTd(x.liveSlots || 0),
+    ]));
+  });
+  const note = s.anyMeasured ? null : el("div", { class: "muted", style: "font-size:12px;margin-top:8px" }, [
+    "Context cost unmeasured — run `agentstack stats --live` to measure each server's tools/list footprint.",
+  ]);
+  return el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [
+    el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])]),
+    note,
+  ])]);
 }
 
 /* ---------- diff preview modal ---------- */
