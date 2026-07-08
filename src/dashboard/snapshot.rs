@@ -723,7 +723,7 @@ fn render_drift_targets(
                 installed,
                 config_present,
                 changed: plan.changed(),
-                diff: crate::util::diff::render_plain(&plan.existing, &plan.proposed),
+                diff: plan.diff_plain(),
                 reason_skipped: None,
             }),
             None => out.push(DriftTarget {

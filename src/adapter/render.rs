@@ -25,6 +25,11 @@ pub struct Rendered {
     /// Claude Desktop config) — callers must skip it rather than write an empty
     /// `{}` entry into a real config file.
     pub representable: bool,
+    /// Every `${REF}` actually resolved for this render, as `(ref-name, value)`.
+    /// The real values are still in `value` (that's what gets written); this set
+    /// lets the display layer redact them from the human-facing diff/apply
+    /// preview so a resolved secret is never printed in cleartext.
+    pub secrets: Vec<(String, String)>,
 }
 
 /// Render one named server for one adapter.
@@ -36,6 +41,7 @@ pub fn render_server(
     let mut body: Map<String, Value> = Map::new();
     let mut unresolved: Vec<String> = Vec::new();
     let mut failed: Vec<(String, String)> = Vec::new();
+    let mut secrets: Vec<(String, String)> = Vec::new();
 
     // CLIs with no MCP support render nothing.
     let Some(mcp) = desc.mcp.as_ref() else {
@@ -44,6 +50,7 @@ pub fn render_server(
             unresolved,
             failed,
             representable: false,
+            secrets,
         };
     };
 
@@ -56,7 +63,16 @@ pub fn render_server(
     };
 
     let passthrough = mcp.secret_mode == SecretMode::Passthrough;
-    let mut sub = |s: &str| substitute_with(s, resolver, passthrough, &mut unresolved, &mut failed);
+    let mut sub = |s: &str| {
+        substitute_with(
+            s,
+            resolver,
+            passthrough,
+            &mut unresolved,
+            &mut failed,
+            &mut secrets,
+        )
+    };
 
     // 1. Transport tag (e.g. Claude's "type": "http").
     if let Some(t) = &mcp.transport {
@@ -132,7 +148,14 @@ pub fn render_server(
         for (k, v) in extra {
             body.insert(
                 k.clone(),
-                substitute_value(v, resolver, passthrough, &mut unresolved, &mut failed),
+                substitute_value(
+                    v,
+                    resolver,
+                    passthrough,
+                    &mut unresolved,
+                    &mut failed,
+                    &mut secrets,
+                ),
             );
         }
     }
@@ -140,12 +163,14 @@ pub fn render_server(
     // De-duplicate refs while keeping first-seen order.
     unresolved.dedup();
     failed.dedup_by(|a, b| a.0 == b.0);
+    secrets.dedup();
 
     Rendered {
         value: Value::Object(body),
         unresolved,
         failed,
         representable,
+        secrets,
     }
 }
 
@@ -157,6 +182,7 @@ fn substitute_value(
     passthrough: bool,
     unresolved: &mut Vec<String>,
     failed: &mut Vec<(String, String)>,
+    secrets: &mut Vec<(String, String)>,
 ) -> Value {
     match v {
         Value::String(s) => Value::String(substitute_with(
@@ -165,10 +191,11 @@ fn substitute_value(
             passthrough,
             unresolved,
             failed,
+            secrets,
         )),
         Value::Array(a) => Value::Array(
             a.iter()
-                .map(|el| substitute_value(el, resolver, passthrough, unresolved, failed))
+                .map(|el| substitute_value(el, resolver, passthrough, unresolved, failed, secrets))
                 .collect(),
         ),
         Value::Object(o) => Value::Object(
@@ -176,7 +203,7 @@ fn substitute_value(
                 .map(|(k, el)| {
                     (
                         k.clone(),
-                        substitute_value(el, resolver, passthrough, unresolved, failed),
+                        substitute_value(el, resolver, passthrough, unresolved, failed, secrets),
                     )
                 })
                 .collect(),
@@ -193,9 +220,10 @@ pub(crate) fn substitute(
     resolver: &dyn Resolver,
     passthrough: bool,
     unresolved: &mut Vec<String>,
+    secrets: &mut Vec<(String, String)>,
 ) -> String {
     let mut failed = Vec::new();
-    let out = substitute_with(s, resolver, passthrough, unresolved, &mut failed);
+    let out = substitute_with(s, resolver, passthrough, unresolved, &mut failed, secrets);
     unresolved.extend(
         failed
             .into_iter()
@@ -215,6 +243,7 @@ pub(crate) fn substitute_with(
     passthrough: bool,
     unresolved: &mut Vec<String>,
     failed: &mut Vec<(String, String)>,
+    secrets: &mut Vec<(String, String)>,
 ) -> String {
     if passthrough || !s.contains("${") {
         return s.to_string();
@@ -228,7 +257,10 @@ pub(crate) fn substitute_with(
                 let name = &inner[..end];
                 if crate::secret::is_ref_name(name) {
                     match resolver.lookup(name) {
-                        Lookup::Found(val) => out.push_str(&val),
+                        Lookup::Found(val) => {
+                            secrets.push((name.to_string(), val.clone()));
+                            out.push_str(&val);
+                        }
                         Lookup::Missing => {
                             unresolved.push(name.to_string());
                             out.push_str(&rest[..2 + end + 1]); // keep `${NAME}`
@@ -281,6 +313,12 @@ mod tests {
         assert_eq!(r.value["type"], "http");
         assert_eq!(r.value["headers"]["Authorization"], "Bearer secret123");
         assert!(r.unresolved.is_empty());
+        // The resolved substitution is surfaced so the display layer can redact
+        // it — the real value stays in `value` (that's what gets written).
+        assert_eq!(
+            r.secrets,
+            vec![("TOK".to_string(), "secret123".to_string())]
+        );
     }
 
     #[test]
@@ -435,15 +473,24 @@ mod tests {
     #[test]
     fn nested_ref_inside_shell_fallback_still_resolves() {
         let mut unresolved = Vec::new();
+        let mut secrets = Vec::new();
         let resolver = MapResolver::from([("B", "vb")]);
-        let out = substitute("${A:-${B}}", &resolver, false, &mut unresolved);
+        let out = substitute(
+            "${A:-${B}}",
+            &resolver,
+            false,
+            &mut unresolved,
+            &mut secrets,
+        );
         assert_eq!(out, "${A:-vb}");
         assert!(unresolved.is_empty());
+        assert_eq!(secrets, vec![("B".to_string(), "vb".to_string())]);
     }
 
     #[test]
     fn substitute_is_utf8_safe() {
         let mut unresolved = Vec::new();
+        let mut secrets = Vec::new();
         let resolver = MapResolver::from([("TOK", "v")]);
         // Multibyte chars survive both outside refs and inside a skipped
         // shell-syntax span.
@@ -452,6 +499,7 @@ mod tests {
             &resolver,
             false,
             &mut unresolved,
+            &mut secrets,
         );
         assert_eq!(out, "héllo v Ω=${GREETING:-héllo}");
         assert!(unresolved.is_empty());
@@ -493,9 +541,17 @@ mod tests {
         // The single-channel wrapper folds the failure into `unresolved`
         // with the message attached (hooks/settings/gateway path).
         let mut unresolved = Vec::new();
-        let out = substitute("${TOK}", &FailingResolver, false, &mut unresolved);
+        let mut secrets = Vec::new();
+        let out = substitute(
+            "${TOK}",
+            &FailingResolver,
+            false,
+            &mut unresolved,
+            &mut secrets,
+        );
         assert_eq!(out, "${TOK}");
         assert_eq!(unresolved, vec!["TOK — keychain read failed: timeout"]);
+        assert!(secrets.is_empty(), "a failed read records no secret value");
     }
 
     #[test]

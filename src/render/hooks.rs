@@ -32,6 +32,9 @@ pub struct HooksPlan {
     /// Hook names we rendered into this target.
     pub managed: Vec<String>,
     pub unresolved: Vec<String>,
+    /// Resolved secret values (`(ref-name, value)`) to redact from the diff
+    /// preview. The real values stay in `proposed` and are what `write` persists.
+    pub secrets: Vec<(String, String)>,
 }
 
 impl HooksPlan {
@@ -39,7 +42,7 @@ impl HooksPlan {
         diff::differs(&self.existing, &self.proposed)
     }
     pub fn diff(&self) -> String {
-        diff::render(&self.existing, &self.proposed)
+        diff::mask_secrets(&diff::render(&self.existing, &self.proposed), &self.secrets)
     }
     pub fn write(&self) -> Result<()> {
         crate::util::atomic::write(&self.path, &self.proposed)
@@ -71,6 +74,7 @@ pub fn plan_hooks(
     }
 
     let mut unresolved = Vec::new();
+    let mut secrets: Vec<(String, String)> = Vec::new();
     let managed: Vec<String> = selected.iter().map(|(n, _)| (*n).clone()).collect();
     let existing = fs::read_to_string(&path).unwrap_or_default();
 
@@ -83,7 +87,9 @@ pub fn plan_hooks(
         }
     } else {
         let obj = match spec.shape {
-            HookShape::Claude => build_claude_hooks(&selected, resolver, &mut unresolved),
+            HookShape::Claude => {
+                build_claude_hooks(&selected, resolver, &mut unresolved, &mut secrets)
+            }
         };
         let entries = [(spec.key.clone(), obj)];
         match format {
@@ -92,6 +98,7 @@ pub fn plan_hooks(
         }
     };
 
+    secrets.dedup();
     Ok(Some(HooksPlan {
         id: desc.id.clone(),
         display: desc.display.clone(),
@@ -101,6 +108,7 @@ pub fn plan_hooks(
         proposed,
         managed,
         unresolved,
+        secrets,
     }))
 }
 
@@ -109,6 +117,7 @@ pub(crate) fn build_claude_hooks(
     selected: &[(&String, &Hook)],
     resolver: &dyn Resolver,
     unresolved: &mut Vec<String>,
+    secrets: &mut Vec<(String, String)>,
 ) -> Value {
     let mut events: Map<String, Value> = Map::new();
     for (_, h) in selected {
@@ -116,13 +125,13 @@ pub(crate) fn build_claude_hooks(
         handler.insert("type".into(), json!("command"));
         handler.insert(
             "command".into(),
-            json!(substitute(&h.command, resolver, false, unresolved)),
+            json!(substitute(&h.command, resolver, false, unresolved, secrets)),
         );
         if !h.args.is_empty() {
             let args: Vec<Value> = h
                 .args
                 .iter()
-                .map(|a| json!(substitute(a, resolver, false, unresolved)))
+                .map(|a| json!(substitute(a, resolver, false, unresolved, secrets)))
                 .collect();
             handler.insert("args".into(), Value::Array(args));
         }
