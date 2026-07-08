@@ -76,6 +76,31 @@ pending bar shows what the next Apply will strip from each CLI's config.
 the pre-write bytes (or deletes files the apply created). The manifest itself
 is never touched by undo.
 
+## 9. Analyze — read-only lenses
+
+Two tabs surface the analysis functions that used to be CLI-only. Both are
+strictly read-only: they add no mutating endpoints and stay fully available in
+`--read-only` mode.
+
+**Proxy** tab: the wire lens, the same ranked report as `agentstack proxy
+report`. Once the observe-only proxy has seen traffic
+(`ANTHROPIC_BASE_URL=http://127.0.0.1:8787`), it shows the per-turn tools and
+token weight plus a per-capability table — tools, average tokens/turn, calls,
+and a `drop / lazy` · `keep` · `watch` hint — so you can see which loaded
+tools actually earn their context. With no telemetry yet it shows an explicit
+empty state pointing at `agentstack proxy start`.
+
+**Insights** tab stacks three read-only reports:
+
+- **Optimize** — the recommendations from `agentstack optimize`, each with its
+  evidence, the exact command/TOML to act on it, and why it's safe or needs a
+  human. (Applying still happens in the terminal — the dashboard only shows.)
+- **Analyze** — runtime call activity from the gateway audit log (ok / error /
+  denied, top servers and tools) plus library dead weight: capabilities carried
+  but never activated or called anywhere.
+- **Stats** — the per-capability table from `agentstack stats`: activations,
+  measured context cost, how many slots each is live in, and dead-weight flags.
+
 ---
 
 Also on the dashboard: skills matrix + consolidate, typed per-CLI settings

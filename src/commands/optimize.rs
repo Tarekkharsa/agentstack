@@ -24,7 +24,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::calllog::CallRecord;
 use crate::cli::OptimizeArgs;
@@ -87,61 +87,123 @@ struct CallStats {
     denied_tools: BTreeMap<String, (u64, String)>,
 }
 
-pub fn run(args: &OptimizeArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    let ctx = super::load(manifest_dir)?;
-    let usage = Usage::load().unwrap_or_default();
-    let footprints = Footprints::load().unwrap_or_default();
-    let now = crate::calllog::now_epoch();
+/// Every on-disk signal `analyze` reads, owned so the borrow in [`Inputs`] is
+/// trivial to construct. Loaded once and shared by the CLI `run`, `--json`, and
+/// the dashboard snapshot so the gathering logic lives in exactly one place.
+struct Signals {
+    usage: Usage,
+    footprints: Footprints,
+    calls: Vec<CallRecord>,
+    managed_anywhere: BTreeSet<String>,
+    trust: Vec<(String, bool, crate::trust::TrustState)>,
+    now: u64,
+}
 
-    let mut calls = crate::calllog::read_all();
-    if let Some(days) = args.since {
-        let cutoff = now.saturating_sub(days * 86_400);
-        calls.retain(|c| c.ts >= cutoff);
+impl Signals {
+    /// Load and window-filter every signal. `since` mirrors `--since` (days);
+    /// `None` keeps the whole audit log. Every source is best-effort.
+    fn load(since: Option<u64>) -> Self {
+        let usage = Usage::load().unwrap_or_default();
+        let footprints = Footprints::load().unwrap_or_default();
+        let now = crate::calllog::now_epoch();
+
+        let mut calls = crate::calllog::read_all();
+        if let Some(days) = since {
+            let cutoff = now.saturating_sub(days * 86_400);
+            calls.retain(|c| c.ts >= cutoff);
+        }
+
+        let state = crate::state::State::load().unwrap_or_default();
+        let managed_anywhere: BTreeSet<String> = state
+            .targets
+            .values()
+            .flat_map(|t| t.managed_servers.iter().cloned())
+            .collect();
+
+        let trust: Vec<(String, bool, crate::trust::TrustState)> = crate::trust::TrustStore::load()
+            .trusted
+            .keys()
+            .map(|p| {
+                let path = Path::new(p);
+                (p.clone(), path.exists(), crate::trust::check(path))
+            })
+            .collect();
+
+        Signals {
+            usage,
+            footprints,
+            calls,
+            managed_anywhere,
+            trust,
+            now,
+        }
     }
 
-    let state = crate::state::State::load().unwrap_or_default();
-    let managed_anywhere: BTreeSet<String> = state
-        .targets
-        .values()
-        .flat_map(|t| t.managed_servers.iter().cloned())
-        .collect();
+    /// Borrow these signals as the pure [`Inputs`] `analyze` consumes.
+    fn inputs<'a>(&'a self, manifest: &'a Manifest) -> Inputs<'a> {
+        Inputs {
+            manifest,
+            usage: &self.usage,
+            footprints: &self.footprints,
+            calls: &self.calls,
+            managed_anywhere: self.managed_anywhere.clone(),
+            trust: self.trust.clone(),
+            now: self.now,
+        }
+    }
+}
 
-    let trust: Vec<(String, bool, crate::trust::TrustState)> = crate::trust::TrustStore::load()
-        .trusted
-        .keys()
-        .map(|p| {
-            let path = Path::new(p);
-            (p.clone(), path.exists(), crate::trust::check(path))
-        })
-        .collect();
+/// Assemble the machine-readable report (project + window + recommendations)
+/// from gathered inputs. Pure over `inputs` so `--json`, the dashboard, and the
+/// unit tests all produce the identical shape.
+fn report_json(project: &str, inputs: &Inputs, since: Option<u64>) -> Value {
+    json!({
+        "project": project,
+        "windowDays": span_days(inputs.calls, inputs.now),
+        "gatewayCalls": inputs.calls.len(),
+        "sinceDays": since,
+        "recommendations": analyze(inputs),
+    })
+}
 
-    let inputs = Inputs {
-        manifest: &ctx.loaded.manifest,
-        usage: &usage,
-        footprints: &footprints,
-        calls: &calls,
-        managed_anywhere,
-        trust,
-        now,
+/// The optimize report as JSON — the shape the dashboard's Insights panel
+/// embeds. Resilient: a manifest that won't load degrades to an empty report
+/// rather than failing the whole snapshot.
+pub fn collect(manifest_dir: Option<&Path>) -> Value {
+    let Ok(ctx) = super::load(manifest_dir) else {
+        return json!({
+            "project": Value::Null,
+            "windowDays": 0,
+            "gatewayCalls": 0,
+            "sinceDays": Value::Null,
+            "recommendations": [],
+        });
     };
-    let recs = analyze(&inputs);
-    let span = span_days(&calls, now);
+    let signals = Signals::load(None);
+    let inputs = signals.inputs(&ctx.loaded.manifest);
+    report_json(&ctx.dir.display().to_string(), &inputs, None)
+}
+
+pub fn run(args: &OptimizeArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let ctx = super::load(manifest_dir)?;
+    let signals = Signals::load(args.since);
+    let inputs = signals.inputs(&ctx.loaded.manifest);
 
     if args.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&json!({
-                "project": ctx.dir.display().to_string(),
-                "windowDays": span,
-                "gatewayCalls": calls.len(),
-                "sinceDays": args.since,
-                "recommendations": recs,
-            }))?
+            serde_json::to_string_pretty(&report_json(
+                &ctx.dir.display().to_string(),
+                &inputs,
+                args.since
+            ))?
         );
         return Ok(());
     }
 
-    print_report(&ctx, &recs, &calls, span);
+    let recs = analyze(&inputs);
+    let span = span_days(&signals.calls, signals.now);
+    print_report(&ctx, &recs, &signals.calls, span);
 
     if args.write {
         apply_safe(&ctx, &recs)?;
@@ -811,6 +873,27 @@ mod tests {
         let changed = recs.iter().find(|r| r.target == "/live/project").unwrap();
         assert!(!changed.safe_auto);
         assert!(changed.action.contains("agentstack trust /live/project"));
+    }
+
+    #[test]
+    fn report_json_wraps_recs_with_window_and_call_count() {
+        let m = manifest("version = 1\n[servers.dead]\ntype = \"http\"\nurl = \"https://x\"\n");
+        let usage = Usage::default();
+        let fps = Footprints::default();
+        let calls = vec![old_call()];
+        let inputs = base_inputs(&m, &usage, &fps, &calls);
+
+        let v = report_json("/proj", &inputs, Some(30));
+        assert_eq!(v["project"], "/proj");
+        assert_eq!(v["gatewayCalls"], 1);
+        assert_eq!(v["sinceDays"], 30);
+        assert!(v["windowDays"].as_u64().is_some());
+        let recs = v["recommendations"].as_array().expect("recs array");
+        assert!(
+            recs.iter()
+                .any(|r| r["kind"] == "unused-server" && r["target"] == "dead"),
+            "the dead server recommendation is carried into the JSON report"
+        );
     }
 
     #[test]

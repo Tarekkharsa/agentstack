@@ -89,6 +89,28 @@ fn welcome(dir: &Path) -> Result<Value> {
     }))
 }
 
+/// The wire-proxy telemetry as JSON for the dashboard's Proxy panel — the same
+/// ranked, per-capability view as `agentstack proxy report`. An empty log
+/// yields `requests: 0` with an empty `capabilities` list (an explicit
+/// empty-state the UI renders, never an error).
+fn proxy_report() -> Value {
+    let report = crate::proxy::aggregate(&crate::proxy::read_all());
+    json!({
+        "requests": report.requests,
+        "totalTools": report.total_tools,
+        "totalEstTokens": report.total_est_tokens,
+        "totalLabel": crate::footprint::fmt_tokens(report.total_est_tokens),
+        "capabilities": report.capabilities.iter().map(|c| json!({
+            "capability": c.capability,
+            "tools": c.tools,
+            "avgEstTokens": c.avg_est_tokens,
+            "avgLabel": crate::footprint::fmt_tokens(c.avg_est_tokens),
+            "calls": c.calls,
+            "hint": c.hint,
+        })).collect::<Vec<_>>(),
+    })
+}
+
 pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
     let ctx = crate::commands::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
@@ -547,6 +569,16 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         },
     });
 
+    // Read-only analysis panels — the same numbers the CLI's `proxy report`,
+    // `analyze`, `optimize`, and `stats` print, embedded for the dashboard.
+    // Each collector is best-effort (no `?`): a failure degrades to an empty
+    // panel rather than sinking the whole snapshot. `statsReport` avoids the
+    // existing `stats` key (activation counts consumed by the Usage card).
+    let proxy = proxy_report();
+    let analyze = crate::commands::analyze::collect();
+    let optimize = crate::commands::optimize::collect(manifest_dir);
+    let stats_report = crate::commands::stats::collect(manifest_dir);
+
     Ok(json!({
         "meta": {
             "name": manifest.meta.name,
@@ -571,6 +603,10 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "secrets": secrets,
         "profiles": profiles,
         "stats": stats,
+        "proxy": proxy,
+        "analyze": analyze,
+        "optimize": optimize,
+        "statsReport": stats_report,
         "health": health,
         "nextActions": next_actions,
         "runs": runs,
@@ -1188,5 +1224,62 @@ mod tests {
 
         assert!(ids.contains(&"missing-secret:KIBANA_TOKEN"));
         assert!(ids.contains(&"drift:global"));
+    }
+
+    #[test]
+    fn proxy_report_is_a_well_formed_empty_state_when_no_telemetry() {
+        // `proxy_report` never touches a manifest, so its empty-state shape is
+        // deterministic regardless of the machine's telemetry: a numeric
+        // request count and a capabilities array (never an error).
+        let p = proxy_report();
+        assert!(p["requests"].is_u64(), "requests is a number");
+        assert!(p["totalTools"].is_u64());
+        assert!(
+            p["totalLabel"].is_string(),
+            "pre-formatted token label for the UI"
+        );
+        assert!(
+            p["capabilities"].is_array(),
+            "capabilities is always an array, empty when no wire activity"
+        );
+        for cap in p["capabilities"].as_array().unwrap() {
+            assert!(cap["capability"].is_string());
+            assert!(cap["tools"].is_u64());
+            assert!(cap["avgLabel"].is_string());
+            assert!(cap["calls"].is_u64());
+            assert!(cap["hint"].is_string());
+        }
+    }
+
+    #[test]
+    fn build_embeds_the_four_analysis_panels() {
+        // A minimal real manifest on disk is enough to exercise `build`; the
+        // four analysis collectors read global state best-effort, so the panels
+        // are present and well-formed even on a machine with no history.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(crate::manifest::load::MANIFEST_FILE),
+            "version = 1\n[meta]\nname = \"test\"\n",
+        )
+        .unwrap();
+
+        let v = build(Some(dir.path())).expect("snapshot builds");
+
+        // Proxy: ranked wire report with an explicit empty state.
+        assert!(v["proxy"]["requests"].is_u64());
+        assert!(v["proxy"]["capabilities"].is_array());
+
+        // Analyze: call activity + library dead weight, both objects.
+        assert!(v["analyze"]["calls"].is_object());
+        assert!(v["analyze"]["dead_weight"].is_object());
+
+        // Optimize: the recommendation list (empty is well-formed).
+        assert!(v["optimize"]["recommendations"].is_array());
+
+        // Stats: per-capability report under `statsReport` (the legacy `stats`
+        // key stays the activation-count list the Usage card consumes).
+        assert!(v["statsReport"]["capabilities"].is_array());
+        assert!(v["statsReport"]["anyMeasured"].is_boolean());
+        assert!(v["stats"].is_array(), "legacy activation list is untouched");
     }
 }
