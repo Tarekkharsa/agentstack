@@ -218,7 +218,7 @@ pub enum Command {
     /// per turn on the wire. A localhost proxy in front of the Anthropic API
     /// that relays requests verbatim (observe only) and accounts the tools
     /// block's per-turn token cost, then ties it back to loaded-vs-called.
-    #[command(subcommand, hide = true)]
+    #[command(subcommand)]
     Proxy(ProxyCmd),
 
     /// Restore a CLI config from its pre-write backup (undo an apply).
