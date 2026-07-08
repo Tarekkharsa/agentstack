@@ -629,9 +629,7 @@ mod tests {
         );
         assert_eq!(m.servers["plain"].cwd, None);
         // `${REF}`s inside cwd are surfaced like any other field.
-        assert!(m
-            .referenced_secrets()
-            .contains(&"TLDRAW_HOME".to_string()));
+        assert!(m.referenced_secrets().contains(&"TLDRAW_HOME".to_string()));
 
         let out = toml::to_string(&m).unwrap();
         let back: Manifest = toml::from_str(&out).unwrap();

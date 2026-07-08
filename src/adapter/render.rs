@@ -402,9 +402,7 @@ mod tests {
         let reg = Registry::load().unwrap();
         let resolver = MapResolver::from([("HOME_DIR", "/home/me")]);
 
-        let stdio = server(
-            "type = \"stdio\"\ncommand = \"node\"\ncwd = \"${HOME_DIR}/server\"\n",
-        );
+        let stdio = server("type = \"stdio\"\ncommand = \"node\"\ncwd = \"${HOME_DIR}/server\"\n");
         let r = render_server(reg.get("codex").unwrap(), &stdio, &resolver);
         assert_eq!(r.value["cwd"], "/home/me/server");
 

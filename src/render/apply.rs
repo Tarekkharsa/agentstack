@@ -734,7 +734,11 @@ mod tests {
         .unwrap();
         std::env::remove_var("HOME");
         assert_eq!(claude.managed, vec!["tldraw"]);
-        assert!(!claude.proposed.contains("/srv/tldraw"), "{}", claude.proposed);
+        assert!(
+            !claude.proposed.contains("/srv/tldraw"),
+            "{}",
+            claude.proposed
+        );
         assert_eq!(claude.warnings, vec!["tldraw".to_string()]);
     }
 
