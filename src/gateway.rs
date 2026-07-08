@@ -439,7 +439,13 @@ impl Gateway {
                     // The gateway resolves for an upstream request, not a diff —
                     // it doesn't display anything, so the redaction set is dropped.
                     let mut secrets = Vec::new();
-                    crate::adapter::render::substitute(v, &ctx.resolver, false, unresolved, &mut secrets)
+                    crate::adapter::render::substitute(
+                        v,
+                        &ctx.resolver,
+                        false,
+                        unresolved,
+                        &mut secrets,
+                    )
                 };
                 let up = match s.server_type {
                     ServerType::Http => {

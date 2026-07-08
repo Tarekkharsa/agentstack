@@ -87,7 +87,9 @@ pub fn plan_hooks(
         }
     } else {
         let obj = match spec.shape {
-            HookShape::Claude => build_claude_hooks(&selected, resolver, &mut unresolved, &mut secrets),
+            HookShape::Claude => {
+                build_claude_hooks(&selected, resolver, &mut unresolved, &mut secrets)
+            }
         };
         let entries = [(spec.key.clone(), obj)];
         match format {

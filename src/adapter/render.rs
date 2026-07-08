@@ -63,8 +63,16 @@ pub fn render_server(
     };
 
     let passthrough = mcp.secret_mode == SecretMode::Passthrough;
-    let mut sub =
-        |s: &str| substitute_with(s, resolver, passthrough, &mut unresolved, &mut failed, &mut secrets);
+    let mut sub = |s: &str| {
+        substitute_with(
+            s,
+            resolver,
+            passthrough,
+            &mut unresolved,
+            &mut failed,
+            &mut secrets,
+        )
+    };
 
     // 1. Transport tag (e.g. Claude's "type": "http").
     if let Some(t) = &mcp.transport {
@@ -299,7 +307,10 @@ mod tests {
         assert!(r.unresolved.is_empty());
         // The resolved substitution is surfaced so the display layer can redact
         // it — the real value stays in `value` (that's what gets written).
-        assert_eq!(r.secrets, vec![("TOK".to_string(), "secret123".to_string())]);
+        assert_eq!(
+            r.secrets,
+            vec![("TOK".to_string(), "secret123".to_string())]
+        );
     }
 
     #[test]
@@ -417,7 +428,13 @@ mod tests {
         let mut unresolved = Vec::new();
         let mut secrets = Vec::new();
         let resolver = MapResolver::from([("B", "vb")]);
-        let out = substitute("${A:-${B}}", &resolver, false, &mut unresolved, &mut secrets);
+        let out = substitute(
+            "${A:-${B}}",
+            &resolver,
+            false,
+            &mut unresolved,
+            &mut secrets,
+        );
         assert_eq!(out, "${A:-vb}");
         assert!(unresolved.is_empty());
         assert_eq!(secrets, vec![("B".to_string(), "vb".to_string())]);
@@ -478,7 +495,13 @@ mod tests {
         // with the message attached (hooks/settings/gateway path).
         let mut unresolved = Vec::new();
         let mut secrets = Vec::new();
-        let out = substitute("${TOK}", &FailingResolver, false, &mut unresolved, &mut secrets);
+        let out = substitute(
+            "${TOK}",
+            &FailingResolver,
+            false,
+            &mut unresolved,
+            &mut secrets,
+        );
         assert_eq!(out, "${TOK}");
         assert_eq!(unresolved, vec!["TOK — keychain read failed: timeout"]);
         assert!(secrets.is_empty(), "a failed read records no secret value");

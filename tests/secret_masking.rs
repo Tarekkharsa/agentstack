@@ -127,5 +127,8 @@ fn diff_masks_secret_on_context_and_changed_lines() {
         "diff should show the masked header:\n{diff}"
     );
     // The url change itself must still be visible (masking is surgical).
-    assert!(diff.contains("v2"), "the real (non-secret) change must show:\n{diff}");
+    assert!(
+        diff.contains("v2"),
+        "the real (non-secret) change must show:\n{diff}"
+    );
 }

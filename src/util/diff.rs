@@ -26,8 +26,7 @@ pub fn differs(before: &str, after: &str) -> bool {
 ///
 /// This is display-only: it never touches the bytes an apply writes to disk.
 pub fn mask_secrets(text: &str, secrets: &[(String, String)]) -> String {
-    let mut pairs: Vec<&(String, String)> =
-        secrets.iter().filter(|(_, v)| !v.is_empty()).collect();
+    let mut pairs: Vec<&(String, String)> = secrets.iter().filter(|(_, v)| !v.is_empty()).collect();
     // Longest value first; ties don't matter for correctness.
     pairs.sort_by_key(|p| std::cmp::Reverse(p.1.len()));
     let mut out = text.to_string();
@@ -116,10 +115,16 @@ mod tests {
 
     #[test]
     fn mask_replaces_secret_value_with_ref_name() {
-        let secrets = vec![("GUMLET_TOKEN".to_string(), "gumlet_5f3bc35892ab".to_string())];
+        let secrets = vec![(
+            "GUMLET_TOKEN".to_string(),
+            "gumlet_5f3bc35892ab".to_string(),
+        )];
         let d = render_plain("x\n", "x\nAuthorization: Bearer gumlet_5f3bc35892ab\n");
         let masked = mask_secrets(&d, &secrets);
-        assert!(!masked.contains("gumlet_5f3bc35892ab"), "secret leaked: {masked}");
+        assert!(
+            !masked.contains("gumlet_5f3bc35892ab"),
+            "secret leaked: {masked}"
+        );
         assert!(masked.contains("Bearer ${GUMLET_TOKEN}"), "{masked}");
     }
 
