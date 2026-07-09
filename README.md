@@ -155,7 +155,9 @@ agentstack lib list                        # what's installed, with provenance
 Every add is content-scanned (hidden-unicode / prompt-injection) before it
 lands. agentstack ships a starter catalog — `run-codex`, `sync-library`,
 `analyze-usage`, `mine-skills` (distill reusable skills from your past agent
-sessions), `adversarial-review`, `route-by-cost`, `using-agentstack`, and more.
+sessions), `adversarial-review` and `orchestrate-workflow` (governed
+multi-agent generate-review-fix loops), `route-by-cost`, `using-agentstack`,
+and more.
 
 Keep the library consistent across machines by versioning it as a git repo.
 Secrets never travel — a fail-closed gate scans every server field (headers,
@@ -283,7 +285,9 @@ Details and trade-offs: [feature reference → three modes](docs/reference.md#wh
   out to every other CLI — instead of reverting the app.
 - **Usage insight** — `agentstack analyze` reports what you actually call (from
   the runtime audit log) and flags library capabilities you installed but never
-  use, so pruning is data-driven. Read-only and local.
+  use, so pruning is data-driven. `--transcripts` adds cross-harness reach from
+  local Claude Code / Codex session logs — sessions, token totals, top tools;
+  aggregates only, never prompt content. Read-only and local.
 
 The closed loop in under a minute — install a versioned pack, spread it to
 every CLI, firewall a tool, watch the refusal in the audit log, upgrade to the

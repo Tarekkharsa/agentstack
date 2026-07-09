@@ -37,6 +37,7 @@ pub mod secret;
 pub mod session;
 pub mod state;
 pub mod store;
+pub mod transcripts;
 pub mod trust;
 pub mod usage;
 pub mod util;

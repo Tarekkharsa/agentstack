@@ -1032,6 +1032,12 @@ pub struct AnalyzeArgs {
     /// Emit the report as JSON (for the dashboard or further processing).
     #[arg(long)]
     pub json: bool,
+
+    /// Also read local session transcripts (Claude Code, Codex) for
+    /// cross-harness reach: sessions, token totals, top tools. Read-only;
+    /// only aggregates are reported, never prompt content.
+    #[arg(long)]
+    pub transcripts: bool,
 }
 
 #[derive(Subcommand, Debug)]

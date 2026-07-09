@@ -192,3 +192,11 @@
   homepage: https://github.com/Tarekkharsa/agentstack
   tags: [review, workflow, quality, multi-agent, diff]
   path: skills/adversarial-review
+
+- kind: skill
+  name: orchestrate-workflow
+  display: Orchestrate a workflow
+  description: "Wire a generate-review-fix multi-agent workflow from agentstack profiles — roles, models, skills, secrets injected at container start — and run it in sandcastle / Claude Code workflows / Docker; agentstack provisions and governs, the executor runs the loop (unofficial, agentstack-authored)"
+  homepage: https://github.com/Tarekkharsa/agentstack
+  tags: [workflow, multi-agent, sandbox, docker, orchestration, review]
+  path: skills/orchestrate-workflow
