@@ -154,7 +154,8 @@ agentstack lib list                        # what's installed, with provenance
 
 Every add is content-scanned (hidden-unicode / prompt-injection) before it
 lands. agentstack ships a starter catalog — `run-codex`, `sync-library`,
-`analyze-usage`, `route-by-cost`, `using-agentstack`, and more.
+`analyze-usage`, `mine-skills` (distill reusable skills from your past agent
+sessions), `adversarial-review`, `route-by-cost`, `using-agentstack`, and more.
 
 Keep the library consistent across machines by versioning it as a git repo.
 Secrets never travel — a fail-closed gate scans every server field (headers,

@@ -15,6 +15,12 @@ The library lives at `~/.agentstack/lib/`. Version it as a git repo and
 push/pull it across machines. git is the right tool here: versioned,
 offline-friendly, no daemon, and it diffs cleanly.
 
+**Never fetch a skill from another machine by hand (scp/rsync/ssh).** A raw
+copy skips the content scan (prompt-injection gate), records no provenance,
+and has no checksum — an unauditable fork the lockfile can't reproduce. If a
+skill you need lives on another device, sync the library (below); the skill
+then resolves by name everywhere.
+
 ## The built-in way (preferred)
 
 agentstack ships a wrapper that does the whole flow — and refuses to push if a

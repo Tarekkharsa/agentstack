@@ -176,3 +176,19 @@
   homepage: https://github.com/Tarekkharsa/agentstack
   tags: [models, routing, cost, orchestration, delegation]
   path: skills/route-by-cost
+
+- kind: skill
+  name: mine-skills
+  display: Mine skills from sessions
+  description: "Analyze past Claude Code / Codex sessions for recurring failures and re-explained procedures, then distill the top candidates into library skills — local, read-only until approved (unofficial, agentstack-authored)"
+  homepage: https://github.com/Tarekkharsa/agentstack
+  tags: [skills, mining, transcripts, sessions, analytics, distill]
+  path: skills/mine-skills
+
+- kind: skill
+  name: adversarial-review
+  display: Adversarial review
+  description: "Review a diff as an adversary — assume it's wrong, work from the diff alone, construct concrete failures; the reviewer role for generate-review-fix workflows (unofficial, agentstack-authored)"
+  homepage: https://github.com/Tarekkharsa/agentstack
+  tags: [review, workflow, quality, multi-agent, diff]
+  path: skills/adversarial-review
