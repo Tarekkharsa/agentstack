@@ -31,6 +31,31 @@ use crate::state::{target_key, State};
 use crate::store::dir_digest;
 use crate::util::paths;
 
+/// Everything one consolidation run has to tell the user: what moved into the
+/// library and what was found on disk but could not be consolidated.
+#[derive(Debug)]
+pub struct ConsolidateReport {
+    pub skills: Vec<Consolidated>,
+    /// Discovered entries that were skipped (dead links, non-skill dirs) —
+    /// surfaced so the report can say so instead of silently dropping them.
+    pub skipped: Vec<Skipped>,
+}
+
+/// A skills-dir entry consolidation could not gather: a symlink whose target is
+/// gone, or a directory without a `SKILL.md`.
+#[derive(Debug)]
+pub struct Skipped {
+    pub cli: String,
+    pub name: String,
+    /// The entry path in the CLI's skills dir.
+    pub entry: PathBuf,
+    /// The symlink's target, when the entry is a link.
+    pub target: Option<PathBuf>,
+    /// True for a dead symlink (target missing); false for a directory that is
+    /// present but has no `SKILL.md`.
+    pub broken: bool,
+}
+
 /// Outcome for one consolidated skill.
 #[derive(Debug)]
 pub struct Consolidated {
@@ -63,19 +88,32 @@ pub fn consolidate(
     only: Option<&[String]>,
     replace: bool,
     write: bool,
-) -> Result<Vec<Consolidated>> {
+) -> Result<ConsolidateReport> {
     // Discover: name -> (real source, [(cli id, entry path in that CLI's dir)]).
     let mut found: BTreeMap<String, (PathBuf, Vec<(String, PathBuf)>)> = BTreeMap::new();
+    let mut skipped: Vec<Skipped> = Vec::new();
     for desc in registry.iter() {
         let Some(dir) = desc.skills_dir_for(Scope::Global, project_dir) else {
             continue;
         };
-        for sk in desc
-            .discover_skills(Scope::Global, project_dir)
-            .into_iter()
-            .filter(|s| s.valid)
-        {
+        for sk in desc.discover_skills(Scope::Global, project_dir) {
             let entry = dir.join(&sk.name);
+            if !sk.valid {
+                // A dead link or a dir without SKILL.md can't be consolidated.
+                // Record it (stray plain files stay quiet) so the report says
+                // what was left behind — a dead link otherwise reads as "my
+                // skills weren't migrated" with no clue why.
+                if sk.broken || sk.source.is_dir() {
+                    skipped.push(Skipped {
+                        cli: desc.id.clone(),
+                        name: sk.name.clone(),
+                        target: fs::read_link(&entry).ok(),
+                        entry,
+                        broken: sk.broken,
+                    });
+                }
+                continue;
+            }
             found
                 .entry(sk.name.clone())
                 .or_insert_with(|| (sk.source.clone(), Vec::new()))
@@ -85,10 +123,12 @@ pub fn consolidate(
     }
     if let Some(names) = only {
         found.retain(|k, _| names.iter().any(|n| n == k));
+        skipped.retain(|s| names.iter().any(|n| n == &s.name));
     }
-    if found.is_empty() {
+    if found.is_empty() && skipped.is_empty() {
         anyhow::bail!("no skills found on disk to consolidate");
     }
+    skipped.sort_by(|a, b| (&a.cli, &a.name).cmp(&(&b.cli, &b.name)));
 
     let lib_home = paths::lib_home();
     let lib_skills = lib_home.join("skills");
@@ -166,7 +206,10 @@ pub fn consolidate(
     if write {
         state.save()?;
     }
-    Ok(report)
+    Ok(ConsolidateReport {
+        skills: report,
+        skipped,
+    })
 }
 
 /// Whether the library already holds a `name` entry whose recorded checksum
