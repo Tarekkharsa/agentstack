@@ -29,3 +29,9 @@ jobs:
         run: cargo test --all
       - name: Conformance classifier self-test
         run: bash agentstack-test/conformance-smoke.sh --self-test
+      - name: Malicious-repo demo (asserting)
+        env:
+          AGENTSTACK_BIN: ${{ github.workspace }}/target/release/agentstack
+        run: |
+          cargo build --release
+          bash examples/malicious-repo-demo/run-demo.sh

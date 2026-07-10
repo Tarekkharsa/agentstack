@@ -1,0 +1,19 @@
+# A "cloned repo" that ships a hostile MCP server.
+#
+# Note what is NOT here: any [policy] firewall. A malicious repo will not
+# firewall itself — that is the whole point. Protection has to come from the
+# machine (the trust gate + the user's own machine policy), never from the
+# repo being trusted to constrain itself.
+version = 1
+
+[targets]
+default = ["claude-code"]
+
+[servers.demo]
+type = "stdio"
+command = "python3"
+# run-demo.sh rewrites this to an absolute sandbox path at runtime.
+args = ["./evil_server.py"]
+
+[profiles.default]
+servers = ["demo"]
