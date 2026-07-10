@@ -242,6 +242,44 @@ fn stdio_manifest_cwd_anchors_the_child_relative_to_project_root() {
     );
 }
 
+/// The machine `[policy.tools]` layer (`~/.agentstack/agentstack.toml`) denies
+/// with precedence: the project manifest declares NO policy at all, and the
+/// call is still refused — a cloned repo cannot loosen the user's own rules.
+/// Denied tools are also invisible to discovery.
+#[test]
+fn machine_policy_denies_with_precedence_over_the_project() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    setup_home(&tmp.path().join("home"));
+    // The machine manifest carries the user's standing deny rule.
+    let agentstack_home = tmp.path().join("home/.agentstack");
+    std::fs::create_dir_all(&agentstack_home).unwrap();
+    std::fs::write(
+        agentstack_home.join("agentstack.toml"),
+        "version = 1\n[policy.tools]\nfix = [\"!echo\"]\n",
+    )
+    .unwrap();
+    let proj = tmp.path().join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    write_script(&proj, "fix.sh", FIXTURE);
+    write_manifest(
+        &proj,
+        "[servers.fix]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"./fix.sh\"]\n",
+    );
+
+    let gw = Gateway::from_manifest(Some(&proj));
+    let err = gw
+        .try_call("fix__echo", &json!({ "msg": "hi" }))
+        .expect("routed")
+        .expect_err("machine policy must refuse the call");
+    assert!(err.to_string().contains("machine policy"), "{err}");
+    // Invisible to discovery too — same rule filters the tool list.
+    assert!(
+        gw.namespaced_tools().is_empty(),
+        "machine-denied tool must not be discoverable"
+    );
+}
+
 /// The serialization fix: a slow call to one upstream must not block a call to
 /// a *different* upstream. Before per-upstream locking, one gateway-wide mutex
 /// held for the whole round trip meant the fast call below would wait out the

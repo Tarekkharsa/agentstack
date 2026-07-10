@@ -208,6 +208,22 @@ denies; any allow pattern makes the list an allowlist. A denied tool is
 refused with the rule named if called anyway. `doctor` errors on rules naming
 unknown servers; `explain <server>` shows the effective policy.
 
+**Machine layer with deny precedence.** The machine manifest
+(`~/.agentstack/agentstack.toml`) may carry its own `[policy.tools]` — the
+user's standing rules, checked **before** the project's on every brokered
+call. A call must pass both layers, so a cloned repo can neither see, shadow,
+nor loosen what the machine forbids; a machine refusal names its layer in the
+error and the audit log. Unlike the instructions merge, a broken machine
+manifest is warned about on stderr (silently dropping the user's own deny
+rules would fail open), though it stays non-fatal — project policy continues
+to apply.
+
+```toml
+# ~/.agentstack/agentstack.toml — applies to every project on this machine
+[policy.tools]
+github = ["!create_*", "!delete_*"]   # no repo can grant these back
+```
+
 ### Call audit log
 
 Every tool call the gateway brokers (MCP proxy and code-mode alike) appends to

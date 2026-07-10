@@ -243,7 +243,9 @@ until you re-lock (which re-gates trust). Review referenced scripts as part
 of `trust .` — same discipline as reading a `.envrc` before `direnv allow`.
 
 After that its servers are live through the gateway — and every brokered call is
-**firewalled** by the manifest's `[policy]` and **audited**:
+**firewalled** and **audited**. Two policy layers apply: the repo's `[policy]`
+and your own machine-level `[policy.tools]` in `~/.agentstack/agentstack.toml`,
+which is checked first and which no repo can loosen:
 
 ```text
 agent → demo.echo         ✓ ok        # brokered through the gateway, logged

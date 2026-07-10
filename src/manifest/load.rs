@@ -185,6 +185,44 @@ pub fn load_from_dir(dir: &Path) -> Result<LoadedManifest> {
 /// [`load_from_dir`], so primitive loads (trust review, the machine layer
 /// itself) stay single-layer.
 ///
+/// The machine manifest's `[policy]` — the user's own firewall layer, loaded
+/// separately from [`merge_user_layer`] so a repo manifest can never see or
+/// shadow it. The runtime gateway enforces it WITH deny precedence: a call
+/// must pass both this policy and the project's, so a cloned repo cannot
+/// loosen what the machine forbids.
+///
+/// Unlike the instructions merge, a broken machine manifest is warned about
+/// (stderr), not silent: silently dropping the user's own deny rules would
+/// fail open on exactly the file that exists to say no. Still non-fatal — the
+/// project policy continues to apply.
+pub fn machine_policy() -> crate::manifest::Policy {
+    let path = crate::util::paths::agentstack_home().join(MANIFEST_FILE);
+    let Ok(text) = fs::read_to_string(&path) else {
+        return crate::manifest::Policy::default();
+    };
+    let parsed: Result<Manifest, _> = toml::from_str(&text);
+    let manifest = match parsed {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!(
+                "warning: machine policy unavailable ({} is unreadable: {e}); only project policy applies",
+                path.display()
+            );
+            return crate::manifest::Policy::default();
+        }
+    };
+    if let Err(e) = crate::util::check_schema_version(
+        manifest.version,
+        SUPPORTED_MANIFEST_VERSION,
+        "manifest",
+        &path,
+    ) {
+        eprintln!("warning: machine policy unavailable ({e:#}); only project policy applies");
+        return crate::manifest::Policy::default();
+    }
+    manifest.policy
+}
+
 /// A missing or unparseable machine layer is a silent no-op — a broken
 /// personal file must not take every project down — as is loading the machine
 /// manifest itself.
@@ -350,6 +388,40 @@ mod tests {
         let inner = proj.join("src");
         fs::create_dir_all(&inner).unwrap();
         assert_eq!(discover_project_base_below(&inner, Some(&home)), Some(proj));
+    }
+
+    /// The machine `[policy]` loads from the machine manifest; a broken or
+    /// future-version file degrades to an empty policy (warned on stderr, not
+    /// fatal) — the project policy still applies either way.
+    #[test]
+    fn machine_policy_loads_from_the_machine_manifest() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", tmp.path());
+        let path = tmp.path().join(MANIFEST_FILE);
+
+        // No machine manifest → empty policy.
+        assert!(machine_policy().is_empty());
+
+        // A [policy.tools] rule loads.
+        fs::write(
+            &path,
+            "version = 1\n[policy.tools]\nfigma = [\"!delete_*\"]\n",
+        )
+        .unwrap();
+        let policy = machine_policy();
+        assert!(policy.tool_allowed("figma", "delete_file").is_err());
+        assert!(policy.tool_allowed("figma", "get_file").is_ok());
+
+        // Unreadable / future-version files degrade to empty, not panic/fatal.
+        fs::write(&path, "not toml {{{").unwrap();
+        assert!(machine_policy().is_empty());
+        fs::write(&path, "version = 99\n[policy.tools]\nfigma = [\"!x\"]\n").unwrap();
+        assert!(machine_policy().is_empty());
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     #[test]

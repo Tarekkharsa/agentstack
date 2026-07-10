@@ -439,6 +439,12 @@ pub struct Gateway {
     upstreams: Vec<UpstreamSlot>,
     cache: std::sync::Mutex<Option<Vec<Value>>>,
     policy: crate::manifest::Policy,
+    /// The machine manifest's `[policy]` (`~/.agentstack/agentstack.toml`) —
+    /// the user's own layer, checked FIRST with deny precedence. A repo
+    /// manifest cannot see, shadow, or loosen it: a call must pass both
+    /// policies. Trust review covers the repo's policy; this one is the
+    /// user's standing rules across every project.
+    machine_policy: crate::manifest::Policy,
     project: Option<String>,
 }
 
@@ -494,6 +500,7 @@ impl Gateway {
             // `[policy.tools]` travels with the gateway — it is the firewall's
             // rule set; `project` is audit-log context.
             let policy = ctx.loaded.manifest.policy.clone();
+            let machine_policy = crate::manifest::machine_policy();
             let project = Some(ctx.dir.display().to_string());
             for (name, resolved) in servers {
                 let s = match resolved {
@@ -585,6 +592,7 @@ impl Gateway {
                 upstreams,
                 cache: std::sync::Mutex::new(None),
                 policy,
+                machine_policy,
                 project,
             };
         }
@@ -592,6 +600,7 @@ impl Gateway {
             upstreams,
             cache: std::sync::Mutex::new(None),
             policy: crate::manifest::Policy::default(),
+            machine_policy: crate::manifest::Policy::default(),
             project: None,
         }
     }
@@ -602,6 +611,7 @@ impl Gateway {
             upstreams: Vec::new(),
             cache: std::sync::Mutex::new(Some(Vec::new())),
             policy: crate::manifest::Policy::default(),
+            machine_policy: crate::manifest::Policy::default(),
             project: None,
         }
     }
@@ -636,7 +646,7 @@ impl Gateway {
                         // tool is invisible, not just refusable — it never
                         // reaches tools_search or code-mode bindings.
                         let bare = t.get("name").and_then(Value::as_str).unwrap_or("");
-                        if self.policy.tool_allowed(&slot.name, bare).is_err() {
+                        if self.tool_allowed(&slot.name, bare).is_err() {
                             continue;
                         }
                         out.push(namespace_tool(&slot.name, &t));
@@ -656,7 +666,7 @@ impl Gateway {
         let (server, tool) = name.split_once("__")?;
         let slot = self.upstreams.iter().find(|u| u.name == server)?;
         let started = Instant::now();
-        if let Err(rule) = self.policy.tool_allowed(server, tool) {
+        if let Err(rule) = self.tool_allowed(server, tool) {
             self.log_call(server, tool, args, "denied", Some(&rule), started);
             return Some(Err(anyhow!("{server}__{tool}: call refused — {rule}")));
         }
@@ -669,6 +679,17 @@ impl Gateway {
             Err(e) => self.log_call(server, tool, args, "error", Some(&e.to_string()), started),
         }
         Some(result)
+    }
+
+    /// The effective firewall: a tool must pass the machine `[policy.tools]`
+    /// AND the project's. Machine denies win by construction — nothing a repo
+    /// declares is consulted before the user's own rules — and the error says
+    /// which layer refused.
+    fn tool_allowed(&self, server: &str, tool: &str) -> Result<(), String> {
+        self.machine_policy
+            .tool_allowed(server, tool)
+            .map_err(|rule| format!("{rule} (machine policy — ~/.agentstack/agentstack.toml)"))?;
+        self.policy.tool_allowed(server, tool)
     }
 
     /// Append one audit record (best-effort; never fails the call). Only the
@@ -794,6 +815,7 @@ impl Gateway {
             upstreams: Vec::new(),
             cache: std::sync::Mutex::new(Some(tools)),
             policy: crate::manifest::Policy::default(),
+            machine_policy: crate::manifest::Policy::default(),
             project: None,
         }
     }
@@ -878,6 +900,30 @@ fn parse_sse(text: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Machine `[policy.tools]` and project `[policy.tools]` compose as AND:
+    /// the machine layer is checked first (its refusal names the layer), the
+    /// project layer cannot loosen it, and each still denies on its own.
+    #[test]
+    fn machine_policy_composes_with_deny_precedence() {
+        let gw = Gateway {
+            upstreams: Vec::new(),
+            cache: std::sync::Mutex::new(Some(Vec::new())),
+            policy: toml::from_str("[tools]\nfigma = [\"!delete_*\"]").unwrap(),
+            machine_policy: toml::from_str("[tools]\nfigma = [\"!post_*\"]").unwrap(),
+            project: None,
+        };
+        // Machine deny wins and says so, even though the project allows it.
+        let err = gw.tool_allowed("figma", "post_comment").unwrap_err();
+        assert!(err.contains("machine policy"), "{err}");
+        // Project deny still applies on its own.
+        let err = gw.tool_allowed("figma", "delete_file").unwrap_err();
+        assert!(!err.contains("machine policy"), "{err}");
+        // A tool neither layer names passes.
+        assert!(gw.tool_allowed("figma", "get_file").is_ok());
+        // Other servers are untouched by either layer.
+        assert!(gw.tool_allowed("github", "delete_repo").is_ok());
+    }
 
     /// The gateway is shared as a bare `Arc` across the serve loop, per-call
     /// worker threads, and the code-mode endpoint — losing `Send + Sync` (say,
