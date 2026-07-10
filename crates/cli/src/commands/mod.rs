@@ -40,6 +40,7 @@ pub mod stats;
 pub mod trust;
 pub mod upgrade;
 pub mod use_profile;
+pub mod verify_cmd;
 
 use std::path::{Path, PathBuf};
 

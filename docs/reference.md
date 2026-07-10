@@ -849,7 +849,9 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 `connect`/`disconnect` (`connect`: `--all`, `--transparent`, `--write`),
 `trust` (`--list`, `--revoke` — pins the manifest layers **and lockfile**;
 re-locking re-gates), `codemode` (`--write`), `analyze` (`--json`,
-`--transcripts`), `hook`, `run`/`runs`/`kill`, `self link|which`.
+`--transcripts`), `hook`, `run` (`--sandbox`)/`runs`/`kill`, `report` (`--json`),
+`sign`/`verify` (`--pubkey`, `--signature` — detached ed25519 lockfile
+signatures, Phase 4), `self link|which`.
 
 This inventory is checked by a test against the CLI's own command list
 (`tests/docs_commands.rs`) — a new subcommand fails CI until it's documented

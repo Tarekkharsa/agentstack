@@ -15,6 +15,10 @@ agentstack-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
+# rule 6: ed25519-dalek is on this crate's blessed list — detached lockfile
+# signatures for registry distribution (Phase 4). from_bytes/sign/verify only;
+# no RNG dependency (seeds come from core::util::random_bytes).
+ed25519-dalek = "2"
 indexmap = { version = "2", features = ["serde"] }
 anyhow = "1"
 # TODO(phase-1): shipped store format is TOML; rule 6's strict list has no

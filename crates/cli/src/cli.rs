@@ -152,6 +152,14 @@ pub enum Command {
     /// decisions, and tool calls) by run id.
     Report(ReportArgs),
 
+    /// Sign this project's agentstack.lock with a fresh ed25519 key (writes a
+    /// detached agentstack.lock.sig, prints the public key to publish).
+    Sign(SignArgs),
+
+    /// Verify agentstack.lock against a published ed25519 public key and its
+    /// detached signature.
+    Verify(VerifyArgs),
+
     /// Print a shell hook for per-directory profile auto-activation.
     #[command(hide = true)]
     Hook(HookArgs),
@@ -386,6 +394,25 @@ pub struct ReportArgs {
     /// Emit the report as JSON instead of the human-readable form.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct SignArgs {
+    /// Print only the public-key line (for scripting).
+    #[arg(long)]
+    pub print_key_only: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct VerifyArgs {
+    /// The publisher's ed25519 public key (64 hex chars).
+    #[arg(long)]
+    pub pubkey: String,
+
+    /// The detached signature (128 hex chars). Defaults to reading
+    /// `agentstack.lock.sig` next to the lockfile.
+    #[arg(long)]
+    pub signature: Option<String>,
 }
 
 #[derive(Args, Debug)]
