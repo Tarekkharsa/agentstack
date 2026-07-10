@@ -582,11 +582,13 @@ fn run_checks(
             report.line(Level::Ok, "all instruction files match the manifest");
         }
     }
-    // Codex-specific instruction quirks, checked whenever codex is a target:
-    // AGENTS.override.md in the same directory silently wins over AGENTS.md,
-    // and Codex stops reading instruction content at project_doc_max_bytes
-    // (32 KiB default) — truncating would silently drop rules, so doctor
-    // reports instead.
+    // Codex-specific instruction/trust quirks, checked whenever codex is a
+    // target. Codex's semantics, per its docs: AGENTS.override.md in a
+    // directory silently wins over AGENTS.md; the EFFECTIVE
+    // project_doc_max_bytes (configured, 32 KiB default) caps the COMBINED
+    // instruction chain; and .codex/config.toml is ignored until the project
+    // is trusted (projects.<path>.trust_level in ~/.codex/config.toml).
+    // Truncation/ignoring is silent on Codex's side — doctor is the alarm.
     if target_ids.iter().any(|id| id == "codex") {
         let root = crate::manifest::project_root_of(&ctx.dir);
         if root.join("AGENTS.override.md").exists() && root.join("AGENTS.md").exists() {
@@ -595,20 +597,31 @@ fn run_checks(
                 "AGENTS.override.md exists beside AGENTS.md — Codex reads ONLY the override; the managed AGENTS.md is shadowed",
             );
         }
-        const CODEX_DOC_DEFAULT_MAX: u64 = 32 * 1024;
-        for path in [root.join("AGENTS.md"), root.join("AGENTS.override.md")] {
-            if let Ok(meta) = std::fs::metadata(&path) {
-                if meta.len() > CODEX_DOC_DEFAULT_MAX {
-                    report.line(
-                        Level::Warn,
-                        format!(
-                            "{} is {} KiB — Codex truncates instruction files at project_doc_max_bytes (32 KiB default) ↳ raise it in ~/.codex/config.toml or split fragments",
-                            path.file_name().and_then(|n| n.to_str()).unwrap_or("AGENTS.md"),
-                            meta.len() / 1024
-                        ),
-                    );
-                }
-            }
+        let limit = codex_doc_limit(&root);
+        let (chain_bytes, chain_files) = codex_instruction_chain(&root);
+        if chain_bytes > limit {
+            report.line(
+                Level::Warn,
+                format!(
+                    "instruction chain for Codex is {} KiB across {} ({}) — over the effective project_doc_max_bytes ({} KiB); Codex truncates silently ↳ raise the limit or split fragments",
+                    chain_bytes / 1024,
+                    if chain_files.len() == 1 { "1 file".to_string() } else { format!("{} files", chain_files.len()) },
+                    chain_files.join(", "),
+                    limit / 1024
+                ),
+            );
+        }
+        // Project-scope render exists but Codex won't read it until trusted —
+        // a healthy-looking render that silently does nothing.
+        if root.join(".codex/config.toml").exists() && !codex_project_trusted(&root) {
+            report.line(
+                Level::Warn,
+                format!(
+                    "Codex will IGNORE {}/.codex/config.toml — the project is not trusted in ~/.codex/config.toml (projects.\"{}\".trust_level) ↳ open Codex in this folder once and accept the trust prompt",
+                    root.display(),
+                    root.display()
+                ),
+            );
         }
     }
 
@@ -1122,6 +1135,79 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
             ),
         ),
     }
+}
+
+/// Codex's effective `project_doc_max_bytes`: the project `.codex/config.toml`
+/// layer wins over the global one (matching Codex's own layering for trusted
+/// projects), 32 KiB when neither sets it. Best-effort parses — a garbled
+/// config just yields the default; this feeds a warning, not a gate.
+fn codex_doc_limit(root: &Path) -> u64 {
+    const DEFAULT: u64 = 32 * 1024;
+    let read = |path: std::path::PathBuf| -> Option<u64> {
+        let text = std::fs::read_to_string(path).ok()?;
+        let value: toml::Value = toml::from_str(&text).ok()?;
+        value
+            .get("project_doc_max_bytes")?
+            .as_integer()?
+            .try_into()
+            .ok()
+    };
+    read(root.join(".codex/config.toml"))
+        .or_else(|| read(paths::expand_tilde("~/.codex/config.toml")))
+        .unwrap_or(DEFAULT)
+}
+
+/// The instruction chain Codex reads for a session at the project root: the
+/// global ~/.codex/AGENTS.md plus, at the root directory, AGENTS.override.md
+/// OR AGENTS.md (override wins; first non-empty only). Returns total bytes and
+/// the file names counted. Sessions started in subdirectories add more chain
+/// levels — this is the floor, which is exactly what a warning needs.
+fn codex_instruction_chain(root: &Path) -> (u64, Vec<String>) {
+    let mut total = 0u64;
+    let mut files = Vec::new();
+    let mut count = |path: std::path::PathBuf, label: &str| {
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.len() > 0 {
+                total += meta.len();
+                files.push(label.to_string());
+                return true;
+            }
+        }
+        false
+    };
+    count(
+        paths::expand_tilde("~/.codex/AGENTS.md"),
+        "~/.codex/AGENTS.md",
+    );
+    // Per directory: override wins, first non-empty only.
+    if !count(root.join("AGENTS.override.md"), "AGENTS.override.md") {
+        count(root.join("AGENTS.md"), "AGENTS.md");
+    }
+    (total, files)
+}
+
+/// Whether Codex trusts `root`: `projects."<canonical path>".trust_level ==
+/// "trusted"` in the global ~/.codex/config.toml. Codex ignores a project's
+/// .codex/ layer entirely until this is set (its gate, recorded when the user
+/// accepts the first-run prompt in that folder).
+fn codex_project_trusted(root: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(paths::expand_tilde("~/.codex/config.toml")) else {
+        return false;
+    };
+    let Ok(value) = toml::from_str::<toml::Value>(&text) else {
+        return false;
+    };
+    let canonical = root
+        .canonicalize()
+        .unwrap_or_else(|_| root.to_path_buf())
+        .display()
+        .to_string();
+    value
+        .get("projects")
+        .and_then(|p| p.get(&canonical))
+        .and_then(|e| e.get("trust_level"))
+        .and_then(|t| t.as_str())
+        == Some("trusted")
 }
 
 /// A policy-matchable source label for a skill, e.g. `git:github.com/acme/repo`

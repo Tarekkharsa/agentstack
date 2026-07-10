@@ -6,7 +6,7 @@
 # Headers go in a nested [mcp_servers.<name>.http_headers] table (not inline).
 # Codex has no generic ${VAR} interpolation in MCP fields (env_vars /
 # bearer_token_env_var / env_http_headers are the field-specific mechanisms),
-# so secrets are written resolved (literal). See plan/secret-capabilities.md.
+# so secrets are written resolved (literal). See docs/design/secret-capabilities.md.
 id: codex
 display: Codex CLI
 detect:

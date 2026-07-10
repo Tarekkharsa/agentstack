@@ -27,3 +27,5 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test --all
+      - name: Conformance classifier self-test
+        run: bash agentstack-test/conformance-smoke.sh --self-test

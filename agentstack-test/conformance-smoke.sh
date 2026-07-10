@@ -9,6 +9,30 @@
 #   ./conformance-smoke.sh codex codex .codex/config.toml
 #   ./conformance-smoke.sh gemini gemini .gemini/settings.json
 set -euo pipefail
+
+# A nonzero CLI exit is a FAILURE unless it matches this auth/onboarding
+# allowlist — the rot alarm must never classify unknown breakage as a skip.
+classify_cli_failure() {
+  if grep -qiE 'log ?in|logged ?in|sign ?in|auth|credential|api.?key|onboard|unauthorized|browser|session expired|token expired|subscription|billing' <<<"$1"; then
+    echo skip
+  else
+    echo fail
+  fi
+}
+
+if [[ "${1:-}" == "--self-test" ]]; then
+  # Regression tests for both classes: auth gates skip, everything else fails.
+  [[ "$(classify_cli_failure "Please sign in to continue")" == skip ]]
+  [[ "$(classify_cli_failure "error: not logged in - run codex login first")" == skip ]]
+  [[ "$(classify_cli_failure "Set the OPENAI_API_KEY environment variable")" == skip ]]
+  [[ "$(classify_cli_failure 'unknown field `mcp_server` at line 4')" == fail ]]
+  [[ "$(classify_cli_failure "failed to load configuration from config.toml")" == fail ]]
+  [[ "$(classify_cli_failure "TOML parse error at line 2, column 1")" == fail ]]
+  [[ "$(classify_cli_failure "segmentation fault")" == fail ]]
+  echo "classify self-test OK"
+  exit 0
+fi
+
 adapter="$1"
 cli_bin="$2"
 config_rel="$3"
@@ -84,15 +108,16 @@ if out="$(env HOME="$home" "$cli_bin" mcp list 2>&1)"; then
     exit 1
   fi
 else
-  # Nonzero exit is USUALLY an auth/onboarding gate — but a config the CLI
-  # can't parse also exits nonzero, and skipping that would let a schema
-  # regression ship. Fail on parse-shaped errors; skip only the rest.
-  if grep -qiE 'pars(e|ing) error|invalid (type|value|key|config)|expected .* found|(toml|json).*(error|invalid)|error.*(toml|json)' <<<"$out"; then
-    echo "FAIL: $cli_bin rejected the rendered config (parse-shaped error):"
+  # Allowlist inversion: only a recognized auth/onboarding gate is a skip;
+  # every other nonzero exit — parse errors, unknown fields, crashes, and
+  # wording we have never seen — FAILS. A rot alarm must fail unknown.
+  if [[ "$(classify_cli_failure "$out")" == skip ]]; then
+    echo "live: SKIPPED — '$cli_bin mcp list' hit an auth/onboarding gate. Output:"
+    echo "$out" | head -20
+  else
+    echo "FAIL: $cli_bin exited nonzero and the output matches no known auth gate:"
     echo "$out" | head -20
     exit 1
   fi
-  echo "live: SKIPPED — '$cli_bin mcp list' exited nonzero (auth/onboarding gate?). Output:"
-  echo "$out" | head -20
 fi
 echo "Done."
