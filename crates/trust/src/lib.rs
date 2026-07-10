@@ -232,4 +232,81 @@ mod tests {
             assert_eq!(check(empty.path()), TrustState::Untrusted);
         });
     }
+
+    // ── Property test: the re-gate invariant (CLAUDE.md rule 4) ────────────
+    // NEVER delete or weaken this test. It is the machine-checked form of
+    // "any pinned byte changes → bundle re-gates": for ALL contents of the
+    // pinned files, ALL choices of file, ALL byte positions, and ALL nonzero
+    // bit patterns, flipping that one byte demotes Trusted to Changed.
+    //
+    // How proptest works, for the record: a `Strategy` is a value generator
+    // (like fast-check arbitraries in the TS world). `proptest!` runs the
+    // test body against many generated inputs, and when a case fails it
+    // *shrinks* — re-runs with progressively simpler inputs (shorter files,
+    // index 0, delta 1) and reports the minimal failing case instead of a
+    // random haystack. `prop_flat_map` builds dependent generators: the
+    // flip index must be generated *after* (and within) the chosen file's
+    // length, so the second stage's ranges depend on the first stage's
+    // output.
+
+    use proptest::prelude::*;
+
+    /// (manifest, local, lock, which file to corrupt, byte index, xor delta).
+    /// All three files non-empty so every (which, idx) pair is valid; delta
+    /// is drawn from 1..=255 so `byte ^ delta` is guaranteed to differ.
+    fn pinned_surface() -> impl Strategy<Value = (Vec<u8>, Vec<u8>, Vec<u8>, usize, usize, u8)> {
+        (
+            prop::collection::vec(any::<u8>(), 1..256),
+            prop::collection::vec(any::<u8>(), 1..256),
+            prop::collection::vec(any::<u8>(), 1..256),
+            0usize..3,
+            1u8..=255u8,
+        )
+            .prop_flat_map(|(manifest, local, lock, which, delta)| {
+                let len = [manifest.len(), local.len(), lock.len()][which];
+                (
+                    Just(manifest),
+                    Just(local),
+                    Just(lock),
+                    Just(which),
+                    0..len,
+                    Just(delta),
+                )
+            })
+    }
+
+    proptest! {
+        // Each case touches the real filesystem (tempdir + env var), so run
+        // fewer, bigger cases than proptest's default 256.
+        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+
+        #[test]
+        fn any_single_byte_flip_in_any_pinned_file_regates(
+            (manifest, local, lock, which, idx, delta) in pinned_surface()
+        ) {
+            with_home(|_| {
+                let proj = assert_fs::TempDir::new().unwrap();
+                // digest_for hashes raw bytes — the files need not parse, so
+                // the invariant holds over arbitrary (hostile) content.
+                proj.child(".agentstack/agentstack.toml").write_binary(&manifest).unwrap();
+                proj.child(".agentstack/agentstack.local.toml").write_binary(&local).unwrap();
+                proj.child(".agentstack/agentstack.lock").write_binary(&lock).unwrap();
+
+                trust(proj.path()).unwrap();
+                prop_assert_eq!(check(proj.path()), TrustState::Trusted);
+
+                let (name, bytes) = match which {
+                    0 => ("agentstack.toml", manifest),
+                    1 => ("agentstack.local.toml", local),
+                    _ => ("agentstack.lock", lock),
+                };
+                let mut corrupted = bytes;
+                corrupted[idx] ^= delta;
+                proj.child(format!(".agentstack/{name}")).write_binary(&corrupted).unwrap();
+
+                prop_assert_eq!(check(proj.path()), TrustState::Changed);
+                Ok(())
+            })?;
+        }
+    }
 }
