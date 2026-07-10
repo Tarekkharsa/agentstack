@@ -243,7 +243,7 @@ impl AutoProject {
         match state {
             crate::trust::TrustState::Trusted => self.activate(&base),
             crate::trust::TrustState::Changed => eprintln!(
-                "agentstack mcp: {} was trusted but its manifest CHANGED since — control-plane tools only. Review it, then re-run `agentstack trust {}`.",
+                "agentstack mcp: {} was trusted but its manifest or lockfile CHANGED since — control-plane tools only. Review it, then re-run `agentstack trust {}`.",
                 base.display(),
                 base.display()
             ),
@@ -265,7 +265,7 @@ impl AutoProject {
                 "This project ({dir}) is not trusted for auto mode, so none of its MCP servers are proxied (spawned or contacted). Ask a human to review the manifest and run `agentstack trust {dir}` to enable them."
             )),
             crate::trust::TrustState::Changed => Some(format!(
-                "This project ({dir}) was trusted, but its manifest changed since — its MCP servers are not proxied until it is re-trusted. Ask a human to review the change and re-run `agentstack trust {dir}`."
+                "This project ({dir}) was trusted, but its manifest or lockfile changed since — its MCP servers are not proxied until it is re-trusted. Ask a human to review the change and re-run `agentstack trust {dir}`."
             )),
         }
     }
@@ -863,7 +863,7 @@ fn doctor_summary(dir: Option<&Path>) -> Result<String> {
     let trust = match crate::trust::check(&base) {
         crate::trust::TrustState::Trusted => "trusted (servers are proxied in auto mode)".into(),
         crate::trust::TrustState::Changed => format!(
-            "manifest changed since trusted — servers are NOT proxied in auto mode until a human re-runs `agentstack trust {}`",
+            "manifest or lockfile changed since trusted — servers are NOT proxied in auto mode until a human re-runs `agentstack trust {}`",
             base.display()
         ),
         crate::trust::TrustState::Untrusted => format!(

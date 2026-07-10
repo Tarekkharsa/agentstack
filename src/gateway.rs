@@ -445,6 +445,10 @@ impl Gateway {
             // Library definitions are outside the trust digest (it covers the
             // manifest layers + lockfile), so they are integrity-checked here
             // against the lock's pinned definition digests before being served.
+            // An unreadable lock fails OPEN (everything unpinned, warned): the
+            // library is user-controlled and any lock byte-change re-gates
+            // trust, so a garbled pin file can't be repo-leverage — refusing
+            // the whole surface for it would punish zero-lock workflows.
             let lock = crate::lock::Lock::load(&ctx.dir).unwrap_or_else(|e| {
                 eprintln!(
                     "gateway: warning: lockfile unavailable ({e:#}); library servers are unpinned"

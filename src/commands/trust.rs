@@ -140,7 +140,8 @@ fn list() -> Result<()> {
             TrustState::Trusted => ("✓".green().to_string(), "current".to_string()),
             TrustState::Changed => (
                 "⚠".yellow().to_string(),
-                "manifest changed since trusted — re-run `agentstack trust` there".to_string(),
+                "manifest or lockfile changed since trusted — re-run `agentstack trust` there"
+                    .to_string(),
             ),
             // An entry exists, so Untrusted can't come back here; kept for
             // completeness.

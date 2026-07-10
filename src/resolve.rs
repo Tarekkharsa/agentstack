@@ -267,6 +267,19 @@ pub fn effective_runtime_servers(
     lib_home: &Path,
     profile: Option<&str>,
 ) -> Vec<(String, Result<ResolvedServer, ServerResolveError>)> {
+    runtime_server_names(manifest, profile)
+        .into_iter()
+        .map(|n| {
+            let r = resolve_server(manifest, library, lib_home, &n);
+            (n, r)
+        })
+        .collect()
+}
+
+/// The names of [`effective_runtime_servers`] without resolving them — for
+/// surfaces (doctor, say) that only need to know whether a runtime surface is
+/// declared, without touching the library on disk.
+pub fn runtime_server_names(manifest: &Manifest, profile: Option<&str>) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut push = |n: &str, names: &mut Vec<String>| {
@@ -292,12 +305,6 @@ pub fn effective_runtime_servers(
         }
     }
     names
-        .into_iter()
-        .map(|n| {
-            let r = resolve_server(manifest, library, lib_home, &n);
-            (n, r)
-        })
-        .collect()
 }
 
 /// SHA-256 hex digest of a byte string.

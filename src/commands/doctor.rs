@@ -251,18 +251,20 @@ fn run_checks(
         }
         crate::trust::TrustState::Changed => report.line(
             Level::Warn,
-            "trusted, but the manifest changed since ↳ review + agentstack trust",
+            "trusted, but the manifest or lockfile changed since ↳ review + agentstack trust",
         ),
         // Untrusted is a choice, not a fault (Ok) — unless a harness actually
-        // uses the bridge AND the manifest declares servers: then every session
-        // here silently gets control-plane tools only, which is worth a warning.
+        // uses the bridge AND the project declares a runtime surface (inline
+        // servers or profile/library name refs): then every session here
+        // silently gets control-plane tools only, which is worth a warning.
         crate::trust::TrustState::Untrusted => {
-            if connected > 0 && !manifest.servers.is_empty() {
+            let runtime = crate::resolve::runtime_server_names(manifest, None);
+            if connected > 0 && !runtime.is_empty() {
                 report.line(
                     Level::Warn,
                     format!(
                         "not trusted — {connected} harness(es) use the bridge, but this project's {} server(s) are not proxied ↳ agentstack trust {}",
-                        manifest.servers.len(),
+                        runtime.len(),
                         base.display()
                     ),
                 );
