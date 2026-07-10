@@ -440,13 +440,13 @@ impl UpstreamSlot {
 pub struct Gateway {
     upstreams: Vec<UpstreamSlot>,
     cache: std::sync::Mutex<Option<Vec<Value>>>,
-    policy: crate::manifest::Policy,
-    /// The machine manifest's `[policy]` (`~/.agentstack/agentstack.toml`) —
-    /// the user's own layer, checked FIRST with deny precedence. A repo
-    /// manifest cannot see, shadow, or loosen it: a call must pass both
-    /// policies. Trust review covers the repo's policy; this one is the
-    /// user's standing rules across every project.
-    machine_policy: crate::manifest::Policy,
+    /// The compiled (machine ∩ bundle) ruleset — the single in-process source
+    /// of enforcement truth. Compiled once at construction from the machine
+    /// manifest's `[policy]` (the user's own layer, which no repo can see,
+    /// shadow, or loosen — its denies win and name the layer) and the
+    /// project's `[policy]`. Phase 2 hands this exact artifact, serialized,
+    /// to the egress proxy.
+    ruleset: agentstack_policy::CompiledRuleset,
     project: Option<String>,
 }
 
@@ -503,10 +503,17 @@ impl Gateway {
             // Relative server paths (`cwd`) anchor at the project root — the
             // dir holding `.agentstack/`, not the manifest dir itself.
             let root = crate::manifest::project_root_of(&ctx.dir);
-            // `[policy.tools]` travels with the gateway — it is the firewall's
-            // rule set; `project` is audit-log context.
-            let policy = ctx.loaded.manifest.policy.clone();
-            let machine_policy = crate::manifest::machine_policy();
+            // The firewall's rule set travels with the gateway as ONE compiled
+            // artifact: (machine [policy] ∩ project [policy]) folded over the
+            // runtime server names. Compiled here, consulted per call —
+            // consumers never re-derive the two-layer merge. `project` is
+            // audit-log context.
+            let server_names: Vec<&str> = servers.iter().map(|(n, _)| n.as_str()).collect();
+            let ruleset = agentstack_policy::compile(
+                &crate::manifest::machine_policy(),
+                &ctx.loaded.manifest.policy,
+                &server_names,
+            );
             let project = Some(ctx.dir.display().to_string());
             for (name, resolved) in servers {
                 let s = match resolved {
@@ -607,16 +614,14 @@ impl Gateway {
             return Gateway {
                 upstreams,
                 cache: std::sync::Mutex::new(None),
-                policy,
-                machine_policy,
+                ruleset,
                 project,
             };
         }
         Gateway {
             upstreams,
             cache: std::sync::Mutex::new(None),
-            policy: crate::manifest::Policy::default(),
-            machine_policy: crate::manifest::Policy::default(),
+            ruleset: agentstack_policy::CompiledRuleset::default(),
             project: None,
         }
     }
@@ -626,8 +631,7 @@ impl Gateway {
         Gateway {
             upstreams: Vec::new(),
             cache: std::sync::Mutex::new(Some(Vec::new())),
-            policy: crate::manifest::Policy::default(),
-            machine_policy: crate::manifest::Policy::default(),
+            ruleset: agentstack_policy::CompiledRuleset::default(),
             project: None,
         }
     }
@@ -700,12 +704,13 @@ impl Gateway {
         Some(result)
     }
 
-    /// The effective firewall — delegated to the policy engine: a tool must
-    /// pass the machine `[policy.tools]` AND the project's, machine denies
-    /// win. Composition semantics and their tests (including the ⊆ machine
-    /// property test) live in `agentstack-policy`.
+    /// The effective firewall — one lookup in the compiled ruleset: a tool
+    /// must pass the machine `[policy.tools]` AND the project's, machine
+    /// denies win and the error names the layer. Composition semantics and
+    /// their tests (⊆ machine, plus live-vs-compiled equivalence) live in
+    /// `agentstack-policy`.
     fn tool_allowed(&self, server: &str, tool: &str) -> Result<(), String> {
-        agentstack_policy::tool_decision(&self.machine_policy, &self.policy, server, tool)
+        self.ruleset.tool_decision(server, tool)
     }
 
     /// Append one audit record (best-effort; never fails the call). Only the
@@ -830,8 +835,7 @@ impl Gateway {
         Gateway {
             upstreams: Vec::new(),
             cache: std::sync::Mutex::new(Some(tools)),
-            policy: crate::manifest::Policy::default(),
-            machine_policy: crate::manifest::Policy::default(),
+            ruleset: agentstack_policy::CompiledRuleset::default(),
             project: None,
         }
     }
@@ -943,16 +947,19 @@ mod tests {
     use super::*;
 
     /// Composition semantics are tested in `agentstack-policy`; this only
-    /// pins the wiring — the Gateway hands BOTH layers to the engine, machine
-    /// first (a broken delegate that dropped the machine layer would pass
-    /// every other gateway test).
+    /// pins the wiring — the Gateway's ruleset carries BOTH layers, machine
+    /// first (a compile call that dropped the machine layer would pass every
+    /// other gateway test).
     #[test]
     fn gateway_delegates_both_policy_layers_to_the_engine() {
+        let machine: crate::manifest::Policy =
+            toml::from_str("[tools]\nfigma = [\"!post_*\"]").unwrap();
+        let project: crate::manifest::Policy =
+            toml::from_str("[tools]\nfigma = [\"!delete_*\"]").unwrap();
         let gw = Gateway {
             upstreams: Vec::new(),
             cache: std::sync::Mutex::new(Some(Vec::new())),
-            policy: toml::from_str("[tools]\nfigma = [\"!delete_*\"]").unwrap(),
-            machine_policy: toml::from_str("[tools]\nfigma = [\"!post_*\"]").unwrap(),
+            ruleset: agentstack_policy::compile(&machine, &project, &["figma"]),
             project: None,
         };
         let err = gw.tool_allowed("figma", "post_comment").unwrap_err();
