@@ -242,6 +242,45 @@ fn stdio_manifest_cwd_anchors_the_child_relative_to_project_root() {
     );
 }
 
+/// Real failures through `try_call` must land in the call log with their
+/// intended fixed class — classified from the actual anyhow chains the
+/// gateway produces, not synthetic strings. (The unit test covers shapes;
+/// this covers the wiring end to end.)
+#[test]
+fn call_log_classifies_real_failures() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    setup_home(&tmp.path().join("home"));
+    let proj = tmp.path().join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    write_script(&proj, "fix.sh", FIXTURE);
+    write_manifest(
+        &proj,
+        "[servers.missing]\ntype = \"stdio\"\ncommand = \"/bin/definitely-not-a-binary\"\n\
+         [servers.hung]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"exec sleep 3600\"]\n\
+         [servers.noref]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"./fix.sh\"]\nenv = { TOKEN = \"${NO_SUCH_SECRET_REF}\" }\n",
+    );
+    // Keep the hung server's start timeout short so the test stays fast.
+    std::env::set_var("AGENTSTACK_STDIO_START_MS", "300");
+    let gw = Gateway::from_manifest(Some(&proj));
+    assert!(gw.try_call("noref__echo", &json!({})).unwrap().is_err());
+    assert!(gw.try_call("missing__echo", &json!({})).unwrap().is_err());
+    assert!(gw.try_call("hung__echo", &json!({})).unwrap().is_err());
+    std::env::remove_var("AGENTSTACK_STDIO_START_MS");
+
+    let detail_for = |server: &str| {
+        agentstack::calllog::read_all()
+            .into_iter()
+            .find(|r| r.server == server)
+            .unwrap_or_else(|| panic!("no log record for {server}"))
+            .detail
+            .unwrap_or_default()
+    };
+    assert_eq!(detail_for("noref"), "unresolved-secret");
+    assert_eq!(detail_for("missing"), "spawn-failed");
+    assert_eq!(detail_for("hung"), "timeout");
+}
+
 /// The machine `[policy.tools]` layer (`~/.agentstack/agentstack.toml`) denies
 /// with precedence: the project manifest declares NO policy at all, and the
 /// call is still refused — a cloned repo cannot loosen the user's own rules.

@@ -92,8 +92,11 @@ fn digest_key() -> Option<Vec<u8>> {
             f.write_all(&key).ok()?;
             Some(key)
         }
-        // Lost the creation race — the other writer's key is the key.
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => fs::read(&path).ok(),
+        // Lost the creation race — the other writer's key is the key (same
+        // length floor as the primary read: a partial write is not a key).
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            fs::read(&path).ok().filter(|k| k.len() >= 16)
+        }
         Err(_) => None,
     }
 }
@@ -139,8 +142,21 @@ fn restrict_dir(dir: &std::path::Path) {
 /// alone (without `audit/key`) can't confirm a guessed argument value.
 pub fn digest_args(args: &Value) -> String {
     let mut h = Sha256::new();
-    if let Some(key) = digest_key() {
-        h.update(&key);
+    match digest_key() {
+        Some(key) => h.update(&key),
+        None => {
+            // Unkeyed fallback: correlation across restarts degrades and the
+            // guess-resistance property is lost for these records — say so
+            // once instead of silently mixing digest kinds.
+            static WARNED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "warning: call-log digest key unavailable ({}); argument digests are unkeyed this session",
+                    key_path().display()
+                );
+            }
+        }
     }
     h.update(serde_json::to_string(args).unwrap_or_default().as_bytes());
     let hex = format!("{:x}", h.finalize());
@@ -174,6 +190,13 @@ pub fn record(rec: &CallRecord) {
         opts.mode(0o600);
     }
     if let Ok(mut f) = opts.open(&path) {
+        // mode() applies only at creation — tighten a log that predates the
+        // 0600 default (or survived a mode-preserving restore) too.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        }
         let _ = writeln!(f, "{line}");
     }
 }
