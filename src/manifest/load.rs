@@ -13,6 +13,10 @@ use anyhow::{Context, Result};
 use super::model::Manifest;
 
 pub const MANIFEST_FILE: &str = "agentstack.toml";
+/// Newest manifest schema version this build reads and writes. Anything above
+/// it was authored by a future agentstack whose semantics this build cannot
+/// know, so [`load_from_dir`] refuses it instead of misinterpreting silently.
+pub const SUPPORTED_MANIFEST_VERSION: u32 = 1;
 pub const LOCAL_FILE: &str = "agentstack.local.toml";
 /// Preferred subdirectory holding the manifest and all agentstack-managed files
 /// (lock, `skills/`, `instructions/`, `.env`). A repo opts in by placing its
@@ -109,6 +113,7 @@ pub fn project_root_of(manifest_dir: &Path) -> PathBuf {
 }
 
 /// Result of a layered load, keeping the resolved manifest plus provenance.
+#[derive(Debug)]
 pub struct LoadedManifest {
     pub manifest: Manifest,
     pub manifest_path: PathBuf,
@@ -148,6 +153,12 @@ pub fn load_from_dir(dir: &Path) -> Result<LoadedManifest> {
     let manifest: Manifest = base
         .try_into()
         .context("manifest does not match the expected schema")?;
+    crate::util::check_schema_version(
+        manifest.version,
+        SUPPORTED_MANIFEST_VERSION,
+        "manifest",
+        &manifest_path,
+    )?;
 
     Ok(LoadedManifest {
         manifest,
@@ -202,6 +213,19 @@ pub fn merge_user_layer(loaded: &mut LoadedManifest) {
     let Ok(user) = toml::from_str::<Manifest>(&text) else {
         return;
     };
+    // Same no-op policy for an unsupported schema version: a machine layer
+    // authored by a future agentstack must neither be misread nor take every
+    // project down.
+    if crate::util::check_schema_version(
+        user.version,
+        SUPPORTED_MANIFEST_VERSION,
+        "manifest",
+        &user_manifest,
+    )
+    .is_err()
+    {
+        return;
+    }
     if user.instructions.is_empty() {
         return;
     }
@@ -409,6 +433,47 @@ mod tests {
             Some(v) => std::env::set_var("AGENTSTACK_HOME", v),
             None => std::env::remove_var("AGENTSTACK_HOME"),
         }
+    }
+
+    #[test]
+    fn load_checks_the_manifest_schema_version() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let path = tmp.path().join(MANIFEST_FILE);
+
+        // The current version loads.
+        fs::write(&path, "version = 1\n").unwrap();
+        assert!(load_from_dir(tmp.path()).is_ok());
+
+        // A future version is refused with an actionable message, not
+        // silently misread.
+        fs::write(&path, "version = 99\n").unwrap();
+        let err = load_from_dir(tmp.path()).unwrap_err().to_string();
+        assert!(err.contains("version 99"), "{err}");
+        assert!(err.contains("newer than this agentstack build"), "{err}");
+        assert!(err.contains("upgrade agentstack"), "{err}");
+        assert!(err.contains(MANIFEST_FILE), "{err}");
+
+        // Version 0 never named a real schema.
+        fs::write(&path, "version = 0\n").unwrap();
+        let err = load_from_dir(tmp.path()).unwrap_err().to_string();
+        assert!(err.contains("version 0"), "{err}");
+
+        // A manifest with no version at all fails deserialization (the field
+        // is required), so it can never sneak past the check.
+        fs::write(&path, "[servers]\n").unwrap();
+        let err = format!("{:#}", load_from_dir(tmp.path()).unwrap_err());
+        assert!(err.contains("version"), "{err}");
+    }
+
+    #[test]
+    fn overlay_cannot_bypass_the_version_check() {
+        // The overlay merges before deserialization, so a local file bumping
+        // the version is caught by the same guard.
+        let tmp = assert_fs::TempDir::new().unwrap();
+        fs::write(tmp.path().join(MANIFEST_FILE), "version = 1\n").unwrap();
+        fs::write(tmp.path().join(LOCAL_FILE), "version = 99\n").unwrap();
+        let err = load_from_dir(tmp.path()).unwrap_err().to_string();
+        assert!(err.contains("version 99"), "{err}");
     }
 
     #[test]

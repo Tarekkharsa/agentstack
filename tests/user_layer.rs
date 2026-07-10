@@ -124,3 +124,30 @@ fn project_definition_wins_and_the_layer_never_merges_into_itself() {
 
     unset_home();
 }
+
+#[test]
+fn future_version_machine_layer_is_skipped_not_fatal() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = set_home(tmp.path());
+
+    // A machine layer written by a future agentstack: same no-op policy as a
+    // broken personal file — it must neither be misread nor take every
+    // project load down.
+    fs::write(
+        home.join("agentstack.toml"),
+        "version = 99\n[instructions.style]\npath = \"./instructions/style.md\"\n",
+    )
+    .unwrap();
+    fs::write(home.join("instructions/style.md"), "Machine style.\n").unwrap();
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(proj.join("agentstack.toml"), "version = 1\n").unwrap();
+
+    let ctx = agentstack::commands::load(Some(&proj)).unwrap();
+    assert!(ctx.loaded.manifest.instructions.is_empty());
+    assert!(ctx.loaded.user_path.is_none());
+
+    unset_home();
+}

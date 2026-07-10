@@ -21,6 +21,10 @@ use serde::{Deserialize, Serialize};
 use crate::util::paths;
 
 pub const LIBRARY_FILE: &str = "library.toml";
+/// Newest library-index schema version this build reads and writes. Anything
+/// above it was written by a future agentstack; [`Library::load`] refuses it
+/// instead of misinterpreting silently.
+pub const SUPPORTED_LIBRARY_VERSION: u32 = 1;
 
 /// The central library index. Lives at `<lib_home>/library.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -114,7 +118,15 @@ impl Library {
         let path = Self::path(lib_home);
         match fs::read_to_string(&path) {
             Ok(text) => {
-                toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+                let library: Library =
+                    toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+                crate::util::check_schema_version(
+                    library.version,
+                    SUPPORTED_LIBRARY_VERSION,
+                    "library index",
+                    &path,
+                )?;
+                Ok(library)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Library::default()),
             Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
@@ -204,6 +216,25 @@ mod tests {
         let lib = Library::load(dir.path()).unwrap();
         assert_eq!(lib, Library::default());
         assert!(lib.skills.is_empty());
+    }
+
+    #[test]
+    fn load_checks_the_library_schema_version() {
+        let dir = assert_fs::TempDir::new().unwrap();
+
+        // The current version loads.
+        fs::write(Library::path(dir.path()), "version = 1\n").unwrap();
+        assert!(Library::load(dir.path()).is_ok());
+
+        // A future version is refused, not silently misread.
+        fs::write(Library::path(dir.path()), "version = 99\n").unwrap();
+        let err = Library::load(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("library index version 99"), "{err}");
+        assert!(err.contains("upgrade agentstack"), "{err}");
+
+        // An index with no version fails deserialization (required field).
+        fs::write(Library::path(dir.path()), "[[skill]]\n").unwrap();
+        assert!(Library::load(dir.path()).is_err());
     }
 
     #[test]
