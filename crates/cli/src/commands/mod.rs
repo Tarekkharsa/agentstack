@@ -28,6 +28,7 @@ pub mod proxy;
 pub mod remove;
 pub mod restore;
 pub mod runs;
+pub mod sandbox;
 pub mod search;
 pub mod secret;
 pub mod self_cmd;

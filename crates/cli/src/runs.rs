@@ -84,7 +84,7 @@ fn save_all(map: &BTreeMap<String, RunRecord>) -> Result<()> {
 /// A short, unique-enough run id (`r-<hex>`). Derived from the wall clock and
 /// pid via FNV-1a — same dependency-free trick as `state::hash` / the dashboard
 /// token; not security-sensitive.
-fn gen_id() -> String {
+pub(crate) fn gen_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())

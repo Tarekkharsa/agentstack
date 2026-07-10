@@ -391,6 +391,13 @@ pub struct RunArgs {
     #[arg(long)]
     pub keep: bool,
 
+    /// Launch the harness inside a sandbox container instead of on the host
+    /// (Phase 2). The container mounts the project as its workspace and has no
+    /// direct network. Requires a build with `--features sandbox` and a running
+    /// Docker daemon.
+    #[arg(long)]
+    pub sandbox: bool,
+
     /// Extra arguments passed through to the harness (after `--`).
     #[arg(
         trailing_var_arg = true,

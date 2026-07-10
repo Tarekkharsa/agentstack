@@ -16,12 +16,22 @@ exclude = ["/tests/snapshots"]
 name = "agentstack"
 path = "src/main.rs"
 
+[features]
+# Compile the Docker sandbox backend into `agentstack run --sandbox`. Off by
+# default (keeps bollard + tokio out of standard builds and CI); a maintainer
+# with Docker builds `cargo build --features sandbox`.
+sandbox = ["agentstack-runtime/docker"]
+
 [dependencies]
 agentstack-core = { path = "../core" }
 agentstack-trust = { path = "../trust" }
 agentstack-policy = { path = "../policy" }
 agentstack-adapters = { path = "../adapters" }
 agentstack-recorder = { path = "../recorder" }
+# Default: the runtime's backend-agnostic core (spec building, orchestration),
+# no bollard. The `sandbox` feature turns on the Docker backend so
+# `agentstack run --sandbox` can actually launch a container.
+agentstack-runtime = { path = "../runtime", default-features = false }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

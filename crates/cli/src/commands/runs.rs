@@ -10,6 +10,9 @@ use owo_colors::OwoColorize;
 use crate::cli::{KillArgs, RunArgs, RunsArgs};
 
 pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
+    if args.sandbox {
+        return crate::commands::sandbox::run_sandboxed(dir, args);
+    }
     if let Some(p) = &args.profile {
         println!(
             "{} launching {} with profile '{}' ({})…",

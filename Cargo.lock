@@ -75,6 +75,7 @@ dependencies = [
  "agentstack-core",
  "agentstack-policy",
  "agentstack-recorder",
+ "agentstack-runtime",
  "agentstack-trust",
  "anyhow",
  "assert_fs",
