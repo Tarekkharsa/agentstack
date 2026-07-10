@@ -84,6 +84,14 @@ impl Resolver for Chain {
                     failure.get_or_insert(Lookup::Failed(e));
                 }
                 Lookup::Missing => {}
+                // A policy denial is terminal: no later store may satisfy a
+                // ref the policy refuses. (Backing stores never produce
+                // Denied — only the per-server scoping wrapper does — but the
+                // chain must stay fail-closed if one ever lands here.)
+                denied @ Lookup::Denied(_) => {
+                    out = denied;
+                    break;
+                }
             }
         }
         if out == Lookup::Missing {
@@ -96,6 +104,52 @@ impl Resolver for Chain {
             .unwrap()
             .insert(name.to_string(), out.clone());
         out
+    }
+}
+
+/// A [`Resolver`] that gates every `${REF}` through the compiled
+/// `[policy.secrets]` for ONE server, then delegates to the real resolver.
+/// A denied ref never reaches any backing store — not even to learn whether
+/// it exists — and surfaces as [`Lookup::Denied`], which blocks the write or
+/// call on the same fail-closed path as an unresolved secret (rule 5).
+///
+/// (TS mental model: a decorator — `class ScopedResolver implements Resolver
+/// { constructor(private inner: Resolver, …) }`. `&dyn Resolver` is a trait
+/// object, i.e. a reference typed by interface; the `'a` lifetimes just say
+/// the wrapper can't outlive what it borrows.)
+pub struct ScopedResolver<'a> {
+    inner: &'a dyn Resolver,
+    ruleset: &'a agentstack_policy::CompiledRuleset,
+    server: &'a str,
+}
+
+impl<'a> ScopedResolver<'a> {
+    pub fn new(
+        inner: &'a dyn Resolver,
+        ruleset: &'a agentstack_policy::CompiledRuleset,
+        server: &'a str,
+    ) -> Self {
+        ScopedResolver {
+            inner,
+            ruleset,
+            server,
+        }
+    }
+}
+
+impl Resolver for ScopedResolver<'_> {
+    fn resolve(&self, name: &str) -> Option<String> {
+        self.lookup(name).found()
+    }
+
+    fn lookup(&self, name: &str) -> Lookup {
+        if let Err(rule) = self.ruleset.secret_decision(self.server, name) {
+            return Lookup::Denied(format!(
+                "server '{}' may not resolve ${{{name}}} — {rule}",
+                self.server
+            ));
+        }
+        self.inner.lookup(name)
     }
 }
 

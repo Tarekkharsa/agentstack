@@ -153,6 +153,7 @@ pub fn activate(
     }
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
+    let ruleset = crate::render::ruleset_for(manifest);
     println!(
         "Activating profile '{}' (scope: {scope}) — {} server(s), {} skill(s)",
         args.profile.bold(),
@@ -221,6 +222,7 @@ pub fn activate(
         match crate::render::plan_target_with_servers(
             desc,
             &ctx.resolver,
+            &ruleset,
             server_map,
             &previously,
             scope,
@@ -240,6 +242,9 @@ pub fn activate(
                 for u in &plan.unresolved {
                     println!("  {} unresolved secret {}", "✗".red(), u);
                 }
+                for d in &plan.denied {
+                    println!("  {} blocked by policy: {}", "✗".red(), d);
+                }
                 for f in &plan.failed {
                     println!(
                         "  {} secret read failed {} — the secret may be set; retry",
@@ -247,8 +252,9 @@ pub fn activate(
                         f
                     );
                 }
-                let blocked = (!plan.unresolved.is_empty() || !plan.failed.is_empty())
-                    && !args.allow_unresolved;
+                let blocked = ((!plan.unresolved.is_empty() || !plan.failed.is_empty())
+                    && !args.allow_unresolved)
+                    || !plan.denied.is_empty();
                 if plan.changed() {
                     if args.write && blocked {
                         blocked_targets.push(desc.display.clone());

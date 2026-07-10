@@ -217,4 +217,12 @@ impl CompiledRuleset {
             .secrets
             .check("[policy.secrets]", reference)
     }
+
+    /// Whether ANY egress rule constrains `server`. Write-time checks use
+    /// this to fail closed when a declared URL's host can't be statically
+    /// determined (it contains a `${REF}`): an unconstrained server passes
+    /// (allow-by-default), a constrained one must be verifiable.
+    pub fn egress_constrained(&self, server: &str) -> bool {
+        !self.rules_for(server).egress.is_empty()
+    }
 }

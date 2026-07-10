@@ -319,6 +319,7 @@ fn run_checks(
             ),
         );
     }
+    let ruleset = crate::render::ruleset_for(manifest);
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
@@ -356,6 +357,7 @@ fn run_checks(
         let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
+            &ruleset,
             &server_map,
             &previously,
             Scope::Global,
@@ -416,7 +418,11 @@ fn run_checks(
         if plan.changed() {
             // An unresolved `${REF}` must never reach a live config — same gate
             // as `apply`/`toggle`. `doctor --fix` has no override, so we refuse.
-            if args.fix && (!plan.unresolved.is_empty() || !plan.failed.is_empty()) {
+            if args.fix
+                && (!plan.unresolved.is_empty()
+                    || !plan.failed.is_empty()
+                    || !plan.denied.is_empty())
+            {
                 any_drift = true;
                 if !plan.unresolved.is_empty() {
                     report.line(

@@ -19,6 +19,11 @@ pub struct Rendered {
     /// `${REF}`s a store errored on while reading — `(name, why)`. Not the
     /// same as unresolved: the secret may well be set, the read failed.
     pub failed: Vec<(String, String)>,
+    /// `${REF}`s `[policy.secrets]` refuses this server — `(name, why)`, the
+    /// why naming the rule and layer. Distinct from both channels above: the
+    /// secret may exist and be readable; the policy says this server may not
+    /// have it. Blocks the write like the others (fail closed, rule 5).
+    pub denied: Vec<(String, String)>,
     /// Whether this adapter's config format can represent this server's
     /// transport at all. `false` means the descriptor maps no field for the
     /// server's defining attribute (e.g. an HTTP server for the stdio-only
@@ -41,6 +46,7 @@ pub fn render_server(
     let mut body: Map<String, Value> = Map::new();
     let mut unresolved: Vec<String> = Vec::new();
     let mut failed: Vec<(String, String)> = Vec::new();
+    let mut denied: Vec<(String, String)> = Vec::new();
     let mut secrets: Vec<(String, String)> = Vec::new();
 
     // CLIs with no MCP support render nothing.
@@ -49,6 +55,7 @@ pub fn render_server(
             value: Value::Object(body),
             unresolved,
             failed,
+            denied,
             representable: false,
             secrets,
         };
@@ -70,6 +77,7 @@ pub fn render_server(
             passthrough,
             &mut unresolved,
             &mut failed,
+            &mut denied,
             &mut secrets,
         )
     };
@@ -218,6 +226,7 @@ pub fn render_server(
                     passthrough,
                     &mut unresolved,
                     &mut failed,
+                    &mut denied,
                     &mut secrets,
                 ),
             );
@@ -227,12 +236,14 @@ pub fn render_server(
     // De-duplicate refs while keeping first-seen order.
     unresolved.dedup();
     failed.dedup_by(|a, b| a.0 == b.0);
+    denied.dedup_by(|a, b| a.0 == b.0);
     secrets.dedup();
 
     Rendered {
         value: Value::Object(body),
         unresolved,
         failed,
+        denied,
         representable,
         secrets,
     }
@@ -265,6 +276,7 @@ fn substitute_value(
     passthrough: bool,
     unresolved: &mut Vec<String>,
     failed: &mut Vec<(String, String)>,
+    denied: &mut Vec<(String, String)>,
     secrets: &mut Vec<(String, String)>,
 ) -> Value {
     match v {
@@ -274,11 +286,22 @@ fn substitute_value(
             passthrough,
             unresolved,
             failed,
+            denied,
             secrets,
         )),
         Value::Array(a) => Value::Array(
             a.iter()
-                .map(|el| substitute_value(el, resolver, passthrough, unresolved, failed, secrets))
+                .map(|el| {
+                    substitute_value(
+                        el,
+                        resolver,
+                        passthrough,
+                        unresolved,
+                        failed,
+                        denied,
+                        secrets,
+                    )
+                })
                 .collect(),
         ),
         Value::Object(o) => Value::Object(
@@ -286,7 +309,15 @@ fn substitute_value(
                 .map(|(k, el)| {
                     (
                         k.clone(),
-                        substitute_value(el, resolver, passthrough, unresolved, failed, secrets),
+                        substitute_value(
+                            el,
+                            resolver,
+                            passthrough,
+                            unresolved,
+                            failed,
+                            denied,
+                            secrets,
+                        ),
                     )
                 })
                 .collect(),
@@ -296,8 +327,8 @@ fn substitute_value(
 }
 
 /// [`substitute_with`] for callers with a single issue channel (hooks,
-/// settings, gateway): read failures fold into `unresolved` with the failure
-/// message attached, so they still block writes and read honestly.
+/// settings): read failures and policy denials fold into `unresolved` with
+/// their message attached, so they still block writes and read honestly.
 pub fn substitute(
     s: &str,
     resolver: &dyn Resolver,
@@ -306,10 +337,20 @@ pub fn substitute(
     secrets: &mut Vec<(String, String)>,
 ) -> String {
     let mut failed = Vec::new();
-    let out = substitute_with(s, resolver, passthrough, unresolved, &mut failed, secrets);
+    let mut denied = Vec::new();
+    let out = substitute_with(
+        s,
+        resolver,
+        passthrough,
+        unresolved,
+        &mut failed,
+        &mut denied,
+        secrets,
+    );
     unresolved.extend(
         failed
             .into_iter()
+            .chain(denied)
             .map(|(name, why)| format!("{name} — {why}")),
     );
     out
@@ -326,6 +367,7 @@ pub fn substitute_with(
     passthrough: bool,
     unresolved: &mut Vec<String>,
     failed: &mut Vec<(String, String)>,
+    denied: &mut Vec<(String, String)>,
     secrets: &mut Vec<(String, String)>,
 ) -> String {
     if passthrough || !s.contains("${") {
@@ -350,6 +392,10 @@ pub fn substitute_with(
                         }
                         Lookup::Failed(why) => {
                             failed.push((name.to_string(), why));
+                            out.push_str(&rest[..2 + end + 1]); // keep `${NAME}`
+                        }
+                        Lookup::Denied(why) => {
+                            denied.push((name.to_string(), why));
                             out.push_str(&rest[..2 + end + 1]); // keep `${NAME}`
                         }
                     }

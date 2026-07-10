@@ -307,6 +307,7 @@ APP_VERSION = "141536"
         let codex = plan_target_with_servers(
             reg.get("codex").unwrap(),
             &resolver,
+            &Default::default(),
             &servers,
             &["node_repl".to_string()],
             Scope::Global,
@@ -326,6 +327,7 @@ APP_VERSION = "141536"
         let claude = plan_target_with_servers(
             reg.get("claude-code").unwrap(),
             &resolver,
+            &Default::default(),
             &servers,
             &[],
             Scope::Global,

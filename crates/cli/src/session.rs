@@ -221,6 +221,7 @@ pub fn start(
 
     // Snapshot: server config files (for undo) + skills dirs (to detect adds,
     // and whether each dir pre-existed so `end` can restore exactly).
+    let ruleset = crate::render::ruleset_for(manifest);
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
     let mut touched: BTreeSet<String> = BTreeSet::new();
     let mut skill_before: Vec<(PathBuf, bool, BTreeSet<String>)> = Vec::new();
@@ -232,6 +233,7 @@ pub fn start(
         if let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
+            &ruleset,
             &prepared.server_map,
             &prev,
             scope,

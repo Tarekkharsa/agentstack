@@ -60,6 +60,7 @@ pub fn report(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<Outcome> {
     let mut drift = 0;
     let mut kept_all: Vec<(String, Vec<String>)> = Vec::new();
 
+    let ruleset = crate::render::ruleset_for(manifest);
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             println!("{} unknown adapter '{id}' — skipping", "⚠".yellow());
@@ -82,6 +83,7 @@ pub fn report(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<Outcome> {
         let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
+            &ruleset,
             &server_map,
             &previously,
             scope,

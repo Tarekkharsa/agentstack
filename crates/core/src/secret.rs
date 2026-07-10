@@ -23,6 +23,13 @@ pub enum Lookup {
     Missing,
     /// A store errored while reading; the message names the store and cause.
     Failed(String),
+    /// `[policy.secrets]` refuses this reference for the requesting server —
+    /// the ref never reaches any backing store. Distinct from `Missing`
+    /// because a policy denial must never masquerade as "secret not set":
+    /// misleading diagnostics at a security boundary are a bug. The message
+    /// names the rule and layer. Fails closed like `Missing` (rule 5): block
+    /// the write/run, never emit a resolved value or drop the placeholder.
+    Denied(String),
 }
 
 impl Lookup {

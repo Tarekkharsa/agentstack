@@ -40,6 +40,11 @@ pub struct TargetPlan {
     /// failure) — the secret may be set; the read failed. Blocks writes like
     /// `unresolved`, but is reported as a read failure, not a missing secret.
     pub failed: Vec<String>,
+    /// Policy refusals — a `${REF}` `[policy.secrets]` denies this server, or
+    /// an HTTP server whose declared URL host fails `[policy.egress]`. The
+    /// message names the rule and layer. Blocks writes fail-closed; an
+    /// egress-refused server is also skipped from the render entirely.
+    pub denied: Vec<String>,
     /// Selected servers this target's config format can't represent (e.g. an
     /// HTTP server for the stdio-only Claude Desktop config). Skipped from the
     /// render rather than written as an empty entry; surfaced so the user knows
@@ -178,9 +183,11 @@ pub fn plan_target(
             (n, s)
         })
         .collect();
+    let ruleset = ruleset_for(manifest);
     plan_target_with_servers(
         desc,
         resolver,
+        &ruleset,
         &servers,
         previously_managed,
         scope,
@@ -196,6 +203,7 @@ pub fn plan_target(
 pub fn plan_target_with_servers(
     desc: &AdapterDescriptor,
     resolver: &dyn Resolver,
+    ruleset: &agentstack_policy::CompiledRuleset,
     servers: &IndexMap<String, Server>,
     previously_managed: &[String],
     scope: Scope,
@@ -211,6 +219,7 @@ pub fn plan_target_with_servers(
     let mut entries: Vec<(String, Value)> = Vec::new();
     let mut unresolved: Vec<String> = Vec::new();
     let mut failed: Vec<String> = Vec::new();
+    let mut denied: Vec<String> = Vec::new();
     let mut managed: Vec<String> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
     let mut secrets: Vec<(String, String)> = Vec::new();
@@ -224,7 +233,36 @@ pub fn plan_target_with_servers(
         if !server.applies_to(&desc.id) {
             continue;
         }
-        let rendered = render_server(desc, server, resolver);
+        // Write-time egress check (HTTP only): the DECLARED URL host must
+        // pass the effective [policy.egress] before this server is rendered
+        // into a live config. A host hidden behind a ${REF} can't be checked
+        // statically — fail closed only when a rule actually constrains this
+        // server (allow-by-default otherwise). Runtime egress filtering is
+        // the Phase-2 proxy's job; this covers what is knowable at write time.
+        if server.server_type == crate::manifest::ServerType::Http {
+            if let Some(url) = &server.url {
+                match declared_host(url) {
+                    Some(host) => {
+                        if let Err(rule) = ruleset.egress_decision(name, &host) {
+                            denied.push(format!("server '{name}' declared host {host} — {rule}"));
+                            continue;
+                        }
+                    }
+                    None => {
+                        if ruleset.egress_constrained(name) {
+                            denied.push(format!(
+                                "server '{name}' has an egress policy but its declared URL host can't be verified (it contains a ${{REF}} or is malformed)"
+                            ));
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        // Per-server secret scoping: refs outside this server's effective
+        // [policy.secrets] never reach any backing store (fail closed).
+        let scoped = crate::secret::ScopedResolver::new(resolver, ruleset, name);
+        let rendered = render_server(desc, server, &scoped);
         // The adapter's format can't express this transport — skip it rather
         // than emit an empty `{}` entry into a real config file.
         if !rendered.representable {
@@ -236,6 +274,9 @@ pub fn plan_target_with_servers(
         }
         for (f, why) in rendered.failed {
             failed.push(format!("{f} (server '{name}') — {why}"));
+        }
+        for (_, why) in rendered.denied {
+            denied.push(why);
         }
         secrets.extend(rendered.secrets);
         // A stdio `cwd` this target's config can't express natively is instead
@@ -298,10 +339,44 @@ pub fn plan_target_with_servers(
         removed,
         unresolved,
         failed,
+        denied,
         skipped,
         secrets,
         warnings,
     }))
+}
+
+/// Compile the effective (machine ∩ project) ruleset for a manifest — the
+/// artifact every render-time policy check consults. Server names come from
+/// the inline `[servers.*]` table; names either policy layer mentions are
+/// folded in by `compile` itself, and anything else routes to the rename-
+/// proof `any` bucket, so library-resolved names are covered either way.
+pub fn ruleset_for(manifest: &Manifest) -> agentstack_policy::CompiledRuleset {
+    let names: Vec<&str> = manifest.servers.keys().map(String::as_str).collect();
+    agentstack_policy::compile(&crate::manifest::machine_policy(), &manifest.policy, &names)
+}
+
+/// The host of a DECLARED server URL, statically: scheme stripped, userinfo
+/// dropped, port dropped. `None` when the host segment contains a `${REF}`
+/// (not knowable at write time) or the URL is malformed. Boring string
+/// parsing on purpose — no URL crate, no surprises.
+pub(crate) fn declared_host(url: &str) -> Option<String> {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let host_port = authority
+        .rsplit_once('@')
+        .map(|(_, h)| h)
+        .unwrap_or(authority);
+    // IPv6 literals keep their brackets out of the port split.
+    let host = if let Some(stripped) = host_port.strip_prefix('[') {
+        stripped.split_once(']').map(|(h, _)| h).unwrap_or(stripped)
+    } else {
+        host_port.split(':').next().unwrap_or(host_port)
+    };
+    if host.is_empty() || host.contains("${") {
+        return None;
+    }
+    Some(host.to_string())
 }
 
 /// Resolve a selection into an ordered list of server names that exist in the
@@ -534,9 +609,17 @@ mod tests {
 
         // Secret present → resolved into the rendered config at render time.
         let resolver = MapResolver::from([("TOKEN", "secret123")]);
-        let plan = plan_target_with_servers(desc, &resolver, &map, &[], Scope::Global, proj.path())
-            .unwrap()
-            .unwrap();
+        let plan = plan_target_with_servers(
+            desc,
+            &resolver,
+            &Default::default(),
+            &map,
+            &[],
+            Scope::Global,
+            proj.path(),
+        )
+        .unwrap()
+        .unwrap();
         assert!(plan.managed.contains(&"kibana".to_string()));
         assert!(
             plan.proposed.contains("secret123"),
@@ -547,9 +630,17 @@ mod tests {
 
         // Secret missing → reported unresolved (the caller blocks the write).
         let empty = MapResolver::from([]);
-        let plan2 = plan_target_with_servers(desc, &empty, &map, &[], Scope::Global, proj.path())
-            .unwrap()
-            .unwrap();
+        let plan2 = plan_target_with_servers(
+            desc,
+            &empty,
+            &Default::default(),
+            &map,
+            &[],
+            Scope::Global,
+            proj.path(),
+        )
+        .unwrap()
+        .unwrap();
         assert!(
             !plan2.unresolved.is_empty(),
             "missing ${{REF}} reported as unresolved"
@@ -615,10 +706,17 @@ mod tests {
         // Same run (same chain), several targets — as `apply --write` does.
         for target in ["claude-code", "opencode", "codex"] {
             let desc = reg.get(target).unwrap();
-            let plan =
-                plan_target_with_servers(desc, &chain, &servers, &[], Scope::Global, proj.path())
-                    .unwrap()
-                    .unwrap();
+            let plan = plan_target_with_servers(
+                desc,
+                &chain,
+                &Default::default(),
+                &servers,
+                &[],
+                Scope::Global,
+                proj.path(),
+            )
+            .unwrap()
+            .unwrap();
             assert!(
                 plan.unresolved.is_empty() && plan.failed.is_empty(),
                 "{target} must reuse the first resolution, got unresolved={:?} failed={:?}",
@@ -673,6 +771,7 @@ mod tests {
         let claude = plan_target_with_servers(
             reg.get("claude-code").unwrap(),
             &resolver,
+            &Default::default(),
             &servers,
             &[],
             Scope::Global,
@@ -687,6 +786,7 @@ mod tests {
         let codex = plan_target_with_servers(
             reg.get("codex").unwrap(),
             &resolver,
+            &Default::default(),
             &servers,
             &["github-github".to_string()],
             Scope::Global,
@@ -733,6 +833,7 @@ mod tests {
         let codex = plan_target_with_servers(
             reg.get("codex").unwrap(),
             &resolver,
+            &Default::default(),
             &servers,
             &[],
             Scope::Global,
@@ -749,6 +850,7 @@ mod tests {
         let claude = plan_target_with_servers(
             reg.get("claude-code").unwrap(),
             &resolver,
+            &Default::default(),
             &servers,
             &[],
             Scope::Global,
@@ -810,6 +912,7 @@ startup_timeout_sec = 20
         let plan = plan_target_with_servers(
             desc,
             &MapResolver::default(),
+            &Default::default(),
             &servers,
             &[],
             Scope::Global,

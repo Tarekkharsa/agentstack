@@ -171,6 +171,9 @@ fn render(
     }
 
     println!("Scope: {scope}");
+    // The effective (machine ∩ project) policy artifact, compiled once for
+    // every render-time check this pass makes (secret scoping, egress).
+    let ruleset = crate::render::ruleset_for(manifest);
     let mut state = State::load()?;
     let identity = crate::state::manifest_identity(&ctx.dir);
     let mut changed_count = 0;
@@ -236,6 +239,7 @@ fn render(
         let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
+            &ruleset,
             &server_map,
             &previously,
             scope,
@@ -282,6 +286,9 @@ fn render(
             println!("  {} unresolved secret {}", "✗".red(), u);
             error_count += 1;
         }
+        for d in &plan.denied {
+            println!("  {} blocked by policy: {}", "✗".red(), d);
+        }
         for f in &plan.failed {
             println!(
                 "  {} secret read failed {} — the secret may be set; retry the apply",
@@ -292,8 +299,10 @@ fn render(
         }
         // `${REF}`s that didn't resolve must never reach a live config file —
         // whether the secret is missing or a store failed to read it.
-        let blocked =
-            (!plan.unresolved.is_empty() || !plan.failed.is_empty()) && !args.allow_unresolved;
+        let blocked = ((!plan.unresolved.is_empty() || !plan.failed.is_empty()) && !args.allow_unresolved)
+                // Policy refusals are not a convenience gap: --allow-unresolved
+                // never overrides [policy.secrets]/[policy.egress].
+                || !plan.denied.is_empty();
         if blocked {
             write_blockers += 1;
         }

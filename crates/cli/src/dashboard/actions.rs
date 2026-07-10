@@ -74,6 +74,9 @@ pub fn toggle(
             plan.unresolved.join(", ")
         );
     }
+    if !plan.denied.is_empty() {
+        anyhow::bail!("blocked by policy: {}", plan.denied.join("; "));
+    }
     if !plan.failed.is_empty() {
         let suffix = if plan.failed.len() == 1 { "" } else { "s" };
         anyhow::bail!(

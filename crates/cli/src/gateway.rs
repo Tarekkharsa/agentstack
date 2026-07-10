@@ -555,23 +555,44 @@ impl Gateway {
                 // Collect any `${REF}`s that don't resolve here (across URL +
                 // headers + args + env) so a call can fail fast with a clear
                 // message instead of sending a literal `${REF}` upstream.
+                // The resolver is scoped per server: a ref outside this
+                // server's effective [policy.secrets] never reaches any
+                // backing store, and the policy message rides the same
+                // fail-fast channel (folded in by `substitute`).
+                let scoped = crate::secret::ScopedResolver::new(&ctx.resolver, &ruleset, &name);
                 let mut unresolved = Vec::new();
                 let sub = |v: &str, unresolved: &mut Vec<String>| {
                     // The gateway resolves for an upstream request, not a diff —
                     // it doesn't display anything, so the redaction set is dropped.
                     let mut secrets = Vec::new();
-                    crate::adapter::render::substitute(
-                        v,
-                        &ctx.resolver,
-                        false,
-                        unresolved,
-                        &mut secrets,
-                    )
+                    crate::adapter::render::substitute(v, &scoped, false, unresolved, &mut secrets)
                 };
                 let up = match s.server_type {
                     ServerType::Http => {
                         let Some(url) = &s.url else { continue };
                         let url = sub(url, &mut unresolved);
+                        // Write-time egress check on the (resolved) URL host.
+                        // A host that still can't be determined fails closed
+                        // only when a rule actually constrains this server —
+                        // runtime egress filtering stays Phase 2's proxy.
+                        match crate::render::declared_host(&url) {
+                            Some(host) => {
+                                if let Err(rule) = ruleset.egress_decision(&name, &host) {
+                                    eprintln!(
+                                        "gateway: skipping '{name}': declared host {host} — {rule}"
+                                    );
+                                    continue;
+                                }
+                            }
+                            None => {
+                                if ruleset.egress_constrained(&name) {
+                                    eprintln!(
+                                        "gateway: skipping '{name}': an egress policy constrains it but its URL host can't be determined"
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
                         let headers = s
                             .headers
                             .iter()
