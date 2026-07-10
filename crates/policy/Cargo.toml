@@ -15,4 +15,3 @@ agentstack-core = { path = "../core" }
 
 [dev-dependencies]
 proptest = "1"
-toml = { version = "0.8", features = ["preserve_order"] }

@@ -36,8 +36,17 @@ pub fn tool_decision(
 mod tests {
     use super::*;
 
-    fn policy(toml_src: &str) -> Policy {
-        toml::from_str(toml_src).unwrap()
+    /// Build a `Policy` whose `[policy.tools]` holds these server → patterns
+    /// entries. Constructed directly (no TOML round-trip) so the crate's
+    /// dev-dependencies stay on the rule-6 strict list.
+    fn tools(entries: &[(&str, &[&str])]) -> Policy {
+        Policy {
+            tools: entries
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
+                .collect(),
+            ..Policy::default()
+        }
     }
 
     /// Machine `[policy.tools]` and project `[policy.tools]` compose as AND:
@@ -45,8 +54,8 @@ mod tests {
     /// project layer cannot loosen it, and each still denies on its own.
     #[test]
     fn machine_policy_composes_with_deny_precedence() {
-        let machine = policy("[tools]\nfigma = [\"!post_*\"]");
-        let project = policy("[tools]\nfigma = [\"!delete_*\"]");
+        let machine = tools(&[("figma", &["!post_*"])]);
+        let project = tools(&[("figma", &["!delete_*"])]);
         // Machine deny wins and says so, even though the project allows it.
         let err = tool_decision(&machine, &project, "figma", "post_comment").unwrap_err();
         assert!(err.contains("machine policy"), "{err}");
@@ -63,8 +72,8 @@ mod tests {
     /// outer bound, the project's can only restrict further — never broaden.
     #[test]
     fn machine_and_project_allowlists_nest() {
-        let machine = policy("[tools]\nfigma = [\"get_*\"]");
-        let project = policy("[tools]\nfigma = [\"get_file\"]");
+        let machine = tools(&[("figma", &["get_*"])]);
+        let project = tools(&[("figma", &["get_file"])]);
         // Inside both bounds.
         assert!(tool_decision(&machine, &project, "figma", "get_file").is_ok());
         // Inside the machine bound, outside the project's → project refuses.
@@ -79,7 +88,7 @@ mod tests {
     /// for machine rules, since named rules bind to repo-chosen server names.
     #[test]
     fn wildcard_policy_key_survives_server_renaming() {
-        let machine = policy("[tools]\n\"*\" = [\"!delete_*\"]");
+        let machine = tools(&[("*", &["!delete_*"])]);
         let project = Policy::default();
         // Whatever a repo names the server, delete_* is refused…
         for server in ["github", "gh", "totally-not-github"] {
