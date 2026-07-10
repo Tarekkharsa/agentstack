@@ -13,4 +13,5 @@ pub mod lock;
 pub mod manifest;
 pub mod refs;
 pub mod scope;
+pub mod secret;
 pub mod util;

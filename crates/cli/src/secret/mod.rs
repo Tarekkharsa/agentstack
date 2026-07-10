@@ -22,40 +22,10 @@ pub mod varlock;
 pub use keychain::KeychainResolver;
 pub use varlock::VarlockResolver;
 
-/// The outcome of one reference lookup. `Failed` is a backing store erroring
-/// while reading (e.g. a keychain timeout) — distinct from `Missing` so callers
-/// don't misreport a transient read failure as "secret not set".
-#[derive(Clone, Debug, PartialEq)]
-pub enum Lookup {
-    Found(String),
-    /// No store has this name.
-    Missing,
-    /// A store errored while reading; the message names the store and cause.
-    Failed(String),
-}
-
-impl Lookup {
-    pub fn found(self) -> Option<String> {
-        match self {
-            Lookup::Found(v) => Some(v),
-            _ => None,
-        }
-    }
-}
-
-/// Anything that can turn a reference name into its secret value.
-pub trait Resolver {
-    fn resolve(&self, name: &str) -> Option<String>;
-
-    /// Error-aware lookup. The default can't tell a read failure from a miss;
-    /// resolvers with fallible backends (keychain) override it.
-    fn lookup(&self, name: &str) -> Lookup {
-        match self.resolve(name) {
-            Some(v) => Lookup::Found(v),
-            None => Lookup::Missing,
-        }
-    }
-}
+// TODO(phase-1): shim — the resolution *contract* (Lookup, Resolver,
+// MapResolver) lives in core; point callers at agentstack_core::secret and
+// drop. Mechanisms below stay here.
+pub use agentstack_core::secret::{Lookup, MapResolver, Resolver};
 
 /// Tries each resolver in order, returning the first hit.
 pub struct Chain {
@@ -213,29 +183,6 @@ impl DotEnvResolver {
 }
 
 impl Resolver for DotEnvResolver {
-    fn resolve(&self, name: &str) -> Option<String> {
-        self.vars.get(name).cloned()
-    }
-}
-
-/// In-memory resolver for tests and deterministic rendering.
-#[derive(Default)]
-pub struct MapResolver {
-    vars: HashMap<String, String>,
-}
-
-impl<const N: usize> From<[(&str, &str); N]> for MapResolver {
-    fn from(pairs: [(&str, &str); N]) -> Self {
-        MapResolver {
-            vars: pairs
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-        }
-    }
-}
-
-impl Resolver for MapResolver {
     fn resolve(&self, name: &str) -> Option<String> {
         self.vars.get(name).cloned()
     }
