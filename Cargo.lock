@@ -72,6 +72,7 @@ version = "0.8.1"
 dependencies = [
  "age",
  "agentstack-core",
+ "agentstack-trust",
  "anyhow",
  "assert_fs",
  "clap",
@@ -110,6 +111,20 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "agentstack-trust"
+version = "0.8.1"
+dependencies = [
+ "agentstack-core",
+ "anyhow",
+ "assert_fs",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "sha2",
  "toml 0.8.23",
 ]
 

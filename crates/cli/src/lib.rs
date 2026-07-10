@@ -40,6 +40,7 @@ pub mod session;
 pub mod state;
 pub mod store;
 pub mod transcripts;
-pub mod trust;
+// TODO(phase-1): shim — migrate callers to agentstack_trust:: and drop.
+pub use agentstack_trust as trust;
 pub mod usage;
 pub use agentstack_core::util;

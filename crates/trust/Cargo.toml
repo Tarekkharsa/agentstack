@@ -1,0 +1,25 @@
+[package]
+name = "agentstack-trust"
+version = "0.8.1"
+edition = "2021"
+rust-version = "1.80"
+description = "agentstack trust store: digest pinning, re-gating, review states"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Tarekkharsa/agentstack"
+publish = false
+
+# TODO(phase-1): rule 6 strict list — swap anyhow for thiserror when this
+# crate's error surface is hardened.
+[dependencies]
+agentstack-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+indexmap = { version = "2", features = ["serde"] }
+anyhow = "1"
+# TODO(phase-1): shipped store format is TOML; rule 6's strict list has no
+# toml — migrate the store to JSON (ARCHITECTURE says trust.json) and drop.
+toml = { version = "0.8", features = ["preserve_order"] }
+
+[dev-dependencies]
+assert_fs = "1"

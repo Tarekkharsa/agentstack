@@ -10,6 +10,8 @@
 //! `git pull`, say) and the project must be re-trusted, exactly like `direnv
 //! allow`.
 
+#![forbid(unsafe_code)]
+
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,9 +20,9 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::lock::LOCK_FILE;
-use crate::manifest::load::{LOCAL_FILE, MANIFEST_FILE};
-use crate::util::paths;
+use agentstack_core::lock::LOCK_FILE;
+use agentstack_core::manifest::load::{LOCAL_FILE, MANIFEST_FILE};
+use agentstack_core::util::paths;
 
 /// Where trust decisions live: `~/.agentstack/trust.toml`.
 pub fn store_path() -> PathBuf {
@@ -63,7 +65,7 @@ impl TrustStore {
 
     pub fn save(&self) -> Result<()> {
         let text = toml::to_string_pretty(self).context("serializing trust store")?;
-        crate::util::atomic::write(&store_path(), &text)
+        agentstack_core::util::atomic::write(&store_path(), &text)
     }
 }
 
@@ -83,7 +85,7 @@ pub fn key_for(base: &Path) -> String {
 /// the lock changes what a name ref runs, so it re-gates the project exactly
 /// like a manifest edit. `None` when there is no manifest.
 pub fn digest_for(base: &Path) -> Option<String> {
-    let dir = crate::manifest::resolve_manifest_dir(base);
+    let dir = agentstack_core::manifest::resolve_manifest_dir(base);
     let manifest = std::fs::read(dir.join(MANIFEST_FILE)).ok()?;
     let local = std::fs::read(dir.join(LOCAL_FILE)).unwrap_or_default();
     let lock = std::fs::read(dir.join(LOCK_FILE)).unwrap_or_default();
@@ -149,7 +151,7 @@ mod tests {
     use assert_fs::prelude::*;
 
     fn with_home<T>(f: impl FnOnce(&assert_fs::TempDir) -> T) -> T {
-        let _guard = crate::util::TEST_ENV_LOCK
+        let _guard = agentstack_core::util::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let home = assert_fs::TempDir::new().unwrap();
