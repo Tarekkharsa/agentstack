@@ -13,7 +13,10 @@ set -euo pipefail
 # A nonzero CLI exit is a FAILURE unless it matches this auth/onboarding
 # allowlist — the rot alarm must never classify unknown breakage as a skip.
 classify_cli_failure() {
-  if grep -qiE 'log ?in|logged ?in|sign ?in|auth|credential|api.?key|onboard|unauthorized|browser|session expired|token expired|subscription|billing' <<<"$1"; then
+  # Contextual phrases only: bare tokens like `auth`, `credential`, `api_key`,
+  # or `browser` also appear in CONFIG and crash errors ("invalid auth mode in
+  # config.toml"), which must FAIL — the self-test pins those as negatives.
+  if grep -qiE 'authentication required|not logged in|logged out|please sign in|sign in to continue|log ?in required|run [a-z. -]+(login|auth)|missing [a-z_ ]{0,40}api.?key|set [a-z_ ]{0,40}api.?key|api.?key (required|not set|is missing)|unauthorized|onboarding|open [a-z ]{0,40}browser to|session expired|token expired' <<<"$1"; then
     echo skip
   else
     echo fail
@@ -29,6 +32,12 @@ if [[ "${1:-}" == "--self-test" ]]; then
   [[ "$(classify_cli_failure "failed to load configuration from config.toml")" == fail ]]
   [[ "$(classify_cli_failure "TOML parse error at line 2, column 1")" == fail ]]
   [[ "$(classify_cli_failure "segmentation fault")" == fail ]]
+  # Negative cases: bare auth-adjacent TOKENS inside config/crash errors must
+  # NOT be classified as auth gates (the round-5 false positives).
+  [[ "$(classify_cli_failure "invalid auth mode in config.toml")" == fail ]]
+  [[ "$(classify_cli_failure "unknown credential field in MCP config")" == fail ]]
+  [[ "$(classify_cli_failure "invalid api_key value")" == fail ]]
+  [[ "$(classify_cli_failure "browser configuration crashed")" == fail ]]
   echo "classify self-test OK"
   exit 0
 fi

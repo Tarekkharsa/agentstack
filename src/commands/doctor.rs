@@ -597,6 +597,14 @@ fn run_checks(
                 "AGENTS.override.md exists beside AGENTS.md — Codex reads ONLY the override; the managed AGENTS.md is shadowed",
             );
         }
+        if paths::expand_tilde("~/.codex/AGENTS.override.md").exists()
+            && paths::expand_tilde("~/.codex/AGENTS.md").exists()
+        {
+            report.line(
+                Level::Warn,
+                "~/.codex/AGENTS.override.md exists beside ~/.codex/AGENTS.md — Codex reads ONLY the override; the managed global file is shadowed",
+            );
+        }
         let limit = codex_doc_limit(&root);
         let (chain_bytes, chain_files) = codex_instruction_chain(&root);
         if chain_bytes > limit {
@@ -1138,9 +1146,11 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
 }
 
 /// Codex's effective `project_doc_max_bytes`: the project `.codex/config.toml`
-/// layer wins over the global one (matching Codex's own layering for trusted
-/// projects), 32 KiB when neither sets it. Best-effort parses — a garbled
-/// config just yields the default; this feeds a warning, not a gate.
+/// layer wins over the global one — but ONLY for a trusted project, because
+/// Codex ignores the whole untrusted project layer (an untrusted 64 KiB must
+/// not mask truncation at the real 32 KiB). 32 KiB when nothing sets it.
+/// Best-effort parses — a garbled config just yields the next layer; this
+/// feeds a warning, not a gate.
 fn codex_doc_limit(root: &Path) -> u64 {
     const DEFAULT: u64 = 32 * 1024;
     let read = |path: std::path::PathBuf| -> Option<u64> {
@@ -1152,16 +1162,21 @@ fn codex_doc_limit(root: &Path) -> u64 {
             .try_into()
             .ok()
     };
-    read(root.join(".codex/config.toml"))
+    let project = if codex_project_trusted(root) {
+        read(root.join(".codex/config.toml"))
+    } else {
+        None
+    };
+    project
         .or_else(|| read(paths::expand_tilde("~/.codex/config.toml")))
         .unwrap_or(DEFAULT)
 }
 
-/// The instruction chain Codex reads for a session at the project root: the
-/// global ~/.codex/AGENTS.md plus, at the root directory, AGENTS.override.md
-/// OR AGENTS.md (override wins; first non-empty only). Returns total bytes and
-/// the file names counted. Sessions started in subdirectories add more chain
-/// levels — this is the floor, which is exactly what a warning needs.
+/// The instruction chain Codex reads for a session at the project root. At
+/// every level — the global ~/.codex/ dir included — AGENTS.override.md wins
+/// over AGENTS.md and only the first non-empty file counts. Returns total
+/// bytes and the file names counted. Sessions started in subdirectories add
+/// more chain levels — this is the floor, which is what a warning needs.
 fn codex_instruction_chain(root: &Path) -> (u64, Vec<String>) {
     let mut total = 0u64;
     let mut files = Vec::new();
@@ -1175,11 +1190,17 @@ fn codex_instruction_chain(root: &Path) -> (u64, Vec<String>) {
         }
         false
     };
-    count(
-        paths::expand_tilde("~/.codex/AGENTS.md"),
-        "~/.codex/AGENTS.md",
-    );
-    // Per directory: override wins, first non-empty only.
+    // At EVERY level — the global ~/.codex/ dir included — the override wins
+    // and only the first non-empty file counts.
+    if !count(
+        paths::expand_tilde("~/.codex/AGENTS.override.md"),
+        "~/.codex/AGENTS.override.md",
+    ) {
+        count(
+            paths::expand_tilde("~/.codex/AGENTS.md"),
+            "~/.codex/AGENTS.md",
+        );
+    }
     if !count(root.join("AGENTS.override.md"), "AGENTS.override.md") {
         count(root.join("AGENTS.md"), "AGENTS.md");
     }
@@ -1331,6 +1352,78 @@ mod tests {
             .find(|s| s.title == "Content scan")
             .expect("content scan section present");
         section.lines[0].1.clone()
+    }
+
+    /// The three Codex diagnostics helpers, against a fenced HOME: the
+    /// effective doc limit honors project config ONLY when trusted; the
+    /// instruction chain prefers the override at BOTH levels; trust reads
+    /// projects."<canonical>".trust_level.
+    #[test]
+    fn codex_helpers_match_codex_semantics() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("AGENTSTACK_HOME", home.path().join(".agentstack"));
+        let proj = assert_fs::TempDir::new().unwrap();
+        let root = proj.path().canonicalize().unwrap();
+
+        // --- codex_doc_limit ---
+        assert_eq!(codex_doc_limit(&root), 32 * 1024, "default");
+        home.child(".codex/config.toml")
+            .write_str("project_doc_max_bytes = 16384\n")
+            .unwrap();
+        assert_eq!(codex_doc_limit(&root), 16384, "global layer applies");
+        // An UNTRUSTED project's limit must NOT apply (Codex ignores the layer).
+        proj.child(".codex/config.toml")
+            .write_str("project_doc_max_bytes = 65536\n")
+            .unwrap();
+        assert!(!codex_project_trusted(&root));
+        assert_eq!(codex_doc_limit(&root), 16384, "untrusted project ignored");
+        // Trusted → the project layer wins.
+        home.child(".codex/config.toml")
+            .write_str(&format!(
+                "project_doc_max_bytes = 16384\n[projects.\"{}\"]\ntrust_level = \"trusted\"\n",
+                root.display()
+            ))
+            .unwrap();
+        assert!(codex_project_trusted(&root));
+        assert_eq!(codex_doc_limit(&root), 65536, "trusted project wins");
+        // Explicitly untrusted is not trusted.
+        home.child(".codex/config.toml")
+            .write_str(&format!(
+                "[projects.\"{}\"]\ntrust_level = \"untrusted\"\n",
+                root.display()
+            ))
+            .unwrap();
+        assert!(!codex_project_trusted(&root));
+
+        // --- codex_instruction_chain: override wins at BOTH levels ---
+        home.child(".codex/AGENTS.md")
+            .write_str("global\n")
+            .unwrap();
+        proj.child("AGENTS.md").write_str("project!\n").unwrap();
+        let (bytes, files) = codex_instruction_chain(&root);
+        assert_eq!(bytes, 7 + 9);
+        assert_eq!(files, ["~/.codex/AGENTS.md", "AGENTS.md"]);
+        // A global override shadows the global AGENTS.md…
+        home.child(".codex/AGENTS.override.md")
+            .write_str("G-OVERRIDE\n")
+            .unwrap();
+        let (bytes, files) = codex_instruction_chain(&root);
+        assert_eq!(bytes, 11 + 9);
+        assert_eq!(files[0], "~/.codex/AGENTS.override.md");
+        // …and a project override shadows the project AGENTS.md.
+        proj.child("AGENTS.override.md").write_str("P!\n").unwrap();
+        let (_, files) = codex_instruction_chain(&root);
+        assert_eq!(files, ["~/.codex/AGENTS.override.md", "AGENTS.override.md"]);
+        // An EMPTY override falls back to AGENTS.md (first non-empty only).
+        proj.child("AGENTS.override.md").write_str("").unwrap();
+        let (_, files) = codex_instruction_chain(&root);
+        assert_eq!(files, ["~/.codex/AGENTS.override.md", "AGENTS.md"]);
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     #[test]
