@@ -4,6 +4,12 @@
 > firewall, and audit every tool call; define servers, skills, instructions,
 > and profiles once, for every agent CLI you use.
 
+**[Website](https://tarekkharsa.github.io/agentstack/)** ·
+[Feature reference](docs/reference.md) ·
+[Central library](https://tarekkharsa.github.io/agentstack/library.html) ·
+[Dashboard](docs/dashboard.md) ·
+[Releases](https://github.com/Tarekkharsa/agentstack/releases)
+
 Define your stack once in `.agentstack/agentstack.toml`. Serve it live through
 a trust-gated gateway (zero files copied anywhere), or render it into the
 native config of 13 agent CLIs — Claude Code, Claude Desktop, Codex, Cursor,

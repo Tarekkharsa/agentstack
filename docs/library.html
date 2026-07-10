@@ -380,7 +380,7 @@ skills  = [<span class="ok">"sql-review"</span>]
           </tr>
           <tr>
             <td>Team or second machine</td>
-            <td class="muted"><code>lock</code>, <code>doctor</code>, and <code>explain</code> verify that the same names resolve to the same digests — or fail loudly.</td>
+            <td class="muted"><code>lock</code>, <code>doctor</code>, and <code>explain</code> verify that the same names resolve to the same digests — or fail loudly. The gateway <em>enforces</em> the pins at serve time: a library definition that drifted from its lock is refused, not silently served.</td>
           </tr>
         </tbody>
       </table>
@@ -410,7 +410,9 @@ skills  = ["sql-review"]
     <p class="small muted">
       <code>agentstack lock</code> is the clean-at-rest companion: it resolves
       every profile's name refs and pins them in <code>agentstack.lock</code>
-      without materializing a single file.
+      without materializing a single file. The lock is part of the trust
+      digest, so re-pinning re-gates the repo — expect to re-run
+      <code>agentstack trust .</code> after locking.
     </p>
   </section>
 
