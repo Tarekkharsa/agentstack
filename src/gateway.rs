@@ -412,25 +412,40 @@ impl Gateway {
             // When a session is active, fence the proxied surface to that
             // session's profile servers — the same fence a profile already puts
             // on skills, extended to runtime tools (PLAN code-mode Phase 3).
+            // A vanished profile means no fence rather than fencing to nothing.
             let session = crate::session::active(&ctx.dir);
-            let fence = server_allowlist(
+            let profile = session
+                .as_ref()
+                .map(|s| s.profile.as_str())
+                .filter(|p| ctx.loaded.manifest.profiles.contains_key(*p));
+            // Name refs resolve through the same inline-first/central-library
+            // path as rendering, so a server declared only in the library is
+            // proxied like an inline one.
+            let library = crate::library::Library::load_default().unwrap_or_default();
+            let servers = crate::resolve::effective_runtime_servers(
                 &ctx.loaded.manifest,
-                session.as_ref().map(|s| s.profile.as_str()),
+                &library,
+                &crate::util::paths::lib_home(),
+                profile,
             );
-            if let Some(allow) = &fence {
+            if profile.is_some() {
                 eprintln!(
                     "gateway: session active — proxying only this profile's {} server(s)",
-                    allow.len()
+                    servers.len()
                 );
             }
             // `[policy.tools]` travels with the gateway — it is the firewall's
             // rule set; `project` is audit-log context.
             let policy = ctx.loaded.manifest.policy.clone();
             let project = Some(ctx.dir.display().to_string());
-            for (name, s) in &ctx.loaded.manifest.servers {
-                if fence.as_ref().is_some_and(|allow| !allow.contains(name)) {
-                    continue;
-                }
+            for (name, resolved) in servers {
+                let s = match resolved {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("gateway: skipping '{name}': {e}");
+                        continue;
+                    }
+                };
                 // Collect any `${REF}`s that don't resolve here (across URL +
                 // headers + args + env) so a call can fail fast with a clear
                 // message instead of sending a literal `${REF}` upstream.
@@ -731,14 +746,6 @@ fn score_tool(bare: &str, server: &str, desc: &str, tokens: &[&str]) -> i32 {
 /// The proxied-server allowlist for the current context. `None` (no active
 /// session, or its profile is gone) means no fence — every manifest server is
 /// proxied. `Some(set)` restricts the proxied surface to that profile's servers.
-fn server_allowlist(
-    manifest: &crate::manifest::Manifest,
-    active_profile: Option<&str>,
-) -> Option<std::collections::HashSet<String>> {
-    let profile = manifest.profiles.get(active_profile?)?;
-    Some(profile.servers.iter().cloned().collect())
-}
-
 fn namespace_tool(server: &str, tool: &Value) -> Value {
     let bare = tool.get("name").and_then(Value::as_str).unwrap_or("tool");
     let mut desc = format!(
@@ -834,23 +841,38 @@ mod tests {
         assert!(gw.search("nonexistent-xyz", 10).is_empty());
     }
 
+    /// The reported bug: a server declared only as a central-library name ref
+    /// (no inline `[servers.*]` table) must reach the gateway's upstream set,
+    /// exactly as it reaches a rendered config via `apply`.
     #[test]
-    fn session_fences_proxied_servers_to_profile() {
-        let manifest: crate::manifest::Manifest = toml::from_str(
-            "version = 1\n\
-             [servers.alpha]\ntype = \"http\"\nurl = \"https://a\"\n\
-             [servers.beta]\ntype = \"http\"\nurl = \"https://b\"\n\
-             [profiles.solo]\nservers = [\"alpha\"]\n",
-        )
-        .unwrap();
-        // No session → no fence (every server proxied).
-        assert!(server_allowlist(&manifest, None).is_none());
-        // Active session on `solo` → only its server is allowed.
-        let allow = server_allowlist(&manifest, Some("solo")).unwrap();
-        assert!(allow.contains("alpha"));
-        assert!(!allow.contains("beta"));
-        // A profile that vanished → no fence rather than fencing to nothing.
-        assert!(server_allowlist(&manifest, Some("ghost")).is_none());
+    fn from_manifest_resolves_library_server_refs() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        home.child("lib/library.toml")
+            .write_str("version = 1\n\n[[server]]\nname = \"kibana\"\n")
+            .unwrap();
+        home.child("lib/servers/kibana.toml")
+            .write_str("type = \"http\"\nurl = \"https://central/mcp\"\n")
+            .unwrap();
+        // The profile's name-only ref is the server's sole declaration; a
+        // second ref is broken (not in the library) and must be skipped
+        // without taking the whole gateway down.
+        let project = assert_fs::TempDir::new().unwrap();
+        project
+            .child("agentstack.toml")
+            .write_str(
+                "version = 1\n\n[servers.alpha]\ntype = \"http\"\nurl = \"https://a\"\n\n\
+                 [profiles.default]\nservers = [\"kibana\", \"ghost\"]\n",
+            )
+            .unwrap();
+        let gw = Gateway::from_manifest(Some(project.path()));
+        std::env::remove_var("AGENTSTACK_HOME");
+        let names: Vec<&str> = gw.upstreams.iter().map(|u| u.name.as_str()).collect();
+        assert_eq!(names, ["alpha", "kibana"]);
     }
 
     #[test]

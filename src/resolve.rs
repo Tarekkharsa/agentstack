@@ -246,6 +246,57 @@ pub fn resolve_server(
     })
 }
 
+/// The servers a runtime surface (the gateway) serves, resolved through the
+/// same inline-first/central-library path as rendering — so a server declared
+/// only as a name ref in a profile reaches the gateway exactly like an inline
+/// one (docs/reference.md: name refs resolve at render/gateway time).
+///
+/// With `profile` set (an active session whose profile exists), the set is
+/// exactly that profile's `servers` list. Otherwise it is everything the
+/// manifest declares anywhere: inline `[servers.*]` entries plus every
+/// profile-referenced name, deduped in first-seen order.
+///
+/// Results are per-name so a best-effort caller can skip (and report) a broken
+/// ref individually, where rendering hard-fails the whole run.
+pub fn effective_runtime_servers(
+    manifest: &Manifest,
+    library: &Library,
+    lib_home: &Path,
+    profile: Option<&str>,
+) -> Vec<(String, Result<Server, ServerResolveError>)> {
+    let mut names: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut push = |n: &str, names: &mut Vec<String>| {
+        if seen.insert(n.to_string()) {
+            names.push(n.to_string());
+        }
+    };
+    match profile.and_then(|p| manifest.profiles.get(p)) {
+        Some(p) => {
+            for n in &p.servers {
+                push(n, &mut names);
+            }
+        }
+        None => {
+            for n in manifest.servers.keys() {
+                push(n, &mut names);
+            }
+            for p in manifest.profiles.values() {
+                for n in &p.servers {
+                    push(n, &mut names);
+                }
+            }
+        }
+    }
+    names
+        .into_iter()
+        .map(|n| {
+            let r = resolve_server(manifest, library, lib_home, &n).map(|r| r.server);
+            (n, r)
+        })
+        .collect()
+}
+
 /// SHA-256 hex digest of a byte string.
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
@@ -1098,6 +1149,52 @@ mod tests {
             ServerResolveError::Unresolved { name } => assert_eq!(name, "nope"),
             other => panic!("expected Unresolved, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn runtime_servers_union_includes_profile_library_refs() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let (library, _) = library_with_server(&lib_home, "kibana", "https://central/mcp");
+        let manifest: Manifest = toml::from_str(
+            "version = 1\n\
+             [servers.alpha]\ntype = \"http\"\nurl = \"https://a\"\n\
+             [profiles.solo]\nservers = [\"kibana\", \"alpha\"]\n",
+        )
+        .unwrap();
+
+        // No active profile → inline servers plus profile-referenced library
+        // names, deduped, inline-first.
+        let all = effective_runtime_servers(&manifest, &library, lib_home.path(), None);
+        let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["alpha", "kibana"]);
+        assert!(all.iter().all(|(_, r)| r.is_ok()));
+
+        // Active profile → exactly its list, in its order.
+        let fenced = effective_runtime_servers(&manifest, &library, lib_home.path(), Some("solo"));
+        let names: Vec<&str> = fenced.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["kibana", "alpha"]);
+
+        // Vanished profile → no fence, same as None.
+        let ghost = effective_runtime_servers(&manifest, &library, lib_home.path(), Some("ghost"));
+        assert_eq!(ghost.len(), 2);
+    }
+
+    #[test]
+    fn runtime_servers_report_broken_refs_per_name() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let library = Library::default();
+        let manifest: Manifest = toml::from_str(
+            "version = 1\n\
+             [servers.alpha]\ntype = \"http\"\nurl = \"https://a\"\n\
+             [profiles.solo]\nservers = [\"nope\"]\n",
+        )
+        .unwrap();
+        let all = effective_runtime_servers(&manifest, &library, lib_home.path(), None);
+        assert!(all.iter().find(|(n, _)| n == "alpha").unwrap().1.is_ok());
+        assert!(matches!(
+            all.iter().find(|(n, _)| n == "nope").unwrap().1,
+            Err(ServerResolveError::Unresolved { .. })
+        ));
     }
 
     #[test]
