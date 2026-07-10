@@ -12,7 +12,12 @@ pub const LOCK_FILE: &str = "agentstack.lock";
 /// Newest lockfile schema version this build reads and writes. Anything above
 /// it was written by a future agentstack; [`Lock::load`] refuses it instead of
 /// misinterpreting silently.
-pub const SUPPORTED_LOCK_VERSION: u32 = 1;
+///
+/// v2 added `[[instruction]]` pins. The bump matters because TOML parsing here
+/// is permissive (no `deny_unknown_fields`): a v1 binary reading a lock with
+/// instruction pins would silently drop them — and write them away on its next
+/// save. The version guard turns that silent unpinning into a loud refusal.
+pub const SUPPORTED_LOCK_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Lock {
@@ -21,14 +26,17 @@ pub struct Lock {
     pub skills: Vec<LockedSkill>,
     #[serde(default, rename = "server")]
     pub servers: Vec<LockedServer>,
+    #[serde(default, rename = "instruction")]
+    pub instructions: Vec<LockedInstruction>,
 }
 
 impl Default for Lock {
     fn default() -> Self {
         Lock {
-            version: 1,
+            version: SUPPORTED_LOCK_VERSION,
             skills: Vec::new(),
             servers: Vec::new(),
+            instructions: Vec::new(),
         }
     }
 }
@@ -41,6 +49,17 @@ impl Default for Lock {
 pub struct LockedServer {
     pub name: String,
     pub source: String,
+    pub checksum: String,
+}
+
+/// A pinned instruction fragment: the SHA-256 of the file's raw bytes.
+/// Instructions are always local files declared by path in the manifest —
+/// no source/git/rev fields apply. Machine-layer (user-layer) fragments are
+/// never pinned; they aren't repo content.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedInstruction {
+    pub name: String,
+    pub path: String,
     pub checksum: String,
 }
 
@@ -75,6 +94,12 @@ impl Lock {
                     "lockfile",
                     &path,
                 )?;
+                // Normalize the in-memory version so struct equality (and the
+                // callers' "no-op if unchanged" save checks) stays honest: an
+                // untouched older lock is never rewritten just to bump its
+                // version, but any genuine write upgrades the file.
+                let mut lock = lock;
+                lock.version = SUPPORTED_LOCK_VERSION;
                 Ok(lock)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Lock::default()),
@@ -113,6 +138,26 @@ impl Lock {
         self.skills.retain(|s| keep.contains(&s.name));
     }
 
+    pub fn get_instruction(&self, name: &str) -> Option<&LockedInstruction> {
+        self.instructions.iter().find(|i| i.name == name)
+    }
+
+    /// Insert or replace an instruction entry, keeping entries sorted by name.
+    pub fn upsert_instruction(&mut self, entry: LockedInstruction) {
+        if let Some(existing) = self.instructions.iter_mut().find(|i| i.name == entry.name) {
+            *existing = entry;
+        } else {
+            self.instructions.push(entry);
+        }
+        self.instructions.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    /// Drop pinned instructions whose name is no longer in `keep` — stale pins
+    /// for removed fragments are pruned by `agentstack lock`.
+    pub fn retain_instruction_names(&mut self, keep: &[String]) {
+        self.instructions.retain(|i| keep.contains(&i.name));
+    }
+
     pub fn get_server(&self, name: &str) -> Option<&LockedServer> {
         self.servers.iter().find(|s| s.name == name)
     }
@@ -140,8 +185,21 @@ mod tests {
         assert_eq!(Lock::load(dir.path()).unwrap(), Lock::default());
 
         // The current version loads.
-        fs::write(Lock::path(dir.path()), "version = 1\n").unwrap();
+        fs::write(
+            Lock::path(dir.path()),
+            format!("version = {SUPPORTED_LOCK_VERSION}\n"),
+        )
+        .unwrap();
         assert!(Lock::load(dir.path()).is_ok());
+
+        // An older (v1, pre-instruction-pins) lock still loads, and its
+        // in-memory version normalizes to the current one so a genuine write
+        // upgrades the file.
+        fs::write(Lock::path(dir.path()), "version = 1\n").unwrap();
+        assert_eq!(
+            Lock::load(dir.path()).unwrap().version,
+            SUPPORTED_LOCK_VERSION
+        );
 
         // A future version is refused, not silently misread.
         fs::write(Lock::path(dir.path()), "version = 99\n").unwrap();
@@ -201,5 +259,39 @@ mod tests {
         assert!(text.contains("[[server]]"));
         let parsed: Lock = toml::from_str(&text).unwrap();
         assert_eq!(parsed.servers, lock.servers);
+    }
+
+    #[test]
+    fn instruction_upsert_sorts_roundtrips_and_retains() {
+        let mut lock = Lock::default();
+        lock.upsert_instruction(LockedInstruction {
+            name: "style".into(),
+            path: "./instructions/style.md".into(),
+            checksum: "cafe".into(),
+        });
+        lock.upsert_instruction(LockedInstruction {
+            name: "house".into(),
+            path: "./instructions/house.md".into(),
+            checksum: "beef".into(),
+        });
+        assert_eq!(lock.instructions[0].name, "house", "sorted by name");
+
+        // Upsert replaces in place.
+        lock.upsert_instruction(LockedInstruction {
+            name: "house".into(),
+            path: "./instructions/house.md".into(),
+            checksum: "f00d".into(),
+        });
+        assert_eq!(lock.get_instruction("house").unwrap().checksum, "f00d");
+
+        let text = toml::to_string_pretty(&lock).unwrap();
+        assert!(text.contains("[[instruction]]"));
+        let parsed: Lock = toml::from_str(&text).unwrap();
+        assert_eq!(parsed.instructions, lock.instructions);
+
+        // Prune to the declared set.
+        lock.retain_instruction_names(&["style".to_string()]);
+        assert!(lock.get_instruction("house").is_none());
+        assert!(lock.get_instruction("style").is_some());
     }
 }
