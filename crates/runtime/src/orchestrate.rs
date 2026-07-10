@@ -141,12 +141,9 @@ mod tests {
 
         let mut out = Vec::new();
         let mut events = Vec::new();
-        let exit = run(
-            &sandbox,
-            &spec(),
-            &mut |c| out.push(c),
-            &mut |e| events.push(e),
-        )
+        let exit = run(&sandbox, &spec(), &mut |c| out.push(c), &mut |e| {
+            events.push(e)
+        })
         .unwrap();
 
         assert_eq!(exit, Exit { code: Some(0) });
@@ -163,16 +160,13 @@ mod tests {
     #[test]
     fn start_failure_propagates_and_emits_no_exit() {
         let mut events = Vec::new();
-        let err = run(
-            &FailingStart,
-            &spec(),
-            &mut |_| {},
-            &mut |e| events.push(e),
-        )
-        .unwrap_err();
+        let err = run(&FailingStart, &spec(), &mut |_| {}, &mut |e| events.push(e)).unwrap_err();
         assert!(matches!(err, RuntimeError::Backend(_)));
         // Started was emitted before the failed start; Exited never is.
-        assert!(matches!(events.as_slice(), [RunEvent::SandboxStarted { .. }]));
+        assert!(matches!(
+            events.as_slice(),
+            [RunEvent::SandboxStarted { .. }]
+        ));
     }
 
     #[test]
@@ -189,6 +183,9 @@ mod tests {
         assert!(matches!(err, RuntimeError::Backend(_)));
         assert!(torn.get(), "teardown must run even when streaming failed");
         // No SandboxExited on a failed run.
-        assert!(matches!(events.as_slice(), [RunEvent::SandboxStarted { .. }]));
+        assert!(matches!(
+            events.as_slice(),
+            [RunEvent::SandboxStarted { .. }]
+        ));
     }
 }

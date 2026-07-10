@@ -164,6 +164,7 @@ dependencies = [
  "agentstack-recorder",
  "assert_fs",
  "bollard",
+ "futures-util",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

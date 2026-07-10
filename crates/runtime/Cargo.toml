@@ -8,13 +8,15 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Tarekkharsa/agentstack"
 publish = false
 
+# The Docker backend (bollard + the tokio it drives) is OPT-IN, not default.
+# Rationale: it is compile-verified but not yet behavior-verified against a
+# real daemon, so it stays out of the default workspace build + CI (which have
+# no Docker) until validated. The backend-agnostic core is always built and
+# fully tested. Enable with `--features docker` to compile the bollard backend;
+# `agentstack run --sandbox` requires it.
 [features]
-# The Docker backend (bollard + the tokio it needs) is default-on so the
-# product is real, but the backend-agnostic core (Sandbox trait, spec,
-# orchestrator, fake) always compiles and is fully tested WITHOUT it — build
-# `--no-default-features` for the pure-logic path, or when Docker is absent.
-default = ["docker"]
-docker = ["dep:bollard", "dep:tokio"]
+default = []
+docker = ["dep:bollard", "dep:tokio", "dep:futures-util"]
 
 [dependencies]
 agentstack-core = { path = "../core" }
@@ -29,6 +31,7 @@ thiserror = "1"
 # it stay synchronous — async/tokio proper is the egress crate (2.2).
 bollard = { version = "0.21", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "net", "io-util", "time"] }
+futures-util = { version = "0.3", optional = true, default-features = false }
 
 [dev-dependencies]
 assert_fs = "1"
