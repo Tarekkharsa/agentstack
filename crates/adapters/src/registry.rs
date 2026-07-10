@@ -8,10 +8,10 @@ use anyhow::{Context, Result};
 use include_dir::{include_dir, Dir};
 
 use super::descriptor::{AdapterDescriptor, AdapterSource};
-use crate::util::paths;
+use agentstack_core::util::paths;
 
 /// Descriptors shipped inside the binary.
-static EMBEDDED: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/adapters");
+static EMBEDDED: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/descriptors");
 
 /// All known adapters, keyed by id. User descriptors override embedded ones
 /// with the same id.
@@ -143,7 +143,7 @@ mod tests {
     /// (never bricks the registry).
     #[test]
     fn user_descriptors_load_override_and_survive_a_broken_file() {
-        let _g = crate::util::TEST_ENV_LOCK
+        let _g = agentstack_core::util::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let home = assert_fs::TempDir::new().unwrap();
@@ -190,7 +190,7 @@ mod tests {
     /// nested inside `.agentstack/` are invisible to the CLIs.
     #[test]
     fn project_paths_anchor_at_root_for_agentstack_layout() {
-        use crate::scope::Scope;
+        use agentstack_core::scope::Scope;
         use std::path::Path;
         let reg = Registry::load().unwrap();
         let desc = reg.get("claude-code").unwrap();

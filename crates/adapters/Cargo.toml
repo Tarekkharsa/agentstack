@@ -1,0 +1,22 @@
+[package]
+name = "agentstack-adapters"
+version = "0.8.1"
+edition = "2021"
+rust-version = "1.80"
+description = "agentstack adapters: data-driven bundle -> per-CLI config compilers (13 CLIs)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Tarekkharsa/agentstack"
+publish = false
+
+[dependencies]
+agentstack-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+serde_yaml = "0.9"
+toml = { version = "0.8", features = ["preserve_order"] }
+indexmap = { version = "2", features = ["serde"] }
+anyhow = "1"
+include_dir = "0.7"
+
+[dev-dependencies]
+assert_fs = "1"

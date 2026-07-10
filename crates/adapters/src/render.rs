@@ -6,8 +6,8 @@
 use serde_json::{Map, Value};
 
 use super::descriptor::{AdapterDescriptor, SecretMode};
-use crate::manifest::{Server, ServerType};
-use crate::secret::{Lookup, Resolver};
+use agentstack_core::manifest::{Server, ServerType};
+use agentstack_core::secret::{Lookup, Resolver};
 
 /// A rendered server entry plus any secret references that could not be
 /// resolved on this machine (surfaced by `doctor`/`apply`).
@@ -298,7 +298,7 @@ fn substitute_value(
 /// [`substitute_with`] for callers with a single issue channel (hooks,
 /// settings, gateway): read failures fold into `unresolved` with the failure
 /// message attached, so they still block writes and read honestly.
-pub(crate) fn substitute(
+pub fn substitute(
     s: &str,
     resolver: &dyn Resolver,
     passthrough: bool,
@@ -320,7 +320,7 @@ pub(crate) fn substitute(
 /// and left in place (never silently blanked) — misses in `unresolved`, store
 /// read errors in `failed`. Spans that are not valid reference names (shell
 /// syntax like `${VAR:-fallback}`) are left verbatim and not recorded.
-pub(crate) fn substitute_with(
+pub fn substitute_with(
     s: &str,
     resolver: &dyn Resolver,
     passthrough: bool,
@@ -338,7 +338,7 @@ pub(crate) fn substitute_with(
         if let Some(inner) = rest.strip_prefix("${") {
             if let Some(end) = inner.find('}') {
                 let name = &inner[..end];
-                if crate::secret::is_ref_name(name) {
+                if agentstack_core::refs::is_ref_name(name) {
                     match resolver.lookup(name) {
                         Lookup::Found(val) => {
                             secrets.push((name.to_string(), val.clone()));
@@ -373,8 +373,8 @@ pub(crate) fn substitute_with(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapter::Registry;
-    use crate::secret::MapResolver;
+    use crate::Registry;
+    use agentstack_core::secret::MapResolver;
 
     fn server(toml_str: &str) -> Server {
         toml::from_str(toml_str).unwrap()

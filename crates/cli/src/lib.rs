@@ -6,7 +6,8 @@
 //! [`adapter`] (per-CLI descriptors + generic render) → [`render`]
 //! (non-destructive merge into native config).
 
-pub mod adapter;
+// TODO(phase-1): shim — migrate callers to agentstack_adapters:: and drop.
+pub use agentstack_adapters as adapter;
 // TODO(phase-1): shim — migrate callers to agentstack_recorder:: and drop.
 pub use agentstack_recorder as calllog;
 pub mod catalog;

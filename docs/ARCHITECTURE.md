@@ -145,7 +145,14 @@ Invariant (property-tested): for all bundle policies B and machine policies M,
 supported agent CLI (Claude Code, Cursor, Codex, …). Generated fresh per run,
 never hand-edited, never read back. The 13 data-driven YAML adapters shipped
 in v0.8.x move here as-is; writes stay blocked while any `${REF}` is
-unresolved.
+unresolved. Resolution completes *before* the compiler runs: render receives
+a concrete server and a resolver, never a library or store to consult — which
+is what lets a sandbox runtime materialize configs from core + adapters
+alone. One trust note, stated plainly: user drop-in adapter descriptors
+(`~/.agentstack/adapters/`) are part of the trusted computing base — they
+alter how configs render and are trusted *because the user placed them*,
+unlike bundle content, which is hostile. Inside a container that dir is
+simply absent, which is expected and correct.
 
 **Host mode** (Phase 1): adapters write configs onto the bare machine.
 Honest framing: advisory enforcement — the trust gate governs what gets

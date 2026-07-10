@@ -1,5 +1,11 @@
-//! Data-driven adapters: descriptors, the registry that loads them, and the
-//! generic renderer that turns manifest servers into target-shaped values.
+//! One-way compilers: bundle -> native config for each supported agent CLI.
+//!
+//! Data-driven: 13 embedded YAML descriptors plus user drop-ins. Pure with
+//! one declared exception (the registry reads the drop-in dir). Resolution
+//! happens BEFORE this crate is called — render receives a concrete Server
+//! and a Resolver, never a library or store to consult.
+
+#![forbid(unsafe_code)]
 
 pub mod descriptor;
 pub mod import;
@@ -13,7 +19,7 @@ pub use render::{render_server, Rendered};
 
 use anyhow::{Context, Result};
 
-use crate::util::paths;
+use agentstack_core::util::paths;
 
 impl AdapterDescriptor {
     /// Whether this CLI's binary is on `$PATH`.
@@ -68,7 +74,8 @@ impl AdapterDescriptor {
         &self,
         project_dir: &std::path::Path,
     ) -> Result<Option<serde_json::Value>> {
-        let Some((path, format)) = self.settings_for(crate::scope::Scope::Global, project_dir)
+        let Some((path, format)) =
+            self.settings_for(agentstack_core::scope::Scope::Global, project_dir)
         else {
             return Ok(None);
         };
@@ -115,7 +122,7 @@ impl AdapterDescriptor {
     /// their real source. Hidden entries (`.system`, …) are skipped.
     pub fn discover_skills(
         &self,
-        scope: crate::scope::Scope,
+        scope: agentstack_core::scope::Scope,
         project_dir: &std::path::Path,
     ) -> Vec<DiscoveredSkill> {
         let Some(dir) = self.skills_dir_for(scope, project_dir) else {
@@ -170,7 +177,7 @@ impl AdapterDescriptor {
     /// extensions: each top-level file or directory (hidden entries skipped).
     pub fn discover_extensions(
         &self,
-        scope: crate::scope::Scope,
+        scope: agentstack_core::scope::Scope,
         project_dir: &std::path::Path,
     ) -> Vec<DiscoveredExtension> {
         let Some(dir) = self.extensions_dir_for(scope, project_dir) else {

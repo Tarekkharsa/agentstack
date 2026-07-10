@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use serde_json::Value;
 
 use super::descriptor::AdapterDescriptor;
-use crate::manifest::{Server, ServerType};
+use agentstack_core::manifest::{Server, ServerType};
 
 /// Extract the settings worth importing from a CLI's parsed settings file:
 /// every top-level key that has at least one catalog field. Whole top-level
@@ -128,7 +128,7 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
                 command,
                 args,
                 cwd,
-                targets: crate::manifest::model::all_targets(),
+                targets: agentstack_core::manifest::model::all_targets(),
                 owner: None,
                 headers,
                 env,
@@ -176,7 +176,7 @@ fn navigate<'a>(root: &'a Value, location: &str) -> Option<&'a Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapter::Registry;
+    use crate::Registry;
     use serde_json::json;
 
     #[test]

@@ -67,10 +67,16 @@ verified against the source, 2026-07-10):
   `gateway.rs`/`mcp_server.rs` → `policy`, as the seed of the intersection
   engine. Enforcement call sites stay in `cli` and call into it.
 - `src/adapter/` + the 13 `adapters/*.yaml` (and their `include_dir` embed +
-  build.rs rerun) → `adapters`. **The one non-mechanical seam:**
-  `adapter::render` depends on `resolve`, which pulls in `library` and
-  `store` — that boundary must be split (e.g. render takes resolved values as
-  input) before the crate can stand alone.
+  build.rs rerun) → `adapters`. **Correction (2026-07-10):** this bullet
+  originally claimed `adapter::render` depends on `resolve`/`library`/`store`
+  and called it "the one non-mechanical seam." Per-file reading showed that
+  was a grep artifact — those imports belong to `manifest/validate.rs`; the
+  adapter module's only non-core dependency was the `Resolver` trait, which
+  moved to `core::secret`. The pipeline (`render/apply.rs`) already resolves
+  before it renders; the boundary followed the data all along.
+  **Meta-lesson, standing rule:** coupling claims made from combined grep
+  sweeps are hypotheses. Before design work is scheduled on an asserted
+  "X depends on Y," the session verifies it per-file against the source.
 - `src/calllog.rs` (audit-log writer) → `recorder`, seeding the event types.
 - Everything else (library, plugins, dashboard, analyze, codemode, the
   observation proxy, resolve/store) stays in `cli` for now.

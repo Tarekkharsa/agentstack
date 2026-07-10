@@ -20,6 +20,7 @@ path = "src/main.rs"
 agentstack-core = { path = "../core" }
 agentstack-trust = { path = "../trust" }
 agentstack-policy = { path = "../policy" }
+agentstack-adapters = { path = "../adapters" }
 agentstack-recorder = { path = "../recorder" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

@@ -347,7 +347,7 @@ PATH; `self which` verifies what a bare `agentstack` runs). Don't wrap the
 binary in a shell function or alias — those exist only in interactive shells,
 so agent harnesses and scripts won't see them.
 
-Adding a CLI is one YAML descriptor — copy `crates/cli/adapters/codex.yaml`, check it with
+Adding a CLI is one YAML descriptor — copy `crates/adapters/descriptors/codex.yaml`, check it with
 `agentstack adapters validate my-agent.yaml`, then drop it into
 `~/.agentstack/adapters/` (no rebuild). `agentstack adapters list` marks which
 adapters are yours; a broken drop-in is skipped with a warning, never fatal.

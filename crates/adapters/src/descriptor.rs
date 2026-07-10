@@ -6,15 +6,15 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::scope::Scope;
-use crate::util::paths;
+use agentstack_core::scope::Scope;
+use agentstack_core::util::paths;
 
 /// Project-scope paths anchor at the PROJECT ROOT. Callers usually hold the
 /// manifest dir, which under the `.agentstack/` layout is one level below the
 /// root — normalize before joining so `.mcp.json`, `.claude/skills/`, etc.
 /// land where the CLIs actually look.
 fn project_root(project_dir: &Path) -> PathBuf {
-    crate::manifest::project_root_of(project_dir)
+    agentstack_core::manifest::project_root_of(project_dir)
 }
 
 /// Where an adapter descriptor was loaded from.

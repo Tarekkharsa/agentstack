@@ -71,6 +71,7 @@ name = "agentstack"
 version = "0.8.1"
 dependencies = [
  "age",
+ "agentstack-adapters",
  "agentstack-core",
  "agentstack-policy",
  "agentstack-recorder",
@@ -97,6 +98,21 @@ dependencies = [
  "tiny_http",
  "toml 0.8.23",
  "toml_edit 0.22.27",
+]
+
+[[package]]
+name = "agentstack-adapters"
+version = "0.8.1"
+dependencies = [
+ "agentstack-core",
+ "anyhow",
+ "assert_fs",
+ "include_dir",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "toml 0.8.23",
 ]
 
 [[package]]
