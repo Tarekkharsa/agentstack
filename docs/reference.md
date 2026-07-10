@@ -731,8 +731,13 @@ Library-referenced server definitions live outside the digest, so the gateway
 integrity-checks them at launch against the lock's pinned definition digests:
 a definition that drifted from its pin is refused (with a
 `re-run \`agentstack lock\`` message) and an unpinned ref is served with a
-warning. Re-locking changes the lockfile, which re-gates trust — the pin, the
-runtime check, and the consent digest close the loop.
+warning. A **missing** lockfile is the zero-lock workflow (everything
+unpinned, warned); a lockfile that exists but can't be read — parse error,
+future schema — fails **closed**: its pins are unknowable, so
+library-referenced servers are refused until it's fixed, and `agentstack
+trust` errors rather than reviewing an unverifiable surface. Re-locking
+changes the lockfile, which re-gates trust — the pin, the runtime check, and
+the consent digest close the loop.
 
 (Upgrading across the digest-formula change — v0.6.x adds the lockfile to it —
 flips previously trusted projects to "changed" once; re-run `agentstack trust`

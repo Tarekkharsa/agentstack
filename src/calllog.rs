@@ -78,8 +78,8 @@ fn digest_key() -> Option<Vec<u8>> {
     }
     let dir = path.parent()?;
     fs::create_dir_all(dir).ok()?;
-    restrict_dir(dir);
-    let key = random_bytes();
+    crate::util::restrict(dir, true);
+    let key = crate::util::random_bytes();
     let mut opts = fs::OpenOptions::new();
     opts.write(true).create_new(true);
     #[cfg(unix)]
@@ -99,42 +99,6 @@ fn digest_key() -> Option<Vec<u8>> {
         }
         Err(_) => None,
     }
-}
-
-/// 32 bytes from the OS entropy pool, with a time/pid-mixed fallback where
-/// /dev/urandom is unavailable. The key gates *guess confirmation*, not
-/// encryption — the fallback's quality is acceptable for that.
-fn random_bytes() -> Vec<u8> {
-    #[cfg(unix)]
-    {
-        use std::io::Read;
-        if let Ok(mut f) = fs::File::open("/dev/urandom") {
-            let mut buf = vec![0u8; 32];
-            if f.read_exact(&mut buf).is_ok() {
-                return buf;
-            }
-        }
-    }
-    let mut h = Sha256::new();
-    h.update(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-            .to_le_bytes(),
-    );
-    h.update(std::process::id().to_le_bytes());
-    h.finalize().to_vec()
-}
-
-fn restrict_dir(dir: &std::path::Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
-    }
-    #[cfg(not(unix))]
-    let _ = dir;
 }
 
 /// First 12 hex chars of SHA-256 over the per-machine key + the serialized
@@ -171,7 +135,7 @@ pub fn record(rec: &CallRecord) {
     if fs::create_dir_all(dir).is_err() {
         return;
     }
-    restrict_dir(dir);
+    crate::util::restrict(dir, true);
     // Size-capped rotation: current → .1 (previous generation dropped).
     if fs::metadata(&path)
         .map(|m| m.len() > MAX_BYTES)

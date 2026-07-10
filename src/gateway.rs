@@ -486,16 +486,20 @@ impl Gateway {
             // Library definitions are outside the trust digest (it covers the
             // manifest layers + lockfile), so they are integrity-checked here
             // against the lock's pinned definition digests before being served.
-            // An unreadable lock fails OPEN (everything unpinned, warned): the
-            // library is user-controlled and any lock byte-change re-gates
-            // trust, so a garbled pin file can't be repo-leverage — refusing
-            // the whole surface for it would punish zero-lock workflows.
-            let lock = crate::lock::Lock::load(&ctx.dir).unwrap_or_else(|e| {
-                eprintln!(
-                    "gateway: warning: lockfile unavailable ({e:#}); library servers are unpinned"
-                );
-                crate::lock::Lock::default()
-            });
+            // A genuinely MISSING lockfile is the zero-lock workflow (Ok with
+            // empty pins — unpinned refs serve with a warning). A lockfile
+            // that exists but can't be read (parse error, future schema) is
+            // different: its pins are unknowable, so library-backed servers
+            // fail CLOSED rather than silently degrading to unpinned.
+            let lock = match crate::lock::Lock::load(&ctx.dir) {
+                Ok(l) => Some(l),
+                Err(e) => {
+                    eprintln!(
+                        "gateway: agentstack.lock is unreadable ({e:#}) — library-referenced servers will NOT be served until it is fixed"
+                    );
+                    None
+                }
+            };
             // Relative server paths (`cwd`) anchor at the project root — the
             // dir holding `.agentstack/`, not the manifest dir itself.
             let root = crate::manifest::project_root_of(&ctx.dir);
@@ -508,6 +512,12 @@ impl Gateway {
                 let s = match resolved {
                     Ok(r) => {
                         if r.origin == crate::resolve::ServerOrigin::Library {
+                            let Some(lock) = &lock else {
+                                eprintln!(
+                                    "gateway: skipping '{name}': library-referenced and the lockfile is unreadable — its pin can't be verified"
+                                );
+                                continue;
+                            };
                             match lock.get_server(&name) {
                                 Some(entry) if entry.checksum != r.checksum => {
                                     eprintln!(
@@ -1202,8 +1212,21 @@ mod tests {
         // No lock entry at all → served (warned, not blocked).
         std::fs::remove_file(project.path().join("agentstack.lock")).unwrap();
         let gw = Gateway::from_manifest(Some(project.path()));
-        std::env::remove_var("AGENTSTACK_HOME");
         assert_eq!(gw.upstreams.len(), 1, "unpinned ref must still be served");
+
+        // An UNREADABLE lock (parse error / future schema) is not the
+        // zero-lock workflow: pins are unknowable, so library-backed servers
+        // fail closed instead of degrading to unpinned.
+        project
+            .child("agentstack.lock")
+            .write_str("version = 99\n")
+            .unwrap();
+        let gw = Gateway::from_manifest(Some(project.path()));
+        std::env::remove_var("AGENTSTACK_HOME");
+        assert!(
+            gw.upstreams.is_empty(),
+            "library server must not be served under an unreadable lock"
+        );
     }
 
     #[test]

@@ -213,7 +213,17 @@ pub fn machine_policy() -> crate::manifest::Policy {
 /// log it away).
 pub fn machine_policy_health() -> Option<Result<crate::manifest::Policy>> {
     let path = crate::util::paths::agentstack_home().join(MANIFEST_FILE);
-    let text = fs::read_to_string(&path).ok()?;
+    // Only a genuinely absent file means "no machine layer". Any other read
+    // failure (permissions, I/O) is a real error — folding it into `None`
+    // would silently drop the user's own firewall with no warning and no
+    // doctor finding.
+    let text = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            return Some(Err(anyhow::anyhow!("reading {}: {e}", path.display())));
+        }
+    };
     let manifest: Manifest = match toml::from_str(&text) {
         Ok(m) => m,
         Err(e) => {
@@ -431,6 +441,20 @@ mod tests {
         assert!(machine_policy().is_empty());
         fs::write(&path, "version = 99\n[policy.tools]\nfigma = [\"!x\"]\n").unwrap();
         assert!(machine_policy().is_empty());
+
+        // Health distinguishes the states doctor needs: broken file = Err…
+        assert!(matches!(machine_policy_health(), Some(Err(_))));
+        // …an I/O failure that isn't NotFound is Err too, never silent None
+        // (a directory at the manifest path errors on read without vanishing).
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(
+            matches!(machine_policy_health(), Some(Err(_))),
+            "non-NotFound read failure must surface, not read as 'no machine layer'"
+        );
+        fs::remove_dir(&path).unwrap();
+        // …and a genuinely absent file is None.
+        assert!(machine_policy_health().is_none());
 
         std::env::remove_var("AGENTSTACK_HOME");
     }

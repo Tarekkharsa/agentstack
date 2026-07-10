@@ -235,7 +235,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@v0.5.0   # pin a release tag, not @main
+  - uses: Tarekkharsa/agentstack@v0.8.1   # pin a release tag, not @main
 ```
 
 ## The trust gate — clone anyone's repo, safely

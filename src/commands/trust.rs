@@ -58,7 +58,10 @@ fn grant(base: &Path) -> Result<()> {
     // will at gateway time, so the human reviews everything auto-mode may run.
     let library = crate::library::Library::load_default_or_warn();
     let lib_home = crate::util::paths::lib_home();
-    let lock = crate::lock::Lock::load(&dir).unwrap_or_default();
+    // A broken lockfile must fail the trust review loudly: its pins are part
+    // of what the human is consenting to, and the gateway will refuse
+    // library-backed servers under an unreadable lock anyway.
+    let lock = crate::lock::Lock::load(&dir)?;
     let servers = crate::resolve::effective_runtime_servers(m, &library, &lib_home, None);
     println!("This project declares — review what auto-mode may run/contact:");
     if servers.is_empty() {

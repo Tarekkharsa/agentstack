@@ -11,7 +11,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tiny_http::{Header, Response, Server};
@@ -51,9 +50,13 @@ pub fn start(dir: Option<&Path>, gateway: Arc<Gateway>) -> Option<RuntimeHandle>
 
     let cmdir = crate::codemode::codemode_dir(dir);
     std::fs::create_dir_all(&cmdir).ok()?;
+    // endpoint.json carries the bearer token for the proxied surface — it must
+    // not be readable by other local users (default umask would leave it 0644).
+    crate::util::restrict(&cmdir, true);
     let endpoint_path = cmdir.join("endpoint.json");
     let record = json!({ "url": url, "token": token });
     crate::util::atomic::write(&endpoint_path, &format!("{record}\n")).ok()?;
+    crate::util::restrict(&endpoint_path, false);
 
     let token_for_thread = token;
     std::thread::spawn(move || {
@@ -134,26 +137,15 @@ fn json_ctype() -> Header {
     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
 }
 
-/// A localhost one-time token (same role as the dashboard's): not a hard
-/// boundary — the socket is already 127.0.0.1-only — it just stops other local
-/// processes from poking the endpoint.
+/// A per-session bearer token for the loopback endpoint. The socket is
+/// 127.0.0.1-only, but the token is a real credential (it invokes proxied
+/// tools), so it comes from the OS entropy pool — not a guessable
+/// time/PID-derived hash.
 fn gen_token() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let seed = nanos ^ ((std::process::id() as u128) << 64);
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in seed.to_le_bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    let mut h2: u64 = h ^ 0x9e3779b97f4a7c15;
-    for b in nanos.to_be_bytes() {
-        h2 ^= b as u64;
-        h2 = h2.wrapping_mul(0x100000001b3);
-    }
-    format!("{h:016x}{h2:016x}")
+    crate::util::random_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 #[cfg(test)]
@@ -183,7 +175,7 @@ mod tests {
     #[test]
     fn tokens_are_stable_length_hex() {
         let t = gen_token();
-        assert_eq!(t.len(), 32);
+        assert_eq!(t.len(), 64);
         assert!(t.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }
