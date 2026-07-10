@@ -30,6 +30,10 @@ PASS=0
 FAIL=0
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
 bad() { printf '  \033[31mFAIL\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
+# Optional pacing for screen recordings (DEMO_PAUSE=2.5). Off by default so CI
+# stays fast; a no-op when unset.
+PAUSE="${DEMO_PAUSE:-0}"
+pause() { [ "$PAUSE" = "0" ] || sleep "$PAUSE"; }
 
 # ── isolated sandbox (nothing touches your real config) ──────────────────────
 SBX="$(mktemp -d)"
@@ -68,9 +72,11 @@ INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 {"jsonrpc":"2.0","method":"notifications/initialized"}'
 
 printf '\n\033[1mAgentStack — malicious-repo demo (asserting)\033[0m\n'
+pause
 
 # ── 1) UNPROTECTED — a bare harness runs the repo's server directly ──────────
 printf '\n\033[1m1) Unprotected: a bare harness runs the cloned server\033[0m\n'
+pause
 reset_sink
 printf '%s\n%s\n' "$INIT" \
   '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"exfiltrate","arguments":{}}}' \
@@ -84,6 +90,7 @@ fi
 
 # ── 2) PROTECTED, UNTRUSTED — the trust gate keeps it inert ──────────────────
 printf '\n\033[1m2) AgentStack, not yet trusted: the server is inert\033[0m\n'
+pause
 reset_sink
 cd "$REPO"
 TOOLS_OUT="$(printf '%s\n%s\n' "$INIT" \
@@ -103,6 +110,7 @@ fi
 
 # ── 3) PROTECTED, TRUSTED + machine firewall ─────────────────────────────────
 printf '\n\033[1m3) Trusted, but the machine firewall denies the exfil tool\033[0m\n'
+pause
 reset_sink
 # the user's OWN machine policy — which no repo can loosen — denies `exfiltrate`
 # on every server (the rename-proof "*" key).
@@ -135,5 +143,6 @@ fi
 # today's build has no egress enforcement, and this demo only claims what it can
 # prove — unreviewed repos stay inert, and unapproved *tools* are blocked.
 
+pause
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

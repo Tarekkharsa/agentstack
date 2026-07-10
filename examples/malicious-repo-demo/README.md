@@ -8,8 +8,12 @@ This is a self-contained, self-asserting reproduction. It runs the *same*
 hostile bundle three ways and checks the outcome of each — so it either
 provably works or fails loudly, which is why it runs in CI.
 
+![The malicious-repo demo: unprotected exfiltrates; AgentStack keeps it inert, then firewalls the exfil tool](../docs/malicious-repo-demo.gif)
+
 ```sh
 examples/malicious-repo-demo/run-demo.sh
+# paced for a screen recording:
+DEMO_PAUSE=2.5 examples/malicious-repo-demo/run-demo.sh
 ```
 
 (Needs `agentstack` on your `PATH`, or `AGENTSTACK_BIN=/path/to/agentstack`, and
