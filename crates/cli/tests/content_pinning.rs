@@ -12,8 +12,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 
-use agentstack::cli::{LockArgs, UseArgs};
-use agentstack::commands::{lock as lock_cmd, use_profile};
+use agentstack::cli::{LockArgs, TrustArgs, UseArgs};
+use agentstack::commands::{lock as lock_cmd, trust as trust_cmd, use_profile};
 use agentstack::trust::{self, TrustState};
 
 // These tests mutate the process-global HOME; serialize them.
@@ -106,6 +106,49 @@ fn inline_skill_drift_blocks_activation_until_relocked() {
     // After human review: re-trust, and activation flows again.
     trust::trust(&proj).unwrap();
     use_profile::run(&use_args(true), Some(&proj)).unwrap();
+}
+
+/// `agentstack trust` refuses to pin over an unpinned or drifted loadable
+/// surface: `agentstack lock` is a prerequisite of trust, so the digest the
+/// human blesses always covers pins that match the reviewed content.
+#[test]
+fn trust_grant_requires_a_pinned_matching_surface() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    write_project(&proj);
+    let grant_args = TrustArgs {
+        path: Some(proj.clone()),
+        list: false,
+        revoke: false,
+    };
+
+    // Unpinned inline skill → refused, pointing at `agentstack lock`.
+    let err = trust_cmd::run(&grant_args).unwrap_err().to_string();
+    assert!(err.contains("isn't fully pinned"), "{err}");
+    assert!(err.contains("helper"), "{err}");
+    assert!(err.contains("`agentstack lock`"), "{err}");
+    assert_eq!(trust::check(&proj), TrustState::Untrusted);
+
+    // Pin it → trust grants.
+    lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
+    trust_cmd::run(&grant_args).unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Trusted);
+
+    // Drift the body → re-granting refuses until re-locked.
+    fs::write(proj.join("skills/helper/SKILL.md"), "# helper v2\n").unwrap();
+    let err = trust_cmd::run(&grant_args).unwrap_err().to_string();
+    assert!(err.contains("drifted"), "{err}");
+
+    lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
+    trust_cmd::run(&grant_args).unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Trusted);
 }
 
 /// First activation of an unpinned project proceeds: recording the first pin
