@@ -593,6 +593,17 @@ fn render(
         );
     }
 
+    // `apply` renders servers/instructions/hooks/settings — never skills.
+    // Say so, or a manifest's skills look silently dropped (they activate
+    // through a profile via `use`).
+    if !manifest.skills.is_empty() && !quiet {
+        println!(
+            "\n{} {} skill(s) in the manifest are not rendered by `apply` — skills activate through a profile: `agentstack use <profile> --write`",
+            "ℹ".cyan(),
+            manifest.skills.len()
+        );
+    }
+
     println!();
     if will_write {
         // Count targets actually written, not pending changes — a gate above

@@ -131,6 +131,10 @@ pub fn activate(
     let mut state = State::load()?;
     let identity = crate::state::manifest_identity(&ctx.dir);
     let mut wrote = 0;
+    // Skill materializations counted separately: "activated on 0 target(s)"
+    // right under a "✓ N skill(s) → …" line reads as a contradiction when no
+    // CLI binaries are on PATH but skills were genuinely written.
+    let mut wrote_skill_dirs = 0;
     let mut blocked_targets: Vec<String> = Vec::new();
     // Project-scope artifacts we write are machine-local (absolute-path
     // symlinks, resolved values) — collect them for the managed .gitignore
@@ -284,6 +288,7 @@ pub fn activate(
                     skills::materialize(&plan)?;
                     state.record_skills(&key, plan.managed_names());
                     crate::usage::bump(&plan.managed_names());
+                    wrote_skill_dirs += 1;
                     println!(
                         "  {} {} skill(s) → {}",
                         "✓".green(),
@@ -354,11 +359,19 @@ pub fn activate(
             &libctx.library,
         )?;
         if blocked_targets.is_empty() {
-            println!(
-                "\n{} activated '{}' on {wrote} target(s).",
-                "✓".green(),
-                args.profile
-            );
+            if wrote == 0 && wrote_skill_dirs > 0 {
+                println!(
+                    "\n{} activated '{}' — wrote skills to {wrote_skill_dirs} location(s); no server configs changed.",
+                    "✓".green(),
+                    args.profile
+                );
+            } else {
+                println!(
+                    "\n{} activated '{}' on {wrote} target(s).",
+                    "✓".green(),
+                    args.profile
+                );
+            }
         } else {
             // A blocked target is a failure, not a footnote: report it in the
             // summary and exit nonzero so scripts can't mistake this for done.

@@ -318,7 +318,40 @@ fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Re
     }
 
     if detected.is_empty() {
-        println!("No supported CLIs detected on this machine. Nothing to import.");
+        // A clean machine is a first-timer's machine. Refusing to create a
+        // manifest here is a circular blocker — every other command's error
+        // says "run `agentstack init`" — so scaffold a commented starter
+        // manifest instead of importing nothing.
+        const STARTER: &str = "\
+version = 1
+
+# Fresh manifest — no agent CLIs were detected to import from.
+# Declare MCP servers here; secrets stay ${REF} placeholders (never values):
+#
+# [servers.github]
+# type = \"stdio\"
+# command = \"npx\"
+# args = [\"-y\", \"@modelcontextprotocol/server-github\"]
+# env = { GITHUB_TOKEN = \"${GH_PAT}\" }
+#
+# Next steps:
+#   agentstack search <query>          find servers/skills in the catalog
+#   agentstack add from <id> --write   add one to this manifest
+#   agentstack apply                   preview what renders into each CLI
+#   agentstack connect --all --write   or skip rendered files entirely:
+#   agentstack trust .                 serve this repo through the gateway
+";
+        if args.dry_run {
+            println!("No supported CLIs detected — would write a starter manifest:\n\n{STARTER}");
+            return Ok(());
+        }
+        crate::util::atomic::write(&manifest_path, STARTER)
+            .with_context(|| format!("writing {}", manifest_path.display()))?;
+        println!(
+            "No supported CLIs detected to import — wrote a starter manifest instead.\n{}  Wrote {}\n\nAdd a server with `agentstack search <query>` + `agentstack add from <id> --write`,\nor edit the manifest directly (it has a commented example).",
+            "✅".dimmed(),
+            manifest_path.display()
+        );
         return Ok(());
     }
 

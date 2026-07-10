@@ -20,7 +20,11 @@ The complete, implemented-and-tested feature inventory. The
 
 Layered load: the preferred `.agentstack/agentstack.toml` plus a gitignored
 `agentstack.local.toml` overlay (legacy root `agentstack.toml` remains
-supported), with static validation before anything renders. The `version`
+supported), with static validation before anything renders. Relative paths in
+the manifest (skill `path`, instruction sources) anchor at the **manifest's
+own directory** — `.agentstack/` in the preferred layout — so
+`path = "./skills/x"` materializes at `.agentstack/skills/x`; a server's
+`cwd` is the deliberate exception and anchors at the project root. The `version`
 field is checked on load — a manifest (or lockfile, or library index)
 written by a newer schema than the build supports errors with an "upgrade
 agentstack" message instead of being misread silently.

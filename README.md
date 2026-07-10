@@ -1,14 +1,15 @@
 # agentstack
 
-> **One reviewed, version-controlled setup for your AI agents** — MCP servers,
-> skills, instructions, settings, and profiles, rendered into every agent CLI
-> you use.
+> **A local control plane for your AI agents' MCP tools** — trust-gate,
+> firewall, and audit every tool call; define servers, skills, instructions,
+> and profiles once, for every agent CLI you use.
 
-Define your stack once in `.agentstack/agentstack.toml`. agentstack writes it
-into the native config of 13 agent CLIs — Claude Code, Claude Desktop, Codex,
-Cursor, Windsurf, Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode,
-Antigravity, Junie, Kiro, and Pi. Secrets stay `${REFERENCES}` that resolve
-per machine, so the file is safe to commit and share.
+Define your stack once in `.agentstack/agentstack.toml`. Serve it live through
+a trust-gated gateway (zero files copied anywhere), or render it into the
+native config of 13 agent CLIs — Claude Code, Claude Desktop, Codex, Cursor,
+Windsurf, Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode, Antigravity,
+Junie, Kiro, and Pi. Secrets stay `${REFERENCES}` that resolve per machine, so
+the file is safe to commit and share.
 
 ## Install
 
@@ -30,16 +31,27 @@ One static binary, no runtime dependencies.
 
 ## Start in 60 seconds
 
-You don't start from a blank page — `init` imports the agent config already on
-your machine:
+`agentstack setup` is the guided path — it imports, previews, and applies
+interactively. The same flow as individual commands:
 
 ```bash
-agentstack init         # turn your existing CLI configs into one manifest
+agentstack init         # existing CLI configs → one manifest
+                        # (nothing installed yet? init writes a starter
+                        #  manifest with a commented example instead)
 agentstack bootstrap    # check CLIs, skills, secrets; see what's missing
 agentstack apply        # preview every CLI's changes, confirm to write
 ```
 
 ![agentstack first run: init → bootstrap → apply](docs/firstrun.gif)
+
+Two things worth knowing before you go further:
+
+- **Skills activate through profiles**, not `apply`: `apply` renders servers,
+  instructions, and hooks; `agentstack use <profile> --write` materializes
+  that profile's skills. (`apply` will remind you if the manifest has skills.)
+- Prefer **no rendered files at all**? Skip `apply` entirely and jump to
+  [the trust gate](#the-trust-gate--clone-anyones-repo-safely) — one gateway
+  registration serves every repo live.
 
 If `bootstrap` reports a missing secret, store it once — it goes in your OS
 keychain, never in the manifest:
@@ -96,6 +108,12 @@ skills = ["sql-review"]                      # resolves from your central librar
 [targets]
 default = ["claude-code", "codex"]
 ```
+
+Relative paths in the manifest (a skill's `path`, a server's `cwd`) anchor at
+the **manifest's directory** — `.agentstack/` in the preferred layout — so
+`path = "./skills/x"` lives at `.agentstack/skills/x`, not the repo root.
+(`cwd` is the exception: it anchors at the project root, matching what a
+harness gives a rendered config.)
 
 ## Everyday commands
 
@@ -221,8 +239,8 @@ it — every call after that is firewalled and audited.
 
 ![The trust gate: clone → inert → review → trust → firewalled → audited — and the library sync gate blocking a literal secret](docs/trust-gate.gif)
 
-Register the gateway once (`agentstack connect`) and every repo you open brings
-its own MCP servers with **no files copied in**. But a repo you haven't reviewed
+Register the gateway once (`agentstack connect --all --write`) and every repo
+you open brings its own MCP servers with **no files copied in**. But a repo you haven't reviewed
 is **inert** — none of its servers are spawned or contacted, no secrets resolved:
 
 ```bash
@@ -234,7 +252,9 @@ agentstack trust .               # you SEE what it declares before authorizing:
 #   ✓ trusted at sha256:…        (editing the manifest re-gates it)
 ```
 
-Trust pins the **manifest and lockfile**, not arbitrary code they point at:
+Trust pins the **manifest and lockfile**, not arbitrary code they point at —
+which also means running `agentstack lock` re-gates the project (new pins =
+new consent); expect to re-run `trust .` after locking. And:
 you're authorizing the command `python3 ./server.py`, and a later edit to
 `server.py` won't re-gate the project (an edit to the manifest or lock will).
 Central-library servers are pinned by definition digest in `agentstack.lock`

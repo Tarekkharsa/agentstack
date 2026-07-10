@@ -1,23 +1,29 @@
 ---
 name: using-agentstack
-description: Operate agentstack — manage a project's MCP servers, skills, profiles, and secrets from its manifest; activate/deactivate capability sets; load skills from the central library; propose new capabilities safely.
+description: Operate agentstack — manage a project's MCP servers, skills, profiles, and secrets from its manifest; work through the trust-gated runtime gateway; interpret policy denials; activate/deactivate capability sets; load skills from the central library; propose new capabilities safely.
 ---
 
 # Using agentstack
 
 Use this skill when a task involves an agent CLI's setup: adding/removing MCP
 servers or skills, switching capability profiles, missing servers/skills in a
-project, secrets that don't resolve, or auditing what an agent can access.
+project, secrets that don't resolve, a proxied tool call being refused, or
+auditing what an agent can access.
 
 ## The mental model (one paragraph)
 
-agentstack is a **compiler**: intent lives in a commit-safe manifest
-(`.agentstack/agentstack.toml`, or legacy root `agentstack.toml`) and is
-rendered into each CLI's native config. Skills and server definitions can live
-in a machine-wide **central library** (`~/.agentstack/lib/`) and be referenced
-**by name**. Secrets are `${REF}` placeholders resolved per machine (env →
-varlock → OS keychain → `.env`); an unresolved secret **blocks** the write.
-Nothing touches disk without `--write`.
+agentstack is a **compiler and a runtime**. Compiler: intent lives in a
+commit-safe manifest (`.agentstack/agentstack.toml`, or legacy root
+`agentstack.toml`) and is rendered into each CLI's native config. Runtime: the
+same manifest can be served live through a **gateway** (`agentstack mcp`) that
+proxies the project's MCP servers to any harness — trust-gated per repo,
+firewalled by two policy layers, every call logged. Skills and server
+definitions can live in a machine-wide **central library** (`~/.agentstack/lib/`)
+and be referenced **by name** (pinned by digest in `agentstack.lock`; the
+gateway refuses a library definition that drifted from its pin). Secrets are
+`${REF}` placeholders resolved per machine (env → varlock → OS keychain →
+`.env`); an unresolved secret **blocks** the write — and blocks the call, at
+the gateway. Nothing touches disk without `--write`.
 
 ## The three artifact modes (recognize which one a project uses)
 
@@ -33,7 +39,40 @@ Nothing touches disk without `--write`.
 3. **Zero-files / MCP** — the agent pulls skills itself through the `agentstack`
    MCP server: `agentstack_list_loadable` to browse names + descriptions, then
    `agentstack_load(name, reason)` for the full instructions. Loads are fenced
-   to the session's profile and logged.
+   to the session's profile and logged. MCP servers flow the same way: the
+   gateway proxies them with **no rendered files at all** — compact mode
+   collapses them behind `tools_search` (search → inspect → call the
+   `<server>__<tool>` name); transparent mode (`--transparent`) advertises
+   them directly in `tools/list`.
+
+## The trust gate (know where you stand)
+
+In auto-project mode a repo's runtime surface is **gated**: until a human runs
+`agentstack trust <dir>`, only control-plane tools work — no servers spawned,
+no secrets resolved. You can always tell where you are: `tools_search` says so
+and names the exact trust command, and `agentstack_doctor` includes a
+`Trust (auto mode):` line.
+
+- **Never run `agentstack trust` yourself.** It is the human consent gate —
+  the entire point is that a human reviews what the manifest runs before
+  authorizing it. Surface the command and what the manifest declares; stop.
+- Trust pins the manifest layers + `agentstack.lock`. If it reports
+  "changed", something was edited (often a `git pull`) — tell the human to
+  review and re-trust, don't look for a workaround.
+
+## Policy denials (two layers — read the refusal)
+
+A refused call says which rule blocked it:
+
+- `denied by [policy.tools] … (machine policy — ~/.agentstack/agentstack.toml)`
+  — the **user's own machine-wide rule**. Nothing in the repo can loosen it;
+  do not edit the project manifest to try. Surface it and move on.
+- `denied by [policy.tools] <server> = …` (no machine marker) — the **repo's**
+  policy. Editing it is a manifest change like any other: propose, human
+  applies (and re-trusts).
+
+Denied tools are also invisible to discovery — a tool you can't find may be
+firewalled, not missing. `explain <server>` shows both policy layers.
 
 ## Commands you'll actually use
 
@@ -49,6 +88,8 @@ agentstack lib sync              # commit/pull/push the library across machines 
 agentstack explain <name>        # provenance, secrets, footprint of a capability
 agentstack doctor --ci           # the full trust gate (validation, lock, policy, content scan)
 agentstack audit --json          # re-scan skills/instructions for hidden-unicode/injection
+agentstack audit --calls         # summarize the gateway call log (who called what, outcomes)
+agentstack analyze               # usage analysis: unused servers, context cost, recommendations
 agentstack secret set NAME       # store a secret in the OS keychain
 agentstack restore <target>      # undo a write from its pre-write backup
 ```
