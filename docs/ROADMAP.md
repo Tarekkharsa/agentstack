@@ -99,9 +99,17 @@ binary still works end to end.
    gap where an edit to a referenced file did not re-gate. `agentstack review`
    diff rendering (manifest, skill content, MCP defs, policy).
    Property test: any single-byte change in any pinned file → untrusted.
-3. `policy`: generalize the machine-first tool check into the intersection
-   engine; add egress + filesystem dimensions; compiled ruleset
-   (serializable). Property test: `effective(B, M) ⊆ M` for all inputs.
+3. `policy`: **done.** Generalized the machine-first tool check into a real
+   (machine ∩ bundle) intersection engine; added `[policy.egress]`,
+   `[policy.secrets]`, and `[policy.filesystem]` dimensions alongside
+   `[policy.tools]`, all sharing one glob grammar and rename-proof `"*"` key;
+   compiled the two-layer result into a serializable `CompiledRuleset`
+   (`crates/policy`), with per-dimension property tests (`effective(B, M) ⊆
+   M`, for all inputs, never deleted or weakened). Secret access is enforced
+   fail-closed at both substitution sites (adapter render + gateway
+   resolver); egress is enforced against each server's declared host at
+   write/spawn time. Filesystem scopes are carried and compiled but stay
+   advisory until Phase 2's sandbox mounts.
 4. `adapters`: already shipped (13 CLIs, data-driven YAML) — keep behavior,
    verify blocked writes when any `${REF}` is unresolved (keychain/varlock,
    fail closed).
@@ -122,9 +130,13 @@ Ship this. Announce this.
 2. `egress` (first async crate — budget learning time, and know that the
    proxy's *design* is harder than the async: per-server egress attribution
    needs one proxy identity per server; HTTPS allowlisting means CONNECT/SNI
-   filtering, no MITM; DNS must be routed and filtered too): consume the
-   compiled ruleset; allow/block per host per MCP server; one event per
-   decision into the recorder sink.
+   filtering, no MITM; DNS must be routed and filtered too): **consumes the
+   `CompiledRuleset` artifact** produced by `crates/policy` (the identical
+   value the gateway already reads, serialized across the process boundary —
+   no re-deriving policy in the proxy); allow/block per host per MCP server
+   using its `egress_decision`; one event per decision into the recorder
+   sink. Filesystem scopes in the same ruleset become enforceable here too,
+   via the sandbox mounts (item 1) rather than the proxy.
 3. `agentstack run --sandbox <bundle>`.
 4. **The demo:** a benign proof-of-concept "malicious" repo that phones home /
    reads a fake secret when used unprotected, and sits inert at the trust

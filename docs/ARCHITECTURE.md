@@ -52,15 +52,17 @@ mcp:
     command: ["npx", "-y", "@example/search-mcp"]
     env:
       SEARCH_API_KEY: ${SEARCH_API_KEY}     # secret ref, never a literal
-    policy:
-      egress: ["api.search.example"]
 
 policy:
+  tools:
+    web-search: ["!*_delete"]
+  egress:
+    web-search: ["api.search.example"]
+  secrets:
+    web-search: ["SEARCH_API_KEY"]
   filesystem:
     read: ["./workspace"]
     write: ["./workspace/out"]
-  tools:
-    confirm: ["*_delete", "*_send"]
 
 runtime:
   clis: [claude-code, cursor]               # adapters to materialize
@@ -119,25 +121,67 @@ This layer must work standalone — valuable with no sandbox, no registry.
 
 ## Layer 3 — Policy engine (`crates/policy`)
 
-Two inputs: the bundle's requested policy and the machine policy
-(`~/.agentstack/policy.yaml`). The machine policy lives outside every repo's
-tree, so no repo content can alter it — but see the host-mode limitation in
-Layer 2: it is still a user-writable file.
+Two inputs: the bundle's requested policy (`[policy.*]` in its manifest) and
+the machine policy — the `[policy.*]` tables of the machine-local
+`~/.agentstack/agentstack.toml` manifest (TOML, loaded by
+`manifest::machine_policy()`; not a separate `policy.yaml`). The machine
+policy lives outside every repo's tree, so no repo content can alter it — but
+see the host-mode limitation in Layer 2: it is still a user-writable file.
 
 Output: effective policy = **intersection**. Bundles can narrow, never widen.
 (The shipped machine-first `[policy.tools]` check is the v0 of this rule;
-Phase 1 generalizes it into a real intersection engine.)
+Phase 1 generalized it into a real intersection engine with more dimensions.)
 
-Policy dimensions: network egress per MCP server (allowlist of hosts),
-filesystem read/write scopes, tool allow/deny/confirm lists, secret access
-per server.
+Four dimensions ship, each a top-level, name-keyed map — **not** nested under
+each MCP server entry in the manifest — every one sharing the same glob
+grammar: a plain pattern allows, a `!`-prefixed pattern denies, and the `"*"`
+key is rename-proof (it constrains every server regardless of what a manifest
+calls it, so a repo can't dodge a machine rule by renaming a server):
 
-The compiled ruleset is a plain serializable artifact handed to the egress
-proxy — this clean interface is what lets the proxy be rewritten (e.g. in a
-separate process or language) without touching the engine.
+- `[policy.tools]` — per-server tool allow/deny globs (`policy.tool_allowed`).
+- `[policy.egress]` — per-server outbound host globs (`policy.egress_allowed`).
+- `[policy.secrets]` — per-server `${REF}` name globs (`policy.secret_allowed`).
+- `[policy.filesystem]` — bundle-global `read`/`write` path globs (`FsPolicy`;
+  no per-server split — a sandbox mount is per-run, not per-server).
+
+All four are **uniform allow-by-default**: an absent key constrains nothing.
+Least privilege is an explicit machine opt-in, not a per-dimension special
+case — e.g. `[policy.tools] * = ["!*"]` to deny everything unless a bundle's
+own allowlist narrows further. (No approval/confirm channel exists yet;
+a future "confirm before calling" tier is unbuilt work, not a shipped
+dimension.)
+
+`compile(machine, bundle, servers)` folds both layers into a
+`CompiledRuleset` — the canonical, serializable artifact every enforcer
+consumes. It is lossless (each layer's allowlist is kept as an independent
+AND-bound, so `tool_decision`/`egress_decision`/`secret_decision` can still
+say *which* layer blocked a call) and rename-proof by construction (`"*"`
+folds into every named server plus an `any` bucket for unknown names). The
+in-process gateway consumes it today; the Phase-2 egress proxy and sandbox
+runtime are meant to receive the identical artifact serialized across the
+process boundary — this is the clean interface that lets the proxy be
+rewritten without touching the engine. **The compiled ruleset is deliberately
+not part of the trust digest**: one of its two inputs (machine policy) lives
+outside the pinned bundle by design, so folding it into the digest would
+create a second, machine-varying source of trust truth.
+
+Enforcement honesty, per dimension (today):
+- **Tools** — enforced: the gateway checks every call before dispatch
+  (Layer 4's single enforcement point).
+- **Secrets** — enforced, fail-closed: a denied `${REF}` never resolves,
+  at both adapter render and the gateway's per-server resolver.
+- **Egress** — partially enforced: a server's *declared* URL host is checked
+  at write/spawn time (render and gateway upstream construction); a host
+  hidden behind an unresolved `${REF}` fails closed if the server is
+  constrained at all. Runtime filtering of arbitrary in-flight traffic is
+  the Phase-2 egress proxy's job — not yet built.
+- **Filesystem** — advisory only: scopes are carried, reviewed, and compiled,
+  but no code path matches paths against them yet. Enforcement is Phase 2's
+  sandbox mounts. Never present these scopes as enforced before then.
 
 Invariant (property-tested): for all bundle policies B and machine policies M,
-`effective(B, M) ⊆ M`. This test is never deleted or weakened.
+`effective(B, M) ⊆ M`, across every dimension. This test is never deleted or
+weakened.
 
 ## Layer 4 — Runtime (`crates/adapters`, `crates/runtime`, `crates/egress`)
 

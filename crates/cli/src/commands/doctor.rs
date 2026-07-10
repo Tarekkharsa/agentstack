@@ -11,7 +11,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::DoctorArgs;
 use crate::manifest::{validate_with_context, Manifest, Server, ServerType};
-use crate::render::{plan_target_with_servers, resolve_targets};
+use crate::render::{declared_host, plan_target_with_servers, resolve_targets, ruleset_for};
 use crate::scope::Scope;
 use crate::secret::Resolver;
 use crate::state::{self, target_key, State};
@@ -883,6 +883,10 @@ fn run_checks(
             check_policy(manifest, report);
         }
         check_machine_policy(machine_policy, report);
+        // The EFFECTIVE (machine ∩ project) ruleset, not just the project
+        // layer — a machine-only deny must surface here too, same as it
+        // would bite at apply/gateway time.
+        check_effective_policy(manifest, report);
     }
 
     if args.live {
@@ -1108,29 +1112,32 @@ fn check_server_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Re
     }
 }
 
-/// A machine `[policy.tools]` deny keyed to a specific server *name* can be
-/// dodged: the rule binds to the name the repo chose, so a repo that renames
-/// its server escapes it. The `"*"` key is rename-proof — it constrains every
-/// server whatever a manifest calls it. Returns one advisory per named deny
-/// that has no identical `"*"` companion. Pure, so it is unit-testable without
-/// a `Report`.
-fn rename_dodgeable_denies(policy: &crate::manifest::Policy) -> Vec<String> {
-    let wildcard_denies: std::collections::HashSet<&str> = policy
-        .tools
+/// A machine policy deny keyed to a specific server *name* can be dodged: the
+/// rule binds to the name the repo chose, so a repo that renames its server
+/// escapes it. The `"*"` key is rename-proof — it constrains every server
+/// whatever a manifest calls it. Returns one advisory per named deny that has
+/// no identical `"*"` companion, for `dimension` (`"tools"`, `"egress"`, or
+/// `"secrets"` — same keyed grammar on all three maps). Pure, so it is
+/// unit-testable without a `Report`.
+fn rename_dodgeable_denies(
+    dimension: &str,
+    map: &indexmap::IndexMap<String, Vec<String>>,
+) -> Vec<String> {
+    let wildcard_denies: std::collections::HashSet<&str> = map
         .get("*")
         .into_iter()
         .flatten()
         .filter_map(|r| r.strip_prefix('!'))
         .collect();
     let mut out = Vec::new();
-    for (server, rules) in &policy.tools {
+    for (server, rules) in map {
         if server == "*" {
             continue;
         }
         for pat in rules.iter().filter_map(|r| r.strip_prefix('!')) {
             if !wildcard_denies.contains(pat) {
                 out.push(format!(
-                    "machine [policy.tools] deny '!{pat}' on server '{server}' can be dodged if a repo renames its server — add '!{pat}' under the \"*\" key to make it rename-proof"
+                    "machine [policy.{dimension}] deny '!{pat}' on server '{server}' can be dodged if a repo renames its server — add '!{pat}' under the \"*\" key to make it rename-proof"
                 ));
             }
         }
@@ -1177,9 +1184,69 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
             report.line(Level::Ok, "all skill sources within allowlist");
         }
     }
-    // [policy.tools] rules must name real servers — a typo'd server name would
-    // silently firewall nothing. `"*"` is the wildcard key (every server).
-    for (server, rules) in &manifest.policy.tools {
+    // Every per-server-keyed policy dimension's rules must name a real
+    // server — a typo'd key would silently firewall nothing. `"*"` is the
+    // wildcard key (every server). Same check, same wording, across all
+    // three dimensions — only the label and where it's enforced differ.
+    check_named_policy_keys(
+        "tools",
+        "enforced at the gateway",
+        &manifest.policy.tools,
+        manifest,
+        report,
+    );
+    check_named_policy_keys(
+        "egress",
+        "checked against the declared host at write/spawn time",
+        &manifest.policy.egress,
+        manifest,
+        report,
+    );
+    check_named_policy_keys(
+        "secrets",
+        "enforced fail-closed at render + gateway",
+        &manifest.policy.secrets,
+        manifest,
+        report,
+    );
+    // [policy.filesystem] scopes are bundle-global (not per-server) and, in
+    // Phase 1, advisory only — path matching is real only once Phase 2's
+    // sandbox mounts exist to enforce against. Never present these as
+    // enforced.
+    if !manifest.policy.filesystem.read.is_empty() {
+        report.line(
+            Level::Ok,
+            format!(
+                "[policy.filesystem] read — {} scope(s) — advisory, enforced by the Phase 2 sandbox",
+                manifest.policy.filesystem.read.len()
+            ),
+        );
+    }
+    if !manifest.policy.filesystem.write.is_empty() {
+        report.line(
+            Level::Ok,
+            format!(
+                "[policy.filesystem] write — {} scope(s) — advisory, enforced by the Phase 2 sandbox",
+                manifest.policy.filesystem.write.len()
+            ),
+        );
+    }
+}
+
+/// One per-server-keyed policy dimension's key-validation: every key in
+/// `map` must be `"*"` or a real server in the manifest, else it silently
+/// firewalls nothing (a typo'd server name). `dimension` is the bare name
+/// (`"tools"`, `"egress"`, `"secrets"`) used in the Ok summary; the Error
+/// line always names the bracketed `[policy.<dimension>]` form to match
+/// how a maintainer would grep the manifest for it.
+fn check_named_policy_keys(
+    dimension: &str,
+    enforced_where: &str,
+    map: &indexmap::IndexMap<String, Vec<String>>,
+    manifest: &Manifest,
+    report: &mut Report,
+) {
+    for (server, rules) in map {
         if server == "*" || manifest.servers.contains_key(server) {
             let denies = rules.iter().filter(|r| r.starts_with('!')).count();
             let allows = rules.len() - denies;
@@ -1190,49 +1257,154 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
             };
             report.line(
                 Level::Ok,
-                format!("tools '{label}' — {allows} allow / {denies} deny rule(s), enforced at the gateway"),
+                format!("{dimension} '{label}' — {allows} allow / {denies} deny rule(s), {enforced_where}"),
             );
         } else {
             report.line(
                 Level::Error,
-                format!("[policy.tools] '{server}' — no such server in the manifest"),
+                format!("[policy.{dimension}] '{server}' — no such server in the manifest"),
             );
         }
     }
 }
 
-/// Whether the machine policy layer has anything for `doctor` to report — a
-/// non-empty `[policy.tools]`, or an unreadable machine manifest (which fails
-/// OPEN and must be surfaced). Used to decide whether the "Policy" section is
-/// warranted at all when the project declares no policy of its own.
-fn machine_policy_reports(machine: &Option<Result<crate::manifest::Policy>>) -> bool {
-    matches!(machine, Some(Ok(p)) if !p.tools.is_empty()) || matches!(machine, Some(Err(_)))
+/// The `${REF}` names one server's OWN fields reference (url/command/args/
+/// cwd/headers/env) — scoped to a single server, unlike
+/// [`Manifest::referenced_secrets`] which flattens across every server. Used
+/// to check each ref against the EFFECTIVE (machine ∩ project)
+/// `[policy.secrets]` for that specific server, so a ref another server may
+/// use freely still gets flagged here if THIS server is denied it.
+fn server_secret_refs(server: &Server) -> Vec<String> {
+    let mut refs: Vec<String> = Vec::new();
+    let mut push = |s: &str| {
+        for r in agentstack_core::refs::refs_in(s) {
+            if !refs.contains(&r) {
+                refs.push(r);
+            }
+        }
+    };
+    if let Some(u) = &server.url {
+        push(u);
+    }
+    if let Some(c) = &server.command {
+        push(c);
+    }
+    for a in &server.args {
+        push(a);
+    }
+    if let Some(cwd) = &server.cwd {
+        push(cwd);
+    }
+    for v in server.headers.values() {
+        push(v);
+    }
+    for v in server.env.values() {
+        push(v);
+    }
+    refs
 }
 
-/// Diagnose the machine `[policy.tools]` layer. Runs regardless of whether the
-/// project declares its own `[policy]` — the machine layer is independent and
-/// applies to every project, so gating it behind a project policy would hide it
-/// exactly when a machine-only firewall is the whole setup. Takes the
-/// pre-computed health so the caller reads the machine manifest once.
+/// Cross-check every manifest server against the EFFECTIVE (machine ∩
+/// project) ruleset — the same artifact `apply` and the gateway consult —
+/// and flag anything that will fail closed at apply/gateway time: a `${REF}`
+/// the server uses but `[policy.secrets]` would deny it (Error, since it
+/// will simply never resolve for this server), and an HTTP server's
+/// declared URL host that `[policy.egress]` would refuse (Error). A host
+/// hidden behind a `${REF}` can't be checked statically; that's only worth a
+/// Warn when this particular server IS actually egress-constrained (an
+/// unconstrained server passes regardless, so silence is correct there).
+fn check_effective_policy(manifest: &Manifest, report: &mut Report) {
+    let ruleset = ruleset_for(manifest);
+    for (name, server) in &manifest.servers {
+        for r in server_secret_refs(server) {
+            if let Err(rule) = ruleset.secret_decision(name, &r) {
+                report.line(
+                    Level::Error,
+                    format!(
+                        "{name:<20} references ${{{r}}} but {rule} — will fail to resolve at apply/gateway time"
+                    ),
+                );
+            }
+        }
+        if server.server_type != ServerType::Http {
+            continue;
+        }
+        let Some(url) = &server.url else { continue };
+        match declared_host(url) {
+            Some(host) => {
+                if let Err(rule) = ruleset.egress_decision(name, &host) {
+                    report.line(
+                        Level::Error,
+                        format!(
+                            "{name:<20} declared host '{host}' — {rule} — will be refused at apply/gateway time"
+                        ),
+                    );
+                }
+            }
+            None if ruleset.egress_constrained(name) => {
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{name:<20} URL host is a ${{REF}} — cannot verify against [policy.egress] statically, and this server IS constrained by it"
+                    ),
+                );
+            }
+            None => {}
+        }
+    }
+}
+
+/// Whether the machine policy layer has anything for `doctor` to report — a
+/// non-empty `[policy.tools]`/`[policy.egress]`/`[policy.secrets]`, or an
+/// unreadable machine manifest (which fails OPEN and must be surfaced). Used
+/// to decide whether the "Policy" section is warranted at all when the
+/// project declares no policy of its own.
+fn machine_policy_reports(machine: &Option<Result<crate::manifest::Policy>>) -> bool {
+    matches!(machine, Some(Ok(p)) if !p.tools.is_empty() || !p.egress.is_empty() || !p.secrets.is_empty())
+        || matches!(machine, Some(Err(_)))
+}
+
+/// One machine-layer dimension's summary + rename-dodge lint: an Ok line
+/// with the rule-set count (silent when the dimension is unused), then one
+/// Warn per named deny not mirrored under `"*"`.
+fn report_machine_dimension(
+    dimension: &str,
+    map: &indexmap::IndexMap<String, Vec<String>>,
+    report: &mut Report,
+) {
+    if map.is_empty() {
+        return;
+    }
+    report.line(
+        Level::Ok,
+        format!(
+            "machine [policy.{dimension}] — {} server rule set(s), checked before project policy on every call",
+            map.len()
+        ),
+    );
+    // Rename-dodge lint: a named-server deny escapes a repo that renames its
+    // server; the "*" key is the rename-proof form.
+    for advisory in rename_dodgeable_denies(dimension, map) {
+        report.line(Level::Warn, advisory);
+    }
+}
+
+/// Diagnose the machine `[policy.tools]`/`[policy.egress]`/`[policy.secrets]`
+/// layers. Runs regardless of whether the project declares its own
+/// `[policy]` — the machine layer is independent and applies to every
+/// project, so gating it behind a project policy would hide it exactly when
+/// a machine-only firewall is the whole setup. Takes the pre-computed health
+/// so the caller reads the machine manifest once.
 fn check_machine_policy(machine: Option<Result<crate::manifest::Policy>>, report: &mut Report) {
     // The machine layer fails OPEN when its manifest is broken (project-only
     // policy, stderr warning only) — doctor is the reliable signal for that.
     match machine {
         None => {}
-        Some(Ok(p)) if p.tools.is_empty() => {}
+        Some(Ok(p)) if p.tools.is_empty() && p.egress.is_empty() && p.secrets.is_empty() => {}
         Some(Ok(p)) => {
-            report.line(
-                Level::Ok,
-                format!(
-                    "machine [policy.tools] — {} server rule set(s), checked before project policy on every call",
-                    p.tools.len()
-                ),
-            );
-            // Rename-dodge lint: a named-server deny escapes a repo that
-            // renames its server; the "*" key is the rename-proof form.
-            for advisory in rename_dodgeable_denies(&p) {
-                report.line(Level::Warn, advisory);
-            }
+            report_machine_dimension("tools", &p.tools, report);
+            report_machine_dimension("egress", &p.egress, report);
+            report_machine_dimension("secrets", &p.secrets, report);
         }
         Some(Err(e)) => report.line(
             Level::Warn,
@@ -1430,22 +1602,20 @@ mod tests {
     use super::*;
     use assert_fs::prelude::*;
 
-    /// Build a machine `Policy` from `[policy.tools]` entries.
-    fn policy_tools(entries: &[(&str, &[&str])]) -> crate::manifest::Policy {
-        crate::manifest::Policy {
-            tools: entries
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
-                .collect(),
-            ..Default::default()
-        }
+    /// Build a `[policy.<dimension>]`-shaped map from `(server, patterns)`
+    /// entries — the same keyed grammar underlies tools/egress/secrets.
+    fn rules_map(entries: &[(&str, &[&str])]) -> indexmap::IndexMap<String, Vec<String>> {
+        entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
+            .collect()
     }
 
     #[test]
     fn rename_dodge_lint_flags_named_deny_without_wildcard() {
         // A named-server deny with no "*" companion is dodgeable.
-        let p = policy_tools(&[("github", &["!delete_*"])]);
-        let out = rename_dodgeable_denies(&p);
+        let m = rules_map(&[("github", &["!delete_*"])]);
+        let out = rename_dodgeable_denies("tools", &m);
         assert_eq!(out.len(), 1, "{out:?}");
         assert!(out[0].contains("!delete_*") && out[0].contains("github"));
     }
@@ -1453,25 +1623,198 @@ mod tests {
     #[test]
     fn rename_dodge_lint_silent_when_wildcard_covers_it() {
         // The identical deny under "*" makes the named one rename-proof.
-        let p = policy_tools(&[("*", &["!delete_*"]), ("github", &["!delete_*"])]);
-        assert!(rename_dodgeable_denies(&p).is_empty());
+        let m = rules_map(&[("*", &["!delete_*"]), ("github", &["!delete_*"])]);
+        assert!(rename_dodgeable_denies("tools", &m).is_empty());
     }
 
     #[test]
     fn rename_dodge_lint_silent_for_wildcard_only_and_for_allows() {
         // Wildcard-only deny: nothing to dodge.
-        assert!(rename_dodgeable_denies(&policy_tools(&[("*", &["!delete_*"])])).is_empty());
+        assert!(rename_dodgeable_denies("tools", &rules_map(&[("*", &["!delete_*"])])).is_empty());
         // Allow-only named rule: no deny to dodge.
-        assert!(rename_dodgeable_denies(&policy_tools(&[("github", &["get_*"])])).is_empty());
+        assert!(rename_dodgeable_denies("tools", &rules_map(&[("github", &["get_*"])])).is_empty());
     }
 
     #[test]
     fn rename_dodge_lint_flags_only_the_uncovered_deny() {
         // "*" covers !delete_* but not !post_* → exactly one advisory.
-        let p = policy_tools(&[("github", &["!delete_*", "!post_*"]), ("*", &["!delete_*"])]);
-        let out = rename_dodgeable_denies(&p);
+        let m = rules_map(&[("github", &["!delete_*", "!post_*"]), ("*", &["!delete_*"])]);
+        let out = rename_dodgeable_denies("tools", &m);
         assert_eq!(out.len(), 1, "{out:?}");
         assert!(out[0].contains("!post_*"));
+    }
+
+    #[test]
+    fn rename_dodge_lint_covers_egress_and_secrets_dimensions() {
+        // Same lint, generalized: a named-server deny under [policy.egress]
+        // or [policy.secrets] is just as dodgeable, and the advisory names
+        // the dimension it came from.
+        let egress = rules_map(&[("figma", &["!evil.example"])]);
+        let out = rename_dodgeable_denies("egress", &egress);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(out[0].contains("[policy.egress]") && out[0].contains("figma"));
+
+        let secrets = rules_map(&[("figma", &["!EVIL_*"])]);
+        let out = rename_dodgeable_denies("secrets", &secrets);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(out[0].contains("[policy.secrets]") && out[0].contains("EVIL_*"));
+    }
+
+    /// Flatten a `Report`'s lines (across every section) into `(tag, msg)`
+    /// pairs for assertions — the sections themselves aren't the point in
+    /// these unit tests, just what got reported.
+    fn report_lines(report: &Report) -> Vec<(&str, &str)> {
+        report
+            .sections
+            .iter()
+            .flat_map(|s| s.lines.iter().map(|(l, m)| (*l, m.as_str())))
+            .collect()
+    }
+
+    /// [policy.egress] and [policy.secrets] keys are checked the same way as
+    /// [policy.tools]: a key must be `"*"` or a real server, else it's a
+    /// typo that silently firewalls nothing.
+    #[test]
+    fn check_named_policy_keys_flags_unknown_server() {
+        let manifest: Manifest = toml::from_str(
+            "version = 1\n[servers.known]\ntype = \"http\"\nurl = \"https://example.com\"\n",
+        )
+        .unwrap();
+        let mut report = Report::quiet();
+        check_named_policy_keys(
+            "egress",
+            "checked against the declared host at write/spawn time",
+            &rules_map(&[("known", &["api.example"]), ("ghost", &["!evil.example"])]),
+            &manifest,
+            &mut report,
+        );
+        let lines = report_lines(&report);
+        assert!(lines.iter().any(|(l, m)| *l == "ok" && m.contains("known")));
+        assert!(lines.iter().any(|(l, m)| *l == "error"
+            && m.contains("[policy.egress]")
+            && m.contains("ghost")
+            && m.contains("no such server")));
+    }
+
+    /// [policy.filesystem] scopes are surfaced but never claimed as
+    /// enforced — Phase 1 carries them, Phase 2's sandbox mounts are the
+    /// only thing that actually matches paths against them.
+    #[test]
+    fn filesystem_scopes_reported_as_advisory_only() {
+        let manifest: Manifest = toml::from_str(
+            "version = 1\n[policy.filesystem]\nread = [\"/tmp/**\"]\nwrite = [\"/tmp/out/**\"]\n",
+        )
+        .unwrap();
+        let mut report = Report::quiet();
+        check_policy(&manifest, &mut report);
+        let lines = report_lines(&report);
+        assert!(lines.iter().any(|(l, m)| *l == "ok"
+            && m.contains("read")
+            && m.contains("advisory")
+            && m.contains("Phase 2 sandbox")));
+        assert!(lines.iter().any(|(l, m)| *l == "ok"
+            && m.contains("write")
+            && m.contains("advisory")
+            && m.contains("Phase 2 sandbox")));
+    }
+
+    /// The EFFECTIVE (machine ∩ project) ruleset cross-check: a server's own
+    /// `${REF}` is flagged when the compiled ruleset would deny it for THAT
+    /// server — the same decision `apply`/the gateway make, surfaced before
+    /// either runs. AGENTSTACK_HOME points at an empty dir so no ambient
+    /// machine policy on the test machine leaks in.
+    #[test]
+    fn effective_policy_flags_secret_ref_denied_by_project_policy() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let manifest: Manifest = toml::from_str(
+            "version = 1\n[servers.figma]\ntype = \"stdio\"\ncommand = \"figma-mcp\"\n\
+             env = { TOKEN = \"${FIGMA_TOKEN}\" }\n\
+             [policy.secrets]\nfigma = [\"!FIGMA_TOKEN\"]\n",
+        )
+        .unwrap();
+        let mut report = Report::quiet();
+        check_effective_policy(&manifest, &mut report);
+        std::env::remove_var("AGENTSTACK_HOME");
+        let lines = report_lines(&report);
+        assert!(
+            lines.iter().any(|(l, m)| *l == "error"
+                && m.contains("figma")
+                && m.contains("FIGMA_TOKEN")
+                && m.contains("[policy.secrets]")),
+            "{lines:?}"
+        );
+    }
+
+    /// Same cross-check, the egress side: an HTTP server's declared host
+    /// fails the effective [policy.egress].
+    #[test]
+    fn effective_policy_flags_denied_declared_host() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let manifest: Manifest = toml::from_str(
+            "version = 1\n[servers.sneaky]\ntype = \"http\"\nurl = \"https://evil.example/mcp\"\n\
+             [policy.egress]\nsneaky = [\"!evil.example\"]\n",
+        )
+        .unwrap();
+        let mut report = Report::quiet();
+        check_effective_policy(&manifest, &mut report);
+        std::env::remove_var("AGENTSTACK_HOME");
+        let lines = report_lines(&report);
+        assert!(
+            lines.iter().any(|(l, m)| *l == "error"
+                && m.contains("sneaky")
+                && m.contains("evil.example")
+                && m.contains("[policy.egress]")),
+            "{lines:?}"
+        );
+    }
+
+    /// A declared URL host hidden behind a `${REF}` can't be verified
+    /// statically. That's silent for a server no egress rule constrains
+    /// (allow-by-default), but worth a Warn once a rule DOES name the
+    /// server — the doctor run can't promise the host is fine either way.
+    #[test]
+    fn effective_policy_warns_on_unverifiable_host_only_when_constrained() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let constrained: Manifest = toml::from_str(
+            "version = 1\n[servers.dyn]\ntype = \"http\"\nurl = \"https://${HOST_REF}/mcp\"\n\
+             [policy.egress]\ndyn = [\"api.example\"]\n",
+        )
+        .unwrap();
+        let mut report = Report::quiet();
+        check_effective_policy(&constrained, &mut report);
+        let lines = report_lines(&report);
+        assert!(
+            lines
+                .iter()
+                .any(|(l, m)| *l == "warn" && m.contains("dyn") && m.contains("${REF}")),
+            "{lines:?}"
+        );
+
+        let unconstrained: Manifest = toml::from_str(
+            "version = 1\n[servers.dyn]\ntype = \"http\"\nurl = \"https://${HOST_REF}/mcp\"\n",
+        )
+        .unwrap();
+        let mut report2 = Report::quiet();
+        check_effective_policy(&unconstrained, &mut report2);
+        std::env::remove_var("AGENTSTACK_HOME");
+        assert!(
+            report_lines(&report2).is_empty(),
+            "{:?}",
+            report_lines(&report2)
+        );
     }
 
     /// The one line under "Content scan" for a run with the given flags.

@@ -227,6 +227,13 @@ fn grant(base: &Path) -> Result<()> {
         }
     }
 
+    // Requested policy, shown at the trust boundary (ARCHITECTURE: "review
+    // shows … policy changes"). Display-only: a bundle's policy can only
+    // narrow — the machine layer caps everything at runtime regardless — so
+    // there is nothing here to block on, but the human should see what the
+    // repo asks for before blessing it.
+    review_policy(&m.policy);
+
     if !blockers.is_empty() {
         let width = blockers.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
         let lines: Vec<String> = blockers
@@ -247,6 +254,35 @@ fn grant(base: &Path) -> Result<()> {
         "✓".green()
     );
     Ok(())
+}
+
+/// Print what the project's `[policy]` requests, per dimension. Bundles can
+/// only narrow, so this is review signal, not a gate. Filesystem scopes are
+/// labelled honestly: advisory until the Phase 2 sandbox mounts enforce them.
+fn review_policy(p: &crate::manifest::Policy) {
+    if p.tools.is_empty() && p.egress.is_empty() && p.secrets.is_empty() && p.filesystem.is_empty()
+    {
+        return;
+    }
+    println!("  policy requested by this project (can only narrow the machine layer):");
+    let dims: [(&str, &indexmap::IndexMap<String, Vec<String>>); 3] = [
+        ("tools", &p.tools),
+        ("egress", &p.egress),
+        ("secrets", &p.secrets),
+    ];
+    for (label, map) in dims {
+        for (server, rules) in map {
+            println!("  · {label:<7} {server}: {}", rules.join(", "));
+        }
+    }
+    for (label, scopes) in [("read", &p.filesystem.read), ("write", &p.filesystem.write)] {
+        if !scopes.is_empty() {
+            println!(
+                "  · filesystem {label} {} (advisory — enforced by the Phase 2 sandbox)",
+                scopes.join(", ")
+            );
+        }
+    }
 }
 
 /// The skill names a trust review covers: the manifest's inline `[skills.*]`

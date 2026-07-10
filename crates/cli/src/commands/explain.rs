@@ -287,6 +287,53 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
             );
         }
     }
+    // The sibling per-server dimensions, same two-layer display. Egress is
+    // checked against the DECLARED URL host at write/spawn time (runtime
+    // filtering is Phase 2); secrets are enforced fail-closed at render and
+    // gateway substitution.
+    if let Some(rules) = manifest.policy.egress.get(name) {
+        kv(
+            &mut o,
+            "Egress (policy)",
+            &format!(
+                "{} — declared URL host checked at write/spawn time; runtime filtering is Phase 2",
+                rule_summary(rules)
+            ),
+        );
+    }
+    if let Some(rules) = manifest.policy.secrets.get(name) {
+        kv(
+            &mut o,
+            "Secret access (policy)",
+            &format!(
+                "{} — refs outside this set never resolve for this server",
+                rule_summary(rules)
+            ),
+        );
+    }
+    for key in [name, "*"] {
+        let scope = if key == "*" { " (via \"*\")" } else { "" };
+        if let Some(rules) = machine.egress.get(key) {
+            kv(
+                &mut o,
+                "Egress (machine)",
+                &format!(
+                    "{}{scope} — this project cannot loosen it",
+                    rule_summary(rules)
+                ),
+            );
+        }
+        if let Some(rules) = machine.secrets.get(key) {
+            kv(
+                &mut o,
+                "Secret access (machine)",
+                &format!(
+                    "{}{scope} — this project cannot loosen it",
+                    rule_summary(rules)
+                ),
+            );
+        }
+    }
 
     // Safety signals.
     o.push_str("  Safety\n");
@@ -295,13 +342,28 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
             &mut o,
             "⚠ runs a local process on your machine — review the command/package",
         ),
-        ServerType::Http => bullet(
-            &mut o,
-            &format!(
-                "connects out to {} (network egress)",
-                host_of(server.url.as_deref().unwrap_or(""))
-            ),
-        ),
+        ServerType::Http => {
+            let host = host_of(server.url.as_deref().unwrap_or(""));
+            let ruleset = crate::render::ruleset_for(manifest);
+            // Annotate the declared host against the effective egress policy
+            // when one constrains this server — the same check apply/gateway
+            // enforce at write/spawn time.
+            let verdict = if ruleset.egress_constrained(name) {
+                match crate::render::declared_host(server.url.as_deref().unwrap_or("")) {
+                    Some(h) => match ruleset.egress_decision(name, &h) {
+                        Ok(()) => " — passes [policy.egress]",
+                        Err(_) => " — ✗ BLOCKED by [policy.egress] at write/spawn time",
+                    },
+                    None => " — host not statically verifiable; fails closed at write/spawn time",
+                }
+            } else {
+                ""
+            };
+            bullet(
+                &mut o,
+                &format!("connects out to {host} (network egress){verdict}"),
+            );
+        }
     }
     if refs.is_empty() {
         bullet(&mut o, "needs no secrets");
