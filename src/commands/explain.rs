@@ -243,8 +243,11 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
         ),
     }
 
-    // Tool firewall: what [policy.tools] does to this server at the gateway.
-    if let Some(rules) = manifest.policy.tools.get(name) {
+    // Tool firewall: what [policy.tools] does to this server at the gateway —
+    // BOTH layers, or the view would understate enforcement. The machine layer
+    // (checked first, deny precedence) matches the exact name and the `"*"`
+    // wildcard key.
+    let rule_summary = |rules: &[String]| {
         let denies: Vec<&str> = rules.iter().filter_map(|r| r.strip_prefix('!')).collect();
         let allows: Vec<&str> = rules
             .iter()
@@ -258,14 +261,31 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
         if !denies.is_empty() {
             parts.push(format!("deny [{}]", denies.join(", ")));
         }
+        parts.join("; ")
+    };
+    if let Some(rules) = manifest.policy.tools.get(name) {
         kv(
             &mut o,
             "Tool policy",
             &format!(
                 "{} — enforced at the gateway; denied tools are invisible to agents and refused if called",
-                parts.join("; ")
+                rule_summary(rules)
             ),
         );
+    }
+    let machine = crate::manifest::machine_policy();
+    for key in [name, "*"] {
+        if let Some(rules) = machine.tools.get(key) {
+            let scope = if key == "*" { " (via \"*\")" } else { "" };
+            kv(
+                &mut o,
+                "Tool policy (machine)",
+                &format!(
+                    "{}{scope} — from ~/.agentstack/agentstack.toml, checked before project policy; this project cannot loosen it",
+                    rule_summary(rules)
+                ),
+            );
+        }
     }
 
     // Safety signals.

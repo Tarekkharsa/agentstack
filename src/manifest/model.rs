@@ -96,27 +96,40 @@ impl Policy {
 
     /// Whether `server`'s `tool` passes `[policy.tools]`. `Ok(())` when allowed;
     /// `Err(rule)` names the pattern (or the allowlist) that blocks it.
+    ///
+    /// Rules under the exact server name AND under the `"*"` wildcard key both
+    /// apply. Named rules are keyed on the manifest-chosen server name — which
+    /// the repo controls and can rename — so `"*"` is how a machine-level rule
+    /// is written rename-proof: it constrains every server, whatever a
+    /// manifest calls it.
     pub fn tool_allowed(&self, server: &str, tool: &str) -> Result<(), String> {
-        let Some(rules) = self.tools.get(server) else {
-            return Ok(());
+        let keys: &[&str] = if server == "*" {
+            &["*"]
+        } else {
+            &[server, "*"]
         };
-        for r in rules {
-            if let Some(deny) = r.strip_prefix('!') {
-                if glob_match(deny, tool) {
-                    return Err(format!("denied by [policy.tools] {server} = \"!{deny}\""));
+        for key in keys {
+            let Some(rules) = self.tools.get(*key) else {
+                continue;
+            };
+            for r in rules {
+                if let Some(deny) = r.strip_prefix('!') {
+                    if glob_match(deny, tool) {
+                        return Err(format!("denied by [policy.tools] {key} = \"!{deny}\""));
+                    }
                 }
             }
-        }
-        let allows: Vec<&String> = rules.iter().filter(|r| !r.starts_with('!')).collect();
-        if !allows.is_empty() && !allows.iter().any(|a| glob_match(a, tool)) {
-            return Err(format!(
-                "not in the [policy.tools] allowlist for {server} ({})",
-                allows
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
+            let allows: Vec<&String> = rules.iter().filter(|r| !r.starts_with('!')).collect();
+            if !allows.is_empty() && !allows.iter().any(|a| glob_match(a, tool)) {
+                return Err(format!(
+                    "not in the [policy.tools] allowlist for {key} ({})",
+                    allows
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
         }
         Ok(())
     }

@@ -196,19 +196,31 @@ pub fn load_from_dir(dir: &Path) -> Result<LoadedManifest> {
 /// fail open on exactly the file that exists to say no. Still non-fatal — the
 /// project policy continues to apply.
 pub fn machine_policy() -> crate::manifest::Policy {
+    match machine_policy_health() {
+        None => crate::manifest::Policy::default(),
+        Some(Ok(policy)) => policy,
+        Some(Err(e)) => {
+            eprintln!("warning: machine policy unavailable ({e:#}); only project policy applies");
+            crate::manifest::Policy::default()
+        }
+    }
+}
+
+/// The machine policy's load result, for health surfaces (`doctor`): `None`
+/// when no machine manifest exists, `Some(Err)` when one exists but is
+/// unreadable or future-versioned — the state where the runtime fails OPEN to
+/// project-only policy, which stderr alone won't reliably surface (harnesses
+/// log it away).
+pub fn machine_policy_health() -> Option<Result<crate::manifest::Policy>> {
     let path = crate::util::paths::agentstack_home().join(MANIFEST_FILE);
-    let Ok(text) = fs::read_to_string(&path) else {
-        return crate::manifest::Policy::default();
-    };
-    let parsed: Result<Manifest, _> = toml::from_str(&text);
-    let manifest = match parsed {
+    let text = fs::read_to_string(&path).ok()?;
+    let manifest: Manifest = match toml::from_str(&text) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!(
-                "warning: machine policy unavailable ({} is unreadable: {e}); only project policy applies",
+            return Some(Err(anyhow::anyhow!(
+                "{} is unreadable: {e}",
                 path.display()
-            );
-            return crate::manifest::Policy::default();
+            )))
         }
     };
     if let Err(e) = crate::util::check_schema_version(
@@ -217,10 +229,9 @@ pub fn machine_policy() -> crate::manifest::Policy {
         "manifest",
         &path,
     ) {
-        eprintln!("warning: machine policy unavailable ({e:#}); only project policy applies");
-        return crate::manifest::Policy::default();
+        return Some(Err(e));
     }
-    manifest.policy
+    Some(Ok(manifest.policy))
 }
 
 /// A missing or unparseable machine layer is a silent no-op — a broken

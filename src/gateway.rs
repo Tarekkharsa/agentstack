@@ -925,6 +925,47 @@ mod tests {
         assert!(gw.tool_allowed("github", "delete_repo").is_ok());
     }
 
+    /// Two allowlists compose as nested bounds: the machine allowlist is the
+    /// outer bound, the project's can only restrict further — never broaden.
+    #[test]
+    fn machine_and_project_allowlists_nest() {
+        let gw = Gateway {
+            upstreams: Vec::new(),
+            cache: std::sync::Mutex::new(Some(Vec::new())),
+            policy: toml::from_str("[tools]\nfigma = [\"get_file\"]").unwrap(),
+            machine_policy: toml::from_str("[tools]\nfigma = [\"get_*\"]").unwrap(),
+            project: None,
+        };
+        // Inside both bounds.
+        assert!(gw.tool_allowed("figma", "get_file").is_ok());
+        // Inside the machine bound, outside the project's → project refuses.
+        let err = gw.tool_allowed("figma", "get_node").unwrap_err();
+        assert!(!err.contains("machine policy"), "{err}");
+        // Outside the machine bound → machine refuses, whatever the project says.
+        let err = gw.tool_allowed("figma", "delete_file").unwrap_err();
+        assert!(err.contains("machine policy"), "{err}");
+    }
+
+    /// The `"*"` wildcard key constrains every server — the rename-proof form
+    /// for machine rules, since named rules bind to repo-chosen server names.
+    #[test]
+    fn wildcard_policy_key_survives_server_renaming() {
+        let gw = Gateway {
+            upstreams: Vec::new(),
+            cache: std::sync::Mutex::new(Some(Vec::new())),
+            policy: crate::manifest::Policy::default(),
+            machine_policy: toml::from_str("[tools]\n\"*\" = [\"!delete_*\"]").unwrap(),
+            project: None,
+        };
+        // Whatever a repo names the server, delete_* is refused…
+        for server in ["github", "gh", "totally-not-github"] {
+            let err = gw.tool_allowed(server, "delete_repo").unwrap_err();
+            assert!(err.contains("machine policy"), "{err}");
+        }
+        // …and everything else still passes.
+        assert!(gw.tool_allowed("gh", "get_repo").is_ok());
+    }
+
     /// The gateway is shared as a bare `Arc` across the serve loop, per-call
     /// worker threads, and the code-mode endpoint — losing `Send + Sync` (say,
     /// by adding an un-mutexed `RefCell` field) must fail the build, not the

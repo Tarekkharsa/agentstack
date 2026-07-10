@@ -1053,14 +1053,19 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
         }
     }
     // [policy.tools] rules must name real servers — a typo'd server name would
-    // silently firewall nothing.
+    // silently firewall nothing. `"*"` is the wildcard key (every server).
     for (server, rules) in &manifest.policy.tools {
-        if manifest.servers.contains_key(server) {
+        if server == "*" || manifest.servers.contains_key(server) {
             let denies = rules.iter().filter(|r| r.starts_with('!')).count();
             let allows = rules.len() - denies;
+            let label = if server == "*" {
+                "every server"
+            } else {
+                server
+            };
             report.line(
                 Level::Ok,
-                format!("tools '{server}' — {allows} allow / {denies} deny rule(s), enforced at the gateway"),
+                format!("tools '{label}' — {allows} allow / {denies} deny rule(s), enforced at the gateway"),
             );
         } else {
             report.line(
@@ -1068,6 +1073,25 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
                 format!("[policy.tools] '{server}' — no such server in the manifest"),
             );
         }
+    }
+    // The machine layer fails OPEN when its manifest is broken (project-only
+    // policy, stderr warning only) — doctor is the reliable signal for that.
+    match crate::manifest::machine_policy_health() {
+        None => {}
+        Some(Ok(p)) if p.tools.is_empty() => {}
+        Some(Ok(p)) => report.line(
+            Level::Ok,
+            format!(
+                "machine [policy.tools] — {} server rule set(s), checked before project policy on every call",
+                p.tools.len()
+            ),
+        ),
+        Some(Err(e)) => report.line(
+            Level::Warn,
+            format!(
+                "machine policy is unreadable — the gateway runs with PROJECT POLICY ONLY ↳ fix it ({e:#})"
+            ),
+        ),
     }
 }
 

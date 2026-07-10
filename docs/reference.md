@@ -211,18 +211,30 @@ unknown servers; `explain <server>` shows the effective policy.
 **Machine layer with deny precedence.** The machine manifest
 (`~/.agentstack/agentstack.toml`) may carry its own `[policy.tools]` — the
 user's standing rules, checked **before** the project's on every brokered
-call. A call must pass both layers, so a cloned repo can neither see, shadow,
-nor loosen what the machine forbids; a machine refusal names its layer in the
-error and the audit log. Unlike the instructions merge, a broken machine
-manifest is warned about on stderr (silently dropping the user's own deny
-rules would fail open), though it stays non-fatal — project policy continues
-to apply.
+call. A call must pass both layers, so a repo policy cannot loosen a machine
+rule; a machine refusal names its layer in the error and the audit log.
+
+Know what a rule binds to: policy is keyed on the **manifest-chosen server
+name**, and a repo picks its own names — a machine rule for `github`
+constrains a server *named* `github`, not the GitHub MCP server under any
+name. For rules that must survive renaming, use the `"*"` wildcard key, which
+constrains every server whatever a manifest calls it (named rules are best
+thought of as guarding *your* naming conventions, plus profile/library servers
+whose names you control):
 
 ```toml
 # ~/.agentstack/agentstack.toml — applies to every project on this machine
 [policy.tools]
-github = ["!create_*", "!delete_*"]   # no repo can grant these back
+"*" = ["!delete_*"]                   # rename-proof: no server may delete_*
+github = ["get_*", "list_*"]          # servers NAMED github are read-only
 ```
+
+The layer is loaded once per gateway launch (like everything else — "the
+manifest is resolved once per launch"), so tightening it mid-session takes
+effect on the next session. A broken machine manifest is warned about on
+stderr and **fails open** to project-only policy (failing closed would brick
+every project over one bad TOML edit) — `doctor` flags that state reliably,
+since harnesses often swallow stderr.
 
 ### Call audit log
 
