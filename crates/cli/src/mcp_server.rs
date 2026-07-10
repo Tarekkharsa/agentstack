@@ -568,7 +568,7 @@ fn handle(
                     ),
                 });
             }
-            let (text, is_error) = match run_tool(name, &args, dir) {
+            let (text, is_error) = match run_tool(name, &args, dir, trust_note) {
                 Ok(t) => (t, false),
                 Err(e) => (format!("Error: {e}"), true),
             };
@@ -754,7 +754,16 @@ fn tool_defs() -> Value {
     ])
 }
 
-fn run_tool(name: &str, args: &Value, dir: Option<&Path>) -> Result<String> {
+/// Dispatch one control-plane tool call. `trust_note` is `Some` exactly when
+/// this is auto-project mode AND the project is Untrusted/Changed (eager mode
+/// and trusted projects pass `None`) — the strict gate for anything that
+/// serves bundle content or writes beyond the manifest.
+fn run_tool(
+    name: &str,
+    args: &Value,
+    dir: Option<&Path>,
+    trust_note: Option<&str>,
+) -> Result<String> {
     match name {
         "agentstack_search" => Ok(search_text(
             args.get("query").and_then(Value::as_str).unwrap_or(""),
@@ -766,8 +775,8 @@ fn run_tool(name: &str, args: &Value, dir: Option<&Path>) -> Result<String> {
         "agentstack_doctor" => doctor_summary(dir),
         "agentstack_add_from" => add_from(args, dir),
         "agentstack_add_server" => add_server(args, dir),
-        "agentstack_list_loadable" => list_loadable(dir),
-        "agentstack_load" => load_capability(args, dir),
+        "agentstack_list_loadable" => list_loadable(dir, trust_note),
+        "agentstack_load" => load_capability(args, dir, trust_note),
         "agentstack_explain" => {
             let name = args
                 .get("name")
@@ -790,6 +799,16 @@ fn run_tool(name: &str, args: &Value, dir: Option<&Path>) -> Result<String> {
             ))
         }
         "agentstack_session_start" => {
+            // Session start IS activation: it materializes skill content into
+            // harness dirs and renders server configs with resolved secrets
+            // (session::start → use_profile::activate, write=true). Untrusted
+            // means inert — in auto mode this must never run before a human
+            // trusts the project. Manifest-only editors (add_skill,
+            // add_server, create_profile, add_from) stay available: they are
+            // commit-safe text edits, nothing executes and nothing resolves.
+            if let Some(note) = trust_note {
+                anyhow::bail!("agentstack_session_start is disabled for this project: {note}");
+            }
             let profile = args
                 .get("profile")
                 .and_then(Value::as_str)
@@ -1265,7 +1284,37 @@ fn builtin_manual_entry(md: &str, loaded: bool) -> Value {
     })
 }
 
-fn list_loadable(dir: Option<&Path>) -> Result<String> {
+fn list_loadable(dir: Option<&Path>, trust_note: Option<&str>) -> Result<String> {
+    // Untrusted project in auto mode: names only. Skill descriptions are
+    // bundle content (SKILL.md frontmatter) and "untrusted means inert"
+    // covers every byte of it — the names give the human enough to review.
+    // Nothing is resolved or read from disk on this path; origin is derived
+    // from the manifest table alone. The built-in manual (embedded, not
+    // bundle content) keeps its description.
+    if let Some(note) = trust_note {
+        let mut entries = vec![builtin_manual_entry(&builtin_manual_md()?, false)];
+        if let Ok(ctx) = crate::commands::load(dir) {
+            let m = &ctx.loaded.manifest;
+            let libctx = ctx.library_ctx();
+            for name in loadable_skill_names(m, &libctx.library, None) {
+                if name == BUILTIN_MANUAL {
+                    continue;
+                }
+                let origin = if m.skills.contains_key(&name) {
+                    "manifest"
+                } else {
+                    "library"
+                };
+                entries.push(json!({ "name": name, "kind": "skill", "origin": origin }));
+            }
+        }
+        return Ok(serde_json::to_string_pretty(&json!({
+            "loadable": entries,
+            "fenced": false,
+            "session": Value::Null,
+            "note": format!("{note} Until then only names are listed and only the built-in manual loads."),
+        }))?);
+    }
     // No manifest anywhere (a control-plane-only session outside any project):
     // the built-in manual is still loadable. A manifest that EXISTS but fails
     // to load is a different story — surface the load error instead of
@@ -1353,7 +1402,7 @@ fn list_loadable(dir: Option<&Path>) -> Result<String> {
     }))?)
 }
 
-fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
+fn load_capability(args: &Value, dir: Option<&Path>, trust_note: Option<&str>) -> Result<String> {
     let name = args
         .get("name")
         .and_then(Value::as_str)
@@ -1371,23 +1420,27 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
     // own `using-agentstack` isn't loadable + resolvable — including with no
     // manifest at all and through session fences.
     if name == BUILTIN_MANUAL {
-        let project_copy = ctx.as_ref().ok().is_some_and(|ctx| {
-            let libctx = ctx.library_ctx();
-            let session = crate::session::active(&ctx.dir);
-            loadable_skill_names(&ctx.loaded.manifest, &libctx.library, session.as_ref())
-                .iter()
-                .any(|n| n == BUILTIN_MANUAL)
-                && crate::resolve::resolve_skill(
-                    &ctx.loaded.manifest,
-                    &ctx.dir,
-                    &libctx.library,
-                    &libctx.lib_home,
-                    &libctx.store,
-                    BUILTIN_MANUAL,
-                    crate::resolve::ResolveMode::NoFetch,
-                )
-                .is_ok()
-        });
+        // An untrusted project's own `using-agentstack` copy is bundle
+        // content like any other skill — under the trust gate the embedded
+        // manual serves instead, so the agent always has its manual.
+        let project_copy = trust_note.is_none()
+            && ctx.as_ref().ok().is_some_and(|ctx| {
+                let libctx = ctx.library_ctx();
+                let session = crate::session::active(&ctx.dir);
+                loadable_skill_names(&ctx.loaded.manifest, &libctx.library, session.as_ref())
+                    .iter()
+                    .any(|n| n == BUILTIN_MANUAL)
+                    && crate::resolve::resolve_skill(
+                        &ctx.loaded.manifest,
+                        &ctx.dir,
+                        &libctx.library,
+                        &libctx.lib_home,
+                        &libctx.store,
+                        BUILTIN_MANUAL,
+                        crate::resolve::ResolveMode::NoFetch,
+                    )
+                    .is_ok()
+            });
         if !project_copy {
             // Loads are still session-logged when a session is active.
             let (sticky, newly) = match &ctx {
@@ -1408,6 +1461,13 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
     }
 
     let ctx = ctx?;
+
+    // Untrusted means inert: in auto mode no bundle skill content enters any
+    // agent context until a human reviews and trusts the project.
+    if let Some(note) = trust_note {
+        anyhow::bail!("'{name}' can't be loaded: {note}");
+    }
+
     let m = &ctx.loaded.manifest;
     let libctx = ctx.library_ctx();
 
@@ -1425,9 +1485,10 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
         }
     }
 
-    // Inline-first, then the central library — same order as `use`. PathOnly:
-    // loading returns SKILL.md's text; nothing here records a lock entry, so
-    // there is no reason to digest the body.
+    // Inline-first, then the central library — same order as `use`. NoFetch
+    // (not PathOnly): what's served must be digest-verified against its
+    // agentstack.lock pin — the content the human trusted — so the body is
+    // hashed even though nothing here records a lock entry.
     let resolved = crate::resolve::resolve_skill(
         m,
         &ctx.dir,
@@ -1435,9 +1496,38 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
         &libctx.lib_home,
         &libctx.store,
         name,
-        crate::resolve::ResolveMode::PathOnly,
+        crate::resolve::ResolveMode::NoFetch,
     )
     .with_context(|| format!("loading skill '{name}'"))?;
+
+    // Fail closed on drift for every origin. Unpinned splits by threat model:
+    // an INLINE skill's bytes live in the (unreviewed-by-default) repo and
+    // are outside the trust digest until pinned — refuse; a LIBRARY skill's
+    // bytes live in the user's own curated, scan-gated central library —
+    // serve, with a warning nudging toward a pin.
+    let lock = crate::lock::Lock::load(&ctx.dir)?;
+    let status =
+        crate::resolve::classify_skill(name, &resolved.checksum, resolved.rev.as_deref(), &lock);
+    let mut warning: Option<String> = None;
+    match crate::verify::skill_verdict(&status) {
+        crate::verify::Verdict::Block(why) => {
+            anyhow::bail!(
+                "refusing to load '{name}': {why} — review the change, then run `agentstack lock` to accept it"
+            );
+        }
+        crate::verify::Verdict::Unpinned => match resolved.origin {
+            crate::resolve::SkillOrigin::Inline => anyhow::bail!(
+                "refusing to load '{name}': inline skill not pinned in agentstack.lock — its body isn't covered by the trust digest until it is; run `agentstack lock`"
+            ),
+            crate::resolve::SkillOrigin::Library => {
+                warning = Some(format!(
+                    "library skill '{name}' is not pinned in agentstack.lock — run `agentstack lock` to pin it"
+                ));
+            }
+        },
+        crate::verify::Verdict::Ok => {}
+    }
+
     let (_, body) = read_skill_md(&resolved.path);
     let instructions = body.with_context(|| format!("skill '{name}' has no SKILL.md"))?;
 
@@ -1447,7 +1537,7 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
         false
     };
 
-    Ok(serde_json::to_string_pretty(&json!({
+    let mut out = json!({
         "loaded": name,
         "origin": match resolved.origin {
             crate::resolve::SkillOrigin::Inline => "manifest",
@@ -1457,7 +1547,11 @@ fn load_capability(args: &Value, dir: Option<&Path>) -> Result<String> {
         "sticky": session.is_some(),
         "newly_loaded": newly,
         "fenced": session.is_some(),
-    }))?)
+    });
+    if let Some(w) = warning {
+        out["warning"] = json!(w);
+    }
+    Ok(serde_json::to_string_pretty(&out)?)
 }
 
 fn str_field(v: &Value, key: &str) -> Option<String> {
@@ -1844,7 +1938,7 @@ mod tests {
 
         // No manifest anywhere: the manual is the whole catalog.
         let empty = assert_fs::TempDir::new().unwrap();
-        let out = list_loadable(Some(empty.path())).unwrap();
+        let out = list_loadable(Some(empty.path()), None).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         let names: Vec<&str> = v["loadable"]
             .as_array()
@@ -1857,7 +1951,7 @@ mod tests {
 
         // …and it loads, serving the embedded SKILL.md body.
         let args = json!({ "name": BUILTIN_MANUAL, "reason": "learn the tools" });
-        let out = load_capability(&args, Some(empty.path())).unwrap();
+        let out = load_capability(&args, Some(empty.path()), None).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["origin"], "builtin");
         assert!(v["instructions"]
@@ -1870,7 +1964,7 @@ mod tests {
         proj.child(".agentstack/agentstack.toml")
             .write_str("version = 1\n")
             .unwrap();
-        let out = list_loadable(Some(proj.path())).unwrap();
+        let out = list_loadable(Some(proj.path()), None).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         let entry = &v["loadable"]
             .as_array()
@@ -1879,7 +1973,7 @@ mod tests {
             .find(|e| e["name"] == BUILTIN_MANUAL)
             .expect("manual listed alongside the project's skills");
         assert_eq!(entry["origin"], "builtin");
-        let out = load_capability(&args, Some(proj.path())).unwrap();
+        let out = load_capability(&args, Some(proj.path()), None).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["origin"], "builtin");
 
@@ -1901,7 +1995,7 @@ mod tests {
             .write_str("version = \n")
             .unwrap();
 
-        let out = list_loadable(Some(proj.path())).unwrap();
+        let out = list_loadable(Some(proj.path()), None).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         // The manual still rides along…
         assert_eq!(v["loadable"][0]["name"], BUILTIN_MANUAL);
@@ -1953,5 +2047,171 @@ mod tests {
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("github"));
         assert_eq!(resp["result"]["isError"], false);
+    }
+
+    /// A project with one inline skill, pinned in the lock. Returns the temp
+    /// dirs (home first — its Drop order doesn't matter, but the env guard
+    /// must outlive both).
+    fn pinned_inline_project() -> (assert_fs::TempDir, assert_fs::TempDir) {
+        use assert_fs::prelude::*;
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child("agentstack.toml")
+            .write_str("version = 1\n[skills.helper]\npath = \"./skills/helper\"\n")
+            .unwrap();
+        proj.child("skills/helper/SKILL.md")
+            .write_str("---\ndescription: helps\n---\n# helper v1\n")
+            .unwrap();
+
+        let checksum =
+            agentstack_core::digest::dir_digest(proj.child("skills/helper").path()).unwrap();
+        let mut lock = crate::lock::Lock::load(proj.path()).unwrap();
+        lock.upsert(crate::lock::LockedSkill {
+            name: "helper".into(),
+            source: "path".into(),
+            path: Some("./skills/helper".into()),
+            git: None,
+            rev: None,
+            checksum,
+        });
+        lock.save(proj.path()).unwrap();
+        (home, proj)
+    }
+
+    #[test]
+    fn untrusted_auto_mode_serves_no_bundle_skill_content() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (_home, proj) = pinned_inline_project();
+        let note = "This project is not trusted for auto mode.";
+
+        // The catalog lists names only — descriptions are bundle content.
+        let out = list_loadable(Some(proj.path()), Some(note)).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let helper = v["loadable"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["name"] == "helper")
+            .expect("names still listed");
+        assert!(
+            helper.get("description").is_none(),
+            "no frontmatter leaks while untrusted: {helper}"
+        );
+        assert!(v["note"].as_str().unwrap().contains("not trusted"));
+
+        // Loading bundle skill content is refused outright — even though this
+        // skill is pinned and matching (untrusted beats verified).
+        let args = json!({ "name": "helper", "reason": "test" });
+        let err = load_capability(&args, Some(proj.path()), Some(note))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not trusted"), "{err}");
+
+        // The built-in manual still serves — from the embedded copy.
+        let args = json!({ "name": BUILTIN_MANUAL, "reason": "test" });
+        let out = load_capability(&args, Some(proj.path()), Some(note)).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["origin"], "builtin");
+
+        // Session start is activation (materializes content, resolves
+        // secrets) — refused while untrusted.
+        let args = json!({ "profile": "p" });
+        let err = run_tool(
+            "agentstack_session_start",
+            &args,
+            Some(proj.path()),
+            Some(note),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("disabled"), "{err}");
+        assert!(err.contains("not trusted"), "{err}");
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn load_verifies_inline_skill_content_against_its_pin() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (_home, proj) = pinned_inline_project();
+        let args = json!({ "name": "helper", "reason": "test" });
+
+        // Pinned + matching → serves the body.
+        let out = load_capability(&args, Some(proj.path()), None).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(v["instructions"].as_str().unwrap().contains("helper v1"));
+        assert!(v.get("warning").is_none());
+
+        // Drift the body: manifest and lock bytes untouched → refuse.
+        proj.child("skills/helper/SKILL.md")
+            .write_str("---\ndescription: helps\n---\n# helper EVIL\n")
+            .unwrap();
+        let err = load_capability(&args, Some(proj.path()), None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("drifted"), "{err}");
+        assert!(err.contains("`agentstack lock`"), "{err}");
+
+        // Unpinned inline skill: also refused — its bytes are outside the
+        // trust digest until pinned.
+        std::fs::remove_file(proj.path().join("agentstack.lock")).unwrap();
+        let err = load_capability(&args, Some(proj.path()), None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not pinned"), "{err}");
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn unpinned_library_skill_loads_with_a_warning() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        // A user-curated central-library skill, not pinned by any lock.
+        home.child("lib/skills/sql-review/SKILL.md")
+            .write_str("---\ndescription: reviews SQL\n---\n# sql\n")
+            .unwrap();
+        let mut lib = crate::library::Library::default();
+        lib.upsert(crate::library::LibrarySkill {
+            name: "sql-review".into(),
+            source: "path".into(),
+            path: Some("sql-review".into()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: None,
+            version: None,
+            provenance: None,
+        });
+        lib.save(&crate::util::paths::lib_home()).unwrap();
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n")
+            .unwrap();
+
+        let args = json!({ "name": "sql-review", "reason": "test" });
+        let out = load_capability(&args, Some(proj.path()), None).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["origin"], "library");
+        assert!(v["instructions"].as_str().unwrap().contains("# sql"));
+        assert!(
+            v["warning"].as_str().unwrap().contains("not pinned"),
+            "unpinned library content serves but nudges toward a pin: {v}"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 }
