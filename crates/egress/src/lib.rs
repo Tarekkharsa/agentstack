@@ -11,24 +11,25 @@
 //!   the gateway already enforces, serialized across the process boundary so
 //!   the proxy never re-derives policy.
 //!
-//! What does NOT live here yet (the supervised 2.2 async increment): the
-//! forward-proxy SERVER itself — the tokio accept loop, byte tunnelling for
-//! allowed connections, per-server proxy identity for attribution, and DNS
-//! routing/filtering. That transport is where tokio/hyper (rule 6: confined to
-//! this crate) will land; it needs real containers + network traffic to
-//! develop against, so it is deliberately not blind-built here. This core is
-//! what that server will call for every connection.
+//! - [`proxy`]: the async forward-proxy SERVER (tokio) that applies the guard
+//!   to real connections — one [`ServerProxy`](proxy::ServerProxy) per MCP
+//!   server (per-server identity = per-listener), tunnelling allowed CONNECTs
+//!   and refusing blocked ones. tokio is confined to this crate (rule 6). It
+//!   is testable on loopback (no Docker); wiring a *container* to route through
+//!   it is the runtime's job (the one Docker-dependent piece).
 //!
 //! Everything here treats its input as hostile: a CONNECT line and a
 //! ClientHello both come from inside an untrusted container, so the parsers
-//! are bounds-checked and never panic.
+//! are bounds-checked and never panic, and the request head is size-capped.
 
 #![forbid(unsafe_code)]
 
 pub mod connect;
 pub mod decide;
+pub mod proxy;
 pub mod sni;
 
 pub use connect::{parse_connect_target, Target};
 pub use decide::{Decision, EgressGuard};
+pub use proxy::{EventSink, ServerProxy};
 pub use sni::extract_sni;
