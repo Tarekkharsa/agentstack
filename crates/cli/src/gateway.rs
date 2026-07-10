@@ -696,15 +696,12 @@ impl Gateway {
         Some(result)
     }
 
-    /// The effective firewall: a tool must pass the machine `[policy.tools]`
-    /// AND the project's. Machine denies win by construction — nothing a repo
-    /// declares is consulted before the user's own rules — and the error says
-    /// which layer refused.
+    /// The effective firewall — delegated to the policy engine: a tool must
+    /// pass the machine `[policy.tools]` AND the project's, machine denies
+    /// win. Composition semantics and their tests (including the ⊆ machine
+    /// property test) live in `agentstack-policy`.
     fn tool_allowed(&self, server: &str, tool: &str) -> Result<(), String> {
-        self.machine_policy
-            .tool_allowed(server, tool)
-            .map_err(|rule| format!("{rule} (machine policy — ~/.agentstack/agentstack.toml)"))?;
-        self.policy.tool_allowed(server, tool)
+        agentstack_policy::tool_decision(&self.machine_policy, &self.policy, server, tool)
     }
 
     /// Append one audit record (best-effort; never fails the call). Only the
@@ -941,11 +938,12 @@ fn parse_sse(text: &str) -> Option<Value> {
 mod tests {
     use super::*;
 
-    /// Machine `[policy.tools]` and project `[policy.tools]` compose as AND:
-    /// the machine layer is checked first (its refusal names the layer), the
-    /// project layer cannot loosen it, and each still denies on its own.
+    /// Composition semantics are tested in `agentstack-policy`; this only
+    /// pins the wiring — the Gateway hands BOTH layers to the engine, machine
+    /// first (a broken delegate that dropped the machine layer would pass
+    /// every other gateway test).
     #[test]
-    fn machine_policy_composes_with_deny_precedence() {
+    fn gateway_delegates_both_policy_layers_to_the_engine() {
         let gw = Gateway {
             upstreams: Vec::new(),
             cache: std::sync::Mutex::new(Some(Vec::new())),
@@ -953,57 +951,11 @@ mod tests {
             machine_policy: toml::from_str("[tools]\nfigma = [\"!post_*\"]").unwrap(),
             project: None,
         };
-        // Machine deny wins and says so, even though the project allows it.
         let err = gw.tool_allowed("figma", "post_comment").unwrap_err();
         assert!(err.contains("machine policy"), "{err}");
-        // Project deny still applies on its own.
         let err = gw.tool_allowed("figma", "delete_file").unwrap_err();
         assert!(!err.contains("machine policy"), "{err}");
-        // A tool neither layer names passes.
         assert!(gw.tool_allowed("figma", "get_file").is_ok());
-        // Other servers are untouched by either layer.
-        assert!(gw.tool_allowed("github", "delete_repo").is_ok());
-    }
-
-    /// Two allowlists compose as nested bounds: the machine allowlist is the
-    /// outer bound, the project's can only restrict further — never broaden.
-    #[test]
-    fn machine_and_project_allowlists_nest() {
-        let gw = Gateway {
-            upstreams: Vec::new(),
-            cache: std::sync::Mutex::new(Some(Vec::new())),
-            policy: toml::from_str("[tools]\nfigma = [\"get_file\"]").unwrap(),
-            machine_policy: toml::from_str("[tools]\nfigma = [\"get_*\"]").unwrap(),
-            project: None,
-        };
-        // Inside both bounds.
-        assert!(gw.tool_allowed("figma", "get_file").is_ok());
-        // Inside the machine bound, outside the project's → project refuses.
-        let err = gw.tool_allowed("figma", "get_node").unwrap_err();
-        assert!(!err.contains("machine policy"), "{err}");
-        // Outside the machine bound → machine refuses, whatever the project says.
-        let err = gw.tool_allowed("figma", "delete_file").unwrap_err();
-        assert!(err.contains("machine policy"), "{err}");
-    }
-
-    /// The `"*"` wildcard key constrains every server — the rename-proof form
-    /// for machine rules, since named rules bind to repo-chosen server names.
-    #[test]
-    fn wildcard_policy_key_survives_server_renaming() {
-        let gw = Gateway {
-            upstreams: Vec::new(),
-            cache: std::sync::Mutex::new(Some(Vec::new())),
-            policy: crate::manifest::Policy::default(),
-            machine_policy: toml::from_str("[tools]\n\"*\" = [\"!delete_*\"]").unwrap(),
-            project: None,
-        };
-        // Whatever a repo names the server, delete_* is refused…
-        for server in ["github", "gh", "totally-not-github"] {
-            let err = gw.tool_allowed(server, "delete_repo").unwrap_err();
-            assert!(err.contains("machine policy"), "{err}");
-        }
-        // …and everything else still passes.
-        assert!(gw.tool_allowed("gh", "get_repo").is_ok());
     }
 
     /// The call log stores a fixed class for failures, never the error text —

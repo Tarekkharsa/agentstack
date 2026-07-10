@@ -1,0 +1,18 @@
+[package]
+name = "agentstack-policy"
+version = "0.8.1"
+edition = "2021"
+rust-version = "1.80"
+description = "agentstack policy engine: machine ∩ bundle composition, the seed of the intersection engine"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Tarekkharsa/agentstack"
+publish = false
+
+# rule 6: this crate is on the strict dependency list. Everything it needs
+# beyond core is dev-only.
+[dependencies]
+agentstack-core = { path = "../core" }
+
+[dev-dependencies]
+proptest = "1"
+toml = { version = "0.8", features = ["preserve_order"] }

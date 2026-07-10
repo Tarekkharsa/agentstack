@@ -72,6 +72,7 @@ version = "0.8.1"
 dependencies = [
  "age",
  "agentstack-core",
+ "agentstack-policy",
  "agentstack-recorder",
  "agentstack-trust",
  "anyhow",
@@ -112,6 +113,15 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "agentstack-policy"
+version = "0.8.1"
+dependencies = [
+ "agentstack-core",
+ "proptest",
  "toml 0.8.23",
 ]
 
