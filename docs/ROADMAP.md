@@ -122,30 +122,39 @@ Ship this. Announce this.
 
 ## Phase 2 — Enforcement (sandbox + egress proxy)
 
-0. Prerequisite: recorder event types + a minimal JSONL sink exist (extracted
-   in Phase 0) so proxy decisions have somewhere to land — the report viewer
-   waits until Phase 3.
-1. `runtime`: container lifecycle via `bollard` — create, mount workspace,
-   no-network namespace except the proxy route, stream output, teardown.
-2. `egress` (first async crate — budget learning time, and know that the
-   proxy's *design* is harder than the async: per-server egress attribution
-   needs one proxy identity per server; HTTPS allowlisting means CONNECT/SNI
-   filtering, no MITM; DNS must be routed and filtered too): **consumes the
-   `CompiledRuleset` artifact** produced by `crates/policy` (the identical
-   value the gateway already reads, serialized across the process boundary —
-   no re-deriving policy in the proxy); allow/block per host per MCP server
-   using its `egress_decision`; one event per decision into the recorder
-   sink. Filesystem scopes in the same ruleset become enforceable here too,
-   via the sandbox mounts (item 1) rather than the proxy.
-3. `agentstack run --sandbox <bundle>`.
-4. **The demo:** a benign proof-of-concept "malicious" repo that phones home /
-   reads a fake secret when used unprotected, and sits inert at the trust
-   gate + gets blocked by the proxy under AgentStack. This demo is the pitch.
-   Claim exactly what it proves — *unreviewed repos stay inert; unapproved
-   egress is blocked* — never "exfiltration is impossible": a prompt-injected
-   agent can still leak through allowed hosts, including the model API.
+Status: every component is built and tested to the limit of a Docker-less
+environment (654+ tests, loopback-verified where a daemon isn't needed). The
+only remaining work is behavior-verification against a real Docker daemon —
+the container↔proxy routing and the recorded demo — flagged per item below.
 
-Done when: the PoC attack demo works end to end, recorded.
+0. **[done]** `recorder`: `RunEvent` + `RunLog` — a per-run `events.jsonl` sink
+   for lifecycle + egress decisions (the report viewer is Phase 3).
+1. **[done, bollard behavior gated]** `runtime`: `Sandbox` trait +
+   orchestrator (create, mount workspace, no-network, stream output,
+   teardown), unit-tested against a fake; a `bollard` backend behind an opt-in
+   `docker` feature, compile-verified with a daemon-gated integration test.
+   *Remaining (Docker):* the `NetworkPolicy::ProxyOnly` container wiring.
+2. **[done, loopback-verified]** `egress` (tokio confined here): CONNECT-target
+   + TLS-SNI parsing (bounds-checked); `EgressGuard` consumes the
+   **`CompiledRuleset` artifact** (the identical value the gateway reads) and
+   decides allow/block per host per server, one event per decision; the async
+   `ServerProxy` (one per server → per-server attribution) tunnels allowed
+   CONNECTs and refuses blocked ones; `EgressBridge` stands up the per-server
+   set. DNS is gated implicitly (the proxy resolves only allowed hosts).
+   Verified end to end on loopback. *Remaining (Docker):* pointing a real
+   container's server processes at these endpoints (`HTTPS_PROXY` injection).
+   Filesystem scopes in the ruleset become enforceable via the mounts (item 1).
+3. **[done, execution gated]** `agentstack run --sandbox <bundle>`: builds the
+   `SandboxSpec` (tested); execution behind the cli `sandbox` feature.
+4. **[remaining — Docker]** The demo: a benign PoC "malicious" repo that phones
+   home / reads a fake secret unprotected, sits inert at the trust gate, and
+   gets blocked by the proxy under AgentStack. Claim exactly what it proves —
+   *unreviewed repos stay inert; unapproved egress is blocked* — never
+   "exfiltration is impossible": a prompt-injected agent can still leak through
+   allowed hosts, including the model API.
+
+Done when: the PoC attack demo works end to end, recorded (needs a Docker
+daemon — the components it exercises are all built and unit/loopback-tested).
 
 ## Phase 3 — Flight recorder surface
 
