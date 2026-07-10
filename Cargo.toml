@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/trust", "crates/policy", "crates/adapters", "crates/recorder", "crates/cli"]
+members = ["crates/core", "crates/trust", "crates/policy", "crates/adapters", "crates/recorder", "crates/runtime", "crates/cli"]
 
 # Profiles only take effect at the workspace root.
 [profile.release]

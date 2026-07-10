@@ -1,0 +1,34 @@
+[package]
+name = "agentstack-runtime"
+version = "0.8.1"
+edition = "2021"
+rust-version = "1.80"
+description = "agentstack sandbox runtime: container lifecycle (Phase 2)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Tarekkharsa/agentstack"
+publish = false
+
+[features]
+# The Docker backend (bollard + the tokio it needs) is default-on so the
+# product is real, but the backend-agnostic core (Sandbox trait, spec,
+# orchestrator, fake) always compiles and is fully tested WITHOUT it — build
+# `--no-default-features` for the pure-logic path, or when Docker is absent.
+default = ["docker"]
+docker = ["dep:bollard", "dep:tokio"]
+
+[dependencies]
+agentstack-core = { path = "../core" }
+agentstack-policy = { path = "../policy" }
+agentstack-recorder = { path = "../recorder" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "1"
+# rule 6: bollard (and the tokio it drives) are confined to THIS crate.
+# The Docker daemon API is async; the backend holds its own current-thread
+# runtime and block_on's each call, so the Sandbox trait and everything above
+# it stay synchronous — async/tokio proper is the egress crate (2.2).
+bollard = { version = "0.21", optional = true }
+tokio = { version = "1", optional = true, features = ["rt", "net", "io-util", "time"] }
+
+[dev-dependencies]
+assert_fs = "1"
