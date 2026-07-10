@@ -120,6 +120,38 @@ pub fn activate(
         .map(|r| (r.name.clone(), r.path.clone()))
         .collect();
 
+    // Fail-closed drift gate (--write only): everything resolved above must
+    // still match its agentstack.lock pin before a single byte is
+    // materialized. Unpinned entries pass — recording the first pin below IS
+    // the pinning act, and it re-gates trust via the lock bytes. Drifted or
+    // broken entries block: the human reviews, `agentstack lock` accepts, and
+    // that lock change flips the trust digest for auto mode. The statuses are
+    // classified from the already-resolved sets, so what we verify is exactly
+    // what we materialize and record.
+    if args.write {
+        let lock = Lock::load(&ctx.dir)?;
+        let skill_statuses: Vec<_> = resolved_skills
+            .iter()
+            .map(|r| {
+                let status =
+                    crate::resolve::classify_skill(&r.name, &r.checksum, r.rev.as_deref(), &lock);
+                (r.name.clone(), status)
+            })
+            .collect();
+        let server_statuses: Vec<_> = resolved_servers
+            .iter()
+            .map(|r| {
+                let status = crate::resolve::classify_server(&r.name, &r.checksum, &lock);
+                (r.name.clone(), status)
+            })
+            .collect();
+        crate::verify::ensure_activatable(
+            &format!("'{}'", args.profile),
+            &skill_statuses,
+            &server_statuses,
+        )?;
+    }
+
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     println!(
         "Activating profile '{}' (scope: {scope}) — {} server(s), {} skill(s)",

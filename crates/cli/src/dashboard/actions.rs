@@ -142,6 +142,25 @@ pub fn toggle_skill(
         })
         .collect();
 
+    // Same fail-closed drift gate as `use --write`: every skill this plan
+    // will (re-)materialize must match its lock pin — inline skills are repo
+    // content the trust digest doesn't cover directly. Unpinned passes (the
+    // zero-lock dashboard flow), drift blocks toward `agentstack lock`.
+    let lock = crate::lock::Lock::load(&ctx.dir)?;
+    let statuses: Vec<_> = active
+        .iter()
+        .map(|(name, path)| {
+            let status = match crate::store::dir_digest_cached(path) {
+                Ok(checksum) => crate::resolve::classify_skill(name, &checksum, None, &lock),
+                Err(e) => crate::resolve::SkillLockStatus::ResolveFailed {
+                    error: format!("{e:#}"),
+                },
+            };
+            (name.clone(), status)
+        })
+        .collect();
+    crate::verify::ensure_activatable(&format!("skill '{skill}' for {target}"), &statuses, &[])?;
+
     let plan = skills::plan(skills_dir, strategy, active, &previously);
     skills::materialize(&plan)?;
     state.record_skills(&key, plan.managed_names());
