@@ -20,7 +20,10 @@ The complete, implemented-and-tested feature inventory. The
 
 Layered load: the preferred `.agentstack/agentstack.toml` plus a gitignored
 `agentstack.local.toml` overlay (legacy root `agentstack.toml` remains
-supported), with static validation before anything renders.
+supported), with static validation before anything renders. The `version`
+field is checked on load — a manifest (or lockfile, or library index)
+written by a newer schema than the build supports errors with an "upgrade
+agentstack" message instead of being misread silently.
 
 ### Data-driven adapters
 
@@ -75,6 +78,11 @@ Cursor, Gemini CLI, OpenCode, and Copilot CLI) and round-trips through
 Windsurf, Kiro, Claude Desktop, …) render the server without it and `apply`
 prints a warning — the server may need a shell wrapper that `cd`s first on
 those harnesses.
+
+The gateway honors `cwd` too: stdio upstreams are spawned in the server's
+`cwd` (relative paths anchor at the project root), defaulting to the project
+root itself — never in whatever directory the client happened to launch
+`agentstack mcp` from.
 
 A server can also scope which targets it renders to at all, mirroring
 instructions and hooks: `[servers.X] targets = ["claude-code"]` fans out to
@@ -239,6 +247,12 @@ are indexed in `library.toml`. A profile's `skills = ["sql-review"]` /
 `servers = ["kibana"]` resolve from there; an inline `[skills.*]` /
 `[servers.*]` table always overrides the library. Provider folders are never
 owned — only their skills and MCP entries are managed.
+
+The runtime gateway resolves server name refs through the same
+inline-first/central-library path as rendering, so a server declared only in
+the library is proxied like an inline one. Where rendering hard-fails a run on
+a broken ref, the gateway skips just that server (with a stderr report) and
+keeps the rest of the surface up.
 
 ### Pinning and provenance
 
@@ -647,6 +661,13 @@ Trust is pinned to the manifest's content digest (including
 `agentstack.local.toml`): any edit — a `git pull`, say — drops the project back
 to control-plane-only until re-trusted. Explicit `--manifest-dir` skips the gate
 (naming a directory is the consent), matching plain `agentstack mcp`.
+
+The scope is manifest-level authorization, not code integrity: the digest
+covers the manifest bytes only, not the files it references. Trusting a repo
+whose server runs `python3 ./server.py` authorizes *that command* — a later
+edit to `server.py` does not re-gate the project (an edit to the manifest
+does). Review referenced local scripts as part of `trust .`, the same way
+you'd review a `.envrc` before `direnv allow`.
 
 The gate is visible from inside the session, not just on stderr: when the
 project is untrusted (or its manifest changed since it was trusted),
