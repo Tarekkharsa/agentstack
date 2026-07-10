@@ -400,11 +400,44 @@ impl HttpTransport {
     }
 }
 
+/// One proxied upstream slot: identity and the unresolved-`${REF}` summary are
+/// readable without locking; the transport (and its lazily spawned stdio child
+/// or HTTP session) sits behind its **own** mutex, so a slow call to one
+/// server never blocks a call to another. Same-server calls stay serialized —
+/// a stdio child is one JSON-RPC pipe.
+struct UpstreamSlot {
+    name: String,
+    /// Mirror of [`Upstream::unresolved`] for lock-free reads.
+    unresolved: Vec<String>,
+    inner: std::sync::Mutex<Upstream>,
+}
+
+impl UpstreamSlot {
+    fn new(up: Upstream) -> Self {
+        UpstreamSlot {
+            name: up.name.clone(),
+            unresolved: up.unresolved.clone(),
+            inner: std::sync::Mutex::new(up),
+        }
+    }
+
+    /// Lock this upstream, riding through poison (a panic mid-call in another
+    /// thread must not wedge this server forever).
+    fn lock(&self) -> std::sync::MutexGuard<'_, Upstream> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 /// All upstreams a manifest declares, plus a discovered-tools cache, the
 /// project's `[policy.tools]` firewall rules, and audit-log context.
+///
+/// `Sync` by construction: each upstream is locked independently and the cache
+/// has its own mutex, so the serve loop, the code-mode endpoint, and any
+/// worker threads share one `Arc<Gateway>` with no global lock — concurrent
+/// calls to *different* servers proceed in parallel.
 pub struct Gateway {
-    upstreams: Vec<Upstream>,
-    cache: RefCell<Option<Vec<Value>>>,
+    upstreams: Vec<UpstreamSlot>,
+    cache: std::sync::Mutex<Option<Vec<Value>>>,
     policy: crate::manifest::Policy,
     project: Option<String>,
 }
@@ -546,18 +579,18 @@ impl Gateway {
                         Upstream::stdio(name.clone(), command, args, env, cwd, unresolved)
                     }
                 };
-                upstreams.push(up);
+                upstreams.push(UpstreamSlot::new(up));
             }
             return Gateway {
                 upstreams,
-                cache: RefCell::new(None),
+                cache: std::sync::Mutex::new(None),
                 policy,
                 project,
             };
         }
         Gateway {
             upstreams,
-            cache: RefCell::new(None),
+            cache: std::sync::Mutex::new(None),
             policy: crate::manifest::Policy::default(),
             project: None,
         }
@@ -567,7 +600,7 @@ impl Gateway {
     pub fn empty() -> Gateway {
         Gateway {
             upstreams: Vec::new(),
-            cache: RefCell::new(Some(Vec::new())),
+            cache: std::sync::Mutex::new(Some(Vec::new())),
             policy: crate::manifest::Policy::default(),
             project: None,
         }
@@ -581,28 +614,38 @@ impl Gateway {
     /// after the first call. Per-server failures are skipped (logged to stderr)
     /// so one slow/down server can't fail the whole list.
     pub fn namespaced_tools(&self) -> Vec<Value> {
-        if let Some(cached) = self.cache.borrow().as_ref() {
+        if let Some(cached) = self
+            .cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             return cached.clone();
         }
+        // Discovery runs WITHOUT the cache lock held (it can be slow), locking
+        // each upstream only for its own listing — a concurrent call to another
+        // server proceeds meanwhile. Two racing first-discoveries do the same
+        // work twice and the last write wins: benign, and cheaper than making
+        // every caller queue behind the slowest server.
         let mut out = Vec::new();
-        for up in &self.upstreams {
-            match up.list_tools() {
+        for slot in &self.upstreams {
+            match slot.lock().list_tools() {
                 Ok(tools) => {
                     for t in tools {
                         // The firewall filters discovery too: a policy-denied
                         // tool is invisible, not just refusable — it never
                         // reaches tools_search or code-mode bindings.
                         let bare = t.get("name").and_then(Value::as_str).unwrap_or("");
-                        if self.policy.tool_allowed(&up.name, bare).is_err() {
+                        if self.policy.tool_allowed(&slot.name, bare).is_err() {
                             continue;
                         }
-                        out.push(namespace_tool(&up.name, &t));
+                        out.push(namespace_tool(&slot.name, &t));
                     }
                 }
-                Err(e) => eprintln!("gateway: '{}' unavailable, skipping: {e}", up.name),
+                Err(e) => eprintln!("gateway: '{}' unavailable, skipping: {e}", slot.name),
             }
         }
-        *self.cache.borrow_mut() = Some(out.clone());
+        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(out.clone());
         out
     }
 
@@ -611,13 +654,16 @@ impl Gateway {
     /// (ok / error / denied) appended to the audit log.
     pub fn try_call(&self, name: &str, args: &Value) -> Option<Result<Value>> {
         let (server, tool) = name.split_once("__")?;
-        let up = self.upstreams.iter().find(|u| u.name == server)?;
+        let slot = self.upstreams.iter().find(|u| u.name == server)?;
         let started = Instant::now();
         if let Err(rule) = self.policy.tool_allowed(server, tool) {
             self.log_call(server, tool, args, "denied", Some(&rule), started);
             return Some(Err(anyhow!("{server}__{tool}: call refused — {rule}")));
         }
-        let result = up.call_tool(tool, args.clone());
+        // Lock ONLY this server for the round trip: a 60s call here does not
+        // block a concurrent call to any other upstream. Same-server calls
+        // queue — one stdio pipe, one HTTP session.
+        let result = slot.lock().call_tool(tool, args.clone());
         match &result {
             Ok(_) => self.log_call(server, tool, args, "ok", None, started),
             Err(e) => self.log_call(server, tool, args, "error", Some(&e.to_string()), started),
@@ -722,6 +768,8 @@ impl Gateway {
     /// this machine. Drives the `codemode` command's secret-health summary and
     /// the `explain` view of the runtime surface.
     pub fn proxied_servers(&self) -> Vec<(String, Vec<String>)> {
+        // Slot metadata is lock-free by design: this must answer even while a
+        // slow call holds an upstream's mutex.
         self.upstreams
             .iter()
             .map(|u| (u.name.clone(), u.unresolved.clone()))
@@ -744,7 +792,7 @@ impl Gateway {
     pub(crate) fn with_tools(tools: Vec<Value>) -> Gateway {
         Gateway {
             upstreams: Vec::new(),
-            cache: RefCell::new(Some(tools)),
+            cache: std::sync::Mutex::new(Some(tools)),
             policy: crate::manifest::Policy::default(),
             project: None,
         }
@@ -830,6 +878,16 @@ fn parse_sse(text: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The gateway is shared as a bare `Arc` across the serve loop, per-call
+    /// worker threads, and the code-mode endpoint — losing `Send + Sync` (say,
+    /// by adding an un-mutexed `RefCell` field) must fail the build, not the
+    /// runtime.
+    #[test]
+    fn gateway_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Gateway>();
+    }
 
     #[test]
     fn namespaces_and_caps_descriptions() {

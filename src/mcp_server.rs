@@ -28,17 +28,17 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
     // On stdio, stdout must carry only JSON-RPC. Library code (apply, profiles,
     // plugins…) prints human progress to stdout, which would corrupt the stream,
     // so reserve the real stdout for responses and redirect fd 1 to stderr.
-    let mut out = protocol_writer();
+    let out = protocol_writer();
 
     if !auto_project {
         // Eager, one-project-per-process mode (the default): the manifest is
         // cwd-or-flag and the gateway is built ONCE for this launch, shared by
         // the stdio loop and the code-mode endpoint (one set of upstream
         // connections / stdio children per process, not one per surface).
-        let gateway = std::sync::Arc::new(std::sync::Mutex::new(
-            crate::gateway::Gateway::from_manifest(dir.as_deref()),
-        ));
-        if !lock_gateway(&gateway).is_empty() {
+        // No global lock: the gateway is Sync with per-upstream mutexes, so
+        // concurrent calls to different servers proceed in parallel.
+        let gateway = std::sync::Arc::new(crate::gateway::Gateway::from_manifest(dir.as_deref()));
+        if !gateway.is_empty() {
             eprintln!("agentstack mcp: gateway active — proxying this project's MCP servers");
         }
 
@@ -54,6 +54,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             );
         }
 
+        let out = std::sync::Arc::new(std::sync::Mutex::new(out));
         for line in stdin.lock().lines() {
             let line = line?;
             if line.trim().is_empty() {
@@ -62,9 +63,21 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             let Ok(req) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
-            if let Some(resp) = handle(&req, dir.as_deref(), &lock_gateway(&gateway), None) {
-                writeln!(out, "{}", serde_json::to_string(&resp)?)?;
-                out.flush()?;
+            if req.get("method").and_then(Value::as_str) == Some("tools/call") {
+                // A tool call can block on a slow upstream for up to 60s —
+                // serve it on its own thread so a parallel call to another
+                // server isn't queued behind it. Out-of-order responses are
+                // fine: JSON-RPC clients match by id.
+                let gw = std::sync::Arc::clone(&gateway);
+                let out = std::sync::Arc::clone(&out);
+                let dir = dir.clone();
+                std::thread::spawn(move || {
+                    if let Some(resp) = handle(&req, dir.as_deref(), &gw, None) {
+                        respond(&out, &resp);
+                    }
+                });
+            } else if let Some(resp) = handle(&req, dir.as_deref(), &gateway, None) {
+                respond(&out, &resp);
             }
         }
         // Remove the machine-local endpoint coordinate file so a dead port+token
@@ -82,6 +95,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
     // time to answer our roots/list request; tools/list is static and needs
     // no gateway.
     let mut auto = AutoProject::new(dir);
+    let out = std::sync::Arc::new(std::sync::Mutex::new(out));
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -95,37 +109,55 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
         if auto.absorb_roots_response(&req) {
             continue;
         }
-        match req.get("method").and_then(Value::as_str).unwrap_or("") {
+        // All AutoProject state changes stay on this thread; only the
+        // already-built gateway crosses into workers.
+        let method = req
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        match method.as_str() {
             "initialize" => auto.note_client_capabilities(&req),
             "notifications/initialized" => {
                 if let Some(request) = auto.roots_request() {
-                    writeln!(out, "{}", serde_json::to_string(&request)?)?;
-                    out.flush()?;
+                    respond(&out, &request);
                 }
             }
             "tools/call" => auto.ensure_gateway(),
             _ => {}
         }
-        if let Some(resp) = handle(
+        if method == "tools/call" {
+            // Same as eager mode: a blocking upstream call gets its own
+            // thread, so parallel calls to other servers aren't serialized.
+            let gw = auto.gateway_arc();
+            let out = std::sync::Arc::clone(&out);
+            let dir = auto.dir().map(Path::to_path_buf);
+            let note = auto.trust_note();
+            std::thread::spawn(move || {
+                if let Some(resp) = handle(&req, dir.as_deref(), &gw, note.as_deref()) {
+                    respond(&out, &resp);
+                }
+            });
+        } else if let Some(resp) = handle(
             &req,
             auto.dir(),
-            &auto.gateway(),
+            auto.gateway(),
             auto.trust_note().as_deref(),
         ) {
-            writeln!(out, "{}", serde_json::to_string(&resp)?)?;
-            out.flush()?;
+            respond(&out, &resp);
         }
     }
     auto.shutdown();
     Ok(())
 }
 
-/// Lock the process-shared gateway, riding through a poisoned mutex (a panic
-/// mid-call must not wedge every later request).
-fn lock_gateway(
-    gateway: &std::sync::Mutex<crate::gateway::Gateway>,
-) -> std::sync::MutexGuard<'_, crate::gateway::Gateway> {
-    gateway.lock().unwrap_or_else(|e| e.into_inner())
+/// Write one protocol frame through the thread-shared writer (line-delimited
+/// JSON — `Value`'s `Display` is compact). Best-effort: a closed stdout means
+/// the client is gone and the stdin loop is about to end anyway.
+fn respond(out: &std::sync::Mutex<Box<dyn Write + Send>>, frame: &Value) {
+    let mut o = out.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = writeln!(o, "{frame}");
+    let _ = o.flush();
 }
 
 /// Session state for `--auto-project`: which project this MCP session belongs
@@ -148,9 +180,11 @@ struct AutoProject {
     /// The trust decision made at gateway-build time — kept so responses can
     /// say *why* nothing is proxied instead of leaving it on stderr only.
     trust: Option<crate::trust::TrustState>,
-    /// Shared with the code-mode endpoint thread, so the process holds one set
-    /// of upstream connections (and stdio children), not one per surface.
-    gateway: std::sync::Arc<std::sync::Mutex<crate::gateway::Gateway>>,
+    /// Shared with the code-mode endpoint thread and per-call workers, so the
+    /// process holds one set of upstream connections (and stdio children), not
+    /// one per surface. No outer mutex: the gateway is Sync with per-upstream
+    /// locking.
+    gateway: std::sync::Arc<crate::gateway::Gateway>,
     built: bool,
     runtime: Option<crate::codemode::endpoint::RuntimeHandle>,
 }
@@ -164,7 +198,7 @@ impl AutoProject {
             roots: Vec::new(),
             dir: None,
             trust: None,
-            gateway: std::sync::Arc::new(std::sync::Mutex::new(crate::gateway::Gateway::empty())),
+            gateway: std::sync::Arc::new(crate::gateway::Gateway::empty()),
             built: false,
             runtime: None,
         }
@@ -174,8 +208,13 @@ impl AutoProject {
         self.dir.as_deref().or(self.explicit.as_deref())
     }
 
-    fn gateway(&self) -> std::sync::MutexGuard<'_, crate::gateway::Gateway> {
-        lock_gateway(&self.gateway)
+    fn gateway(&self) -> &crate::gateway::Gateway {
+        &self.gateway
+    }
+
+    /// Clone the shared gateway handle for a worker thread.
+    fn gateway_arc(&self) -> std::sync::Arc<crate::gateway::Gateway> {
+        std::sync::Arc::clone(&self.gateway)
     }
 
     /// Record whether the client can answer `roots/list` (from its declared
@@ -299,9 +338,7 @@ impl AutoProject {
         self.dir = Some(base.to_path_buf());
         // One gateway per process: the code-mode endpoint shares it instead of
         // building (and connecting/spawning) its own copy of every upstream.
-        self.gateway = std::sync::Arc::new(std::sync::Mutex::new(
-            crate::gateway::Gateway::from_manifest(Some(base)),
-        ));
+        self.gateway = std::sync::Arc::new(crate::gateway::Gateway::from_manifest(Some(base)));
         if !self.gateway().is_empty() {
             eprintln!(
                 "agentstack mcp: gateway active for {} — proxying its MCP servers",
@@ -353,7 +390,7 @@ fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
 /// stdout and point fd 1 at stderr so stray `println!` from command code lands
 /// on stderr instead of poisoning the protocol. Falls back to plain stdout.
 #[cfg(unix)]
-fn protocol_writer() -> Box<dyn Write> {
+fn protocol_writer() -> Box<dyn Write + Send> {
     use std::os::unix::io::FromRawFd;
     let saved = unsafe { libc::dup(libc::STDOUT_FILENO) };
     if saved < 0 {
@@ -364,7 +401,7 @@ fn protocol_writer() -> Box<dyn Write> {
 }
 
 #[cfg(not(unix))]
-fn protocol_writer() -> Box<dyn Write> {
+fn protocol_writer() -> Box<dyn Write + Send> {
     Box::new(std::io::stdout())
 }
 

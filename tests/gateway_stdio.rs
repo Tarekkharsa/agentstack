@@ -39,6 +39,27 @@ while IFS= read -r line; do
 done
 "#;
 
+/// A deliberately slow server: sleeps 1.5s before answering a `tools/call` —
+/// the fixture for proving per-upstream locking (a call here must not block a
+/// call to a different server).
+const SLOW_FIXTURE: &str = r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"slow","version":"0"}}}\n' "$id"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"wait","description":"Answer slowly.","inputSchema":{"type":"object","properties":{}}}]}}\n' "$id"
+      ;;
+    *'"method":"tools/call"'*)
+      sleep 1.5
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"finally"}]}}\n' "$id"
+      ;;
+  esac
+done
+"#;
+
 /// A server that starts but never answers anything — the timeout fixture.
 const HANG_FIXTURE: &str = "#!/bin/sh\nexec sleep 3600\n";
 
@@ -218,6 +239,49 @@ fn stdio_manifest_cwd_anchors_the_child_relative_to_project_root() {
         reported_cwd(&gw, "sub__where"),
         srv.canonicalize().unwrap(),
         "child must run in the manifest-declared cwd"
+    );
+}
+
+/// The serialization fix: a slow call to one upstream must not block a call to
+/// a *different* upstream. Before per-upstream locking, one gateway-wide mutex
+/// held for the whole round trip meant the fast call below would wait out the
+/// slow server's full 1.5s.
+#[test]
+fn slow_upstream_does_not_block_calls_to_another_server() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    setup_home(&tmp.path().join("home"));
+    let proj = tmp.path().join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    write_script(&proj, "slow.sh", SLOW_FIXTURE);
+    write_script(&proj, "fast.sh", CWD_FIXTURE);
+    write_manifest(
+        &proj,
+        "[servers.slow]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"./slow.sh\"]\n\
+         [servers.fast]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"./fast.sh\"]\n",
+    );
+
+    let gw = std::sync::Arc::new(Gateway::from_manifest(Some(&proj)));
+    // Pre-warm both children and the discovery cache so the timing below
+    // measures call concurrency, not spawn/discovery cost.
+    assert_eq!(gw.namespaced_tools().len(), 2);
+    gw.try_call("fast__where", &json!({})).unwrap().unwrap();
+
+    // Occupy the slow server from another thread (holds its slot for ~1.5s)…
+    let slow_gw = std::sync::Arc::clone(&gw);
+    let slow = std::thread::spawn(move || slow_gw.try_call("slow__wait", &json!({})));
+    std::thread::sleep(Duration::from_millis(150)); // let it acquire the slot
+
+    // …and prove the other server answers immediately meanwhile.
+    let t0 = Instant::now();
+    gw.try_call("fast__where", &json!({})).unwrap().unwrap();
+    let fast_elapsed = t0.elapsed();
+
+    let slow_result = slow.join().unwrap().expect("routed").expect("slow call ok");
+    assert!(call_text(&slow_result).contains("finally"));
+    assert!(
+        fast_elapsed < Duration::from_millis(1000),
+        "fast call took {fast_elapsed:?} — it was serialized behind the slow upstream"
     );
 }
 

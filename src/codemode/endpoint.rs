@@ -10,7 +10,7 @@
 //! only brokers the real upstream MCP call.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -40,8 +40,8 @@ impl RuntimeHandle {
 /// `None` when there is nothing to proxy or the loopback socket / coordinate
 /// file can't be created. Serves calls on a detached thread until the process
 /// exits.
-pub fn start(dir: Option<&Path>, gateway: Arc<Mutex<Gateway>>) -> Option<RuntimeHandle> {
-    if gateway.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
+pub fn start(dir: Option<&Path>, gateway: Arc<Gateway>) -> Option<RuntimeHandle> {
+    if gateway.is_empty() {
         return None;
     }
     let server = Server::http("127.0.0.1:0").ok()?;
@@ -57,28 +57,34 @@ pub fn start(dir: Option<&Path>, gateway: Arc<Mutex<Gateway>>) -> Option<Runtime
 
     let token_for_thread = token;
     std::thread::spawn(move || {
-        // Single-threaded request loop. The gateway is `Send` but not `Sync`;
-        // it is shared with the stdio serve loop behind the mutex, so each
-        // call locks for its duration (calls were already serialized per loop).
+        // Accept loop only: each request is served on its own thread. The
+        // gateway is Sync with per-upstream locking, so parallel code-mode
+        // calls to different servers proceed concurrently — one slow upstream
+        // no longer blocks the endpoint (or the stdio serve loop). Local,
+        // agent-driven traffic: thread-per-request is plenty.
         for mut req in server.incoming_requests() {
-            let authed = req.headers().iter().any(|h| {
-                h.field.equiv("X-Agentstack-Token") && h.value.as_str() == token_for_thread
+            let gateway = Arc::clone(&gateway);
+            let token = token_for_thread.clone();
+            std::thread::spawn(move || {
+                let authed = req
+                    .headers()
+                    .iter()
+                    .any(|h| h.field.equiv("X-Agentstack-Token") && h.value.as_str() == token);
+                let mut body = String::new();
+                let _ = req.as_reader().read_to_string(&mut body);
+                let (status, payload) = if !authed {
+                    (
+                        401,
+                        json!({ "error": "unauthorized — endpoint token mismatch" }).to_string(),
+                    )
+                } else {
+                    handle_runtime_call(&gateway, &body)
+                };
+                let resp = Response::from_string(payload)
+                    .with_status_code(status)
+                    .with_header(json_ctype());
+                let _ = req.respond(resp);
             });
-            let mut body = String::new();
-            let _ = req.as_reader().read_to_string(&mut body);
-            let (status, payload) = if !authed {
-                (
-                    401,
-                    json!({ "error": "unauthorized — endpoint token mismatch" }).to_string(),
-                )
-            } else {
-                let gw = gateway.lock().unwrap_or_else(|e| e.into_inner());
-                handle_runtime_call(&gw, &body)
-            };
-            let resp = Response::from_string(payload)
-                .with_status_code(status)
-                .with_header(json_ctype());
-            let _ = req.respond(resp);
         }
     });
 
