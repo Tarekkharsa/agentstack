@@ -665,6 +665,27 @@ You can still register it by hand like any stdio MCP server if you prefer:
 { "mcpServers": { "agentstack": { "type": "stdio", "command": "agentstack", "args": ["mcp", "--auto-project"] } } }
 ```
 
+### Transparent mode (`--transparent`)
+
+Two ways to expose the proxied surface:
+
+- **Compact (default)**: `tools/list` advertises agentstack's control-plane
+  tools only; upstream tools collapse behind `tools_search` (and code mode),
+  so the agent's tool context stays bounded no matter how many tools the
+  upstreams expose. Requires the agent to use `tools_search` → call by
+  namespaced name.
+- **Transparent** (`agentstack mcp --transparent`, or register it with
+  `connect --transparent`): `tools/list` additionally advertises every
+  policy-filtered upstream tool as `<server>__<tool>` — a drop-in MCP proxy
+  any standard client can consume with zero agentstack knowledge. The
+  firewall, trust gate, and audit log apply identically; the first listing
+  pays upstream discovery (bounded per-server timeouts, partial results).
+
+In auto-project mode the gateway builds lazily, so transparent mode declares
+the `listChanged` capability and sends `notifications/tools/list_changed`
+once the (trust-gated) gateway comes up — clients re-fetch `tools/list` and
+see the upstream tools without ever calling a control-plane tool first.
+
 ### The zero-copy bridge (`--auto-project` + `trust`)
 
 With `--auto-project`, one global registration serves **every** repo: at session

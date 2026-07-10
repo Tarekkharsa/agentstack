@@ -22,7 +22,7 @@ const PROTOCOL_VERSION: &str = "2025-06-18";
 /// Server-initiated ids live in their own namespace, so a string is safe.
 const ROOTS_REQUEST_ID: &str = "agentstack:roots";
 
-pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
+pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool) -> Result<()> {
     let dir = manifest_dir.map(Path::to_path_buf);
     let stdin = std::io::stdin();
     // On stdio, stdout must carry only JSON-RPC. Library code (apply, profiles,
@@ -55,6 +55,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
         }
 
         let out = std::sync::Arc::new(std::sync::Mutex::new(out));
+        let mut workers = WorkerPool::new();
         for line in stdin.lock().lines() {
             let line = line?;
             if line.trim().is_empty() {
@@ -73,15 +74,18 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
                 let gw = std::sync::Arc::clone(&gateway);
                 let out = std::sync::Arc::clone(&out);
                 let dir = dir.clone();
-                std::thread::spawn(move || {
-                    if let Some(resp) = handle(&req, dir.as_deref(), &gw, None) {
+                workers.spawn(move || {
+                    if let Some(resp) = handle(&req, dir.as_deref(), &gw, None, transparent) {
                         respond(&out, &resp);
                     }
                 });
-            } else if let Some(resp) = handle(&req, dir.as_deref(), &gateway, None) {
+            } else if let Some(resp) = handle(&req, dir.as_deref(), &gateway, None, transparent) {
                 respond(&out, &resp);
             }
         }
+        // stdin EOF: drain in-flight calls before exiting, or their responses
+        // (and the stdio children's polite shutdown) would be lost mid-call.
+        workers.join_all();
         // Remove the machine-local endpoint coordinate file so a dead port+token
         // isn't left behind for the next shim call.
         if let Some(rt) = runtime {
@@ -98,6 +102,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
     // no gateway.
     let mut auto = AutoProject::new(dir);
     let out = std::sync::Arc::new(std::sync::Mutex::new(out));
+    let mut workers = WorkerPool::new();
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -107,8 +112,14 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             continue;
         };
         // The client's answer to our roots/list request is ours, not a request
-        // to serve.
+        // to serve. In transparent mode the roots answer is also the natural
+        // "project known" moment: build the (trust-gated) gateway now and tell
+        // the client its tool list grew, so upstream tools become callable
+        // without an agent ever invoking a control-plane tool first.
         if auto.absorb_roots_response(&req) {
+            if transparent {
+                notify_if_gateway_appears(&mut auto, &out);
+            }
             continue;
         }
         // All AutoProject state changes stay on this thread; only the
@@ -125,7 +136,19 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
                     respond(&out, &request);
                 }
             }
-            "tools/call" => auto.ensure_gateway(),
+            // A roots-incapable client will never trigger the roots path, so
+            // its first transparent tools/list builds the gateway via the
+            // cwd-walk-up ladder directly.
+            "tools/list" if transparent && !auto.client_has_roots => {
+                notify_if_gateway_appears(&mut auto, &out);
+            }
+            "tools/call" => {
+                if transparent {
+                    notify_if_gateway_appears(&mut auto, &out);
+                } else {
+                    auto.ensure_gateway();
+                }
+            }
             _ => {}
         }
         if method == "tools/call" && is_upstream_call(&req) {
@@ -135,8 +158,9 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             let out = std::sync::Arc::clone(&out);
             let dir = auto.dir().map(Path::to_path_buf);
             let note = auto.trust_note();
-            std::thread::spawn(move || {
-                if let Some(resp) = handle(&req, dir.as_deref(), &gw, note.as_deref()) {
+            workers.spawn(move || {
+                if let Some(resp) = handle(&req, dir.as_deref(), &gw, note.as_deref(), transparent)
+                {
                     respond(&out, &resp);
                 }
             });
@@ -145,10 +169,13 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             auto.dir(),
             auto.gateway(),
             auto.trust_note().as_deref(),
+            transparent,
         ) {
             respond(&out, &resp);
         }
     }
+    // stdin EOF: drain in-flight calls before tearing the session down.
+    workers.join_all();
     auto.shutdown();
     Ok(())
 }
@@ -160,6 +187,52 @@ fn respond(out: &std::sync::Mutex<Box<dyn Write + Send>>, frame: &Value) {
     let mut o = out.lock().unwrap_or_else(|e| e.into_inner());
     let _ = writeln!(o, "{frame}");
     let _ = o.flush();
+}
+
+/// In-flight per-call worker threads, so stdin EOF can drain them instead of
+/// exiting mid-call (which would drop responses and skip the stdio children's
+/// polite shutdown). Finished handles are pruned on each spawn, keeping the
+/// set bounded by concurrent — not total — calls.
+struct WorkerPool {
+    handles: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl WorkerPool {
+    fn new() -> Self {
+        WorkerPool {
+            handles: Vec::new(),
+        }
+    }
+
+    fn spawn(&mut self, f: impl FnOnce() + Send + 'static) {
+        self.handles.retain(|h| !h.is_finished());
+        self.handles.push(std::thread::spawn(f));
+    }
+
+    fn join_all(&mut self) {
+        for h in self.handles.drain(..) {
+            let _ = h.join();
+        }
+    }
+}
+
+/// Transparent auto-mode: build the gateway if it isn't yet (trust-gated as
+/// always) and, when it just came up non-empty, send
+/// `notifications/tools/list_changed` so the client re-fetches `tools/list`
+/// and sees the upstream tools — the lazy-build handshake for clients that
+/// only call advertised tools.
+fn notify_if_gateway_appears(
+    auto: &mut AutoProject,
+    out: &std::sync::Arc<std::sync::Mutex<Box<dyn Write + Send>>>,
+) {
+    let was_built = auto.built;
+    auto.ensure_gateway();
+    if !was_built && auto.built && !auto.gateway().is_empty() {
+        respond(
+            out,
+            &json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }),
+        );
+    }
 }
 
 /// Whether a `tools/call` targets a proxied upstream (`<server>__<tool>`) —
@@ -424,6 +497,7 @@ fn handle(
     dir: Option<&Path>,
     gateway: &crate::gateway::Gateway,
     trust_note: Option<&str>,
+    transparent: bool,
 ) -> Option<Value> {
     let id = req.get("id").cloned();
     let method = req.get("method")?.as_str()?;
@@ -431,18 +505,32 @@ fn handle(
         "initialize" => Some(result(
             id,
             json!({
+                // listChanged is declared unconditionally (harmless when never
+                // sent); transparent auto-mode uses it to announce the lazily
+                // built gateway's upstream tools.
                 "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": { "tools": {} },
+                "capabilities": { "tools": { "listChanged": true } },
                 "serverInfo": { "name": "agentstack", "version": env!("CARGO_PKG_VERSION") }
             }),
         )),
         "notifications/initialized" | "notifications/cancelled" => None,
         "tools/list" => {
-            // agentstack's own control-plane tools only. The project's proxied
-            // upstream tools are NOT listed here — they collapse behind the one
-            // `tools_search` discovery tool, so this surface stays bounded no
-            // matter how many tools the upstreams expose (PLAN code-mode Phase 1).
-            let tools = tool_defs().as_array().cloned().unwrap_or_default();
+            // Compact mode (default): agentstack's own control-plane tools
+            // only. The project's proxied upstream tools are NOT listed — they
+            // collapse behind the one `tools_search` discovery tool, so this
+            // surface stays bounded no matter how many tools the upstreams
+            // expose (PLAN code-mode Phase 1).
+            //
+            // Transparent mode (--transparent): additionally advertise the
+            // policy-filtered upstream tools, namespaced `<server>__<tool>`,
+            // so any standard MCP client — one that only calls advertised
+            // tools — can use the proxied surface with zero agentstack
+            // knowledge. First listing pays discovery (bounded per-server
+            // timeouts, partial results).
+            let mut tools = tool_defs().as_array().cloned().unwrap_or_default();
+            if transparent {
+                tools.extend(gateway.namespaced_tools());
+            }
             Some(result(id, json!({ "tools": tools })))
         }
         "tools/call" => {
@@ -1390,6 +1478,48 @@ fn obj_to_map(v: Option<&Value>) -> IndexMap<String, String> {
 mod tests {
     use super::*;
 
+    /// Transparent mode appends the (policy-filtered, namespaced) upstream
+    /// tools to `tools/list`; compact mode keeps them behind `tools_search`.
+    #[test]
+    fn transparent_tools_list_advertises_upstream_tools() {
+        let req = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" });
+        let gw = crate::gateway::Gateway::with_tools(vec![json!({
+            "name": "figma__get_file",
+            "description": "[via figma] Get a file.",
+            "inputSchema": { "type": "object" }
+        })]);
+        let names = |resp: &Value| -> Vec<String> {
+            resp["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        // Compact (default): control-plane tools only.
+        let compact = names(&handle(&req, None, &gw, None, false).unwrap());
+        assert!(!compact.iter().any(|n| n == "figma__get_file"));
+        assert!(compact.iter().any(|n| n == "tools_search"));
+        // Transparent: upstream tools advertised too, control plane intact.
+        let transparent = names(&handle(&req, None, &gw, None, true).unwrap());
+        assert!(transparent.iter().any(|n| n == "figma__get_file"));
+        assert!(transparent.iter().any(|n| n == "tools_search"));
+    }
+
+    /// listChanged is declared so transparent auto-mode can announce the
+    /// lazily built gateway's tools; clients that never see the notification
+    /// lose nothing.
+    #[test]
+    fn initialize_declares_list_changed_capability() {
+        let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" });
+        let gw = crate::gateway::Gateway::empty();
+        let resp = handle(&req, None, &gw, None, false).unwrap();
+        assert_eq!(
+            resp["result"]["capabilities"]["tools"]["listChanged"],
+            json!(true)
+        );
+    }
+
     /// Only proxied `<server>__<tool>` calls go to worker threads; agentstack's
     /// own control-plane tools (some of which read-modify-write the manifest)
     /// must stay serialized on the main loop.
@@ -1411,7 +1541,7 @@ mod tests {
     fn initialize_returns_server_info() {
         let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" });
         let gw = crate::gateway::Gateway::empty();
-        let resp = handle(&req, None, &gw, None).unwrap();
+        let resp = handle(&req, None, &gw, None, false).unwrap();
         assert_eq!(resp["result"]["serverInfo"]["name"], "agentstack");
         assert_eq!(resp["id"], 1);
     }
@@ -1420,7 +1550,7 @@ mod tests {
     fn tools_list_includes_search_and_add() {
         let req = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" });
         let gw = crate::gateway::Gateway::empty();
-        let resp = handle(&req, None, &gw, None).unwrap();
+        let resp = handle(&req, None, &gw, None, false).unwrap();
         let names: Vec<&str> = resp["result"]["tools"]
             .as_array()
             .unwrap()
@@ -1460,7 +1590,7 @@ mod tests {
     fn notifications_get_no_response() {
         let req = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
         let gw = crate::gateway::Gateway::empty();
-        assert!(handle(&req, None, &gw, None).is_none());
+        assert!(handle(&req, None, &gw, None, false).is_none());
     }
 
     /// A namespaced fixture tool, shaped like the gateway's discovered cache.
@@ -1477,7 +1607,7 @@ mod tests {
         // control-plane tools — the proxied surface hides behind tools_search.
         let gw = crate::gateway::Gateway::with_tools(proxied_fixture());
         let req = json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/list" });
-        let resp = handle(&req, None, &gw, None).unwrap();
+        let resp = handle(&req, None, &gw, None, false).unwrap();
         let names: Vec<&str> = resp["result"]["tools"]
             .as_array()
             .unwrap()
@@ -1496,7 +1626,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 8, "method": "tools/call",
             "params": { "name": "tools_search", "arguments": { "query": "file" } }
         });
-        let resp = handle(&req, None, &gw, None).unwrap();
+        let resp = handle(&req, None, &gw, None, false).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("figma__get_file"));
         assert!(text.contains("entity=\"figma__get_file:tool\""));
@@ -1510,7 +1640,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 9, "method": "tools/call",
             "params": { "name": "tools_search", "arguments": { "entity": "figma__get_file:tool" } }
         });
-        let resp = handle(&req, None, &gw, None).unwrap();
+        let resp = handle(&req, None, &gw, None, false).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("**Server:** figma"));
         assert!(text.contains("fileKey"));
@@ -1520,7 +1650,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 10, "method": "tools/call",
             "params": { "name": "tools_search", "arguments": { "entity": "figma__nope:tool" } }
         });
-        let resp = handle(&req, None, &gw, None).unwrap();
+        let resp = handle(&req, None, &gw, None, false).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("No proxied tool matches"));
     }
@@ -1534,7 +1664,7 @@ mod tests {
                 "jsonrpc": "2.0", "id": 12, "method": "tools/call",
                 "params": { "name": "tools_search", "arguments": args }
             });
-            let resp = handle(&req, None, &gw, Some(note)).unwrap();
+            let resp = handle(&req, None, &gw, Some(note), false).unwrap();
             let text = resp["result"]["content"][0]["text"].as_str().unwrap();
             assert!(text.contains("agentstack trust /tmp/repo"), "got: {text}");
             assert!(
@@ -1553,7 +1683,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 13, "method": "tools/call",
             "params": { "name": "tools_search", "arguments": {} }
         });
-        let resp = handle(&req, None, &gw, None).unwrap();
+        let resp = handle(&req, None, &gw, None, false).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("proxies no upstream MCP tools"));
         assert!(
@@ -1569,7 +1699,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 11, "method": "tools/call",
             "params": { "name": "tools_bindings", "arguments": {} }
         });
-        let resp = handle(&req, None, &gw, None).unwrap();
+        let resp = handle(&req, None, &gw, None, false).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         // The generated client + shim + recipe, all secret-free.
         assert!(text.contains("export const codemode = {"));
@@ -1819,7 +1949,7 @@ mod tests {
             "params": { "name": "agentstack_search", "arguments": { "query": "github" } }
         });
         let gw = crate::gateway::Gateway::empty();
-        let resp = handle(&req, None, &gw, None).unwrap();
+        let resp = handle(&req, None, &gw, None, false).unwrap();
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("github"));
         assert_eq!(resp["result"]["isError"], false);

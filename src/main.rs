@@ -53,7 +53,9 @@ fn run() -> Result<()> {
         Command::Export(args) => commands::bundle::run_export(args, dir),
         Command::Import(args) => commands::bundle::run_import(args, dir),
         Command::Dashboard(args) => agentstack::dashboard::serve(args, dir),
-        Command::Mcp(args) => agentstack::mcp_server::serve(dir, args.auto_project),
+        Command::Mcp(args) => {
+            agentstack::mcp_server::serve(dir, args.auto_project, args.transparent)
+        }
         Command::Connect(args) => commands::connect::run_connect(args),
         Command::Disconnect(args) => commands::connect::run_disconnect(args),
         Command::Trust(args) => commands::trust::run(args),

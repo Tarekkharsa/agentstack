@@ -29,7 +29,7 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
         /*for_removal=*/ false,
     )?;
     let command = bridge_command(args.command.as_deref());
-    let bridge = bridge_server(&command);
+    let bridge = bridge_server(&command, args.transparent);
 
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
     let mut touched: Vec<String> = Vec::new();
@@ -237,12 +237,16 @@ fn select_targets<'r>(
 
 /// The bridge, expressed as a manifest server so the existing per-adapter
 /// renderer shapes it (transport tags, field names, command arrays).
-fn bridge_server(command: &str) -> Server {
+fn bridge_server(command: &str, transparent: bool) -> Server {
+    let mut args = vec!["mcp".to_string(), "--auto-project".to_string()];
+    if transparent {
+        args.push("--transparent".to_string());
+    }
     Server {
         server_type: ServerType::Stdio,
         url: None,
         command: Some(command.to_string()),
-        args: vec!["mcp".to_string(), "--auto-project".to_string()],
+        args,
         cwd: None,
         targets: crate::manifest::model::all_targets(),
         owner: None,
@@ -358,7 +362,7 @@ mod tests {
     #[test]
     fn bridge_renders_into_claude_json_and_codex_toml() {
         let reg = Registry::load().unwrap();
-        let bridge = bridge_server("/usr/local/bin/agentstack");
+        let bridge = bridge_server("/usr/local/bin/agentstack", false);
 
         // Claude Code: JSON, transport-tagged.
         let desc = reg.get("claude-code").unwrap();

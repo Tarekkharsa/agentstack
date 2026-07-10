@@ -301,6 +301,14 @@ pub struct McpArgs {
     /// `agentstack connect` registers.
     #[arg(long)]
     pub auto_project: bool,
+
+    /// Advertise the proxied upstream tools in `tools/list` (policy-filtered,
+    /// namespaced `<server>__<tool>`) so any standard MCP client can call them
+    /// without learning agentstack's control-plane tools first. Default is
+    /// compact mode: upstream tools are reached via `tools_search`/code mode,
+    /// keeping the agent's tool context small.
+    #[arg(long)]
+    pub transparent: bool,
 }
 
 #[derive(Args, Debug)]
@@ -313,6 +321,12 @@ pub struct ConnectArgs {
     /// Register in every installed harness that supports MCP.
     #[arg(long)]
     pub all: bool,
+
+    /// Register the bridge in transparent mode (`agentstack mcp --auto-project
+    /// --transparent`): upstream tools are advertised in `tools/list` instead
+    /// of being reached via `tools_search`.
+    #[arg(long)]
+    pub transparent: bool,
 
     /// Write the change (else dry-run: show the diff per harness).
     #[arg(long)]
