@@ -442,13 +442,44 @@ impl Gateway {
                     servers.len()
                 );
             }
+            // Library definitions are outside the trust digest (it covers the
+            // manifest layers + lockfile), so they are integrity-checked here
+            // against the lock's pinned definition digests before being served.
+            let lock = crate::lock::Lock::load(&ctx.dir).unwrap_or_else(|e| {
+                eprintln!(
+                    "gateway: warning: lockfile unavailable ({e:#}); library servers are unpinned"
+                );
+                crate::lock::Lock::default()
+            });
+            // Relative server paths (`cwd`) anchor at the project root — the
+            // dir holding `.agentstack/`, not the manifest dir itself.
+            let root = crate::manifest::project_root_of(&ctx.dir);
             // `[policy.tools]` travels with the gateway — it is the firewall's
             // rule set; `project` is audit-log context.
             let policy = ctx.loaded.manifest.policy.clone();
             let project = Some(ctx.dir.display().to_string());
             for (name, resolved) in servers {
                 let s = match resolved {
-                    Ok(s) => s,
+                    Ok(r) => {
+                        if r.origin == crate::resolve::ServerOrigin::Library {
+                            match lock.get_server(&name) {
+                                Some(entry) if entry.checksum != r.checksum => {
+                                    eprintln!(
+                                        "gateway: skipping '{name}': library definition drifted from agentstack.lock \
+                                         (locked {}, current {}) — review it and re-run `agentstack lock`",
+                                        entry.checksum, r.checksum
+                                    );
+                                    continue;
+                                }
+                                Some(_) => {}
+                                None => eprintln!(
+                                    "gateway: warning: library server '{name}' is not pinned in agentstack.lock — \
+                                     pin it with `agentstack lock`"
+                                ),
+                            }
+                        }
+                        r.server
+                    }
                     Err(e) => {
                         eprintln!("gateway: skipping '{name}': {e}");
                         continue;
@@ -503,8 +534,8 @@ impl Gateway {
                         // to the project root. Mirrors what a rendered config
                         // gives a harness, whose own cwd is the project root.
                         let cwd = match &s.cwd {
-                            Some(c) => ctx.dir.join(sub(c, &mut unresolved)),
-                            None => ctx.dir.clone(),
+                            Some(c) => root.join(sub(c, &mut unresolved)),
+                            None => root.clone(),
                         };
                         unresolved.sort();
                         unresolved.dedup();
@@ -889,6 +920,66 @@ mod tests {
         std::env::remove_var("AGENTSTACK_HOME");
         let names: Vec<&str> = gw.upstreams.iter().map(|u| u.name.as_str()).collect();
         assert_eq!(names, ["alpha", "kibana"]);
+    }
+
+    /// Library definitions live outside the trust digest; the lock's pinned
+    /// definition digest is what the human consented to. A drifted definition
+    /// must not be served; a matching pin must be; an unpinned ref is served
+    /// with a warning (zero-lock workflows keep working).
+    #[test]
+    fn from_manifest_verifies_library_servers_against_the_lock() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        home.child("lib/library.toml")
+            .write_str("version = 1\n\n[[server]]\nname = \"kibana\"\n")
+            .unwrap();
+        home.child("lib/servers/kibana.toml")
+            .write_str("type = \"http\"\nurl = \"https://central/mcp\"\n")
+            .unwrap();
+        let project = assert_fs::TempDir::new().unwrap();
+        project
+            .child("agentstack.toml")
+            .write_str("version = 1\n\n[profiles.default]\nservers = [\"kibana\"]\n")
+            .unwrap();
+
+        // Drifted pin → the server is skipped.
+        project
+            .child("agentstack.lock")
+            .write_str(
+                "version = 1\n[[server]]\nname = \"kibana\"\nsource = \"library\"\nchecksum = \"not-the-current-definition\"\n",
+            )
+            .unwrap();
+        let gw = Gateway::from_manifest(Some(project.path()));
+        assert!(
+            gw.upstreams.is_empty(),
+            "drifted library pin must be skipped"
+        );
+
+        // Matching pin → served. (Resolve to learn the current digest.)
+        let manifest: crate::manifest::Manifest = toml::from_str("version = 1").unwrap();
+        let library = crate::library::Library::load(&home.path().join("lib")).unwrap();
+        let current =
+            crate::resolve::resolve_server(&manifest, &library, &home.path().join("lib"), "kibana")
+                .unwrap()
+                .checksum;
+        project
+            .child("agentstack.lock")
+            .write_str(&format!(
+                "version = 1\n[[server]]\nname = \"kibana\"\nsource = \"library\"\nchecksum = \"{current}\"\n",
+            ))
+            .unwrap();
+        let gw = Gateway::from_manifest(Some(project.path()));
+        assert_eq!(gw.upstreams.len(), 1, "matching pin must be served");
+
+        // No lock entry at all → served (warned, not blocked).
+        std::fs::remove_file(project.path().join("agentstack.lock")).unwrap();
+        let gw = Gateway::from_manifest(Some(project.path()));
+        std::env::remove_var("AGENTSTACK_HOME");
+        assert_eq!(gw.upstreams.len(), 1, "unpinned ref must still be served");
     }
 
     #[test]

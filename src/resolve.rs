@@ -257,13 +257,16 @@ pub fn resolve_server(
 /// profile-referenced name, deduped in first-seen order.
 ///
 /// Results are per-name so a best-effort caller can skip (and report) a broken
-/// ref individually, where rendering hard-fails the whole run.
+/// ref individually, where rendering hard-fails the whole run. Each success is
+/// the full [`ResolvedServer`] — origin and definition checksum included — so
+/// runtime surfaces can verify library definitions against `agentstack.lock`
+/// before serving them.
 pub fn effective_runtime_servers(
     manifest: &Manifest,
     library: &Library,
     lib_home: &Path,
     profile: Option<&str>,
-) -> Vec<(String, Result<Server, ServerResolveError>)> {
+) -> Vec<(String, Result<ResolvedServer, ServerResolveError>)> {
     let mut names: Vec<String> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut push = |n: &str, names: &mut Vec<String>| {
@@ -291,7 +294,7 @@ pub fn effective_runtime_servers(
     names
         .into_iter()
         .map(|n| {
-            let r = resolve_server(manifest, library, lib_home, &n).map(|r| r.server);
+            let r = resolve_server(manifest, library, lib_home, &n);
             (n, r)
         })
         .collect()

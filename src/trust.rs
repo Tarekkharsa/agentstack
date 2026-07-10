@@ -4,9 +4,11 @@
 //! whatever manifest the current project carries. Auto-loading that manifest's
 //! servers would let any cloned repo spawn stdio commands and receive secrets —
 //! so discovery is gated: a project's runtime surface stays control-plane-only
-//! until a human runs `agentstack trust`, and trust is pinned to the manifest's
-//! content digest. Change the manifest (a `git pull`, say) and the project must
-//! be re-trusted, exactly like `direnv allow`.
+//! until a human runs `agentstack trust`, and trust is pinned to the content
+//! digest of the manifest layers plus `agentstack.lock` (which pins the
+//! definition digests of library-referenced servers). Change any of them (a
+//! `git pull`, say) and the project must be re-trusted, exactly like `direnv
+//! allow`.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,6 +18,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::lock::LOCK_FILE;
 use crate::manifest::load::{LOCAL_FILE, MANIFEST_FILE};
 use crate::util::paths;
 
@@ -33,7 +36,8 @@ pub struct TrustStore {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrustEntry {
-    /// `sha256:<hex>` over the manifest (+ local overlay) at trust time.
+    /// `sha256:<hex>` over the manifest (+ local overlay + lockfile) at trust
+    /// time.
     pub digest: String,
     pub trusted_at: u64,
 }
@@ -72,17 +76,23 @@ pub fn key_for(base: &Path) -> String {
         .to_string()
 }
 
-/// Content digest of the manifest layers at `base` (`agentstack.toml` plus the
-/// `agentstack.local.toml` overlay, both of which declare runnable servers).
-/// `None` when there is no manifest.
+/// Content digest of the consent surface at `base`: the manifest layers
+/// (`agentstack.toml` plus the `agentstack.local.toml` overlay, both of which
+/// declare runnable servers) and `agentstack.lock`, which pins the definition
+/// digests of library-referenced servers the gateway will serve. Re-pinning
+/// the lock changes what a name ref runs, so it re-gates the project exactly
+/// like a manifest edit. `None` when there is no manifest.
 pub fn digest_for(base: &Path) -> Option<String> {
     let dir = crate::manifest::resolve_manifest_dir(base);
     let manifest = std::fs::read(dir.join(MANIFEST_FILE)).ok()?;
     let local = std::fs::read(dir.join(LOCAL_FILE)).unwrap_or_default();
+    let lock = std::fs::read(dir.join(LOCK_FILE)).unwrap_or_default();
     let mut hasher = Sha256::new();
     hasher.update(&manifest);
     hasher.update([0u8]);
     hasher.update(&local);
+    hasher.update([0u8]);
+    hasher.update(&lock);
     Some(format!("sha256:{:x}", hasher.finalize()))
 }
 
@@ -189,6 +199,23 @@ mod tests {
             // invalidate trust too.
             proj.child(".agentstack/agentstack.local.toml")
                 .write_str("[servers.local]\ntype = \"stdio\"\ncommand = \"sh\"\n")
+                .unwrap();
+            assert_eq!(check(proj.path()), TrustState::Changed);
+        });
+    }
+
+    #[test]
+    fn lockfile_participates_in_the_digest() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            trust(proj.path()).unwrap();
+            // The lock pins the library server definitions the gateway will
+            // run — re-pinning changes the runtime surface, so it re-gates
+            // exactly like a manifest edit.
+            proj.child(".agentstack/agentstack.lock")
+                .write_str(
+                    "version = 1\n[[server]]\nname = \"kibana\"\nsource = \"library\"\nchecksum = \"sha256:aaa\"\n",
+                )
                 .unwrap();
             assert_eq!(check(proj.path()), TrustState::Changed);
         });

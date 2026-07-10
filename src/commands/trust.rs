@@ -45,31 +45,57 @@ fn resolve_base(path: Option<&Path>) -> Result<PathBuf> {
 }
 
 fn grant(base: &Path) -> Result<()> {
-    let loaded = crate::manifest::load_from_dir(&crate::manifest::resolve_manifest_dir(base))?;
+    let dir = crate::manifest::resolve_manifest_dir(base);
+    let loaded = crate::manifest::load_from_dir(&dir)?;
     let m = &loaded.manifest;
 
     println!(
         "Trusting {} for the zero-files bridge.\n",
         base.display().to_string().bold()
     );
-    println!("This manifest declares — review what auto-mode may run/contact:");
-    if m.servers.is_empty() {
+    // Preview the gateway's actual runtime surface, not just the inline
+    // `[servers.*]` tables: library name refs resolve here exactly like they
+    // will at gateway time, so the human reviews everything auto-mode may run.
+    let library = crate::library::Library::load_default_or_warn();
+    let lib_home = crate::util::paths::lib_home();
+    let lock = crate::lock::Lock::load(&dir).unwrap_or_default();
+    let servers = crate::resolve::effective_runtime_servers(m, &library, &lib_home, None);
+    println!("This project declares — review what auto-mode may run/contact:");
+    if servers.is_empty() {
         println!("  (no servers)");
     }
-    for (name, s) in &m.servers {
-        match s.server_type {
+    for (name, resolved) in &servers {
+        let r = match resolved {
+            Ok(r) => r,
+            Err(e) => {
+                println!("  {} {name}: unresolvable ({e})", "✗".red());
+                continue;
+            }
+        };
+        let origin = match r.origin {
+            crate::resolve::ServerOrigin::Inline => String::new(),
+            crate::resolve::ServerOrigin::Library => match lock.get_server(name) {
+                Some(entry) if entry.checksum == r.checksum => "   [library, pinned]".to_string(),
+                Some(_) => format!("   [library, {}]", "DRIFTED from lock".red()),
+                None => format!(
+                    "   [library, {}]",
+                    "unpinned — run `agentstack lock`".yellow()
+                ),
+            },
+        };
+        match r.server.server_type {
             // A stdio server is arbitrary local code execution — the thing the
             // trust gate exists for. Call it out explicitly.
             ServerType::Stdio => println!(
-                "  {} {name}: runs `{} {}`",
+                "  {} {name}: runs `{} {}`{origin}",
                 "▶".yellow(),
-                s.command.as_deref().unwrap_or("?"),
-                s.args.join(" ")
+                r.server.command.as_deref().unwrap_or("?"),
+                r.server.args.join(" ")
             ),
             ServerType::Http => println!(
-                "  {} {name}: contacts {}",
+                "  {} {name}: contacts {}{origin}",
                 "→".cyan(),
-                s.url.as_deref().unwrap_or("?")
+                r.server.url.as_deref().unwrap_or("?")
             ),
         }
     }
@@ -83,7 +109,7 @@ fn grant(base: &Path) -> Result<()> {
 
     let digest = trust::trust(base)?;
     println!(
-        "\n{} trusted at {digest}.\nEditing the manifest invalidates this — re-run `agentstack trust` after reviewing changes.\nWithdraw anytime with `agentstack trust --revoke`.",
+        "\n{} trusted at {digest}.\nEditing the manifest or lockfile invalidates this — re-run `agentstack trust` after reviewing changes.\nWithdraw anytime with `agentstack trust --revoke`.",
         "✓".green()
     );
     Ok(())

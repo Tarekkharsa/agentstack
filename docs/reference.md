@@ -657,17 +657,32 @@ agentstack trust --list     # every trusted project + whether its manifest still
 agentstack trust --revoke   # withdraw
 ```
 
-Trust is pinned to the manifest's content digest (including
-`agentstack.local.toml`): any edit — a `git pull`, say — drops the project back
-to control-plane-only until re-trusted. Explicit `--manifest-dir` skips the gate
-(naming a directory is the consent), matching plain `agentstack mcp`.
+Trust is pinned to the content digest of the manifest layers (including
+`agentstack.local.toml`) plus `agentstack.lock`: any edit — a `git pull`, a
+re-lock — drops the project back to control-plane-only until re-trusted.
+Explicit `--manifest-dir` skips the gate (naming a directory is the consent),
+matching plain `agentstack mcp`. `trust .` previews the **effective runtime
+surface** — inline servers and library name refs alike, each library ref
+labeled pinned/unpinned/drifted — so the review covers exactly what the
+gateway will serve.
 
-The scope is manifest-level authorization, not code integrity: the digest
-covers the manifest bytes only, not the files it references. Trusting a repo
-whose server runs `python3 ./server.py` authorizes *that command* — a later
-edit to `server.py` does not re-gate the project (an edit to the manifest
-does). Review referenced local scripts as part of `trust .`, the same way
-you'd review a `.envrc` before `direnv allow`.
+Library-referenced server definitions live outside the digest, so the gateway
+integrity-checks them at launch against the lock's pinned definition digests:
+a definition that drifted from its pin is refused (with a
+`re-run \`agentstack lock\`` message) and an unpinned ref is served with a
+warning. Re-locking changes the lockfile, which re-gates trust — the pin, the
+runtime check, and the consent digest close the loop.
+
+(Upgrading across the digest-formula change — v0.6.x adds the lockfile to it —
+flips previously trusted projects to "changed" once; re-run `agentstack trust`
+after reviewing.)
+
+The remaining scope limit is local code integrity: the digest does not cover
+arbitrary files the manifest references. Trusting a repo whose server runs
+`python3 ./server.py` authorizes *that command* — a later edit to `server.py`
+does not re-gate the project (an edit to the manifest does). Review referenced
+local scripts as part of `trust .`, the same way you'd review a `.envrc`
+before `direnv allow`.
 
 The gate is visible from inside the session, not just on stderr: when the
 project is untrusted (or its manifest changed since it was trusted),

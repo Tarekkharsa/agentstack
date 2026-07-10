@@ -222,6 +222,32 @@ fn stdio_manifest_cwd_anchors_the_child_relative_to_project_root() {
 }
 
 #[test]
+fn stdio_agentstack_layout_anchors_at_project_root_not_manifest_dir() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    setup_home(&tmp.path().join("home"));
+    let proj = tmp.path().join("proj");
+    let sub = proj.join(".agentstack");
+    std::fs::create_dir_all(&sub).unwrap();
+    write_script(&proj, "cwdfix.sh", CWD_FIXTURE);
+    // Preferred `.agentstack/` layout: the manifest dir is NOT the project
+    // root. Relative paths must anchor at the root, not at `.agentstack/`.
+    std::fs::write(
+        sub.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.here]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"./cwdfix.sh\"]\n",
+    )
+    .unwrap();
+
+    let gw = Gateway::from_manifest(Some(&proj));
+    assert_eq!(
+        reported_cwd(&gw, "here__where"),
+        proj.canonicalize().unwrap(),
+        "child must run in the project root, not the .agentstack/ manifest dir"
+    );
+}
+
+#[test]
 fn stdio_unresolved_secret_refuses_calls_but_still_lists() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();

@@ -234,9 +234,12 @@ agentstack trust .               # you SEE what it declares before authorizing:
 #   ✓ trusted at sha256:…        (editing the manifest re-gates it)
 ```
 
-Trust pins the **manifest**, not the code it points at: you're authorizing the
-command `python3 ./server.py`, and a later edit to `server.py` won't re-gate
-the project (an edit to the manifest will). Review referenced scripts as part
+Trust pins the **manifest and lockfile**, not arbitrary code they point at:
+you're authorizing the command `python3 ./server.py`, and a later edit to
+`server.py` won't re-gate the project (an edit to the manifest or lock will).
+Central-library servers are pinned by definition digest in `agentstack.lock`
+and verified by the gateway before serving — a drifted definition is refused
+until you re-lock (which re-gates trust). Review referenced scripts as part
 of `trust .` — same discipline as reading a `.envrc` before `direnv allow`.
 
 After that its servers are live through the gateway — and every brokered call is
