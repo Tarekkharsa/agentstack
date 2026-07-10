@@ -26,6 +26,7 @@ pub mod pack;
 pub mod plugins;
 pub mod proxy;
 pub mod remove;
+pub mod report;
 pub mod restore;
 pub mod runs;
 pub mod sandbox;

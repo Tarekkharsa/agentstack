@@ -148,6 +148,10 @@ pub enum Command {
     #[command(hide = true)]
     Kill(KillArgs),
 
+    /// Show a sandboxed run's flight-recorder report (lifecycle, egress
+    /// decisions, and tool calls) by run id.
+    Report(ReportArgs),
+
     /// Print a shell hook for per-directory profile auto-activation.
     #[command(hide = true)]
     Hook(HookArgs),
@@ -370,6 +374,16 @@ pub struct TrustArgs {
 #[derive(Args, Debug)]
 pub struct RunsArgs {
     /// Emit machine-readable JSON instead of the text table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ReportArgs {
+    /// The run id (e.g. `r-1a2b3c4d`), as shown when `run --sandbox` starts.
+    pub run: String,
+
+    /// Emit the report as JSON instead of the human-readable form.
     #[arg(long)]
     pub json: bool,
 }

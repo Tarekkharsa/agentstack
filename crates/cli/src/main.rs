@@ -67,5 +67,6 @@ fn run() -> Result<()> {
         Command::Run(args) => commands::runs::run(args, dir),
         Command::Runs(args) => commands::runs::list(args),
         Command::Kill(args) => commands::runs::kill(args),
+        Command::Report(args) => commands::report::run(args),
     }
 }
