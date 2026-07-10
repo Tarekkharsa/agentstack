@@ -724,6 +724,7 @@ fn run_checks(
     report.section("Reproducibility");
     check_reproducibility(manifest, &ctx.dir, &store, report);
     check_server_reproducibility(manifest, &ctx.dir, report);
+    check_instruction_reproducibility(manifest, &ctx.dir, report);
 
     report.section("Plugin recipes");
     let recipe_statuses = crate::plugin_recipes::statuses(manifest, &ctx.registry, &ctx.dir);
@@ -1017,6 +1018,38 @@ fn check_reproducibility(
     }
     if emitted == 0 {
         report.line(Level::Ok, "no library-backed profile skills to verify");
+    }
+}
+
+/// Check that each project-declared instruction fragment's bytes match its
+/// `agentstack.lock` pin. Drift and unreadable files are errors (`doctor --ci`
+/// gates on them); an unpinned fragment is a warning. Machine-layer fragments
+/// are the user's own content and are never pinned — skipped.
+fn check_instruction_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Report) {
+    use crate::resolve::{instruction_lock_status, InstructionLockStatus};
+    let lock = crate::lock::Lock::load(dir).unwrap_or_default();
+    for (name, instr) in manifest
+        .instructions
+        .iter()
+        .filter(|(_, i)| !i.from_user_layer)
+    {
+        match instruction_lock_status(name, instr, dir, &lock) {
+            InstructionLockStatus::ResolveFailed { error } => report.line(
+                Level::Error,
+                format!("{name:<20} broken instruction ref — {error}"),
+            ),
+            InstructionLockStatus::ChecksumDrift { .. } => report.line(
+                Level::Error,
+                format!("{name:<20} instruction content drifted from lock ↳ agentstack lock"),
+            ),
+            InstructionLockStatus::MissingLockEntry => report.line(
+                Level::Warn,
+                format!("{name:<20} instruction not locked ↳ agentstack lock"),
+            ),
+            InstructionLockStatus::Matches => {
+                report.line(Level::Ok, format!("{name:<20} instruction · matches lock"))
+            }
+        }
     }
 }
 
