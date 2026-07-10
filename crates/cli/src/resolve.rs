@@ -307,13 +307,8 @@ pub fn runtime_server_names(manifest: &Manifest, profile: Option<&str>) -> Vec<S
     names
 }
 
-/// SHA-256 hex digest of a byte string.
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
-}
+// TODO(phase-1): shim — migrate callers to agentstack_core::digest and drop.
+pub(crate) use agentstack_core::digest::sha256_hex;
 
 /// How a server's currently-resolved **definition** compares to its
 /// `agentstack.lock` pin. No rev/offline variants — servers are local

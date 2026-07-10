@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod digest;
 pub mod lock;
 pub mod manifest;
 pub mod refs;

@@ -125,6 +125,7 @@ dependencies = [
  "dirs",
  "indexmap",
  "owo-colors",
+ "proptest",
  "serde",
  "serde_json",
  "sha2",

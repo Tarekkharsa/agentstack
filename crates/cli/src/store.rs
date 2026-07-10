@@ -449,57 +449,15 @@ pub fn dir_size(root: &Path) -> u64 {
         .sum()
 }
 
-/// SHA-256 digest of a directory's contents (relative paths + file bytes,
-/// sorted; `.git` excluded).
-pub fn dir_digest(root: &Path) -> Result<String> {
-    let mut files: Vec<PathBuf> = Vec::new();
-    collect_files(root, root, &mut files)?;
-    files.sort();
-    let mut hasher = Sha256::new();
-    for rel in &files {
-        hasher.update(rel.to_string_lossy().as_bytes());
-        hasher.update([0]);
-        let bytes = fs::read(root.join(rel))
-            .with_context(|| format!("reading {}", root.join(rel).display()))?;
-        hasher.update(bytes);
-        hasher.update([0]);
-    }
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        if entry.file_name() == ".git" {
-            continue;
-        }
-        let path = entry.path();
-        if entry.file_type()?.is_dir() {
-            collect_files(root, &path, out)?;
-        } else if let Ok(rel) = path.strip_prefix(root) {
-            out.push(rel.to_path_buf());
-        }
-    }
-    Ok(())
-}
+// The digest itself (paths + bytes → sha256) lives in core with the lockfile
+// types it feeds; only the stat-fingerprint cache above is cli policy.
+// TODO(phase-1): shim — migrate callers to agentstack_core::digest and drop.
+pub use agentstack_core::digest::{collect_files, dir_digest};
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use assert_fs::prelude::*;
-
-    #[test]
-    fn dir_digest_stable_and_sensitive() {
-        let tmp = assert_fs::TempDir::new().unwrap();
-        tmp.child("a.txt").write_str("hello").unwrap();
-        tmp.child("sub/b.txt").write_str("world").unwrap();
-        let d1 = dir_digest(tmp.path()).unwrap();
-        let d2 = dir_digest(tmp.path()).unwrap();
-        assert_eq!(d1, d2);
-        assert_eq!(d1.len(), 64);
-        tmp.child("a.txt").write_str("changed").unwrap();
-        assert_ne!(d1, dir_digest(tmp.path()).unwrap());
-    }
 
     #[test]
     fn resolves_path_source() {
