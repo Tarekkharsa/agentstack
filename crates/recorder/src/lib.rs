@@ -185,6 +185,138 @@ pub fn now_epoch() -> u64 {
         .unwrap_or(0)
 }
 
+// ─────────────────────────── run-scoped flight recorder ───────────────────────
+//
+// The machine-global `calls.jsonl` above is diagnostics across every project.
+// A *sandboxed run* (Phase 2 `agentstack run --sandbox`) also gets its OWN
+// append-only event log under `~/.agentstack/runs/<run-id>/events.jsonl`, so a
+// Phase 3 `agentstack report <run>` can read exactly one run's lifecycle and
+// the egress proxy's per-decision output — separate from the cross-project
+// diagnostic log. Synchronous, best-effort, and `core`-only by design: the
+// async runtime/egress crates own a channel and drain it into these plain
+// appends, so the recorder itself never pulls in an async runtime.
+//
+// The event set is a seed — only the variants the runtime (container
+// lifecycle) and egress (per-host decisions) crates emit today. More land as
+// those crates grow; the report viewer waits until Phase 3.
+
+/// One line in a run's `events.jsonl`. `#[serde(tag = "event")]` makes each
+/// row self-describing (`{"event":"egress",…}`) so the future report reader
+/// needs no schema out of band.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum RunEvent {
+    /// The sandbox container was created and started.
+    SandboxStarted {
+        ts: u64,
+        image: String,
+        /// Host path mounted as the container's workspace.
+        workspace: String,
+    },
+    /// The egress proxy allowed or blocked one outbound connection, attributed
+    /// to the MCP server that opened it. `rule` names the matching policy line
+    /// on a block.
+    Egress {
+        ts: u64,
+        server: String,
+        host: String,
+        allowed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rule: Option<String>,
+    },
+    /// The sandbox container exited. `code` is absent when it was killed by a
+    /// signal (e.g. teardown).
+    SandboxExited {
+        ts: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<i32>,
+    },
+}
+
+/// The append-only event log for one sandboxed run.
+///
+/// Construct once per run with [`RunLog::create`] (which prepares the run's
+/// private directory), hold it for the run's lifetime, and [`append`] events
+/// as they happen. Reading back for a report is [`RunLog::read`].
+///
+/// [`append`]: RunLog::append
+pub struct RunLog {
+    dir: PathBuf,
+}
+
+/// A run id is safe to use as a single directory segment: non-empty, and only
+/// the characters `agentstack run`'s `gen_id` produces (`r-<hex>`) plus the
+/// conservative superset a user-set `AGENTSTACK_RUN_ID` might carry. Rejects
+/// anything with a path separator, `..`, or other surprises — defensive even
+/// though ids are agentstack-generated, so a stray env value can never escape
+/// the runs directory.
+fn safe_run_segment(run_id: &str) -> bool {
+    !run_id.is_empty()
+        && run_id.len() <= 128
+        && run_id != "."
+        && run_id != ".."
+        && run_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
+}
+
+fn run_dir(run_id: &str) -> Option<PathBuf> {
+    if !safe_run_segment(run_id) {
+        return None;
+    }
+    Some(paths::agentstack_home().join("runs").join(run_id))
+}
+
+impl RunLog {
+    /// Prepare a run's private event directory (0700). `None` when `run_id`
+    /// isn't a safe path segment (see [`safe_run_segment`]).
+    pub fn create(run_id: &str) -> Option<RunLog> {
+        let dir = run_dir(run_id)?;
+        fs::create_dir_all(&dir).ok()?;
+        agentstack_core::util::restrict(&dir, true);
+        Some(RunLog { dir })
+    }
+
+    /// The events file path for this run.
+    pub fn path(&self) -> PathBuf {
+        self.dir.join("events.jsonl")
+    }
+
+    /// Append one event. Best-effort: any failure is swallowed — a recorder
+    /// hiccup must never fail the run it describes (same contract as
+    /// [`record`]).
+    pub fn append(&self, ev: &RunEvent) {
+        let Ok(line) = serde_json::to_string(ev) else {
+            return;
+        };
+        let path = self.path();
+        let mut opts = fs::OpenOptions::new();
+        opts.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        if let Ok(mut f) = opts.open(&path) {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+
+    /// Read a run's events, oldest first. Unparseable lines are skipped (a
+    /// torn write must not brick the log). Empty when the run has none.
+    pub fn read(run_id: &str) -> Vec<RunEvent> {
+        let Some(dir) = run_dir(run_id) else {
+            return Vec::new();
+        };
+        let Ok(text) = fs::read_to_string(dir.join("events.jsonl")) else {
+            return Vec::new();
+        };
+        text.lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +382,81 @@ mod tests {
                 0o700,
                 "audit dir must be private"
             );
+        });
+    }
+
+    #[test]
+    fn run_events_roundtrip_in_order() {
+        with_home(|| {
+            let log = RunLog::create("r-abc123").expect("safe id");
+            let events = vec![
+                RunEvent::SandboxStarted {
+                    ts: 1,
+                    image: "agentstack/sandbox".into(),
+                    workspace: "/proj".into(),
+                },
+                RunEvent::Egress {
+                    ts: 2,
+                    server: "web-search".into(),
+                    host: "api.search.example".into(),
+                    allowed: true,
+                    rule: None,
+                },
+                RunEvent::Egress {
+                    ts: 3,
+                    server: "web-search".into(),
+                    host: "evil.example".into(),
+                    allowed: false,
+                    rule: Some("[policy.egress] \"*\" = \"!evil.example\"".into()),
+                },
+                RunEvent::SandboxExited {
+                    ts: 4,
+                    code: Some(0),
+                },
+            ];
+            for e in &events {
+                log.append(e);
+            }
+            assert_eq!(
+                RunLog::read("r-abc123"),
+                events,
+                "read back in append order"
+            );
+            // Self-describing rows: the discriminant is on the wire.
+            let raw = fs::read_to_string(log.path()).unwrap();
+            assert!(raw.contains("\"event\":\"egress\""), "{raw}");
+            // A blocked decision carries its rule; an allowed one omits it.
+            assert!(raw.contains("evil.example") && raw.contains("[policy.egress]"));
+        });
+    }
+
+    #[test]
+    fn read_of_unknown_run_is_empty_not_error() {
+        with_home(|| {
+            assert!(RunLog::read("r-nope").is_empty());
+        });
+    }
+
+    #[test]
+    fn unsafe_run_ids_cannot_escape_the_runs_dir() {
+        with_home(|| {
+            for bad in ["", ".", "..", "../evil", "a/b", "x\0y"] {
+                assert!(RunLog::create(bad).is_none(), "must reject {bad:?}");
+                assert!(RunLog::read(bad).is_empty(), "no read for {bad:?}");
+            }
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_event_log_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        with_home(|| {
+            let log = RunLog::create("r-priv").unwrap();
+            log.append(&RunEvent::SandboxExited { ts: 0, code: None });
+            let mode = |p: &std::path::Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&log.path()), 0o600, "run events must be private");
+            assert_eq!(mode(&log.dir), 0o700, "run dir must be private");
         });
     }
 }
