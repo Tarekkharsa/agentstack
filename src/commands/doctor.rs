@@ -608,6 +608,36 @@ fn run_checks(
             Some(_) => report.line(Level::Ok, format!("{name:<20} present · SKILL.md ok")),
         }
     }
+    // Broken skill links on disk: a symlink in a detected CLI's skills dir
+    // whose target is gone loads nothing — and consolidate skips it — so name
+    // it here with the fix instead of leaving the skill silently dead. Every
+    // detected adapter is walked, not just the manifest's targets: the dead
+    // link breaks that CLI regardless of what this project fans out to.
+    for desc in ctx.registry.iter().filter(|d| d.detected()) {
+        for scope in [Scope::Global, Scope::Project] {
+            let Some(dir) = desc.skills_dir_for(scope, &ctx.dir) else {
+                continue;
+            };
+            for sk in desc.discover_skills(scope, &ctx.dir) {
+                if !sk.broken {
+                    continue;
+                }
+                let entry = dir.join(&sk.name);
+                let target = std::fs::read_link(&entry).unwrap_or_else(|_| sk.source.clone());
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<14} broken skill link '{}' → {} (target missing) \
+                         ↳ remove it: rm {} · or reinstall the skill it points at",
+                        desc.display,
+                        sk.name,
+                        target.display(),
+                        entry.display()
+                    ),
+                );
+            }
+        }
+    }
 
     // Supply-chain content scan (same detectors as `agentstack audit`): hidden
     // Unicode is an error so `--ci` gates it; injection heuristics only warn.

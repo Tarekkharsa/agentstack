@@ -53,7 +53,7 @@ fn consolidate_indexes_into_library_and_symlinks_back() {
 
     let registry = Registry::load().unwrap();
     let report = consolidate(&registry, &manifest, &proj, None, false, true).unwrap();
-    let names: Vec<&str> = report.iter().map(|c| c.name.as_str()).collect();
+    let names: Vec<&str> = report.skills.iter().map(|c| c.name.as_str()).collect();
     assert!(
         names.contains(&"figma") && names.contains(&"shared"),
         "{names:?}"
@@ -98,7 +98,10 @@ fn consolidate_indexes_into_library_and_symlinks_back() {
 
     // Re-running is idempotent: already-in-library skills don't error.
     let again = consolidate(&registry, &manifest, &proj, None, false, true).unwrap();
-    assert!(again.iter().any(|c| c.name == "figma" && c.already_home));
+    assert!(again
+        .skills
+        .iter()
+        .any(|c| c.name == "figma" && c.already_home));
     assert!(lib_skills.join("figma/helper.py").is_file());
 }
 
@@ -110,7 +113,7 @@ fn consolidate_dry_run_writes_nothing() {
 
     let registry = Registry::load().unwrap();
     let report = consolidate(&registry, &manifest, &proj, None, false, false).unwrap();
-    assert!(report.iter().any(|c| c.name == "figma"));
+    assert!(report.skills.iter().any(|c| c.name == "figma"));
 
     // No files, no library index, no symlink change.
     assert!(!home.join(".agentstack/lib/skills/figma").exists());
@@ -151,6 +154,7 @@ fn consolidate_preserves_inline_manifest_definition() {
     assert!(m.contains("./skills/figma"));
     // ...and the override is reported.
     assert!(report
+        .skills
         .iter()
         .any(|c| c.name == "figma" && c.inline_override));
 }
@@ -185,4 +189,85 @@ fn consolidate_collision_fails_without_replace() {
     consolidate(&registry, &manifest, &proj, None, true, true).unwrap();
     let body = fs::read_to_string(lib_home.join("skills/figma/SKILL.md")).unwrap();
     assert_eq!(body, "# figma\n");
+}
+
+/// A dead symlink and a dir without SKILL.md are skipped, but the report must
+/// SAY so — silently dropping them reads as "my skills weren't migrated".
+#[test]
+fn consolidate_reports_skipped_broken_links_and_non_skills() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (home, proj, manifest) = setup(tmp.path());
+
+    // A dead symlink in Claude's skills dir (its target was never created)…
+    let claude_skills = home.join(".claude/skills");
+    fs::create_dir_all(&claude_skills).unwrap();
+    let gone = home.join(".agents/skills/find-skills");
+    std::os::unix::fs::symlink(&gone, claude_skills.join("find-skills")).unwrap();
+    // …and a real directory without a SKILL.md in Codex's.
+    fs::create_dir_all(home.join(".codex/skills/notes")).unwrap();
+
+    let registry = Registry::load().unwrap();
+    let report = consolidate(&registry, &manifest, &proj, None, false, false).unwrap();
+
+    // The valid skill still consolidates.
+    assert!(report.skills.iter().any(|c| c.name == "figma"));
+
+    // The dead link is reported with its target and origin CLI.
+    let broken = report
+        .skipped
+        .iter()
+        .find(|s| s.name == "find-skills")
+        .expect("dead link reported");
+    assert!(broken.broken);
+    assert_eq!(broken.cli, "claude-code");
+    assert_eq!(broken.target.as_deref(), Some(gone.as_path()));
+
+    // The SKILL.md-less dir is reported as skipped, not broken.
+    let notes = report
+        .skipped
+        .iter()
+        .find(|s| s.name == "notes")
+        .expect("non-skill dir reported");
+    assert!(!notes.broken);
+    assert_eq!(notes.cli, "codex");
+}
+
+/// When EVERY discovered entry is a dead link, consolidate must not claim
+/// "no skills found" — it returns the skipped entries so the command can
+/// explain what it saw and why nothing moved (the real-world pi case).
+#[test]
+fn consolidate_only_broken_links_returns_skipped_not_error() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    // Two dead links, nothing else, in Pi's skills dir.
+    let pi_skills = home.join(".pi/agent/skills");
+    fs::create_dir_all(&pi_skills).unwrap();
+    for name in ["find-skills", "playwright-cli"] {
+        std::os::unix::fs::symlink(home.join(".agents/skills").join(name), pi_skills.join(name))
+            .unwrap();
+    }
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    let manifest = proj.join("agentstack.toml");
+    fs::write(&manifest, "version = 1\n[targets]\ndefault = [\"pi\"]\n").unwrap();
+
+    let registry = Registry::load().unwrap();
+    let report = consolidate(&registry, &manifest, &proj, None, false, false).unwrap();
+    assert!(report.skills.is_empty());
+    let skipped: Vec<(&str, &str)> = report
+        .skipped
+        .iter()
+        .map(|s| (s.cli.as_str(), s.name.as_str()))
+        .collect();
+    assert_eq!(
+        skipped,
+        vec![("pi", "find-skills"), ("pi", "playwright-cli")]
+    );
+    assert!(report.skipped.iter().all(|s| s.broken));
 }

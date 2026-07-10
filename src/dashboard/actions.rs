@@ -459,7 +459,7 @@ pub fn consolidate_skills(manifest_dir: Option<&Path>, names: &[String]) -> Resu
         false,
         true,
     )?;
-    Ok(report.len())
+    Ok(report.skills.len())
 }
 
 /// Adopt a skill already present on disk (discovered in a CLI's skills dir) into

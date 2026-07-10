@@ -19,8 +19,13 @@ pub fn run(args: &ConsolidateArgs, manifest_dir: Option<&Path>) -> Result<()> {
             for sk in found {
                 any = true;
                 let kind = if sk.is_symlink { "link" } else { "dir " };
+                let note = if sk.broken {
+                    format!(" {}", "(target missing)".red())
+                } else {
+                    String::new()
+                };
                 println!(
-                    "  {} {:30} {} {}",
+                    "  {} {:30} {} {}{note}",
                     desc.id.dimmed(),
                     sk.name.bold(),
                     kind.dimmed(),
@@ -49,7 +54,7 @@ pub fn run(args: &ConsolidateArgs, manifest_dir: Option<&Path>) -> Result<()> {
         args.write,
     )?;
 
-    for c in &report {
+    for c in &report.skills {
         let where_ = c.linked_into.join(", ");
         if c.already_home {
             println!(
@@ -78,6 +83,44 @@ pub fn run(args: &ConsolidateArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
 
+    // What was found but left behind — a dead link otherwise reads as "my
+    // skills weren't migrated" with nothing saying why. Printed in dry-run and
+    // write modes alike.
+    let broken: Vec<_> = report.skipped.iter().filter(|s| s.broken).collect();
+    let no_skill_md: Vec<_> = report.skipped.iter().filter(|s| !s.broken).collect();
+    if !broken.is_empty() {
+        println!(
+            "\n{} skipped {} broken link(s):",
+            "⚠".yellow(),
+            broken.len()
+        );
+        for s in &broken {
+            let target = s.target.as_ref().unwrap_or(&s.entry);
+            println!(
+                "  {}: {} → {} (target missing)",
+                s.cli.dimmed(),
+                s.name.bold(),
+                target.display()
+            );
+        }
+        println!("  remove the dead link(s) or reinstall the skill(s) they point at");
+    }
+    if !no_skill_md.is_empty() {
+        println!(
+            "\n{} skipped {} dir(s) without SKILL.md:",
+            "⚠".yellow(),
+            no_skill_md.len()
+        );
+        for s in &no_skill_md {
+            println!(
+                "  {}: {} ({})",
+                s.cli.dimmed(),
+                s.name.bold(),
+                s.entry.display().to_string().dimmed()
+            );
+        }
+    }
+
     let verb = if args.write {
         "Consolidated"
     } else {
@@ -85,9 +128,12 @@ pub fn run(args: &ConsolidateArgs, manifest_dir: Option<&Path>) -> Result<()> {
     };
     println!(
         "\n{verb} {} skill(s) into {}.",
-        report.len(),
+        report.skills.len(),
         crate::util::paths::lib_home().join("skills").display()
     );
+    if report.skills.is_empty() {
+        return Ok(());
+    }
     if args.write {
         println!("Originals are now symlinks; backups are in ~/.agentstack/backups/skills/.");
         println!("Skills are referenced by name from the library (`agentstack lib list`).");
