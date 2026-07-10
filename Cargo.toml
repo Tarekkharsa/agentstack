@@ -1,50 +1,8 @@
-[package]
-name = "agentstack"
-version = "0.8.1"
-edition = "2021"
-rust-version = "1.80"
-description = "One portable manifest, every agent CLI. Manage MCP servers + skills across Claude Code, Codex, and more."
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/Tarekkharsa/agentstack"
-homepage = "https://github.com/Tarekkharsa/agentstack"
-readme = "README.md"
-keywords = ["mcp", "cli", "claude", "codex", "agents"]
-categories = ["command-line-utilities", "development-tools"]
-exclude = ["/.github", "/tests/snapshots", "/packaging", "/agentstack-PLAN.md", "/install.sh"]
+[workspace]
+resolver = "2"
+members = ["crates/cli"]
 
-[[bin]]
-name = "agentstack"
-path = "src/main.rs"
-
-[dependencies]
-clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-sha2 = "0.10"
-toml = { version = "0.8", features = ["preserve_order"] }
-toml_edit = "0.22"
-serde_yaml = "0.9"
-include_dir = "0.7"
-indexmap = { version = "2", features = ["serde"] }
-keyring = "2"
-rpassword = "7"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-age = "0.10"
-tiny_http = "0.12"
-dirs = "5"
-anyhow = "1"
-thiserror = "1"
-regex = "1"
-owo-colors = "4"
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[dev-dependencies]
-insta = { version = "1", features = ["yaml"] }
-assert_fs = "1"
-tempfile = "3"
-
+# Profiles only take effect at the workspace root.
 [profile.release]
 strip = true
 lto = "thin"

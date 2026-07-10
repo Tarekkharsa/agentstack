@@ -7,7 +7,7 @@ use clap::CommandFactory;
 
 #[test]
 fn every_subcommand_is_documented_in_the_reference() {
-    let reference = include_str!("../docs/reference.md");
+    let reference = include_str!("../../../docs/reference.md");
     let section = reference
         .split("## All commands")
         .nth(1)
