@@ -16,6 +16,9 @@ per machine, so the file is safe to commit and share.
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
 ```
 
+The installer verifies the release tarball against the `checksums.txt`
+published with each release before installing.
+
 Or from a checkout:
 
 ```sh
@@ -208,7 +211,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@main   # or pin a release tag
+  - uses: Tarekkharsa/agentstack@v0.5.0   # pin a release tag, not @main
 ```
 
 ## The trust gate — clone anyone's repo, safely

@@ -40,14 +40,37 @@ have tar || err "tar is required"
 
 asset="agentstack-${target}.tar.gz"
 if [ "$VERSION" = "latest" ]; then
-  url="https://github.com/${REPO}/releases/latest/download/${asset}"
+  base="https://github.com/${REPO}/releases/latest/download"
 else
-  url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
+  base="https://github.com/${REPO}/releases/download/${VERSION}"
 fi
 say "Downloading ${asset} (${VERSION}) …"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-curl -fsSL "$url" -o "$tmp/$asset" || err "download failed: $url"
+curl -fsSL "$base/$asset" -o "$tmp/$asset" || err "download failed: $base/$asset"
+
+# Verify the tarball against the release's checksums.txt.
+if have sha256sum; then
+  sha256() { sha256sum "$1" | awk '{print $1}'; }
+elif have shasum; then
+  sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+else
+  err "sha256sum or shasum is required to verify the download"
+fi
+curl -fsSL "$base/checksums.txt" -o "$tmp/checksums.txt" \
+  || err "checksums.txt not found for this release: $base/checksums.txt
+Releases before v0.6.0 were published without checksums; pass a newer AGENTSTACK_VERSION."
+expected="$(awk -v a="$asset" '$2 == a {print $1}' "$tmp/checksums.txt")"
+[ -n "$expected" ] || err "no entry for $asset in checksums.txt"
+actual="$(sha256 "$tmp/$asset")"
+if [ "$actual" != "$expected" ]; then
+  err "sha256 mismatch for $asset
+  expected: $expected
+  actual:   $actual
+The download may be corrupted or tampered with. Not installing."
+fi
+say "Verified sha256: $actual"
+
 tar xzf "$tmp/$asset" -C "$tmp"
 install -m 0755 "$tmp/agentstack-${target}/agentstack" "$PREFIX/agentstack"
 
