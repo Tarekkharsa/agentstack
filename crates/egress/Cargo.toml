@@ -1,0 +1,20 @@
+[package]
+name = "agentstack-egress"
+version = "0.8.1"
+edition = "2021"
+rust-version = "1.80"
+description = "agentstack egress proxy enforcement: CONNECT/SNI parsing + per-host policy decisions (Phase 2)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Tarekkharsa/agentstack"
+publish = false
+
+# NOTE: this crate is the *enforcement core* only — the pure, fully-tested
+# decision logic a forward proxy needs (CONNECT-target + TLS-SNI parsing, and
+# the per-host policy decision that emits recorder events). The async proxy
+# SERVER that wires this to real sockets (tokio/hyper — rule 6 confines them
+# here) is the supervised 2.2 increment; tokio is deliberately NOT a dependency
+# yet, so everything in this crate is verifiable without a network or Docker.
+[dependencies]
+agentstack-core = { path = "../core" }
+agentstack-policy = { path = "../policy" }
+agentstack-recorder = { path = "../recorder" }

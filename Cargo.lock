@@ -135,6 +135,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentstack-egress"
+version = "0.8.1"
+dependencies = [
+ "agentstack-core",
+ "agentstack-policy",
+ "agentstack-recorder",
+]
+
+[[package]]
 name = "agentstack-policy"
 version = "0.8.1"
 dependencies = [
