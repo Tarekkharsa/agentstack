@@ -42,6 +42,25 @@ done
 /// A server that starts but never answers anything — the timeout fixture.
 const HANG_FIXTURE: &str = "#!/bin/sh\nexec sleep 3600\n";
 
+/// A server whose one tool (`where`) reports the directory it runs in — the
+/// fixture for cwd anchoring.
+const CWD_FIXTURE: &str = r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"cwd","version":"0"}}}\n' "$id"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"where","description":"Report the working directory.","inputSchema":{"type":"object","properties":{}}}]}}\n' "$id"
+      ;;
+    *'"method":"tools/call"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"cwd:%s"}]}}\n' "$id" "$(pwd)"
+      ;;
+  esac
+done
+"#;
+
 fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
     let path = dir.join(name);
     std::fs::write(&path, body).unwrap();
@@ -139,6 +158,67 @@ fn stdio_round_trip_env_secrets_and_group_kill() {
         std::thread::sleep(Duration::from_millis(50));
     }
     std::env::remove_var("FIX_SECRET");
+}
+
+/// Ask the `where` tool for the child's working directory, canonicalized (so
+/// macOS's `/tmp` → `/private/tmp` symlink doesn't fail the comparison).
+fn reported_cwd(gw: &Gateway, tool: &str) -> PathBuf {
+    let res = gw
+        .try_call(tool, &json!({}))
+        .expect("routed")
+        .expect("call ok");
+    let text = call_text(&res);
+    let dir = text.strip_prefix("cwd:").unwrap_or_else(|| {
+        panic!("unexpected tool output: {text}");
+    });
+    PathBuf::from(dir).canonicalize().unwrap()
+}
+
+#[test]
+fn stdio_spawns_in_project_root_so_relative_args_resolve() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    setup_home(&tmp.path().join("home"));
+    let proj = tmp.path().join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    write_script(&proj, "cwdfix.sh", CWD_FIXTURE);
+    // A *relative* script path: it only resolves if the child is spawned from
+    // the manifest's project root — the test process itself runs elsewhere.
+    write_manifest(
+        &proj,
+        "[servers.here]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"./cwdfix.sh\"]\n",
+    );
+
+    let gw = Gateway::from_manifest(Some(&proj));
+    assert_eq!(
+        reported_cwd(&gw, "here__where"),
+        proj.canonicalize().unwrap(),
+        "child must run in the manifest's project root, not the gateway's cwd"
+    );
+}
+
+#[test]
+fn stdio_manifest_cwd_anchors_the_child_relative_to_project_root() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    setup_home(&tmp.path().join("home"));
+    let proj = tmp.path().join("proj");
+    let srv = proj.join("srv");
+    std::fs::create_dir_all(&srv).unwrap();
+    write_script(&srv, "cwdfix.sh", CWD_FIXTURE);
+    // `cwd = "srv"` is relative to the project root; the relative script path
+    // then resolves against that cwd, matching the rendered-config contract.
+    write_manifest(
+        &proj,
+        "[servers.sub]\ntype = \"stdio\"\ncwd = \"srv\"\ncommand = \"/bin/sh\"\nargs = [\"./cwdfix.sh\"]\n",
+    );
+
+    let gw = Gateway::from_manifest(Some(&proj));
+    assert_eq!(
+        reported_cwd(&gw, "sub__where"),
+        srv.canonicalize().unwrap(),
+        "child must run in the manifest-declared cwd"
+    );
 }
 
 #[test]

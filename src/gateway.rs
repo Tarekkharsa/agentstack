@@ -82,6 +82,11 @@ struct StdioTransport {
     command: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
+    /// Working directory the child is spawned in: the server's manifest `cwd`
+    /// (relative paths anchor at the project root) or the project root itself.
+    /// Never the gateway's own cwd — that depends on where the client launched
+    /// `agentstack mcp`, so relative commands/args would resolve unpredictably.
+    cwd: std::path::PathBuf,
     child: RefCell<Option<StdioChild>>,
 }
 
@@ -141,6 +146,7 @@ impl StdioTransport {
         let mut cmd = std::process::Command::new(&self.command);
         cmd.args(&self.args)
             .envs(self.env.iter().cloned())
+            .current_dir(&self.cwd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             // The child's stderr flows to ours: `agentstack mcp` keeps the
@@ -159,7 +165,7 @@ impl StdioTransport {
         }
         let mut proc = cmd
             .spawn()
-            .with_context(|| format!("spawning '{}'", self.command))?;
+            .with_context(|| format!("spawning '{}' in {}", self.command, self.cwd.display()))?;
         let stdin = Some(proc.stdin.take().expect("piped stdin"));
         let stdout = proc.stdout.take().expect("piped stdout");
         let (tx, rx) = std::sync::mpsc::channel();
@@ -254,6 +260,7 @@ impl Upstream {
         command: String,
         args: Vec<String>,
         env: Vec<(String, String)>,
+        cwd: std::path::PathBuf,
         unresolved: Vec<String>,
     ) -> Self {
         Self {
@@ -263,6 +270,7 @@ impl Upstream {
                 command,
                 args,
                 env,
+                cwd,
                 child: RefCell::new(None),
             }),
             initialized: RefCell::new(false),
@@ -490,9 +498,17 @@ impl Gateway {
                             .iter()
                             .map(|(k, v)| (k.clone(), sub(v, &mut unresolved)))
                             .collect();
+                        // Manifest `cwd` (relative paths anchor at the project
+                        // root — `join` keeps absolute ones as-is), defaulting
+                        // to the project root. Mirrors what a rendered config
+                        // gives a harness, whose own cwd is the project root.
+                        let cwd = match &s.cwd {
+                            Some(c) => ctx.dir.join(sub(c, &mut unresolved)),
+                            None => ctx.dir.clone(),
+                        };
                         unresolved.sort();
                         unresolved.dedup();
-                        Upstream::stdio(name.clone(), command, args, env, unresolved)
+                        Upstream::stdio(name.clone(), command, args, env, cwd, unresolved)
                     }
                 };
                 upstreams.push(up);
