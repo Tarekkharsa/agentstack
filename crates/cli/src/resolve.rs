@@ -355,24 +355,27 @@ pub fn server_lock_status(
                 error: e.to_string(),
             },
         },
-        Ok(resolved) => {
-            let status = match lock.get_server(name) {
-                None => ServerLockStatus::MissingLockEntry,
-                Some(entry) if entry.checksum != resolved.checksum => {
-                    ServerLockStatus::ChecksumDrift {
-                        locked: entry.checksum.clone(),
-                        current: resolved.checksum.clone(),
-                    }
-                }
-                Some(_) => ServerLockStatus::Matches,
-            };
-            ServerLockReport {
-                name: name.to_string(),
-                origin: Some(resolved.origin),
-                provenance: resolved.provenance,
-                status,
-            }
-        }
+        Ok(resolved) => ServerLockReport {
+            name: name.to_string(),
+            origin: Some(resolved.origin),
+            provenance: resolved.provenance.clone(),
+            status: classify_server(name, &resolved.checksum, lock),
+        },
+    }
+}
+
+/// Compare an **already-resolved** server definition digest to its lockfile
+/// pin. Pure — no filesystem, no re-resolution — so use-time gates can verify
+/// the exact resolved set they are about to act on (no re-resolve between
+/// check and use).
+pub fn classify_server(name: &str, current_checksum: &str, lock: &Lock) -> ServerLockStatus {
+    match lock.get_server(name) {
+        None => ServerLockStatus::MissingLockEntry,
+        Some(entry) if entry.checksum != current_checksum => ServerLockStatus::ChecksumDrift {
+            locked: entry.checksum.clone(),
+            current: current_checksum.to_string(),
+        },
+        Some(_) => ServerLockStatus::Matches,
     }
 }
 
@@ -451,30 +454,38 @@ pub fn skill_lock_status(
                 error: e.to_string(),
             },
         },
-        Ok(resolved) => {
-            let status = match lock.get(name) {
-                None => SkillLockStatus::MissingLockEntry,
-                Some(entry) if entry.checksum != resolved.checksum => {
-                    SkillLockStatus::ChecksumDrift {
-                        locked: entry.checksum.clone(),
-                        current: resolved.checksum.clone(),
-                    }
-                }
-                Some(entry) => match (&entry.rev, &resolved.rev) {
-                    (Some(l), Some(c)) if l != c => SkillLockStatus::RevDrift {
-                        locked: l.clone(),
-                        current: c.clone(),
-                    },
-                    _ => SkillLockStatus::Matches,
-                },
-            };
-            SkillLockReport {
-                name: name.to_string(),
-                origin: Some(resolved.origin),
-                provenance: resolved.provenance.clone(),
-                status,
-            }
-        }
+        Ok(resolved) => SkillLockReport {
+            name: name.to_string(),
+            origin: Some(resolved.origin),
+            provenance: resolved.provenance.clone(),
+            status: classify_skill(name, &resolved.checksum, resolved.rev.as_deref(), lock),
+        },
+    }
+}
+
+/// Compare an **already-resolved** skill (content checksum + optional git rev)
+/// to its lockfile pin. Pure — no filesystem, no re-resolution — so use-time
+/// gates can verify the exact resolved set they are about to materialize.
+/// Checksum drift takes precedence over rev drift.
+pub fn classify_skill(
+    name: &str,
+    current_checksum: &str,
+    current_rev: Option<&str>,
+    lock: &Lock,
+) -> SkillLockStatus {
+    match lock.get(name) {
+        None => SkillLockStatus::MissingLockEntry,
+        Some(entry) if entry.checksum != current_checksum => SkillLockStatus::ChecksumDrift {
+            locked: entry.checksum.clone(),
+            current: current_checksum.to_string(),
+        },
+        Some(entry) => match (entry.rev.as_deref(), current_rev) {
+            (Some(l), Some(c)) if l != c => SkillLockStatus::RevDrift {
+                locked: l.to_string(),
+                current: c.to_string(),
+            },
+            _ => SkillLockStatus::Matches,
+        },
     }
 }
 
