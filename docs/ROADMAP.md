@@ -9,6 +9,37 @@ trust gate, policy, audit log, secrets, and all 13 adapters. Phases 0–1 are
 external users — breaking changes to formats, paths, and CLI surface are free.
 No migration shims.
 
+## Session types — supervision policy
+
+Classify every piece of work before starting it. The split is about how a
+mistake gets caught: machine-checkable work can run long and unattended;
+security-semantic work gets short sessions and line-by-line human review.
+
+**Long-run eligible** (large unattended sessions are fine — correctness is
+machine-checkable or review is cheap):
+
+- Adapter coverage for additional agent CLIs, with conformance tests
+- Expanding the proptest suites (more generators, more invariant instances)
+- The Phase 2 malicious-repo demo PoC
+- Bundle round-trip conformance tests
+- Documentation
+- The run-report viewer (Phase 3)
+
+**Supervised only** (short sessions, plan-first, maintainer reviews line by
+line):
+
+- Anything touching trust granting
+- Policy composition / the intersection engine
+- Secret resolution
+- Digest computation
+- The `adapter::render` / `resolve` seam design
+
+**Near-term order:** the adapter seam gets settled first, in a supervised
+session. After that, the next *large* session targets the demo PoC repo and
+adapter-matrix expansion — the wedge and the demo take priority over further
+foundation work, which is now closed except for what this roadmap already
+lists.
+
 ## Phase 0 — Extraction (the restructure)
 
 Step 1: convert to a virtual workspace with the whole existing crate moved to
