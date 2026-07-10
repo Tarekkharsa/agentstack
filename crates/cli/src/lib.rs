@@ -19,6 +19,8 @@ pub mod footprint;
 pub mod gateway;
 pub mod history;
 pub mod library;
+// TODO(phase-1): re-export shims — migrate callers to agentstack_core:: paths
+// and drop these, so the crate graph (not cli) is what exposes core types.
 pub use agentstack_core::lock;
 pub mod manifest;
 pub mod mcp;

@@ -170,6 +170,7 @@ impl SecretSources {
     }
 }
 
+// TODO(phase-1): shim — point callers at agentstack_core::refs and drop.
 pub use agentstack_core::refs::{is_ref_name, refs_in};
 
 /// Process environment variables (`$NAME`).
