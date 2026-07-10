@@ -98,11 +98,9 @@
     display: inline-flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em;
   }
   .wordmark:hover { text-decoration: none; }
-  .glyph {
-    width: 22px; height: 22px; border-radius: 6px; flex: none;
-    background: var(--accent); color: var(--accent-ink);
-    display: grid; place-items: center; font-size: 0.72rem; font-weight: 700;
-    box-shadow: var(--shadow-sm);
+  .wordmark .mark {
+    height: 26px; width: auto; flex: none; display: block;
+    filter: drop-shadow(0 1px 1.5px rgba(20,24,28,0.18));
   }
   .bar nav { margin-left: auto; display: flex; align-items: center; gap: 1.15rem; flex-wrap: wrap; }
   .bar nav a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
@@ -299,7 +297,7 @@
 
 <header class="site" id="site-header">
   <div class="bar">
-    <a class="wordmark" href="./"><span class="glyph" aria-hidden="true">as</span>agentstack</a>
+    <a class="wordmark" href="./"><svg class="mark" viewBox="24 18 72 85" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="navTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F5A968"/><stop offset="1" stop-color="#E7864A"/></linearGradient></defs><path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/><path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/><path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/><path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/><path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/><path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/><path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#navTop)"/><path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/><path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/><path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/></svg>agentstack</a>
     <nav aria-label="Project links">
       <a class="refline" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">reference</a>
       <a href="library.html" aria-current="page">library&nbsp;guide</a>
