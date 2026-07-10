@@ -236,15 +236,23 @@ stderr and **fails open** to project-only policy (failing closed would brick
 every project over one bad TOML edit) — `doctor` flags that state reliably,
 since harnesses often swallow stderr.
 
-### Call audit log
+### Call log
 
 Every tool call the gateway brokers (MCP proxy and code-mode alike) appends to
-`~/.agentstack/audit/calls.jsonl`: timestamp, run id (when launched via
-`agentstack run`), server, tool, **argument digest** (never values), outcome
-(`ok`/`error`/`denied`), latency. Summarize with `agentstack audit --calls
-[--since <days>] [--json]`; the dashboard's Runs panel shows each run's trust
-footprint and an all-runs view. Best-effort and size-rotated; logging can
-never fail a call.
+`~/.agentstack/audit/calls.jsonl` (created `0600`, dir `0700`): timestamp, run
+id (when launched via `agentstack run`), server, tool, **keyed argument
+digest** (never values — keyed with a per-machine secret so an exfiltrated log
+can't confirm guessed arguments), outcome (`ok`/`error`/`denied`), latency,
+and a detail that is either the policy rule (denials) or a **fixed error
+class** (failures) — upstream error text is never written, so a malicious
+server can't inject content into the log. Summarize with `agentstack audit
+--calls [--since <days>] [--json]`; the dashboard's Runs panel shows each
+run's trust footprint and an all-runs view.
+
+Honest scope: this is best-effort local **diagnostics** (logging can never
+fail a call; size-rotated at ~5 MB × 2). It is not durable or tamper-evident —
+any process running as your user can edit it. Treat it as the input to
+`analyze`/`optimize` and incident triage, not as forensic evidence.
 
 ### Content scanning and `audit`
 
