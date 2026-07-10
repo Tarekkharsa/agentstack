@@ -1,6 +1,6 @@
 [package]
 name = "agentstack"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.80"
 description = "One portable manifest, every agent CLI. Manage MCP servers + skills across Claude Code, Codex, and more."
