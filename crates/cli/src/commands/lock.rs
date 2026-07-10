@@ -27,6 +27,12 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
 
+    // Instructions are manifest-global, not profile-scoped: pin them
+    // regardless of the profile selection (and even with zero profiles). The
+    // lock command is strict — an unreadable fragment errors, stale pins for
+    // undeclared names are pruned.
+    let instructions = record_instruction_pins(&ctx.dir, manifest, true)?;
+
     let profiles: Vec<String> = match &args.profile {
         Some(p) => {
             manifest
@@ -38,7 +44,16 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         None => manifest.profiles.keys().cloned().collect(),
     };
     if profiles.is_empty() {
-        println!("Manifest defines no profiles — nothing to lock.");
+        if instructions > 0 {
+            println!(
+                "{} pinned {instructions} instruction(s) in {}",
+                "✓".green(),
+                Lock::path(&ctx.dir).display()
+            );
+            println!("  manifest defines no profiles — no skills or servers to pin.");
+        } else {
+            println!("Manifest defines no profiles — nothing to lock.");
+        }
         return Ok(());
     }
 
@@ -51,17 +66,69 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     record_lock(&ctx.dir, &skills, &servers, manifest, &library)?;
 
     println!(
-        "{} pinned {} skill(s) + {} server(s) from {} profile(s) in {}",
+        "{} pinned {} skill(s) + {} server(s) from {} profile(s) + {} instruction(s) in {}",
         "✓".green(),
         skills.len(),
         servers.len(),
         profiles.len(),
+        instructions,
         Lock::path(&ctx.dir).display()
     );
     println!(
         "  no configs rendered, no skills materialized — that stays `agentstack use <profile> --write`."
     );
     Ok(())
+}
+
+/// Digest every project-declared instruction fragment and pin it in the lock.
+/// Machine-layer (`from_user_layer`) fragments never pin — they are the user's
+/// own machine content, not repo bytes under review. Returns how many pinned.
+///
+/// `strict` (the `agentstack lock` command): an unreadable fragment is an
+/// error (can't pin what can't be read), and pins for names no longer declared
+/// are pruned. Non-strict (`apply --write` / `instructions --write` first-pin
+/// recording): unreadable fragments are skipped — the compile machinery
+/// already reports and blocks them per target — and nothing is pruned.
+pub(crate) fn record_instruction_pins(
+    dir: &Path,
+    manifest: &Manifest,
+    strict: bool,
+) -> Result<usize> {
+    let mut lock = Lock::load(dir)?;
+    let before = lock.clone();
+    let mut declared: Vec<String> = Vec::new();
+    let mut pinned = 0usize;
+    for (name, instr) in &manifest.instructions {
+        if instr.from_user_layer {
+            continue;
+        }
+        declared.push(name.clone());
+        let src = crate::render::instructions::fragment_source(dir, &instr.path);
+        match std::fs::read(&src) {
+            Ok(bytes) => {
+                lock.upsert_instruction(agentstack_core::lock::LockedInstruction {
+                    name: name.clone(),
+                    path: instr.path.clone(),
+                    checksum: agentstack_core::digest::sha256_hex(&bytes),
+                });
+                pinned += 1;
+            }
+            Err(e) if strict => {
+                return Err(e).with_context(|| {
+                    format!("pinning instruction '{name}': reading {}", src.display())
+                });
+            }
+            Err(_) => {}
+        }
+    }
+    if strict {
+        lock.retain_instruction_names(&declared);
+    }
+    // Don't churn the lockfile (or the trust digest) for a byte-identical pin.
+    if lock != before {
+        lock.save(dir)?;
+    }
+    Ok(pinned)
 }
 
 /// Resolve the named profiles' skill + server refs through the library-aware

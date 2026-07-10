@@ -131,6 +131,33 @@ fn render(
         will_write = false;
     }
 
+    // Fail-closed instruction drift gate (--write only): every readable
+    // project-declared fragment must still match its agentstack.lock pin
+    // before any target's instruction region is compiled. Unpinned fragments
+    // pass — the successful write records their first pin below. Missing
+    // sources keep the existing per-target blocked-write handling (reported
+    // in the loop), and machine-layer fragments are exempt: they are the
+    // user's own machine content, never pinned.
+    if will_write && !manifest.instructions.is_empty() {
+        let lock = crate::lock::Lock::load(&ctx.dir)?;
+        let statuses: Vec<_> = manifest
+            .instructions
+            .iter()
+            .filter(|(_, i)| !i.from_user_layer)
+            .map(|(n, i)| {
+                let status = crate::resolve::instruction_lock_status(n, i, &ctx.dir, &lock);
+                (n.clone(), status)
+            })
+            .filter(|(_, s)| {
+                !matches!(
+                    s,
+                    crate::resolve::InstructionLockStatus::ResolveFailed { .. }
+                )
+            })
+            .collect();
+        crate::verify::ensure_instructions_compilable(&ctx.dir.display().to_string(), &statuses)?;
+    }
+
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     if target_ids.is_empty() {
         if !quiet {
@@ -579,6 +606,13 @@ fn render(
             touched_targets.into_iter().collect(),
             backups,
         );
+        // Pin the project-declared instruction fragments that compiled. The
+        // gate above already blocked on drift, so every checksum recorded
+        // here is either unchanged or a first pin — never absorbed drift.
+        // (Non-strict: unreadable fragments were reported per target above.)
+        if manifest.instructions.values().any(|i| !i.from_user_layer) {
+            super::lock::record_instruction_pins(&ctx.dir, manifest, false)?;
+        }
     }
 
     if will_write

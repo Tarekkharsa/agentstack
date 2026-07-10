@@ -21,6 +21,30 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
+    // Same fail-closed drift gate as `apply --write`: readable project
+    // fragments must match their lock pins before compiling; unpinned passes
+    // (the write records the first pin below); missing sources keep the
+    // per-target blocked-write handling; machine-layer fragments are exempt.
+    if args.write {
+        let lock = crate::lock::Lock::load(&ctx.dir)?;
+        let statuses: Vec<_> = manifest
+            .instructions
+            .iter()
+            .filter(|(_, i)| !i.from_user_layer)
+            .map(|(n, i)| {
+                let status = crate::resolve::instruction_lock_status(n, i, &ctx.dir, &lock);
+                (n.clone(), status)
+            })
+            .filter(|(_, s)| {
+                !matches!(
+                    s,
+                    crate::resolve::InstructionLockStatus::ResolveFailed { .. }
+                )
+            })
+            .collect();
+        crate::verify::ensure_instructions_compilable(&ctx.dir.display().to_string(), &statuses)?;
+    }
+
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
     println!("Scope: {scope}");
     if let Some(up) = &ctx.loaded.user_path {
@@ -95,6 +119,11 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     println!();
     if args.write {
+        // Record first pins for the readable project fragments (the gate
+        // above blocked on drift, so nothing recorded here absorbed a change).
+        if manifest.instructions.values().any(|i| !i.from_user_layer) {
+            super::lock::record_instruction_pins(&ctx.dir, manifest, false)?;
+        }
         println!("Updated {changed} instruction file(s).");
     } else {
         println!(
