@@ -867,9 +867,15 @@ fn run_checks(
         }
     }
 
-    if !manifest.policy.is_empty() {
+    // Project policy is optional; the machine layer applies either way, so the
+    // "Policy" section shows whenever EITHER has something to report.
+    let machine_policy = crate::manifest::machine_policy_health();
+    if !manifest.policy.is_empty() || machine_policy_reports(&machine_policy) {
         report.section("Policy");
-        check_policy(manifest, report);
+        if !manifest.policy.is_empty() {
+            check_policy(manifest, report);
+        }
+        check_machine_policy(machine_policy, report);
     }
 
     if args.live {
@@ -1063,6 +1069,36 @@ fn check_server_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Re
     }
 }
 
+/// A machine `[policy.tools]` deny keyed to a specific server *name* can be
+/// dodged: the rule binds to the name the repo chose, so a repo that renames
+/// its server escapes it. The `"*"` key is rename-proof — it constrains every
+/// server whatever a manifest calls it. Returns one advisory per named deny
+/// that has no identical `"*"` companion. Pure, so it is unit-testable without
+/// a `Report`.
+fn rename_dodgeable_denies(policy: &crate::manifest::Policy) -> Vec<String> {
+    let wildcard_denies: std::collections::HashSet<&str> = policy
+        .tools
+        .get("*")
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r.strip_prefix('!'))
+        .collect();
+    let mut out = Vec::new();
+    for (server, rules) in &policy.tools {
+        if server == "*" {
+            continue;
+        }
+        for pat in rules.iter().filter_map(|r| r.strip_prefix('!')) {
+            if !wildcard_denies.contains(pat) {
+                out.push(format!(
+                    "machine [policy.tools] deny '!{pat}' on server '{server}' can be dodged if a repo renames its server — add '!{pat}' under the \"*\" key to make it rename-proof"
+                ));
+            }
+        }
+    }
+    out
+}
+
 /// Enforce the `[policy]` block: required/forbidden capabilities + source
 /// allowlist. Violations are errors (so `doctor --ci` fails).
 fn check_policy(manifest: &Manifest, report: &mut Report) {
@@ -1124,18 +1160,41 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
             );
         }
     }
+}
+
+/// Whether the machine policy layer has anything for `doctor` to report — a
+/// non-empty `[policy.tools]`, or an unreadable machine manifest (which fails
+/// OPEN and must be surfaced). Used to decide whether the "Policy" section is
+/// warranted at all when the project declares no policy of its own.
+fn machine_policy_reports(machine: &Option<Result<crate::manifest::Policy>>) -> bool {
+    matches!(machine, Some(Ok(p)) if !p.tools.is_empty()) || matches!(machine, Some(Err(_)))
+}
+
+/// Diagnose the machine `[policy.tools]` layer. Runs regardless of whether the
+/// project declares its own `[policy]` — the machine layer is independent and
+/// applies to every project, so gating it behind a project policy would hide it
+/// exactly when a machine-only firewall is the whole setup. Takes the
+/// pre-computed health so the caller reads the machine manifest once.
+fn check_machine_policy(machine: Option<Result<crate::manifest::Policy>>, report: &mut Report) {
     // The machine layer fails OPEN when its manifest is broken (project-only
     // policy, stderr warning only) — doctor is the reliable signal for that.
-    match crate::manifest::machine_policy_health() {
+    match machine {
         None => {}
         Some(Ok(p)) if p.tools.is_empty() => {}
-        Some(Ok(p)) => report.line(
-            Level::Ok,
-            format!(
-                "machine [policy.tools] — {} server rule set(s), checked before project policy on every call",
-                p.tools.len()
-            ),
-        ),
+        Some(Ok(p)) => {
+            report.line(
+                Level::Ok,
+                format!(
+                    "machine [policy.tools] — {} server rule set(s), checked before project policy on every call",
+                    p.tools.len()
+                ),
+            );
+            // Rename-dodge lint: a named-server deny escapes a repo that
+            // renames its server; the "*" key is the rename-proof form.
+            for advisory in rename_dodgeable_denies(&p) {
+                report.line(Level::Warn, advisory);
+            }
+        }
         Some(Err(e)) => report.line(
             Level::Warn,
             format!(
@@ -1331,6 +1390,50 @@ fn check_quirks(manifest: &Manifest) -> Vec<String> {
 mod tests {
     use super::*;
     use assert_fs::prelude::*;
+
+    /// Build a machine `Policy` from `[policy.tools]` entries.
+    fn policy_tools(entries: &[(&str, &[&str])]) -> crate::manifest::Policy {
+        crate::manifest::Policy {
+            tools: entries
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn rename_dodge_lint_flags_named_deny_without_wildcard() {
+        // A named-server deny with no "*" companion is dodgeable.
+        let p = policy_tools(&[("github", &["!delete_*"])]);
+        let out = rename_dodgeable_denies(&p);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(out[0].contains("!delete_*") && out[0].contains("github"));
+    }
+
+    #[test]
+    fn rename_dodge_lint_silent_when_wildcard_covers_it() {
+        // The identical deny under "*" makes the named one rename-proof.
+        let p = policy_tools(&[("*", &["!delete_*"]), ("github", &["!delete_*"])]);
+        assert!(rename_dodgeable_denies(&p).is_empty());
+    }
+
+    #[test]
+    fn rename_dodge_lint_silent_for_wildcard_only_and_for_allows() {
+        // Wildcard-only deny: nothing to dodge.
+        assert!(rename_dodgeable_denies(&policy_tools(&[("*", &["!delete_*"])])).is_empty());
+        // Allow-only named rule: no deny to dodge.
+        assert!(rename_dodgeable_denies(&policy_tools(&[("github", &["get_*"])])).is_empty());
+    }
+
+    #[test]
+    fn rename_dodge_lint_flags_only_the_uncovered_deny() {
+        // "*" covers !delete_* but not !post_* → exactly one advisory.
+        let p = policy_tools(&[("github", &["!delete_*", "!post_*"]), ("*", &["!delete_*"])]);
+        let out = rename_dodgeable_denies(&p);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(out[0].contains("!post_*"));
+    }
 
     /// The one line under "Content scan" for a run with the given flags.
     fn scan_line(deep: bool, ci: bool, proj: &Path) -> String {
