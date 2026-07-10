@@ -63,8 +63,10 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             let Ok(req) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
-            if req.get("method").and_then(Value::as_str) == Some("tools/call") {
-                // A tool call can block on a slow upstream for up to 60s —
+            if req.get("method").and_then(Value::as_str) == Some("tools/call")
+                && is_upstream_call(&req)
+            {
+                // An upstream call can block on a slow server for up to 60s —
                 // serve it on its own thread so a parallel call to another
                 // server isn't queued behind it. Out-of-order responses are
                 // fine: JSON-RPC clients match by id.
@@ -126,7 +128,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool) -> Result<()> {
             "tools/call" => auto.ensure_gateway(),
             _ => {}
         }
-        if method == "tools/call" {
+        if method == "tools/call" && is_upstream_call(&req) {
             // Same as eager mode: a blocking upstream call gets its own
             // thread, so parallel calls to other servers aren't serialized.
             let gw = auto.gateway_arc();
@@ -158,6 +160,18 @@ fn respond(out: &std::sync::Mutex<Box<dyn Write + Send>>, frame: &Value) {
     let mut o = out.lock().unwrap_or_else(|e| e.into_inner());
     let _ = writeln!(o, "{frame}");
     let _ = o.flush();
+}
+
+/// Whether a `tools/call` targets a proxied upstream (`<server>__<tool>`) —
+/// the only long-blocking kind, and the only kind served off-thread.
+/// agentstack's own control-plane tools stay inline on the main loop: several
+/// of them mutate the manifest or session files with read-modify-write, and
+/// sequential handling is their serialization (two parallel
+/// `agentstack_add_server` calls would otherwise lose one update).
+fn is_upstream_call(req: &Value) -> bool {
+    req.pointer("/params/name")
+        .and_then(Value::as_str)
+        .is_some_and(|n| n.contains("__"))
 }
 
 /// Session state for `--auto-project`: which project this MCP session belongs
@@ -1375,6 +1389,23 @@ fn obj_to_map(v: Option<&Value>) -> IndexMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only proxied `<server>__<tool>` calls go to worker threads; agentstack's
+    /// own control-plane tools (some of which read-modify-write the manifest)
+    /// must stay serialized on the main loop.
+    #[test]
+    fn upstream_calls_are_detected_by_namespace() {
+        let call = |name: &str| {
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": { "name": name, "arguments": {} } })
+        };
+        assert!(is_upstream_call(&call("figma__get_file")));
+        assert!(!is_upstream_call(&call("agentstack_add_server")));
+        assert!(!is_upstream_call(&call("tools_search")));
+        assert!(!is_upstream_call(
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call" })
+        ));
+    }
 
     #[test]
     fn initialize_returns_server_info() {
