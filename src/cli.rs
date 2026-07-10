@@ -163,8 +163,8 @@ pub enum Command {
     /// Trust a project's manifest for the zero-files bridge (direnv-style).
     /// Until trusted, an auto-discovered project gets control-plane tools only:
     /// none of its servers are spawned or contacted, no secrets are resolved.
-    /// Trust pins the manifest's content digest — editing the manifest requires
-    /// re-trusting it.
+    /// Trust pins the content digest of the manifest layers AND the lockfile —
+    /// editing either (a `git pull`, an `agentstack lock`) requires re-trusting.
     #[command(hide = true)]
     Trust(TrustArgs),
 

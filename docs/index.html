@@ -6,16 +6,28 @@
 <title>agentstack — trust-gate, firewall, and one manifest for every agent CLI</title>
 <meta name="description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call. Define servers, skills, and instructions once; agentstack renders them into 13 agent CLIs. Secrets stay references.">
 <meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta property="og:title" content="agentstack — trust-gate, firewall, and one manifest for every agent CLI">
 <meta property="og:description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call. One manifest renders into 13 agent CLIs. Secrets stay references.">
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://tarekkharsa.github.io/agentstack/">
+<meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="agentstack — the local control plane for your AI agent CLIs">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="agentstack — trust-gate, firewall, and one manifest for every agent CLI">
+<meta name="twitter:description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call. One manifest renders into 13 agent CLIs.">
+<meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <style>
   :root {
     --paper: #FBFAF7;
     --surface: #FFFFFF;
     --ink: #1B1F24;
     --muted: #5B6570;
-    --faint: #8A929B;
+    --faint: #69727C;
     --accent: #B4540A;
     --accent-ink: #FFFFFF;
     --accent-soft: rgba(180, 84, 10, 0.10);
@@ -24,7 +36,7 @@
     --line-soft: #EFEBE3;
     --term: #14181C;
     --term-ink: #D7DEE4;
-    --term-dim: #6B7683;
+    --term-dim: #97A1AD;
     --term-green: #7CC08B;
     --term-red: #E5786B;
     --term-amber: #E0B04A;
@@ -74,6 +86,10 @@
   a:hover, a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
   ::selection { background: var(--accent-soft); }
+
+  /* Skip link: visually hidden until focused. */
+  .skip { position: absolute; left: -9999px; top: 0; z-index: 100; background: var(--accent); color: var(--accent-ink); padding: 0.5rem 0.9rem; border-radius: 0 0 var(--radius-sm) 0; }
+  .skip:focus { left: 0; }
 
   /* ---------- sticky nav ---------- */
   header {
@@ -293,8 +309,8 @@
   footer nav a:hover { color: var(--accent); }
 
   /* ---------- scroll reveal ---------- */
-  .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.6s ease, transform 0.6s ease; }
-  .reveal.in { opacity: 1; transform: none; }
+  html.js .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.6s ease, transform 0.6s ease; }
+  html.js .reveal.in, .reveal { opacity: 1; transform: none; }
   @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
 
   @media (max-width: 620px) {
@@ -306,8 +322,14 @@
     section { margin-top: 4rem; }
   }
 </style>
+<link rel="canonical" href="https://tarekkharsa.github.io/agentstack/">
+<link rel="icon" type="image/svg+xml" href="logo-mark.svg">
+<meta property="og:url" content="https://tarekkharsa.github.io/agentstack/">
+<meta property="og:image" content="https://tarekkharsa.github.io/agentstack/logo.svg">
+<meta name="twitter:card" content="summary">
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 
 <header id="site-header">
   <div class="bar">
@@ -320,15 +342,16 @@
   </div>
 </header>
 
-<main>
+<main id="main">
 
   <section id="hero" style="margin-top:3.5rem">
-    <p class="eyebrow">One binary · 13 agent CLIs</p>
-    <h1>One manifest.<br>Every agent CLI.<span class="cursor" aria-hidden="true"></span></h1>
+    <p class="eyebrow">One binary · a trust-gated MCP gateway · 13 agent CLIs</p>
+    <h1>Trust every MCP tool.<br>Run any agent.<span class="cursor" aria-hidden="true"></span></h1>
     <p class="lede">
-      Define your MCP servers, skills, and instructions once in
-      <code>.agentstack/agentstack.toml</code>. agentstack renders them into the
-      native config of 13 agent CLIs. <strong>Secrets stay references. Setups travel.</strong>
+      One local gateway <strong>trust-gates, firewalls, and logs</strong> your
+      agents' MCP calls — across Claude Code, Codex, Cursor, and ten more. The
+      same manifest renders native configs when you want files.
+      <strong>Secrets stay references. Setups travel.</strong>
     </p>
     <div class="cta">
       <a class="btn primary" href="#install">Install agentstack</a>
@@ -336,26 +359,28 @@
     </div>
 
     <div class="term">
-      <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>the everyday loop</b></div>
-      <pre><code><span class="p">$</span> agentstack init
-<span class="ok">✓</span> imported 4 servers + 2 skills from your existing CLI configs
-<span class="ok">✓</span> lifted 2 inline tokens into ${REF}s <span class="c"># stored in your OS keychain</span>
+      <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → trust → firewalled → logged</b></div>
+      <pre><code><span class="p">$</span> agentstack connect --all --write     <span class="c"># once: the gateway, in every CLI</span>
+<span class="p">$</span> git clone some-repo &amp;&amp; cd some-repo  <span class="c"># declares servers you've never seen</span>
+<span class="c">  agent session starts…</span>
+<span class="no">  ✗ untrusted — no servers spawned, no secrets resolved</span>
 
-<span class="p">$</span> agentstack bootstrap
-<span class="ok">✓</span> claude-code · codex detected
-<span class="c">⚠ secret GH_PAT unresolved  ↳ agentstack secret set GH_PAT</span>
+<span class="p">$</span> agentstack trust .                   <span class="c"># you review, then consent</span>
+<span class="c">  ▶ demo: runs `python3 ./server.py`</span>
+<span class="ok">  ✓</span> trusted at sha256:945b4b…
 
-<span class="p">$</span> agentstack apply
-<span class="c">→ preview of every CLI's config changes … confirm to write</span>
-<span class="ok">✓</span> rendered to claude-code, codex — backups taken, state tracked</code></pre>
+<span class="c">  agent → demo.echo        </span><span class="ok">✓ ok</span><span class="c">      brokered, logged</span>
+<span class="c">  agent → demo.delete_all  </span><span class="no">✗ denied</span><span class="c">  YOUR machine policy</span></code></pre>
     </div>
     <p class="small muted">
-      Lost? Run <code>agentstack</code> with no arguments — it names the one next
-      step for the directory you're in.
+      Two ways in: the <a href="#trust">runtime control plane</a>
+      (<code>connect → trust →</code> firewalled calls, zero files copied) — or
+      <a href="#start">portable configuration</a> (<code>init → apply</code>
+      renders every CLI's native config from one manifest).
     </p>
 
     <div class="clis">
-      <p class="lbl">Renders into the native config of</p>
+      <p class="lbl">Serves — and renders native config for —</p>
       <div class="chips">
         <span class="chip">Claude Code</span>
         <span class="chip">Codex CLI</span>
@@ -415,7 +440,7 @@
       </li>
     </ol>
     <figure>
-      <img src="firstrun.gif" alt="Terminal recording of agentstack init, bootstrap, and apply on a fresh machine" loading="lazy">
+      <img src="firstrun.gif" alt="Terminal recording of agentstack init, bootstrap, and apply on a fresh machine" width="691" height="490" loading="lazy">
       <figcaption>The first run, end to end.</figcaption>
     </figure>
   </section>
@@ -476,13 +501,13 @@ default = ["claude-code", "codex"]</code></pre>
 <span class="c">  every call → ~/.agentstack/audit/calls.jsonl  (tool · outcome · latency)</span></code></pre>
     </div>
     <figure>
-      <img src="trust-gate.gif" alt="Terminal recording: an untrusted repo is inert, you review and trust it, its tool is brokered and logged, a firewalled tool is refused, and a library sync carrying a literal secret is blocked until it becomes a ${REF}" loading="lazy">
+      <img src="trust-gate.gif" alt="Terminal recording: an untrusted repo is inert, you review and trust it, its tool is brokered and logged, a firewalled tool is refused, and a library sync carrying a literal secret is blocked until it becomes a ${REF}" width="860" height="686" loading="lazy">
       <figcaption>Clone → inert → review → trust → brokered → firewalled → audited — and secrets never travel. Runnable: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/trust-gate-demo.sh"><code>docs/trust-gate-demo.sh</code></a>.</figcaption>
     </figure>
     <p class="small muted">
-      No vendor or agent framework tells this story: an untrusted repo's agents
-      can touch nothing you didn't review, and every capability call is
-      firewallable and logged. Prefer a drop-in proxy? <code>--transparent</code>
+      The whole story, in one binary: an untrusted repo's agents can touch
+      nothing you didn't review, and every capability call is firewallable
+      and logged (<a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#secrets-and-trust">the documented limits</a> say exactly what trust does and doesn't cover). Prefer a drop-in proxy? <code>--transparent</code>
       advertises every policy-filtered upstream tool straight in
       <code>tools/list</code>, so any standard MCP client works with zero
       agentstack knowledge — the default compact mode keeps them behind one
@@ -579,7 +604,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
       </div>
     </div>
     <figure>
-      <img src="closed-loop.gif" alt="Terminal recording: install a versioned pack, apply everywhere, firewall a tool, watch the audited refusal, upgrade" loading="lazy">
+      <img src="closed-loop.gif" alt="Terminal recording: install a versioned pack, apply everywhere, firewall a tool, watch the audited refusal, upgrade" width="1060" height="739" loading="lazy">
       <figcaption>The closed loop in under a minute — pack install → apply → firewall → audited refusal → upgrade.</figcaption>
     </figure>
   </section>
@@ -598,8 +623,12 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
 </footer>
 
 <script>
+  // Progressive enhancement marker: reveal-hiding only applies with JS alive.
+  document.documentElement.classList.add("js");
+
   // Copy buttons.
   for (const btn of document.querySelectorAll(".copybtn")) {
+    btn.setAttribute("aria-live", "polite"); // announce copy feedback
     btn.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(btn.dataset.copy);

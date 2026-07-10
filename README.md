@@ -1,4 +1,4 @@
-# agentstack
+<img alt="agentstack" src="docs/logo.svg" width="380">
 
 > **A local control plane for your AI agents' MCP tools** — trust-gate,
 > firewall, and audit every tool call; define servers, skills, instructions,

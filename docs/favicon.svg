@@ -1,0 +1,22 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="agentstack">
+  <title>agentstack</title>
+  <defs>
+    <linearGradient id="fvTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F5A968"/>
+      <stop offset="1" stop-color="#E7864A"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="64" height="64" rx="14" fill="#23282E"/>
+  <g transform="translate(-5.2,-5.5) scale(0.62)">
+    <path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/>
+    <path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/>
+    <path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/>
+    <path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/>
+    <path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/>
+    <path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/>
+    <path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#fvTop)"/>
+    <path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/>
+    <path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/>
+    <path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/>
+  </g>
+</svg>

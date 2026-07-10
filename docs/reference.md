@@ -159,9 +159,12 @@ rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled `CLAUDE.md`
   injected by `agentstack run` / `session start` and reverted on exit;
   `agentstack lock` pins name refs without rendering, so `git status` stays
   silent.
-- **Zero files** — nothing generated at all. `agentstack connect` registers
-  the gateway once per harness and every **trusted** repo serves its own stack
-  at session start — see [the zero-copy bridge](#the-zero-copy-bridge---auto-project--trust).
+- **Zero-copy** — no persistent per-project provider artifacts. `agentstack
+  connect` registers the gateway once per harness (one write to each
+  harness's global config) and every **trusted** repo serves its own stack
+  live at session start; a machine-local `codemode/endpoint.json` coordinate
+  may exist for the session's duration — see
+  [the zero-copy bridge](#the-zero-copy-bridge---auto-project--trust).
 
 The managed `.gitignore` block is anchored to **outcomes, not declarations**:
 an entry exists only for a file agentstack actually wrote or still manages
@@ -841,10 +844,16 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 `search`, `stats` (`--live`), `proxy start|report` (`start`: `--port`,
 `--upstream`; `report`: `--json`),
 `secret set|get|rm|list`, `export`/`import`, `adapters` (`list|show|validate`),
-`pack init`, `plugins`,
-`dashboard`, `mcp` (`--auto-project`), `connect`/`disconnect`,
-`trust` (`--list`, `--revoke`), `codemode`, `hook`, `run`/`runs`/`kill`,
-`self link|which`.
+`pack init`, `plugins`, `setup`, `settings`,
+`dashboard`, `mcp` (`--auto-project`, `--transparent`),
+`connect`/`disconnect` (`connect`: `--all`, `--transparent`, `--write`),
+`trust` (`--list`, `--revoke` — pins the manifest layers **and lockfile**;
+re-locking re-gates), `codemode` (`--write`), `analyze` (`--json`,
+`--transcripts`), `hook`, `run`/`runs`/`kill`, `self link|which`.
+
+This inventory is checked by a test against the CLI's own command list
+(`tests/docs_commands.rs`) — a new subcommand fails CI until it's documented
+here.
 
 ## Everything shipped so far
 

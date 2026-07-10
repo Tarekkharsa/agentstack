@@ -6,13 +6,16 @@
 <title>Central library — agentstack</title>
 <meta name="description" content="One managed home for skills and MCP servers; projects select by name and stay digest-pinned. The agentstack central-library guide.">
 <meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
   :root {
     --paper: #FBFAF7;
     --surface: #FFFFFF;
     --ink: #1B1F24;
     --muted: #5B6570;
-    --faint: #8A929B;
+    --faint: #69727C;
     --accent: #B4540A;
     --accent-ink: #FFFFFF;
     --accent-soft: rgba(180, 84, 10, 0.10);
@@ -21,7 +24,7 @@
     --line-soft: #EFEBE3;
     --term: #14181C;
     --term-ink: #D7DEE4;
-    --term-dim: #6B7683;
+    --term-dim: #97A1AD;
     --term-green: #7CC08B;
     --term-red: #E5786B;
     --term-amber: #E0B04A;
@@ -71,6 +74,10 @@
   a:hover, a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
   ::selection { background: var(--accent-soft); }
+
+  /* Skip link: visually hidden until focused. */
+  .skip { position: absolute; left: -9999px; top: 0; z-index: 100; background: var(--accent); color: var(--accent-ink); padding: 0.5rem 0.9rem; border-radius: 0 0 var(--radius-sm) 0; }
+  .skip:focus { left: 0; }
 
   /* ---------- sticky nav ---------- */
   header.site {
@@ -271,8 +278,8 @@
   footer.site nav a:hover { color: var(--accent); }
 
   /* ---------- scroll reveal ---------- */
-  .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.6s ease, transform 0.6s ease; }
-  .reveal.in { opacity: 1; transform: none; }
+  html.js .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.6s ease, transform 0.6s ease; }
+  html.js .reveal.in, .reveal { opacity: 1; transform: none; }
   @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
 
   @media (max-width: 560px) {
@@ -282,8 +289,11 @@
     section { margin-top: 4rem; }
   }
 </style>
+<link rel="canonical" href="https://tarekkharsa.github.io/agentstack/library.html">
+<link rel="icon" type="image/svg+xml" href="logo-mark.svg">
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 
 <header class="site" id="site-header">
   <div class="bar">
@@ -296,7 +306,7 @@
   </div>
 </header>
 
-<main>
+<main id="main">
 
   <section id="hero" style="margin-top:3.5rem">
     <p class="eyebrow">Central library</p>
@@ -399,9 +409,14 @@ skills  = [<span class="ok">"sql-review"</span>]
 
 <span class="c"># the whole project manifest:</span>
 <span class="p">$</span> cat .agentstack/agentstack.toml
+version = 1
+
 [profiles.central]
 servers = ["kibana"]
 skills  = ["sql-review"]
+
+[targets]
+default = ["claude-code"]
 
 <span class="p">$</span> agentstack use central --write   <span class="c"># render views + pin digests</span>
 <span class="p">$</span> agentstack lock                  <span class="c"># or: pin WITHOUT rendering anything</span>
@@ -517,11 +532,11 @@ Authorization = "Bearer real-token-value"</code></pre>
     <p class="eyebrow">Field guide</p>
     <h2>Every file you might encounter</h2>
     <div class="filters" role="group" aria-label="Filter cases">
-      <button class="chip active" type="button" data-filter="all">all</button>
-      <button class="chip" type="button" data-filter="central">central</button>
-      <button class="chip" type="button" data-filter="project">project</button>
-      <button class="chip" type="button" data-filter="provider">provider view</button>
-      <button class="chip" type="button" data-filter="safety">safety</button>
+      <button class="chip active" type="button" data-filter="all" aria-pressed="true">all</button>
+      <button class="chip" type="button" data-filter="central" aria-pressed="false">central</button>
+      <button class="chip" type="button" data-filter="project" aria-pressed="false">project</button>
+      <button class="chip" type="button" data-filter="provider" aria-pressed="false">provider view</button>
+      <button class="chip" type="button" data-filter="safety" aria-pressed="false">safety</button>
     </div>
     <ul class="cases">
       <li data-case="central project"><b>Clean central project</b>
@@ -594,6 +609,7 @@ Authorization = "Bearer real-token-value"</code></pre>
   <section id="roadmap" class="reveal">
     <p class="eyebrow">Status</p>
     <h2>Implemented and next</h2>
+    <p class="small muted">As of v0.8.1 (July 2026) — the <a href="https://github.com/Tarekkharsa/agentstack/releases">releases page</a> is the source of truth.</p>
     <ul class="cases">
       <li><b class="done">Central skills + server definitions</b>
         <p>Name resolution with inline override; digest locks; doctor drift; explain provenance; the full <code>lib</code> toolbox.</p></li>
@@ -628,13 +644,17 @@ Authorization = "Bearer real-token-value"</code></pre>
 </footer>
 
 <script>
+  // Progressive enhancement marker: reveal-hiding only applies with JS alive.
+  document.documentElement.classList.add("js");
+
   // Field-guide filter chips.
   const chips = document.querySelectorAll("button.chip");
   const rows = document.querySelectorAll("[data-case]");
   for (const chip of chips) {
     chip.addEventListener("click", () => {
-      for (const c of chips) c.classList.remove("active");
+      for (const c of chips) { c.classList.remove("active"); c.setAttribute("aria-pressed", "false"); }
       chip.classList.add("active");
+      chip.setAttribute("aria-pressed", "true");
       const f = chip.dataset.filter;
       for (const row of rows) {
         row.hidden = f !== "all" && !row.dataset.case.split(" ").includes(f);
