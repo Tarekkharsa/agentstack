@@ -59,7 +59,7 @@ pub fn plan_instructions(
         if !instr.compiles_at(&desc.id, scope) {
             continue;
         }
-        let src = resolve(project_dir, &instr.path);
+        let src = fragment_source(project_dir, &instr.path);
         match fs::read_to_string(&src) {
             Ok(text) => {
                 blocks.push(text.trim_end_matches('\n').to_string());
@@ -92,7 +92,11 @@ pub fn manages_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn resolve(dir: &Path, path: &str) -> PathBuf {
+/// Anchor an instruction fragment's declared path: absolute passes through,
+/// relative joins the manifest dir. The single rule shared by the compiler
+/// above and lock-pin verification (`resolve::instruction_lock_status`) — both
+/// must read the same bytes or a pin could verify one file and compile another.
+pub fn fragment_source(dir: &Path, path: &str) -> PathBuf {
     let p = PathBuf::from(path);
     if p.is_absolute() {
         p

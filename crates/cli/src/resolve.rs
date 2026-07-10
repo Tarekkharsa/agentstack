@@ -364,6 +364,58 @@ pub fn server_lock_status(
     }
 }
 
+/// How an instruction fragment's current file bytes compare to its
+/// `agentstack.lock` pin. A strict subset of [`SkillLockStatus`]: instructions
+/// are always single local files, so the git-only variants don't apply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstructionLockStatus {
+    /// Current bytes match the locked checksum.
+    Matches,
+    /// The fragment has no entry in the lockfile yet.
+    MissingLockEntry,
+    /// Current bytes differ from the locked checksum.
+    ChecksumDrift { locked: String, current: String },
+    /// The fragment file could not be read (missing/unreadable).
+    ResolveFailed { error: String },
+}
+
+/// Compare an **already-computed** instruction checksum to its lockfile pin.
+/// Pure — same contract as [`classify_skill`]/[`classify_server`].
+pub fn classify_instruction(
+    name: &str,
+    current_checksum: &str,
+    lock: &Lock,
+) -> InstructionLockStatus {
+    match lock.get_instruction(name) {
+        None => InstructionLockStatus::MissingLockEntry,
+        Some(entry) if entry.checksum != current_checksum => InstructionLockStatus::ChecksumDrift {
+            locked: entry.checksum.clone(),
+            current: current_checksum.to_string(),
+        },
+        Some(_) => InstructionLockStatus::Matches,
+    }
+}
+
+/// Read one instruction fragment's bytes and compare them to the lock pin.
+/// The path anchors exactly like compilation does
+/// ([`crate::render::instructions::fragment_source`]) so verification and the
+/// compiler always read the same file. Machine-layer fragments
+/// (`from_user_layer`) are the caller's job to filter — they are never pinned.
+pub fn instruction_lock_status(
+    name: &str,
+    instr: &crate::manifest::Instruction,
+    manifest_dir: &Path,
+    lock: &Lock,
+) -> InstructionLockStatus {
+    let src = crate::render::instructions::fragment_source(manifest_dir, &instr.path);
+    match std::fs::read(&src) {
+        Ok(bytes) => classify_instruction(name, &agentstack_core::digest::sha256_hex(&bytes), lock),
+        Err(e) => InstructionLockStatus::ResolveFailed {
+            error: format!("reading {}: {e}", src.display()),
+        },
+    }
+}
+
 /// Compare an **already-resolved** server definition digest to its lockfile
 /// pin. Pure — no filesystem, no re-resolution — so use-time gates can verify
 /// the exact resolved set they are about to act on (no re-resolve between
@@ -519,6 +571,69 @@ mod tests {
 
     fn empty_manifest() -> Manifest {
         toml::from_str("version = 1").unwrap()
+    }
+
+    #[test]
+    fn classify_instruction_covers_every_arm() {
+        let mut lock = Lock::default();
+        lock.upsert_instruction(agentstack_core::lock::LockedInstruction {
+            name: "house".into(),
+            path: "./instructions/house.md".into(),
+            checksum: "aaaa".into(),
+        });
+        assert_eq!(
+            classify_instruction("house", "aaaa", &lock),
+            InstructionLockStatus::Matches
+        );
+        assert_eq!(
+            classify_instruction("house", "bbbb", &lock),
+            InstructionLockStatus::ChecksumDrift {
+                locked: "aaaa".into(),
+                current: "bbbb".into()
+            }
+        );
+        assert_eq!(
+            classify_instruction("style", "cccc", &lock),
+            InstructionLockStatus::MissingLockEntry
+        );
+    }
+
+    #[test]
+    fn instruction_lock_status_digests_the_anchored_file() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child("instructions/house.md")
+            .write_str("be kind\n")
+            .unwrap();
+        let instr: crate::manifest::Instruction =
+            toml::from_str("path = \"./instructions/house.md\"").unwrap();
+        let checksum = agentstack_core::digest::sha256_hex(b"be kind\n");
+        let mut lock = Lock::default();
+        lock.upsert_instruction(agentstack_core::lock::LockedInstruction {
+            name: "house".into(),
+            path: "./instructions/house.md".into(),
+            checksum,
+        });
+
+        assert_eq!(
+            instruction_lock_status("house", &instr, proj.path(), &lock),
+            InstructionLockStatus::Matches
+        );
+
+        // A byte flips → drift.
+        proj.child("instructions/house.md")
+            .write_str("be evil\n")
+            .unwrap();
+        assert!(matches!(
+            instruction_lock_status("house", &instr, proj.path(), &lock),
+            InstructionLockStatus::ChecksumDrift { .. }
+        ));
+
+        // The file vanishes → broken, never silently unpinned.
+        std::fs::remove_file(proj.child("instructions/house.md").path()).unwrap();
+        assert!(matches!(
+            instruction_lock_status("house", &instr, proj.path(), &lock),
+            InstructionLockStatus::ResolveFailed { .. }
+        ));
     }
 
     fn manifest_with_inline_skill(dir: &assert_fs::TempDir, name: &str, body: &str) -> Manifest {

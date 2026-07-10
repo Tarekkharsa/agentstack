@@ -10,7 +10,7 @@
 //! reviewed and re-trusted. Trust stays bound to content because nothing is
 //! used that doesn't match the lock the human trusted.
 
-use crate::resolve::{ServerLockStatus, SkillLockStatus};
+use crate::resolve::{InstructionLockStatus, ServerLockStatus, SkillLockStatus};
 
 /// The verdict for one capability vs its lock pin.
 ///
@@ -70,6 +70,24 @@ pub fn server_verdict(status: &ServerLockStatus) -> Verdict {
     }
 }
 
+/// Verdict for an instruction fragment's lock status. Same fail-closed rule:
+/// drift and unreadable files block; a missing pin is `Unpinned` (the write
+/// site records the first pin).
+pub fn instruction_verdict(status: &InstructionLockStatus) -> Verdict {
+    match status {
+        InstructionLockStatus::Matches => Verdict::Ok,
+        InstructionLockStatus::MissingLockEntry => Verdict::Unpinned,
+        InstructionLockStatus::ChecksumDrift { locked, current } => Verdict::Block(format!(
+            "instruction content drifted from agentstack.lock (locked {}, current {})",
+            short(locked),
+            short(current)
+        )),
+        InstructionLockStatus::ResolveFailed { error } => {
+            Verdict::Block(format!("broken ref — {error}"))
+        }
+    }
+}
+
 /// The activation gate (`use --write`, session start, dashboard): block when
 /// anything in the resolved set drifted or broke, naming every offender.
 /// `Unpinned` passes — first activation records the pin, which itself flips
@@ -90,6 +108,29 @@ pub fn ensure_activatable(
             blocked.push((name.clone(), why));
         }
     }
+    bail_blocked(&format!("activate {what}"), blocked)
+}
+
+/// The instruction-compile gate (`apply --write`, `instructions --write`):
+/// same semantics as activation — drift/broken block, unpinned passes and the
+/// write that follows records the first pin.
+pub fn ensure_instructions_compilable(
+    what: &str,
+    instructions: &[(String, InstructionLockStatus)],
+) -> anyhow::Result<()> {
+    let blocked: Vec<(String, String)> = instructions
+        .iter()
+        .filter_map(|(name, status)| match instruction_verdict(status) {
+            Verdict::Block(why) => Some((name.clone(), why)),
+            _ => None,
+        })
+        .collect();
+    bail_blocked(&format!("compile instructions for {what}"), blocked)
+}
+
+/// Shared fail-closed bail: name every offender, point at `agentstack lock`
+/// (whose byte change is what re-gates trust).
+fn bail_blocked(action: &str, blocked: Vec<(String, String)>) -> anyhow::Result<()> {
     if blocked.is_empty() {
         return Ok(());
     }
@@ -99,7 +140,7 @@ pub fn ensure_activatable(
         .map(|(name, why)| format!("  {name:width$}  {why}"))
         .collect();
     anyhow::bail!(
-        "refusing to activate {what}: {} pinned item(s) changed since agentstack.lock was written —\n{}\nReview the changes, then run `agentstack lock` to accept them (re-locking re-gates the project for auto mode).",
+        "refusing to {action}: {} pinned item(s) changed since agentstack.lock was written —\n{}\nReview the changes, then run `agentstack lock` to accept them (re-locking re-gates the project for auto mode).",
         blocked.len(),
         lines.join("\n")
     )
@@ -182,6 +223,58 @@ mod tests {
         };
         assert!(msg.contains("aaaaaaaaaaaa"), "{msg}");
         assert!(!msg.contains("aaaaaaaaaaaaa"), "not the full digest: {msg}");
+    }
+
+    #[test]
+    fn instruction_verdicts_fail_closed_on_drift_and_broken() {
+        assert_eq!(
+            instruction_verdict(&InstructionLockStatus::Matches),
+            Verdict::Ok
+        );
+        assert_eq!(
+            instruction_verdict(&InstructionLockStatus::MissingLockEntry),
+            Verdict::Unpinned
+        );
+        for status in [
+            InstructionLockStatus::ChecksumDrift {
+                locked: "a".into(),
+                current: "b".into(),
+            },
+            InstructionLockStatus::ResolveFailed {
+                error: "nope".into(),
+            },
+        ] {
+            assert!(
+                matches!(instruction_verdict(&status), Verdict::Block(_)),
+                "{status:?} must block"
+            );
+        }
+    }
+
+    #[test]
+    fn ensure_instructions_compilable_blocks_on_drift_passes_on_unpinned() {
+        let ok = vec![
+            ("house".to_string(), InstructionLockStatus::Matches),
+            ("style".to_string(), InstructionLockStatus::MissingLockEntry),
+        ];
+        assert!(ensure_instructions_compilable("claude-code", &ok).is_ok());
+
+        let drifted = vec![(
+            "house".to_string(),
+            InstructionLockStatus::ChecksumDrift {
+                locked: "aaaa".into(),
+                current: "bbbb".into(),
+            },
+        )];
+        let err = ensure_instructions_compilable("claude-code", &drifted)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("refusing to compile instructions for claude-code"),
+            "{err}"
+        );
+        assert!(err.contains("house"), "{err}");
+        assert!(err.contains("`agentstack lock`"), "{err}");
     }
 
     #[test]
