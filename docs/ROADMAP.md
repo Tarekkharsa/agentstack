@@ -17,8 +17,14 @@ green). Then carve crate by crate, moving code — not rewriting it (mapping
 verified against the source, 2026-07-10):
 
 - `src/manifest/`, `src/lock.rs`, `src/util/` (shared path helpers), digest
-  code → `core`. The requested-policy schema (`manifest::Policy`) stays with
-  manifest parsing in core — it is manifest data.
+  code → `core`, plus two pieces the compiler flushed out: `scope.rs` (the
+  layering enum the model references) and the pure `${REF}` syntax scanner
+  (`refs_in`/`is_ref_name` — resolution stays in `cli`). The requested-policy
+  schema (`manifest::Policy`) stays with manifest parsing in core — it is
+  manifest data. `manifest::validate` stays in `cli` (it walks the library
+  and resolver), re-exported so callers still see one module. `core`
+  temporarily keeps `clap` (two enums derive `ValueEnum`) — dropping it is
+  Phase 1 hardening.
 - `src/trust.rs` (trust store, digest pinning) → `trust`; its CLI command
   (`src/commands/trust.rs`) stays in `cli`. Coupling is clean: lock + two
   manifest constants + `util::paths` only.

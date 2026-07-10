@@ -176,7 +176,7 @@ pub struct Instruction {
     pub from_user_layer: bool,
 }
 
-pub(crate) fn all_targets() -> Vec<String> {
+pub fn all_targets() -> Vec<String> {
     vec!["*".to_string()]
 }
 
@@ -448,7 +448,7 @@ impl Manifest {
     pub fn referenced_secrets(&self) -> Vec<String> {
         let mut refs: Vec<String> = Vec::new();
         let mut push = |s: &str| {
-            for r in crate::secret::refs_in(s) {
+            for r in crate::refs::refs_in(s) {
                 if !refs.contains(&r) {
                     refs.push(r);
                 }

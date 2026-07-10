@@ -1,0 +1,25 @@
+[package]
+name = "agentstack-core"
+version = "0.8.1"
+edition = "2021"
+rust-version = "1.80"
+description = "agentstack bundle format: manifest + lockfile parsing, content digests"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Tarekkharsa/agentstack"
+publish = false
+
+[dependencies]
+# TODO(phase-1): drop clap from core — Scope/ServerType derive ValueEnum today.
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+toml = { version = "0.8", features = ["preserve_order"] }
+sha2 = "0.10"
+dirs = "5"
+anyhow = "1"
+indexmap = { version = "2", features = ["serde"] }
+owo-colors = "4"
+
+[dev-dependencies]
+assert_fs = "1"
+tempfile = "3"

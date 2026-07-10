@@ -17,6 +17,7 @@ name = "agentstack"
 path = "src/main.rs"
 
 [dependencies]
+agentstack-core = { path = "../core" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

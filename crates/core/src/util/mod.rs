@@ -77,5 +77,7 @@ pub fn check_schema_version(
 
 /// A process-wide lock for tests that mutate the global `AGENTSTACK_HOME` env
 /// var, so they don't clobber each other under cargo's parallel test runner.
-#[cfg(test)]
+/// Compiled unconditionally (not `#[cfg(test)]`) because `cfg(test)` does not
+/// propagate across crates — the cli crate's tests take this lock too. A
+/// never-contended `Mutex<()>` static is free in release builds.
 pub static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
