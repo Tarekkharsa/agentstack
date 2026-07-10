@@ -9,6 +9,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 pub const LOCK_FILE: &str = "agentstack.lock";
+/// Newest lockfile schema version this build reads and writes. Anything above
+/// it was written by a future agentstack; [`Lock::load`] refuses it instead of
+/// misinterpreting silently.
+pub const SUPPORTED_LOCK_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Lock {
@@ -63,7 +67,15 @@ impl Lock {
         let path = Self::path(dir);
         match fs::read_to_string(&path) {
             Ok(text) => {
-                toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+                let lock: Lock =
+                    toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+                crate::util::check_schema_version(
+                    lock.version,
+                    SUPPORTED_LOCK_VERSION,
+                    "lockfile",
+                    &path,
+                )?;
+                Ok(lock)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Lock::default()),
             Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
@@ -119,6 +131,28 @@ impl Lock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn load_checks_the_lock_schema_version() {
+        let dir = assert_fs::TempDir::new().unwrap();
+
+        // No lockfile → empty default (unchanged).
+        assert_eq!(Lock::load(dir.path()).unwrap(), Lock::default());
+
+        // The current version loads.
+        fs::write(Lock::path(dir.path()), "version = 1\n").unwrap();
+        assert!(Lock::load(dir.path()).is_ok());
+
+        // A future version is refused, not silently misread.
+        fs::write(Lock::path(dir.path()), "version = 99\n").unwrap();
+        let err = Lock::load(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("lockfile version 99"), "{err}");
+        assert!(err.contains("upgrade agentstack"), "{err}");
+
+        // A lockfile with no version fails deserialization (required field).
+        fs::write(Lock::path(dir.path()), "[[skill]]\n").unwrap();
+        assert!(Lock::load(dir.path()).is_err());
+    }
 
     #[test]
     fn upsert_and_roundtrip() {
