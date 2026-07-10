@@ -189,6 +189,44 @@ fn grant(base: &Path) -> Result<()> {
         }
     }
 
+    // Instruction fragments, same review: they compile into CLAUDE.md /
+    // AGENTS.md — straight into agent context — and their bytes are repo
+    // content the trust digest doesn't cover. The pin is what binds them.
+    // (grant loads the project manifest only, so machine-layer fragments
+    // can't appear here; the filter guards the invariant regardless.)
+    let instructions: Vec<_> = m
+        .instructions
+        .iter()
+        .filter(|(_, i)| !i.from_user_layer)
+        .collect();
+    if !instructions.is_empty() {
+        println!("  instruction fragments (compile into CLAUDE.md / AGENTS.md):");
+        for (name, instr) in instructions {
+            use crate::resolve::InstructionLockStatus;
+            match crate::resolve::instruction_lock_status(name, instr, &dir, &lock) {
+                InstructionLockStatus::Matches => println!("  · {name}   [pinned]"),
+                InstructionLockStatus::ChecksumDrift { .. } => {
+                    println!("  {} {name}   [{}]", "✗".red(), "DRIFTED from lock".red());
+                    blockers.push((
+                        name.clone(),
+                        "instruction content drifted from lock".to_string(),
+                    ));
+                }
+                InstructionLockStatus::MissingLockEntry => {
+                    println!("  {} {name}   [{}]", "✗".red(), "unpinned".red());
+                    blockers.push((
+                        name.clone(),
+                        "instruction unpinned — run `agentstack lock`".to_string(),
+                    ));
+                }
+                InstructionLockStatus::ResolveFailed { error } => {
+                    println!("  {} {name}: broken ref ({error})", "✗".red());
+                    blockers.push((name.clone(), format!("broken ref — {error}")));
+                }
+            }
+        }
+    }
+
     if !blockers.is_empty() {
         let width = blockers.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
         let lines: Vec<String> = blockers

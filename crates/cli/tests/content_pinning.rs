@@ -12,8 +12,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 
-use agentstack::cli::{LockArgs, TrustArgs, UseArgs};
-use agentstack::commands::{lock as lock_cmd, trust as trust_cmd, use_profile};
+use agentstack::cli::{ApplyArgs, LockArgs, TrustArgs, UseArgs};
+use agentstack::commands::{apply, lock as lock_cmd, trust as trust_cmd, use_profile};
+use agentstack::scope::Scope;
 use agentstack::trust::{self, TrustState};
 
 // These tests mutate the process-global HOME; serialize them.
@@ -149,6 +150,160 @@ fn trust_grant_requires_a_pinned_matching_surface() {
     lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
     trust_cmd::run(&grant_args).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
+}
+
+fn apply_args() -> ApplyArgs {
+    ApplyArgs {
+        targets: vec!["claude-code".into()],
+        profile: None,
+        dry_run: false,
+        write: true,
+        scope: Some(Scope::Global),
+        allow_unresolved: false,
+        prune_foreign: false,
+        no_gitignore: true,
+    }
+}
+
+/// Instruction fragments walk the same re-gate chain as skills: first apply
+/// pins, trust requires the pin, drift blocks the compile and the re-grant,
+/// `agentstack lock` accepts (flipping trust to Changed), re-trust restores.
+#[test]
+fn instruction_drift_blocks_apply_until_relocked() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("instructions")).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [instructions.house]\npath = \"./instructions/house.md\"\n",
+    )
+    .unwrap();
+    fs::write(proj.join("instructions/house.md"), "Be kind.\n").unwrap();
+    let grant_args = TrustArgs {
+        path: Some(proj.clone()),
+        list: false,
+        revoke: false,
+    };
+
+    // Unpinned instruction → trust refuses.
+    let err = trust_cmd::run(&grant_args).unwrap_err().to_string();
+    assert!(err.contains("isn't fully pinned"), "{err}");
+    assert!(err.contains("house"), "{err}");
+
+    // First apply --write compiles AND records the first pin.
+    apply::run(&apply_args(), Some(&proj)).unwrap();
+    let lock_path = proj.join("agentstack.lock");
+    let lock_before = fs::read_to_string(&lock_path).unwrap();
+    assert!(
+        lock_before.contains("[[instruction]]") && lock_before.contains("house"),
+        "apply pinned the fragment: {lock_before}"
+    );
+    let compiled = home.join(".claude/CLAUDE.md");
+    assert!(
+        fs::read_to_string(&compiled).unwrap().contains("Be kind."),
+        "fragment compiled into the instruction file"
+    );
+
+    // Pinned → trust grants.
+    trust_cmd::run(&grant_args).unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Trusted);
+
+    // Drift the fragment: manifest + lock untouched → trust digest holds.
+    fs::write(proj.join("instructions/house.md"), "Be EVIL.\n").unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Trusted);
+
+    // The compile gate fails closed, and the lock isn't silently rewritten.
+    let err = apply::run(&apply_args(), Some(&proj))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("refusing to compile instructions"), "{err}");
+    assert!(err.contains("house"), "{err}");
+    assert_eq!(fs::read_to_string(&lock_path).unwrap(), lock_before);
+    assert!(
+        !fs::read_to_string(&compiled).unwrap().contains("Be EVIL."),
+        "drifted content never reached the instruction file"
+    );
+
+    // Re-granting trust refuses over the drift.
+    let err = trust_cmd::run(&grant_args).unwrap_err().to_string();
+    assert!(err.contains("drifted"), "{err}");
+
+    // Accept via `agentstack lock` (zero profiles — instructions still pin),
+    // which re-gates trust through the lock bytes.
+    lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Changed);
+
+    // Re-trust → apply flows and the accepted content compiles.
+    trust_cmd::run(&grant_args).unwrap();
+    apply::run(&apply_args(), Some(&proj)).unwrap();
+    assert!(fs::read_to_string(&compiled).unwrap().contains("Be EVIL."));
+}
+
+/// Machine-layer fragments are the user's own content: they never pin, never
+/// block the gates, and never appear in the trust review.
+#[test]
+fn machine_layer_fragments_are_exempt_from_pinning() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    let ast_home = home.join(".agentstack");
+    fs::create_dir_all(ast_home.join("instructions")).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", &ast_home);
+
+    // Machine manifest declares a fragment (like setup's house rules).
+    fs::write(
+        ast_home.join("agentstack.toml"),
+        "version = 1\n[instructions.style]\npath = \"./instructions/style.md\"\n",
+    )
+    .unwrap();
+    fs::write(ast_home.join("instructions/style.md"), "Machine style.\n").unwrap();
+
+    // Project declares its own.
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("instructions")).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [instructions.house]\npath = \"./instructions/house.md\"\n",
+    )
+    .unwrap();
+    fs::write(proj.join("instructions/house.md"), "Project rule.\n").unwrap();
+
+    // `agentstack lock` pins the project fragment only.
+    lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
+    let lock = fs::read_to_string(proj.join("agentstack.lock")).unwrap();
+    assert!(lock.contains("house"), "{lock}");
+    assert!(
+        !lock.contains("style"),
+        "machine fragment must not pin into the project lock: {lock}"
+    );
+
+    // Trust grants (the machine fragment is invisible to the review), and
+    // apply --write compiles both layers without the machine fragment ever
+    // blocking or pinning.
+    trust_cmd::run(&TrustArgs {
+        path: Some(proj.clone()),
+        list: false,
+        revoke: false,
+    })
+    .unwrap();
+    apply::run(&apply_args(), Some(&proj)).unwrap();
+    let compiled = fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap();
+    assert!(compiled.contains("Machine style."));
+    assert!(compiled.contains("Project rule."));
+    let lock = fs::read_to_string(proj.join("agentstack.lock")).unwrap();
+    assert!(
+        !lock.contains("style"),
+        "apply must not pin machine fragments"
+    );
 }
 
 /// First activation of an unpinned project proceeds: recording the first pin
