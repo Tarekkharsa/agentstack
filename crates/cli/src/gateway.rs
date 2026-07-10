@@ -486,11 +486,11 @@ impl Gateway {
             // Library definitions are outside the trust digest (it covers the
             // manifest layers + lockfile), so they are integrity-checked here
             // against the lock's pinned definition digests before being served.
-            // A genuinely MISSING lockfile is the zero-lock workflow (Ok with
-            // empty pins — unpinned refs serve with a warning). A lockfile
-            // that exists but can't be read (parse error, future schema) is
-            // different: its pins are unknowable, so library-backed servers
-            // fail CLOSED rather than silently degrading to unpinned.
+            // Fail closed on every unverifiable state: drifted pins skip, a
+            // missing pin skips (an unpinned definition was never part of what
+            // the human trusted — `agentstack lock` is the acceptance act),
+            // and a lockfile that exists but can't be read (parse error,
+            // future schema) skips too, since its pins are unknowable.
             let lock = match crate::lock::Lock::load(&ctx.dir) {
                 Ok(l) => Some(l),
                 Err(e) => {
@@ -528,10 +528,14 @@ impl Gateway {
                                     continue;
                                 }
                                 Some(_) => {}
-                                None => eprintln!(
-                                    "gateway: warning: library server '{name}' is not pinned in agentstack.lock — \
-                                     pin it with `agentstack lock`"
-                                ),
+                                None => {
+                                    eprintln!(
+                                        "gateway: skipping '{name}': library server is not pinned in agentstack.lock — \
+                                         its definition isn't covered by the trust digest, so it can't be served unverified; \
+                                         pin it with `agentstack lock`"
+                                    );
+                                    continue;
+                                }
                             }
                         }
                         r.server
@@ -1102,6 +1106,19 @@ mod tests {
                  [profiles.default]\nservers = [\"kibana\", \"ghost\"]\n",
             )
             .unwrap();
+        // Library servers only serve pinned: pin kibana's current definition.
+        let manifest: crate::manifest::Manifest = toml::from_str("version = 1").unwrap();
+        let library = crate::library::Library::load(&home.path().join("lib")).unwrap();
+        let current =
+            crate::resolve::resolve_server(&manifest, &library, &home.path().join("lib"), "kibana")
+                .unwrap()
+                .checksum;
+        project
+            .child("agentstack.lock")
+            .write_str(&format!(
+                "version = 1\n[[server]]\nname = \"kibana\"\nsource = \"library\"\nchecksum = \"{current}\"\n",
+            ))
+            .unwrap();
         let gw = Gateway::from_manifest(Some(project.path()));
         std::env::remove_var("AGENTSTACK_HOME");
         let names: Vec<&str> = gw.upstreams.iter().map(|u| u.name.as_str()).collect();
@@ -1110,8 +1127,8 @@ mod tests {
 
     /// Library definitions live outside the trust digest; the lock's pinned
     /// definition digest is what the human consented to. A drifted definition
-    /// must not be served; a matching pin must be; an unpinned ref is served
-    /// with a warning (zero-lock workflows keep working).
+    /// must not be served; a matching pin must be; an unpinned ref fails
+    /// closed too — an unverified definition was never part of any review.
     #[test]
     fn from_manifest_verifies_library_servers_against_the_lock() {
         use assert_fs::prelude::*;
@@ -1161,10 +1178,14 @@ mod tests {
         let gw = Gateway::from_manifest(Some(project.path()));
         assert_eq!(gw.upstreams.len(), 1, "matching pin must be served");
 
-        // No lock entry at all → served (warned, not blocked).
+        // No lock entry at all → skipped. `agentstack lock` is the acceptance
+        // act; a definition that was never pinned was never reviewed.
         std::fs::remove_file(project.path().join("agentstack.lock")).unwrap();
         let gw = Gateway::from_manifest(Some(project.path()));
-        assert_eq!(gw.upstreams.len(), 1, "unpinned ref must still be served");
+        assert!(
+            gw.upstreams.is_empty(),
+            "unpinned library ref must fail closed"
+        );
 
         // An UNREADABLE lock (parse error / future schema) is not the
         // zero-lock workflow: pins are unknowable, so library-backed servers
