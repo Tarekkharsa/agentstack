@@ -429,7 +429,7 @@ impl Gateway {
             // Name refs resolve through the same inline-first/central-library
             // path as rendering, so a server declared only in the library is
             // proxied like an inline one.
-            let library = crate::library::Library::load_default().unwrap_or_default();
+            let library = crate::library::Library::load_default_or_warn();
             let servers = crate::resolve::effective_runtime_servers(
                 &ctx.loaded.manifest,
                 &library,

@@ -69,7 +69,7 @@ impl Context {
     /// Load the central-library inputs for this command.
     pub fn library_ctx(&self) -> LibraryCtx {
         LibraryCtx {
-            library: crate::library::Library::load_default().unwrap_or_default(),
+            library: crate::library::Library::load_default_or_warn(),
             lib_home: crate::util::paths::lib_home(),
             store: crate::store::Store::default_store(),
         }

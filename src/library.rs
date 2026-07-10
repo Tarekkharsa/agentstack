@@ -139,6 +139,20 @@ impl Library {
         Self::load(&paths::lib_home())
     }
 
+    /// Best-effort load for surfaces that degrade to inline-only resolution
+    /// rather than failing (the gateway, rendering). The error — an unreadable
+    /// index, or one written by a newer schema — is reported on stderr instead
+    /// of being swallowed, so a version-incompatible library says "upgrade
+    /// agentstack" rather than masquerading as name refs that don't resolve.
+    pub fn load_default_or_warn() -> Self {
+        Self::load_default().unwrap_or_else(|e| {
+            eprintln!(
+                "warning: central library unavailable ({e:#}); resolving inline servers only"
+            );
+            Library::default()
+        })
+    }
+
     /// Write the index to a library home, creating the directory if needed.
     pub fn save(&self, lib_home: &Path) -> Result<()> {
         fs::create_dir_all(lib_home).with_context(|| format!("creating {}", lib_home.display()))?;
