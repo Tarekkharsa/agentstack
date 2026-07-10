@@ -139,7 +139,10 @@ mod tests {
         fn effective_is_never_more_permissive_than_machine(
             machine in arb_policy(),
             project in arb_policy(),
-            server in "[a-z_]{1,8}",
+            // A server literally named "*" is generated too: tool_allowed
+            // routes it to the wildcard key only, and the invariant must
+            // hold on that path as well as for ordinary names.
+            server in prop_oneof![9 => "[a-z_]{1,8}", 1 => Just("*".to_string())],
             tool in "[a-z_]{1,8}",
         ) {
             if machine.tool_allowed(&server, &tool).is_err() {

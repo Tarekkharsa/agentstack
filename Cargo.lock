@@ -122,7 +122,6 @@ version = "0.8.1"
 dependencies = [
  "agentstack-core",
  "proptest",
- "toml 0.8.23",
 ]
 
 [[package]]

@@ -152,6 +152,16 @@ Honest framing: advisory enforcement — the trust gate governs what gets
 written, but a CLI on the host could bypass policy, and could in principle
 tamper with the trust store itself (Layer 2).
 
+**Single enforcement point (declared, not just observed):** every MCP tool
+call agentstack itself brokers — the gateway serve loop, the `agentstack mcp`
+bridge, code mode — dispatches through one function, `Gateway::try_call`,
+which consults the policy engine before any upstream I/O; the upstream
+transport is private to it, so no other module *can* reach a server directly.
+Any new brokered path must route through it — adding a second dispatch path
+is a security-review event, not a refactor. (Rendered-config modes hand the
+transport to the harness itself and are governed at write time — the
+advisory framing above.)
+
 **Sandbox mode** (Phase 2): `agentstack run --sandbox` launches the CLI in a
 container via the Docker API (`bollard`). The container has no direct network;
 its only route out is the **egress proxy**, which enforces the compiled
