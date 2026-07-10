@@ -21,7 +21,7 @@ fn setup(tmp: &Path) -> (PathBuf, PathBuf, PathBuf) {
     std::env::set_var("HOME", &home);
     std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
 
-    let codex_skills = home.join(".codex/skills");
+    let codex_skills = home.join(".agents/skills");
     fs::create_dir_all(codex_skills.join("figma")).unwrap();
     fs::write(codex_skills.join("figma/SKILL.md"), "# figma\n").unwrap();
     fs::write(codex_skills.join("figma/helper.py"), "print(1)\n").unwrap();
@@ -46,7 +46,7 @@ fn consolidate_indexes_into_library_and_symlinks_back() {
     // A shared skill symlinked into Claude from an external source.
     let claude_skills = home.join(".claude/skills");
     fs::create_dir_all(&claude_skills).unwrap();
-    let external = home.join(".agents/skills/shared");
+    let external = home.join("external-skills/shared");
     fs::create_dir_all(&external).unwrap();
     fs::write(external.join("SKILL.md"), "# shared\n").unwrap();
     std::os::unix::fs::symlink(&external, claude_skills.join("shared")).unwrap();
@@ -72,7 +72,7 @@ fn consolidate_indexes_into_library_and_symlinks_back() {
     assert!(library.get("shared").is_some());
 
     // Originals are symlinks resolving to the library copy (old behavior works).
-    let figma_link = home.join(".codex/skills/figma");
+    let figma_link = home.join(".agents/skills/figma");
     assert!(fs::symlink_metadata(&figma_link)
         .unwrap()
         .file_type()
@@ -121,7 +121,7 @@ fn consolidate_dry_run_writes_nothing() {
         .unwrap()
         .skills
         .is_empty());
-    let figma = home.join(".codex/skills/figma");
+    let figma = home.join(".agents/skills/figma");
     assert!(
         figma.is_dir()
             && !fs::symlink_metadata(&figma)
@@ -202,10 +202,10 @@ fn consolidate_reports_skipped_broken_links_and_non_skills() {
     // A dead symlink in Claude's skills dir (its target was never created)…
     let claude_skills = home.join(".claude/skills");
     fs::create_dir_all(&claude_skills).unwrap();
-    let gone = home.join(".agents/skills/find-skills");
+    let gone = home.join("external-skills/find-skills");
     std::os::unix::fs::symlink(&gone, claude_skills.join("find-skills")).unwrap();
     // …and a real directory without a SKILL.md in Codex's.
-    fs::create_dir_all(home.join(".codex/skills/notes")).unwrap();
+    fs::create_dir_all(home.join(".agents/skills/notes")).unwrap();
 
     let registry = Registry::load().unwrap();
     let report = consolidate(&registry, &manifest, &proj, None, false, false).unwrap();
@@ -248,8 +248,11 @@ fn consolidate_only_broken_links_returns_skipped_not_error() {
     let pi_skills = home.join(".pi/agent/skills");
     fs::create_dir_all(&pi_skills).unwrap();
     for name in ["find-skills", "playwright-cli"] {
-        std::os::unix::fs::symlink(home.join(".agents/skills").join(name), pi_skills.join(name))
-            .unwrap();
+        std::os::unix::fs::symlink(
+            home.join("external-skills").join(name),
+            pi_skills.join(name),
+        )
+        .unwrap();
     }
 
     let proj = tmp.path().join("proj");

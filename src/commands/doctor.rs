@@ -582,6 +582,35 @@ fn run_checks(
             report.line(Level::Ok, "all instruction files match the manifest");
         }
     }
+    // Codex-specific instruction quirks, checked whenever codex is a target:
+    // AGENTS.override.md in the same directory silently wins over AGENTS.md,
+    // and Codex stops reading instruction content at project_doc_max_bytes
+    // (32 KiB default) — truncating would silently drop rules, so doctor
+    // reports instead.
+    if target_ids.iter().any(|id| id == "codex") {
+        let root = crate::manifest::project_root_of(&ctx.dir);
+        if root.join("AGENTS.override.md").exists() && root.join("AGENTS.md").exists() {
+            report.line(
+                Level::Warn,
+                "AGENTS.override.md exists beside AGENTS.md — Codex reads ONLY the override; the managed AGENTS.md is shadowed",
+            );
+        }
+        const CODEX_DOC_DEFAULT_MAX: u64 = 32 * 1024;
+        for path in [root.join("AGENTS.md"), root.join("AGENTS.override.md")] {
+            if let Ok(meta) = std::fs::metadata(&path) {
+                if meta.len() > CODEX_DOC_DEFAULT_MAX {
+                    report.line(
+                        Level::Warn,
+                        format!(
+                            "{} is {} KiB — Codex truncates instruction files at project_doc_max_bytes (32 KiB default) ↳ raise it in ~/.codex/config.toml or split fragments",
+                            path.file_name().and_then(|n| n.to_str()).unwrap_or("AGENTS.md"),
+                            meta.len() / 1024
+                        ),
+                    );
+                }
+            }
+        }
+    }
 
     report.section("Quirks");
     let quirks = check_quirks(manifest);

@@ -1,6 +1,6 @@
 //! Consolidate scattered skills into the central library.
 //!
-//! Skills end up spread across each CLI's own skills directory (`~/.codex/skills/
+//! Skills end up spread across each CLI's own skills directory (`~/.agents/skills/
 //! figma`, `~/.claude/skills/...`). This gathers them into the central capability
 //! library (`~/.agentstack/lib/skills/`) via the library's own insertion path
 //! ([`crate::commands::lib::add_skill`]) and replaces every original with a

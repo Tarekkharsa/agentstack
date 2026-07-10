@@ -84,6 +84,14 @@ if out="$(env HOME="$home" "$cli_bin" mcp list 2>&1)"; then
     exit 1
   fi
 else
+  # Nonzero exit is USUALLY an auth/onboarding gate — but a config the CLI
+  # can't parse also exits nonzero, and skipping that would let a schema
+  # regression ship. Fail on parse-shaped errors; skip only the rest.
+  if grep -qiE 'pars(e|ing) error|invalid (type|value|key|config)|expected .* found|(toml|json).*(error|invalid)|error.*(toml|json)' <<<"$out"; then
+    echo "FAIL: $cli_bin rejected the rendered config (parse-shaped error):"
+    echo "$out" | head -20
+    exit 1
+  fi
   echo "live: SKIPPED — '$cli_bin mcp list' exited nonzero (auth/onboarding gate?). Output:"
   echo "$out" | head -20
 fi
