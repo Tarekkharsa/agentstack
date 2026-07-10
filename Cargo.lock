@@ -138,7 +138,10 @@ name = "agentstack-policy"
 version = "0.8.1"
 dependencies = [
  "agentstack-core",
+ "indexmap",
  "proptest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

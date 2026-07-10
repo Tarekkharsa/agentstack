@@ -78,6 +78,41 @@ pub struct Policy {
     /// A denied tool is invisible to discovery and refused if called.
     #[serde(default)]
     pub tools: IndexMap<String, Vec<String>>,
+    /// Per-server outbound host rules, same grammar as `tools` (globs over
+    /// hostnames, `!` denies, `"*"` key is rename-proof). Phase 1 checks a
+    /// server's DECLARED URL host at write/spawn time; runtime egress
+    /// filtering is the Phase-2 proxy's job.
+    #[serde(default)]
+    pub egress: IndexMap<String, Vec<String>>,
+    /// Per-server secret access, same grammar (globs over `${REF}` names).
+    /// Enforced fail-closed at both substitution sites: a ref outside a
+    /// server's effective set never resolves for it — not into a rendered
+    /// config, not into a gateway upstream.
+    #[serde(default)]
+    pub secrets: IndexMap<String, Vec<String>>,
+    /// Bundle-global filesystem scopes (path globs). Advisory in Phase 1 —
+    /// carried, reviewed, and compiled, but path matching is enforced only by
+    /// the Phase-2 sandbox mounts.
+    #[serde(default, skip_serializing_if = "FsPolicy::is_empty")]
+    pub filesystem: FsPolicy,
+}
+
+/// `[policy.filesystem]` — read/write path-glob scopes. New table, so typos
+/// are rejected outright (`deny_unknown_fields`) — unlike the long-shipped
+/// `Policy` fields, there is no existing config to stay lenient for.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct FsPolicy {
+    #[serde(default)]
+    pub read: Vec<String>,
+    #[serde(default)]
+    pub write: Vec<String>,
+}
+
+impl FsPolicy {
+    pub fn is_empty(&self) -> bool {
+        self.read.is_empty() && self.write.is_empty()
+    }
 }
 
 impl Policy {
@@ -86,6 +121,9 @@ impl Policy {
             && self.forbid.is_empty()
             && self.allowed_sources.is_empty()
             && self.tools.is_empty()
+            && self.egress.is_empty()
+            && self.secrets.is_empty()
+            && self.filesystem.is_empty()
     }
 
     /// Whether `source` is allowed (any source allowed when the list is empty).
@@ -103,36 +141,65 @@ impl Policy {
     /// is written rename-proof: it constrains every server, whatever a
     /// manifest calls it.
     pub fn tool_allowed(&self, server: &str, tool: &str) -> Result<(), String> {
-        let keys: &[&str] = if server == "*" {
-            &["*"]
-        } else {
-            &[server, "*"]
+        map_allowed(&self.tools, "[policy.tools]", server, tool)
+    }
+
+    /// Whether `server` may reach `host` per `[policy.egress]` — the same
+    /// keyed grammar and `"*"` rename-proofing as `tool_allowed`.
+    pub fn egress_allowed(&self, server: &str, host: &str) -> Result<(), String> {
+        map_allowed(&self.egress, "[policy.egress]", server, host)
+    }
+
+    /// Whether `server` may resolve the secret named `reference` per
+    /// `[policy.secrets]` — same keyed grammar and `"*"` rename-proofing.
+    pub fn secret_allowed(&self, server: &str, reference: &str) -> Result<(), String> {
+        map_allowed(&self.secrets, "[policy.secrets]", server, reference)
+    }
+}
+
+/// The one keyed matcher behind every per-server policy dimension. Rules
+/// under the exact server name AND under the `"*"` wildcard key both apply.
+/// Named rules are keyed on the manifest-chosen server name — which the repo
+/// controls and can rename — so `"*"` is how a machine-level rule is written
+/// rename-proof: it constrains every server, whatever a manifest calls it.
+/// Grammar: plain globs allow, `!`-prefixed globs deny; a key with at least
+/// one allow pattern is an allowlist; an absent key constrains nothing
+/// (uniform allow-by-default — least privilege is an explicit `"*" = ["!*"]`).
+fn map_allowed(
+    map: &IndexMap<String, Vec<String>>,
+    dimension: &str,
+    server: &str,
+    subject: &str,
+) -> Result<(), String> {
+    let keys: &[&str] = if server == "*" {
+        &["*"]
+    } else {
+        &[server, "*"]
+    };
+    for key in keys {
+        let Some(rules) = map.get(*key) else {
+            continue;
         };
-        for key in keys {
-            let Some(rules) = self.tools.get(*key) else {
-                continue;
-            };
-            for r in rules {
-                if let Some(deny) = r.strip_prefix('!') {
-                    if glob_match(deny, tool) {
-                        return Err(format!("denied by [policy.tools] {key} = \"!{deny}\""));
-                    }
+        for r in rules {
+            if let Some(deny) = r.strip_prefix('!') {
+                if glob_match(deny, subject) {
+                    return Err(format!("denied by {dimension} {key} = \"!{deny}\""));
                 }
             }
-            let allows: Vec<&String> = rules.iter().filter(|r| !r.starts_with('!')).collect();
-            if !allows.is_empty() && !allows.iter().any(|a| glob_match(a, tool)) {
-                return Err(format!(
-                    "not in the [policy.tools] allowlist for {key} ({})",
-                    allows
-                        .iter()
-                        .map(|s| s.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
         }
-        Ok(())
+        let allows: Vec<&String> = rules.iter().filter(|r| !r.starts_with('!')).collect();
+        if !allows.is_empty() && !allows.iter().any(|a| glob_match(a, subject)) {
+            return Err(format!(
+                "not in the {dimension} allowlist for {key} ({})",
+                allows
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
     }
+    Ok(())
 }
 
 /// Minimal glob: `*` matches any run of characters (including empty). No `?`.

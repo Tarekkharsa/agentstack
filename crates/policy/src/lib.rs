@@ -14,6 +14,12 @@
 
 #![forbid(unsafe_code)]
 
+mod compile;
+pub mod ruleset;
+
+pub use compile::compile;
+pub use ruleset::{CompiledRuleset, RULESET_VERSION};
+
 use agentstack_core::manifest::Policy;
 
 /// The effective firewall decision for one tool call: it must pass the
@@ -30,6 +36,37 @@ pub fn tool_decision(
         .tool_allowed(server, tool)
         .map_err(|rule| format!("{rule} (machine policy — ~/.agentstack/agentstack.toml)"))?;
     project.tool_allowed(server, tool)
+}
+
+/// The effective egress decision for one (server, host): machine
+/// `[policy.egress]` AND the project's, machine denies named and first.
+/// Phase 1 applies this to a server's DECLARED URL host at write/spawn time;
+/// runtime filtering is the Phase-2 proxy's job.
+pub fn egress_decision(
+    machine: &Policy,
+    project: &Policy,
+    server: &str,
+    host: &str,
+) -> Result<(), String> {
+    machine
+        .egress_allowed(server, host)
+        .map_err(|rule| format!("{rule} (machine policy — ~/.agentstack/agentstack.toml)"))?;
+    project.egress_allowed(server, host)
+}
+
+/// The effective secret-access decision for one (server, `${REF}` name):
+/// machine `[policy.secrets]` AND the project's. Enforced fail-closed at both
+/// substitution sites — a denied ref never resolves, never renders.
+pub fn secret_decision(
+    machine: &Policy,
+    project: &Policy,
+    server: &str,
+    reference: &str,
+) -> Result<(), String> {
+    machine
+        .secret_allowed(server, reference)
+        .map_err(|rule| format!("{rule} (machine policy — ~/.agentstack/agentstack.toml)"))?;
+    project.secret_allowed(server, reference)
 }
 
 #[cfg(test)]
@@ -117,10 +154,9 @@ mod tests {
             .prop_map(|(deny, body)| if deny { format!("!{body}") } else { body })
     }
 
-    /// An arbitrary tool policy: up to 4 server keys (real names or the `"*"`
-    /// wildcard), each with up to 4 patterns. Other `Policy` fields don't
-    /// participate in tool decisions and stay default.
-    fn arb_policy() -> impl Strategy<Value = Policy> {
+    /// An arbitrary keyed dimension: up to 4 server keys (real names or the
+    /// `"*"` wildcard), each with up to 4 patterns.
+    fn arb_map() -> impl Strategy<Value = Vec<(String, Vec<String>)>> {
         proptest::collection::vec(
             (
                 prop_oneof![Just("*".to_string()), "[a-z_]{1,8}"],
@@ -128,8 +164,25 @@ mod tests {
             ),
             0..4,
         )
-        .prop_map(|entries| Policy {
+    }
+
+    /// An arbitrary tool policy: the tools generator is unchanged from the
+    /// original guarded proptest; egress/secrets stay default here so the
+    /// original invariant's input distribution is untouched.
+    fn arb_policy() -> impl Strategy<Value = Policy> {
+        arb_map().prop_map(|entries| Policy {
             tools: entries.into_iter().collect(),
+            ..Policy::default()
+        })
+    }
+
+    /// An arbitrary policy across ALL keyed dimensions (tools + egress +
+    /// secrets), for the compiled-ruleset and per-dimension invariants.
+    fn arb_policy_full() -> impl Strategy<Value = Policy> {
+        (arb_map(), arb_map(), arb_map()).prop_map(|(tools, egress, secrets)| Policy {
+            tools: tools.into_iter().collect(),
+            egress: egress.into_iter().collect(),
+            secrets: secrets.into_iter().collect(),
             ..Policy::default()
         })
     }
@@ -152,5 +205,229 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── Per-dimension invariants: same ⊆ M law, one named test each so no
+    //    single deletion can silently drop a dimension from coverage.
+    //    NEVER delete or weaken these tests.
+
+    proptest! {
+        #[test]
+        fn effective_egress_never_more_permissive_than_machine(
+            machine in arb_policy_full(),
+            project in arb_policy_full(),
+            server in prop_oneof![9 => "[a-z_]{1,8}", 1 => Just("*".to_string())],
+            host in "[a-z_.]{1,12}",
+        ) {
+            if machine.egress_allowed(&server, &host).is_err() {
+                prop_assert!(egress_decision(&machine, &project, &server, &host).is_err());
+            }
+        }
+
+        #[test]
+        fn effective_secrets_never_more_permissive_than_machine(
+            machine in arb_policy_full(),
+            project in arb_policy_full(),
+            server in prop_oneof![9 => "[a-z_]{1,8}", 1 => Just("*".to_string())],
+            reference in "[A-Z_]{1,10}",
+        ) {
+            if machine.secret_allowed(&server, &reference).is_err() {
+                prop_assert!(secret_decision(&machine, &project, &server, &reference).is_err());
+            }
+        }
+    }
+
+    /// A machine `"*"` deny survives whatever a hostile repo renames its
+    /// server to — for egress and secrets this is the primary attack, so it
+    /// gets the same explicit test the tools dimension has.
+    #[test]
+    fn wildcard_egress_and_secret_rules_survive_server_renaming() {
+        let mut machine = Policy::default();
+        machine
+            .egress
+            .insert("*".into(), vec!["!169.254.169.254".into()]);
+        machine.secrets.insert("*".into(), vec!["!AWS_*".into()]);
+        let project = Policy::default();
+        for server in ["github", "gh", "totally-not-github"] {
+            let err = egress_decision(&machine, &project, server, "169.254.169.254").unwrap_err();
+            assert!(err.contains("machine policy"), "{err}");
+            let err = secret_decision(&machine, &project, server, "AWS_SECRET_KEY").unwrap_err();
+            assert!(err.contains("machine policy"), "{err}");
+        }
+        assert!(egress_decision(&machine, &project, "gh", "api.github.com").is_ok());
+        assert!(secret_decision(&machine, &project, "gh", "GITHUB_TOKEN").is_ok());
+    }
+
+    // ── Compiled-ruleset invariants ─────────────────────────────────────────
+    // The compiled artifact must be exactly as strict as the live two-layer
+    // decision — never more permissive than the machine (rule 2 restated on
+    // the artifact), and behavior-preserving in BOTH directions so Phase 2
+    // consumers inherit today's semantics unchanged.
+    // NEVER delete or weaken these tests.
+
+    /// Server-name set for compilation, plus a lookup name that is sometimes
+    /// in the set, sometimes not (exercising the `any` fallback), sometimes
+    /// literally `"*"`.
+    fn arb_servers_and_lookup() -> impl Strategy<Value = (Vec<String>, String)> {
+        (
+            proptest::collection::vec("[a-z_]{1,8}", 0..3),
+            prop_oneof![
+                6 => "[a-z_]{1,8}",
+                3 => Just("__pick__".to_string()),
+                1 => Just("*".to_string())
+            ],
+        )
+            .prop_map(|(servers, lookup)| {
+                let lookup = if lookup == "__pick__" {
+                    servers.first().cloned().unwrap_or_else(|| "alpha".into())
+                } else {
+                    lookup
+                };
+                (servers, lookup)
+            })
+    }
+
+    proptest! {
+        /// compile() changes representation, never decisions: for every input
+        /// the compiled tool decision matches the live two-layer decision —
+        /// including for servers absent from the compiled set (any-bucket
+        /// routing) and for policy-named servers the bundle never declared.
+        #[test]
+        fn compilation_preserves_tool_decisions(
+            machine in arb_policy_full(),
+            project in arb_policy_full(),
+            (servers, lookup) in arb_servers_and_lookup(),
+            tool in "[a-z_]{1,8}",
+        ) {
+            let names: Vec<&str> = servers.iter().map(String::as_str).collect();
+            let ruleset = compile(&machine, &project, &names);
+            prop_assert_eq!(
+                ruleset.tool_decision(&lookup, &tool).is_ok(),
+                tool_decision(&machine, &project, &lookup, &tool).is_ok(),
+                "compiled and live decisions diverged for {}.{}", lookup, tool
+            );
+        }
+
+        /// Same equivalence for the egress and secrets dimensions.
+        #[test]
+        fn compilation_preserves_egress_and_secret_decisions(
+            machine in arb_policy_full(),
+            project in arb_policy_full(),
+            (servers, lookup) in arb_servers_and_lookup(),
+            subject in "[a-zA-Z_.]{1,10}",
+        ) {
+            let names: Vec<&str> = servers.iter().map(String::as_str).collect();
+            let ruleset = compile(&machine, &project, &names);
+            prop_assert_eq!(
+                ruleset.egress_decision(&lookup, &subject).is_ok(),
+                egress_decision(&machine, &project, &lookup, &subject).is_ok()
+            );
+            prop_assert_eq!(
+                ruleset.secret_decision(&lookup, &subject).is_ok(),
+                secret_decision(&machine, &project, &lookup, &subject).is_ok()
+            );
+        }
+
+        /// Rule 2 stated directly on the artifact, independent of the
+        /// equivalence test above (defense in depth: if compile and the
+        /// equivalence test ever drift together, this still bites): a call
+        /// the machine layer denies is denied by the compiled ruleset,
+        /// whatever the bundle says.
+        #[test]
+        fn compiled_is_never_more_permissive_than_machine(
+            machine in arb_policy_full(),
+            project in arb_policy_full(),
+            (servers, lookup) in arb_servers_and_lookup(),
+            tool in "[a-z_]{1,8}",
+        ) {
+            let names: Vec<&str> = servers.iter().map(String::as_str).collect();
+            if machine.tool_allowed(&lookup, &tool).is_err() {
+                prop_assert!(
+                    compile(&machine, &project, &names).tool_decision(&lookup, &tool).is_err(),
+                    "machine denied {}.{} but the compiled ruleset allowed it", lookup, tool
+                );
+            }
+        }
+
+        /// Rule 2 on the artifact: whatever the bundle says, the compiled
+        /// ruleset never allows a call the machine-only compilation forbids.
+        #[test]
+        fn compiled_bundle_only_narrows(
+            machine in arb_policy_full(),
+            project in arb_policy_full(),
+            (servers, lookup) in arb_servers_and_lookup(),
+            tool in "[a-z_]{1,8}",
+        ) {
+            let names: Vec<&str> = servers.iter().map(String::as_str).collect();
+            let machine_only = compile(&machine, &Policy::default(), &names);
+            let both = compile(&machine, &project, &names);
+            if machine_only.tool_decision(&lookup, &tool).is_err() {
+                prop_assert!(both.tool_decision(&lookup, &tool).is_err());
+            }
+        }
+
+        /// The wire contract: serde roundtrip is lossless, and the serialized
+        /// bytes are identical regardless of the policies' IndexMap insertion
+        /// order (canonicalization is what Phase 2 hands across the process
+        /// boundary).
+        #[test]
+        fn compiled_ruleset_serializes_deterministically(
+            machine in arb_policy_full(),
+            project in arb_policy_full(),
+            servers in proptest::collection::vec("[a-z_]{1,8}", 0..3),
+        ) {
+            let names: Vec<&str> = servers.iter().map(String::as_str).collect();
+            let ruleset = compile(&machine, &project, &names);
+
+            // Roundtrip.
+            let json = serde_json::to_string(&ruleset).unwrap();
+            let back: CompiledRuleset = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(&back, &ruleset);
+
+            // Insertion-order independence: rebuild both policies with their
+            // dimension maps reversed and recompile.
+            let reverse = |p: &Policy| {
+                let mut r = p.clone();
+                r.tools = p.tools.iter().rev().map(|(k, v)| (k.clone(), v.clone())).collect();
+                r.egress = p.egress.iter().rev().map(|(k, v)| (k.clone(), v.clone())).collect();
+                r.secrets = p.secrets.iter().rev().map(|(k, v)| (k.clone(), v.clone())).collect();
+                r
+            };
+            let mut names_rev: Vec<&str> = names.clone();
+            names_rev.reverse();
+            let recompiled = compile(&reverse(&machine), &reverse(&project), &names_rev);
+            prop_assert_eq!(serde_json::to_string(&recompiled).unwrap(), json);
+        }
+    }
+
+    /// Guard semantics pinned as plain unit checks: denies win, every
+    /// allowlist bound applies (AND across lists), machine refusals name
+    /// their layer, and an empty guard allows (uniform allow-by-default).
+    #[test]
+    fn guard_check_deny_wins_and_allow_bounds_and() {
+        use crate::ruleset::{Guard, LayerRules};
+        let guard = Guard {
+            machine: LayerRules {
+                deny: vec!["post_*".into()],
+                allow_all_of: vec![vec!["get_*".into(), "list_*".into()]],
+            },
+            bundle: LayerRules {
+                deny: vec![],
+                allow_all_of: vec![vec!["*_file".into()]],
+            },
+        };
+        // Passes every bound.
+        assert!(guard.check("[policy.tools]", "get_file").is_ok());
+        // Machine deny wins and names the layer.
+        let err = guard.check("[policy.tools]", "post_file").unwrap_err();
+        assert!(err.contains("machine policy"), "{err}");
+        // Inside the machine bound, outside the bundle bound → bundle refuses.
+        let err = guard.check("[policy.tools]", "get_node").unwrap_err();
+        assert!(!err.contains("machine policy"), "{err}");
+        // Outside the machine allowlist → machine refuses.
+        let err = guard.check("[policy.tools]", "delete_file").unwrap_err();
+        assert!(err.contains("machine policy"), "{err}");
+        // Empty guard: allow-by-default.
+        assert!(Guard::default().check("[policy.tools]", "anything").is_ok());
     }
 }

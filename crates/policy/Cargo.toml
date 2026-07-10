@@ -8,10 +8,14 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Tarekkharsa/agentstack"
 publish = false
 
-# rule 6: this crate is on the strict dependency list. Everything it needs
-# beyond core is dev-only.
+# rule 6: this crate is on the strict dependency list — serde, serde_json,
+# and indexmap are all on it (the compiled ruleset is the serialized wire
+# contract for Phase-2 enforcers; indexmap mirrors the manifest policy maps).
 [dependencies]
 agentstack-core = { path = "../core" }
+indexmap = { version = "2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 proptest = "1"
+serde_json = "1"
