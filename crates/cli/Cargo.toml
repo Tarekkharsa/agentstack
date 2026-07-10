@@ -19,6 +19,7 @@ path = "src/main.rs"
 [dependencies]
 agentstack-core = { path = "../core" }
 agentstack-trust = { path = "../trust" }
+agentstack-recorder = { path = "../recorder" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

@@ -7,7 +7,8 @@
 //! (non-destructive merge into native config).
 
 pub mod adapter;
-pub mod calllog;
+// TODO(phase-1): shim — migrate callers to agentstack_recorder:: and drop.
+pub use agentstack_recorder as calllog;
 pub mod catalog;
 pub mod cli;
 pub mod codemode;

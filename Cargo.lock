@@ -72,6 +72,7 @@ version = "0.8.1"
 dependencies = [
  "age",
  "agentstack-core",
+ "agentstack-recorder",
  "agentstack-trust",
  "anyhow",
  "assert_fs",
@@ -112,6 +113,17 @@ dependencies = [
  "sha2",
  "tempfile",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "agentstack-recorder"
+version = "0.8.1"
+dependencies = [
+ "agentstack-core",
+ "assert_fs",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

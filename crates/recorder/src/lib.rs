@@ -20,6 +20,8 @@
 //! size-capped rotation of ~5 MB × two generations. It is **not** durable or
 //! tamper-evident: any local process running as the user can edit it.
 
+#![forbid(unsafe_code)]
+
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -28,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::util::paths;
+use agentstack_core::util::paths;
 
 const MAX_BYTES: u64 = 5 * 1024 * 1024;
 
@@ -78,8 +80,8 @@ fn digest_key() -> Option<Vec<u8>> {
     }
     let dir = path.parent()?;
     fs::create_dir_all(dir).ok()?;
-    crate::util::restrict(dir, true);
-    let key = crate::util::random_bytes();
+    agentstack_core::util::restrict(dir, true);
+    let key = agentstack_core::util::random_bytes();
     let mut opts = fs::OpenOptions::new();
     opts.write(true).create_new(true);
     #[cfg(unix)]
@@ -135,7 +137,7 @@ pub fn record(rec: &CallRecord) {
     if fs::create_dir_all(dir).is_err() {
         return;
     }
-    crate::util::restrict(dir, true);
+    agentstack_core::util::restrict(dir, true);
     // Size-capped rotation: current → .1 (previous generation dropped).
     if fs::metadata(&path)
         .map(|m| m.len() > MAX_BYTES)
@@ -189,7 +191,7 @@ mod tests {
     use serde_json::json;
 
     fn with_home<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = crate::util::TEST_ENV_LOCK
+        let _guard = agentstack_core::util::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let home = assert_fs::TempDir::new().unwrap();
