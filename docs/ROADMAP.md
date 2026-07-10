@@ -24,6 +24,9 @@ machine-checkable or review is cheap):
 - Bundle round-trip conformance tests
 - Documentation
 - The run-report viewer (Phase 3)
+- (post-demo backlog) `doctor` lint: warn when the machine policy carries
+  server-specific deny rules with no `"*"` fallback — a named deny can be
+  dodged by a repo renaming its server; the wildcard form is rename-proof
 
 **Supervised only** (short sessions, plan-first, maintainer reviews line by
 line):
