@@ -97,6 +97,18 @@ Trust binds to the digest, so any byte change anywhere re-gates automatically.
 Invariant (property-tested): flipping any single byte in any pinned file
 produces a digest mismatch and an untrusted state.
 
+**Principle — trust is a portable claim about content, never a fact about a
+machine.** A trust decision asserts "this exact content (this digest, and in
+Phase 4 this signature) was reviewed and approved" — it must carry no
+assumption about *where* that approval happened or where it will be honored.
+The party that trusts a bundle and the machine that runs it may be different
+parties: a maintainer signs, CI verifies, a runtime executes, an auditor
+reads the record. No code may couple trust to local identity — machine
+hostnames, local usernames, or absolute local paths must never become part
+of what a trust claim *means*. (Shipped delta: the v0 store keys entries by
+canonicalized local project path, which is fine as a lookup key on one
+machine but is not the claim itself; the claim stays digest-shaped.)
+
 **Honest limitation:** the trust store and machine policy live under
 `~/.agentstack/`, which is writable by the user — and in host mode the agent
 CLI runs *as* the user, so a compromised agent could modify them and
