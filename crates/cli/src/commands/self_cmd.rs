@@ -226,20 +226,8 @@ fn make_link(exe: &Path, dest: &Path) -> Result<()> {
 
 /// True when `dir` is writable by this user — the `[ -w ]` check install.sh
 /// uses to pick `/usr/local/bin` over `~/.local/bin`.
-#[cfg(unix)]
 fn dir_writable(dir: &Path) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-    let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
-        return false;
-    };
-    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
-}
-
-#[cfg(not(unix))]
-fn dir_writable(dir: &Path) -> bool {
-    std::fs::metadata(dir)
-        .map(|m| m.is_dir() && !m.permissions().readonly())
-        .unwrap_or(false)
+    crate::sys::dir_writable(dir)
 }
 
 fn on_path(dir: &Path) -> bool {

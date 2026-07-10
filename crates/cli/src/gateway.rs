@@ -128,12 +128,12 @@ impl Drop for StdioChild {
         }
         #[cfg(unix)]
         {
-            let pid = self.proc.id() as i32;
-            unsafe { libc::kill(-pid, libc::SIGTERM) };
+            let pgid = self.proc.id() as i32;
+            let _ = crate::sys::signal_group(pgid, crate::sys::Signal::Term);
             if self.wait_for_exit(Duration::from_millis(300)) {
                 return;
             }
-            unsafe { libc::kill(-pid, libc::SIGKILL) };
+            let _ = crate::sys::signal_group(pgid, crate::sys::Signal::Kill);
         }
         #[cfg(not(unix))]
         {
@@ -154,17 +154,9 @@ impl StdioTransport {
             // The child's stderr flows to ours: `agentstack mcp` keeps the
             // protocol on the real stdout, so this is debug-visible and safe.
             .stderr(std::process::Stdio::inherit());
-        #[cfg(unix)]
-        unsafe {
-            use std::os::unix::process::CommandExt;
-            // setpgid(0, 0): own process group, so Drop can tree-kill it.
-            cmd.pre_exec(|| {
-                if libc::setpgid(0, 0) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
+        // Own process group, so Drop can tree-kill the child and anything it
+        // spawns.
+        crate::sys::spawn_in_new_process_group(&mut cmd);
         let mut proc = cmd
             .spawn()
             .with_context(|| format!("spawning '{}' in {}", self.command, self.cwd.display()))?;

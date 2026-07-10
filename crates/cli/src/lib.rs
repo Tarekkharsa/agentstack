@@ -6,6 +6,12 @@
 //! [`adapter`] (per-CLI descriptors + generic render) → [`render`]
 //! (non-destructive merge into native config).
 
+// Unsafe is denied crate-wide; the sole sanctioned exception is `sys`, which
+// concentrates every libc / raw-fd / pre_exec call behind safe wrappers so the
+// entire unsafe surface is one greppable file (CLAUDE.md rule 1). `deny`, not
+// `forbid`, because `forbid` can't be locally downgraded by this `#[allow]`.
+#![deny(unsafe_code)]
+
 // TODO(phase-1): shim — migrate callers to agentstack_adapters:: and drop.
 pub use agentstack_adapters as adapter;
 // TODO(phase-1): shim — migrate callers to agentstack_recorder:: and drop.
@@ -41,6 +47,8 @@ pub mod secret;
 pub mod session;
 pub mod state;
 pub mod store;
+#[allow(unsafe_code)]
+pub(crate) mod sys;
 pub mod transcripts;
 // TODO(phase-1): shim — migrate callers to agentstack_trust:: and drop.
 pub use agentstack_trust as trust;

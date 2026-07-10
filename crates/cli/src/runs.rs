@@ -99,23 +99,11 @@ fn gen_id() -> String {
     format!("r-{}", &hex[..10])
 }
 
-/// Whether a pid is still alive. `kill(pid, 0)` sends no signal — it just probes
-/// existence/permission, returning 0 when the process is there.
-#[cfg(unix)]
-fn is_alive(pid: i32) -> bool {
-    unsafe { libc::kill(pid, 0) == 0 }
-}
-
-#[cfg(not(unix))]
-fn is_alive(_pid: i32) -> bool {
-    true
-}
-
 /// Drop records whose process has exited. Returns the surviving map and whether
 /// anything was removed (so the caller can persist the cleanup).
 fn prune(mut map: BTreeMap<String, RunRecord>) -> (BTreeMap<String, RunRecord>, bool) {
     let before = map.len();
-    map.retain(|_, r| is_alive(r.pid));
+    map.retain(|_, r| crate::sys::pid_alive(r.pid));
     let changed = map.len() != before;
     (map, changed)
 }
@@ -254,21 +242,12 @@ fn spawn_child(
     cwd: &Path,
     run_id: &str,
 ) -> Result<std::process::Child> {
-    use std::os::unix::process::CommandExt;
     let mut cmd = std::process::Command::new(bin);
     cmd.args(args)
         .current_dir(cwd)
         .env(crate::calllog::RUN_ID_ENV, run_id);
-    // setpgid(0, 0): make the child its own process-group leader so kill(-pgid)
-    // later reaps it and anything it spawned.
-    unsafe {
-        cmd.pre_exec(|| {
-            if libc::setpgid(0, 0) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
+    // Own process group so kill(-pgid) later reaps the child and its tree.
+    crate::sys::spawn_in_new_process_group(&mut cmd);
     cmd.spawn().map_err(Into::into)
 }
 
@@ -282,43 +261,33 @@ fn spawn_child(
     anyhow::bail!("`agentstack run` is not supported on this platform yet")
 }
 
-#[cfg(unix)]
 fn terminate(pid: i32, force: bool) -> Result<()> {
     if force {
-        return signal_pgid(pid, libc::SIGKILL);
+        return signal_run_group(pid, crate::sys::Signal::Kill);
     }
-    signal_pgid(pid, libc::SIGTERM)?;
+    signal_run_group(pid, crate::sys::Signal::Term)?;
     // Poll until it's gone, then hard-kill anything that ignored SIGTERM.
     let deadline = Instant::now() + GRACE;
     while Instant::now() < deadline {
-        if !is_alive(pid) {
+        if !crate::sys::pid_alive(pid) {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    if is_alive(pid) {
-        signal_pgid(pid, libc::SIGKILL)?;
+    if crate::sys::pid_alive(pid) {
+        signal_run_group(pid, crate::sys::Signal::Kill)?;
     }
     Ok(())
 }
 
-/// Send `sig` to the whole process group led by `pid` (negative pid → group).
-#[cfg(unix)]
-fn signal_pgid(pid: i32, sig: i32) -> Result<()> {
-    let rc = unsafe { libc::kill(-pid, sig) };
-    if rc != 0 {
-        let err = std::io::Error::last_os_error();
-        // ESRCH = already gone; treat as success so the registry still gets cleaned.
-        if err.raw_os_error() != Some(libc::ESRCH) {
-            return Err(anyhow::anyhow!("signalling run: {err}"));
-        }
+/// Signal the run's whole process group, treating "already gone" (ESRCH) as
+/// success so a race with the process exiting still cleans the registry.
+fn signal_run_group(pid: i32, sig: crate::sys::Signal) -> Result<()> {
+    match crate::sys::signal_group(pid, sig) {
+        Ok(()) => Ok(()),
+        Err(e) if crate::sys::is_already_gone(&e) => Ok(()),
+        Err(e) => Err(anyhow::anyhow!("signalling run: {e}")),
     }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn terminate(_pid: i32, _force: bool) -> Result<()> {
-    anyhow::bail!("killing runs is not supported on this platform yet")
 }
 
 #[cfg(test)]

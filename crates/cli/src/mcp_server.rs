@@ -473,23 +473,12 @@ fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
     Some(PathBuf::from(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
-/// The channel JSON-RPC responses are written to. On Unix, duplicate the real
-/// stdout and point fd 1 at stderr so stray `println!` from command code lands
-/// on stderr instead of poisoning the protocol. Falls back to plain stdout.
-#[cfg(unix)]
+/// The channel JSON-RPC responses are written to. On Unix this reserves the
+/// real stdout and redirects fd 1 to stderr so stray `println!` from command
+/// code lands on stderr instead of poisoning the protocol (see
+/// [`crate::sys::reserve_stdout_for_protocol`]).
 fn protocol_writer() -> Box<dyn Write + Send> {
-    use std::os::unix::io::FromRawFd;
-    let saved = unsafe { libc::dup(libc::STDOUT_FILENO) };
-    if saved < 0 {
-        return Box::new(std::io::stdout());
-    }
-    unsafe { libc::dup2(libc::STDERR_FILENO, libc::STDOUT_FILENO) };
-    Box::new(unsafe { std::fs::File::from_raw_fd(saved) })
-}
-
-#[cfg(not(unix))]
-fn protocol_writer() -> Box<dyn Write + Send> {
-    Box::new(std::io::stdout())
+    crate::sys::reserve_stdout_for_protocol()
 }
 
 fn handle(
