@@ -46,6 +46,13 @@ pub fn report_text(run_id: &str) -> String {
     let mut o = String::new();
     o.push_str(&format!("{}\n", format!("Run {run_id}").bold()));
 
+    // Enforcement posture: the honest label for how strongly this run's policy
+    // was enforced, recorded by the CLI when the sandbox started. Omitted for
+    // runs that predate posture recording (the field is additive).
+    if let Some(p) = crate::commands::sandbox::read_recorded_posture(run_id) {
+        o.push_str(&format!("  {:<9} {}\n", "Posture", p));
+    }
+
     // Lifecycle: the sandbox start line.
     for e in &events {
         if let RunEvent::SandboxStarted {
@@ -130,6 +137,9 @@ pub fn report_json(run_id: &str) -> Result<String> {
     let calls = calls_for(run_id);
     Ok(serde_json::to_string_pretty(&serde_json::json!({
         "run": run_id,
+        // Additive field: the recorded enforcement posture slug, or null for a
+        // run that predates posture recording.
+        "posture": crate::commands::sandbox::read_recorded_posture(run_id).map(|p| p.slug()),
         "events": events,
         "calls": calls,
     }))?)
@@ -197,6 +207,26 @@ mod tests {
             assert!(text.contains("evil.example") && text.contains("[policy.egress] denied"));
             assert!(text.contains("web-search__search") && text.contains("12ms"));
             assert!(text.contains("Exit") && text.contains('0'));
+        });
+    }
+
+    #[test]
+    fn posture_line_shown_when_recorded() {
+        with_home(|| {
+            let log = RunLog::create("r-post").unwrap();
+            log.append(&RunEvent::SandboxExited {
+                ts: 1,
+                code: Some(0),
+            });
+            // The CLI records posture beside events.jsonl; emulate that here.
+            std::fs::write(log.path().with_file_name("posture"), "lockdown").unwrap();
+            let text = report_text("r-post");
+            assert!(text.contains("Posture"), "{text}");
+            assert!(text.contains("LOCKDOWN / ENFORCED"), "{text}");
+            // JSON carries the slug.
+            let v: serde_json::Value =
+                serde_json::from_str(&report_json("r-post").unwrap()).unwrap();
+            assert_eq!(v["posture"], "lockdown");
         });
     }
 

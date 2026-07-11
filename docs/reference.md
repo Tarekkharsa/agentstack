@@ -659,6 +659,37 @@ profile-bound run uses the session engine, so one is allowed per directory at a
 time. Unix only for now. Showing the full per-run trust footprint in the
 dashboard is part of the portable-runtime roadmap.
 
+### Execution posture
+
+Every run is labelled with its **enforcement posture** — how strongly the
+effective policy is actually enforced at runtime, not merely declared. The label
+appears on the run banner, in `agentstack run --sandbox --plan`, and in
+`agentstack report <run>`:
+
+| Posture                                 | Mode                          | What it means |
+|-----------------------------------------|-------------------------------|---------------|
+| `HOST / ADVISORY`                       | `agentstack run` (host)       | No container. The gateway still brokers MCP tool calls, but nothing confines the process's own egress or filesystem — policy is advisory. The banner says so, once. |
+| `SANDBOX / PROXIED · DIRECT ROUTE OPEN` | `run --sandbox`               | Container with a host-side egress proxy; proxied HTTPS egress is checked against compiled policy, but the container's bridge network still has a direct route a proxy-ignoring process could use — only `--lockdown` removes it. |
+| `LOCKDOWN / ENFORCED · NO DIRECT ROUTE` | `run --lockdown`              | Container on an internal-only network whose sole peer is the egress sidecar — enforced *and* topologically confined (no host route, no direct internet). |
+
+`ENFORCED` is reserved for lockdown, where the confinement is topological. The
+honest claim even there is *unapproved egress is blocked*, not that
+exfiltration is impossible. Host mode makes no runtime claim at all — it
+only labels itself advisory so the two are never confused. A sandbox run records
+its posture beside the flight-recorder log, so `agentstack report` can label it
+after the fact (`report --json` carries the `posture` slug).
+
+`agentstack doctor` also prints a one-word **machine-policy posture** — `open`
+(no machine policy, or empty/unreadable and failing open), `restrictive` (a
+rename-proof `"*"` rule or a `[policy.filesystem]` scope binds every server), or
+`mixed` (only dodgeable named-server rules). "restrictive" means a `"*"` rule
+binds every server, not that the policy is tight — the line never overstates.
+
+Ready-to-use machine policies for the common postures live in
+[`examples/policies/`](../examples/policies/) (`compatible`, `developer`,
+`locked-down`, `ci`), each a parseable `~/.agentstack/agentstack.toml` with
+comments explaining every choice.
+
 ## Agent-operable (`agentstack mcp`)
 
 agentstack can run as an MCP server over stdio, so the agent itself can discover

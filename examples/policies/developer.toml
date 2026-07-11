@@ -1,0 +1,51 @@
+# developer — sensible guardrails for an everyday dev machine.
+#
+# Goal: keep destructive tools and secret-exfiltration patterns off the table,
+# scope outbound traffic to the hosts real work needs, and let sandboxed agents
+# actually edit the workspace. Tighter than compatible.toml, still comfortable
+# for daily coding.
+#
+# Install: copy to ~/.agentstack/agentstack.toml. Merges UNDER each project's
+# policy with deny precedence. Verify: agentstack doctor (posture: "restrictive").
+
+version = 1
+
+# ── Tools ────────────────────────────────────────────────────────────────────
+[policy.tools]
+# Machine-wide (rename-proof) denies: destructive verbs and anything that reads
+# secrets/credentials back out through a tool call.
+"*" = [
+  "!delete_*",
+  "!destroy_*",
+  "!drop_*",
+  "!*_admin",
+  "!admin_*",
+  "!get_secret*",
+  "!read_secret*",
+  "!list_secrets",
+]
+
+# ── Egress (outbound host allow/deny, checked at write/spawn + enforced by the
+# Phase-2 proxy). Same grammar as tools; a "host:port" pattern scopes the port,
+# a bare host means any port. ──────────────────────────────────────────────────
+[policy.egress]
+# Deny-list for every server: block cloud metadata endpoints (SSRF target) and
+# plaintext-HTTP paste/exfil hosts. Everything else stays reachable — a dev box
+# needs broad egress, so this narrows the sharp edges rather than allow-listing.
+"*" = ["!169.254.169.254", "!metadata.google.internal", "!*.local"]
+
+# ── Secrets (which ${REF} names a server may resolve; fail-closed at render and
+# at the gateway). ────────────────────────────────────────────────────────────
+[policy.secrets]
+# Deny the common "everything" ${REF}s no single server should ever pull in.
+# Named servers you trust can still be granted specific refs in a project policy.
+"*" = ["!AWS_SECRET_*", "!*_PRIVATE_KEY", "!*_ROOT_*"]
+
+# ── Filesystem (bundle-global path globs) ────────────────────────────────────
+# Enforced in --sandbox / --lockdown: the workspace mounts READ-WRITE only if a
+# write scope covers its root. "./**" covers the whole workspace so sandboxed
+# agents can edit code; nothing outside the mounted workspace is reachable
+# regardless. Host-mode remains advisory.
+[policy.filesystem]
+read = ["./**"]
+write = ["./**"]

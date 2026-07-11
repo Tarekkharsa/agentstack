@@ -1,0 +1,58 @@
+# ci — non-interactive automation on a build agent.
+#
+# Goal: let an agent do read + build work unattended, reach only the hosts a
+# build legitimately needs (package registries, the model API), and touch no
+# secrets beyond what the CI system injects for a specific named server. No
+# human is watching, so the defaults deny.
+#
+# Install: write to ~/.agentstack/agentstack.toml on the runner (or bake it into
+# the image). Gate the repo with `agentstack doctor --ci` (exits nonzero on any
+# error). Verify posture: agentstack doctor (posture: "restrictive").
+
+version = 1
+
+# ── Tools: allow-list of read + build shapes ─────────────────────────────────
+# Allowlist for every server (an allow pattern flips "*" to allowlist mode).
+# Read/list/build/test tools pass; destructive and admin verbs never do.
+[policy.tools]
+"*" = [
+  "get_*",
+  "list_*",
+  "read_*",
+  "search_*",
+  "build_*",
+  "test_*",
+  "run_tests*",
+  "!delete_*",
+  "!destroy_*",
+  "!*_admin",
+]
+
+# ── Egress: allow-list of build-time hosts ───────────────────────────────────
+# Only the hosts a build needs. Ports are pinned where it matters. Trim or
+# extend to match your stack; anything not listed is refused.
+[policy.egress]
+"*" = [
+  "api.anthropic.com:443",   # model API
+  "registry.npmjs.org:443",  # npm
+  "pypi.org:443",            # pip
+  "files.pythonhosted.org:443",
+  "crates.io:443",           # cargo
+  "static.crates.io:443",
+  "github.com:443",          # source + release fetches
+  "codeload.github.com:443",
+]
+
+# ── Secrets: deny-all at the machine floor ───────────────────────────────────
+# CI injects credentials per job; grant them to the specific NAMED server that
+# needs them in the project policy, never broadly here. "!*" denies every ${REF}
+# for every server as the machine-wide default.
+[policy.secrets]
+"*" = ["!*"]
+
+# ── Filesystem: read-only workspace ──────────────────────────────────────────
+# A CI agent inspects and builds; it should not rewrite the checkout from inside
+# a sandbox. No write scope → the --sandbox / --lockdown workspace mounts
+# READ-ONLY (deny-by-default). Add `write = [...]` only for a job that must.
+[policy.filesystem]
+read = ["./**"]

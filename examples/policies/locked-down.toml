@@ -1,0 +1,44 @@
+# locked-down — deny-by-default everywhere; allow only what you name.
+#
+# Goal: the strongest posture. Nothing is permitted unless an explicit allow
+# pattern grants it. Expect to add allows as you hit walls — that is the point:
+# every capability an agent gets here was a deliberate decision.
+#
+# Pair this with `agentstack run --lockdown` for the matching runtime: an
+# internal-only network whose sole peer is the egress sidecar (no host route, no
+# direct internet). The honest claim is *unapproved egress is blocked*, not that
+# exfiltration is impossible.
+#
+# Install: copy to ~/.agentstack/agentstack.toml. Verify: agentstack doctor
+# (posture: "restrictive").
+
+version = 1
+
+# ── Tools: allow-list ────────────────────────────────────────────────────────
+# With at least one ALLOW pattern the "*" list becomes an allowlist: a tool must
+# match an allow AND no deny. Here only read-shaped tools are allowed for every
+# server; a project policy can grant a specific named server more.
+[policy.tools]
+"*" = ["get_*", "list_*", "read_*", "search_*", "!*_admin"]
+
+# ── Egress: allow-list, single approved host ─────────────────────────────────
+# An allow pattern makes this an allowlist too — only the model API on 443 is
+# reachable; every other host is refused. Add the exact "host:port" of any MCP
+# server you actually need. (Replace with your provider's host as appropriate.)
+[policy.egress]
+"*" = ["api.anthropic.com:443"]
+
+# ── Secrets: deny-all by default ─────────────────────────────────────────────
+# "!*" denies every ${REF} for every server. Grant specific refs to specific
+# NAMED servers in a project policy (e.g. `github = ["GITHUB_TOKEN"]`) — never
+# widen it back here, or the machine layer stops being the floor.
+[policy.secrets]
+"*" = ["!*"]
+
+# ── Filesystem: no write scope → read-only sandbox workspace ─────────────────
+# Omitting a write scope means a --sandbox / --lockdown run mounts the workspace
+# READ-ONLY (deny-by-default). A read scope is informational today (the sandbox
+# mounts one whole workspace). Add `write = ["./**"]` only if a locked-down run
+# genuinely must edit files.
+[policy.filesystem]
+read = ["./**"]

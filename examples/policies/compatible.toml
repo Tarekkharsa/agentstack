@@ -1,0 +1,35 @@
+# compatible — the light-touch machine policy.
+#
+# Goal: block the handful of things that are almost always a mistake, and stay
+# out of the way of everything else, so dropping this in rarely breaks a repo.
+# This is a good starting point if you've never set a machine policy before.
+#
+# Install: copy to ~/.agentstack/agentstack.toml (it merges UNDER every project's
+# own policy with deny precedence — a project can only narrow it, never loosen).
+# Verify with: agentstack doctor  (look for the "Machine policy posture" line —
+# this preset reads as "restrictive", because the "*" rules bind every server).
+
+version = 1
+
+# ── Tools (the MCP firewall, enforced at the runtime gateway) ────────────────
+# Rules are keyed on the SERVER NAME a repo chose, so a named rule only guards
+# your own naming. The "*" key is rename-proof: it binds every server whatever a
+# manifest calls it — always prefer it for a machine-wide guardrail.
+[policy.tools]
+# Deny obviously destructive tool names across every server. Plain globs allow,
+# "!" denies; with only deny patterns, everything else stays allowed — so this
+# is a deny-list, not an allow-list, which is what keeps it broadly compatible.
+"*" = ["!delete_*", "!destroy_*", "!*_admin", "!drop_*"]
+
+# ── Egress and secrets: intentionally unset ──────────────────────────────────
+# No [policy.egress] and no [policy.secrets] blocks here — this preset does not
+# constrain outbound hosts or which ${REF}s a server may resolve. Add them (see
+# developer.toml / locked-down.toml) when you want that; leaving them out keeps
+# "compatible" from tripping a repo that legitimately needs a host or a secret.
+
+# ── Filesystem: intentionally unset ──────────────────────────────────────────
+# With no [policy.filesystem] write scope, a --sandbox / --lockdown run mounts
+# the workspace READ-ONLY (writes are deny-by-default in the sandbox). That is
+# the safe default; grant writes explicitly (see developer.toml) if your agents
+# need to edit files inside the sandbox. Host-mode runs are unaffected — nothing
+# confines the filesystem there (agentstack doctor and the run banner say so).

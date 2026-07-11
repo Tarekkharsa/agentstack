@@ -98,6 +98,100 @@ pub fn build_sandbox_spec(
     }
 }
 
+/// How strongly a run's effective policy is actually *enforced* at runtime, as
+/// opposed to merely declared. This is the one honest label we surface wherever
+/// a run is described (the start banner, `--plan`, and `agentstack report`), so
+/// nobody mistakes advisory host-mode policy for enforced sandbox policy.
+///
+/// (This is a plain C-like enum — the Rust analogue of a TypeScript string-union
+/// discriminant. `#[derive(Clone, Copy)]` lets it be passed by value like a
+/// number instead of moved, which is what you want for a tiny tag type.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Posture {
+    /// Host process, no container: the gateway still brokers MCP tool calls, but
+    /// nothing confines the process's own egress or filesystem — policy there is
+    /// advisory, not enforced.
+    Host,
+    /// Sandboxed with a host-side egress proxy: proxied HTTPS egress is checked
+    /// against compiled policy, but the container sits on an ordinary bridge —
+    /// a process that ignores `HTTPS_PROXY` can still dial out directly. Only
+    /// `--lockdown` removes that route, so this label must never say ENFORCED.
+    Sandbox,
+    /// Sandboxed on an internal-only network whose sole peer is the egress
+    /// sidecar: enforced *and* topologically confined — no host route, no direct
+    /// internet.
+    Lockdown,
+}
+
+impl Posture {
+    /// The stable machine slug persisted beside a run's event log and emitted in
+    /// `report --json`. Kept separate from the human [`Display`] label so the
+    /// on-disk form never shifts when we reword the banner.
+    ///
+    /// [`Display`]: std::fmt::Display
+    pub fn slug(self) -> &'static str {
+        match self {
+            Posture::Host => "host",
+            Posture::Sandbox => "sandbox",
+            Posture::Lockdown => "lockdown",
+        }
+    }
+
+    /// Parse a slug back into a `Posture`. `None` for anything unrecognized (a
+    /// posture file from a future version, or a truncated write) — the reader
+    /// then just omits the label rather than guessing.
+    pub fn from_slug(s: &str) -> Option<Posture> {
+        match s.trim() {
+            "host" => Some(Posture::Host),
+            "sandbox" => Some(Posture::Sandbox),
+            "lockdown" => Some(Posture::Lockdown),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Posture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `posture / enforcement-strength` — the second half is the honest part.
+        // ENFORCED is reserved for lockdown: plain --sandbox proxies egress but
+        // leaves the direct route open (a proxy-ignoring process can bypass it).
+        let label = match self {
+            Posture::Host => "HOST / ADVISORY",
+            Posture::Sandbox => "SANDBOX / PROXIED · DIRECT ROUTE OPEN",
+            Posture::Lockdown => "LOCKDOWN / ENFORCED · NO DIRECT ROUTE",
+        };
+        f.write_str(label)
+    }
+}
+
+/// Read the enforcement posture recorded for a completed run, if any. The CLI
+/// writes a one-word `posture` file beside the run's `events.jsonl` when a
+/// sandbox starts (see [`execute_plan`]); `agentstack report` reads it back to
+/// label the run. `None` when the run predates posture recording, was a host
+/// run (host runs aren't recorded at all), or the file is unreadable.
+///
+/// `run_id` comes from the user, so we guard it to a single safe path segment
+/// before joining — a stray `../` must never read outside the runs directory
+/// (mirrors the recorder's own `safe_run_segment`, which is private to it).
+pub fn read_recorded_posture(run_id: &str) -> Option<Posture> {
+    let safe = !run_id.is_empty()
+        && run_id.len() <= 128
+        && run_id != "."
+        && run_id != ".."
+        && run_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.');
+    if !safe {
+        return None;
+    }
+    let path = crate::util::paths::agentstack_home()
+        .join("runs")
+        .join(run_id)
+        .join("posture");
+    let raw = std::fs::read_to_string(path).ok()?;
+    Posture::from_slug(&raw)
+}
+
 /// The single, immutable description of one sandbox run. Everything the run
 /// needs — verified trust, effective compiled policy, the exact mounts, command,
 /// egress mode, and run id — is assembled and checked in ONE place
@@ -122,6 +216,16 @@ pub struct ExecutionPlan {
 }
 
 impl ExecutionPlan {
+    /// This run's enforcement posture. Both sandbox modes enforce policy; the
+    /// no-host-route lockdown is the stronger of the two.
+    pub fn posture(&self) -> Posture {
+        if self.lockdown {
+            Posture::Lockdown
+        } else {
+            Posture::Sandbox
+        }
+    }
+
     /// Assemble and verify one sandbox run from a loaded context. This is the
     /// single seam where trust is checked, the effective (machine ∩ bundle)
     /// policy is compiled, the command + mounts are resolved, and the mode is
@@ -191,6 +295,10 @@ impl ExecutionPlan {
             self.server.bold(),
             self.run_id.dimmed()
         );
+        // Enforcement posture: the honest label for how strongly this run's
+        // policy is enforced (both sandbox modes ENFORCE; lockdown also has no
+        // host route). Shown in cyan like the mode lines below.
+        let _ = writeln!(s, "  posture: {}", self.posture().to_string().cyan().bold());
         match &self.fs_readonly_reason {
             Some(why) => {
                 let _ = writeln!(
@@ -355,6 +463,14 @@ fn execute_plan(plan: ExecutionPlan) -> Result<()> {
              — refusing to run a sandbox unobserved",
             plan.run_id
         );
+    }
+    // Record the run's enforcement posture beside its event log so
+    // `agentstack report` can label it honestly later. Best-effort (same
+    // contract as the recorder itself): a posture-write hiccup must never fail
+    // the run it describes. Written to the exact dir `RunLog::create` prepared,
+    // so it lands in the run-private 0700 directory.
+    if let Some(l) = (*log).as_ref() {
+        let _ = std::fs::write(l.path().with_file_name("posture"), plan.posture().slug());
     }
     // A per-run token authenticates the sandbox to its proxy: the listener must
     // bind a broad address so the container can reach it, so the token — not the
@@ -630,6 +746,81 @@ mod tests {
             "r-abc",
         );
         assert!(spec.mounts[0].read_only, "partial scopes round down to ro");
+    }
+
+    /// Posture selection: lockdown → Lockdown, otherwise Sandbox. Host posture
+    /// isn't reachable from an ExecutionPlan (a plan only ever describes a
+    /// sandbox run); it's produced directly on the host-mode banner path.
+    #[test]
+    fn plan_posture_tracks_the_mode() {
+        let plan = |lockdown| ExecutionPlan {
+            run_id: "r".into(),
+            server: "claude-code".into(),
+            spec: build_sandbox_spec(
+                Path::new("/proj"),
+                vec!["claude".into()],
+                CompiledRuleset::default(),
+                "r",
+            ),
+            lockdown,
+            trust: agentstack_trust::TrustState::Trusted,
+            fs_readonly_reason: None,
+        };
+        assert_eq!(plan(true).posture(), Posture::Lockdown);
+        assert_eq!(plan(false).posture(), Posture::Sandbox);
+    }
+
+    /// Every posture's slug round-trips, and the human label states the
+    /// enforcement strength honestly. ENFORCED is reserved for lockdown:
+    /// plain --sandbox leaves the direct route open, and its label must say so
+    /// rather than claim enforcement a proxy-ignoring process could bypass.
+    #[test]
+    fn posture_slug_roundtrips_and_labels_enforcement() {
+        for p in [Posture::Host, Posture::Sandbox, Posture::Lockdown] {
+            assert_eq!(Posture::from_slug(p.slug()), Some(p));
+        }
+        assert!(Posture::Host.to_string().contains("ADVISORY"));
+        assert!(Posture::Sandbox.to_string().contains("DIRECT ROUTE OPEN"));
+        assert!(!Posture::Sandbox.to_string().contains("ENFORCED"));
+        assert!(Posture::Lockdown.to_string().contains("NO DIRECT ROUTE"));
+        // Unknown / truncated slugs read back as None (the reader then omits the
+        // label rather than guessing).
+        assert_eq!(Posture::from_slug("host\n"), Some(Posture::Host)); // trims
+        assert_eq!(Posture::from_slug("mystery"), None);
+        assert_eq!(Posture::from_slug(""), None);
+    }
+
+    /// The `--plan`/banner display names the posture label, not just the mode.
+    #[test]
+    fn plan_display_names_the_posture() {
+        let plan = ExecutionPlan {
+            run_id: "r".into(),
+            server: "codex".into(),
+            spec: build_sandbox_spec(
+                Path::new("/proj"),
+                vec!["x".into()],
+                CompiledRuleset::default(),
+                "r",
+            ),
+            lockdown: false,
+            trust: agentstack_trust::TrustState::Trusted,
+            fs_readonly_reason: None,
+        };
+        let out = plan.display(Path::new("/proj"), true);
+        assert!(out.contains("posture:"), "{out}");
+        assert!(
+            out.contains("SANDBOX / PROXIED · DIRECT ROUTE OPEN"),
+            "{out}"
+        );
+    }
+
+    /// `read_recorded_posture` refuses run ids that aren't a single safe path
+    /// segment — a stray `../` must never read outside the runs directory.
+    #[test]
+    fn read_recorded_posture_rejects_unsafe_ids() {
+        for bad in ["", ".", "..", "../evil", "a/b", "x\0y"] {
+            assert_eq!(read_recorded_posture(bad), None, "must reject {bad:?}");
+        }
     }
 
     /// A write scope covering the workspace root flips the mount to rw.

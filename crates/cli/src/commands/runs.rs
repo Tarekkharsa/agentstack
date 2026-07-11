@@ -25,6 +25,19 @@ pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
     } else {
         println!("{} launching {}…", "▶".green(), args.harness.bold());
     }
+    // Host mode has no container: name the posture and say — once, honestly, in
+    // the same style as the sandbox "unreviewed bundle" warning — that policy is
+    // advisory here. The gateway still brokers MCP tool calls, but nothing
+    // confines this process's own egress or filesystem; `--sandbox`/`--lockdown`
+    // are what enforce those at runtime.
+    use crate::commands::sandbox::Posture;
+    println!("  posture: {}", Posture::Host.to_string().yellow().bold());
+    eprintln!(
+        "  {} host mode: policy is advisory — the gateway brokers MCP tool calls, but \
+         this process's own egress and filesystem are not confined; use `--sandbox` or \
+         `--lockdown` to enforce them at runtime.",
+        "⚠".yellow()
+    );
     crate::runs::launch(
         dir,
         &args.harness,

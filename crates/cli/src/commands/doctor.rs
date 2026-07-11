@@ -877,6 +877,14 @@ fn run_checks(
     // Project policy is optional; the machine layer applies either way, so the
     // "Policy" section shows whenever EITHER has something to report.
     let machine_policy = crate::manifest::machine_policy_health();
+    // Machine-policy posture: one honest word (open / mixed / restrictive) for
+    // how locked-down THIS machine's own firewall layer is — shown even when
+    // there's no machine policy at all, because "open" is the case most worth
+    // stating out loud. Borrows `machine_policy`; the Policy section below still
+    // moves it into `check_machine_policy`.
+    report.section("Machine policy posture");
+    let (posture, why) = classify_machine_posture(&machine_policy);
+    report.line(Level::Ok, format!("{posture} — {why}"));
     if !manifest.policy.is_empty() || machine_policy_reports(&machine_policy) {
         report.section("Policy");
         if !manifest.policy.is_empty() {
@@ -1390,6 +1398,60 @@ fn report_machine_dimension(
     }
 }
 
+/// Classify the machine policy layer's overall posture in one honest word, for
+/// `doctor`. Deliberately simple — this is a one-line headline, not the section
+/// detail below it:
+///
+/// - **open** — no machine manifest, an empty `[policy]`, or (fail-open) an
+///   unreadable one: nothing on this machine narrows what a cloned repo may do.
+/// - **restrictive** — at least one dimension carries a rename-proof `"*"` rule
+///   (tools/egress/secrets), or a `[policy.filesystem]` scope is set: the
+///   firewall binds every server, whatever a repo renames it to.
+/// - **mixed** — some machine policy, but only named-server rules, which a repo
+///   can dodge by renaming its server (see the rename-dodge lint above).
+///
+/// Never overstates: a `"*"` rule earns "restrictive", not "locked down" — a
+/// `"*"` allowlist can still be broad. Pure (takes a borrow, returns static
+/// strings) so it is unit-testable without a `Report` or a real machine file.
+fn classify_machine_posture(
+    machine: &Option<Result<crate::manifest::Policy>>,
+) -> (&'static str, &'static str) {
+    let policy = match machine {
+        None => {
+            return (
+                "open",
+                "no machine policy file — every project runs with its own policy only",
+            )
+        }
+        Some(Err(_)) => {
+            return (
+                "open",
+                "machine policy is unreadable — the gateway fails open to project-only policy",
+            )
+        }
+        Some(Ok(p)) => p,
+    };
+    let dims = [&policy.tools, &policy.egress, &policy.secrets];
+    if dims.iter().all(|m| m.is_empty()) && policy.filesystem.is_empty() {
+        return (
+            "open",
+            "machine [policy] is empty — nothing here narrows what a project may do",
+        );
+    }
+    let has_wildcard = dims.iter().any(|m| m.contains_key("*"));
+    if has_wildcard || !policy.filesystem.is_empty() {
+        (
+            "restrictive",
+            "a rename-proof \"*\" rule (or a filesystem scope) constrains every server",
+        )
+    } else {
+        (
+            "mixed",
+            "only named-server rules — a repo can dodge them by renaming its server",
+        )
+    }
+}
+
 /// Diagnose the machine `[policy.tools]`/`[policy.egress]`/`[policy.secrets]`
 /// layers. Runs regardless of whether the project declares its own
 /// `[policy]` — the machine layer is independent and applies to every
@@ -1659,6 +1721,48 @@ mod tests {
         let out = rename_dodgeable_denies("secrets", &secrets);
         assert_eq!(out.len(), 1, "{out:?}");
         assert!(out[0].contains("[policy.secrets]") && out[0].contains("EVIL_*"));
+    }
+
+    /// Machine-policy posture classification: the simple open / mixed /
+    /// restrictive heuristic, and its honest handling of the no-file and
+    /// unreadable cases (both fail open).
+    #[test]
+    fn machine_posture_classification() {
+        let policy = |toml_body: &str| -> crate::manifest::Policy {
+            let m: Manifest = toml::from_str(&format!("version = 1\n{toml_body}")).unwrap();
+            m.policy
+        };
+
+        // No machine file at all → open.
+        assert_eq!(classify_machine_posture(&None).0, "open");
+        // Unreadable machine file → open (fails open to project-only policy).
+        assert_eq!(
+            classify_machine_posture(&Some(Err(anyhow::anyhow!("boom")))).0,
+            "open"
+        );
+        // Present but empty [policy] → open.
+        assert_eq!(classify_machine_posture(&Some(Ok(policy("")))).0, "open");
+        // Only a named-server rule → mixed (a repo can rename its server).
+        assert_eq!(
+            classify_machine_posture(&Some(Ok(policy(
+                "[policy.tools]\ngithub = [\"!delete_*\"]\n"
+            ))))
+            .0,
+            "mixed"
+        );
+        // A rename-proof "*" rule → restrictive.
+        assert_eq!(
+            classify_machine_posture(&Some(Ok(policy("[policy.egress]\n\"*\" = [\"!*\"]\n")))).0,
+            "restrictive"
+        );
+        // A filesystem scope alone → restrictive (bundle-global, no server key).
+        assert_eq!(
+            classify_machine_posture(&Some(Ok(policy(
+                "[policy.filesystem]\nwrite = [\"./**\"]\n"
+            ))))
+            .0,
+            "restrictive"
+        );
     }
 
     /// Flatten a `Report`'s lines (across every section) into `(tag, msg)`
