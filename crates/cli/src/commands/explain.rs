@@ -350,7 +350,7 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
             // enforce at write/spawn time.
             let verdict = if ruleset.egress_constrained(name) {
                 match crate::render::declared_host(server.url.as_deref().unwrap_or("")) {
-                    Some(h) => match ruleset.egress_decision(name, &h) {
+                    Some(h) => match ruleset.egress_decision(name, &h, None) {
                         Ok(()) => " — passes [policy.egress]",
                         Err(_) => " — ✗ BLOCKED by [policy.egress] at write/spawn time",
                     },

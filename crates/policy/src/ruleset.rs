@@ -28,12 +28,18 @@
 
 use std::collections::BTreeMap;
 
-use agentstack_core::manifest::glob_match;
+use agentstack_core::manifest::{egress_match, glob_match};
 use serde::{Deserialize, Serialize};
 
 /// Bump ONLY on an incompatible semantic change. Additive fields ride on
 /// serde defaults without a bump.
-pub const RULESET_VERSION: u32 = 1;
+///
+/// v2: egress patterns gained an optional `:port` suffix (`host:port` scopes to
+/// that port). This REINTERPRETS the grammar — a v1 consumer would read
+/// `!evil.example:443` as a hostname glob and fail to deny it — so the version
+/// gate must make an older enforcer fail closed rather than misread a v2
+/// ruleset.
+pub const RULESET_VERSION: u32 = 2;
 
 /// Default action when no rule constrains a subject. Uniform allow-by-default
 /// across dimensions (maintainer ruling): least privilege is an explicit
@@ -78,14 +84,18 @@ impl LayerRules {
         self.deny.is_empty() && self.allow_all_of.is_empty()
     }
 
-    fn check(&self, dimension: &str, subject: &str) -> Result<(), String> {
+    /// Deny-then-allow evaluation with a custom `matches(pattern)` (leading `!`
+    /// already stripped for denies) that captures its own subject. Glob
+    /// dimensions pass a `glob_match` closure via [`Guard::check`]; egress
+    /// passes a port-aware one.
+    fn check_with(&self, dimension: &str, matches: &impl Fn(&str) -> bool) -> Result<(), String> {
         for d in &self.deny {
-            if glob_match(d, subject) {
+            if matches(d) {
                 return Err(format!("denied by {dimension} rule \"!{d}\""));
             }
         }
         for allows in &self.allow_all_of {
-            if !allows.iter().any(|a| glob_match(a, subject)) {
+            if !allows.iter().any(|a| matches(a)) {
                 return Err(format!(
                     "not in the {dimension} allowlist ({})",
                     allows.join(", ")
@@ -116,10 +126,20 @@ impl Guard {
     /// Machine layer first (its refusal names the layer), then the bundle's —
     /// the same composition as `agentstack_policy::tool_decision`.
     pub fn check(&self, dimension: &str, subject: &str) -> Result<(), String> {
+        self.check_with(dimension, &|pat| glob_match(pat, subject))
+    }
+
+    /// Machine-then-bundle check with a custom pattern matcher (egress uses it
+    /// to scope by port). Machine refusals still name their layer.
+    pub fn check_with(
+        &self,
+        dimension: &str,
+        matches: &impl Fn(&str) -> bool,
+    ) -> Result<(), String> {
         self.machine
-            .check(dimension, subject)
+            .check_with(dimension, matches)
             .map_err(|r| format!("{r} (machine policy — ~/.agentstack/agentstack.toml)"))?;
-        self.bundle.check(dimension, subject)
+        self.bundle.check_with(dimension, matches)
     }
 }
 
@@ -203,11 +223,20 @@ impl CompiledRuleset {
         self.rules_for(server).tools.check("[policy.tools]", tool)
     }
 
-    /// Whether `server` may reach `host` per the compiled `[policy.egress]`.
-    /// Phase 1 enforces this at write/spawn time against a server's DECLARED
-    /// URL host only; runtime egress filtering is the Phase-2 proxy's job.
-    pub fn egress_decision(&self, server: &str, host: &str) -> Result<(), String> {
-        self.rules_for(server).egress.check("[policy.egress]", host)
+    /// Whether `server` may reach `host` (on `port`, if known) per the compiled
+    /// `[policy.egress]`. `port` is `Some` at runtime (the proxy has the CONNECT
+    /// port, so `host:port` patterns are enforced exactly) and `None` for the
+    /// host-only write/spawn-time check (where the exact port is deferred to
+    /// runtime — a `host:port` pattern still matches the host there).
+    pub fn egress_decision(
+        &self,
+        server: &str,
+        host: &str,
+        port: Option<u16>,
+    ) -> Result<(), String> {
+        self.rules_for(server)
+            .egress
+            .check_with("[policy.egress]", &|pat| egress_match(pat, host, port))
     }
 
     /// Whether `server` may resolve the secret named `reference` per the

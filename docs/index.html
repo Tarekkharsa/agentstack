@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>agentstack — trust-gate, firewall, and one manifest for every agent CLI</title>
-<meta name="description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call. Define servers, skills, and instructions once; agentstack renders them into 13 agent CLIs. Secrets stay references.">
+<title>agentstack — trust, firewall, and sandbox every agent CLI</title>
+<meta name="description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call — or run the agent in a lockdown sandbox with no route out but the policy proxy. One manifest renders into 13 agent CLIs. Secrets stay references.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta property="og:title" content="agentstack — trust-gate, firewall, and one manifest for every agent CLI">
-<meta property="og:description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call. One manifest renders into 13 agent CLIs. Secrets stay references.">
+<meta property="og:title" content="agentstack — trust, firewall, and sandbox every agent CLI">
+<meta property="og:description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call — or sandbox the agent with no route out but the policy proxy. One manifest renders into 13 agent CLIs.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://tarekkharsa.github.io/agentstack/">
 <meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
@@ -18,8 +18,8 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="agentstack — the local control plane for your AI agent CLIs">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="agentstack — trust-gate, firewall, and one manifest for every agent CLI">
-<meta name="twitter:description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call. One manifest renders into 13 agent CLIs.">
+<meta name="twitter:title" content="agentstack — trust, firewall, and sandbox every agent CLI">
+<meta name="twitter:description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call — or sandbox the agent with no route out. One manifest renders into 13 agent CLIs.">
 <meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <style>
   :root {
@@ -345,13 +345,16 @@
 <main id="main">
 
   <section id="hero" style="margin-top:3.5rem">
-    <p class="eyebrow">One binary · a trust-gated MCP gateway · 13 agent CLIs</p>
-    <h1>Trust every MCP tool.<br>Run any agent.<span class="cursor" aria-hidden="true"></span></h1>
+    <p class="eyebrow">One binary · trust gate · firewall · sandbox · 13 agent CLIs</p>
+    <h1>Trust it. Firewall it. Sandbox it.<br>Run any agent.<span class="cursor" aria-hidden="true"></span></h1>
     <p class="lede">
-      One local gateway <strong>trust-gates, firewalls, and logs</strong> your
-      agents' MCP calls — across Claude Code, Codex, Cursor, and ten more. The
-      same manifest renders native configs when you want files.
-      <strong>Secrets stay references. Setups travel.</strong>
+      The local control plane for AI coding agents. <strong>Nothing a repo
+      declares runs until you review and trust it.</strong> Every MCP call
+      passes your firewall and lands in the log. And when you trust an agent
+      less than that, it runs in a container <strong>whose only way out is
+      your policy</strong>. One manifest renders native config for Claude
+      Code, Codex, Cursor, and ten more —
+      <strong>secrets stay references, setups travel.</strong>
     </p>
     <div class="cta">
       <a class="btn primary" href="#install">Install agentstack</a>
@@ -376,7 +379,9 @@
       Two ways in: the <a href="#trust">runtime control plane</a>
       (<code>connect → trust →</code> firewalled calls, zero files copied) — or
       <a href="#start">portable configuration</a> (<code>init → apply</code>
-      renders every CLI's native config from one manifest).
+      renders every CLI's native config from one manifest). Either way,
+      <a href="#sandbox"><code>run --lockdown</code></a> can put the agent in a
+      container with no route out but the policy proxy.
     </p>
 
     <div class="clis">
@@ -515,6 +520,55 @@ default = ["claude-code", "codex"]</code></pre>
     </p>
   </section>
 
+  <section id="sandbox" class="reveal">
+    <p class="eyebrow">The sandbox</p>
+    <h2>Don't trust the agent? Take away the network.</h2>
+    <p class="muted">
+      The trust gate decides what an agent <em>may</em> do.
+      <code>agentstack run --sandbox</code> decides what it <em>can</em> do:
+      the harness runs in a container, its traffic routes through an egress
+      proxy enforcing your machine <code>[policy.egress]</code>, and every
+      allow and block lands in a per-run flight recorder you read back with
+      <code>agentstack report</code>. The workspace mounts read-only unless
+      your <code>[policy.filesystem]</code> says otherwise — the kernel
+      enforces the bind, not the harness.
+    </p>
+    <dl class="modes">
+      <div>
+        <dt>--sandbox <small>proxy-enforced</small></dt>
+        <dd>The container gets an ordinary bridge network with its
+            <code>HTTPS_PROXY</code> pointed at the agentstack proxy: configured
+            egress is filtered and recorded. A process that ignores the proxy
+            env still has a direct route — that caveat is what the next flag
+            removes.</dd>
+      </div>
+      <div>
+        <dt>--lockdown <small>no route out</small></dt>
+        <dd>The container's only network is an internal one whose single
+            reachable peer is the egress-proxy <strong>sidecar</strong>. No host
+            route, no internet, no DNS beyond it. An agent that ignores the
+            proxy reaches nothing — the confinement is topology, not
+            convention. Verified live on Docker through the real binary.</dd>
+      </div>
+    </dl>
+    <figure>
+      <img src="lockdown.gif" alt="Terminal recording: agentstack run --sandbox --lockdown — a container with no host route tries a direct connection and reaches nothing; a proxied request to a denied host is blocked by machine policy and recorded in the flight-recorder report" width="961" height="764" loading="lazy">
+      <figcaption>Lockdown, end to end — direct route dead, denied host blocked, every decision on the record. Runnable (needs Docker): <a href="https://github.com/Tarekkharsa/agentstack/blob/main/agentstack-test/demo-lockdown.sh"><code>agentstack-test/demo-lockdown.sh</code></a>.</figcaption>
+    </figure>
+    <p class="small muted">
+      The proxy is picky on purpose: hostnames are normalized before matching,
+      a tunnel's TLS SNI must equal the CONNECT host (no domain fronting),
+      any name resolving to a loopback, private, link-local, or cloud-metadata
+      address is refused (no SSRF into your own network), and a per-run
+      credential means only its own sandbox can use it. This boundary was
+      swept by a <a href="security-review-2026-07-11.html">two-reviewer
+      security review</a> — all five High findings and six of seven Mediums
+      are closed, the rest tracked in the open. Honest scope: hosts you allow
+      stay allowed — the claim is <em>unapproved egress is blocked</em>,
+      never "exfiltration is impossible."
+    </p>
+  </section>
+
   <section id="modes" class="reveal">
     <p class="eyebrow">Rendered files</p>
     <h2>Pick where artifacts live</h2>
@@ -555,6 +609,12 @@ agentstack apply --write</code></pre>
     <p class="muted">In CI, the trust gate is two commands — or the one-line GitHub Action:</p>
     <pre><code>agentstack install --locked   # fail if sources drifted from the pinned lock
 agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</code></pre>
+    <p class="small muted">
+      Provenance, too: <code>agentstack sign</code> writes a detached ed25519
+      signature over the lockfile, and <code>agentstack verify</code> checks
+      it — so CI can prove the pinned content is the content someone actually
+      reviewed.
+    </p>
   </section>
 
   <section id="more" class="reveal">
@@ -618,6 +678,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
       <a href="https://github.com/Tarekkharsa/agentstack">source</a>
       <a href="https://github.com/Tarekkharsa/agentstack/issues">issues</a>
       <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
+      <a href="security-review-2026-07-11.html">security&nbsp;review</a>
     </nav>
   </div>
 </footer>

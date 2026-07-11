@@ -222,8 +222,17 @@ tracked to closure so this plan and the report can't drift apart:
   `adapters → policy` dependency edge withdrawn from CLAUDE.md and
   ARCHITECTURE.md (L5, doc half); a sandbox run now fails closed if its run log
   can't be created — "nothing trusted runs unobserved" (L4 remainder).
-- **Open, accepted and tracked:** egress decisions match host only, not port
-  (M5 — an "HTTPS-only" policy isn't expressible yet); the stat-based digest
+- **Closed — M5 (port-scoped egress):** egress patterns gained an optional
+  `:port` (`api.example.com:443` scopes to that port; a bare host still means
+  any port), matched by a shared `egress_match` threaded through the same
+  intersection check so tools/secrets are untouched; the proxy enforces the
+  exact CONNECT port, write-time checks defer the port to runtime. The grammar
+  change bumped `RULESET_VERSION` to 2 so an older enforcer fails closed rather
+  than misread `!host:port`. An adversarial verification pass (a Codex review +
+  three invariant checkers) proved (machine ∩ bundle) still only narrows, drove
+  the version bump, and closed two parser holes (malformed bracketed patterns no
+  longer widen to any-port; port 0 is refused at CONNECT).
+- **Open, accepted and tracked:** the stat-based digest
   cache stays off every verification path — that containment IS the fix, keep
   it true (L1); the event-sink append is synchronous inside the async proxy
   (L3 — latency, not correctness); `trust`

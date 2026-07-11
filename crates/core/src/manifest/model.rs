@@ -79,9 +79,10 @@ pub struct Policy {
     #[serde(default)]
     pub tools: IndexMap<String, Vec<String>>,
     /// Per-server outbound host rules, same grammar as `tools` (globs over
-    /// hostnames, `!` denies, `"*"` key is rename-proof). Phase 1 checks a
-    /// server's DECLARED URL host at write/spawn time; runtime egress
-    /// filtering is the Phase-2 proxy's job.
+    /// hostnames, `!` denies, `"*"` key is rename-proof), with an optional
+    /// `:port` suffix: `api.example.com:443` scopes to that port, a bare host
+    /// means any port. The write/spawn-time check matches the host and defers
+    /// the port; the Phase-2 proxy enforces the exact CONNECT port.
     #[serde(default)]
     pub egress: IndexMap<String, Vec<String>>,
     /// Per-server secret access, same grammar (globs over `${REF}` names).
@@ -143,19 +144,28 @@ impl Policy {
     /// is written rename-proof: it constrains every server, whatever a
     /// manifest calls it.
     pub fn tool_allowed(&self, server: &str, tool: &str) -> Result<(), String> {
-        map_allowed(&self.tools, "[policy.tools]", server, tool)
+        map_allowed(&self.tools, "[policy.tools]", server, |pat| {
+            glob_match(pat, tool)
+        })
     }
 
     /// Whether `server` may reach `host` per `[policy.egress]` — the same
-    /// keyed grammar and `"*"` rename-proofing as `tool_allowed`.
+    /// keyed grammar and `"*"` rename-proofing as `tool_allowed`. Host-only
+    /// (no query port), so a `host:port` pattern is treated as matching here
+    /// and the exact port is enforced at runtime (the proxy calls the compiled
+    /// ruleset with the real port).
     pub fn egress_allowed(&self, server: &str, host: &str) -> Result<(), String> {
-        map_allowed(&self.egress, "[policy.egress]", server, host)
+        map_allowed(&self.egress, "[policy.egress]", server, |pat| {
+            egress_match(pat, host, None)
+        })
     }
 
     /// Whether `server` may resolve the secret named `reference` per
     /// `[policy.secrets]` — same keyed grammar and `"*"` rename-proofing.
     pub fn secret_allowed(&self, server: &str, reference: &str) -> Result<(), String> {
-        map_allowed(&self.secrets, "[policy.secrets]", server, reference)
+        map_allowed(&self.secrets, "[policy.secrets]", server, |pat| {
+            glob_match(pat, reference)
+        })
     }
 }
 
@@ -171,7 +181,10 @@ fn map_allowed(
     map: &IndexMap<String, Vec<String>>,
     dimension: &str,
     server: &str,
-    subject: &str,
+    // Given a pattern (with its leading `!` already stripped for denies),
+    // whether it matches the subject the closure captured. Dimensions differ
+    // only here: tools/secrets glob-match a bare name; egress scopes by port.
+    matches: impl Fn(&str) -> bool,
 ) -> Result<(), String> {
     let keys: &[&str] = if server == "*" {
         &["*"]
@@ -184,13 +197,13 @@ fn map_allowed(
         };
         for r in rules {
             if let Some(deny) = r.strip_prefix('!') {
-                if glob_match(deny, subject) {
+                if matches(deny) {
                     return Err(format!("denied by {dimension} {key} = \"!{deny}\""));
                 }
             }
         }
         let allows: Vec<&String> = rules.iter().filter(|r| !r.starts_with('!')).collect();
-        if !allows.is_empty() && !allows.iter().any(|a| glob_match(a, subject)) {
+        if !allows.is_empty() && !allows.iter().any(|a| matches(a)) {
             return Err(format!(
                 "not in the {dimension} allowlist for {key} ({})",
                 allows
@@ -202,6 +215,68 @@ fn map_allowed(
         }
     }
     Ok(())
+}
+
+/// Egress pattern match: the pattern is `host` (any port) or `host:port` (that
+/// exact port), matched against `host` and an optional query `port`. Host uses
+/// the same [`glob_match`] as every other dimension; the port, when the pattern
+/// pins one, must equal the query's. A `None` query port (a host-only, e.g.
+/// write-time, check) defers the port test to runtime and matches. Bracketed
+/// IPv6 (`[::1]:443`) is understood; a bare `::1` (multiple colons, unbracketed)
+/// is treated as a host with no port so its own colons aren't read as a port.
+pub fn egress_match(pattern: &str, host: &str, port: Option<u16>) -> bool {
+    let (pat_host, pat_port) = split_pattern_port(pattern);
+    if !glob_match(pat_host, host) {
+        return false;
+    }
+    match (pat_port, port) {
+        (None, _) => true,            // pattern pins no port → any port
+        (Some(_), None) => true,      // no query port → port enforced at runtime
+        (Some(p), Some(q)) => p == q, // pinned port must match exactly
+    }
+}
+
+/// Split an egress pattern into its host part and an optional pinned port.
+/// `host:443` → (`host`, Some(443)); `host` or `host:*` → (`host`, None);
+/// `[::1]:443` → (`::1`, Some(443)); a bare `::1` → (`::1`, None).
+fn split_pattern_port(pattern: &str) -> (&str, Option<u16>) {
+    if let Some(rest) = pattern.strip_prefix('[') {
+        // Bracketed IPv6 literal: `[addr]` or `[addr]:port`.
+        if let Some((addr, after)) = rest.split_once(']') {
+            if after.is_empty() {
+                return (addr, None); // `[addr]` → any port
+            }
+            if let Some(port) = after
+                .strip_prefix(':')
+                .and_then(|p| p.parse::<u16>().ok())
+                .filter(|p| *p != 0)
+            {
+                return (addr, Some(port));
+            }
+            // A non-empty, non-`:port` suffix (`[::1]:443junk`, `[::1]:`,
+            // `[::1]garbage`) is malformed — do NOT silently widen to any-port.
+            // Return the whole pattern as the host so it matches no real host
+            // (a malformed allow grants nothing; a malformed deny is inert —
+            // manifest validation should have rejected it upstream).
+            return (pattern, None);
+        }
+        return (pattern, None);
+    }
+    // Only read a trailing `:port` when there's a SINGLE colon — otherwise a
+    // bare IPv6 literal's own colons would be misread as a port.
+    if let Some((h, p)) = pattern.rsplit_once(':') {
+        if !h.contains(':') && !p.is_empty() {
+            if p == "*" {
+                return (h, None); // explicit any-port
+            }
+            if let Ok(port) = p.parse::<u16>() {
+                if port != 0 {
+                    return (h, Some(port));
+                }
+            }
+        }
+    }
+    (pattern, None)
 }
 
 /// Minimal glob: `*` matches any run of characters (including empty). No `?`.
@@ -594,6 +669,75 @@ mod tests {
         // The refusal names the rule.
         let err = p.tool_allowed("jira", "delete_issue").unwrap_err();
         assert!(err.contains("!delete_*"), "{err}");
+    }
+
+    #[test]
+    fn egress_match_scopes_by_port() {
+        // Bare host pattern matches any port.
+        assert!(egress_match(
+            "api.example.com",
+            "api.example.com",
+            Some(443)
+        ));
+        assert!(egress_match("api.example.com", "api.example.com", Some(22)));
+        // host:port pins the exact port.
+        assert!(egress_match(
+            "api.example.com:443",
+            "api.example.com",
+            Some(443)
+        ));
+        assert!(!egress_match(
+            "api.example.com:443",
+            "api.example.com",
+            Some(22)
+        ));
+        // Host-only query (no port) defers the port test → matches.
+        assert!(egress_match("api.example.com:443", "api.example.com", None));
+        // Glob host still applies, with a pinned port.
+        assert!(egress_match(
+            "*.example.com:443",
+            "api.example.com",
+            Some(443)
+        ));
+        assert!(!egress_match(
+            "*.example.com:443",
+            "api.example.com",
+            Some(80)
+        ));
+        // Explicit any-port.
+        assert!(egress_match(
+            "api.example.com:*",
+            "api.example.com",
+            Some(9999)
+        ));
+        // Host mismatch is a mismatch regardless of port.
+        assert!(!egress_match(
+            "api.example.com:443",
+            "evil.example",
+            Some(443)
+        ));
+    }
+
+    #[test]
+    fn egress_match_handles_ipv6_literals() {
+        // A bare IPv6 literal's own colons are NOT read as a port.
+        assert!(egress_match("::1", "::1", Some(443)));
+        // Bracketed form pins a port.
+        assert!(egress_match("[::1]:443", "::1", Some(443)));
+        assert!(!egress_match("[::1]:443", "::1", Some(80)));
+        assert!(egress_match("[::1]", "::1", Some(80)));
+        // A MALFORMED bracketed suffix must NOT silently widen to any-port —
+        // it matches nothing (never all ports).
+        for bad in ["[::1]:443junk", "[::1]:", "[::1]garbage", "[::1]:0"] {
+            assert!(
+                !egress_match(bad, "::1", Some(443)),
+                "malformed pattern {bad} must not match"
+            );
+            assert!(
+                !egress_match(bad, "::1", Some(80)),
+                "malformed pattern {bad} must not match any port"
+            );
+        }
     }
 
     #[test]

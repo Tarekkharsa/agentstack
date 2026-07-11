@@ -569,7 +569,7 @@ impl Gateway {
                         // runtime egress filtering stays Phase 2's proxy.
                         match crate::render::declared_host(&url) {
                             Some(host) => {
-                                if let Err(rule) = ruleset.egress_decision(&name, &host) {
+                                if let Err(rule) = ruleset.egress_decision(&name, &host, None) {
                                     eprintln!(
                                         "gateway: skipping '{name}': declared host {host} — {rule}"
                                     );

@@ -258,6 +258,49 @@ mod tests {
         assert!(secret_decision(&machine, &project, "gh", "GITHUB_TOKEN").is_ok());
     }
 
+    #[test]
+    fn compiled_egress_scopes_by_port() {
+        // Machine allows the host only on 443.
+        let mut machine = Policy::default();
+        machine
+            .egress
+            .insert("api".into(), vec!["api.example.com:443".into()]);
+        let rs = compile(&machine, &Policy::default(), &["api"]);
+        // The runtime decision (Some(port)) enforces the port exactly.
+        assert!(rs
+            .egress_decision("api", "api.example.com", Some(443))
+            .is_ok());
+        assert!(rs
+            .egress_decision("api", "api.example.com", Some(22))
+            .is_err());
+        // A host-only (write-time) check defers the port and still allows.
+        assert!(rs.egress_decision("api", "api.example.com", None).is_ok());
+    }
+
+    /// Pinning a port can only NARROW: if the machine allows a host on any port
+    /// and the bundle pins 443, the effective decision denies 22 (which the
+    /// machine alone would have allowed). Rule 2 in the port dimension.
+    #[test]
+    fn a_bundle_port_pin_narrows_the_machine_any_port_allow() {
+        let mut machine = Policy::default();
+        machine
+            .egress
+            .insert("api".into(), vec!["api.example.com".into()]); // any port
+        let mut bundle = Policy::default();
+        bundle
+            .egress
+            .insert("api".into(), vec!["api.example.com:443".into()]); // 443 only
+        let rs = compile(&machine, &bundle, &["api"]);
+        assert!(rs
+            .egress_decision("api", "api.example.com", Some(443))
+            .is_ok());
+        // 22 is allowed by the machine layer alone but denied by the bundle pin
+        // → effective is narrower, never wider.
+        assert!(rs
+            .egress_decision("api", "api.example.com", Some(22))
+            .is_err());
+    }
+
     // ── Compiled-ruleset invariants ─────────────────────────────────────────
     // The compiled artifact must be exactly as strict as the live two-layer
     // decision — never more permissive than the machine (rule 2 restated on
@@ -318,8 +361,11 @@ mod tests {
         ) {
             let names: Vec<&str> = servers.iter().map(String::as_str).collect();
             let ruleset = compile(&machine, &project, &names);
+            // Host-only (port=None) so both sides are the same shape — the live
+            // reference `egress_decision` is host-only; port-scoping is covered
+            // by dedicated tests in ruleset.rs.
             prop_assert_eq!(
-                ruleset.egress_decision(&lookup, &subject).is_ok(),
+                ruleset.egress_decision(&lookup, &subject, None).is_ok(),
                 egress_decision(&machine, &project, &lookup, &subject).is_ok()
             );
             prop_assert_eq!(

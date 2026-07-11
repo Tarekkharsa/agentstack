@@ -1333,7 +1333,7 @@ fn check_effective_policy(manifest: &Manifest, report: &mut Report) {
         let Some(url) = &server.url else { continue };
         match declared_host(url) {
             Some(host) => {
-                if let Err(rule) = ruleset.egress_decision(name, &host) {
+                if let Err(rule) = ruleset.egress_decision(name, &host, None) {
                     report.line(
                         Level::Error,
                         format!(

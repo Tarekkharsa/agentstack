@@ -243,7 +243,7 @@ pub fn plan_target_with_servers(
             if let Some(url) = &server.url {
                 match declared_host(url) {
                     Some(host) => {
-                        if let Err(rule) = ruleset.egress_decision(name, &host) {
+                        if let Err(rule) = ruleset.egress_decision(name, &host, None) {
                             denied.push(format!("server '{name}' declared host {host} — {rule}"));
                             continue;
                         }

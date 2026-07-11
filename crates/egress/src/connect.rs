@@ -54,6 +54,12 @@ fn split_host_port(authority: &str) -> Option<Target> {
         (host.to_string(), port)
     };
     let port: u16 = port.parse().ok()?;
+    // Reject port 0: it never names a real CONNECT target (and won't connect),
+    // and policy patterns can't pin it — so refusing it here keeps the parser
+    // and the `host:port` policy grammar consistent.
+    if port == 0 {
+        return None;
+    }
     let host = normalize_host(&host);
     if host.is_empty() {
         return None;
@@ -134,6 +140,9 @@ mod tests {
         // Non-numeric / out-of-range port.
         assert_eq!(parse_connect_target(b"CONNECT h:notaport HTTP/1.1"), None);
         assert_eq!(parse_connect_target(b"CONNECT h:99999 HTTP/1.1"), None);
+        // Port 0 is refused (consistent with the policy grammar, which can't
+        // pin port 0).
+        assert_eq!(parse_connect_target(b"CONNECT h:0 HTTP/1.1"), None);
         // Empty host.
         assert_eq!(parse_connect_target(b"CONNECT :443 HTTP/1.1"), None);
         // Garbage / empty.

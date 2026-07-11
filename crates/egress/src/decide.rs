@@ -34,7 +34,7 @@ impl EgressGuard {
     /// rule constrains the server — the same grammar the gateway uses; the
     /// machine layer narrows it, and the compiled ruleset already folded both
     /// layers.
-    pub fn decide(&self, server: &str, host: &str) -> Decision {
+    pub fn decide(&self, server: &str, host: &str, port: u16) -> Decision {
         // Fail closed on a ruleset newer than this consumer understands — the
         // artifact's own ruling ("the enforcement artifact, not advisory
         // config"). With the sidecar proxy the ruleset crosses a real process
@@ -47,7 +47,9 @@ impl EgressGuard {
                 self.ruleset.version
             ))
         } else {
-            self.ruleset.egress_decision(server, host)
+            // The proxy has the real CONNECT port, so `host:port` egress
+            // patterns are enforced exactly here.
+            self.ruleset.egress_decision(server, host, Some(port))
         };
         let allowed = result.is_ok();
         let rule = result.err();
@@ -100,7 +102,7 @@ mod tests {
     fn allows_unconstrained_and_records_it() {
         // No egress policy at all → allow-by-default.
         let guard = EgressGuard::new(CompiledRuleset::default());
-        let d = guard.decide("web-search", "api.search.example");
+        let d = guard.decide("web-search", "api.search.example", 443);
         assert!(d.allowed);
         match d.event {
             RunEvent::Egress {
@@ -123,7 +125,7 @@ mod tests {
     fn blocks_a_denied_host_and_records_the_rule_and_layer() {
         let rs = ruleset(&[("*", &["!evil.example"])], "web-search");
         let guard = EgressGuard::new(rs);
-        let d = guard.decide("web-search", "evil.example");
+        let d = guard.decide("web-search", "evil.example", 443);
         assert!(!d.allowed);
         match d.event {
             RunEvent::Egress { allowed, rule, .. } => {
@@ -135,7 +137,11 @@ mod tests {
             other => panic!("expected Egress, got {other:?}"),
         }
         // A different host on the same server is still allowed.
-        assert!(guard.decide("web-search", "api.search.example").allowed);
+        assert!(
+            guard
+                .decide("web-search", "api.search.example", 443)
+                .allowed
+        );
     }
 
     /// A ruleset from a future, unknown version denies EVERYTHING — never
@@ -148,7 +154,7 @@ mod tests {
             ..CompiledRuleset::default()
         };
         let guard = EgressGuard::new(rs);
-        let d = guard.decide("any-server", "api.search.example");
+        let d = guard.decide("any-server", "api.search.example", 443);
         assert!(!d.allowed, "an unknown version must deny everything");
         match d.event {
             RunEvent::Egress { rule, .. } => {
@@ -164,7 +170,7 @@ mod tests {
         let rs = ruleset(&[("*", &["!*.internal"])], "anything");
         let guard = EgressGuard::new(rs);
         // Whatever a repo names its server, the machine wildcard deny holds.
-        assert!(!guard.decide("renamed-server", "db.internal").allowed);
-        assert!(!guard.decide("another-name", "svc.internal").allowed);
+        assert!(!guard.decide("renamed-server", "db.internal", 443).allowed);
+        assert!(!guard.decide("another-name", "svc.internal", 443).allowed);
     }
 }

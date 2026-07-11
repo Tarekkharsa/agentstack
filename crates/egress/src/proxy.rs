@@ -149,7 +149,7 @@ impl ServerProxy {
         // the decision — we emit exactly one event reflecting the FINAL outcome,
         // so a policy-allow that a transport guard later refuses is recorded as
         // the block it actually was, not a misleading allow.
-        let decision = self.guard.decide(&self.server, &target.host);
+        let decision = self.guard.decide(&self.server, &target.host, target.port);
         if !decision.allowed {
             (self.on_event)(decision.event);
             let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n").await;

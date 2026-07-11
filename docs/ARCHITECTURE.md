@@ -139,7 +139,10 @@ key is rename-proof (it constrains every server regardless of what a manifest
 calls it, so a repo can't dodge a machine rule by renaming a server):
 
 - `[policy.tools]` — per-server tool allow/deny globs (`policy.tool_allowed`).
-- `[policy.egress]` — per-server outbound host globs (`policy.egress_allowed`).
+- `[policy.egress]` — per-server outbound host globs, optionally port-scoped
+  as `host:port` (`api.example.com:443`); a bare host means any port. The
+  runtime proxy enforces the exact CONNECT port (`policy.egress_allowed` /
+  `CompiledRuleset::egress_decision`).
 - `[policy.secrets]` — per-server `${REF}` name globs (`policy.secret_allowed`).
 - `[policy.filesystem]` — bundle-global `read`/`write` path globs (`FsPolicy`;
   no per-server split — a sandbox mount is per-run, not per-server).
