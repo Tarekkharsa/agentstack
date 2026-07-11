@@ -1,6 +1,6 @@
 [package]
 name = "agentstack-adapters"
-version = "0.8.1"
+version = "0.9.0"
 edition = "2021"
 rust-version = "1.80"
 description = "agentstack adapters: data-driven bundle -> per-CLI config compilers (13 CLIs)"

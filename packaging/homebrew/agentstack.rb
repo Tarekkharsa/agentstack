@@ -6,7 +6,7 @@
 class Agentstack < Formula
   desc "One portable manifest, every agent CLI — manage MCP servers + skills across AI coding tools"
   homepage "https://github.com/Tarekkharsa/agentstack"
-  version "0.2.0"
+  version "0.9.0"
   license any_of: ["MIT", "Apache-2.0"]
 
   on_macos do
