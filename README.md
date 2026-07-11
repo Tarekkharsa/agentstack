@@ -327,6 +327,15 @@ Details and trade-offs: [feature reference → three modes](docs/reference.md#wh
   use, so pruning is data-driven. `--transcripts` adds cross-harness reach from
   local Claude Code / Codex session logs — sessions, token totals, top tools;
   aggregates only, never prompt content. Read-only and local.
+- **Sandboxed runs** — `agentstack run --sandbox --lockdown` launches the agent
+  in a container with **no host route and no internet**: its only path out is
+  the AgentStack egress-proxy sidecar, which enforces your machine
+  `[policy.egress]` and records every decision to the run's flight recorder
+  (`agentstack report`). Ignoring the proxy reaches nothing — the confinement
+  is topological. Runnable demo (needs Docker):
+  [`agentstack-test/demo-lockdown.sh`](agentstack-test/demo-lockdown.sh).
+
+![agentstack lockdown: a container with no host route — its only egress is the AgentStack proxy sidecar, which blocks a denied host and records it](docs/lockdown.gif)
 
 The closed loop in under a minute — install a versioned pack, spread it to
 every CLI, firewall a tool, watch the refusal in the audit log, upgrade to the

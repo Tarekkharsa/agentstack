@@ -10,6 +10,7 @@ under an isolated `HOME` inside `runtime/` (gitignored).
 as                      # run the binary against the simulated machine
 demo-firstrun.sh        # clean first-run adoption story (see below)
 demo-central-library.sh # end-to-end central-library walkthrough (see below)
+demo-lockdown.sh        # no-direct-route sandbox: run --sandbox --lockdown (needs Docker)
 fixtures/               # demo INPUT — not owned by any project, not the library
   central-library/
     kibana.toml         #   a server definition (${REF} secret only)
