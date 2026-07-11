@@ -256,21 +256,38 @@ pub fn report_text(run_id: &str) -> String {
 /// Render the report as JSON.
 pub fn report_json(run_id: &str) -> Result<String> {
     let events = RunLog::read(run_id);
-    // `calls` is the FALLBACK tool-call source, mirroring `tool_rows`'
-    // all-or-nothing preference: a run whose own `events.jsonl` already carries
-    // `ToolCall` events (every sandboxed run now does, once its MCP traffic
-    // routes through the gateway) has the same calls in both logs, so emitting
-    // both would double-count them. When events carry tool calls, the audit-log
-    // fallback is redundant and omitted; only older runs (no ToolCall events)
-    // surface `calls` here.
-    let has_tool_events = events
-        .iter()
-        .any(|e| matches!(e, RunEvent::ToolCall { .. }));
-    let calls = if has_tool_events {
-        Vec::new()
-    } else {
-        calls_for(run_id)
-    };
+    // A gateway-routed run mirrors each tool call into BOTH events.jsonl (a
+    // `ToolCall`) and the cross-project audit log, so emitting both raw would
+    // double-count. But the mirror is best-effort and independent of the audit
+    // write, so the two can diverge — a mirror that failed for one call leaves
+    // that call ONLY in the audit log. So instead of dropping `calls` wholesale
+    // when any ToolCall exists, keep only the audit records NOT already present
+    // as a ToolCall event (matched on server+tool+digest+timestamp). That
+    // de-dupes the common case and still surfaces a call the mirror missed.
+    let mut event_keys = std::collections::HashSet::new();
+    for e in &events {
+        if let RunEvent::ToolCall {
+            server,
+            tool,
+            args_digest,
+            ts,
+            ..
+        } = e
+        {
+            event_keys.insert((server.clone(), tool.clone(), args_digest.clone(), *ts));
+        }
+    }
+    let calls: Vec<CallRecord> = calls_for(run_id)
+        .into_iter()
+        .filter(|c| {
+            !event_keys.contains(&(
+                c.server.clone(),
+                c.tool.clone(),
+                c.args_digest.clone(),
+                c.ts,
+            ))
+        })
+        .collect();
     Ok(serde_json::to_string_pretty(&serde_json::json!({
         "run": run_id,
         // Additive field: the recorded enforcement posture slug, or null for a

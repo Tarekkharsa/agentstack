@@ -22,8 +22,28 @@
 
 use std::io;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use tokio::net::{TcpListener, TcpStream};
+
+/// Cap on concurrent relayed connections. The relay's peer is the sandboxed
+/// (potentially compromised) container, so an unbounded accept loop would let
+/// it drive unbounded task/fd creation on the sidecar and connection fan-out
+/// into the host gateway. One harness's MCP client never needs this many at
+/// once; excess connections are dropped (closed) rather than queued. Bounded
+/// with a plain `AtomicUsize` (not a tokio `Semaphore`) so the sidecar binary
+/// doesn't need tokio's `sync` feature when built in isolation.
+const MAX_CONNECTIONS: usize = 64;
+
+/// Decrements the connection counter when a relayed connection ends, even on a
+/// panic — so a task panic can't permanently consume a slot.
+struct ConnGuard(Arc<AtomicUsize>);
+impl Drop for ConnGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Release);
+    }
+}
 
 /// Bind a relay on `listen` that splices every accepted connection to `dest`
 /// (e.g. `host.docker.internal:12345`). Returns the bound local address; the
@@ -32,14 +52,22 @@ use tokio::net::{TcpListener, TcpStream};
 pub async fn start_relay(listen: SocketAddr, dest: String) -> io::Result<SocketAddr> {
     let listener = TcpListener::bind(listen).await?;
     let addr = listener.local_addr()?;
+    let inflight = Arc::new(AtomicUsize::new(0));
     tokio::spawn(async move {
         // Loop until the listener socket dies; each connection is spliced on
         // its own task so one slow client can't block new accepts.
         while let Ok((inbound, _)) = listener.accept().await {
+            // Bounded concurrency: at the cap, drop the connection instead of
+            // spawning another task/dial (shed load rather than exhaust).
+            if inflight.fetch_add(1, Ordering::AcqRel) >= MAX_CONNECTIONS {
+                inflight.fetch_sub(1, Ordering::Release);
+                drop(inbound);
+                continue;
+            }
+            let guard = ConnGuard(Arc::clone(&inflight));
             let dest = dest.clone();
             tokio::spawn(async move {
-                // A failed dial or a client that hangs up just drops this
-                // connection — the relay keeps serving.
+                let _guard = guard; // decrements when this connection ends
                 let _ = splice(inbound, &dest).await;
             });
         }

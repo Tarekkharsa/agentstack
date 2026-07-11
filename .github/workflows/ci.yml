@@ -65,4 +65,5 @@ jobs:
             --test sandbox_cli_e2e \
             --test sandbox_fs \
             --test sandbox_lockdown \
+            --test sandbox_gateway_e2e \
             -- --nocapture

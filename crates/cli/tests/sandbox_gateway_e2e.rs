@@ -22,7 +22,21 @@
 use std::fs;
 use std::process::Command;
 
-use agentstack::calllog::{RunEvent, RunLog};
+use agentstack::calllog::RunEvent;
+
+/// Read a run's events.jsonl directly from its home, WITHOUT mutating the
+/// process-global `AGENTSTACK_HOME` (which `RunLog::read` reads live). These
+/// tests run concurrently in one binary; a global env mutation would race
+/// between tests and clobber each other's home.
+fn read_events(as_home: &std::path::Path, run_id: &str) -> Vec<RunEvent> {
+    let path = as_home.join("runs").join(run_id).join("events.jsonl");
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    raw.lines()
+        .filter_map(|l| serde_json::from_str::<RunEvent>(l).ok())
+        .collect()
+}
 
 /// A node image is the sandbox runner (the shipped `docker/sandbox.Dockerfile`
 /// base) — its `node` binary is both the fake harness and the MCP client.
@@ -276,8 +290,7 @@ fn trusted_bundle_routes_denied_tool_and_records_it() {
         .find(|w| w.starts_with("r-"))
         .map(|w| w.trim_end_matches([')', '.']).to_string())
         .expect("run --sandbox prints a run id");
-    std::env::set_var("AGENTSTACK_HOME", &as_home);
-    let events = RunLog::read(&run_id);
+    let events = read_events(&as_home, &run_id);
     eprintln!("--- run {run_id} events ---\n{events:#?}");
 
     // The gateway recorded the denied tool call in the run's own log.
@@ -353,8 +366,7 @@ fn lockdown_routes_denied_tool_through_the_sidecar_relay() {
         .find(|w| w.starts_with("r-"))
         .map(|w| w.trim_end_matches([')', '.']).to_string())
         .expect("run --lockdown prints a run id");
-    std::env::set_var("AGENTSTACK_HOME", &as_home);
-    let events = RunLog::read(&run_id);
+    let events = read_events(&as_home, &run_id);
     eprintln!("--- run {run_id} events ---\n{events:#?}");
 
     // The denied tool call was refused and recorded — reached the host gateway

@@ -28,12 +28,22 @@
 //!   mutate the manifest it runs under.
 
 use std::io::Read;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
 use tiny_http::{Header, Method, Response, Server};
 
 use crate::gateway::Gateway;
+
+/// Decrements the in-flight counter when a served request finishes, even on a
+/// panic in `serve_one` — so a handler panic can't permanently consume a slot.
+struct InflightGuard(Arc<AtomicUsize>);
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Release);
+    }
+}
 
 /// Hard cap on a request body (CLAUDE.md rule 7 — bound sizes on hostile
 /// input). This endpoint is reachable by the untrusted sandboxed container
@@ -42,6 +52,14 @@ use crate::gateway::Gateway;
 /// whole into memory. MCP JSON-RPC messages are kilobytes; 4 MiB is a
 /// generous ceiling that still refuses an OOM attempt.
 const MAX_BODY_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Cap on concurrently-served requests (CLAUDE.md rule 7, same reasoning as the
+/// body cap). Each request is served on its own OS thread; without a cap a
+/// compromised container could open thousands of connections and exhaust host
+/// threads (a `thread::spawn` panic would then take the whole endpoint — the
+/// harness's only MCP transport — down). One harness's MCP client never needs
+/// this many in flight; excess requests get a fast `503` instead of a thread.
+const MAX_INFLIGHT: usize = 64;
 
 /// A running gateway HTTP endpoint. The serve threads are detached and live
 /// until the process exits — the endpoint's lifetime is the run's lifetime,
@@ -65,27 +83,57 @@ pub fn start(gateway: Arc<Gateway>, bind: &str) -> Option<GatewayHttp> {
     let session_id = hex_token();
 
     let token_for_thread = token.clone();
+    let inflight = Arc::new(AtomicUsize::new(0));
     std::thread::spawn(move || {
         // Accept loop only; each request gets its own thread. The gateway is
         // Sync with per-upstream locking, so one slow upstream call doesn't
         // block the endpoint (mirrors the code-mode endpoint's model).
         for req in server.incoming_requests() {
+            // Bounded concurrency: shed load with a fast 503 rather than
+            // spawning an unbounded number of host threads for a hostile
+            // container. `fetch_add` then compare so the check + reserve is one
+            // step against the accept loop's single thread.
+            if inflight.fetch_add(1, Ordering::AcqRel) >= MAX_INFLIGHT {
+                inflight.fetch_sub(1, Ordering::Release);
+                let resp = Response::from_string(json!({ "error": "server busy" }).to_string())
+                    .with_status_code(503)
+                    .with_header(json_ctype());
+                let _ = req.respond(resp);
+                continue;
+            }
+            let guard = InflightGuard(Arc::clone(&inflight));
             let gateway = Arc::clone(&gateway);
             let token = token_for_thread.clone();
             let session_id = session_id.clone();
-            std::thread::spawn(move || serve_one(req, &gateway, &token, &session_id));
+            std::thread::spawn(move || {
+                let _guard = guard; // released (decrementing) on thread exit
+                serve_one(req, &gateway, &token, &session_id);
+            });
         }
     });
 
     Some(GatewayHttp { port, token })
 }
 
+/// Constant-time byte-equality — no early return on the first mismatched byte,
+/// so comparing the bearer token can't leak a per-byte timing signal. (The
+/// token length is fixed and public, so length may short-circuit.)
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// Handle one HTTP request: token first, then method, then MCP dispatch.
 fn serve_one(mut req: tiny_http::Request, gateway: &Gateway, token: &str, session_id: &str) {
-    let authed = req
-        .headers()
-        .iter()
-        .any(|h| h.field.equiv("X-Agentstack-Token") && h.value.as_str() == token);
+    let authed = req.headers().iter().any(|h| {
+        h.field.equiv("X-Agentstack-Token") && ct_eq(h.value.as_str().as_bytes(), token.as_bytes())
+    });
     if !authed {
         let resp = Response::from_string(json!({ "error": "unauthorized" }).to_string())
             .with_status_code(401)

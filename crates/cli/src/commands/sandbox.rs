@@ -221,6 +221,10 @@ pub struct ExecutionPlan {
     /// format (per-adapter field names + transport tag) without re-consulting
     /// the registry inside the feature-gated executor.
     pub harness_desc: crate::adapter::AdapterDescriptor,
+    /// `--profile <name>`, if given: the gateway fences its proxied surface to
+    /// that profile's servers, so a sandboxed run scoped to a profile only
+    /// exposes that profile's servers (same scoping the host path applies).
+    pub profile: Option<String>,
 }
 
 impl ExecutionPlan {
@@ -275,6 +279,7 @@ impl ExecutionPlan {
             fs_readonly_reason,
             manifest_dir: ctx.dir.clone(),
             harness_desc: desc.clone(),
+            profile: args.profile.clone(),
         })
     }
 
@@ -488,9 +493,29 @@ struct GatewayConfig {
     project_container: Option<String>,
 }
 
+/// A harness global config path (as declared on the descriptor, e.g.
+/// `~/.claude.json`, `~/.codex/config.toml`) mapped to a path RELATIVE to the
+/// container home, intermediate dirs preserved. Returns `None` for a
+/// `{config}`/`{data}` placeholder form (VS Code, Claude Desktop) — those have
+/// no reliable container-home mapping, so a run must decline to route rather
+/// than mount at a bogus path and claim enforcement.
+#[cfg(feature = "sandbox")]
+fn container_rel_path(config_path: &str) -> Option<String> {
+    if config_path.contains('{') {
+        return None;
+    }
+    Some(
+        config_path
+            .strip_prefix("~/")
+            .or_else(|| config_path.strip_prefix('~'))
+            .unwrap_or_else(|| config_path.trim_start_matches('/'))
+            .to_string(),
+    )
+}
+
 /// Render the gateway entry into the harness's own config format. Returns
-/// `None` when the harness has no MCP config, or can't represent an HTTP entry
-/// (e.g. a stdio-only adapter).
+/// `None` when the harness has no MCP config, can't represent an HTTP entry
+/// (e.g. a stdio-only adapter), or has a config path with no container mapping.
 #[cfg(feature = "sandbox")]
 fn render_gateway_config(
     desc: &crate::adapter::AdapterDescriptor,
@@ -533,36 +558,42 @@ fn render_gateway_config(
         return Ok(None);
     }
 
-    let entries = vec![("agentstack-gateway".to_string(), rendered.value)];
-    let (global_body, empty_body) = match config.format {
-        Format::Json => (
-            merge_json::merge("", &mcp.location, &entries)?,
-            merge_json::merge("", &mcp.location, &[])?,
-        ),
-        Format::Toml => (
-            merge_toml::merge_with_removals(
-                "",
-                &mcp.location,
-                &entries,
-                &[],
-                mcp.headers_as_subtable,
-            )?,
-            merge_toml::merge_with_removals("", &mcp.location, &[], &[], mcp.headers_as_subtable)?,
-        ),
-    };
-
     // The global config path RELATIVE to home, intermediate dirs preserved:
     // `~/.claude.json` → `.claude.json`, `~/.codex/config.toml` →
     // `.codex/config.toml` (Docker creates the parent dir in the writable
     // container home). Flattening to the basename would mount codex's config at
-    // `/root/config.toml`, a path it never reads — silently losing routing for
-    // every non-claude-code adapter. A non-`~` (absolute) path is unusual for an
-    // HTTP-capable adapter; fall back to stripping the leading `/`.
-    let rel = config
-        .path
-        .strip_prefix("~/")
-        .or_else(|| config.path.strip_prefix('~'))
-        .unwrap_or_else(|| config.path.trim_start_matches('/'));
+    // `/root/config.toml`, a path it never reads.
+    let Some(rel) = container_rel_path(&config.path) else {
+        // A `{config}`/`{data}` placeholder path (e.g. VS Code's
+        // `{config}/Code/User/mcp.json`) has no reliable mapping into the
+        // container home — routing it would mount at a bogus path while
+        // claiming enforcement. Decline to route rather than mislead.
+        return Ok(None);
+    };
+
+    let entries = vec![("agentstack-gateway".to_string(), rendered.value)];
+    let render = |es: &[(String, serde_json::Value)], fmt: Format| -> Result<String> {
+        Ok(match fmt {
+            Format::Json => merge_json::merge("", &mcp.location, es)?,
+            Format::Toml => merge_toml::merge_with_removals(
+                "",
+                &mcp.location,
+                es,
+                &[],
+                mcp.headers_as_subtable,
+            )?,
+        })
+    };
+    let global_body = render(&entries, config.format)?;
+    // The shadow rides at PROJECT scope, so render the empty map in the
+    // project's own format when it differs from the global one (a user adapter
+    // may — `config_for` honors `project.format.unwrap_or(config.format)`).
+    let project_fmt = desc
+        .project
+        .as_ref()
+        .and_then(|p| p.format)
+        .unwrap_or(config.format);
+    let empty_body = render(&[], project_fmt)?;
     let project_container = desc
         .project
         .as_ref()
@@ -578,7 +609,8 @@ fn render_gateway_config(
 
 /// The live gateway wiring for one sandboxed run: the HTTP endpoint the
 /// container talks to, plus the temp dir holding the rendered config mounted
-/// into it. Held for the run's lifetime; dropping it removes the temp dir.
+/// into it. Held for the run's lifetime; its `Drop` removes the temp dir (RAII,
+/// so the token-bearing config is cleaned up even on an early error return).
 #[cfg(feature = "sandbox")]
 struct SandboxGateway {
     /// The token-gated HTTP MCP endpoint. Its serve thread owns the
@@ -586,12 +618,22 @@ struct SandboxGateway {
     /// children) live until this process exits — the run's lifetime.
     _endpoint: crate::gateway_http::GatewayHttp,
     /// Run-scoped dir holding the rendered config files bind-mounted into the
-    /// container; removed after the run.
+    /// container; removed on drop.
     tempdir: PathBuf,
     /// In lockdown, the host gateway address (`host.docker.internal:<port>`)
     /// the sidecar relay must splice to; `None` in plain `--sandbox` (the
     /// container reaches the host gateway directly).
     relay_dest: Option<String>,
+}
+
+#[cfg(feature = "sandbox")]
+impl Drop for SandboxGateway {
+    fn drop(&mut self) {
+        // The staged config carries the live per-run bearer token; remove it
+        // once the run has released its mounts. Best-effort — a leaked temp dir
+        // is visible, not silent, and never blocks the run's own result.
+        let _ = std::fs::remove_dir_all(&self.tempdir);
+    }
 }
 
 /// Route the sandbox's MCP traffic through the in-process gateway so
@@ -605,16 +647,19 @@ struct SandboxGateway {
 /// this milestone), and its endpoint is token-gated per request. Resolved
 /// secrets never enter the container — it sees only the endpoint URL + token.
 ///
-/// Returns `None` (leaving `spec` untouched) when there is nothing to route:
-/// an untrusted/empty bundle, a harness that can't host an HTTP MCP entry, or
-/// (for now) lockdown mode — the container there has no host route, so
-/// reaching a host-side endpoint needs the sidecar relay a later session adds.
+/// Returns `None` (leaving `spec` untouched) when there is nothing to route: an
+/// untrusted bundle, one with no proxied servers, or a harness that can't host
+/// an HTTP MCP entry — each surfaced on stderr. Both `--sandbox` (container
+/// reaches the host gateway directly) and `--lockdown` (a sidecar relay bridges
+/// the internal-only network to the host gateway) are routed.
 #[cfg(feature = "sandbox")]
+#[allow(clippy::too_many_arguments)]
 fn wire_sandbox_gateway(
     manifest_dir: &Path,
     desc: &crate::adapter::AdapterDescriptor,
     run_id: &str,
     lockdown: bool,
+    profile: Option<&str>,
     spec: &mut SandboxSpec,
 ) -> Result<Option<SandboxGateway>> {
     use std::sync::Arc;
@@ -622,17 +667,37 @@ fn wire_sandbox_gateway(
     // Build the run's gateway from the SAME compiled ruleset the plan carries
     // (never recompiled) and hard trust-gate it: untrusted → empty → no
     // routing, no secret resolution, no host children.
-    let gateway =
-        crate::gateway::Gateway::from_plan(Some(manifest_dir), spec.ruleset.clone(), None, run_id);
+    let gateway = crate::gateway::Gateway::from_plan(
+        Some(manifest_dir),
+        spec.ruleset.clone(),
+        profile,
+        run_id,
+    );
     if gateway.is_empty() {
+        // An empty gateway means either an untrusted bundle (from_plan already
+        // printed "gateway: refusing to serve …") or a TRUSTED bundle with no
+        // proxied servers. Surface the latter so a run that silently isn't
+        // routed always has a stderr reason (the untrusted case already does).
+        let root = crate::manifest::project_root_of(manifest_dir);
+        if crate::trust::check(&root) == agentstack_trust::TrustState::Trusted {
+            eprintln!(
+                "  {} no proxied servers to route through the gateway; \
+                 running without tool-policy routing",
+                "note:".dimmed()
+            );
+        }
         return Ok(None);
     }
 
     // Cheap pre-check: a harness that can't host an HTTP MCP entry (no config,
-    // or a stdio-only adapter with no `url` field) can't be routed — bail
-    // BEFORE binding an endpoint we'd otherwise leak for the run.
-    let can_host_http =
-        desc.config.is_some() && desc.mcp.as_ref().is_some_and(|m| m.fields.url.is_some());
+    // a stdio-only adapter with no `url` field, or a config path with no
+    // container-home mapping) can't be routed — bail BEFORE binding an endpoint
+    // we'd otherwise leak for the run.
+    let can_host_http = desc
+        .config
+        .as_ref()
+        .is_some_and(|c| container_rel_path(&c.path).is_some())
+        && desc.mcp.as_ref().is_some_and(|m| m.fields.url.is_some());
     if !can_host_http {
         eprintln!(
             "  {} {} can't host an HTTP MCP entry; running without tool-policy routing",
@@ -686,11 +751,19 @@ fn wire_sandbox_gateway(
 
     // Stage the rendered configs in a run-scoped 0700 dir (0600 files — the
     // global one carries the live endpoint token), bind-mounted read-only.
-    // Removed after the run, mirroring the lockdown ruleset staging.
     let tempdir = std::env::temp_dir().join(format!("agentstack-gw-{run_id}"));
     std::fs::create_dir_all(&tempdir).context("creating the gateway config staging dir")?;
     crate::util::restrict(&tempdir, true);
-    let global_host = tempdir.join("global-config");
+    // Own the tempdir in the RAII handle from HERE, so any `?` below (a failed
+    // config write) drops it and removes the token-bearing dir — no leak on the
+    // error path.
+    let gw = SandboxGateway {
+        _endpoint: endpoint,
+        tempdir,
+        relay_dest,
+    };
+
+    let global_host = gw.tempdir.join("global-config");
     std::fs::write(&global_host, &cfg.global_body).context("writing the gateway config")?;
     crate::util::restrict(&global_host, false);
     spec.mounts.push(Mount {
@@ -706,7 +779,7 @@ fn wire_sandbox_gateway(
     // the mountpoint exists too, so the read-only overlay works.
     if let (Some(project_container), Some(proj)) = (cfg.project_container, desc.project.as_ref()) {
         if manifest_dir.join(&proj.config).exists() {
-            let empty_host = tempdir.join("project-shadow");
+            let empty_host = gw.tempdir.join("project-shadow");
             std::fs::write(&empty_host, &cfg.empty_body)
                 .context("writing the project shadow config")?;
             crate::util::restrict(&empty_host, false);
@@ -730,11 +803,7 @@ fn wire_sandbox_gateway(
         "  {} MCP tool calls routed through the gateway (tool policy enforced, calls recorded)",
         "✓".green()
     );
-    Ok(Some(SandboxGateway {
-        _endpoint: endpoint,
-        tempdir,
-        relay_dest,
-    }))
+    Ok(Some(gw))
 }
 
 /// Execute an assembled [`ExecutionPlan`]. Creates the run's flight-recorder log
@@ -776,6 +845,7 @@ fn execute_plan(plan: ExecutionPlan) -> Result<()> {
         &plan.harness_desc,
         &plan.run_id,
         plan.lockdown,
+        plan.profile.as_deref(),
         &mut spec,
     )?;
 
@@ -787,10 +857,9 @@ fn execute_plan(plan: ExecutionPlan) -> Result<()> {
         execute_proxy(spec, &plan.server, log, token)
     };
 
-    // Tear down the gateway staging after the run releases its mounts.
-    if let Some(g) = gateway {
-        let _ = std::fs::remove_dir_all(&g.tempdir);
-    }
+    // `gateway` (if any) drops here, after the run released its mounts — its
+    // Drop removes the token-bearing staging dir.
+    drop(gateway);
     result
 }
 
@@ -976,6 +1045,7 @@ mod tests {
             fs_readonly_reason: Some("no write scope".into()),
             manifest_dir: PathBuf::from("/proj"),
             harness_desc: Default::default(),
+            profile: None,
         };
         // --plan view includes the command.
         let out = plan.display(Path::new("/proj"), true);
@@ -1008,6 +1078,7 @@ mod tests {
             fs_readonly_reason: None,
             manifest_dir: PathBuf::from("/proj"),
             harness_desc: Default::default(),
+            profile: None,
         };
         let out2 = plan2.display(Path::new("/proj"), true);
         assert!(out2.contains("trusted"), "{out2}");
@@ -1084,6 +1155,7 @@ mod tests {
             fs_readonly_reason: None,
             manifest_dir: PathBuf::from("/proj"),
             harness_desc: Default::default(),
+            profile: None,
         };
         assert_eq!(plan(true).posture(), Posture::Lockdown);
         assert_eq!(plan(false).posture(), Posture::Sandbox);
@@ -1126,6 +1198,7 @@ mod tests {
             fs_readonly_reason: None,
             manifest_dir: PathBuf::from("/proj"),
             harness_desc: Default::default(),
+            profile: None,
         };
         let out = plan.display(Path::new("/proj"), true);
         assert!(out.contains("posture:"), "{out}");
