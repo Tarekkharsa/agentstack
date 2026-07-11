@@ -5,10 +5,6 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
-  packages: write   # push the egress-proxy sidecar image to GHCR
-
 env:
   # Resilience against flaky crates.io fetches on the runners.
   CARGO_NET_RETRY: "10"
@@ -18,6 +14,8 @@ jobs:
   build:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -28,11 +26,12 @@ jobs:
           - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      # Intentionally floating: `stable` is a branch ref with no resolvable tag.
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Cross linker (aarch64 linux)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
@@ -41,7 +40,7 @@ jobs:
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked --features sandbox --target ${{ matrix.target }}
 
       - name: Package
         shell: bash
@@ -59,7 +58,7 @@ jobs:
             tar czf "$name.tar.gz" "$name"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: agentstack-${{ matrix.target }}
           path: |
@@ -71,8 +70,12 @@ jobs:
     name: publish release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: assets
           merge-multiple: true
@@ -81,7 +84,14 @@ jobs:
         working-directory: assets
         run: sha256sum agentstack-* > checksums.txt
 
-      - uses: softprops/action-gh-release@v3
+      - name: Attest release binaries
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: |
+            assets/agentstack-*.tar.gz
+            assets/agentstack-*.zip
+
+      - uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           draft: true
           files: |
@@ -99,9 +109,15 @@ jobs:
   # (see docker/sandbox.Dockerfile).
   egress-image:
     name: publish egress-proxy image (GHCR)
+    needs: release
     runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write   # push the egress-proxy sidecar image to GHCR
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Tag must match the cli crate version
         # The binary compiled from this tag defaults to
         # ...egress-proxy:v<CARGO_PKG_VERSION>; a mismatched tag would ship
@@ -115,13 +131,14 @@ jobs:
       - name: Lowercase owner (GHCR requires lowercase paths)
         run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push
-        uses: docker/build-push-action@v6
+        id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: docker/egress-proxy.Dockerfile
@@ -129,3 +146,21 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER_LC }}/agentstack-egress-proxy:${{ github.ref_name }}
             ghcr.io/${{ env.OWNER_LC }}/agentstack-egress-proxy:latest
+
+      - name: Attest egress-proxy image
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-name: ghcr.io/${{ env.OWNER_LC }}/agentstack-egress-proxy
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Add immutable image digest to release notes
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
+        with:
+          append_body: true
+          # Without an explicit draft: true this update step would flip the
+          # draft the `release` job created to published — silently defeating
+          # the "review the draft, then publish" human gate.
+          draft: true
+          body: |
+            Egress proxy image: `ghcr.io/${{ env.OWNER_LC }}/agentstack-egress-proxy@${{ steps.push.outputs.digest }}`

@@ -21,8 +21,19 @@ git push --tags
 ```
 
 `.github/workflows/release.yml` builds for macOS (arm64/x64), Linux (arm64/x64),
-and Windows (x64), and attaches `.tar.gz` / `.zip` assets to a **draft** release.
-Review the draft, then publish it.
+and Windows (x64), with the `sandbox` feature enabled on every target. It
+attaches `.tar.gz` / `.zip` assets to a **draft** release and records build
+provenance attestations for them. Review the draft, then publish it.
+
+After downloading an asset, verify that its provenance is tied to this
+repository and GitHub Actions workflow:
+
+```sh
+gh attestation verify agentstack-<target>.tar.gz --repo Tarekkharsa/agentstack
+```
+
+The attestation establishes where the artifact was built; continue to compare
+its SHA-256 digest with `checksums.txt` when validating a download.
 
 ## 2. curl installer
 
@@ -56,7 +67,18 @@ brew install Tarekkharsa/tap/agentstack
 
 The tag also builds and pushes the **egress-proxy sidecar** image `--lockdown`
 needs, to `ghcr.io/<owner>/agentstack-egress-proxy:{tag,latest}` (the
-`egress-image` job in `release.yml` — GHCR, built-in token, no secrets).
+`egress-image` job in `release.yml` — GHCR, built-in token, no secrets). The
+job attests the pushed image and appends its immutable
+`ghcr.io/<owner>/agentstack-egress-proxy@sha256:...` reference to the draft
+release notes.
+
+Verify that image provenance against the immutable reference from the release:
+
+```sh
+gh attestation verify \
+  oci://ghcr.io/tarekkharsa/agentstack-egress-proxy@sha256:<digest> \
+  --repo Tarekkharsa/agentstack
+```
 
 Lockdown is **zero-config**: the binary's compiled-in default is exactly
 `ghcr.io/tarekkharsa/agentstack-egress-proxy:v<its own version>`, and the
@@ -74,6 +96,17 @@ The **sandbox runner** image (the harness cage) is *not* published: it must carr
 your chosen harness. Users build it from
 [`docker/sandbox.Dockerfile`](docker/sandbox.Dockerfile) and set
 `AGENTSTACK_SANDBOX_IMAGE`.
+
+## Release credential compromise and revocation
+
+If a release credential or GitHub Actions publishing path may be compromised,
+stop publishing, revoke or rotate the affected credential, disable the affected
+workflow, and mark suspect releases and image tags as untrusted. Remove suspect
+artifacts/tags where practical, publish a security notice identifying the exact
+versions and immutable digests involved, and rebuild replacements from a known
+good commit only after the publishing path has been reviewed. Attestations and
+checksums help identify what was built and distributed; they do not make a
+compromised publisher trustworthy or revoke copies already downloaded.
 
 ## 5. crates.io (optional)
 
