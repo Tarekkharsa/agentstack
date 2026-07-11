@@ -339,9 +339,11 @@ Details and trade-offs: [feature reference → three modes](docs/reference.md#wh
   with `--features sandbox` (Docker support is off by default). The container
   runs your harness, so point `run --sandbox` at an image that carries it —
   build one from [`docker/sandbox.Dockerfile`](docker/sandbox.Dockerfile) and
-  set `AGENTSTACK_SANDBOX_IMAGE` (lockdown also needs the sidecar image from
-  [`docker/egress-proxy.Dockerfile`](docker/egress-proxy.Dockerfile), overridden
-  with `AGENTSTACK_EGRESS_IMAGE`). Runnable demo (needs Docker):
+  set `AGENTSTACK_SANDBOX_IMAGE`. The lockdown proxy sidecar needs no setup:
+  each release publishes it to GHCR and the binary pulls the tag pinned to its
+  own version (override with `AGENTSTACK_EGRESS_IMAGE`, e.g. a local
+  [`docker/egress-proxy.Dockerfile`](docker/egress-proxy.Dockerfile) build).
+  Runnable demo (needs Docker):
   [`agentstack-test/demo-lockdown.sh`](agentstack-test/demo-lockdown.sh).
 
 ![agentstack lockdown: a container with no host route — its only egress is the AgentStack proxy sidecar, which blocks a denied host and records it](docs/lockdown.gif)

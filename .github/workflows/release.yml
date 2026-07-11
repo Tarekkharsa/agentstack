@@ -89,21 +89,29 @@ jobs:
             assets/agentstack-*.zip
             assets/checksums.txt
 
-  # The egress-proxy sidecar image `--lockdown` needs, published so lockdown
-  # works without users hand-building it. Namespace derives from the repo owner
-  # (no hardcoded org), and GHCR pushes with the built-in token — no secrets to
-  # set up. Users then pull it and set AGENTSTACK_EGRESS_IMAGE to the tag.
-  #
-  # Decision left to the maintainer: to make lockdown work with NO env var,
-  # publish instead to Docker Hub `agentstack/egress-proxy` (the code's default
-  # tag) — that needs the `agentstack` org + DOCKERHUB_* secrets; swap the
-  # registry/login below. A companion sandbox RUNNER image is intentionally not
-  # published: it must carry the user's chosen harness (see docker/sandbox.Dockerfile).
+  # The egress-proxy sidecar image `--lockdown` needs. The binary's compiled
+  # default is this exact GHCR path pinned to its own crate version
+  # (crates/cli/src/commands/sandbox.rs), and the runtime pulls it on first
+  # use — so lockdown is zero-config with no env var and no extra secrets
+  # (GHCR pushes with the built-in token; the package must be made PUBLIC once
+  # after the first push — see RELEASING.md). A companion sandbox RUNNER image
+  # is intentionally not published: it must carry the user's chosen harness
+  # (see docker/sandbox.Dockerfile).
   egress-image:
     name: publish egress-proxy image (GHCR)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Tag must match the cli crate version
+        # The binary compiled from this tag defaults to
+        # ...egress-proxy:v<CARGO_PKG_VERSION>; a mismatched tag would ship
+        # binaries pointing at an image this job never publishes.
+        run: |
+          version="$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d'"' -f2)"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} != cli crate version v${version}" >&2
+            exit 1
+          fi
       - name: Lowercase owner (GHCR requires lowercase paths)
         run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
       - name: Log in to GHCR

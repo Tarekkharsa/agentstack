@@ -10,8 +10,13 @@ Distribution is set up but **not yet published**. To cut the first release:
 
 ## 1. Release binaries (GitHub Releases)
 
+The tag **must** be `v<version>` where `<version>` is the cli crate's
+`version` in `crates/cli/Cargo.toml` — the binary's compiled-in default
+egress-image tag is derived from it, and the `egress-image` job fails the
+release on a mismatch. Bump the crate version first, then:
+
 ```sh
-git tag v0.1.0
+git tag "v$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d'"' -f2)"
 git push --tags
 ```
 
@@ -50,16 +55,20 @@ brew install Tarekkharsa/tap/agentstack
 ## 4. Container images (sandbox / lockdown)
 
 The tag also builds and pushes the **egress-proxy sidecar** image `--lockdown`
-needs, to `ghcr.io/<owner>/agentstack-egress-proxy:{tag,latest}` (see the
-`egress-image` job in `release.yml`, GHCR, no secrets). After a release, lockdown
-users pull it and set `AGENTSTACK_EGRESS_IMAGE` to that tag.
+needs, to `ghcr.io/<owner>/agentstack-egress-proxy:{tag,latest}` (the
+`egress-image` job in `release.yml` — GHCR, built-in token, no secrets).
 
-**One decision before v1:** the code's default egress tag is
-`agentstack/egress-proxy:latest` (Docker Hub). Either (a) keep GHCR and tell
-users to set `AGENTSTACK_EGRESS_IMAGE`, or (b) publish to Docker Hub
-`agentstack/egress-proxy` so lockdown works with no env var — that needs the
-`agentstack` org + `DOCKERHUB_*` secrets; swap the registry in the `egress-image`
-job.
+Lockdown is **zero-config**: the binary's compiled-in default is exactly
+`ghcr.io/tarekkharsa/agentstack-egress-proxy:v<its own version>`, and the
+runtime pulls it on first use if it isn't present locally. The pin means a
+binary never silently picks up a newer enforcement sidecar; `latest` exists
+only for humans browsing the registry. `AGENTSTACK_EGRESS_IMAGE` overrides the
+default (e.g. a locally built `docker/egress-proxy.Dockerfile` tag) — a
+present local image is never re-pulled.
+
+**One-time, after the first release:** GHCR packages are *private* by default.
+Make `agentstack-egress-proxy` public (package settings → Danger Zone →
+Change visibility), or anonymous pulls — i.e. every lockdown user — fail.
 
 The **sandbox runner** image (the harness cage) is *not* published: it must carry
 your chosen harness. Users build it from

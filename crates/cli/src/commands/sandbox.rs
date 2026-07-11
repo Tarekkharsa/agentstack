@@ -41,13 +41,23 @@ fn sandbox_image() -> String {
         .unwrap_or_else(|_| "agentstack/sandbox:latest".to_string())
 }
 
-/// The egress-proxy sidecar image (lockdown mode). Overridable with
-/// `AGENTSTACK_EGRESS_IMAGE`; default matches the tag
-/// `docker/egress-proxy.Dockerfile` builds.
+/// The egress-proxy sidecar image (lockdown mode). Defaults to the GHCR
+/// image `release.yml` publishes for this exact version — pinned, not
+/// `:latest`, so a binary never silently picks up a newer enforcement
+/// sidecar — making `--lockdown` zero-config after a release. Override with
+/// `AGENTSTACK_EGRESS_IMAGE` (e.g. a locally built
+/// `docker/egress-proxy.Dockerfile` tag).
 #[cfg(feature = "sandbox")]
 fn egress_image() -> String {
-    std::env::var("AGENTSTACK_EGRESS_IMAGE")
-        .unwrap_or_else(|_| "agentstack/egress-proxy:latest".to_string())
+    std::env::var("AGENTSTACK_EGRESS_IMAGE").unwrap_or_else(|_| {
+        // env!/concat! evaluate at compile time: the crate version is baked
+        // into the binary, and release.yml refuses a tag that doesn't match.
+        concat!(
+            "ghcr.io/tarekkharsa/agentstack-egress-proxy:v",
+            env!("CARGO_PKG_VERSION")
+        )
+        .to_string()
+    })
 }
 
 /// Build the sandbox spec for one run: mount the project as the workspace,

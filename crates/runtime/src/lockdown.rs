@@ -38,8 +38,8 @@ use bollard::models::{
     ContainerCreateBody, EndpointSettings, HostConfig, NetworkConnectRequest, NetworkCreateRequest,
 };
 use bollard::query_parameters::{
-    CreateContainerOptionsBuilder, LogsOptionsBuilder, RemoveContainerOptionsBuilder,
-    StartContainerOptions,
+    CreateContainerOptionsBuilder, CreateImageOptionsBuilder, LogsOptionsBuilder,
+    RemoveContainerOptionsBuilder, StartContainerOptions,
 };
 use bollard::Docker;
 use futures_util::StreamExt;
@@ -110,6 +110,13 @@ impl Lockdown {
         let (ready_tx, ready_rx) = mpsc::channel::<std::result::Result<(), String>>();
 
         let created = rt.block_on(async {
+            // The sidecar image is pulled if absent (bollard's create_container
+            // does NOT auto-pull like the docker CLI) — this is what makes
+            // `--lockdown` zero-config against the published, version-pinned
+            // GHCR image. Only the sidecar gets this treatment: the sandbox
+            // RUNNER image is user-built by design and is never pulled.
+            ensure_image(&docker, proxy_image).await?;
+
             // Two networks: internal (no route out) for the sandbox↔proxy hop,
             // and an ordinary bridge so the dual-homed proxy can forward out.
             create_network(&docker, &internal_net, true).await?;
@@ -217,6 +224,38 @@ impl Drop for Lockdown {
 
 /// Create a user-defined bridge network; `internal` cuts its route to the host
 /// and the outside world.
+/// Make sure `image` exists locally, pulling it if not. A locally present
+/// image is NEVER re-pulled — the default tag is version-pinned, so "present"
+/// means "the one this binary was released with", and a floating local
+/// override stays exactly what the user built.
+async fn ensure_image(docker: &Docker, image: &str) -> Result<()> {
+    match docker.inspect_image(image).await {
+        Ok(_) => return Ok(()),
+        // 404 = not present locally → pull. Any other error (daemon down,
+        // permission) is real and propagates.
+        Err(bollard::errors::Error::DockerResponseServerError {
+            status_code: 404, ..
+        }) => {}
+        Err(e) => return Err(RuntimeError::Backend(e.to_string())),
+    }
+
+    let opts = CreateImageOptionsBuilder::default()
+        .from_image(image)
+        .build();
+    // create_image streams pull progress; drain it, keeping only errors.
+    let mut pull = docker.create_image(Some(opts), None, None);
+    while let Some(step) = pull.next().await {
+        step.map_err(|e| {
+            RuntimeError::Backend(format!(
+                "pulling egress sidecar image {image}: {e} \
+                 (build it locally from docker/egress-proxy.Dockerfile and set \
+                 AGENTSTACK_EGRESS_IMAGE to use your own tag)"
+            ))
+        })?;
+    }
+    Ok(())
+}
+
 async fn create_network(docker: &Docker, name: &str, internal: bool) -> Result<()> {
     docker
         .create_network(NetworkCreateRequest {
