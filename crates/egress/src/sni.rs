@@ -122,58 +122,59 @@ fn parse_server_name(data: &[u8]) -> Option<String> {
     None
 }
 
+/// Build a minimal but structurally valid ClientHello record carrying one
+/// host_name SNI — doubles as documentation of the wire format the parser
+/// walks. Crate-visible under test so the proxy's SNI-wiring tests can reuse it.
+#[cfg(test)]
+pub(crate) fn client_hello_with_sni(name: &str) -> Vec<u8> {
+    let name = name.as_bytes();
+
+    // server_name extension body.
+    let mut entry = Vec::new();
+    entry.push(0x00); // name_type = host_name
+    entry.extend_from_slice(&(name.len() as u16).to_be_bytes());
+    entry.extend_from_slice(name);
+    let mut sni_body = Vec::new();
+    sni_body.extend_from_slice(&(entry.len() as u16).to_be_bytes()); // list len
+    sni_body.extend_from_slice(&entry);
+
+    // extension = type(0x0000) + len + body.
+    let mut ext = Vec::new();
+    ext.extend_from_slice(&0x0000u16.to_be_bytes());
+    ext.extend_from_slice(&(sni_body.len() as u16).to_be_bytes());
+    ext.extend_from_slice(&sni_body);
+
+    // ClientHello body.
+    let mut body = Vec::new();
+    body.extend_from_slice(&[0x03, 0x03]); // client_version TLS 1.2
+    body.extend_from_slice(&[0u8; 32]); // random
+    body.push(0x00); // session_id len 0
+    body.extend_from_slice(&0x0002u16.to_be_bytes()); // cipher_suites len
+    body.extend_from_slice(&[0x13, 0x01]); // one cipher suite
+    body.push(0x01); // compression_methods len
+    body.push(0x00); // null compression
+    body.extend_from_slice(&(ext.len() as u16).to_be_bytes()); // extensions len
+    body.extend_from_slice(&ext);
+
+    // Handshake header.
+    let mut hs = Vec::new();
+    hs.push(0x01); // ClientHello
+    let bl = body.len();
+    hs.extend_from_slice(&[(bl >> 16) as u8, (bl >> 8) as u8, bl as u8]);
+    hs.extend_from_slice(&body);
+
+    // Record header.
+    let mut rec = Vec::new();
+    rec.push(0x16); // Handshake
+    rec.extend_from_slice(&[0x03, 0x01]); // legacy record version
+    rec.extend_from_slice(&(hs.len() as u16).to_be_bytes());
+    rec.extend_from_slice(&hs);
+    rec
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Build a minimal but structurally valid ClientHello record carrying one
-    /// host_name SNI — doubles as documentation of the wire format the parser
-    /// walks.
-    fn client_hello_with_sni(name: &str) -> Vec<u8> {
-        let name = name.as_bytes();
-
-        // server_name extension body.
-        let mut entry = Vec::new();
-        entry.push(0x00); // name_type = host_name
-        entry.extend_from_slice(&(name.len() as u16).to_be_bytes());
-        entry.extend_from_slice(name);
-        let mut sni_body = Vec::new();
-        sni_body.extend_from_slice(&(entry.len() as u16).to_be_bytes()); // list len
-        sni_body.extend_from_slice(&entry);
-
-        // extension = type(0x0000) + len + body.
-        let mut ext = Vec::new();
-        ext.extend_from_slice(&0x0000u16.to_be_bytes());
-        ext.extend_from_slice(&(sni_body.len() as u16).to_be_bytes());
-        ext.extend_from_slice(&sni_body);
-
-        // ClientHello body.
-        let mut body = Vec::new();
-        body.extend_from_slice(&[0x03, 0x03]); // client_version TLS 1.2
-        body.extend_from_slice(&[0u8; 32]); // random
-        body.push(0x00); // session_id len 0
-        body.extend_from_slice(&0x0002u16.to_be_bytes()); // cipher_suites len
-        body.extend_from_slice(&[0x13, 0x01]); // one cipher suite
-        body.push(0x01); // compression_methods len
-        body.push(0x00); // null compression
-        body.extend_from_slice(&(ext.len() as u16).to_be_bytes()); // extensions len
-        body.extend_from_slice(&ext);
-
-        // Handshake header.
-        let mut hs = Vec::new();
-        hs.push(0x01); // ClientHello
-        let bl = body.len();
-        hs.extend_from_slice(&[(bl >> 16) as u8, (bl >> 8) as u8, bl as u8]);
-        hs.extend_from_slice(&body);
-
-        // Record header.
-        let mut rec = Vec::new();
-        rec.push(0x16); // Handshake
-        rec.extend_from_slice(&[0x03, 0x01]); // legacy record version
-        rec.extend_from_slice(&(hs.len() as u16).to_be_bytes());
-        rec.extend_from_slice(&hs);
-        rec
-    }
 
     #[test]
     fn extracts_the_sni_hostname() {

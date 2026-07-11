@@ -286,9 +286,18 @@ impl RunLog {
     /// hiccup must never fail the run it describes (same contract as
     /// [`record`]).
     pub fn append(&self, ev: &RunEvent) {
-        let Ok(line) = serde_json::to_string(ev) else {
+        let Ok(mut line) = serde_json::to_string(ev) else {
             return;
         };
+        // Include the newline in ONE buffer and issue a single `write_all`.
+        // Two concurrent appenders (the egress proxy thread and the sandbox
+        // lifecycle thread) each hold their own `O_APPEND` handle; `writeln!`
+        // emits the line and the `\n` as separate `write()` syscalls, so their
+        // outputs could interleave into a torn, unparseable line — a silently
+        // dropped audit record. A single write of a NUL-free, newline-terminated
+        // buffer under `O_APPEND` is atomic on local filesystems, so records
+        // stay whole even under concurrent writers.
+        line.push('\n');
         let path = self.path();
         let mut opts = fs::OpenOptions::new();
         opts.create(true).append(true);
@@ -298,7 +307,7 @@ impl RunLog {
             opts.mode(0o600);
         }
         if let Ok(mut f) = opts.open(&path) {
-            let _ = writeln!(f, "{line}");
+            let _ = f.write_all(line.as_bytes());
         }
     }
 

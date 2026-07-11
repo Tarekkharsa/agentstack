@@ -1,5 +1,6 @@
 //! Small filesystem helpers shared across commands.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -26,6 +27,33 @@ pub fn copy_dir_all_following_symlinks(src: &Path, dst: &Path) -> Result<()> {
 }
 
 fn copy_dir_impl(src: &Path, dst: &Path, follow_symlinks: bool) -> Result<()> {
+    let mut active_directories = HashSet::new();
+    copy_dir_impl_inner(src, dst, follow_symlinks, &mut active_directories)
+}
+
+fn copy_dir_impl_inner(
+    src: &Path,
+    dst: &Path,
+    follow_symlinks: bool,
+    active_directories: &mut HashSet<std::path::PathBuf>,
+) -> Result<()> {
+    let canonical_src =
+        fs::canonicalize(src).with_context(|| format!("canonicalizing {}", src.display()))?;
+    if !active_directories.insert(canonical_src.clone()) {
+        anyhow::bail!("symlink cycle while copying {}", src.display());
+    }
+
+    let result = copy_dir_contents(src, dst, follow_symlinks, active_directories);
+    active_directories.remove(&canonical_src);
+    result
+}
+
+fn copy_dir_contents(
+    src: &Path,
+    dst: &Path,
+    follow_symlinks: bool,
+    active_directories: &mut HashSet<std::path::PathBuf>,
+) -> Result<()> {
     fs::create_dir_all(dst).with_context(|| format!("creating {}", dst.display()))?;
     for entry in fs::read_dir(src).with_context(|| format!("reading {}", src.display()))? {
         let entry = entry?;
@@ -39,13 +67,13 @@ fn copy_dir_impl(src: &Path, dst: &Path, follow_symlinks: bool) -> Result<()> {
             // Copy the link's target contents (skills rarely nest links; keep it simple).
             if let Ok(real) = fs::canonicalize(&from) {
                 if real.is_dir() {
-                    copy_dir_impl(&real, &to, follow_symlinks)?;
+                    copy_dir_impl_inner(&real, &to, follow_symlinks, active_directories)?;
                 } else {
                     fs::copy(&real, &to).with_context(|| format!("copying {}", from.display()))?;
                 }
             }
         } else if ft.is_dir() {
-            copy_dir_impl(&from, &to, follow_symlinks)?;
+            copy_dir_impl_inner(&from, &to, follow_symlinks, active_directories)?;
         } else {
             fs::copy(&from, &to).with_context(|| format!("copying {}", from.display()))?;
         }
@@ -108,5 +136,17 @@ mod tests {
         copy_dir_all_following_symlinks(src.path(), &dst).unwrap();
 
         assert!(!dst.join("dangling").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn following_symlinks_rejects_an_ancestor_cycle() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let src = tmp.child("src");
+        src.child("nested").create_dir_all().unwrap();
+        std::os::unix::fs::symlink(src.path(), src.child("nested/back").path()).unwrap();
+        let dst = tmp.child("dst").path().to_path_buf();
+
+        assert!(copy_dir_all_following_symlinks(src.path(), &dst).is_err());
     }
 }

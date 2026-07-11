@@ -18,7 +18,7 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
 use crate::decide::EgressGuard;
-use crate::proxy::{EventSink, ServerProxy};
+use crate::proxy::{EventSink, ProxyConfig, ServerProxy};
 
 /// One server's proxy endpoint: point that server's process at `addr`.
 #[derive(Debug, Clone)]
@@ -44,6 +44,26 @@ impl EgressBridge {
         Self::start_on(IpAddr::V4(Ipv4Addr::LOCALHOST), servers, ruleset, sink).await
     }
 
+    /// Like [`start`](Self::start) but for tests/demos that dial loopback: turns
+    /// the anti-SSRF address check off (`allow_local_targets`).
+    pub async fn start_allowing_local(
+        servers: &[String],
+        ruleset: CompiledRuleset,
+        sink: EventSink,
+    ) -> io::Result<(EgressBridge, Vec<ProxyEndpoint>)> {
+        let pairs: Vec<(String, u16)> = servers.iter().map(|s| (s.clone(), 0)).collect();
+        Self::start_fixed_with(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            &pairs,
+            ruleset,
+            sink,
+            ProxyConfig {
+                allow_local_targets: true,
+            },
+        )
+        .await
+    }
+
     /// Bind and start one proxy per server on `bind` (ephemeral ports), each
     /// filtering for its own server name against the shared compiled ruleset
     /// and reporting to `sink`. Returns the bridge (keep it alive for the run)
@@ -55,8 +75,20 @@ impl EgressBridge {
         ruleset: CompiledRuleset,
         sink: EventSink,
     ) -> io::Result<(EgressBridge, Vec<ProxyEndpoint>)> {
+        Self::start_on_with(bind, servers, ruleset, sink, ProxyConfig::default()).await
+    }
+
+    /// [`start_on`](Self::start_on) with explicit transport config (the SSRF
+    /// address-class check). Production leaves it default (strict).
+    pub async fn start_on_with(
+        bind: IpAddr,
+        servers: &[String],
+        ruleset: CompiledRuleset,
+        sink: EventSink,
+        config: ProxyConfig,
+    ) -> io::Result<(EgressBridge, Vec<ProxyEndpoint>)> {
         let pairs: Vec<(String, u16)> = servers.iter().map(|s| (s.clone(), 0)).collect();
-        Self::start_fixed(bind, &pairs, ruleset, sink).await
+        Self::start_fixed_with(bind, &pairs, ruleset, sink, config).await
     }
 
     /// Bind one proxy per (server, port) on `bind` — the sidecar form. Inside
@@ -70,15 +102,27 @@ impl EgressBridge {
         ruleset: CompiledRuleset,
         sink: EventSink,
     ) -> io::Result<(EgressBridge, Vec<ProxyEndpoint>)> {
+        Self::start_fixed_with(bind, servers, ruleset, sink, ProxyConfig::default()).await
+    }
+
+    /// [`start_fixed`](Self::start_fixed) with explicit transport config.
+    pub async fn start_fixed_with(
+        bind: IpAddr,
+        servers: &[(String, u16)],
+        ruleset: CompiledRuleset,
+        sink: EventSink,
+        config: ProxyConfig,
+    ) -> io::Result<(EgressBridge, Vec<ProxyEndpoint>)> {
         let mut tasks = Vec::new();
         let mut endpoints = Vec::new();
         for (server, port) in servers {
             let listener = TcpListener::bind((bind, *port)).await?;
             let addr = listener.local_addr()?;
-            let proxy = ServerProxy::new(
+            let proxy = ServerProxy::with_config(
                 server.clone(),
                 EgressGuard::new(ruleset.clone()),
                 Arc::clone(&sink),
+                config,
             );
             tasks.push(tokio::spawn(async move {
                 let _ = proxy.serve(listener).await;
@@ -132,9 +176,11 @@ mod tests {
         let sink: EventSink = Arc::new(move |e| ev.lock().unwrap().push(e));
 
         let servers = vec!["alpha".to_string(), "beta".to_string()];
-        let (_bridge, endpoints) = EgressBridge::start(&servers, CompiledRuleset::default(), sink)
-            .await
-            .unwrap();
+        // Loopback echo target → allow local (the SSRF check would else refuse).
+        let (_bridge, endpoints) =
+            EgressBridge::start_allowing_local(&servers, CompiledRuleset::default(), sink)
+                .await
+                .unwrap();
         assert_eq!(endpoints.len(), 2);
 
         // Drive each server's own proxy.

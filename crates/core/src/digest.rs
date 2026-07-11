@@ -14,8 +14,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
+
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
+
+const DIR_DIGEST_DOMAIN: &[u8] = b"agentstack-dir-digest-v2\0";
+const MAX_DIRECTORY_DEPTH: usize = 64;
 
 /// SHA-256 hex digest of a byte string.
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -31,13 +37,15 @@ pub fn dir_digest(root: &Path) -> Result<String> {
     collect_files(root, root, &mut files)?;
     files.sort();
     let mut hasher = Sha256::new();
+    hasher.update(DIR_DIGEST_DOMAIN);
     for rel in &files {
-        hasher.update(rel.to_string_lossy().as_bytes());
-        hasher.update([0]);
+        let path_bytes = normalized_relative_path_bytes(rel);
+        hasher.update((path_bytes.len() as u64).to_le_bytes());
+        hasher.update(&path_bytes);
         let bytes = fs::read(root.join(rel))
             .with_context(|| format!("reading {}", root.join(rel).display()))?;
+        hasher.update((bytes.len() as u64).to_le_bytes());
         hasher.update(bytes);
-        hasher.update([0]);
     }
     Ok(format!("{:x}", hasher.finalize()))
 }
@@ -46,19 +54,62 @@ pub fn dir_digest(root: &Path) -> Result<String> {
 /// subdirectories; `.git` is excluded. Shared by [`dir_digest`] and the cli's
 /// stat-fingerprint cache so both walk the identical file set.
 pub fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    collect_files_at_depth(root, dir, out, 0)
+}
+
+fn collect_files_at_depth(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<PathBuf>,
+    depth: usize,
+) -> Result<()> {
+    if depth > MAX_DIRECTORY_DEPTH {
+        anyhow::bail!(
+            "directory nesting exceeds the maximum depth of {MAX_DIRECTORY_DEPTH} under {}",
+            root.display()
+        );
+    }
+
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         if entry.file_name() == ".git" {
             continue;
         }
         let path = entry.path();
-        if entry.file_type()?.is_dir() {
-            collect_files(root, &path, out)?;
+        let file_type = entry.file_type()?;
+        // SAFETY of trust: links may escape the hostile bundle and can target
+        // unbounded devices, so they are never part of a directory digest.
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            collect_files_at_depth(root, &path, out, depth + 1)?;
         } else if let Ok(rel) = path.strip_prefix(root) {
             out.push(rel.to_path_buf());
         }
     }
     Ok(())
+}
+
+fn normalized_relative_path_bytes(path: &Path) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for (index, component) in path.components().enumerate() {
+        if index != 0 {
+            bytes.push(b'/');
+        }
+        append_os_str_bytes(&mut bytes, component.as_os_str());
+    }
+    bytes
+}
+
+#[cfg(unix)]
+fn append_os_str_bytes(out: &mut Vec<u8>, value: &std::ffi::OsStr) {
+    out.extend_from_slice(value.as_bytes());
+}
+
+#[cfg(not(unix))]
+fn append_os_str_bytes(out: &mut Vec<u8>, value: &std::ffi::OsStr) {
+    out.extend_from_slice(value.to_string_lossy().as_bytes());
 }
 
 #[cfg(test)]
@@ -95,6 +146,74 @@ mod tests {
         let d1 = dir_digest(tmp.path()).unwrap();
         tmp.child(".git/HEAD").write_str("ref: main\n").unwrap();
         assert_eq!(d1, dir_digest(tmp.path()).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dir_digest_skips_symlinks_without_following_them() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let bundle = tmp.child("bundle");
+        bundle.child("file.txt").write_str("inside").unwrap();
+        let outside = tmp.child("outside.txt");
+        outside.write_str("foreign bytes").unwrap();
+
+        let without_link = dir_digest(bundle.path()).unwrap();
+        std::os::unix::fs::symlink(outside.path(), bundle.child("link").path()).unwrap();
+
+        assert_eq!(without_link, dir_digest(bundle.path()).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dir_digest_skips_broken_symlinks() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::os::unix::fs::symlink(tmp.child("missing").path(), tmp.child("broken").path())
+            .unwrap();
+
+        assert!(dir_digest(tmp.path()).is_ok());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dir_digest_distinguishes_non_utf8_paths() {
+        use std::ffi::OsStr;
+
+        let first = assert_fs::TempDir::new().unwrap();
+        let second = assert_fs::TempDir::new().unwrap();
+        fs::write(first.path().join(OsStr::from_bytes(b"name-\x80")), b"same").unwrap();
+        fs::write(second.path().join(OsStr::from_bytes(b"name-\x81")), b"same").unwrap();
+
+        assert_ne!(
+            dir_digest(first.path()).unwrap(),
+            dir_digest(second.path()).unwrap()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn normalized_paths_preserve_distinct_non_utf8_bytes() {
+        use std::ffi::OsStr;
+
+        let first = Path::new(OsStr::from_bytes(b"name-\x80"));
+        let second = Path::new(OsStr::from_bytes(b"name-\x81"));
+
+        assert_ne!(
+            normalized_relative_path_bytes(first),
+            normalized_relative_path_bytes(second)
+        );
+    }
+
+    #[test]
+    fn dir_digest_rejects_excessive_directory_depth() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let mut dir = tmp.path().to_path_buf();
+        for _ in 0..=MAX_DIRECTORY_DEPTH {
+            dir.push("nested");
+            fs::create_dir(&dir).unwrap();
+        }
+        fs::write(dir.join("file.txt"), b"deep").unwrap();
+
+        assert!(dir_digest(tmp.path()).is_err());
     }
 
     /// The content-pinning invariant, one layer below the trust-store proptest

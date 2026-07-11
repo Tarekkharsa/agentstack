@@ -247,11 +247,23 @@ async fn start_sidecar(
         extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
         ..Default::default()
     };
-    let env = vec![
+    let mut env = vec![
         format!("AGENTSTACK_RULESET={RULESET_IN}"),
         format!("AGENTSTACK_SERVERS={servers_env}"),
         format!("AGENTSTACK_PROXY_BASE_PORT={PROXY_BASE_PORT}"),
     ];
+    // Propagate the anti-SSRF opt-out into the sidecar when the host set it to a
+    // TRUTHY value (the demo dials the host gateway). A mere-presence check would
+    // wrongly forward it for `=0`/`=false`; match the sidecar/CLI truthy parse so
+    // an explicit false keeps the address-class check ON.
+    if matches!(
+        std::env::var("AGENTSTACK_ALLOW_LOCAL_TARGETS")
+            .ok()
+            .as_deref(),
+        Some("1") | Some("true") | Some("yes")
+    ) {
+        env.push("AGENTSTACK_ALLOW_LOCAL_TARGETS=1".to_string());
+    }
     let body = ContainerCreateBody {
         image: Some(image.to_string()),
         env: Some(env),

@@ -28,6 +28,7 @@ pub mod blocking;
 pub mod bridge;
 pub mod connect;
 pub mod decide;
+pub mod netguard;
 pub mod proxy;
 pub mod sni;
 

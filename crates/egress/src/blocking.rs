@@ -11,7 +11,7 @@ use std::net::IpAddr;
 use agentstack_policy::CompiledRuleset;
 
 use crate::bridge::{EgressBridge, ProxyEndpoint};
-use crate::proxy::EventSink;
+use crate::proxy::{EventSink, ProxyConfig};
 
 /// A running set of per-server egress proxies plus the runtime driving them.
 /// Hold it for the life of the sandbox run; dropping it stops every proxy and
@@ -32,12 +32,25 @@ impl BlockingBridge {
         ruleset: CompiledRuleset,
         sink: EventSink,
     ) -> io::Result<BlockingBridge> {
+        Self::start_on_with(bind, servers, ruleset, sink, ProxyConfig::default())
+    }
+
+    /// [`start_on`](Self::start_on) with explicit transport config — lets the
+    /// `cli` opt into `allow_local_targets` for a demo without a rebuild.
+    pub fn start_on_with(
+        bind: IpAddr,
+        servers: &[String],
+        ruleset: CompiledRuleset,
+        sink: EventSink,
+        config: ProxyConfig,
+    ) -> io::Result<BlockingBridge> {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
             .build()?;
-        let (bridge, endpoints) =
-            rt.block_on(EgressBridge::start_on(bind, servers, ruleset, sink))?;
+        let (bridge, endpoints) = rt.block_on(EgressBridge::start_on_with(
+            bind, servers, ruleset, sink, config,
+        ))?;
         Ok(BlockingBridge {
             endpoints,
             _bridge: bridge,

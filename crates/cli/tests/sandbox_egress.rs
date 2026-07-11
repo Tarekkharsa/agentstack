@@ -18,6 +18,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use agentstack_egress::proxy::ProxyConfig;
 use agentstack_egress::{EgressGuard, EventSink, ServerProxy};
 use agentstack_policy::CompiledRuleset;
 use agentstack_recorder::RunEvent;
@@ -86,7 +87,17 @@ fn start_world(rs: CompiledRuleset) -> World {
             let proxy_port = listener.local_addr().unwrap().port();
             let ev3 = Arc::clone(&ev2);
             let sink: EventSink = Arc::new(move |e| ev3.lock().unwrap().push(e));
-            let proxy = ServerProxy::new("demo", EgressGuard::new(rs), sink);
+            // The demo's "allowed" target is the host sink on 127.0.0.1 (a
+            // loopback address), so opt into local targets — the anti-SSRF check
+            // would otherwise refuse the fixture. Real deployments leave it off.
+            let proxy = ServerProxy::with_config(
+                "demo",
+                EgressGuard::new(rs),
+                sink,
+                ProxyConfig {
+                    allow_local_targets: true,
+                },
+            );
 
             tx.send((sink_port, proxy_port)).unwrap();
             let _ = proxy.serve(listener).await;

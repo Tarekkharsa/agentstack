@@ -228,11 +228,22 @@ fn execute_proxy(mut spec: SandboxSpec, run_id: &str, server: &str) -> Result<()
             l.append(&ev);
         }
     });
-    let bridge = agentstack_egress::BlockingBridge::start_on(
+    // Anti-SSRF address check is on by default; the demo dials the host gateway
+    // (host.docker.internal), so it opts out via env — never set in real use.
+    let proxy_config = agentstack_egress::proxy::ProxyConfig {
+        allow_local_targets: matches!(
+            std::env::var("AGENTSTACK_ALLOW_LOCAL_TARGETS")
+                .ok()
+                .as_deref(),
+            Some("1") | Some("true") | Some("yes")
+        ),
+    };
+    let bridge = agentstack_egress::BlockingBridge::start_on_with(
         IpAddr::V4(Ipv4Addr::UNSPECIFIED),
         std::slice::from_ref(&server.to_string()),
         spec.ruleset.clone(),
         sink,
+        proxy_config,
     )
     .context("starting the egress proxy")?;
     let port = bridge

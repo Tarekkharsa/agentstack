@@ -247,10 +247,23 @@ async learning curve. Known-hard sub-problems, stated up front:
 - **Per-server attribution**: attributing egress to a specific MCP server
   requires one proxy identity per server (distinct ports, containers, or
   credentials), not one shared funnel.
-- **HTTPS filtering**: host allowlisting means CONNECT/SNI-based filtering —
-  no TLS interception/MITM.
+- **HTTPS filtering** (enforced): the proxy decides on the CONNECT authority
+  and, once TLS starts, requires the ClientHello's SNI to match that host —
+  so a client can't tunnel to an allowed front and then ask for a denied host
+  behind it (domain fronting). No TLS interception/MITM. Hostnames are
+  normalized (lowercase, trailing dot stripped) before matching so casing
+  can't dodge a deny.
+- **Anti-SSRF** (enforced): an allowed *name* can still resolve to the host's
+  own network. The proxy resolves once and requires every resolved address to
+  be global unicast — loopback, private, link-local (incl. the
+  `169.254.169.254` metadata IP), unique-local, and reserved ranges are
+  refused — then dials the validated address (no second resolution, closing
+  DNS rebinding). Literal-IP CONNECTs flow through the same check. Tests/demos
+  that dial the host gateway opt out via `AGENTSTACK_ALLOW_LOCAL_TARGETS`;
+  production never sets it.
 - **DNS** is itself an exfiltration channel and needs to be routed and
-  filtered, not left open.
+  filtered, not left open — the container resolves nothing directly; the proxy
+  resolves only allowed names.
 
 **Scope honesty — exfiltration through allowed channels:** even a perfectly
 enforced allowlist permits traffic to allowed hosts, including the model API

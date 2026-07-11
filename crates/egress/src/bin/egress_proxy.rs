@@ -27,6 +27,7 @@ use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
+use agentstack_egress::proxy::ProxyConfig;
 use agentstack_egress::{EgressBridge, EventSink};
 use agentstack_policy::{CompiledRuleset, RULESET_VERSION};
 
@@ -70,6 +71,13 @@ fn run() -> Result<(), String> {
         }
     });
 
+    // Anti-SSRF is on by default: resolved targets must be global unicast.
+    // The Docker demo dials the host gateway (host.docker.internal), so it opts
+    // out via this env — never set in a real deployment.
+    let config = ProxyConfig {
+        allow_local_targets: env_flag("AGENTSTACK_ALLOW_LOCAL_TARGETS"),
+    };
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -79,10 +87,15 @@ fn run() -> Result<(), String> {
         // 0.0.0.0: inside the container, "everyone" is only whoever shares a
         // Docker network with this sidecar — that scoping is the runtime's
         // topology, not a bind address's.
-        let (bridge, endpoints) =
-            EgressBridge::start_fixed(IpAddr::V4(Ipv4Addr::UNSPECIFIED), &pairs, ruleset, sink)
-                .await
-                .map_err(|e| format!("binding the proxy listeners: {e}"))?;
+        let (bridge, endpoints) = EgressBridge::start_fixed_with(
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            &pairs,
+            ruleset,
+            sink,
+            config,
+        )
+        .await
+        .map_err(|e| format!("binding the proxy listeners: {e}"))?;
 
         // READY only after every listener is bound: the host waits for these
         // lines before starting the sandbox, so no request can race the bind.
@@ -101,6 +114,15 @@ fn run() -> Result<(), String> {
         std::future::pending::<()>().await;
         unreachable!("pending() never resolves")
     })
+}
+
+/// True when an env var is set to a truthy value (`1`/`true`/`yes`). Absent or
+/// anything else is false — the SSRF check stays on unless explicitly disabled.
+fn env_flag(name: &str) -> bool {
+    matches!(
+        std::env::var(name).ok().as_deref(),
+        Some("1") | Some("true") | Some("yes")
+    )
 }
 
 fn load_ruleset() -> Result<CompiledRuleset, String> {

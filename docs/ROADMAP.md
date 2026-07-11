@@ -145,6 +145,17 @@ the container↔proxy routing and the recorded demo — flagged per item below.
    set. DNS is gated implicitly (the proxy resolves only allowed hosts).
    Verified end to end on loopback AND against a real container (item 4).
    `BlockingBridge` is the sync facade the cli drives (tokio stays in egress).
+   **Destination hardening (security review follow-up):** hostnames are
+   normalized (lowercase + trailing-dot strip) before matching; the parsed SNI
+   is *enforced* to equal the CONNECT host, and an incomplete ClientHello fails
+   closed (no domain fronting); resolved addresses are checked against an
+   IP-class guard (`netguard`) that permits only global unicast — loopback,
+   private, link-local (incl. the `169.254.169.254` metadata IP), unique-local,
+   and reserved ranges are refused, and the proxy dials the validated address
+   (no re-resolution → no DNS rebind), so a literal-IP or SSRF pivot into the
+   host/internal network is blocked. Per-step timeouts bound slowloris. The
+   `CompiledRuleset` version is checked at the enforcement boundary and fails
+   closed when newer than the proxy understands.
 3. **[done]** `agentstack run --sandbox <bundle>`: builds the `SandboxSpec`
    (tested), stands up the egress proxy from the effective policy, injects
    `HTTPS_PROXY` into the container, and records lifecycle + egress decisions

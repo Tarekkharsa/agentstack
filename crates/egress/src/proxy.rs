@@ -18,13 +18,18 @@
 //! This is testable end to end on loopback (see the tests) — no Docker.
 
 use std::io;
+use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use agentstack_recorder::RunEvent;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::timeout;
 
-use crate::decide::EgressGuard;
+use crate::decide::{guard_block_event, EgressGuard};
+use crate::netguard::is_forbidden_target;
+use crate::sni::extract_sni;
 
 /// Where decision events go. The runtime wraps `RunLog::append`; tests collect
 /// them. Called from async tasks, so it is `Send + Sync`.
@@ -35,19 +40,50 @@ pub type EventSink = Arc<dyn Fn(RunEvent) + Send + Sync>;
 /// bound.
 const MAX_HEAD: usize = 8 * 1024;
 
+/// Cap on the client's first post-CONNECT flight (the TLS ClientHello) we read
+/// to check SNI. A TLS record maxes at 16 KiB + 5 header bytes; past that we
+/// stop reading and proceed without an SNI assertion rather than buffer forever.
+const MAX_HELLO: usize = 16 * 1024 + 5;
+
+/// Deadline for each blocking network step (reading the CONNECT head, reading
+/// the ClientHello, resolving, dialing). Bounds slowloris-style clients that
+/// open a tunnel and then dribble bytes to pin a task indefinitely.
+const STEP_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Transport-level knobs for a proxy, separate from the policy the guard holds.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProxyConfig {
+    /// Permit resolved targets in loopback / private / link-local ranges. Only
+    /// for tests and the Docker demo, which dial the host gateway on purpose.
+    /// NEVER set in production: it disables the anti-SSRF address-class check.
+    pub allow_local_targets: bool,
+}
+
 /// A forward proxy dedicated to one MCP server.
 pub struct ServerProxy {
     server: String,
     guard: Arc<EgressGuard>,
     on_event: EventSink,
+    config: ProxyConfig,
 }
 
 impl ServerProxy {
+    /// Strict proxy: resolved targets must be global unicast (anti-SSRF on).
     pub fn new(server: impl Into<String>, guard: EgressGuard, on_event: EventSink) -> Arc<Self> {
+        Self::with_config(server, guard, on_event, ProxyConfig::default())
+    }
+
+    pub fn with_config(
+        server: impl Into<String>,
+        guard: EgressGuard,
+        on_event: EventSink,
+        config: ProxyConfig,
+    ) -> Arc<Self> {
         Arc::new(ServerProxy {
             server: server.into(),
             guard: Arc::new(guard),
             on_event,
+            config,
         })
     }
 
@@ -66,9 +102,9 @@ impl ServerProxy {
     }
 
     async fn handle(&self, mut client: TcpStream) -> io::Result<()> {
-        let head = match read_head(&mut client).await {
-            Some(h) => h,
-            None => {
+        let head = match timeout(STEP_TIMEOUT, read_head(&mut client)).await {
+            Ok(Some(h)) => h,
+            _ => {
                 let _ = client.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
                 return Ok(());
             }
@@ -81,19 +117,35 @@ impl ServerProxy {
             }
         };
 
-        // The one enforcement point: consult the guard, record the decision.
+        // Policy layer: does the machine/bundle ruleset allow this host? Hold
+        // the decision — we emit exactly one event reflecting the FINAL outcome,
+        // so a policy-allow that a transport guard later refuses is recorded as
+        // the block it actually was, not a misleading allow.
         let decision = self.guard.decide(&self.server, &target.host);
-        (self.on_event)(decision.event);
         if !decision.allowed {
+            (self.on_event)(decision.event);
             let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n").await;
             return Ok(());
         }
 
-        // Allowed: dial the target (name resolution happens here, only for an
-        // allowed host) and splice the two sockets together.
-        let mut upstream = match TcpStream::connect((target.host.as_str(), target.port)).await {
-            Ok(u) => u,
-            Err(_) => {
+        // Anti-SSRF: resolve the (allowed) name ONCE and require every resolved
+        // address to be global unicast, then dial a validated address directly
+        // (never a second implicit resolution that could return a different,
+        // forbidden answer — closing the DNS-rebinding window). A literal-IP
+        // CONNECT resolves to itself and is judged the same way.
+        let addr = match self.resolve_validated(&target.host, target.port).await {
+            Ok(a) => a,
+            Err(reason) => {
+                (self.on_event)(guard_block_event(&self.server, &target.host, reason));
+                let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n").await;
+                return Ok(());
+            }
+        };
+
+        let mut upstream = match timeout(STEP_TIMEOUT, TcpStream::connect(addr)).await {
+            Ok(Ok(u)) => u,
+            _ => {
+                (self.on_event)(decision.event);
                 let _ = client.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
                 return Ok(());
             }
@@ -101,10 +153,100 @@ impl ServerProxy {
         client
             .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             .await?;
+
+        // Domain-fronting guard: the client now speaks TLS. Peek its first
+        // flight and, if it carries an SNI, require it to match the host it
+        // CONNECTed to — otherwise a client could tunnel to an allowed front and
+        // then ask (via SNI) for a denied host behind it.
+        let flight = match read_client_hello(&mut client).await? {
+            // Not TLS — no SNI concept, and we already dialed the validated
+            // CONNECT host. Forward whatever it sent and splice.
+            FirstFlight::NonTls(bytes) => bytes,
+            // A complete ClientHello: assert SNI == CONNECT host (absent SNI is
+            // fine — the client isn't claiming a different host).
+            FirstFlight::Tls(bytes) => {
+                if let Some(sni) = extract_sni(&bytes) {
+                    let sni = crate::connect::normalize_host(&sni);
+                    if sni != target.host {
+                        (self.on_event)(guard_block_event(
+                            &self.server,
+                            &target.host,
+                            format!(
+                                "TLS SNI '{sni}' does not match CONNECT host '{}'",
+                                target.host
+                            ),
+                        ));
+                        return Ok(()); // tunnel established; drop it
+                    }
+                }
+                bytes
+            }
+            // TLS-looking but the ClientHello never completed (stall past the
+            // timeout, oversize, or EOF). Fail CLOSED: a partial hello is a way
+            // to slip a mismatched SNI in AFTER the splice starts, dodging the
+            // check above.
+            FirstFlight::Incomplete => {
+                (self.on_event)(guard_block_event(
+                    &self.server,
+                    &target.host,
+                    "incomplete TLS ClientHello — cannot verify SNI, failing closed".to_string(),
+                ));
+                return Ok(());
+            }
+        };
+
+        // Final outcome is allow: record it, replay the buffered first flight to
+        // upstream, then splice the sockets.
+        (self.on_event)(decision.event);
+        upstream.write_all(&flight).await?;
         tokio::io::copy_bidirectional(&mut client, &mut upstream)
             .await
             .map(|_| ())
     }
+
+    /// Resolve `host:port` once and return the first global-unicast address, or
+    /// an `Err(reason)` describing why every candidate was refused. With
+    /// `allow_local_targets` the address-class check is skipped (tests/demo).
+    async fn resolve_validated(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> Result<std::net::SocketAddr, String> {
+        let addrs = match timeout(STEP_TIMEOUT, tokio::net::lookup_host((host, port))).await {
+            Ok(Ok(it)) => it.collect::<Vec<_>>(),
+            Ok(Err(e)) => return Err(format!("could not resolve '{host}': {e}")),
+            Err(_) => return Err(format!("resolving '{host}' timed out")),
+        };
+        if addrs.is_empty() {
+            return Err(format!("'{host}' resolved to no addresses"));
+        }
+        if self.config.allow_local_targets {
+            return Ok(addrs[0]);
+        }
+        // Pick the first safe address; refuse if the name resolves ONLY to
+        // forbidden ranges (loopback/private/link-local/metadata) — the SSRF
+        // pivot a locked-down sandbox must not get.
+        match addrs.iter().find(|a| !is_forbidden_target(a.ip())) {
+            Some(a) => Ok(*a),
+            None => Err(format!(
+                "'{host}' resolves only to non-global addresses ({}) — refused (SSRF guard)",
+                forbidden_summary(&addrs),
+            )),
+        }
+    }
+}
+
+/// A short, bounded description of the forbidden addresses a name resolved to,
+/// for the audit record. Caps the list so a hostile name with many answers
+/// can't bloat the log line.
+fn forbidden_summary(addrs: &[std::net::SocketAddr]) -> String {
+    addrs
+        .iter()
+        .map(|a| a.ip())
+        .take(3)
+        .map(|ip: IpAddr| ip.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Read the request head up to the blank line (`\r\n\r\n`), bounded by
@@ -124,6 +266,67 @@ async fn read_head(client: &mut TcpStream) -> Option<Vec<u8>> {
         if buf.len() >= MAX_HEAD {
             return None;
         }
+    }
+}
+
+/// The client's first flight after CONNECT, classified so the SNI check can
+/// fail closed on an unverifiable TLS handshake instead of waving it through.
+enum FirstFlight {
+    /// Not a TLS handshake (first byte ≠ 0x16) or nothing sent — no SNI to
+    /// assert. Carries the bytes to replay upstream.
+    NonTls(Vec<u8>),
+    /// A complete TLS ClientHello record. Carries the bytes to replay upstream.
+    Tls(Vec<u8>),
+    /// A TLS-looking flight that never completed (timeout / oversize / EOF
+    /// mid-handshake). The caller must refuse it.
+    Incomplete,
+}
+
+/// Read the client's first flight after CONNECT — enough to classify it and, if
+/// TLS, parse the ClientHello's SNI. Reads whole TLS records up to
+/// [`MAX_HELLO`], returning as soon as it can decide. Bounded and time-limited
+/// so a client can't stall the tunnel here.
+async fn read_client_hello(client: &mut TcpStream) -> io::Result<FirstFlight> {
+    let mut buf = Vec::with_capacity(512);
+    let mut chunk = [0u8; 4096];
+    loop {
+        let n = match timeout(STEP_TIMEOUT, client.read(&mut chunk)).await {
+            Ok(Ok(n)) => n,
+            // Timeout or read error before a complete hello.
+            _ => return Ok(classify_incomplete(buf)),
+        };
+        if n == 0 {
+            // EOF before a complete hello.
+            return Ok(classify_incomplete(buf));
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        // A non-handshake first byte means this isn't TLS at all.
+        if buf[0] != 0x16 {
+            return Ok(FirstFlight::NonTls(buf));
+        }
+        // Once the first TLS record is complete, we have the ClientHello.
+        if buf.len() >= 5 {
+            let record_len = ((buf[3] as usize) << 8) | buf[4] as usize;
+            if buf.len() >= 5 + record_len {
+                return Ok(FirstFlight::Tls(buf));
+            }
+        }
+        // TLS-looking but growing past the cap without completing → refuse.
+        if buf.len() >= MAX_HELLO {
+            return Ok(FirstFlight::Incomplete);
+        }
+    }
+}
+
+/// Classify a first flight that ended (EOF/timeout) without a complete TLS
+/// record. Empty or non-TLS bytes carry no SNI to bypass, so they pass; a
+/// partial TLS handshake fails closed — a stalled ClientHello is exactly how a
+/// client would try to smuggle a mismatched SNI in after the splice begins.
+fn classify_incomplete(buf: Vec<u8>) -> FirstFlight {
+    if buf.is_empty() || buf[0] != 0x16 {
+        FirstFlight::NonTls(buf)
+    } else {
+        FirstFlight::Incomplete
     }
 }
 
@@ -164,14 +367,29 @@ mod tests {
     }
 
     /// Start a ServerProxy on a fresh loopback port; return its addr + the
-    /// shared event log.
+    /// shared event log. Loopback targets → `allow_local_targets` on, else the
+    /// anti-SSRF check would refuse the test's own 127.0.0.1 echo server.
     async fn start_proxy(rs: CompiledRuleset) -> (std::net::SocketAddr, Arc<Mutex<Vec<RunEvent>>>) {
+        start_proxy_cfg(
+            rs,
+            ProxyConfig {
+                allow_local_targets: true,
+            },
+        )
+        .await
+    }
+
+    async fn start_proxy_cfg(
+        rs: CompiledRuleset,
+        cfg: ProxyConfig,
+    ) -> (std::net::SocketAddr, Arc<Mutex<Vec<RunEvent>>>) {
         let events = Arc::new(Mutex::new(Vec::new()));
         let ev = Arc::clone(&events);
-        let proxy = ServerProxy::new(
+        let proxy = ServerProxy::with_config(
             "web-search",
             EgressGuard::new(rs),
             Arc::new(move |e| ev.lock().unwrap().push(e)),
+            cfg,
         );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -248,5 +466,121 @@ mod tests {
         let mut c = TcpStream::connect(paddr).await.unwrap();
         c.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
         assert!(read_some(&mut c).await.contains("400"));
+    }
+
+    /// Policy allows the name, but it resolves to a forbidden (loopback)
+    /// address — the anti-SSRF guard must refuse and record the block. This is
+    /// the SSRF/pivot case a locked-down sandbox must not achieve.
+    #[tokio::test]
+    async fn resolved_forbidden_address_is_blocked_by_ssrf_guard() {
+        // Strict proxy (default): local targets NOT allowed.
+        let (paddr, events) =
+            start_proxy_cfg(CompiledRuleset::default(), ProxyConfig::default()).await;
+
+        let mut c = TcpStream::connect(paddr).await.unwrap();
+        // "localhost" is allowed by (empty) policy but resolves to 127.0.0.1/::1.
+        c.write_all(b"CONNECT localhost:443 HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
+        assert!(
+            read_some(&mut c).await.contains("403"),
+            "SSRF target refused"
+        );
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let evs = events.lock().unwrap();
+        assert!(
+            evs.iter().any(|e| match e {
+                RunEvent::Egress { allowed, rule, .. } =>
+                    !allowed && rule.as_deref().is_some_and(|r| r.contains("SSRF")),
+                _ => false,
+            }),
+            "SSRF block recorded with reason: {evs:?}"
+        );
+    }
+
+    /// A tunnel opened to an allowed host, then a TLS ClientHello whose SNI
+    /// names a DIFFERENT host, must be refused (domain-fronting guard).
+    #[tokio::test]
+    async fn sni_not_matching_connect_host_is_blocked() {
+        let echo = echo_server().await;
+        let (paddr, events) = start_proxy(CompiledRuleset::default()).await;
+
+        let mut c = TcpStream::connect(paddr).await.unwrap();
+        c.write_all(format!("CONNECT {echo} HTTP/1.1\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        assert!(read_some(&mut c).await.contains("200"), "tunnel opened");
+
+        // Speak TLS with an SNI for a host we did NOT CONNECT to.
+        let hello = crate::sni::client_hello_with_sni("evil.example");
+        c.write_all(&hello).await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let evs = events.lock().unwrap();
+        assert!(
+            evs.iter().any(|e| match e {
+                RunEvent::Egress { allowed, rule, .. } =>
+                    !allowed && rule.as_deref().is_some_and(|r| r.contains("SNI")),
+                _ => false,
+            }),
+            "SNI mismatch block recorded: {evs:?}"
+        );
+    }
+
+    /// A partial TLS ClientHello (the record header claims more bytes than the
+    /// client sends) must be refused, not waved through — otherwise a client
+    /// could stall, get spliced, and then send a mismatched SNI. Fail closed.
+    #[tokio::test]
+    async fn incomplete_tls_client_hello_is_refused() {
+        let echo = echo_server().await;
+        let (paddr, events) = start_proxy(CompiledRuleset::default()).await;
+
+        let mut c = TcpStream::connect(paddr).await.unwrap();
+        c.write_all(format!("CONNECT {echo} HTTP/1.1\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        assert!(read_some(&mut c).await.contains("200"), "tunnel opened");
+
+        // TLS record header (0x16) declaring a 300-byte record, but we send only
+        // a handful of bytes and then close the write half — the hello never
+        // completes, so the proxy hits EOF mid-handshake.
+        c.write_all(&[0x16, 0x03, 0x01, 0x01, 0x2c, 0x01, 0x00, 0x00])
+            .await
+            .unwrap();
+        c.shutdown().await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let evs = events.lock().unwrap();
+        assert!(
+            evs.iter().any(|e| match e {
+                RunEvent::Egress { allowed, rule, .. } =>
+                    !allowed && rule.as_deref().is_some_and(|r| r.contains("incomplete")),
+                _ => false,
+            }),
+            "incomplete ClientHello blocked and recorded: {evs:?}"
+        );
+    }
+
+    /// A matching SNI passes the guard and the tunnel carries bytes.
+    #[tokio::test]
+    async fn sni_matching_connect_host_is_allowed() {
+        let echo = echo_server().await;
+        let (paddr, _events) = start_proxy(CompiledRuleset::default()).await;
+
+        let mut c = TcpStream::connect(paddr).await.unwrap();
+        // CONNECT to the echo by an IP:port authority; SNI must equal that host.
+        c.write_all(format!("CONNECT {echo} HTTP/1.1\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        assert!(read_some(&mut c).await.contains("200"));
+
+        let host = echo.ip().to_string();
+        let hello = crate::sni::client_hello_with_sni(&host);
+        c.write_all(&hello).await.unwrap();
+        // The echo server bounces the ClientHello bytes back through the tunnel.
+        let mut b = [0u8; 64];
+        let n = c.read(&mut b).await.unwrap();
+        assert!(n > 0, "matching-SNI tunnel forwards bytes");
     }
 }

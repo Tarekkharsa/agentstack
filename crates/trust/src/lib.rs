@@ -26,6 +26,8 @@ use agentstack_core::lock::LOCK_FILE;
 use agentstack_core::manifest::load::{LOCAL_FILE, MANIFEST_FILE};
 use agentstack_core::util::paths;
 
+const TRUST_DIGEST_DOMAIN: &[u8] = b"agentstack-trust-digest-v2\0";
+
 /// Where trust decisions live: `~/.agentstack/trust.toml`.
 pub fn store_path() -> PathBuf {
     paths::agentstack_home().join("trust.toml")
@@ -92,11 +94,13 @@ pub fn digest_for(base: &Path) -> Option<String> {
     let local = std::fs::read(dir.join(LOCAL_FILE)).unwrap_or_default();
     let lock = std::fs::read(dir.join(LOCK_FILE)).unwrap_or_default();
     let mut hasher = Sha256::new();
-    hasher.update(&manifest);
-    hasher.update([0u8]);
-    hasher.update(&local);
-    hasher.update([0u8]);
-    hasher.update(&lock);
+    hasher.update(TRUST_DIGEST_DOMAIN);
+    for segment in [&manifest, &local, &lock] {
+        // Length prefixes make each file boundary unambiguous, like framing
+        // three byte buffers before concatenating them in TypeScript.
+        hasher.update((segment.len() as u64).to_le_bytes());
+        hasher.update(segment);
+    }
     Some(format!("sha256:{:x}", hasher.finalize()))
 }
 
@@ -223,6 +227,38 @@ mod tests {
                 .unwrap();
             assert_eq!(check(proj.path()), TrustState::Changed);
         });
+    }
+
+    #[test]
+    fn digest_is_stable_for_identical_inputs() {
+        let proj = project_with_manifest();
+
+        assert_eq!(digest_for(proj.path()), digest_for(proj.path()));
+    }
+
+    #[test]
+    fn digest_frames_manifest_and_local_as_distinct_segments() {
+        let first = assert_fs::TempDir::new().unwrap();
+        first
+            .child(".agentstack/agentstack.toml")
+            .write_binary(b"")
+            .unwrap();
+        first
+            .child(".agentstack/agentstack.local.toml")
+            .write_binary(b"\0")
+            .unwrap();
+
+        let second = assert_fs::TempDir::new().unwrap();
+        second
+            .child(".agentstack/agentstack.toml")
+            .write_binary(b"\0")
+            .unwrap();
+        second
+            .child(".agentstack/agentstack.local.toml")
+            .write_binary(b"")
+            .unwrap();
+
+        assert_ne!(digest_for(first.path()), digest_for(second.path()));
     }
 
     #[test]

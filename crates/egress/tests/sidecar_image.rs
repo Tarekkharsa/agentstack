@@ -147,6 +147,11 @@ fn sidecar_container_enforces_policy_and_reports_on_stdout() {
             "AGENTSTACK_SERVERS=demo",
             "-e",
             "AGENTSTACK_PROXY_BASE_PORT=18080",
+            // The "allowed" target here is the host sink reached via
+            // host.docker.internal (a private gateway IP), so opt out of the
+            // anti-SSRF address check — the same opt-in tests and demos use.
+            "-e",
+            "AGENTSTACK_ALLOW_LOCAL_TARGETS=1",
             "-v",
             &format!("{}:/ruleset.json:ro", ruleset_path.display()),
             "--add-host",

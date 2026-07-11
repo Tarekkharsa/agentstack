@@ -64,6 +64,20 @@ impl EgressGuard {
     }
 }
 
+/// Build a block event for a connection that policy *allowed* but a transport
+/// guard (SSRF address-class check, SNI mismatch) then refused. Recorded so a
+/// run report shows the connection was stopped and why — the audit trail must
+/// reflect the final outcome, not the intermediate policy verdict.
+pub fn guard_block_event(server: &str, host: &str, rule: String) -> RunEvent {
+    RunEvent::Egress {
+        ts: now_epoch(),
+        server: server.to_string(),
+        host: host.to_string(),
+        allowed: false,
+        rule: Some(rule),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
