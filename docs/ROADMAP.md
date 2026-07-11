@@ -146,15 +146,22 @@ the container↔proxy routing and the recorded demo — flagged per item below.
    Filesystem scopes in the ruleset become enforceable via the mounts (item 1).
 3. **[done, execution gated]** `agentstack run --sandbox <bundle>`: builds the
    `SandboxSpec` (tested); execution behind the cli `sandbox` feature.
-4. **[remaining — Docker]** The demo: a benign PoC "malicious" repo that phones
-   home / reads a fake secret unprotected, sits inert at the trust gate, and
-   gets blocked by the proxy under AgentStack. Claim exactly what it proves —
-   *unreviewed repos stay inert; unapproved egress is blocked* — never
-   "exfiltration is impossible": a prompt-injected agent can still leak through
-   allowed hosts, including the model API.
+4. **[done — verified on real Docker]** The demo: a real `curl` container
+   exfiltrates to a host reachable only through the AgentStack egress proxy;
+   the proxy blocks it under a deny policy (sink gets nothing, DENY recorded)
+   and tunnels it under allow (sink gets the exfil, ALLOW recorded) — same
+   container, the machine policy decides. Lives as a Docker-gated integration
+   test (`crates/cli/tests/sandbox_egress.rs`, `--features sandbox`); the
+   bollard backend's create→stream→teardown is likewise verified against a
+   live daemon. Claim exactly what it proves — *unreviewed repos stay inert;
+   unapproved egress is blocked* — never "exfiltration is impossible": a
+   prompt-injected agent can still leak through allowed hosts, incl. the model
+   API. Remaining hardening: true no-direct-route lockdown (an `--internal`
+   network with the proxy as the only reachable peer) so a container can't
+   bypass the proxy at all, and wiring the demo through `run --sandbox` itself.
 
-Done when: the PoC attack demo works end to end, recorded (needs a Docker
-daemon — the components it exercises are all built and unit/loopback-tested).
+Done when: **met** — the PoC attack demo works end to end (verified live on
+Docker 25.0.3). Recording it and the lockdown hardening are follow-ups.
 
 ## Phase 3 — Flight recorder surface
 
