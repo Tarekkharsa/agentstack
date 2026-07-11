@@ -141,27 +141,42 @@ the container↔proxy routing and the recorded demo — flagged per item below.
    `ServerProxy` (one per server → per-server attribution) tunnels allowed
    CONNECTs and refuses blocked ones; `EgressBridge` stands up the per-server
    set. DNS is gated implicitly (the proxy resolves only allowed hosts).
-   Verified end to end on loopback. *Remaining (Docker):* pointing a real
-   container's server processes at these endpoints (`HTTPS_PROXY` injection).
+   Verified end to end on loopback AND against a real container (item 4).
+   `BlockingBridge` is the sync facade the cli drives (tokio stays in egress).
    Filesystem scopes in the ruleset become enforceable via the mounts (item 1).
-3. **[done, execution gated]** `agentstack run --sandbox <bundle>`: builds the
-   `SandboxSpec` (tested); execution behind the cli `sandbox` feature.
-4. **[done — verified on real Docker]** The demo: a real `curl` container
-   exfiltrates to a host reachable only through the AgentStack egress proxy;
-   the proxy blocks it under a deny policy (sink gets nothing, DENY recorded)
-   and tunnels it under allow (sink gets the exfil, ALLOW recorded) — same
-   container, the machine policy decides. Lives as a Docker-gated integration
-   test (`crates/cli/tests/sandbox_egress.rs`, `--features sandbox`); the
-   bollard backend's create→stream→teardown is likewise verified against a
-   live daemon. Claim exactly what it proves — *unreviewed repos stay inert;
-   unapproved egress is blocked* — never "exfiltration is impossible": a
-   prompt-injected agent can still leak through allowed hosts, incl. the model
-   API. Remaining hardening: true no-direct-route lockdown (an `--internal`
-   network with the proxy as the only reachable peer) so a container can't
-   bypass the proxy at all, and wiring the demo through `run --sandbox` itself.
+3. **[done]** `agentstack run --sandbox <bundle>`: builds the `SandboxSpec`
+   (tested), stands up the egress proxy from the effective policy, injects
+   `HTTPS_PROXY` into the container, and records lifecycle + egress decisions
+   to the run log (readable via `agentstack report`). Execution behind the cli
+   `sandbox` feature; verified through the real binary on Docker.
+4. **[done — verified on real Docker]** The demo, proven two ways on Docker
+   25.0.3: (a) a real `curl` container exfiltrates to a host reachable only
+   through the proxy — blocked under a deny policy (sink gets nothing), tunneled
+   under allow (sink gets it), the machine policy deciding
+   (`crates/cli/tests/sandbox_egress.rs`); (b) driven through the real
+   `agentstack run --sandbox` binary, whose flight recorder shows the egress
+   BLOCK (`crates/cli/tests/sandbox_cli_e2e.rs`). The bollard backend's
+   create→stream→teardown is likewise verified against a live daemon. Claim
+   exactly what it proves — *unreviewed repos stay inert; unapproved egress is
+   blocked* — never "exfiltration is impossible": a prompt-injected agent can
+   still leak through allowed hosts, incl. the model API.
 
-Done when: **met** — the PoC attack demo works end to end (verified live on
-Docker 25.0.3). Recording it and the lockdown hardening are follow-ups.
+Done when: **met** — the PoC attack demo works end to end, both directly and
+through the real CLI (verified live on Docker 25.0.3).
+
+**Remaining hardening (beyond the done-criterion, honestly scoped).** Today
+`run --sandbox` gives the container a bridge network and points its
+`HTTPS_PROXY` at the proxy: this enforces the agent's *configured* egress
+(model API, HTTP MCP servers all use CONNECT, which the proxy gates), and any
+target reachable only via the proxy (host loopback in the demo) is genuinely
+blocked — but a container that deliberately ignores the proxy env could still
+reach the open internet directly. **True no-direct-route lockdown** needs the
+container on a Docker `--internal` network whose only reachable peer is the
+proxy, which in turn means running the proxy as a sidecar *container* on that
+network (bridging to the outside) rather than as a host process — because an
+`--internal` network has no route to the host. That containerized-proxy step
+(a small Linux image built from the egress crate) is the next hardening; the
+enforcement logic it would run is already built and tested.
 
 ## Phase 3 — Flight recorder surface
 

@@ -103,7 +103,8 @@ fn start_world(rs: CompiledRuleset) -> World {
 }
 
 /// Build the spec: a curl container that CONNECT-tunnels to the sink via the
-/// proxy. `curlimages/curl`'s entrypoint IS `curl`, so `command` is just args.
+/// proxy. The runtime clears the image entrypoint, so `command` is the full
+/// argv (`curl …`).
 fn curl_spec(world: &World) -> SandboxSpec {
     let proxy = format!("http://host.docker.internal:{}", world.proxy_port);
     let target = format!(
@@ -113,6 +114,7 @@ fn curl_spec(world: &World) -> SandboxSpec {
     SandboxSpec {
         image: IMAGE.to_string(),
         command: vec![
+            "curl".into(),
             "-s".into(),
             "-m".into(),
             "6".into(),
