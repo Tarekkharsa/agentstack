@@ -17,10 +17,10 @@ name = "agentstack"
 path = "src/main.rs"
 
 [features]
-# Compile the Docker sandbox backend into `agentstack run --sandbox`. Off by
-# default (keeps bollard + tokio out of standard builds and CI); a maintainer
-# with Docker builds `cargo build --features sandbox`.
-sandbox = ["agentstack-runtime/docker"]
+# Compile the Docker sandbox backend + the egress proxy into `agentstack run
+# --sandbox`. Off by default (keeps bollard + tokio out of standard builds and
+# CI); a maintainer with Docker builds `cargo build --features sandbox`.
+sandbox = ["agentstack-runtime/docker", "dep:agentstack-egress"]
 
 [dependencies]
 agentstack-core = { path = "../core" }
@@ -32,6 +32,9 @@ agentstack-recorder = { path = "../recorder" }
 # no bollard. The `sandbox` feature turns on the Docker backend so
 # `agentstack run --sandbox` can actually launch a container.
 agentstack-runtime = { path = "../runtime", default-features = false }
+# The egress proxy — pulled in only with the `sandbox` feature (it brings
+# tokio); the default cli build doesn't compile it.
+agentstack-egress = { path = "../egress", optional = true }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -59,3 +62,5 @@ libc = "0.2"
 insta = { version = "1", features = ["yaml"] }
 assert_fs = "1"
 tempfile = "3"
+# For the Docker-gated sandbox-egress integration test (feature `sandbox`).
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }

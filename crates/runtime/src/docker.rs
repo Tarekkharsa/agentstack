@@ -70,14 +70,21 @@ impl Sandbox for DockerSandbox {
             })
             .collect();
 
-        // Phase 2's core guarantee: no direct network. `none` gives the
-        // container no interface at all; `ProxyOnly` (once the egress crate
-        // exists) will instead attach an internal network whose only route is
-        // the proxy. Until then a proxy endpoint is treated as still-no-network
-        // rather than silently granting open egress.
-        let network_mode = match &spec.network {
-            NetworkPolicy::None => Some("none".to_string()),
-            NetworkPolicy::ProxyOnly { .. } => Some("none".to_string()),
+        // Network exposure. `None` gives the container no interface at all.
+        // `ProxyOnly` gives it a default bridge and a route to the host
+        // (`host.docker.internal`, mapped to the host gateway) so it can reach
+        // the egress proxy the caller runs on the host — the proxy is what
+        // gates its outbound connections. (True no-direct-route lockdown, via
+        // an `--internal` network with the proxy as the only reachable peer,
+        // is a further hardening step; today an allowed target the container
+        // could also reach directly is still gated when it's only reachable
+        // via the proxy, e.g. host loopback — see the sandbox-egress demo.)
+        let (network_mode, extra_hosts) = match &spec.network {
+            NetworkPolicy::None => (Some("none".to_string()), None),
+            NetworkPolicy::ProxyOnly { .. } => (
+                None, // Docker default bridge.
+                Some(vec!["host.docker.internal:host-gateway".to_string()]),
+            ),
         };
 
         let env: Vec<String> = spec.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
@@ -85,6 +92,7 @@ impl Sandbox for DockerSandbox {
         let host_config = HostConfig {
             binds: Some(binds),
             network_mode,
+            extra_hosts,
             ..Default::default()
         };
         let body = ContainerCreateBody {

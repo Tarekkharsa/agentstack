@@ -73,6 +73,7 @@ dependencies = [
  "age",
  "agentstack-adapters",
  "agentstack-core",
+ "agentstack-egress",
  "agentstack-policy",
  "agentstack-recorder",
  "agentstack-runtime",
@@ -97,6 +98,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tiny_http",
+ "tokio",
  "toml 0.8.23",
  "toml_edit 0.22.27",
 ]
