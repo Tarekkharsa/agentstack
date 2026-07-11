@@ -84,7 +84,8 @@ impl Lock {
 
     pub fn load(dir: &Path) -> Result<Self> {
         let path = Self::path(dir);
-        match fs::read_to_string(&path) {
+        // Bounded: a cloned repo's lockfile is hostile input (rule 7).
+        match crate::util::read_to_string_bounded(&path, crate::util::MAX_CONFIG_BYTES) {
             Ok(text) => {
                 let lock: Lock =
                     toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;

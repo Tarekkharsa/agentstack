@@ -128,13 +128,16 @@ pub struct LoadedManifest {
 /// it when present.
 pub fn load_from_dir(dir: &Path) -> Result<LoadedManifest> {
     let manifest_path = dir.join(MANIFEST_FILE);
-    let base_text = fs::read_to_string(&manifest_path).with_context(|| {
-        format!(
-            "no manifest here (looked for {}) — run `agentstack init` to create \
-             .agentstack/agentstack.toml, or point at one with --manifest-dir",
-            manifest_path.display()
-        )
-    })?;
+    // Bounded: a cloned repo's manifest is hostile input (rule 7).
+    let base_text =
+        crate::util::read_to_string_bounded(&manifest_path, crate::util::MAX_CONFIG_BYTES)
+            .with_context(|| {
+                format!(
+                    "no manifest here (looked for {}) — run `agentstack init` to create \
+                 .agentstack/agentstack.toml, or point at one with --manifest-dir",
+                    manifest_path.display()
+                )
+            })?;
     let mut base: toml::Value = toml::from_str(&base_text)
         .with_context(|| format!("parsing {}", manifest_path.display()))?;
 

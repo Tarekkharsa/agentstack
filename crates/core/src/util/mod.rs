@@ -6,6 +6,32 @@ pub mod diff;
 pub mod fsx;
 pub mod paths;
 
+/// A generous ceiling for a manifest or lockfile. These are hand-written config
+/// files — kilobytes in practice — so multiple megabytes is already far past
+/// anything legitimate, while still bounding a hostile repo (rule 7: bundle
+/// content is hostile input) from making us buffer a multi-GB file into memory.
+pub const MAX_CONFIG_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Read a whole file to a `String`, refusing anything larger than `max_bytes`.
+/// Uses `Take` so the bound holds even if the file grows between a `stat` and
+/// the read (no TOCTOU window) — we never allocate past the limit.
+pub fn read_to_string_bounded(path: &std::path::Path, max_bytes: u64) -> std::io::Result<String> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    // `take(max+1)` lets us DETECT an over-limit file (we'd read max+1 bytes)
+    // while still never buffering more than one byte past the cap.
+    let mut limited = file.take(max_bytes.saturating_add(1));
+    let mut buf = String::new();
+    limited.read_to_string(&mut buf)?;
+    if buf.len() as u64 > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{} exceeds the {max_bytes}-byte limit", path.display()),
+        ));
+    }
+    Ok(buf)
+}
+
 /// 32 bytes from the OS entropy pool, with a time/pid-mixed hash fallback
 /// where /dev/urandom is unavailable. Shared by every credential-ish secret
 /// agentstack mints locally (call-log digest key, code-mode endpoint token).
@@ -81,3 +107,25 @@ pub fn check_schema_version(
 /// propagate across crates — the cli crate's tests take this lock too. A
 /// never-contended `Mutex<()>` static is free in release builds.
 pub static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+mod tests {
+    use super::read_to_string_bounded;
+
+    #[test]
+    fn bounded_read_within_limit_and_refuses_over_limit() {
+        let dir = std::env::temp_dir().join(format!("astk-bounded-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = dir.join("small.txt");
+        std::fs::write(&small, "hello").unwrap();
+        assert_eq!(read_to_string_bounded(&small, 1024).unwrap(), "hello");
+
+        // A file at exactly the limit reads; one byte over is refused.
+        let at = dir.join("at.txt");
+        std::fs::write(&at, "12345").unwrap();
+        assert!(read_to_string_bounded(&at, 5).is_ok());
+        assert!(read_to_string_bounded(&at, 4).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

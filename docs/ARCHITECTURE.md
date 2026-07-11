@@ -20,7 +20,7 @@ bundle (inert) → trust gate → policy engine → sandboxed runtime → flight
                              machine rules      secrets resolver
 ```
 
-A bundle arrives (cloned, pulled, copied) and is inert by construction. `agentstack review` renders a human-readable diff of everything the bundle declares. Trusting it pins the lockfile digest into the machine-local trust store. At run time, the policy engine intersects the bundle's requested policy with the machine's rules, compiles a ruleset, and hands it to the runtime. In sandbox mode the agent CLI runs in a container whose only network route is the egress proxy enforcing that ruleset. Every tool call, block, secret resolution, and cost figure streams into an append-only run log.
+A bundle arrives (cloned, pulled, copied) and is inert by construction. `agentstack review` renders a human-readable diff of everything the bundle declares. Trusting it pins the lockfile digest into the machine-local trust store. At run time, the policy engine intersects the bundle's requested policy with the machine's rules, compiles a ruleset, and hands it to the runtime. In sandbox mode the agent CLI runs in a container routed through an egress proxy enforcing that ruleset — and in lockdown mode the proxy sidecar is topologically the *only* route out. Every tool call, block, secret resolution, and cost figure streams into an append-only run log.
 
 ## Layer 1 — The bundle (`crates/core`)
 
@@ -170,11 +170,14 @@ Enforcement honesty, per dimension (today):
   (Layer 4's single enforcement point).
 - **Secrets** — enforced, fail-closed: a denied `${REF}` never resolves,
   at both adapter render and the gateway's per-server resolver.
-- **Egress** — partially enforced: a server's *declared* URL host is checked
-  at write/spawn time (render and gateway upstream construction); a host
-  hidden behind an unresolved `${REF}` fails closed if the server is
-  constrained at all. Runtime filtering of arbitrary in-flight traffic is
-  the Phase-2 egress proxy's job — not yet built.
+- **Egress** — enforced in sandbox mode: the egress proxy (host-process or
+  lockdown sidecar, Layer 4) filters in-flight traffic against the compiled
+  ruleset, Docker-verified end to end. In host mode it is write/spawn-time
+  only: a server's *declared* URL host is checked (render and gateway
+  upstream construction), and a host hidden behind an unresolved `${REF}`
+  fails closed if the server is constrained at all. One known gap either
+  way: the decision matches the *host*, not the port — an allowed host is
+  reachable on any port, and an HTTPS-only intent is not yet expressible.
 - **Filesystem** — write scope enforced in sandbox mode: the workspace mounts
   read-only unless the effective write scope covers the workspace root
   (deny-by-default — the one dimension where absence means deny, because a
@@ -229,7 +232,13 @@ policy from advisory to enforced. Two confinement strengths ship:
   network and its `HTTPS_PROXY` points at a proxy on the host
   (`host.docker.internal`). This enforces the agent's *configured* egress and
   gates anything reachable only via the proxy — but a container that ignored
-  the proxy env could still reach the open internet directly.
+  the proxy env could still reach the open internet directly. The listener
+  necessarily binds a broad address so the container can reach it, so the
+  peer is authenticated: a per-run random token rides in the proxy URL's
+  userinfo and the proxy 407s any CONNECT that doesn't present it — the
+  token, not the bind address, is what stops a LAN neighbor from using the
+  proxy as an open relay (and the same token authenticates the sandbox to
+  the lockdown sidecar).
 - **`--lockdown`** (no direct route): the container is attached ONLY to an
   internal Docker network — no host route, no internet, no DNS beyond it —
   whose single reachable peer is the **egress-proxy sidecar container**
@@ -264,6 +273,12 @@ async learning curve. Known-hard sub-problems, stated up front:
 - **DNS** is itself an exfiltration channel and needs to be routed and
   filtered, not left open — the container resolves nothing directly; the proxy
   resolves only allowed names.
+- **Peer authentication** (enforced): the listener must bind a broad address so
+  the container can reach it, so a per-run token — minted by the CLI, injected
+  as the sandbox's `HTTPS_PROXY` credentials and into the sidecar's env — is
+  what authenticates the peer, not the bind. A CONNECT without valid
+  `Proxy-Authorization` gets a 407 and is recorded, so the proxy can't be used
+  as an open relay by anything else that can route to it.
 
 **Scope honesty — exfiltration through allowed channels:** even a perfectly
 enforced allowlist permits traffic to allowed hosts, including the model API
@@ -306,11 +321,17 @@ core     → (nothing)
 trust    → core
 policy   → core
 recorder → core
-adapters → core, policy
+adapters → core
 runtime  → core, policy, recorder
 egress   → core, policy, recorder
 cli      → everything
 ```
+
+(The 2026-07-11 security review flagged that this table once granted
+`adapters → policy` while the crate never used it — the fail-closed secret
+check happens *before* render, in the caller. The edge is withdrawn to match
+reality; re-granting it is a deliberate architecture change, not a Cargo.toml
+edit.)
 
 `core` depends on nothing internal; nothing depends on `cli`. `trust` and
 `policy` are the security-critical crates: they depend on `core` only, stay

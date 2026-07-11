@@ -41,3 +41,60 @@ pub fn refs_in(s: &str) -> Vec<String> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ref_name_rules() {
+        assert!(is_ref_name("GH_PAT"));
+        assert!(is_ref_name("_x"));
+        assert!(is_ref_name("A1_b2"));
+        assert!(!is_ref_name("")); // empty
+        assert!(!is_ref_name("1ABC")); // leading digit
+        assert!(!is_ref_name("A-B")); // hyphen
+        assert!(!is_ref_name("A B")); // space
+        assert!(!is_ref_name("VAR:-x")); // shell fallback syntax
+    }
+
+    #[test]
+    fn extracts_refs_in_order() {
+        assert_eq!(refs_in("${A} and ${B}"), vec!["A", "B"]);
+        assert_eq!(refs_in("Bearer ${TOKEN}"), vec!["TOKEN"]);
+        assert!(refs_in("no refs here").is_empty());
+    }
+
+    #[test]
+    fn skips_non_names_but_scans_their_interior() {
+        // A shell fallback `${A:-${B}}` is not itself a ref name, but the
+        // nested `${B}` inside it is still found.
+        assert_eq!(refs_in("${A:-${B}}"), vec!["B"]);
+        // A bare `${...}` with junk yields nothing.
+        assert!(refs_in("${1bad}").is_empty());
+        assert!(refs_in("${a-b}").is_empty());
+    }
+
+    #[test]
+    fn hostile_input_never_panics() {
+        // Unterminated, empty, multibyte, and adversarial brace soup must all
+        // return cleanly (the scanner walks bytes, so UTF-8 boundaries matter).
+        for s in [
+            "",
+            "$",
+            "${",
+            "${}",
+            "${unterminated",
+            "${${${",
+            "€${MÜNZE}€", // multibyte around and inside
+            "}{}{}{",
+            "${A}${B}${C}",
+        ] {
+            let _ = refs_in(s); // must not panic
+        }
+        // Multibyte inside a ${…} span is not a valid name → skipped, no panic.
+        assert!(refs_in("${MÜNZE}").is_empty());
+        // But a valid name adjacent to multibyte is still found.
+        assert_eq!(refs_in("€${TOKEN}"), vec!["TOKEN"]);
+    }
+}

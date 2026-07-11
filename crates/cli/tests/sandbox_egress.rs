@@ -96,6 +96,7 @@ fn start_world(rs: CompiledRuleset) -> World {
                 sink,
                 ProxyConfig {
                     allow_local_targets: true,
+                    ..ProxyConfig::default()
                 },
             );
 

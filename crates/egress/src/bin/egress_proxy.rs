@@ -74,8 +74,14 @@ fn run() -> Result<(), String> {
     // Anti-SSRF is on by default: resolved targets must be global unicast.
     // The Docker demo dials the host gateway (host.docker.internal), so it opts
     // out via this env — never set in a real deployment.
+    //
+    // The peer token (if the host provided one) authenticates the sandbox: only
+    // a client presenting it may tunnel. Absent → no auth (loopback/dev).
     let config = ProxyConfig {
         allow_local_targets: env_flag("AGENTSTACK_ALLOW_LOCAL_TARGETS"),
+        auth_token: std::env::var("AGENTSTACK_PROXY_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty()),
     };
 
     let rt = tokio::runtime::Builder::new_multi_thread()

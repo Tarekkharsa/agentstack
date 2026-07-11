@@ -153,9 +153,12 @@ the container↔proxy routing and the recorded demo — flagged per item below.
    private, link-local (incl. the `169.254.169.254` metadata IP), unique-local,
    and reserved ranges are refused, and the proxy dials the validated address
    (no re-resolution → no DNS rebind), so a literal-IP or SSRF pivot into the
-   host/internal network is blocked. Per-step timeouts bound slowloris. The
-   `CompiledRuleset` version is checked at the enforcement boundary and fails
-   closed when newer than the proxy understands.
+   host/internal network is blocked. Per-step timeouts bound slowloris. A
+   per-run Basic-auth token authenticates the sandbox to the proxy (the listener
+   must bind a broad address, so the token — not the bind — is what stops an
+   open relay; a CONNECT without it gets 407). The `CompiledRuleset` version is
+   checked at the enforcement boundary and fails closed when newer than the
+   proxy understands.
 3. **[done]** `agentstack run --sandbox <bundle>`: builds the `SandboxSpec`
    (tested), stands up the egress proxy from the effective policy, injects
    `HTTPS_PROXY` into the container, and records lifecycle + egress decisions
@@ -198,6 +201,39 @@ and the `--lockdown` flag. Verified live on Docker through the real binary:
 reaches nothing; a proxied request to a denied host is blocked and recorded)
 and `crates/egress/tests/sidecar_image.rs` (the image itself, incl. fail-closed
 on a future ruleset version).
+
+**Security-review ledger (2026-07-11,
+`docs/security-review-2026-07-11.html`).** The two-reviewer audit's findings,
+tracked to closure so this plan and the report can't drift apart:
+
+- **Closed — Highs (H1–H5):** lockdown network (H1), hostname normalization
+  (H2), enforced SNI-equals-CONNECT (H3), anti-SSRF IP-class guard +
+  dial-the-validated-address (H4), literal-IP CONNECTs through the same guard
+  (H5).
+- **Closed — Mediums:** ruleset version gate fails closed at the decision
+  boundary and in the sidecar (M1); length-framed trust digest segments (M2);
+  single-write atomic run-log appends (M3); per-run proxy peer-auth token —
+  the broad bind is no longer an open relay, and the same token authenticates
+  the sandbox to the lockdown sidecar (M4); per-step proxy timeouts (M6);
+  v2 dir digests skip symlinks and cap recursion depth (M7).
+- **Closed — Lows:** bounded reads for hostile manifest/lockfile input plus
+  hostile-input tests for the `${REF}` scanner (most of L4); digest paths
+  hashed as raw bytes with `/` separators on unix (L2, unix half); the stale
+  `adapters → policy` dependency edge withdrawn from CLAUDE.md and
+  ARCHITECTURE.md (L5, doc half).
+- **Open, accepted and tracked:** egress decisions match host only, not port
+  (M5 — an "HTTPS-only" policy isn't expressible yet); the stat-based digest
+  cache stays off every verification path — that containment IS the fix, keep
+  it true (L1); the event-sink append is synchronous inside the async proxy
+  (L3 — latency, not correctness); a run still proceeds if the run log can't
+  be created (L4 remainder — should fail closed or warn loudly); `trust`
+  still carries `anyhow` + `toml` (L5 code half, TODO-tracked for the Phase 1
+  rule-6 sweep).
+- **Structural recommendation, unscheduled:** the reviewers' "one
+  enforcement-plan boundary" — a library API that turns a trusted, resolved
+  bundle into one immutable plan that commands execute or display, instead of
+  re-assembling the security model per command in the large `cli` files.
+  Worth its own design session before Phase 3 grows the surface further.
 
 ## Phase 3 — Flight recorder surface
 

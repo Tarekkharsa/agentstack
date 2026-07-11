@@ -67,7 +67,7 @@ Exact internal dependency edges (nothing else is permitted):
 - `trust` → `core`
 - `policy` → `core`
 - `recorder` → `core`
-- `adapters` → `core`, `policy`
+- `adapters` → `core` (the `policy` edge was withdrawn 2026-07-11 — the crate never used it; secrets are checked fail-closed before render, in the caller. Re-granting it is an architecture change, not a Cargo.toml edit)
 - `runtime` → `core`, `policy`, `recorder`
 - `egress` → `core`, `policy`, `recorder`
 - `cli` → everything

@@ -77,6 +77,7 @@ pub struct Lockdown {
     egress_net: String,
     sidecar_id: String,
     follow: Option<JoinHandle<()>>,
+    auth_token: Option<String>,
 }
 
 impl Lockdown {
@@ -88,12 +89,14 @@ impl Lockdown {
     /// sidecar; `proxy_image` is the sidecar image tag. Every [`RunEvent`] the
     /// sidecar emits is handed to `sink`. Returns once the proxy is READY, or
     /// an error (after cleaning up whatever it created) if it never is.
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         backend: &DockerSandbox,
         run_id: &str,
         servers: &[String],
         ruleset_json_path: &str,
         proxy_image: &str,
+        auth_token: Option<String>,
         sink: LockdownSink,
     ) -> Result<Lockdown> {
         let rt = Arc::clone(backend.runtime());
@@ -121,6 +124,7 @@ impl Lockdown {
                 &egress_net,
                 ruleset_json_path,
                 &servers_env,
+                auth_token.as_deref(),
             )
             .await?;
             connect_with_alias(&docker, &internal_net, &sidecar_id, PROXY_ALIAS).await?;
@@ -157,6 +161,7 @@ impl Lockdown {
             egress_net,
             sidecar_id,
             follow: Some(follow),
+            auth_token,
         };
         match ready_rx.recv_timeout(READY_TIMEOUT) {
             Ok(Ok(())) => Ok(lock),
@@ -178,9 +183,14 @@ impl Lockdown {
         &self.internal_net
     }
 
-    /// The `HTTPS_PROXY` value the sandbox should carry (`http://alias:port`).
+    /// The `HTTPS_PROXY` value the sandbox should carry. When a peer token is
+    /// set it rides in the URL userinfo (`http://agentstack:<token>@alias:port`)
+    /// so the container's client sends `Proxy-Authorization` on CONNECT.
     pub fn proxy_endpoint(&self) -> String {
-        format!("http://{PROXY_ALIAS}:{PROXY_BASE_PORT}")
+        match &self.auth_token {
+            Some(t) => format!("http://agentstack:{t}@{PROXY_ALIAS}:{PROXY_BASE_PORT}"),
+            None => format!("http://{PROXY_ALIAS}:{PROXY_BASE_PORT}"),
+        }
     }
 }
 
@@ -236,6 +246,7 @@ async fn start_sidecar(
     egress_net: &str,
     ruleset_json_path: &str,
     servers_env: &str,
+    auth_token: Option<&str>,
 ) -> Result<String> {
     const RULESET_IN: &str = "/agentstack/ruleset.json";
     let host_config = HostConfig {
@@ -263,6 +274,11 @@ async fn start_sidecar(
         Some("1") | Some("true") | Some("yes")
     ) {
         env.push("AGENTSTACK_ALLOW_LOCAL_TARGETS=1".to_string());
+    }
+    // The peer token the sandbox must present; the proxy binary reads it and
+    // rejects any CONNECT that doesn't carry it.
+    if let Some(token) = auth_token {
+        env.push(format!("AGENTSTACK_PROXY_TOKEN={token}"));
     }
     let body = ContainerCreateBody {
         image: Some(image.to_string()),

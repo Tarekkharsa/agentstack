@@ -59,6 +59,7 @@ impl EgressBridge {
             sink,
             ProxyConfig {
                 allow_local_targets: true,
+                ..ProxyConfig::default()
             },
         )
         .await
@@ -122,7 +123,7 @@ impl EgressBridge {
                 server.clone(),
                 EgressGuard::new(ruleset.clone()),
                 Arc::clone(&sink),
-                config,
+                config.clone(),
             );
             tasks.push(tokio::spawn(async move {
                 let _ = proxy.serve(listener).await;

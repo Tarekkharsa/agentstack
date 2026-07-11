@@ -197,6 +197,21 @@ fn set_proxy_env(spec: &mut SandboxSpec, url: &str) {
     }
 }
 
+/// A fresh per-run credential the sandbox presents to its egress proxy — hex of
+/// 32 random bytes from the same OS entropy source agentstack uses for its other
+/// locally-minted secrets. Authenticates the container to the proxy so the
+/// broadly-bound listener can't be used as an open relay by anything else.
+#[cfg(feature = "sandbox")]
+fn mint_proxy_token() -> String {
+    use std::fmt::Write;
+    agentstack_core::util::random_bytes()
+        .iter()
+        .fold(String::with_capacity(64), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
 #[cfg(feature = "sandbox")]
 fn execute_sandbox(spec: SandboxSpec, run_id: &str, server: &str, lockdown: bool) -> Result<()> {
     if lockdown {
@@ -228,6 +243,11 @@ fn execute_proxy(mut spec: SandboxSpec, run_id: &str, server: &str) -> Result<()
             l.append(&ev);
         }
     });
+    // A per-run token authenticates the sandbox to the proxy: the listener
+    // binds 0.0.0.0 so the container can reach it via host.docker.internal, so
+    // the token — not the bind — is what stops a LAN neighbor from using it as
+    // an open relay.
+    let proxy_token = mint_proxy_token();
     // Anti-SSRF address check is on by default; the demo dials the host gateway
     // (host.docker.internal), so it opts out via env — never set in real use.
     let proxy_config = agentstack_egress::proxy::ProxyConfig {
@@ -237,6 +257,7 @@ fn execute_proxy(mut spec: SandboxSpec, run_id: &str, server: &str) -> Result<()
                 .as_deref(),
             Some("1") | Some("true") | Some("yes")
         ),
+        auth_token: Some(proxy_token.clone()),
     };
     let bridge = agentstack_egress::BlockingBridge::start_on_with(
         IpAddr::V4(Ipv4Addr::UNSPECIFIED),
@@ -253,7 +274,12 @@ fn execute_proxy(mut spec: SandboxSpec, run_id: &str, server: &str) -> Result<()
         .addr
         .port();
 
-    set_proxy_env(&mut spec, &format!("http://host.docker.internal:{port}"));
+    // The credentials ride in the proxy URL's userinfo; curl et al. turn that
+    // into `Proxy-Authorization: Basic …` on CONNECT.
+    set_proxy_env(
+        &mut spec,
+        &format!("http://agentstack:{proxy_token}@host.docker.internal:{port}"),
+    );
 
     let backend = agentstack_runtime::docker::DockerSandbox::connect()
         .map_err(|e| anyhow::anyhow!("cannot reach Docker ({e}) — is the daemon running?"))?;
@@ -302,17 +328,22 @@ fn execute_lockdown(mut spec: SandboxSpec, run_id: &str, server: &str) -> Result
     let backend = agentstack_runtime::docker::DockerSandbox::connect()
         .map_err(|e| anyhow::anyhow!("cannot reach Docker ({e}) — is the daemon running?"))?;
 
+    // Per-run token authenticating the sandbox to the sidecar (the sidecar reads
+    // it from its env; the sandbox presents it via the proxy URL userinfo).
+    let proxy_token = mint_proxy_token();
     let lock = agentstack_runtime::Lockdown::start(
         &backend,
         run_id,
         std::slice::from_ref(&server.to_string()),
         &ruleset_path.display().to_string(),
         &egress_image(),
+        Some(proxy_token),
         sink,
     )
     .context("standing up the egress lockdown (is the sidecar image built?)")?;
 
-    // Attach the sandbox to the internal network and point it at the sidecar.
+    // Attach the sandbox to the internal network and point it at the sidecar
+    // (proxy_endpoint carries the token in its userinfo).
     spec.network = NetworkPolicy::Lockdown {
         network: lock.internal_network().to_string(),
     };
