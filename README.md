@@ -49,7 +49,9 @@ agentstack bootstrap    # check CLIs, skills, secrets; see what's missing
 agentstack apply        # preview every CLI's changes, confirm to write
 ```
 
-![agentstack first run: init → bootstrap → apply](docs/firstrun.gif)
+![agentstack first run: init → bootstrap → apply](docs/firstrun.svg)
+
+> ▶ [Watch it live on the site](https://tarekkharsa.github.io/agentstack/#start) — same flow, replayed in your browser.
 
 Two things worth knowing before you go further:
 
@@ -244,7 +246,9 @@ steps:
 Clone any repo and its agents can touch **nothing** until you review and trust
 it — every call after that is firewalled and audited.
 
-![The trust gate: clone → inert → review → trust → firewalled → audited — and the library sync gate blocking a literal secret](docs/trust-gate.gif)
+![The trust gate: clone → inert → review → trust → firewalled → audited — and the library sync gate blocking a literal secret](docs/trust-gate.svg)
+
+> ▶ [Watch it live on the site](https://tarekkharsa.github.io/agentstack/#trust) — and run it yourself: [`docs/trust-gate-demo.sh`](docs/trust-gate-demo.sh).
 
 Register the gateway once (`agentstack connect --all --write`) and every repo
 you open brings its own MCP servers with **no files copied in**. But a repo you haven't reviewed
@@ -352,13 +356,17 @@ Details and trade-offs: [feature reference → three modes](docs/reference.md#wh
   restricts destinations and records decisions; it cannot guarantee sensitive
   content never leaves through a host you *allowed*.
 
-![agentstack lockdown: a container with no host route — its only egress is the AgentStack proxy sidecar, which blocks a denied host and records it](docs/lockdown.gif)
+![agentstack lockdown: a container with no host route — its only egress is the AgentStack proxy sidecar, which blocks a denied host and records it](docs/lockdown.svg)
+
+> ▶ [Watch it live on the site](https://tarekkharsa.github.io/agentstack/#sandbox) — and run it yourself (needs Docker): [`agentstack-test/demo-lockdown.sh`](agentstack-test/demo-lockdown.sh).
 
 The closed loop in under a minute — install a versioned pack, spread it to
 every CLI, firewall a tool, watch the refusal in the audit log, upgrade to the
 vendor's next tag:
 
-![agentstack closed loop](docs/closed-loop.gif)
+![agentstack closed loop: install a versioned pack, spread it everywhere, firewall a tool, watch the audited refusal, upgrade](docs/closed-loop.svg)
+
+> ▶ Run it yourself: [`agentstack-test/demo-closed-loop.sh`](agentstack-test/demo-closed-loop.sh).
 
 ## Develop
 

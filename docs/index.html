@@ -515,10 +515,16 @@
 <span class="c">  agent → demo.delete_all   </span><span class="no">✗ denied</span><span class="c">   YOUR machine policy — "*" = ["!delete_*"]</span>
 <span class="c">  every call → ~/.agentstack/audit/calls.jsonl  (tool · outcome · latency)</span></code></pre>
     </div>
-    <figure>
-      <img src="trust-gate.gif" alt="Terminal recording: an untrusted repo is inert, you review and trust it, its tool is brokered and logged, a firewalled tool is refused, and a library sync carrying a literal secret is blocked until it becomes a ${REF}" width="860" height="686" loading="lazy">
-      <figcaption>Clone → inert → review → trust → brokered → firewalled → audited — and secrets never travel. Runnable: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/trust-gate-demo.sh"><code>docs/trust-gate-demo.sh</code></a>.</figcaption>
-    </figure>
+    <div class="term" data-replay style="margin-top:1.6rem">
+      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>…and secrets never travel</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
+      <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack lib sync</span><span class="c">   # your library syncs machine-to-machine over git</span></span>
+<span class="row" data-d="800"><span class="no">  ✗ refusing to sync — 'Authorization' looks like a literal secret</span></span>
+<span class="row"><span class="ok">  ✓</span><span class="c"> make it a ${REF} and it travels safely — values never leave the keychain</span></span></code></pre>
+    </div>
+    <p class="small muted" style="margin-top:0.8rem">
+      Condensed from a real run — reproduce the whole gate:
+      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/trust-gate-demo.sh"><code>docs/trust-gate-demo.sh</code></a>.
+    </p>
     <p class="small muted">
       The whole story, in one binary: an untrusted repo's agents can touch
       nothing you didn't review, and every capability call is firewallable
@@ -860,10 +866,25 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
         <span class="tag" style="color:var(--faint)">Data-driven adapters</span>
       </div>
     </div>
-    <figure>
-      <img src="closed-loop.gif" alt="Terminal recording: install a versioned pack, apply everywhere, firewall a tool, watch the audited refusal, upgrade" width="1060" height="739" loading="lazy">
-      <figcaption>The closed loop in under a minute — pack install → apply → firewall → audited refusal → upgrade.</figcaption>
-    </figure>
+    <div class="term" data-replay style="margin-top:1.6rem">
+      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>pack @v1.0.0 → every CLI → firewalled → audited → @v1.1.0</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
+      <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack add from git:acme/pack@v1.0.0 --write</span></span>
+<span class="row"><span class="ok">  ✓ installed pack 'acme'</span><span class="c"> — servers + skills, secrets stay ${REF}s</span></span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack apply --write</span></span>
+<span class="row" data-d="700"><span class="ok">  ✓</span><span class="c"> the whole pack spreads to every CLI on this machine</span></span>
+<span class="row" data-d="450"> </span>
+<span class="row"><span class="c">  acme__search_docs     </span><span class="ok">✓ ok</span></span>
+<span class="row" data-d="700"><span class="c">  acme__delete_index    </span><span class="no">✗ refused</span><span class="c">   [policy.tools] rule "!delete_*"</span></span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack audit --calls</span></span>
+<span class="row" data-d="800"><span class="c">  2 calls · 2 tools · </span><span class="no">1 denied by policy</span><span class="c"> — digests, never values</span></span>
+<span class="row" data-d="450"> </span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack upgrade acme --yes --write</span><span class="c">   # vendor ships v1.1.0</span></span>
+<span class="row"><span class="ok">  ✓ upgraded pack 'acme'</span><span class="c"> — previewed, re-pinned @v1.1.0</span></span></code></pre>
+    </div>
+    <p class="small muted" style="margin-top:0.8rem">
+      The closed loop in under a minute, condensed from a real run:
+      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/agentstack-test/demo-closed-loop.sh"><code>agentstack-test/demo-closed-loop.sh</code></a>.
+    </p>
   </section>
 
 </main>
