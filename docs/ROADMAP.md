@@ -169,19 +169,24 @@ the container↔proxy routing and the recorded demo — flagged per item below.
 Done when: **met** — the PoC attack demo works end to end, both directly and
 through the real CLI (verified live on Docker 25.0.3).
 
-**Remaining hardening (beyond the done-criterion, honestly scoped).** Today
-`run --sandbox` gives the container a bridge network and points its
-`HTTPS_PROXY` at the proxy: this enforces the agent's *configured* egress
-(model API, HTTP MCP servers all use CONNECT, which the proxy gates), and any
-target reachable only via the proxy (host loopback in the demo) is genuinely
-blocked — but a container that deliberately ignores the proxy env could still
-reach the open internet directly. **True no-direct-route lockdown** needs the
-container on a Docker `--internal` network whose only reachable peer is the
-proxy, which in turn means running the proxy as a sidecar *container* on that
-network (bridging to the outside) rather than as a host process — because an
-`--internal` network has no route to the host. That containerized-proxy step
-(a small Linux image built from the egress crate) is the next hardening; the
-enforcement logic it would run is already built and tested.
+**No-direct-route lockdown — DONE, Docker-verified.** `run --sandbox` gives
+the container a bridge network and points its `HTTPS_PROXY` at a host-process
+proxy: enforces the agent's *configured* egress and blocks anything reachable
+only via the proxy, but a container that ignored the proxy env could still
+reach the open internet directly. `run --sandbox --lockdown` closes that: the
+container is attached ONLY to a Docker `--internal` network (no host route, no
+internet, no DNS beyond it) whose single reachable peer is the egress proxy
+running as a **sidecar container** — dual-homed onto a second ordinary network
+so it (and only it) forwards allowed traffic out. Ignoring the proxy env then
+reaches nothing; the confinement is topological. Shipped as: the
+`agentstack-egress-proxy` binary + `docker/egress-proxy.Dockerfile`, the
+`runtime::docker::Lockdown` orchestrator (creates both networks + the sidecar,
+follows its RunEvent stream into the run log, tears everything down on drop),
+and the `--lockdown` flag. Verified live on Docker through the real binary:
+`crates/cli/tests/sandbox_lockdown.rs` (a direct route bypassing the proxy env
+reaches nothing; a proxied request to a denied host is blocked and recorded)
+and `crates/egress/tests/sidecar_image.rs` (the image itself, incl. fail-closed
+on a future ruleset version).
 
 ## Phase 3 — Flight recorder surface
 

@@ -38,6 +38,15 @@ fn sandbox_image() -> String {
         .unwrap_or_else(|_| "agentstack/sandbox:latest".to_string())
 }
 
+/// The egress-proxy sidecar image (lockdown mode). Overridable with
+/// `AGENTSTACK_EGRESS_IMAGE`; default matches the tag
+/// `docker/egress-proxy.Dockerfile` builds.
+#[cfg(feature = "sandbox")]
+fn egress_image() -> String {
+    std::env::var("AGENTSTACK_EGRESS_IMAGE")
+        .unwrap_or_else(|_| "agentstack/egress-proxy:latest".to_string())
+}
+
 /// Build the sandbox spec for one run: mount the project as the workspace,
 /// run `command` there routed through the egress proxy, carry the run id in
 /// the env (like host-mode `run`), and attach the effective compiled ruleset
@@ -122,19 +131,86 @@ pub fn run_sandboxed(dir: Option<&Path>, args: &RunArgs) -> Result<()> {
             "read-write".green()
         ),
     }
-    println!(
-        "  {} egress is routed through the AgentStack proxy; \
-         review it after with `agentstack report {}`.",
-        "🛡".cyan(),
-        run_id
-    );
+    if args.lockdown {
+        println!(
+            "  {} lockdown: no host route, no internet — the container's only \
+             peer is the egress sidecar. Review it with `agentstack report {}`.",
+            "🔒".cyan(),
+            run_id
+        );
+    } else {
+        println!(
+            "  {} egress is routed through the AgentStack proxy; \
+             review it after with `agentstack report {}`.",
+            "🛡".cyan(),
+            run_id
+        );
+    }
 
-    execute_sandbox(spec, &run_id, &args.harness)
+    execute_sandbox(spec, &run_id, &args.harness, args.lockdown)
+}
+
+/// Connect to Docker and stream the sandbox container to completion, reporting
+/// its exit. Shared by both modes; the caller has already set `spec.network`
+/// and `HTTPS_PROXY`, and stood up whatever egress layer the mode needs.
+#[cfg(feature = "sandbox")]
+fn run_container_to_completion(
+    spec: &SandboxSpec,
+    log: &std::sync::Arc<Option<agentstack_recorder::RunLog>>,
+    backend: &agentstack_runtime::docker::DockerSandbox,
+) -> Result<()> {
+    use std::io::Write;
+    use std::sync::Arc;
+
+    let mut on_output = |chunk: agentstack_runtime::StreamChunk| match chunk.stream {
+        agentstack_runtime::Stream::Stdout => {
+            let _ = std::io::stdout().write_all(&chunk.bytes);
+        }
+        agentstack_runtime::Stream::Stderr => {
+            let _ = std::io::stderr().write_all(&chunk.bytes);
+        }
+    };
+    let ev_log = Arc::clone(log);
+    let mut on_event = |ev: agentstack_recorder::RunEvent| {
+        if let Some(l) = ev_log.as_ref() {
+            l.append(&ev);
+        }
+    };
+
+    let exit = agentstack_runtime::run(backend, spec, &mut on_output, &mut on_event)?;
+    match exit.code {
+        Some(0) => {
+            println!("\n{} sandbox exited cleanly.", "✓".green());
+            Ok(())
+        }
+        Some(c) => anyhow::bail!("sandbox exited with code {c}"),
+        None => anyhow::bail!("sandbox was killed by a signal"),
+    }
+}
+
+/// Add the four `HTTPS_PROXY`/`HTTP_PROXY` spellings pointing at `url`, so any
+/// client convention inside the container is covered.
+#[cfg(feature = "sandbox")]
+fn set_proxy_env(spec: &mut SandboxSpec, url: &str) {
+    for key in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
+        spec.env.push((key.to_string(), url.to_string()));
+    }
 }
 
 #[cfg(feature = "sandbox")]
-fn execute_sandbox(mut spec: SandboxSpec, run_id: &str, server: &str) -> Result<()> {
-    use std::io::Write;
+fn execute_sandbox(spec: SandboxSpec, run_id: &str, server: &str, lockdown: bool) -> Result<()> {
+    if lockdown {
+        execute_lockdown(spec, run_id, server)
+    } else {
+        execute_proxy(spec, run_id, server)
+    }
+}
+
+/// Host-process-proxy mode (`--sandbox`): the container gets an ordinary bridge
+/// network and its `HTTPS_PROXY` points at a proxy running on the host. This
+/// gates the agent's *configured* egress; `--lockdown` is the stronger mode.
+#[cfg(feature = "sandbox")]
+fn execute_proxy(mut spec: SandboxSpec, run_id: &str, server: &str) -> Result<()> {
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
 
@@ -166,47 +242,84 @@ fn execute_sandbox(mut spec: SandboxSpec, run_id: &str, server: &str) -> Result<
         .addr
         .port();
 
-    // Point the container's HTTPS egress at the proxy (the model API + HTTP MCP
-    // servers use CONNECT, which this proxy gates). Both cases so any client
-    // convention is covered.
-    let proxy_url = format!("http://host.docker.internal:{port}");
-    for key in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
-        spec.env.push((key.to_string(), proxy_url.clone()));
-    }
+    set_proxy_env(&mut spec, &format!("http://host.docker.internal:{port}"));
+
+    let backend = agentstack_runtime::docker::DockerSandbox::connect()
+        .map_err(|e| anyhow::anyhow!("cannot reach Docker ({e}) — is the daemon running?"))?;
+    let result = run_container_to_completion(&spec, &log, &backend);
+    drop(bridge); // stop the proxy now the run is done
+    result
+}
+
+/// Lockdown mode (`--lockdown`): the container is attached ONLY to an internal
+/// network with no host route and no internet; its sole reachable peer is the
+/// egress-proxy sidecar the runtime stands up on that network. Ignoring the
+/// proxy env then reaches nothing — the confinement is topological, not
+/// convention.
+#[cfg(feature = "sandbox")]
+fn execute_lockdown(mut spec: SandboxSpec, run_id: &str, server: &str) -> Result<()> {
+    use std::sync::Arc;
+
+    let log = Arc::new(agentstack_recorder::RunLog::create(run_id));
+
+    // Hand the sidecar its policy: the compiled ruleset serialized to a host
+    // file, bind-mounted read-only into the proxy container. Staged in a
+    // run-scoped temp dir kept until the run — and the sidecar — are done, then
+    // removed. (No `tempfile` dep in the shipped build; std is enough here.)
+    let ruleset_dir = std::env::temp_dir().join(format!("agentstack-lock-{run_id}"));
+    std::fs::create_dir_all(&ruleset_dir).context("creating the ruleset staging dir")?;
+    let ruleset_path = ruleset_dir.join("ruleset.json");
+    std::fs::write(
+        &ruleset_path,
+        serde_json::to_vec(&spec.ruleset).context("serializing the compiled ruleset")?,
+    )
+    .context("writing the ruleset for the sidecar")?;
+
+    // The sidecar reports each egress decision as a JSON line; parse it into a
+    // RunEvent and append to the same flight recorder the sandbox lifecycle
+    // writes. Runtime forwards the raw line so serde stays out of that crate.
+    let sink_log = Arc::clone(&log);
+    let sink: agentstack_runtime::LockdownSink = Arc::new(move |line: &str| {
+        if let (Some(l), Ok(ev)) = (
+            sink_log.as_ref(),
+            serde_json::from_str::<agentstack_recorder::RunEvent>(line),
+        ) {
+            l.append(&ev);
+        }
+    });
 
     let backend = agentstack_runtime::docker::DockerSandbox::connect()
         .map_err(|e| anyhow::anyhow!("cannot reach Docker ({e}) — is the daemon running?"))?;
 
-    let mut on_output = |chunk: agentstack_runtime::StreamChunk| match chunk.stream {
-        agentstack_runtime::Stream::Stdout => {
-            let _ = std::io::stdout().write_all(&chunk.bytes);
-        }
-        agentstack_runtime::Stream::Stderr => {
-            let _ = std::io::stderr().write_all(&chunk.bytes);
-        }
-    };
-    let ev_log = Arc::clone(&log);
-    let mut on_event = |ev: agentstack_recorder::RunEvent| {
-        if let Some(l) = ev_log.as_ref() {
-            l.append(&ev);
-        }
-    };
+    let lock = agentstack_runtime::Lockdown::start(
+        &backend,
+        run_id,
+        std::slice::from_ref(&server.to_string()),
+        &ruleset_path.display().to_string(),
+        &egress_image(),
+        sink,
+    )
+    .context("standing up the egress lockdown (is the sidecar image built?)")?;
 
-    let exit = agentstack_runtime::run(&backend, &spec, &mut on_output, &mut on_event)?;
-    drop(bridge); // stop the proxy now the run is done
+    // Attach the sandbox to the internal network and point it at the sidecar.
+    spec.network = NetworkPolicy::Lockdown {
+        network: lock.internal_network().to_string(),
+    };
+    set_proxy_env(&mut spec, &lock.proxy_endpoint());
 
-    match exit.code {
-        Some(0) => {
-            println!("\n{} sandbox exited cleanly.", "✓".green());
-            Ok(())
-        }
-        Some(c) => anyhow::bail!("sandbox exited with code {c}"),
-        None => anyhow::bail!("sandbox was killed by a signal"),
-    }
+    let result = run_container_to_completion(&spec, &log, &backend);
+    drop(lock); // tear down the sidecar + networks first (it holds the mount)
+    let _ = std::fs::remove_dir_all(&ruleset_dir); // then drop the staged ruleset
+    result
 }
 
 #[cfg(not(feature = "sandbox"))]
-fn execute_sandbox(_spec: SandboxSpec, _run_id: &str, _server: &str) -> Result<()> {
+fn execute_sandbox(
+    _spec: SandboxSpec,
+    _run_id: &str,
+    _server: &str,
+    _lockdown: bool,
+) -> Result<()> {
     anyhow::bail!(
         "sandbox support is not compiled into this build — rebuild with \
          `cargo build --features sandbox` (it also needs a running Docker daemon)."

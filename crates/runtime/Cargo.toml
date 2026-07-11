@@ -26,11 +26,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "1"
 # rule 6: bollard (and the tokio it drives) are confined to THIS crate.
-# The Docker daemon API is async; the backend holds its own current-thread
-# runtime and block_on's each call, so the Sandbox trait and everything above
-# it stay synchronous — async/tokio proper is the egress crate (2.2).
+# The Docker daemon API is async; the backend holds its own runtime and
+# block_on's each call, so the Sandbox trait and everything above it stay
+# synchronous. The runtime is multi-thread because lockdown mode follows the
+# sidecar's logs on a spawned task that must run WHILE this thread blocks on
+# the sandbox container — async/tokio proper is still the egress crate (2.2).
 bollard = { version = "0.21", optional = true }
-tokio = { version = "1", optional = true, features = ["rt", "net", "io-util", "time"] }
+tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "net", "io-util", "time"] }
 futures-util = { version = "0.3", optional = true, default-features = false }
 
 [dev-dependencies]

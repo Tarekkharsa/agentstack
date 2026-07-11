@@ -29,8 +29,17 @@ pub enum NetworkPolicy {
     None,
     /// The container's only route out is the egress proxy at this address
     /// (`host:port`), which enforces the compiled ruleset per host per server.
-    /// Reserved for when the egress crate lands; not yet constructed.
+    /// Today this is the host-process proxy reached via `host.docker.internal`:
+    /// it gates the agent's *configured* egress (HTTPS_PROXY), but a container
+    /// that ignored the env could still reach the open internet directly.
     ProxyOnly { endpoint: String },
+    /// True no-direct-route lockdown: the container is attached ONLY to this
+    /// internal Docker network, which has no host route and no internet. Its
+    /// sole reachable peer is the egress-proxy sidecar the lockdown module
+    /// stands up on the same network — so ignoring `HTTPS_PROXY` reaches
+    /// nothing. The network is created and torn down per run by
+    /// `runtime::docker::Lockdown`.
+    Lockdown { network: String },
 }
 
 /// The full description of one sandboxed run.

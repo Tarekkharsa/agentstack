@@ -44,7 +44,13 @@ impl DockerSandbox {
     /// Errors when no daemon is reachable — the caller can fall back or refuse
     /// to run in sandbox mode.
     pub fn connect() -> Result<Self> {
-        let rt = tokio::runtime::Builder::new_current_thread()
+        // A multi-thread runtime (not current-thread): the lockdown module
+        // follows the sidecar's logs on a spawned task that must make progress
+        // WHILE this thread blocks on the sandbox container — a current-thread
+        // runtime can only drive one block_on at a time, so the follow task
+        // would starve. The Docker backend's own calls don't care which.
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
             .enable_all()
             .build()
             .map_err(backend)?;
@@ -56,6 +62,18 @@ impl DockerSandbox {
             rt: Arc::new(rt),
             docker,
         })
+    }
+
+    /// The shared async runtime — used by the lockdown orchestrator (same
+    /// crate) to drive network + sidecar setup on the one runtime this
+    /// backend owns, keeping tokio confined here (rule 6).
+    pub(crate) fn runtime(&self) -> &Arc<Runtime> {
+        &self.rt
+    }
+
+    /// The bollard connection, cloneable (it is internally reference-counted).
+    pub(crate) fn client(&self) -> Docker {
+        self.docker.clone()
     }
 }
 
@@ -85,6 +103,12 @@ impl Sandbox for DockerSandbox {
                 None, // Docker default bridge.
                 Some(vec!["host.docker.internal:host-gateway".to_string()]),
             ),
+            // The container's ONLY network is this internal one — no host
+            // route, no internet, no DNS beyond it. Its single reachable peer
+            // is the egress-proxy sidecar (set up by the lockdown module),
+            // whose alias the container's HTTPS_PROXY env already points at.
+            // No extra_hosts: host.docker.internal must NOT resolve here.
+            NetworkPolicy::Lockdown { network } => (Some(network.clone()), None),
         };
 
         let env: Vec<String> = spec.env.iter().map(|(k, v)| format!("{k}={v}")).collect();

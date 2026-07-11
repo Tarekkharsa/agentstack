@@ -10,7 +10,8 @@ use owo_colors::OwoColorize;
 use crate::cli::{KillArgs, RunArgs, RunsArgs};
 
 pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
-    if args.sandbox {
+    // --lockdown is the stronger sandbox mode; it implies --sandbox.
+    if args.sandbox || args.lockdown {
         return crate::commands::sandbox::run_sandboxed(dir, args);
     }
     if let Some(p) = &args.profile {

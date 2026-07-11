@@ -439,6 +439,15 @@ pub struct RunArgs {
     #[arg(long)]
     pub sandbox: bool,
 
+    /// Stronger egress confinement (implies --sandbox): put the container on
+    /// an internal Docker network with NO host route and NO internet, whose
+    /// only reachable peer is the AgentStack egress-proxy sidecar. Ignoring
+    /// the proxy env then reaches nothing. Needs the sidecar image (build it
+    /// with `docker build -f docker/egress-proxy.Dockerfile`); override the
+    /// tag with `AGENTSTACK_EGRESS_IMAGE`.
+    #[arg(long)]
+    pub lockdown: bool,
+
     /// Extra arguments passed through to the harness (after `--`).
     #[arg(
         trailing_var_arg = true,

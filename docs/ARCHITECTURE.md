@@ -220,10 +220,27 @@ transport to the harness itself and are governed at write time — the
 advisory framing above.)
 
 **Sandbox mode** (Phase 2): `agentstack run --sandbox` launches the CLI in a
-container via the Docker API (`bollard`). The container has no direct network;
-its only route out is the **egress proxy**, which enforces the compiled
-ruleset and emits one event per decision (allow/block, host, server, tool).
-The container boundary is what upgrades policy from advisory to enforced.
+container via the Docker API (`bollard`). Its only route out is the **egress
+proxy**, which enforces the compiled ruleset and emits one event per decision
+(allow/block, host, server, tool). The container boundary is what upgrades
+policy from advisory to enforced. Two confinement strengths ship:
+
+- **`--sandbox`** (host-process proxy): the container gets an ordinary bridge
+  network and its `HTTPS_PROXY` points at a proxy on the host
+  (`host.docker.internal`). This enforces the agent's *configured* egress and
+  gates anything reachable only via the proxy — but a container that ignored
+  the proxy env could still reach the open internet directly.
+- **`--lockdown`** (no direct route): the container is attached ONLY to an
+  internal Docker network — no host route, no internet, no DNS beyond it —
+  whose single reachable peer is the **egress-proxy sidecar container**
+  (`docker/egress-proxy.Dockerfile`, the `egress` crate's binary). The sidecar
+  is dual-homed onto a second ordinary network so it (and only it) forwards
+  allowed traffic out. Ignoring the proxy env then reaches nothing: the
+  confinement is topological, not convention. The ruleset crosses the process
+  boundary as a serialized `CompiledRuleset` the sidecar fails closed on if
+  its version is newer than the binary understands. Both modes are
+  Docker-verified end to end through the real binary (`sandbox_egress`,
+  `sandbox_cli_e2e`, `sandbox_fs`, `sandbox_lockdown`, `sidecar_image`).
 
 The egress proxy is the hardest engineering in the system — harder than the
 async learning curve. Known-hard sub-problems, stated up front:
