@@ -30,6 +30,7 @@ pub mod connect;
 pub mod decide;
 pub mod netguard;
 pub mod proxy;
+pub mod relay;
 pub mod sni;
 
 pub use blocking::BlockingBridge;
@@ -37,4 +38,5 @@ pub use bridge::{EgressBridge, ProxyEndpoint};
 pub use connect::{parse_connect_target, Target};
 pub use decide::{Decision, EgressGuard};
 pub use proxy::{EventSink, ServerProxy};
+pub use relay::start_relay;
 pub use sni::extract_sni;

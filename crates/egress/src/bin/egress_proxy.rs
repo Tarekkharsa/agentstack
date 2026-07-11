@@ -103,6 +103,23 @@ fn run() -> Result<(), String> {
         .await
         .map_err(|e| format!("binding the proxy listeners: {e}"))?;
 
+        // Optional gateway relay (lockdown gateway routing): a fixed-destination
+        // TCP splice to the host-side gateway, bound BEFORE any READY line so it
+        // is listening when the host starts the sandbox. It is NOT an egress
+        // proxy — no policy, no SSRF check, a dumb pipe to the address the host
+        // supplied; auth stays end-to-end at the gateway.
+        let relay_addr = match relay_dest() {
+            Some(dest) => {
+                let port = relay_port()?;
+                let listen = std::net::SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
+                let addr = agentstack_egress::start_relay(listen, dest)
+                    .await
+                    .map_err(|e| format!("binding the gateway relay: {e}"))?;
+                Some(addr)
+            }
+            None => None,
+        };
+
         // READY only after every listener is bound: the host waits for these
         // lines before starting the sandbox, so no request can race the bind.
         {
@@ -110,6 +127,10 @@ fn run() -> Result<(), String> {
             for ep in &endpoints {
                 writeln!(out, "READY {} {}", ep.server, ep.addr.port())
                     .map_err(|e| format!("writing READY: {e}"))?;
+            }
+            if let Some(addr) = relay_addr {
+                writeln!(out, "READY __gateway_relay__ {}", addr.port())
+                    .map_err(|e| format!("writing relay READY: {e}"))?;
             }
             out.flush().map_err(|e| format!("flushing READY: {e}"))?;
         }
@@ -178,4 +199,22 @@ fn base_port() -> Result<u16, String> {
             .map_err(|_| format!("AGENTSTACK_PROXY_BASE_PORT is not a port: {v:?}")),
         Err(_) => Ok(DEFAULT_BASE_PORT),
     }
+}
+
+/// The host gateway address the relay splices to (`host.docker.internal:port`),
+/// or `None` when this run isn't routing MCP through the gateway.
+fn relay_dest() -> Option<String> {
+    std::env::var("AGENTSTACK_GATEWAY_RELAY_DEST")
+        .ok()
+        .filter(|d| !d.is_empty())
+}
+
+/// The port the relay listens on — the host owns this number (it renders the
+/// container's config to match), so it arrives via env like the base port.
+fn relay_port() -> Result<u16, String> {
+    let v = std::env::var("AGENTSTACK_GATEWAY_RELAY_PORT").map_err(|_| {
+        "AGENTSTACK_GATEWAY_RELAY_DEST is set but AGENTSTACK_GATEWAY_RELAY_PORT is not"
+    })?;
+    v.parse::<u16>()
+        .map_err(|_| format!("AGENTSTACK_GATEWAY_RELAY_PORT is not a port: {v:?}"))
 }

@@ -582,6 +582,10 @@ struct SandboxGateway {
     /// Run-scoped dir holding the rendered config files bind-mounted into the
     /// container; removed after the run.
     tempdir: PathBuf,
+    /// In lockdown, the host gateway address (`host.docker.internal:<port>`)
+    /// the sidecar relay must splice to; `None` in plain `--sandbox` (the
+    /// container reaches the host gateway directly).
+    relay_dest: Option<String>,
 }
 
 /// Route the sandbox's MCP traffic through the in-process gateway so
@@ -609,18 +613,6 @@ fn wire_sandbox_gateway(
 ) -> Result<Option<SandboxGateway>> {
     use std::sync::Arc;
 
-    // Lockdown has no host route to a host-side endpoint; the sidecar relay
-    // that bridges it is a later session. Until then lockdown keeps its
-    // pre-milestone behavior (harness talks to upstreams directly).
-    if lockdown {
-        eprintln!(
-            "  {} gateway tool-policy routing is not yet wired for --lockdown; \
-             this run enforces egress but not [policy.tools]",
-            "note:".dimmed()
-        );
-        return Ok(None);
-    }
-
     // Build the run's gateway from the SAME compiled ruleset the plan carries
     // (never recompiled) and hard trust-gate it: untrusted → empty → no
     // routing, no secret resolution, no host children.
@@ -631,12 +623,37 @@ fn wire_sandbox_gateway(
     }
 
     // Start the endpoint first so the rendered config can carry its real port +
-    // token. Bind broadly (0.0.0.0) so the container reaches it via
-    // host.docker.internal — the token is the gate, per the endpoint's own
-    // contract, exactly like the egress proxy's broad bind.
+    // token. Bind broadly (0.0.0.0) so the container reaches it — the token is
+    // the gate, per the endpoint's own contract, like the egress proxy's bind.
     let endpoint = crate::gateway_http::start(Arc::new(gateway), "0.0.0.0:0")
         .context("starting the gateway HTTP endpoint")?;
-    let url = format!("http://host.docker.internal:{}/mcp", endpoint.port);
+
+    // How the container reaches the host gateway differs by mode:
+    // - `--sandbox`: direct, via host.docker.internal (the container has a
+    //   route to the host).
+    // - `--lockdown`: NO host route — it reaches the sidecar's relay alias,
+    //   which splices to the host gateway. `relay_dest` is what the sidecar
+    //   dials on its egress leg.
+    // NO_PROXY carves the gateway host out of the container's proxy env so its
+    // plain-HTTP request goes DIRECT, not through the CONNECT-only egress proxy.
+    let (gateway_host, relay_dest) = if lockdown {
+        (
+            format!(
+                "{}:{}",
+                agentstack_runtime::PROXY_ALIAS,
+                agentstack_runtime::GATEWAY_RELAY_PORT
+            ),
+            Some(format!("host.docker.internal:{}", endpoint.port)),
+        )
+    } else {
+        (format!("host.docker.internal:{}", endpoint.port), None)
+    };
+    let url = format!("http://{gateway_host}/mcp");
+    let no_proxy_host = gateway_host
+        .split(':')
+        .next()
+        .unwrap_or(&gateway_host)
+        .to_string();
 
     let Some(cfg) = render_gateway_config(desc, &container_home(), &url, &endpoint.token)? else {
         eprintln!(
@@ -681,13 +698,12 @@ fn wire_sandbox_gateway(
         }
     }
 
-    // Carve the gateway host out of the container's proxy env: its plain-HTTP
-    // request to host.docker.internal must go DIRECT, not through the
-    // CONNECT-only egress proxy (which would 400 it). Verified necessary in the
-    // spike. Real upstream egress (other hosts) still goes through the proxy.
+    // Carve the gateway host out of the container's proxy env (see above): its
+    // plain-HTTP request must go DIRECT, not through the CONNECT-only egress
+    // proxy (which would 400 it). Verified necessary in the spike. Real
+    // upstream egress (other hosts) still goes through the proxy.
     for key in ["NO_PROXY", "no_proxy"] {
-        spec.env
-            .push((key.to_string(), "host.docker.internal".to_string()));
+        spec.env.push((key.to_string(), no_proxy_host.clone()));
     }
 
     println!(
@@ -697,6 +713,7 @@ fn wire_sandbox_gateway(
     Ok(Some(SandboxGateway {
         _endpoint: endpoint,
         tempdir,
+        relay_dest,
     }))
 }
 
@@ -742,8 +759,10 @@ fn execute_plan(plan: ExecutionPlan) -> Result<()> {
         &mut spec,
     )?;
 
+    // In lockdown, the sidecar relay splices to this host gateway address.
+    let relay_dest = gateway.as_ref().and_then(|g| g.relay_dest.clone());
     let result = if plan.lockdown {
-        execute_lockdown(spec, &plan.run_id, &plan.server, log, token)
+        execute_lockdown(spec, &plan.run_id, &plan.server, log, token, relay_dest)
     } else {
         execute_proxy(spec, &plan.server, log, token)
     };
@@ -824,12 +843,14 @@ fn execute_proxy(
 /// proxy env then reaches nothing — the confinement is topological, not
 /// convention.
 #[cfg(feature = "sandbox")]
+#[allow(clippy::too_many_arguments)]
 fn execute_lockdown(
     mut spec: SandboxSpec,
     run_id: &str,
     server: &str,
     log: std::sync::Arc<Option<agentstack_recorder::RunLog>>,
     proxy_token: String,
+    gateway_relay_dest: Option<String>,
 ) -> Result<()> {
     use std::sync::Arc;
 
@@ -872,6 +893,7 @@ fn execute_lockdown(
         &ruleset_path.display().to_string(),
         &egress_image(),
         Some(proxy_token),
+        gateway_relay_dest.as_deref(),
         sink,
     )
     .context("standing up the egress lockdown (is the sidecar image built?)")?;

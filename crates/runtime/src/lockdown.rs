@@ -57,6 +57,13 @@ pub const PROXY_ALIAS: &str = "egress-proxy";
 /// matches the binary's `DEFAULT_BASE_PORT`.
 pub const PROXY_BASE_PORT: u16 = 18080;
 
+/// The port the sidecar's OPTIONAL gateway relay listens on (lockdown gateway
+/// routing). Chosen well clear of `PROXY_BASE_PORT + i` server listeners so it
+/// never collides regardless of server count. The host renders the container's
+/// gateway config to `http://<PROXY_ALIAS>:<this>` and tells the sidecar to
+/// listen here via env, so the number is owned in one place.
+pub const GATEWAY_RELAY_PORT: u16 = 19080;
+
 /// How long to wait for the sidecar to print `READY` before giving up.
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -97,6 +104,7 @@ impl Lockdown {
         ruleset_json_path: &str,
         proxy_image: &str,
         auth_token: Option<String>,
+        gateway_relay_dest: Option<&str>,
         sink: LockdownSink,
     ) -> Result<Lockdown> {
         let rt = Arc::clone(backend.runtime());
@@ -132,6 +140,7 @@ impl Lockdown {
                 ruleset_json_path,
                 &servers_env,
                 auth_token.as_deref(),
+                gateway_relay_dest,
             )
             .await?;
             connect_with_alias(&docker, &internal_net, &sidecar_id, PROXY_ALIAS).await?;
@@ -198,6 +207,14 @@ impl Lockdown {
             Some(t) => format!("http://agentstack:{t}@{PROXY_ALIAS}:{PROXY_BASE_PORT}"),
             None => format!("http://{PROXY_ALIAS}:{PROXY_BASE_PORT}"),
         }
+    }
+
+    /// The base URL the sandbox uses to reach the host gateway through the
+    /// sidecar relay (lockdown gateway routing): `http://<alias>:<relay port>`.
+    /// No auth in the URL — the relay is a dumb pipe; the gateway checks the
+    /// per-run bearer token the container's config carries as a header.
+    pub fn relay_endpoint(&self) -> String {
+        format!("http://{PROXY_ALIAS}:{GATEWAY_RELAY_PORT}")
     }
 }
 
@@ -279,6 +296,7 @@ async fn remove_network(docker: &Docker, name: &str) -> Result<()> {
 /// Create + start the sidecar proxy on `egress_net`, mounting the ruleset file
 /// read-only and passing the server list through the env contract the binary
 /// reads. Returns the container id.
+#[allow(clippy::too_many_arguments)]
 async fn start_sidecar(
     docker: &Docker,
     image: &str,
@@ -286,6 +304,7 @@ async fn start_sidecar(
     ruleset_json_path: &str,
     servers_env: &str,
     auth_token: Option<&str>,
+    gateway_relay_dest: Option<&str>,
 ) -> Result<String> {
     const RULESET_IN: &str = "/agentstack/ruleset.json";
     let host_config = HostConfig {
@@ -318,6 +337,16 @@ async fn start_sidecar(
     // rejects any CONNECT that doesn't carry it.
     if let Some(token) = auth_token {
         env.push(format!("AGENTSTACK_PROXY_TOKEN={token}"));
+    }
+    // Gateway relay (lockdown gateway routing): a fixed-destination splice to
+    // the host gateway. The host owns the listen port so its rendered config
+    // matches; the sidecar's `extra_hosts` already maps host.docker.internal on
+    // the egress leg, so the relay's destination resolves.
+    if let Some(dest) = gateway_relay_dest {
+        env.push(format!("AGENTSTACK_GATEWAY_RELAY_DEST={dest}"));
+        env.push(format!(
+            "AGENTSTACK_GATEWAY_RELAY_PORT={GATEWAY_RELAY_PORT}"
+        ));
     }
     let body = ContainerCreateBody {
         image: Some(image.to_string()),

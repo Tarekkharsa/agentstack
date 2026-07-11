@@ -62,12 +62,12 @@ Modes are columns; policy dimensions are rows. Legend:
 
 | Dimension | `host` | `gateway` | `--sandbox` | `--lockdown` |
 |---|---|---|---|---|
-| **Tools** | unsupported | **enforced** | unsupported | unsupported |
+| **Tools** | unsupported | **enforced** | **enforced**† | **enforced**† |
 | **Egress** | coarse | coarse | **enforced**\* | **enforced** |
-| **Secrets** | **enforced** | **enforced** | coarse | coarse |
+| **Secrets** | **enforced** | **enforced** | **enforced**‡ | **enforced**‡ |
 | **Filesystem — write** | unsupported | unsupported | coarse | coarse |
 | **Filesystem — read** | unsupported | unsupported | coarse | coarse |
-| **Audit / recording** | unsupported | **enforced** | coarse | coarse |
+| **Audit / recording** | unsupported | **enforced** | **enforced**§ | **enforced**§ |
 
 \* **for proxied traffic only.** Plain `--sandbox` points `HTTPS_PROXY` at the
 proxy but the container keeps an ordinary bridge network — a process that
@@ -75,6 +75,31 @@ ignores the proxy env can still dial out directly. The run is labelled
 `SANDBOX / PROXIED · DIRECT ROUTE OPEN` for exactly this reason; only
 `--lockdown` (no direct route, topological confinement) earns `ENFORCED`.
 See the egress section below.
+
+† **for MCP traffic routed through the gateway.** `run --sandbox[/--lockdown]`
+of a *trusted* bundle now renders one gateway HTTP entry into the harness's
+config (host-side gateway; the sidecar relay bridges it under lockdown) and
+shadows any direct project config, so tool calls hit `Gateway::try_call` and
+`[policy.tools]` is enforced there. The ceiling matches egress's: an agent that
+reaches an upstream host *directly* — any host on `--sandbox`'s open route, or
+an egress-*allowed* host under `--lockdown` — bypasses the gateway. Denying the
+container direct egress to upstream hosts (leaving the relay the only path to
+them) is the remaining step for an unconditional cell; until then this is
+"enforced for what transits the gateway," not "impossible to evade." An
+*untrusted* bundle is not routed at all (empty gateway), so its cell is
+`unsupported` — no tool policy, but also no secrets and no server spawn.
+
+‡ **for gateway-routed runs.** The host-side gateway resolves `${REF}` secrets
+in its own memory and hands the container only the endpoint URL + a per-run
+bearer token — resolved secret *values* never enter the container. A prior
+`agentstack apply` that baked secrets into a project config is shadowed out.
+(A run that isn't gateway-routed falls back to the coarse rendered-config path.)
+
+§ **tool calls + secret refs now recorded.** A gateway-routed run's own
+`events.jsonl` gains a `ToolCall` per call (digest-only args) and a
+`SecretAccess` per resolved ref (name only), alongside the lifecycle + egress
+events it already held. Trust-store mutations and cost/tokens remain unrecorded.
+See the Audit / recording section.
 
 Two of the four columns are execution modes for a *rendered* config: **host** is
 `agentstack apply` + `agentstack run` (adapters write native config, the harness
@@ -97,12 +122,26 @@ Docker container behind the egress proxy.
   dispatch, and `namespaced_tools()` filters denied tools out of discovery too, so
   a denied tool is invisible *and* refused if called anyway. This is the single
   enforcement point. (`Gateway::try_call`, `crates/cli/src/gateway.rs`)
-- **sandbox / lockdown — unsupported.** The harness binary is the container's
-  command; it is not routed through `Gateway::try_call`. The proxy inspects only
-  the CONNECT authority (host:port) and, post-CONNECT, the TLS SNI — it never
-  parses MCP JSON-RPC, so it cannot see individual tool names. `[policy.tools]`
-  rides inside the shipped `CompiledRuleset` but nothing in the sandbox/proxy path
-  consults it. (`crates/cli/src/commands/sandbox.rs`, `crates/egress/src/proxy.rs`)
+- **sandbox / lockdown — enforced for gateway-routed traffic.** A trusted run
+  builds a host-side gateway (`Gateway::from_plan` — hard trust gate: untrusted
+  → empty → unrouted) and a token-gated HTTP MCP endpoint, then renders one
+  gateway entry into the harness's user-scope config and shadows any direct
+  project config. The container's MCP calls therefore reach `Gateway::try_call`,
+  where `[policy.tools]` is enforced exactly as in gateway mode (denied at
+  discovery *and* at call), and each call is recorded in the run's own
+  `events.jsonl`. Under `--sandbox` the container reaches the gateway directly
+  (`host.docker.internal`); under `--lockdown` — no host route — it reaches the
+  egress sidecar's fixed-destination **relay** (`crates/egress/src/relay.rs`),
+  which splices to the host gateway. The relay is a dumb byte pipe: it parses
+  nothing, runs no policy, and does no SSRF check (its destination is host-fixed,
+  not client-chosen), so the real egress proxy's anti-SSRF guard is untouched;
+  auth stays end-to-end at the gateway. The proxy still never parses MCP
+  JSON-RPC — enforcement is at the gateway, not the proxy. **Ceiling:** an agent
+  that opens its own connection to an upstream host the egress policy allows
+  bypasses the gateway; making the relay the *only* route to upstream hosts
+  (deny their direct egress) is the remaining step. (`Gateway::from_plan`,
+  `crates/cli/src/gateway_http.rs`, `crates/cli/src/commands/sandbox.rs`
+  `wire_sandbox_gateway`, `crates/runtime/src/lockdown.rs`)
 
 ### Egress
 
@@ -192,12 +231,19 @@ Docker container behind the egress proxy.
   error text is reduced to a fixed class so a malicious upstream can't write
   arbitrary bytes into the log. This is the most complete audit dimension.
   (`crates/cli/src/gateway.rs`, `crates/recorder/src/lib.rs`)
-- **sandbox / lockdown — coarse.** `RunLog::create` is mandatory and fails closed
-  ("nothing trusted runs unobserved"). The run log captures container lifecycle
-  (`SandboxStarted` / `SandboxExited`) and every egress decision. It does **not**
-  yet capture individual MCP tool calls or secret resolutions — the `RunEvent`
-  enum has only those three variants so far (`crates/recorder/src/lib.rs`);
-  filling it out is Phase 3 work (see ROADMAP). (`crates/cli/src/commands/sandbox.rs`)
+- **sandbox / lockdown — enforced (for a gateway-routed run).** `RunLog::create`
+  is mandatory and fails closed ("nothing trusted runs unobserved"). The run log
+  captures container lifecycle (`SandboxStarted` / `SandboxExited`) and every
+  egress decision — and, now that a trusted run's MCP traffic routes through the
+  host-side gateway, every **tool call** (`ToolCall`: server, tool, outcome,
+  argument *digest* only — never values) and every **secret reference** resolved
+  (`SecretAccess`: ref *name* only). The gateway mirrors these into the run's own
+  `events.jsonl` because it inherits the run id (`Gateway::from_plan`), so
+  `agentstack report <run>` reads a self-contained record without the
+  cross-project audit log. Still missing from a run's log: trust-store mutations
+  (below) and cost/tokens. A run that isn't gateway-routed (untrusted bundle, or
+  no servers) records only lifecycle + egress. (`crates/cli/src/gateway.rs`
+  `log_call`, `crates/cli/src/commands/sandbox.rs`)
 
 ### Not yet wired: trust-store mutation logging
 
@@ -215,5 +261,3 @@ run/audit event for trust mutations exists.
   audit cells; distribution/signing).
 - [`HISTORY.md`](HISTORY.md) — dated corrections and the closed security-review
   ledger.
-</content>
-</invoke>

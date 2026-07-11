@@ -38,7 +38,7 @@ pub use sandbox::{Exit, Sandbox, SandboxHandle, Stream, StreamChunk};
 pub use spec::{Mount, NetworkPolicy, SandboxSpec};
 
 #[cfg(feature = "docker")]
-pub use lockdown::{Lockdown, LockdownSink, PROXY_ALIAS, PROXY_BASE_PORT};
+pub use lockdown::{Lockdown, LockdownSink, GATEWAY_RELAY_PORT, PROXY_ALIAS, PROXY_BASE_PORT};
 
 /// A runtime failure. Backend errors are wrapped as `Backend` so the
 /// orchestration layer stays backend-agnostic.

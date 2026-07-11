@@ -27,6 +27,9 @@ use agentstack::calllog::{RunEvent, RunLog};
 /// A node image is the sandbox runner (the shipped `docker/sandbox.Dockerfile`
 /// base) — its `node` binary is both the fake harness and the MCP client.
 const IMAGE: &str = "node:22-slim";
+/// The egress sidecar image (lockdown), built from the workspace so it carries
+/// the current relay code.
+const EGRESS_IMAGE: &str = "agentstack/egress-proxy:gateway-e2e";
 
 fn docker_and_image() -> bool {
     let up = Command::new("docker")
@@ -48,6 +51,29 @@ fn docker_and_image() -> bool {
         return false;
     }
     true
+}
+
+/// Build the egress sidecar image from the workspace (so it has the current
+/// relay code). Returns false to SKIP if Docker or the build is unavailable.
+fn build_egress_image() -> bool {
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    eprintln!("building {EGRESS_IMAGE} (first run compiles the workspace — cached after)…");
+    Command::new("docker")
+        .args([
+            "build",
+            "-f",
+            "docker/egress-proxy.Dockerfile",
+            "-t",
+            EGRESS_IMAGE,
+            ".",
+        ])
+        .current_dir(repo_root)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn strip_ansi(s: &str) -> String {
@@ -95,6 +121,32 @@ fn machine_home(tmp: &std::path::Path) -> (std::path::PathBuf, std::path::PathBu
     .unwrap();
     (home, as_home)
 }
+
+/// The in-container MCP client: reads the mounted gateway config, confirms the
+/// stale project config was shadowed empty, then calls a DENIED tool through
+/// the gateway. Retries a few times so a cold container's first dial can race
+/// DNS/endpoint warmup; each attempt has its own timeout. Reused by both the
+/// `--sandbox` (direct host route) and `--lockdown` (sidecar relay) tests — it
+/// reads the URL from the config, so it doesn't care which route it takes.
+const CLIENT_SCRIPT: &str = r#"
+const fs=require('fs');
+const c=JSON.parse(fs.readFileSync('/root/.gwtest.json','utf8'));
+const s=c.mcpServers['agentstack-gateway'];
+const body=JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'figma__post_comment',arguments:{}}});
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+(async()=>{
+  try{const proj=JSON.parse(fs.readFileSync('/workspace/.mcp.json','utf8'));console.log('SHADOW',JSON.stringify(proj.mcpServers||{}));}
+  catch(e){console.log('SHADOW none');}
+  for(let i=0;i<8;i++){
+    try{
+      const r=await fetch(s.url,{method:'POST',headers:{'content-type':'application/json','X-Agentstack-Token':s.headers['X-Agentstack-Token']},body,signal:AbortSignal.timeout(4000)});
+      console.log('GWRESP',await r.text());
+      return;
+    }catch(e){console.error('GWTRY',i,String(e));await sleep(500);}
+  }
+  console.error('GWERR gave up');process.exit(7);
+})();
+"#;
 
 /// A project declaring one HTTP MCP server the gateway will proxy.
 fn project(tmp: &std::path::Path) -> std::path::PathBuf {
@@ -188,31 +240,8 @@ fn trusted_bundle_routes_denied_tool_and_records_it() {
 
     // The container reads the mounted gateway config and calls a DENIED tool
     // through the endpoint. node's fetch dials host.docker.internal directly.
-    // Retry the call a few times: on a cold container the first dial to
-    // host.docker.internal can race DNS/endpoint warmup. Each attempt has its
-    // own timeout so a hang can't wedge the run.
-    let script = r#"
-const fs=require('fs');
-const c=JSON.parse(fs.readFileSync('/root/.gwtest.json','utf8'));
-const s=c.mcpServers['agentstack-gateway'];
-const body=JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'figma__post_comment',arguments:{}}});
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-(async()=>{
-  // The stale project config must be SHADOWED to an empty server map.
-  const proj=JSON.parse(fs.readFileSync('/workspace/.mcp.json','utf8'));
-  console.log('SHADOW',JSON.stringify(proj.mcpServers||{}));
-  for(let i=0;i<8;i++){
-    try{
-      const r=await fetch(s.url,{method:'POST',headers:{'content-type':'application/json','X-Agentstack-Token':s.headers['X-Agentstack-Token']},body,signal:AbortSignal.timeout(4000)});
-      console.log('GWRESP',await r.text());
-      return;
-    }catch(e){console.error('GWTRY',i,String(e));await sleep(500);}
-  }
-  console.error('GWERR gave up');process.exit(7);
-})();
-"#;
     let out = Command::new(bin)
-        .args(["run", "--sandbox", "gwtest", "--", "-e", script])
+        .args(["run", "--sandbox", "gwtest", "--", "-e", CLIENT_SCRIPT])
         .current_dir(&proj)
         .env("HOME", &home)
         .env("AGENTSTACK_HOME", &as_home)
@@ -260,5 +289,83 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
     assert!(
         denied,
         "the run log must carry the DENIED tool call recorded by the gateway: {events:?}"
+    );
+}
+
+/// LOCKDOWN: the container has NO host route — it reaches the host gateway only
+/// through the sidecar's fixed-destination relay. Proves the relay bridges an
+/// internal-only network to the host gateway, and tool policy is enforced +
+/// recorded there. This is what earns the unqualified "enforced" cell.
+#[test]
+fn lockdown_routes_denied_tool_through_the_sidecar_relay() {
+    if !docker_and_image() {
+        return;
+    }
+    if !build_egress_image() {
+        eprintln!("SKIP: cannot build the egress sidecar image");
+        return;
+    }
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (home, as_home) = machine_home(tmp.path());
+    let proj = project(tmp.path());
+    // Also exercise the shadow under lockdown: a stale direct entry must be
+    // neutralized here too.
+    fs::write(
+        proj.join(".mcp.json"),
+        "{\"mcpServers\":{\"evil-direct\":{\"type\":\"http\",\"url\":\"https://evil.invalid/mcp\",\"headers\":{\"Authorization\":\"Bearer STALE-SECRET\"}}}}",
+    )
+    .unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    for step in [vec!["lock"], vec!["trust"]] {
+        let s = Command::new(bin)
+            .args(&step)
+            .current_dir(&proj)
+            .env("HOME", &home)
+            .env("AGENTSTACK_HOME", &as_home)
+            .output()
+            .unwrap();
+        assert!(s.status.success(), "`agentstack {}` failed", step[0]);
+    }
+
+    let out = Command::new(bin)
+        .args(["run", "--lockdown", "gwtest", "--", "-e", CLIENT_SCRIPT])
+        .current_dir(&proj)
+        .env("HOME", &home)
+        .env("AGENTSTACK_HOME", &as_home)
+        .env("AGENTSTACK_SANDBOX_IMAGE", IMAGE)
+        .env("AGENTSTACK_EGRESS_IMAGE", EGRESS_IMAGE)
+        .output()
+        .unwrap();
+    let stdout = strip_ansi(&String::from_utf8_lossy(&out.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&out.stderr));
+    eprintln!("--- lockdown run stdout ---\n{stdout}\n--- stderr ---\n{stderr}");
+
+    assert!(
+        stdout.contains("routed through the gateway"),
+        "lockdown bundle should route through the gateway: {stdout}"
+    );
+
+    let run_id = stdout
+        .split_whitespace()
+        .find(|w| w.starts_with("r-"))
+        .map(|w| w.trim_end_matches([')', '.']).to_string())
+        .expect("run --lockdown prints a run id");
+    std::env::set_var("AGENTSTACK_HOME", &as_home);
+    let events = RunLog::read(&run_id);
+    eprintln!("--- run {run_id} events ---\n{events:#?}");
+
+    // The denied tool call was refused and recorded — reached the host gateway
+    // through the relay despite the container having no direct host route.
+    let denied = events.iter().any(|e| {
+        matches!(
+            e,
+            RunEvent::ToolCall { server, tool, outcome, .. }
+                if server == "figma" && tool == "post_comment" && outcome == "denied"
+        )
+    });
+    assert!(
+        denied,
+        "the run log must carry the DENIED tool call routed through the relay: {events:?}"
     );
 }
