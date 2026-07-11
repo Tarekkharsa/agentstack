@@ -1,0 +1,9 @@
+# Keep docker build contexts (repo root) lean: the egress-proxy image build
+# needs the workspace SOURCE only.
+target/
+.git/
+.github/
+docs/
+demo/
+*.cast
+*.gif

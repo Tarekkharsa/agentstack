@@ -14,11 +14,20 @@ publish = false
 # testable on loopback (a client sends CONNECT, the proxy consults the guard,
 # tunnels or refuses) — no Docker needed; wiring a *container* to route through
 # it is the runtime's job.
+# The sidecar binary this crate ships (packaged into the proxy container
+# image by docker/egress-proxy.Dockerfile).
+[[bin]]
+name = "agentstack-egress-proxy"
+path = "src/bin/egress_proxy.rs"
+
 [dependencies]
 agentstack-core = { path = "../core" }
 agentstack-policy = { path = "../policy" }
 agentstack-recorder = { path = "../recorder" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "macros"] }
+# For the sidecar binary: deserialize the ruleset handed across the process
+# boundary; emit RunEvent JSONL on stdout (maintainer-approved, rule 6).
+serde_json = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }

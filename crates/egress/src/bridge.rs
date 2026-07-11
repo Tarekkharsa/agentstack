@@ -55,10 +55,25 @@ impl EgressBridge {
         ruleset: CompiledRuleset,
         sink: EventSink,
     ) -> io::Result<(EgressBridge, Vec<ProxyEndpoint>)> {
+        let pairs: Vec<(String, u16)> = servers.iter().map(|s| (s.clone(), 0)).collect();
+        Self::start_fixed(bind, &pairs, ruleset, sink).await
+    }
+
+    /// Bind one proxy per (server, port) on `bind` — the sidecar form. Inside
+    /// the proxy *container* the sandbox must know each endpoint a priori
+    /// (`alias:port` on the internal network), so ports are caller-chosen
+    /// instead of ephemeral. Port 0 still means "any" (used by the loopback
+    /// forms above).
+    pub async fn start_fixed(
+        bind: IpAddr,
+        servers: &[(String, u16)],
+        ruleset: CompiledRuleset,
+        sink: EventSink,
+    ) -> io::Result<(EgressBridge, Vec<ProxyEndpoint>)> {
         let mut tasks = Vec::new();
         let mut endpoints = Vec::new();
-        for server in servers {
-            let listener = TcpListener::bind((bind, 0)).await?;
+        for (server, port) in servers {
+            let listener = TcpListener::bind((bind, *port)).await?;
             let addr = listener.local_addr()?;
             let proxy = ServerProxy::new(
                 server.clone(),

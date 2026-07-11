@@ -143,6 +143,7 @@ dependencies = [
  "agentstack-core",
  "agentstack-policy",
  "agentstack-recorder",
+ "serde_json",
  "tokio",
 ]
 

@@ -12,8 +12,10 @@ pub struct Mount {
     pub host: String,
     /// Absolute path inside the container.
     pub container: String,
-    /// Read-only when true. The workspace is read-write; everything else a
-    /// bundle's filesystem policy grants read access to is mounted read-only.
+    /// Read-only when true — the backend turns this into a `:ro` bind, so
+    /// the kernel enforces it. The caller decides: the workspace is
+    /// read-only unless the effective `[policy.filesystem]` write scope
+    /// covers it (`CompiledRuleset::workspace_write_decision`).
     pub read_only: bool,
 }
 

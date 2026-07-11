@@ -3,7 +3,7 @@
 //! ruleset, and produce the recorder event. This is the one place the async
 //! proxy server (2.2) will call for every CONNECT it accepts.
 
-use agentstack_policy::CompiledRuleset;
+use agentstack_policy::{CompiledRuleset, RULESET_VERSION};
 use agentstack_recorder::{now_epoch, RunEvent};
 
 /// The outcome of one egress decision: whether to allow the connection, plus
@@ -35,7 +35,20 @@ impl EgressGuard {
     /// machine layer narrows it, and the compiled ruleset already folded both
     /// layers.
     pub fn decide(&self, server: &str, host: &str) -> Decision {
-        let result = self.ruleset.egress_decision(server, host);
+        // Fail closed on a ruleset newer than this consumer understands — the
+        // artifact's own ruling ("the enforcement artifact, not advisory
+        // config"). With the sidecar proxy the ruleset crosses a real process
+        // boundary into a separately-built binary, so version skew is
+        // possible for real, not just in theory.
+        let result = if self.ruleset.version > RULESET_VERSION {
+            Err(format!(
+                "ruleset version {} is newer than this proxy understands \
+                 (max {RULESET_VERSION}) — failing closed",
+                self.ruleset.version
+            ))
+        } else {
+            self.ruleset.egress_decision(server, host)
+        };
         let allowed = result.is_ok();
         let rule = result.err();
         Decision {
@@ -109,6 +122,27 @@ mod tests {
         }
         // A different host on the same server is still allowed.
         assert!(guard.decide("web-search", "api.search.example").allowed);
+    }
+
+    /// A ruleset from a future, unknown version denies EVERYTHING — never
+    /// guess at semantics you don't understand. NEVER delete or weaken this.
+    #[test]
+    fn unknown_future_ruleset_version_fails_closed() {
+        // Allow-by-default rules… but a version too new to trust.
+        let rs = CompiledRuleset {
+            version: agentstack_policy::RULESET_VERSION + 1,
+            ..CompiledRuleset::default()
+        };
+        let guard = EgressGuard::new(rs);
+        let d = guard.decide("any-server", "api.search.example");
+        assert!(!d.allowed, "an unknown version must deny everything");
+        match d.event {
+            RunEvent::Egress { rule, .. } => {
+                let rule = rule.expect("the block names the version mismatch");
+                assert!(rule.contains("version"), "{rule}");
+            }
+            other => panic!("expected Egress, got {other:?}"),
+        }
     }
 
     #[test]
