@@ -199,6 +199,26 @@
     background: rgba(255,255,255,0.015);
   }
   .term-head i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  /* ---------- terminal replays (term-replay.js) ---------- */
+  .term[data-replay].tr-armed .row { visibility: hidden; }
+  .term[data-replay].tr-armed .row.on { visibility: visible; }
+  .row.typing .c { visibility: hidden; }
+  .tr-armed .row.cur::after,
+  .tr-armed .row.typing .t::after {
+    content: ""; display: inline-block; width: 0.55ch; height: 1.05em;
+    vertical-align: -0.18em; margin-left: 0.06em; background: var(--term-green);
+    animation: blink 1.15s steps(2, start) infinite;
+  }
+  /* While a command types, the cursor rides the typed text, not the row end
+     (the hidden comment span still occupies its width). */
+  .tr-armed .row.cur.typing::after { display: none; }
+  .tr-replay {
+    margin-left: 0.8rem; font: 600 0.68rem/1.6 var(--mono); letter-spacing: 0.08em;
+    color: var(--term-dim); background: none; border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 5px; padding: 0.05rem 0.5rem; cursor: pointer; display: none;
+  }
+  .tr-replay:hover { color: var(--term-ink); border-color: rgba(255,255,255,0.3); }
+  .term.tr-done .tr-replay { display: inline-block; }
   .term-head .r { background: var(--term-red); }
   .term-head .y { background: var(--term-amber); }
   .term-head .g { background: var(--term-green); }
@@ -213,6 +233,7 @@
   .term .c { color: var(--term-dim); }
   .term .ok { color: var(--term-green); }
   .term .no { color: var(--term-red); }
+  .term .am { color: var(--term-amber); }
 
   .copywrap { position: relative; }
   .copybtn {
@@ -413,21 +434,21 @@
       <a class="btn secondary" href="#install">Install</a>
     </div>
 
-    <div class="term">
-      <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → trust → firewalled → logged</b></div>
-      <pre><code><span class="p">$</span> agentstack connect --all --write     <span class="c"># once: the gateway, in every CLI</span>
-<span class="p">$</span> git clone some-repo &amp;&amp; cd some-repo  <span class="c"># declares servers you've never seen</span>
-<span class="c">  agent session starts…</span>
-<span class="no">  ✗ untrusted — no servers spawned, no secrets resolved</span>
-
-<span class="p">$</span> agentstack trust .                   <span class="c"># you review, then consent</span>
-<span class="c">  ▶ demo: runs `python3 ./server.py`</span>
-<span class="ok">  ✓</span> trusted at sha256:945b4b…
-
-<span class="c">  agent → demo.echo        </span><span class="ok">✓ ok</span><span class="c">      brokered, logged</span>
-<span class="c">  agent → demo.delete_all  </span><span class="no">✗ denied</span><span class="c">  rule "!delete_*" — YOUR machine policy</span>
-
-<span class="c">  # both calls are in the audit log — nothing trusted runs unobserved</span></code></pre>
+    <div class="term" data-replay>
+      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → trust → firewalled → logged</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
+      <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack connect --all --write</span><span class="c">     # once: the gateway, in every CLI</span></span>
+<span class="row cmd"><span class="p">$</span> <span class="t">git clone some-repo &amp;&amp; cd some-repo</span><span class="c">  # declares servers you've never seen</span></span>
+<span class="row" data-d="450"><span class="c">  agent session starts…</span></span>
+<span class="row" data-d="800"><span class="no">  ✗ untrusted — no servers spawned, no secrets resolved</span></span>
+<span class="row" data-d="500"> </span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack trust .</span><span class="c">                   # you review, then consent</span></span>
+<span class="row" data-d="450"><span class="c">  ▶ demo: runs `python3 ./server.py`</span></span>
+<span class="row" data-d="800"><span class="ok">  ✓</span> trusted at sha256:945b4b…</span>
+<span class="row" data-d="500"> </span>
+<span class="row" data-d="450"><span class="c">  agent → demo.echo        </span><span class="ok">✓ ok</span><span class="c">      brokered, logged</span></span>
+<span class="row" data-d="800"><span class="c">  agent → demo.delete_all  </span><span class="no">✗ denied</span><span class="c">  rule "!delete_*" — YOUR machine policy</span></span>
+<span class="row" data-d="500"> </span>
+<span class="row"><span class="c">  # both calls are in the audit log — nothing trusted runs unobserved</span></span></code></pre>
     </div>
     <div class="journey" aria-label="What agentstack does, in order">
       <a href="#trust">
@@ -540,10 +561,29 @@
             convention. Verified live on Docker through the real binary.</dd>
       </div>
     </dl>
-    <figure>
-      <img src="lockdown.gif" alt="Terminal recording: agentstack run --sandbox --lockdown — a container with no host route tries a direct connection and reaches nothing; a proxied request to a denied host is blocked by machine policy and recorded in the flight-recorder report" width="961" height="764" loading="lazy">
-      <figcaption>Lockdown, end to end — direct route dead, denied host blocked, every decision on the record. Runnable (needs Docker): <a href="https://github.com/Tarekkharsa/agentstack/blob/main/agentstack-test/demo-lockdown.sh"><code>agentstack-test/demo-lockdown.sh</code></a>.</figcaption>
-    </figure>
+    <div class="term" data-replay style="margin-top:1.6rem">
+      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>no route out · denied host blocked · on the record</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
+      <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">cat ~/.agentstack/agentstack.toml</span><span class="c">   # YOUR machine firewall</span></span>
+<span class="row"><span class="c">  [policy.egress]</span></span>
+<span class="row"><span class="c">  "*" = ["!blocked.invalid"]</span><span class="c">           # no repo can loosen this</span></span>
+<span class="row" data-d="500"> </span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack run --lockdown shtest -- -c 'unset HTTPS_PROXY; curl example.com'</span></span>
+<span class="row"><span class="c">  posture: </span><span class="am">LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span></span>
+<span class="row"><span class="c">  🔒 no host route, no internet — the only peer is the egress sidecar</span></span>
+<span class="row" data-d="700"><span class="no">  BLOCKED</span><span class="c">                               # ignoring the proxy reaches nothing</span></span>
+<span class="row" data-d="500"> </span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack run --lockdown shtest -- -c 'curl https://blocked.invalid/steal'</span></span>
+<span class="row" data-d="700"><span class="no">  ✗ refused at the sidecar</span><span class="c"> — and recorded</span></span>
+<span class="row" data-d="500"> </span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack report r-0859dcee73</span></span>
+<span class="row"><span class="c">  Posture   </span><span class="am">LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span></span>
+<span class="row"><span class="c">  Egress</span></span>
+<span class="row"><span class="no">    ✗ shtest → blocked.invalid</span><span class="c">  denied by rule "!blocked.invalid" (machine policy)</span></span></code></pre>
+    </div>
+    <p class="small muted" style="margin-top:0.8rem">
+      Condensed from a real run. The full script is runnable (needs Docker):
+      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/agentstack-test/demo-lockdown.sh"><code>agentstack-test/demo-lockdown.sh</code></a>.
+    </p>
     <p class="small muted">
       The proxy is picky on purpose: hostnames are normalized before matching,
       a tunnel's TLS SNI must equal the CONNECT host (no domain fronting),
@@ -675,10 +715,29 @@
         <p>Any time something feels off. Every warning names the exact fix command.</p>
       </li>
     </ol>
-    <figure>
-      <img src="firstrun.gif" alt="Terminal recording of agentstack init, bootstrap, and apply on a fresh machine" width="691" height="490" loading="lazy">
-      <figcaption>The first run, end to end.</figcaption>
-    </figure>
+    <div class="term" data-replay style="margin-top:1.6rem">
+      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>init → bootstrap → apply → every CLI in sync</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
+      <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack init</span></span>
+<span class="row"><span class="c">  🔍 Detected 6 CLIs: Claude Code · Codex · Copilot · Gemini · OpenCode · Pi</span></span>
+<span class="row"><span class="c">  📥 Imported 1 MCP server from existing configs</span></span>
+<span class="row" data-d="600"><span class="ok">  ✅ Wrote .agentstack/agentstack.toml</span></span>
+<span class="row" data-d="500"> </span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack bootstrap</span></span>
+<span class="row"><span class="ok">  ✓</span><span class="c"> manifest validates · 6 adapters installed · no missing secrets</span></span>
+<span class="row" data-d="500"> </span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack apply --write</span></span>
+<span class="row"><span class="c">  Claude Code   </span><span class="ok">✓ up to date</span><span class="c">                    # it already had the server</span></span>
+<span class="row"><span class="c">  Codex CLI     + [mcp_servers.filesystem]      </span><span class="ok">✓ wrote 1 server</span></span>
+<span class="row"><span class="c">  Gemini CLI    + "filesystem": { … }           </span><span class="ok">✓ wrote 1 server</span></span>
+<span class="row" data-d="700"><span class="c">  …Copilot, OpenCode, Pi — the same server, each in its own syntax</span></span>
+<span class="row" data-d="500"> </span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack apply</span></span>
+<span class="row"><span class="ok">  ✓</span><span class="c"> nothing to write — every target in sync</span></span></code></pre>
+    </div>
+    <p class="small muted" style="margin-top:0.8rem">
+      Condensed from a real run. Reproduce it fenced (never touches your real
+      configs): <a href="https://github.com/Tarekkharsa/agentstack/blob/main/agentstack-test/demo-firstrun.sh"><code>agentstack-test/demo-firstrun.sh</code></a>.
+    </p>
   </section>
 
   <section id="manifest" class="reveal">
@@ -858,5 +917,6 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
   }
 </script>
 
+<script src="term-replay.js" defer></script>
 </body>
 </html>

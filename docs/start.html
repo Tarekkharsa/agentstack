@@ -459,10 +459,7 @@ agentstack run claude-code --sandbox --lockdown          # launch confined</code
 <span class="ok">  ✓</span> api.anthropic.com:443   <span class="c">allowed by [policy.egress] — recorded</span>
 <span class="no">  ✗</span> evil.example.com:443    <span class="c">denied — no such host in policy — recorded</span></code></pre>
       </div>
-      <figure style="margin:1.5rem 0 0">
-        <img src="lockdown.gif" alt="Terminal recording: a lockdown container with no host route tries a direct connection and reaches nothing; a proxied request to a denied host is blocked and recorded" style="max-width:100%;border-radius:var(--radius);border:1px solid var(--line);box-shadow:var(--shadow-md);display:block" width="961" height="764" loading="lazy">
-        <figcaption class="small muted" style="margin-top:0.7rem">Runnable end to end (needs Docker): <a href="https://github.com/Tarekkharsa/agentstack/blob/main/agentstack-test/demo-lockdown.sh"><code>agentstack-test/demo-lockdown.sh</code></a>.</figcaption>
-      </figure>
+      <p class="small muted" style="margin-top:1rem">Runnable end to end (needs Docker): <a href="https://github.com/Tarekkharsa/agentstack/blob/main/agentstack-test/demo-lockdown.sh"><code>agentstack-test/demo-lockdown.sh</code></a>.</p>
       <p class="small muted">
         Honest scope: hosts you allow stay reachable. agentstack
         <strong>restricts destinations and records every decision</strong> — it
