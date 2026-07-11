@@ -154,13 +154,25 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
+      # Deliberately NOT softprops/action-gh-release here: that action cannot
+      # find an existing DRAFT by tag (drafts own no tag ref), so with
+      # append_body it creates a duplicate draft and then deletes it — the
+      # v0.9.0 dry run proved the appended body is silently lost while the
+      # step stays green. A direct API PATCH against the draft's id is
+      # deterministic and cannot flip the draft to published.
       - name: Add immutable image digest to release notes
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
-        with:
-          append_body: true
-          # Without an explicit draft: true this update step would flip the
-          # draft the `release` job created to published — silently defeating
-          # the "review the draft, then publish" human gate.
-          draft: true
-          body: |
-            Egress proxy image: `ghcr.io/${{ env.OWNER_LC }}/agentstack-egress-proxy@${{ steps.push.outputs.digest }}`
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rid="$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq "[.[] | select(.draft and .tag_name == \"${GITHUB_REF_NAME}\")][0].id")"
+          if [ -z "$rid" ] || [ "$rid" = "null" ]; then
+            echo "::error::no draft release found for ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+          body="$(gh api "repos/${GITHUB_REPOSITORY}/releases/$rid" --jq '.body // ""')"
+          printf '%s\n\nEgress proxy image: `ghcr.io/%s/agentstack-egress-proxy@%s`\n' \
+            "$body" "${OWNER_LC}" "${{ steps.push.outputs.digest }}" > /tmp/release-body.md
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$rid" \
+            -F body=@/tmp/release-body.md --silent
