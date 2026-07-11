@@ -220,13 +220,13 @@ tracked to closure so this plan and the report can't drift apart:
   hostile-input tests for the `${REF}` scanner (most of L4); digest paths
   hashed as raw bytes with `/` separators on unix (L2, unix half); the stale
   `adapters → policy` dependency edge withdrawn from CLAUDE.md and
-  ARCHITECTURE.md (L5, doc half).
+  ARCHITECTURE.md (L5, doc half); a sandbox run now fails closed if its run log
+  can't be created — "nothing trusted runs unobserved" (L4 remainder).
 - **Open, accepted and tracked:** egress decisions match host only, not port
   (M5 — an "HTTPS-only" policy isn't expressible yet); the stat-based digest
   cache stays off every verification path — that containment IS the fix, keep
   it true (L1); the event-sink append is synchronous inside the async proxy
-  (L3 — latency, not correctness); a run still proceeds if the run log can't
-  be created (L4 remainder — should fail closed or warn loudly); `trust`
+  (L3 — latency, not correctness); `trust`
   still carries `anyhow` + `toml` (L5 code half, TODO-tracked for the Phase 1
   rule-6 sweep).
 - **Structural recommendation, unscheduled:** the reviewers' "one

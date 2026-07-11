@@ -233,6 +233,14 @@ fn execute_proxy(mut spec: SandboxSpec, run_id: &str, server: &str) -> Result<()
     // its own threads) and the sandbox lifecycle (this thread). Append is
     // best-effort and O_APPEND-atomic per line.
     let log = Arc::new(agentstack_recorder::RunLog::create(run_id));
+    // "Nothing trusted runs unobserved": if the run log can't be created, refuse
+    // to run rather than execute a sandbox with no audit trail (fail closed).
+    if log.is_none() {
+        anyhow::bail!(
+            "could not create the run log for run {run_id} under ~/.agentstack/runs \
+             — refusing to run a sandbox unobserved"
+        );
+    }
 
     // Stand up the egress proxy for this run from the compiled policy, bound on
     // 0.0.0.0 so the container reaches it via host.docker.internal. Attributed
@@ -298,6 +306,14 @@ fn execute_lockdown(mut spec: SandboxSpec, run_id: &str, server: &str) -> Result
     use std::sync::Arc;
 
     let log = Arc::new(agentstack_recorder::RunLog::create(run_id));
+    // "Nothing trusted runs unobserved": if the run log can't be created, refuse
+    // to run rather than execute a sandbox with no audit trail (fail closed).
+    if log.is_none() {
+        anyhow::bail!(
+            "could not create the run log for run {run_id} under ~/.agentstack/runs \
+             — refusing to run a sandbox unobserved"
+        );
+    }
 
     // Hand the sidecar its policy: the compiled ruleset serialized to a host
     // file, bind-mounted read-only into the proxy container. Staged in a
