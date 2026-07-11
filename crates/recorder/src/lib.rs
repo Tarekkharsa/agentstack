@@ -23,7 +23,7 @@
 #![forbid(unsafe_code)]
 
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,7 @@ use sha2::{Digest, Sha256};
 use agentstack_core::util::paths;
 
 const MAX_BYTES: u64 = 5 * 1024 * 1024;
+const TAIL_CHUNK_BYTES: usize = 64 * 1024;
 
 /// The env var `agentstack run` sets on the harness it launches, so calls made
 /// by that run's agent can be attributed to the run.
@@ -178,6 +179,53 @@ pub fn read_all() -> Vec<CallRecord> {
         .collect()
 }
 
+/// Read at most the last `n` parseable records, newest last, without reading
+/// the whole log when the requested tail fits near the end of the file.
+/// Malformed lines and a leading fragment caused by a backward seek are
+/// skipped.
+pub fn read_tail(n: usize) -> Vec<CallRecord> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let Ok(mut file) = fs::File::open(log_path()) else {
+        return Vec::new();
+    };
+    let Ok(mut start) = file.seek(SeekFrom::End(0)) else {
+        return Vec::new();
+    };
+    let mut window = Vec::new();
+
+    loop {
+        let chunk_len = start.min(TAIL_CHUNK_BYTES as u64) as usize;
+        start -= chunk_len as u64;
+        if file.seek(SeekFrom::Start(start)).is_err() {
+            return Vec::new();
+        }
+        let mut chunk = vec![0; chunk_len];
+        if file.read_exact(&mut chunk).is_err() {
+            return Vec::new();
+        }
+        chunk.extend_from_slice(&window);
+        window = chunk;
+
+        let complete = if start == 0 {
+            window.as_slice()
+        } else {
+            match window.iter().position(|byte| *byte == b'\n') {
+                Some(boundary) => &window[boundary + 1..],
+                None => &[],
+            }
+        };
+        let records: Vec<_> = complete
+            .split(|byte| *byte == b'\n')
+            .filter_map(|line| serde_json::from_slice(line).ok())
+            .collect();
+        if records.len() >= n || start == 0 {
+            return records.into_iter().rev().take(n).rev().collect();
+        }
+    }
+}
+
 pub fn now_epoch() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -223,6 +271,37 @@ pub enum RunEvent {
         allowed: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         rule: Option<String>,
+    },
+    /// One tool call the run's agent made through the gateway, mirrored into
+    /// this run's log so a report reads the run's ACTIONS without cross-
+    /// referencing the machine-global `calls.jsonl`. Sensitive fields follow
+    /// that audit record exactly: only the keyed argument DIGEST is stored,
+    /// never values or resolved secrets; `outcome` is `ok` / `error` /
+    /// `denied`; `detail` is the policy rule on a block or a fixed error class
+    /// on a failure — never upstream-authored text.
+    ToolCall {
+        ts: u64,
+        server: String,
+        tool: String,
+        outcome: String,
+        /// Keyed SHA-256 digest prefix over the arguments (see
+        /// [`digest_args`]) — the same value `calls.jsonl` stores, never the
+        /// argument values themselves.
+        args_digest: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+        ms: u64,
+    },
+    /// A secret reference this run resolved, by ref NAME only — never the
+    /// value. Attributed to the server the ref was resolved for, so a reviewer
+    /// can see a run's secret surface without any value ever touching the log.
+    SecretAccess {
+        ts: u64,
+        server: String,
+        /// The `${REF}` name (e.g. `OPENAI_API_KEY`). `ref` is a Rust keyword,
+        /// so the field is `reference` in code but `"ref"` on the wire.
+        #[serde(rename = "ref")]
+        reference: String,
     },
     /// The sandbox container exited. `code` is absent when it was killed by a
     /// signal (e.g. teardown).
@@ -342,6 +421,68 @@ mod tests {
         out
     }
 
+    fn call_record(ts: u64) -> CallRecord {
+        CallRecord {
+            ts,
+            run: None,
+            pid: 1,
+            project: None,
+            server: "server".into(),
+            tool: format!("tool-{ts}-{}", "x".repeat(256)),
+            args_digest: format!("{ts:012x}"),
+            outcome: "ok".into(),
+            detail: None,
+            ms: ts,
+        }
+    }
+
+    fn write_calls(records: impl IntoIterator<Item = CallRecord>) {
+        let path = log_path();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let text = records
+            .into_iter()
+            .map(|record| serde_json::to_string(&record).unwrap() + "\n")
+            .collect::<String>();
+        fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn read_tail_handles_empty_exact_and_truncated_logs() {
+        with_home(|| {
+            write_calls([]);
+            assert!(read_tail(3).is_empty());
+
+            write_calls((1..=3).map(call_record));
+            assert_eq!(
+                read_tail(3).iter().map(|r| r.ts).collect::<Vec<_>>(),
+                [1, 2, 3]
+            );
+
+            let mut file = fs::OpenOptions::new()
+                .append(true)
+                .open(log_path())
+                .unwrap();
+            file.write_all(b"{\"ts\":4,\"server\":\"cut-off").unwrap();
+            assert_eq!(
+                read_tail(4).iter().map(|r| r.ts).collect::<Vec<_>>(),
+                [1, 2, 3]
+            );
+        });
+    }
+
+    #[test]
+    fn read_tail_returns_only_latest_records_across_chunks() {
+        with_home(|| {
+            write_calls((0..600).map(call_record));
+            let tail = read_tail(25);
+            assert_eq!(tail.len(), 25);
+            assert_eq!(tail.first().unwrap().ts, 575);
+            assert_eq!(tail.last().unwrap().ts, 599);
+            assert!(!tail.iter().any(|record| record.ts < 575));
+            assert!(fs::metadata(log_path()).unwrap().len() > TAIL_CHUNK_BYTES as u64);
+        });
+    }
+
     #[test]
     fn digest_is_stable_keyed_and_value_free() {
         with_home(|| {
@@ -436,6 +577,74 @@ mod tests {
             assert!(raw.contains("\"event\":\"egress\""), "{raw}");
             // A blocked decision carries its rule; an allowed one omits it.
             assert!(raw.contains("evil.example") && raw.contains("[policy.egress]"));
+        });
+    }
+
+    #[test]
+    fn tool_call_and_secret_access_roundtrip() {
+        with_home(|| {
+            let log = RunLog::create("r-actions").expect("safe id");
+            let events = vec![
+                RunEvent::ToolCall {
+                    ts: 10,
+                    server: "figma".into(),
+                    tool: "get_file".into(),
+                    outcome: "ok".into(),
+                    args_digest: "0123456789ab".into(),
+                    detail: None,
+                    ms: 42,
+                },
+                RunEvent::ToolCall {
+                    ts: 11,
+                    server: "figma".into(),
+                    tool: "delete_file".into(),
+                    outcome: "denied".into(),
+                    args_digest: "beefbeefbeef".into(),
+                    detail: Some("machine policy denies delete_*".into()),
+                    ms: 0,
+                },
+                RunEvent::SecretAccess {
+                    ts: 12,
+                    server: "figma".into(),
+                    reference: "FIGMA_TOKEN".into(),
+                },
+            ];
+            for e in &events {
+                log.append(e);
+            }
+            assert_eq!(RunLog::read("r-actions"), events, "round-trip in order");
+            let raw = fs::read_to_string(log.path()).unwrap();
+            // Self-describing rows, and the wire uses the short `"ref"` key.
+            assert!(raw.contains("\"event\":\"tool_call\""), "{raw}");
+            assert!(raw.contains("\"event\":\"secret_access\""), "{raw}");
+            assert!(raw.contains("\"ref\":\"FIGMA_TOKEN\""), "{raw}");
+            // A denied call keeps its rule; a plain ok omits the detail field.
+            assert!(raw.contains("machine policy denies delete_*"));
+            // The digest is on the wire but no argument value ever is.
+            assert!(raw.contains("0123456789ab"));
+        });
+    }
+
+    #[test]
+    fn old_logs_without_new_variants_still_parse() {
+        with_home(|| {
+            // A log written before the ToolCall/SecretAccess variants existed:
+            // only the original three event kinds. Adding variants is additive,
+            // so these rows must still parse against the current enum.
+            let log = RunLog::create("r-old").unwrap();
+            let legacy = "\
+{\"event\":\"sandbox_started\",\"ts\":1,\"image\":\"img\",\"workspace\":\"/w\"}
+{\"event\":\"egress\",\"ts\":2,\"server\":\"s\",\"host\":\"h\",\"allowed\":true}
+{\"event\":\"sandbox_exited\",\"ts\":3,\"code\":0}
+";
+            fs::write(log.path(), legacy).unwrap();
+            let events = RunLog::read("r-old");
+            assert_eq!(events.len(), 3, "all three legacy rows parse");
+            assert!(matches!(events[0], RunEvent::SandboxStarted { .. }));
+            assert!(matches!(
+                events[2],
+                RunEvent::SandboxExited { code: Some(0), .. }
+            ));
         });
     }
 

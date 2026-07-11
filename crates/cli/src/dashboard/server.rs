@@ -182,7 +182,16 @@ fn route(
             // first, bounded, filterable by run id and server.
             let run = query_param(query, "run");
             let server = query_param(query, "server");
-            let mut entries = crate::calllog::read_all();
+            // The bounded tail read is only correct when NOTHING is filtered
+            // out afterwards: tail-then-filter would show a filtered run only
+            // if it appears in the 500 newest GLOBAL rows, silently
+            // under-reporting older activity on an audit surface. Filtered
+            // views pay the full read; the common unfiltered poll stays cheap.
+            let mut entries = if run.is_some() || server.is_some() {
+                agentstack_recorder::read_all()
+            } else {
+                agentstack_recorder::read_tail(500)
+            };
             entries.reverse();
             let filtered: Vec<_> = entries
                 .into_iter()

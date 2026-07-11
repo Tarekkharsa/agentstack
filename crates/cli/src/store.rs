@@ -3,6 +3,7 @@
 //! path sources pass through. A content digest gives the lockfile its integrity
 //! field.
 
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,6 +16,7 @@ use crate::util::paths;
 
 pub struct Store {
     root: PathBuf,
+    digest_cache: RefCell<DigestCache>,
 }
 
 /// The resolved local location of a skill's content.
@@ -33,11 +35,15 @@ impl Store {
     pub fn default_store() -> Self {
         Store {
             root: paths::agentstack_home().join("store"),
+            digest_cache: RefCell::new(DigestCache::load()),
         }
     }
 
     pub fn with_root(root: PathBuf) -> Self {
-        Store { root }
+        Store {
+            root,
+            digest_cache: RefCell::new(DigestCache::load()),
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -57,7 +63,7 @@ impl Store {
             SkillSource::Path(p) => {
                 let path = resolve_path(manifest_dir, &p);
                 let checksum = if path.exists() {
-                    dir_digest_cached(&path)?
+                    dir_digest_cached_with(&path, &mut self.digest_cache.borrow_mut())?
                 } else {
                     String::new()
                 };
@@ -86,7 +92,8 @@ impl Store {
                         );
                     }
                 }
-                let checksum = dir_digest_cached(&content)?;
+                let checksum =
+                    dir_digest_cached_with(&content, &mut self.digest_cache.borrow_mut())?;
                 Ok(Resolved {
                     path: content,
                     rev: Some(resolved_rev),
@@ -108,7 +115,7 @@ impl Store {
             SkillSource::Path(p) => {
                 let path = resolve_path(manifest_dir, &p);
                 let checksum = if path.exists() {
-                    dir_digest_cached(&path)?
+                    dir_digest_cached_with(&path, &mut self.digest_cache.borrow_mut())?
                 } else {
                     String::new()
                 };
@@ -128,7 +135,10 @@ impl Store {
                 let content = git_content_dir(&clone, subpath.as_deref())?;
                 Ok(Some(Resolved {
                     rev: git_head(&clone).ok(),
-                    checksum: dir_digest_cached(&content)?,
+                    checksum: dir_digest_cached_with(
+                        &content,
+                        &mut self.digest_cache.borrow_mut(),
+                    )?,
                     path: content,
                     fetched: false,
                     source_kind: "git",
@@ -174,6 +184,15 @@ impl Store {
 
     fn git_dir(&self, url: &str) -> PathBuf {
         self.root.join("git").join(sanitize(url))
+    }
+}
+
+impl Drop for Store {
+    fn drop(&mut self) {
+        let cache = self.digest_cache.get_mut();
+        if cache.dirty {
+            cache.save();
+        }
     }
 }
 
@@ -348,6 +367,8 @@ struct DigestCacheEntry {
 struct DigestCache {
     #[serde(default)]
     entries: std::collections::BTreeMap<String, DigestCacheEntry>,
+    #[serde(skip)]
+    dirty: bool,
 }
 
 impl DigestCache {
@@ -406,11 +427,19 @@ fn dir_fingerprint(root: &Path) -> Result<DirFingerprint> {
 /// mismatch (or a fingerprint too fresh to be trustworthy) recomputes the full
 /// digest and updates the cache.
 pub fn dir_digest_cached(root: &Path) -> Result<String> {
+    let mut cache = DigestCache::load();
+    let sha256 = dir_digest_cached_with(root, &mut cache)?;
+    if cache.dirty {
+        cache.save();
+    }
+    Ok(sha256)
+}
+
+fn dir_digest_cached_with(root: &Path, cache: &mut DigestCache) -> Result<String> {
     let canon = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let key = canon.display().to_string();
     let fingerprint = dir_fingerprint(&canon)?;
 
-    let mut cache = DigestCache::load();
     if let Some(entry) = cache.entries.get(&key) {
         if entry.fingerprint == fingerprint {
             return Ok(entry.sha256.clone());
@@ -430,8 +459,10 @@ pub fn dir_digest_cached(root: &Path) -> Result<String> {
                 sha256: sha256.clone(),
             },
         );
-        cache.save();
+        cache.dirty = true;
     }
+    // TODO(perf): fingerprinting and content hashing still walk separately on
+    // misses; combining them risks changing the digest algorithm owned by core.
     Ok(sha256)
 }
 

@@ -431,7 +431,12 @@ impl UpstreamSlot {
 /// calls to *different* servers proceed in parallel.
 pub struct Gateway {
     upstreams: Vec<UpstreamSlot>,
-    cache: std::sync::Mutex<Option<Vec<Value>>>,
+    /// Discovered namespaced tools, behind an `Arc` so `namespaced_tools()`
+    /// hands out cheap reference-counted clones instead of deep-copying the
+    /// whole `Vec<Value>` on every discovery/search/describe/bindings call —
+    /// the payload is read-only once built. (Like sharing an immutable array
+    /// by reference in TS, but with the refcount made explicit.)
+    cache: std::sync::Mutex<Option<std::sync::Arc<Vec<Value>>>>,
     /// The compiled (machine ∩ bundle) ruleset — the single in-process source
     /// of enforcement truth. Compiled once at construction from the machine
     /// manifest's `[policy]` (the user's own layer, which no repo can see,
@@ -507,6 +512,10 @@ impl Gateway {
                 &server_names,
             );
             let project = Some(ctx.dir.display().to_string());
+            // Per-server secret-ref NAMES resolved during construction (values
+            // are never kept). Emitted as run-scoped `SecretAccess` events below
+            // when this gateway is built inside an `agentstack run` sandbox.
+            let mut secret_touches: Vec<(String, Vec<String>)> = Vec::new();
             for (name, resolved) in servers {
                 let s = match resolved {
                     Ok(r) => {
@@ -553,11 +562,27 @@ impl Gateway {
                 // fail-fast channel (folded in by `substitute`).
                 let scoped = crate::secret::ScopedResolver::new(&ctx.resolver, &ruleset, &name);
                 let mut unresolved = Vec::new();
+                // The secret ref NAMES that actually resolved for this server.
+                // A `RefCell` gives interior mutability so `sub` stays an `Fn`
+                // (it's used inside the header/env `.map` closures below); the
+                // resolved VALUES are dropped on the same line they arrive.
+                let resolved_refs = std::cell::RefCell::new(Vec::<String>::new());
                 let sub = |v: &str, unresolved: &mut Vec<String>| {
                     // The gateway resolves for an upstream request, not a diff —
-                    // it doesn't display anything, so the redaction set is dropped.
+                    // it doesn't display anything, so the redaction set (the
+                    // resolved values) is dropped; only the ref names are kept.
                     let mut secrets = Vec::new();
-                    crate::adapter::render::substitute(v, &scoped, false, unresolved, &mut secrets)
+                    let out = crate::adapter::render::substitute(
+                        v,
+                        &scoped,
+                        false,
+                        unresolved,
+                        &mut secrets,
+                    );
+                    resolved_refs
+                        .borrow_mut()
+                        .extend(secrets.into_iter().map(|(name, _val)| name));
+                    out
                 };
                 let up = match s.server_type {
                     ServerType::Http => {
@@ -622,7 +647,29 @@ impl Gateway {
                         Upstream::stdio(name.clone(), command, args, env, cwd, unresolved)
                     }
                 };
+                // The resolved values are already gone; keep the distinct ref
+                // names this server touched for the run-scoped mirror below.
+                let mut refs = resolved_refs.take();
+                refs.sort();
+                refs.dedup();
+                if !refs.is_empty() {
+                    secret_touches.push((name.clone(), refs));
+                }
                 upstreams.push(UpstreamSlot::new(up));
+            }
+            // Additive, run-scoped: when built inside an `agentstack run`
+            // sandbox (RUN_ID_ENV set), record which secret refs each proxied
+            // server resolved — NAMES only, never values — so `agentstack
+            // report` shows the run's secret surface. Best-effort; a no-op
+            // outside a run.
+            for (srv, refs) in &secret_touches {
+                for r in refs {
+                    Self::record_run_event(&crate::calllog::RunEvent::SecretAccess {
+                        ts: crate::calllog::now_epoch(),
+                        server: srv.clone(),
+                        reference: r.clone(),
+                    });
+                }
             }
             return Gateway {
                 upstreams,
@@ -643,7 +690,7 @@ impl Gateway {
     pub fn empty() -> Gateway {
         Gateway {
             upstreams: Vec::new(),
-            cache: std::sync::Mutex::new(Some(Vec::new())),
+            cache: std::sync::Mutex::new(Some(std::sync::Arc::new(Vec::new()))),
             ruleset: agentstack_policy::CompiledRuleset::default(),
             project: None,
         }
@@ -656,13 +703,14 @@ impl Gateway {
     /// Discover every upstream's tools, namespaced `<server>__<tool>`. Cached
     /// after the first call. Per-server failures are skipped (logged to stderr)
     /// so one slow/down server can't fail the whole list.
-    pub fn namespaced_tools(&self) -> Vec<Value> {
+    pub fn namespaced_tools(&self) -> std::sync::Arc<Vec<Value>> {
         if let Some(cached) = self
             .cache
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
         {
+            // Cheap: bumps the refcount, does not copy the tool list.
             return cached.clone();
         }
         // Discovery runs WITHOUT the cache lock held (it can be slow), locking
@@ -688,8 +736,9 @@ impl Gateway {
                 Err(e) => eprintln!("gateway: '{}' unavailable, skipping: {e}", slot.name),
             }
         }
-        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(out.clone());
-        out
+        let shared = std::sync::Arc::new(out);
+        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(shared.clone());
+        shared
     }
 
     /// If `name` is `<server>__<tool>` and we own that server, forward the
@@ -737,22 +786,60 @@ impl Gateway {
         detail: Option<&str>,
         started: Instant,
     ) {
+        // Compute the shared, non-sensitive fields once — the machine-global
+        // audit record and the run-scoped mirror below carry the exact same
+        // digest, class, timing, and timestamp.
+        let ts = crate::calllog::now_epoch();
+        let ms = started.elapsed().as_millis() as u64;
+        let args_digest = crate::calllog::digest_args(args);
+        let detail = detail.map(|d| {
+            let mut d = d.to_string();
+            d.truncate(200);
+            d
+        });
+        // 1) The cross-project diagnostic log — byte-identical to before.
         crate::calllog::record(&crate::calllog::CallRecord {
-            ts: crate::calllog::now_epoch(),
+            ts,
             run: std::env::var(crate::calllog::RUN_ID_ENV).ok(),
             pid: std::process::id(),
             project: self.project.clone(),
             server: server.to_string(),
             tool: tool.to_string(),
-            args_digest: crate::calllog::digest_args(args),
+            args_digest: args_digest.clone(),
             outcome: outcome.to_string(),
-            detail: detail.map(|d| {
-                let mut d = d.to_string();
-                d.truncate(200);
-                d
-            }),
-            ms: started.elapsed().as_millis() as u64,
+            detail: detail.clone(),
+            ms,
         });
+        // 2) Additive run-scoped mirror: when this gateway runs inside an
+        // `agentstack run` sandbox (RUN_ID_ENV set), the same decision also
+        // lands in that run's flight recorder, so `agentstack report` reads the
+        // run's ACTIONS from its own events.jsonl — not only the cross-project
+        // audit log. Best-effort, exactly like the audit write: a recorder
+        // hiccup never fails the call, and calls.jsonl above is untouched.
+        Self::record_run_event(&crate::calllog::RunEvent::ToolCall {
+            ts,
+            server: server.to_string(),
+            tool: tool.to_string(),
+            outcome: outcome.to_string(),
+            args_digest,
+            detail,
+            ms,
+        });
+    }
+
+    /// Mirror one event into the launching run's flight recorder — but only
+    /// when this process was started by `agentstack run` (RUN_ID_ENV set).
+    /// Best-effort and additive: a no-op outside a run, and any failure is
+    /// swallowed (same contract as the audit write). `RunLog::create` only
+    /// prepares/reuses the run's already-existing directory; it opens no new
+    /// state a plain `agentstack mcp` launch wouldn't.
+    fn record_run_event(ev: &crate::calllog::RunEvent) {
+        let Ok(run_id) = std::env::var(crate::calllog::RUN_ID_ENV) else {
+            return;
+        };
+        if let Some(log) = crate::calllog::RunLog::create(&run_id) {
+            log.append(ev);
+        }
     }
 
     /// Rank the proxied tools against `query`, returning at most `limit` hits.
@@ -769,7 +856,7 @@ impl Gateway {
         let q = query.trim().to_lowercase();
         let tokens: Vec<&str> = q.split_whitespace().collect();
         let mut scored: Vec<(i32, Hit)> = Vec::new();
-        for t in &tools {
+        for t in tools.iter() {
             let name = t.get("name").and_then(Value::as_str).unwrap_or("");
             let desc = t.get("description").and_then(Value::as_str).unwrap_or("");
             let (server, bare) = name.split_once("__").unwrap_or(("", name));
@@ -847,7 +934,7 @@ impl Gateway {
     pub(crate) fn with_tools(tools: Vec<Value>) -> Gateway {
         Gateway {
             upstreams: Vec::new(),
-            cache: std::sync::Mutex::new(Some(tools)),
+            cache: std::sync::Mutex::new(Some(std::sync::Arc::new(tools))),
             ruleset: agentstack_policy::CompiledRuleset::default(),
             project: None,
         }
@@ -971,7 +1058,7 @@ mod tests {
             toml::from_str("[tools]\nfigma = [\"!delete_*\"]").unwrap();
         let gw = Gateway {
             upstreams: Vec::new(),
-            cache: std::sync::Mutex::new(Some(Vec::new())),
+            cache: std::sync::Mutex::new(Some(std::sync::Arc::new(Vec::new()))),
             ruleset: agentstack_policy::compile(&machine, &project, &["figma"]),
             project: None,
         };
@@ -1035,6 +1122,79 @@ mod tests {
     fn gateway_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<Gateway>();
+    }
+
+    /// A tool call made inside an `agentstack run` sandbox (RUN_ID_ENV set)
+    /// lands in BOTH the cross-project audit log and the run's own flight
+    /// recorder — the additive mirror F11 adds. Outside a run, the mirror is a
+    /// no-op (only the audit log is written).
+    #[test]
+    fn run_scoped_call_is_mirrored_into_the_run_log() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        std::env::set_var(crate::calllog::RUN_ID_ENV, "r-gw");
+
+        let gw = Gateway::empty();
+        gw.log_call(
+            "figma",
+            "get_file",
+            &json!({ "id": 1 }),
+            "ok",
+            None,
+            Instant::now(),
+        );
+
+        // 1) The cross-project audit log still records it (unchanged path).
+        let calls = crate::calllog::read_all();
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.server == "figma" && c.run.as_deref() == Some("r-gw")),
+            "audit log must still carry the call"
+        );
+        // 2) AND the run's flight recorder gets a tool-call event.
+        let events = crate::calllog::RunLog::read("r-gw");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                crate::calllog::RunEvent::ToolCall { server, tool, outcome, .. }
+                    if server == "figma" && tool == "get_file" && outcome == "ok"
+            )),
+            "run log must carry the mirrored tool call: {events:?}"
+        );
+
+        // Outside a run, only the audit log is written — no run log appears.
+        std::env::remove_var(crate::calllog::RUN_ID_ENV);
+        gw.log_call(
+            "figma",
+            "get_file",
+            &json!({ "id": 2 }),
+            "ok",
+            None,
+            Instant::now(),
+        );
+        assert!(
+            crate::calllog::RunLog::read("r-none").is_empty(),
+            "no run log without RUN_ID_ENV"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// `namespaced_tools()` hands out a shared `Arc` (P2): two calls return
+    /// pointers to the SAME allocation, not independent deep copies.
+    #[test]
+    fn namespaced_tools_shares_one_arc() {
+        let gw = Gateway::with_tools(vec![json!({ "name": "figma__get_file" })]);
+        let a = gw.namespaced_tools();
+        let b = gw.namespaced_tools();
+        assert!(
+            std::sync::Arc::ptr_eq(&a, &b),
+            "cached tools must be shared, not copied"
+        );
     }
 
     #[test]

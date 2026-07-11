@@ -30,6 +30,108 @@ fn calls_for(run_id: &str) -> Vec<CallRecord> {
         .collect()
 }
 
+/// One tool call, normalized from either source (the run's own `ToolCall`
+/// events or a fallback `CallRecord` from the audit log) so the renderer treats
+/// them identically.
+struct ToolRow {
+    server: String,
+    tool: String,
+    outcome: String,
+    detail: Option<String>,
+    ms: u64,
+}
+
+/// The run's tool calls, preferring its self-contained `events.jsonl` and
+/// falling back to the cross-project audit log for older runs. The two sources
+/// carry the same non-sensitive fields (server, tool, decision, digest-backed
+/// timing) — never argument values.
+fn tool_rows(events: &[RunEvent], calls: &[CallRecord]) -> Vec<ToolRow> {
+    let from_events: Vec<ToolRow> = events
+        .iter()
+        .filter_map(|e| match e {
+            RunEvent::ToolCall {
+                server,
+                tool,
+                outcome,
+                detail,
+                ms,
+                ..
+            } => Some(ToolRow {
+                server: server.clone(),
+                tool: tool.clone(),
+                outcome: outcome.clone(),
+                detail: detail.clone(),
+                ms: *ms,
+            }),
+            _ => None,
+        })
+        .collect();
+    if !from_events.is_empty() {
+        return from_events;
+    }
+    calls
+        .iter()
+        .map(|c| ToolRow {
+            server: c.server.clone(),
+            tool: c.tool.clone(),
+            outcome: c.outcome.clone(),
+            detail: c.detail.clone(),
+            ms: c.ms,
+        })
+        .collect()
+}
+
+/// Distinct `(server, ref)` secret references this run resolved, in first-seen
+/// order. Ref NAMES only — a value never enters the event log.
+fn secret_refs(events: &[RunEvent]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for e in events {
+        if let RunEvent::SecretAccess {
+            server, reference, ..
+        } = e
+        {
+            let pair = (server.clone(), reference.clone());
+            if !out.contains(&pair) {
+                out.push(pair);
+            }
+        }
+    }
+    out
+}
+
+/// A one-line wall-time summary, or `None` when there's nothing to report. The
+/// sandbox lifetime needs both a `SandboxStarted` and a `SandboxExited` to be
+/// known; the in-tool total is the sum of the run's tool-call durations.
+fn wall_time_summary(events: &[RunEvent], rows: &[ToolRow]) -> Option<String> {
+    let started = events.iter().find_map(|e| match e {
+        RunEvent::SandboxStarted { ts, .. } => Some(*ts),
+        _ => None,
+    });
+    let exited = events.iter().find_map(|e| match e {
+        RunEvent::SandboxExited { ts, .. } => Some(*ts),
+        _ => None,
+    });
+    let mut parts: Vec<String> = Vec::new();
+    // `saturating_sub` guards against a clock that went backwards between the
+    // two timestamps (epoch seconds are coarse and not monotonic).
+    if let (Some(a), Some(b)) = (started, exited) {
+        parts.push(format!("{}s sandbox", b.saturating_sub(a)));
+    }
+    if !rows.is_empty() {
+        let in_tool: u64 = rows.iter().map(|r| r.ms).sum();
+        parts.push(format!(
+            "{} tool call{}, {in_tool}ms in-tool",
+            rows.len(),
+            if rows.len() == 1 { "" } else { "s" }
+        ));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("; "))
+    }
+}
+
 /// Render the human-readable report.
 pub fn report_text(run_id: &str) -> String {
     let events = RunLog::read(run_id);
@@ -98,24 +200,44 @@ pub fn report_text(run_id: &str) -> String {
     }
 
     // Tool calls the run's agent made (digest only, never argument values).
-    if !calls.is_empty() {
+    // Sourced from the run's OWN events.jsonl when the gateway mirrored them
+    // there; older runs fall back to the cross-project audit log.
+    let rows = tool_rows(&events, &calls);
+    if !rows.is_empty() {
         o.push_str(&format!("  {}\n", "Tool calls".bold()));
-        for c in &calls {
-            let mark = match c.outcome.as_str() {
+        for r in &rows {
+            let mark = match r.outcome.as_str() {
                 "ok" => "✓".green().to_string(),
                 "denied" => "✗".red().to_string(),
                 _ => "⚠".yellow().to_string(),
             };
-            let why = c
+            let why = r
                 .detail
                 .as_deref()
                 .map(|d| format!("  ({d})"))
                 .unwrap_or_default();
             o.push_str(&format!(
                 "    {mark} {}__{}  {}ms{why}\n",
-                c.server, c.tool, c.ms
+                r.server, r.tool, r.ms
             ));
         }
+    }
+
+    // Secret refs this run resolved — NAMES only, never values. New event kind;
+    // omitted cleanly for runs recorded before the gateway emitted it.
+    let secrets = secret_refs(&events);
+    if !secrets.is_empty() {
+        o.push_str(&format!("  {}\n", "Secret refs".bold()));
+        for (server, reference) in &secrets {
+            o.push_str(&format!("    {server} → {reference}\n"));
+        }
+    }
+
+    // Wall-time summary: the sandbox's lifetime (when both start and exit were
+    // recorded) and the time the agent spent inside tool calls. Omitted when
+    // there's nothing to summarize.
+    if let Some(line) = wall_time_summary(&events, &rows) {
+        o.push_str(&format!("  {:<9} {}\n", "Wall time", line));
     }
 
     // Exit.
@@ -227,6 +349,79 @@ mod tests {
             let v: serde_json::Value =
                 serde_json::from_str(&report_json("r-post").unwrap()).unwrap();
             assert_eq!(v["posture"], "lockdown");
+        });
+    }
+
+    #[test]
+    fn renders_event_sourced_tool_calls_secrets_and_wall_time() {
+        with_home(|| {
+            let log = RunLog::create("r-actions").unwrap();
+            log.append(&RunEvent::SandboxStarted {
+                ts: 100,
+                image: "agentstack/sandbox".into(),
+                workspace: "/proj".into(),
+            });
+            log.append(&RunEvent::ToolCall {
+                ts: 101,
+                server: "figma".into(),
+                tool: "get_file".into(),
+                outcome: "ok".into(),
+                args_digest: "abc123".into(),
+                detail: None,
+                ms: 30,
+            });
+            log.append(&RunEvent::ToolCall {
+                ts: 102,
+                server: "figma".into(),
+                tool: "delete_file".into(),
+                outcome: "denied".into(),
+                args_digest: "def456".into(),
+                detail: Some("machine policy denies delete_*".into()),
+                ms: 0,
+            });
+            log.append(&RunEvent::SecretAccess {
+                ts: 103,
+                server: "figma".into(),
+                reference: "FIGMA_TOKEN".into(),
+            });
+            // A duplicate ref must collapse to one line.
+            log.append(&RunEvent::SecretAccess {
+                ts: 104,
+                server: "figma".into(),
+                reference: "FIGMA_TOKEN".into(),
+            });
+            log.append(&RunEvent::SandboxExited {
+                ts: 110,
+                code: Some(0),
+            });
+
+            let text = report_text("r-actions");
+            // Tool calls sourced from the run's OWN events (no audit record).
+            assert!(
+                text.contains("figma__get_file") && text.contains("30ms"),
+                "{text}"
+            );
+            assert!(
+                text.contains("figma__delete_file")
+                    && text.contains("machine policy denies delete_*"),
+                "{text}"
+            );
+            // Secret refs section, names only, deduped to a single line.
+            assert!(text.contains("Secret refs"), "{text}");
+            assert_eq!(text.matches("FIGMA_TOKEN").count(), 1, "{text}");
+            // Wall-time summary: 10s sandbox span, 2 calls, 30ms in-tool.
+            assert!(text.contains("Wall time"), "{text}");
+            assert!(text.contains("10s sandbox"), "{text}");
+            assert!(
+                text.contains("2 tool calls") && text.contains("30ms in-tool"),
+                "{text}"
+            );
+            // JSON carries the new event kinds too.
+            let v: serde_json::Value =
+                serde_json::from_str(&report_json("r-actions").unwrap()).unwrap();
+            assert_eq!(v["events"][1]["event"], "tool_call");
+            assert_eq!(v["events"][3]["event"], "secret_access");
+            assert_eq!(v["events"][3]["ref"], "FIGMA_TOKEN");
         });
     }
 

@@ -518,7 +518,9 @@ fn handle(
             // timeouts, partial results).
             let mut tools = tool_defs().as_array().cloned().unwrap_or_default();
             if transparent {
-                tools.extend(gateway.namespaced_tools());
+                // namespaced_tools() now hands back a shared `Arc<Vec<Value>>`
+                // (read-only cache); clone the entries we advertise out of it.
+                tools.extend(gateway.namespaced_tools().iter().cloned());
             }
             Some(result(id, json!({ "tools": tools })))
         }
