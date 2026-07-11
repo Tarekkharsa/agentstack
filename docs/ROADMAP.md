@@ -238,6 +238,65 @@ the separate audit log), secret refs touched, trust-store mutations, and
 cost/wall-time — so every sandbox run produces a self-contained report a security
 reviewer could read. (The viewer is done; the log fill-out is what remains.)
 
+## Adopted from the 2026-07-11 strategy reviews
+
+Two independent external reviews were assessed 2026-07-11. The
+observability-first positioning one of them recommended was **rejected**:
+universal cross-CLI observation requires the same MCP interception engineering
+as enforcement — same cost, weaker claim — so build the interception and sell
+the stronger promise. What survived, in priority order (all downstream of the
+existing phases, none of it scaffolded early):
+
+1. **One canonical execution path — DONE (branch `feat/gateway-unification`,
+   awaiting maintainer review + merge).** Sandboxed runs now route their MCP
+   traffic through the in-process gateway, so `[policy.tools]` is enforced and
+   every tool call + secret ref is recorded in the run's own `events.jsonl` —
+   under `--sandbox` (direct `host.docker.internal`) and `--lockdown` (a
+   fixed-destination relay in the egress sidecar bridges the internal-only
+   network to the host gateway). Hard trust-gated (`Gateway::from_plan`:
+   untrusted → not routed), secrets resolved host-side (never enter the
+   container), stale project config shadowed. Docker-verified end to end. The
+   `ENFORCEMENT.md` Tools/Secrets/Audit cells for sandbox+lockdown moved to
+   **enforced**, *qualified* "for gateway-routed traffic." **Remaining for an
+   unconditional Tools cell:** deny the container direct egress to upstream MCP
+   hosts (a separate container-scope egress ruleset) so the gateway is the only
+   path to them — until then an agent reaching an egress-allowed upstream host
+   directly bypasses the gateway, and the cells stay qualified.
+2. **Hero command: `agentstack run --locked <bundle-or-repo>`.** One command
+   composing existing pieces: resolve + content-pin → review → trust gate
+   (re-gate on any changed byte) → gateway + lockdown → ephemeral secret
+   injection → self-contained run report. The user should not need to
+   understand apply, connect, gateway registration, or Docker topology. The
+   report is the payoff of every run — the first-run experience is
+   observational even though the product is enforcement.
+3. **Sequence-anomaly flag in `agentstack report`** (content-exfil heuristic
+   v1, no payload inspection). From events the run log already records, flag
+   runs where a `secret_access` is followed shortly by egress to a host other
+   than what that secret's server is egress-constrained to. Flag, never block,
+   and claim discipline applies: this is a heuristic over metadata — not DLP,
+   not content inspection, and it must never be described as either.
+4. **Doc-claims consistency in CI.** ENFORCEMENT.md promises to be "checked
+   against the source" but drifted anyway (the `RunEvent` variant list went
+   stale the same week the variants landed). Add a test that asserts the
+   machine-checkable doc claims — the matrix cells' code anchors, the event-type
+   list — against the code, so a stale claim fails the build instead of
+   misleading the next reviewer.
+5. **Release artifacts ship the sandbox backend.** The `sandbox` cargo feature
+   stays for lean dev/CI builds, but distributed binaries are built with it on —
+   the defining protection cannot be an opt-in compile flag in the artifact a
+   user downloads.
+
+Reaffirmed, not changed: everything in Phase 4 stays gated on real users, and
+additionally deferred until then — org policy repos, log shipping/collectors,
+compliance mapping (SOC 2 / EU AI Act), fleet features, further adapters unless
+requested. If the project decides it wants users at all, the cheapest test is:
+publish the v0.9.0 draft, record the three security demos (malicious repo /
+compromised MCP server / changed pinned byte), and see whether five strangers
+complete a locked run. If positioning is ever needed, the frame is
+**cross-CLI agent action audit** — what agents *did* (tools, files, egress),
+backed by enforcement — never the crowded LLM-observability category
+(traces/tokens/evals).
+
 ## Phase 4 — Distribution (only after real users)
 
 - **[done — primitive]** ed25519 signing of lockfiles: `agentstack sign` derives
