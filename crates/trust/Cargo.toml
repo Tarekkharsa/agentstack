@@ -8,8 +8,11 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Tarekkharsa/agentstack"
 publish = false
 
-# TODO(phase-1): rule 6 strict list — swap anyhow for thiserror when this
-# crate's error surface is hardened.
+# rule 6: this crate is reviewed line by line, so its dependency list is the
+# strict one and nothing else: serde, serde_json, sha2, ed25519-dalek,
+# thiserror, indexmap (deterministic ordering is digest-relevant), proptest
+# (dev). The 2026-07-11 sweep dropped anyhow (→ thiserror) and toml (store
+# migrated from trust.toml to trust.json).
 [dependencies]
 agentstack-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
@@ -20,10 +23,7 @@ sha2 = "0.10"
 # no RNG dependency (seeds come from core::util::random_bytes).
 ed25519-dalek = "2"
 indexmap = { version = "2", features = ["serde"] }
-anyhow = "1"
-# TODO(phase-1): shipped store format is TOML; rule 6's strict list has no
-# toml — migrate the store to JSON (ARCHITECTURE says trust.json) and drop.
-toml = { version = "0.8", features = ["preserve_order"] }
+thiserror = "1"
 
 [dev-dependencies]
 assert_fs = "1"

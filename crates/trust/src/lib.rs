@@ -17,7 +17,6 @@ pub mod sign;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -28,9 +27,36 @@ use agentstack_core::util::paths;
 
 const TRUST_DIGEST_DOMAIN: &[u8] = b"agentstack-trust-digest-v2\0";
 
-/// Where trust decisions live: `~/.agentstack/trust.toml`.
+/// The reviewed crate gets a closed error enum instead of `anyhow` (rule 6):
+/// every failure a caller can see is named here, nothing is stringly ad-hoc.
+/// `thiserror` derives `Display` from the `#[error]` attributes and
+/// `std::error::Error` for free — the Rust analogue of a TS discriminated
+/// union of failure cases. The cli's `anyhow` call sites keep working because
+/// `?` auto-converts any `std::error::Error` into `anyhow::Error`.
+#[derive(Debug, thiserror::Error)]
+pub enum TrustError {
+    /// The project has no manifest — there is nothing to pin, so there is
+    /// nothing to trust.
+    #[error("no agentstack manifest under {}", base.display())]
+    NoManifest { base: PathBuf },
+    /// The trust store could not be serialized or written to disk. Carries the
+    /// underlying error's rendered text (the writer in `core` has its own
+    /// error type; we keep only its message so this crate's dependency list
+    /// stays the strict one).
+    #[error("saving trust store: {0}")]
+    Store(String),
+}
+
+pub type Result<T> = std::result::Result<T, TrustError>;
+
+/// Where trust decisions live: `~/.agentstack/trust.json`.
+///
+/// Format note (2026-07-11, rule-6 sweep): the store moved from `trust.toml`
+/// to JSON so this crate needs no TOML parser. Deliberately NO migration shim
+/// (no external users): a leftover `trust.toml` is ignored, which fails
+/// CLOSED — every project simply reads as untrusted until re-trusted.
 pub fn store_path() -> PathBuf {
-    paths::agentstack_home().join("trust.toml")
+    paths::agentstack_home().join("trust.json")
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -64,12 +90,16 @@ impl TrustStore {
         let Ok(text) = std::fs::read_to_string(store_path()) else {
             return TrustStore::default();
         };
-        toml::from_str(&text).unwrap_or_default()
+        // A corrupt store parses as the EMPTY store — fail closed: everything
+        // reads untrusted until a human re-trusts it.
+        serde_json::from_str(&text).unwrap_or_default()
     }
 
     pub fn save(&self) -> Result<()> {
-        let text = toml::to_string_pretty(self).context("serializing trust store")?;
+        let text =
+            serde_json::to_string_pretty(self).map_err(|e| TrustError::Store(e.to_string()))?;
         agentstack_core::util::atomic::write(&store_path(), &text)
+            .map_err(|e| TrustError::Store(format!("{e:#}")))
     }
 }
 
@@ -120,8 +150,9 @@ pub fn check(base: &Path) -> TrustState {
 /// Record trust for `base` at its current manifest digest. Errors when there is
 /// no manifest to pin.
 pub fn trust(base: &Path) -> Result<String> {
-    let digest = digest_for(base)
-        .with_context(|| format!("no agentstack manifest under {}", base.display()))?;
+    let digest = digest_for(base).ok_or_else(|| TrustError::NoManifest {
+        base: base.to_path_buf(),
+    })?;
     let mut store = TrustStore::load();
     store.trusted.insert(
         key_for(base),

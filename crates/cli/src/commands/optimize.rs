@@ -483,7 +483,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 target: path.clone(),
                 impact: "low",
                 title: format!("trusted project no longer exists: {path}"),
-                evidence: vec!["directory not found on disk; its trust grant is dead weight (trust.toml)".into()],
+                evidence: vec!["directory not found on disk; its trust grant is dead weight (trust.json)".into()],
                 action: format!("agentstack trust --revoke {path}"),
                 safe_auto: true,
                 safety: "safe: revoking trust for a nonexistent path only tightens — nothing can lose access".into(),
@@ -495,7 +495,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 impact: "medium",
                 title: format!("manifest changed since trusted: {path}"),
                 evidence: vec![
-                    "content digest no longer matches the trust grant — the bridge already dropped it to control-plane only (trust.toml)".into(),
+                    "content digest no longer matches the trust grant — the bridge already dropped it to control-plane only (trust.json)".into(),
                 ],
                 action: format!("review the manifest, then: agentstack trust {path}"),
                 safe_auto: false,

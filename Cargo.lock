@@ -190,7 +190,6 @@ name = "agentstack-trust"
 version = "0.9.0"
 dependencies = [
  "agentstack-core",
- "anyhow",
  "assert_fs",
  "ed25519-dalek",
  "indexmap",
@@ -198,7 +197,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "toml 0.8.23",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
