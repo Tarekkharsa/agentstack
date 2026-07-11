@@ -1,0 +1,390 @@
+<title>AgentStack — Security Review Findings</title>
+<style>
+  :root {
+    --ground: #f7f5f1;
+    --surface: #ffffff;
+    --surface-2: #f1eee8;
+    --ink: #1b1e22;
+    --muted: #5f6672;
+    --faint: #8a909b;
+    --border: #e5e0d7;
+    --border-strong: #d3cdc1;
+    --accent: #bf7420;
+    --accent-soft: #f3e5d2;
+    --high: #c33b3b;
+    --high-soft: #f6dede;
+    --med: #b9791a;
+    --med-soft: #f6e9cf;
+    --low: #57687b;
+    --low-soft: #e6ebf0;
+    --good: #2c8a5b;
+    --good-soft: #d8ede1;
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --shadow: 0 1px 2px rgba(24,20,12,.04), 0 6px 20px rgba(24,20,12,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0f1216;
+      --surface: #171b21;
+      --surface-2: #1d222a;
+      --ink: #e7e9ec;
+      --muted: #9aa4b0;
+      --faint: #6a7481;
+      --border: #262b33;
+      --border-strong: #333a44;
+      --accent: #e8a33d;
+      --accent-soft: #34281324;
+      --high: #e5675f;
+      --high-soft: #3a1f1f;
+      --med: #e0a93e;
+      --med-soft: #362a15;
+      --low: #8698ab;
+      --low-soft: #212832;
+      --good: #48b57e;
+      --good-soft: #16281f;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f7f5f1; --surface: #ffffff; --surface-2: #f1eee8; --ink: #1b1e22;
+    --muted: #5f6672; --faint: #8a909b; --border: #e5e0d7; --border-strong: #d3cdc1;
+    --accent: #bf7420; --accent-soft: #f3e5d2; --high: #c33b3b; --high-soft: #f6dede;
+    --med: #b9791a; --med-soft: #f6e9cf; --low: #57687b; --low-soft: #e6ebf0;
+    --good: #2c8a5b; --good-soft: #d8ede1; --shadow: 0 1px 2px rgba(24,20,12,.04), 0 6px 20px rgba(24,20,12,.05);
+  }
+  :root[data-theme="dark"] {
+    --ground: #0f1216; --surface: #171b21; --surface-2: #1d222a; --ink: #e7e9ec;
+    --muted: #9aa4b0; --faint: #6a7481; --border: #262b33; --border-strong: #333a44;
+    --accent: #e8a33d; --accent-soft: #34281324; --high: #e5675f; --high-soft: #3a1f1f;
+    --med: #e0a93e; --med-soft: #362a15; --low: #8698ab; --low-soft: #212832;
+    --good: #48b57e; --good-soft: #16281f; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--sans); line-height: 1.6;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px 96px; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); font-weight: 600;
+  }
+  .mono { font-family: var(--mono); }
+
+  /* Header */
+  header { padding: 72px 0 40px; border-bottom: 1px solid var(--border); }
+  h1 {
+    font-size: clamp(34px, 6vw, 52px); line-height: 1.04; letter-spacing: -0.02em;
+    font-weight: 700; margin: 18px 0 0; text-wrap: balance;
+  }
+  .sub { font-size: 18px; color: var(--muted); margin: 16px 0 0; max-width: 60ch; }
+  .meta-row {
+    display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 28px;
+    font-family: var(--mono); font-size: 12.5px; color: var(--faint);
+  }
+  .meta-row b { color: var(--muted); font-weight: 600; }
+  .gate-ok { color: var(--good); }
+
+  /* Verdict / thesis */
+  .thesis {
+    margin: 40px 0 0; padding: 30px 32px; background: var(--surface);
+    border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 10px; box-shadow: var(--shadow);
+  }
+  .thesis .label { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+  .thesis p { margin: 12px 0 0; font-size: 20px; line-height: 1.5; letter-spacing: -0.01em; }
+  .thesis .hl { color: var(--accent); font-weight: 600; }
+
+  /* Ledger */
+  .ledger { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 40px; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 16px 14px; position: relative; overflow: hidden;
+  }
+  .tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+  .tile.high::before { background: var(--high); }
+  .tile.med::before { background: var(--med); }
+  .tile.low::before { background: var(--low); }
+  .tile.good::before { background: var(--good); }
+  .tile .n { font-family: var(--mono); font-size: 30px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .tile .k { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .tile.high .n { color: var(--high); }
+  .tile.med .n { color: var(--med); }
+  .tile.low .n { color: var(--low); }
+  .tile.good .n { color: var(--good); }
+
+  /* Section head */
+  .sec-head { margin: 56px 0 4px; display: flex; align-items: baseline; gap: 14px; }
+  .sec-head h2 { font-size: 15px; font-family: var(--mono); letter-spacing: .04em; text-transform: uppercase; margin: 0; color: var(--ink); }
+  .sec-head .rule { flex: 1; height: 1px; background: var(--border); }
+  .sec-note { color: var(--muted); font-size: 14.5px; margin: 10px 0 22px; max-width: 66ch; }
+
+  /* Finding */
+  .finding {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    margin-bottom: 14px; padding: 20px 22px; box-shadow: var(--shadow);
+    border-left: 3px solid var(--border-strong);
+  }
+  .finding.high { border-left-color: var(--high); }
+  .finding.med { border-left-color: var(--med); }
+  .finding.low { border-left-color: var(--low); }
+  .finding .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .id { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--faint); letter-spacing: .04em; }
+  .chip {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 5px; white-space: nowrap;
+  }
+  .chip.high { background: var(--high-soft); color: var(--high); }
+  .chip.med { background: var(--med-soft); color: var(--med); }
+  .chip.low { background: var(--low-soft); color: var(--low); }
+  .agree {
+    margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .dot.both { background: var(--good); }
+  .dot.refined { background: var(--med); }
+  .dot.codex { background: var(--accent); }
+  .finding h3 { font-size: 18px; margin: 12px 0 0; letter-spacing: -.01em; line-height: 1.3; }
+  .finding p { margin: 9px 0 0; color: var(--muted); font-size: 15px; }
+  .finding p .ink { color: var(--ink); }
+  .path {
+    font-family: var(--mono); font-size: 12.5px; color: var(--accent);
+    background: var(--surface-2); padding: 1px 6px; border-radius: 4px; white-space: nowrap;
+  }
+  .disagree-note {
+    margin-top: 12px; padding: 11px 14px; background: var(--surface-2);
+    border-radius: 8px; font-size: 13.5px; color: var(--muted); border: 1px solid var(--border);
+  }
+  .disagree-note b { color: var(--ink); font-family: var(--mono); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; }
+
+  /* Strong list */
+  .good-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .good-item {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; border-left: 3px solid var(--good);
+  }
+  .good-item h4 { margin: 0; font-size: 15px; letter-spacing: -.01em; }
+  .good-item p { margin: 6px 0 0; font-size: 13.5px; color: var(--muted); }
+
+  /* Priority list */
+  ol.prio { list-style: none; counter-reset: p; margin: 0; padding: 0; }
+  ol.prio li {
+    counter-increment: p; position: relative; padding: 16px 18px 16px 58px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px;
+  }
+  ol.prio li::before {
+    content: counter(p); position: absolute; left: 16px; top: 15px;
+    font-family: var(--mono); font-weight: 700; font-size: 15px; color: var(--accent);
+    width: 26px; height: 26px; border-radius: 7px; background: var(--accent-soft);
+    display: grid; place-items: center; border: 1px solid var(--border);
+  }
+  ol.prio li b { font-size: 15.5px; }
+  ol.prio li p { margin: 5px 0 0; color: var(--muted); font-size: 14px; }
+
+  footer { margin-top: 60px; padding-top: 26px; border-top: 1px solid var(--border); color: var(--faint); font-size: 13px; }
+  footer .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 18px; font-family: var(--mono); font-size: 12px; }
+  footer .legend span { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); }
+  footer p { margin: 6px 0; max-width: 70ch; }
+  a { color: var(--accent); }
+
+  @media (max-width: 680px) {
+    .ledger { grid-template-columns: repeat(2, 1fr); }
+    .good-grid { grid-template-columns: 1fr; }
+    .agree { margin-left: 0; width: 100%; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Security Review · AgentStack v0.8.1</div>
+    <h1>The model is sound. The perimeter around it leaks.</h1>
+    <p class="sub">A two-reviewer audit of the AgentStack control plane — trust gating, policy intersection, secret resolution, and the new Docker sandbox + egress proxy. Independent findings, cross-checked against each other.</p>
+    <div class="meta-row">
+      <span><b>Date</b> 2026-07-11</span>
+      <span><b>Scope</b> 8 crates · ~49k LOC Rust</span>
+      <span><b>Gates</b> <span class="gate-ok">fmt ✓ clippy ✓ 146/146 tests ✓</span></span>
+      <span><b>Sandbox e2e</b> <span class="gate-ok">verified live on Docker 25.0.3</span></span>
+    </div>
+  </header>
+
+  <div class="thesis">
+    <div class="label">Convergent verdict — both reviewers, independently</div>
+    <p>This is <span class="hl">not security theater</span>. The policy engine, trust re-gating, scoped secret resolution, and deterministic compiled ruleset show real security engineering. The central weakness is that <span class="hl">the clean model does not yet survive contact with the runtime boundary</span> — today's sandbox asks hostile code to <em>cooperate</em> with its proxy, when the whole premise is that hostile code must not be trusted to cooperate.</p>
+  </div>
+
+  <div class="ledger">
+    <div class="tile high"><div class="n">5</div><div class="k">High / enforcement</div></div>
+    <div class="tile med"><div class="n">7</div><div class="k">Medium</div></div>
+    <div class="tile low"><div class="n">7</div><div class="k">Low / hygiene</div></div>
+    <div class="tile good"><div class="n">6</div><div class="k">Verified strong</div></div>
+  </div>
+
+  <!-- HIGH -->
+  <div class="sec-head"><h2>High — the enforcement boundary</h2><span class="rule"></span></div>
+  <p class="sec-note">Every High finding lives at the sandbox/egress edge, and all five were confirmed by both reviewers. The theme is singular: the egress firewall is currently <em>advisory</em>, and traffic that does reach the proxy is filtered on attacker-controlled strings without canonicalization or resolved-address checks.</p>
+
+  <div class="finding high">
+    <div class="top">
+      <span class="id">H1</span><span class="chip high">High</span>
+      <span class="agree"><span class="dot both"></span>both agree</span>
+    </div>
+    <h3>Egress enforcement is advisory, not mandatory</h3>
+    <p><span class="ink">The sandbox's <code class="path">ProxyOnly</code> mode uses Docker's default bridge</span> (<code class="path">runtime/src/docker.rs:73</code>) — full NAT internet access — and steers traffic to the proxy only via <code class="path">HTTPS_PROXY</code> env vars (<code class="path">cli/commands/sandbox.rs:148</code>) that any child process can unset. A hostile process reaches any host by direct TCP, raw socket, IPv6, or its own DNS, never touching the proxy or the recorder. The CLI and <code class="path">spec.rs:20</code> assert "no direct route out"; the code contradicts it. <span class="ink">This breaks the primary sandbox-egress guarantee.</span></p>
+  </div>
+
+  <div class="finding high">
+    <div class="top">
+      <span class="id">H2</span><span class="chip high">High</span>
+      <span class="agree"><span class="dot both"></span>both agree</span>
+    </div>
+    <h3>Hostname matching has a silent deny-bypass</h3>
+    <p><code class="path">glob_match</code> (<code class="path">core/manifest/model.rs:206</code>) is case-sensitive and exact, and nothing normalizes the CONNECT authority before policy. <span class="ink"><code class="path">CONNECT EVIL.EXAMPLE:443</code></span> or a trailing-dot <code class="path">evil.example.</code> sails past a <code class="path">!evil.example</code> deny — and equally defeats allowlists / default-deny configs, not just explicit denies. Fix: ASCII-lowercase and strip a trailing dot before <code class="path">egress_decision</code>.</p>
+  </div>
+
+  <div class="finding high">
+    <div class="top">
+      <span class="id">H3</span><span class="chip high">High</span>
+      <span class="agree"><span class="dot both"></span>both agree</span>
+    </div>
+    <h3>The SNI filter is fully built and never called</h3>
+    <p><code class="path">egress/src/sni.rs</code> is implemented and tested but only exported — the proxy decides on the CONNECT authority (<code class="path">proxy.rs:85</code>) and copies tunnel bytes untouched (<code class="path">proxy.rs:101</code>). Yet <code class="path">egress/lib.rs:7</code> and <code class="path">ARCHITECTURE.md:227</code> advertise SNI name-filtering. The result is a domain-fronting gap: CONNECT to an allowed host, speak TLS to a denied one behind the same front. The defense that would catch it (assert SNI == CONNECT host) exists in the repo but isn't wired.</p>
+  </div>
+
+  <div class="finding high">
+    <div class="top">
+      <span class="id">H4</span><span class="chip high">High</span>
+      <span class="agree"><span class="dot codex"></span>codex escalated · from M</span>
+    </div>
+    <h3>SSRF: policy checks the name, the socket resolves the address</h3>
+    <p><span class="ink">The proxy validates the hostname string</span> (<code class="path">proxy.rs:85</code>) <span class="ink">then independently re-resolves and connects</span> (<code class="path">proxy.rs:94</code>) with no check on the resolved IP class. An allowed, attacker-controlled hostname that resolves to <code class="path">169.254.169.254</code> (cloud metadata), loopback, or a private range is reachable — direct SSRF into host and internal networks; DNS-rebinding between check and connect is the secondary case. Fix: resolve once, reject forbidden IP classes by default, connect to the validated address.</p>
+    <div class="disagree-note"><b>Cross-check</b> — Raised by my team at Medium as a DNS-rebind note; codex re-scoped it as first-order SSRF and escalated to High. Sibling of H2 and H5.</div>
+  </div>
+
+  <div class="finding high">
+    <div class="top">
+      <span class="id">H5</span><span class="chip high">High</span>
+      <span class="agree"><span class="dot codex"></span>codex found · both missed</span>
+    </div>
+    <h3>Literal-IP CONNECT bypasses hostname policy entirely</h3>
+    <p>The parser explicitly accepts IPv6 literals (<code class="path">connect.rs:39</code>) and passes IPv4 literals as ordinary hosts. With no canonicalization or IP-class policy, a container can <code class="path">CONNECT 93.184.216.34:443</code> and skip name-based rules altogether; alternate textual IP encodings can also defeat exact denies. Neither reviewer caught this on the first pass — it surfaced only in cross-check, and it compounds H1, H2, and H4.</p>
+  </div>
+
+  <!-- MEDIUM -->
+  <div class="sec-head"><h2>Medium — real, contained</h2><span class="rule"></span></div>
+  <p class="sec-note">Documented guarantees the code doesn't yet provide, plus audit-integrity and exposure gaps. Several are latent today (in-process, single-user) but become live the moment Phase 2 crosses a process or trust boundary.</p>
+
+  <div class="finding med">
+    <div class="top"><span class="id">M1</span><span class="chip med">Medium</span><span class="agree"><span class="dot both"></span>both agree</span></div>
+    <h3>"Fail closed on unknown ruleset version" is documented, not implemented</h3>
+    <p>Found independently by both reviewers. <code class="path">policy/ruleset.rs:19</code> rules that an unknown <code>version</code> must deny everything; no decision method reads <code>self.version</code> (<code class="path">ruleset.rs:193</code>). Unreachable in-process (always current version) — but this is the Phase-2 cross-process wire contract, and a future/tampered ruleset would be enforced with v1 semantics instead of deny-all. Add a central version gate at the decision entry points.</p>
+  </div>
+
+  <div class="finding med">
+    <div class="top"><span class="id">M2</span><span class="chip med">Medium</span><span class="agree"><span class="dot both"></span>both agree</span></div>
+    <h3>Trust digest domain separation is not injective</h3>
+    <p><code class="path">digest_for</code> (<code class="path">trust/lib.rs:94</code>) joins manifest ‖ local ‖ lock with a single <code>0x00</code> separator, so bytes can move across a file boundary without changing the digest — distinct pinned triples can collide. Exploitation needs control of adjacent files, "but that is precisely the consent surface." The byte-flip proptest structurally can't detect this class. Fix: length-prefix or tag each segment.</p>
+  </div>
+
+  <div class="finding med">
+    <div class="top"><span class="id">M3</span><span class="chip med">Medium</span><span class="agree"><span class="dot both"></span>both agree</span></div>
+    <h3>Concurrent run-log appends can tear — silent audit loss</h3>
+    <p>Two threads append to <code class="path">events.jsonl</code> through separate <code>O_APPEND</code> handles, and <code>writeln!</code> is multi-syscall (<code class="path">recorder/lib.rs:288</code>). Interleaved writes produce malformed lines that <code>RunLog::read</code> silently discards (<code class="path">lib.rs:314</code>) — losing exactly the egress decisions the tool exists to record. The "O_APPEND-atomic per line" comment at <code class="path">sandbox.rs:122</code> is unjustified. Fix: format the whole line and issue one <code>write_all</code>, or serialize behind a mutex.</p>
+  </div>
+
+  <div class="finding med">
+    <div class="top"><span class="id">M4</span><span class="chip med">Medium</span><span class="agree"><span class="dot both"></span>both agree · +codex extension</span></div>
+    <h3>Egress proxy binds 0.0.0.0 — an open, unauthenticated relay</h3>
+    <p>The proxy binds <code>0.0.0.0</code> (<code class="path">sandbox.rs:134</code>) so the container can reach it, exposing it to the whole LAN for the run's duration; with allow-by-default policy (<code class="path">ruleset.rs:38</code>) that's an open forward relay whose traffic is attributed to the harness. Codex adds a sibling both teams missed: <span class="ink">proxy identity is the listener, never the peer</span> (<code class="path">proxy.rs:38</code>) — any process reaching a per-server listener inherits that server's egress privileges. Fix: bind the bridge gateway IP; authenticate the peer.</p>
+  </div>
+
+  <div class="finding med">
+    <div class="top"><span class="id">M5</span><span class="chip med">Medium</span><span class="agree"><span class="dot both"></span>both agree</span></div>
+    <h3>Port is dropped from the egress decision</h3>
+    <p><code class="path">connect.rs:54</code> parses <code>host:port</code>, but <code>egress_decision</code> matches host only (<code class="path">ruleset.rs:208</code>). An allowed host is reachable on any port — <code class="path">CONNECT allowed-web-host:22</code> passes. Medium where a policy intends HTTPS-only; at minimum the port-blindness should be explicit.</p>
+  </div>
+
+  <div class="finding med">
+    <div class="top"><span class="id">M6</span><span class="chip med">Medium</span><span class="agree"><span class="dot both"></span>both agree</span></div>
+    <h3>No read/idle timeouts — slowloris</h3>
+    <p>The request head is read one byte at a time with no timeout (<code class="path">proxy.rs:112</code>) and the tunnel has no idle deadline. A container can open many connections and dribble bytes to pin async tasks indefinitely. Memory is bounded (8 KiB head cap) but connection count and lifetime are not.</p>
+  </div>
+
+  <div class="finding med">
+    <div class="top"><span class="id">M7</span><span class="chip med">Medium</span><span class="agree"><span class="dot refined"></span>refined · disclosure downgraded</span></div>
+    <h3>dir_digest follows symlinks in hostile bundle content</h3>
+    <p><code class="path">collect_files</code> accepts non-directory symlinks (<code class="path">core/digest.rs:55</code>), then <code>fs::read</code> follows them (<code class="path">digest.rs:37</code>) — during <code>agentstack trust</code>, before gating protects you. A hostile skill can link to <code class="path">/dev/zero</code> (OOM/hang) or a FIFO (indefinite hang). The following-symlinks copy variant (<code class="path">fsx.rs:38</code>) also lacks cycle detection (ancestor link → infinite recursion).</p>
+    <div class="disagree-note"><b>Cross-check</b> — My team flagged reading <code>~/.ssh/id_rsa</code> as info disclosure. Codex downgraded that specific vector: it's a <em>digest oracle</em>, not direct disclosure, unless another output compares digests. The DoS half stands; net severity Medium.</div>
+  </div>
+
+  <!-- LOW -->
+  <div class="sec-head"><h2>Low — hygiene & debt</h2><span class="rule"></span></div>
+  <p class="sec-note">Correctness debt and portability issues, plus two items both reviewers over-rated and codex pulled down to Low. None are exploitable in the shipped single-user in-process path.</p>
+
+  <div class="finding low">
+    <div class="top"><span class="id">L1</span><span class="chip low">Low</span><span class="agree"><span class="dot refined"></span>codex downgraded · from M</span></div>
+    <h3>Stat-based digest cache can reuse a digest without reading bytes</h3>
+    <p><code class="path">dir_digest_cached</code> (<code class="path">store.rs:413</code>) returns the cached SHA when path + size + mtime match. Codex sharpened it: the freshness guard only gates cache <em>insertion</em> (line 425), not <em>lookup</em> — so a same-size, restored-mtime substitution against an existing entry is served from cache. Contained because the trust-critical drift check (<code class="path">consolidate.rs:219</code>) uses the <em>uncached</em> <code>dir_digest</code>. Keep the cache off any verification path.</p>
+  </div>
+
+  <div class="finding low">
+    <div class="top"><span class="id">L2</span><span class="chip low">Low</span><span class="agree"><span class="dot refined"></span>codex downgraded · from M</span></div>
+    <h3>dir_digest is not cross-platform deterministic</h3>
+    <p>It hashes OS-native path separators and <code>to_string_lossy</code> on filenames (<code class="path">core/digest.rs:35</code>). The lossy conversion is a same-platform collision class for non-UTF-8 names; the separator difference mainly causes portability / re-lock churn when a pin travels between a Mac and Windows — not a direct bypass. Normalize to <code>/</code> and hash raw path bytes.</p>
+  </div>
+
+  <div class="finding low">
+    <div class="top"><span class="id">L3</span><span class="chip low">Low</span><span class="agree"><span class="dot both"></span>both agree</span></div>
+    <h3>Sync log append blocks the async proxy handler</h3>
+    <p>Codex corrected the framing here: the proxy's socket I/O is properly async — it's the synchronous event-sink / log append at <code class="path">proxy.rs:86</code> that blocks the single-worker runtime. Move it to <code>spawn_blocking</code> or a logging channel (which the recorder doc already envisions).</p>
+  </div>
+
+  <div class="finding low">
+    <div class="top"><span class="id">L4</span><span class="chip low">Low</span><span class="agree"><span class="dot both"></span>both agree</span></div>
+    <h3>Remaining hardening debt</h3>
+    <p><span class="ink">No size caps</span> on manifest / lockfile / store reads (bound attacker-reachable reads per rule 7) · <span class="ink">unbounded recursion depth</span> in the digest/copy walks (stack-overflow DoS; the symlink-following copy can elevate this) · <span class="ink">a run proceeds silently if the run log can't be created</span> (<code class="path">recorder/lib.rs:273</code>) · <span class="ink"><code class="path">refs.rs</code> — the hostile-input <code>${REF}</code> scanner — has zero unit tests</span> (coverage debt, not a live bug).</p>
+  </div>
+
+  <div class="finding low">
+    <div class="top"><span class="id">L5</span><span class="chip low">Low</span><span class="agree"><span class="dot both"></span>architecture / policy drift</span></div>
+    <h3>Two pinned-rule deviations</h3>
+    <p>The <code class="path">adapters</code> crate doesn't actually depend on <code class="path">policy</code>, though CLAUDE.md pins that edge — architecture drift, not independently reportable without a bypass. And <code class="path">trust</code> carries off-allowlist <code>anyhow</code> + <code>toml</code> (both TODO-tracked) — a supply-chain-policy violation of the "reviewed line by line" crate, not a code vulnerability by itself.</p>
+  </div>
+
+  <!-- STRONG -->
+  <div class="sec-head"><h2>Verified strong</h2><span class="rule"></span></div>
+  <p class="sec-note">What held up under scrutiny — read, not assumed. Both models were emphatic that the core is real security engineering.</p>
+  <div class="good-grid">
+    <div class="good-item"><h4>Unsafe already contained</h4><p>All 7 non-cli crates carry <code>#![forbid(unsafe_code)]</code>; the entire libc surface is concentrated in one <code class="path">cli/sys.rs</code> with <code>SAFETY:</code> notes — the rule-1 work marked "before Phase 2" is already done.</p></div>
+    <div class="good-item"><h4>Policy meets the line-by-line bar</h4><p>Intersection logic is correct and the proptests are non-tautological: bidirectional compiled-vs-live equivalence, an artifact-level restatement of "policy only narrows," IndexMap-order independence.</p></div>
+    <div class="good-item"><h4>Secrets fail closed</h4><p>Policy denial is terminal and gates every <code>${REF}</code> before any backing store is consulted; no raw-secret or placeholder path to disk was found. Bundle export encrypts opt-in via age.</p></div>
+    <div class="good-item"><h4>Trust gating ordered correctly</h4><p><code>trust::check</code> runs before <code>activate</code> everywhere; only <code>Trusted</code> reaches gateway spawn. No command was found using bundle content before its trust check.</p></div>
+    <div class="good-item"><h4>Recorder is tamper-resistant</h4><p>The run log lives host-side under <code class="path">~/.agentstack/runs/</code>, is never mounted into the container, is 0600/0700, and guards run-id path escape — a sandboxed process can't reach it.</p></div>
+    <div class="good-item"><h4>The gates are green</h4><p><code>fmt</code> and <code>clippy -D warnings</code> clean, 146/146 tests pass, and the Phase-2 sandbox e2e tests were re-run live against real Docker — the "verified on Docker" claim is true.</p></div>
+  </div>
+
+  <!-- PRIORITIES -->
+  <div class="sec-head"><h2>What to fix first</h2><span class="rule"></span></div>
+  <p class="sec-note">Both reviewers independently reached the same sequencing: freeze feature work and make the runtime boundary non-bypassable before anything else.</p>
+  <ol class="prio">
+    <li><b>Make egress confinement real.</b><p>A dedicated <code>--internal</code> Docker network with the proxy as the only reachable peer (or equivalent host firewall rules). Then add an adversarial test that unsets proxy vars and attempts direct TCP, direct DNS, host-gateway and metadata IPs — all must fail while a proxied allow succeeds. Until then, rename <code>ProxyOnly</code> and soften the "no direct route out" claim. <em>(H1, H4, H5)</em></p></li>
+    <li><b>Harden destination validation.</b><p>Resolve once, reject forbidden IP classes by default, apply policy to both the requested name and the resolved address, constrain ports, normalize the host (lowercase + trailing dot), and decide whether SNI ≠ CONNECT authority must be rejected. <em>(H2, H3, H4, H5, M5)</em></p></li>
+    <li><b>Fix digest identity, remove the cache from trust.</b><p>Versioned, length-framed digest encoding with explicit symlink behavior (reject or canonicalize-and-bound); hostile tests for symlinks, non-UTF-8 paths, and size/mtime-preserving edits. Keep the stat cache off any verification path. <em>(M2, M7, L1, L2)</em></p></li>
+    <li><b>Implement unknown-version rejection centrally.</b><p>One deny-all gate at the decision entry points, before the ruleset ever crosses a process boundary. Add the missing proptest. <em>(M1)</em></p></li>
+    <li><b>One enforcement-plan boundary; shrink the CLI.</b><p>A library API that turns a trusted, resolved bundle into an immutable plan (identities, checked policy, authorized refs, mounts, processes, endpoints, recorder context). Commands execute or display that plan instead of re-assembling the security model across 1,000–2,500-line files. <em>(reduces the surface behind M3 and every "did this path skip a check?" question)</em></p></li>
+  </ol>
+
+  <footer>
+    <div class="legend">
+      <span><span class="dot both"></span>both reviewers agree</span>
+      <span><span class="dot refined"></span>severity refined in cross-check</span>
+      <span><span class="dot codex"></span>surfaced by cross-check only</span>
+    </div>
+    <p><b>Method.</b> Four scoped review agents swept the workspace (trust+policy, runtime+egress+recorder, core+adapters+hygiene, cli+docs), verifying claims against source. A second independent reviewer (gpt-5.6-sol, via Codex) read the same code cold, then cross-checked every consolidated finding — agreeing, disputing severity, or adding what both missed. Findings here reflect that reconciliation, not either pass alone.</p>
+    <p>Line/column references point at <span class="mono">v0.8.1</span> as reviewed on 2026-07-11. Severities describe the security-tool threat model (hostile bundle content, a hostile sandboxed process), not the current single-user deployment where most are latent.</p>
+  </footer>
+</div>
