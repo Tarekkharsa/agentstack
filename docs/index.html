@@ -278,6 +278,46 @@
   }
   figcaption { font-size: 0.86rem; color: var(--muted); margin-top: 0.7rem; }
 
+  /* ---------- enforcement matrix ---------- */
+  .posture-legend { margin: 1.5rem 0 0; display: grid; gap: 0.7rem; grid-template-columns: 1fr 1fr; }
+  .posture-legend > div {
+    border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface);
+    padding: 0.7rem 0.85rem; box-shadow: var(--shadow-sm);
+  }
+  .posture-legend .lab { font-family: var(--mono); font-size: 0.76rem; font-weight: 700; letter-spacing: 0.02em; }
+  .posture-legend .lab .slug { color: var(--accent); }
+  .posture-legend small { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
+
+  .matrix-wrap { margin: 1.6rem 0 0; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+  table.matrix { border-collapse: collapse; width: 100%; min-width: 34rem; background: var(--surface); font-size: 0.88rem; }
+  table.matrix th, table.matrix td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid var(--line-soft); }
+  table.matrix thead th {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.02em; font-weight: 700;
+    color: var(--ink); vertical-align: bottom; border-bottom: 1px solid var(--line);
+    background: var(--line-soft);
+  }
+  table.matrix thead th .mode { color: var(--accent); }
+  table.matrix thead th small { display: block; font-weight: 600; color: var(--faint); font-size: 0.64rem; letter-spacing: 0.04em; margin-top: 0.15rem; }
+  table.matrix tbody th { font-family: var(--sans); font-weight: 600; color: var(--ink); white-space: nowrap; }
+  table.matrix tbody tr:last-child th, table.matrix tbody tr:last-child td { border-bottom: 0; }
+  table.matrix td { text-align: center; }
+  .cell {
+    font-family: var(--mono); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; display: inline-block; padding: 0.18rem 0.5rem; border-radius: 999px;
+    border: 1px solid transparent;
+  }
+  .cell.e  { color: var(--term-green); background: rgba(124,192,139,0.13); border-color: rgba(124,192,139,0.34); }
+  .cell.co { color: var(--term-amber); background: rgba(224,176,74,0.13); border-color: rgba(224,176,74,0.34); }
+  .cell.un { color: var(--faint); background: color-mix(in srgb, var(--faint) 10%, transparent); border-color: color-mix(in srgb, var(--faint) 26%, transparent); }
+  .matrix-key { margin: 1rem 0 0; display: flex; flex-wrap: wrap; gap: 0.5rem 1.1rem; font-size: 0.84rem; color: var(--muted); }
+  .matrix-key span { display: inline-flex; align-items: center; gap: 0.45rem; }
+  .matrix-key i { width: 0.7rem; height: 0.7rem; border-radius: 3px; flex: none; }
+  .matrix-key i.e { background: var(--term-green); }
+  .matrix-key i.co { background: var(--term-amber); }
+  .matrix-key i.un { background: var(--faint); }
+
+  @media (max-width: 620px) { .posture-legend { grid-template-columns: 1fr; } }
+
   /* ---------- feature card grid ---------- */
   .cards { margin: 1.6rem 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
   .fcard {
@@ -335,9 +375,10 @@
   <div class="bar">
     <a class="wordmark" href="./"><svg class="mark" viewBox="24 18 72 85" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="navTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F5A968"/><stop offset="1" stop-color="#E7864A"/></linearGradient></defs><path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/><path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/><path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/><path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/><path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/><path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/><path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#navTop)"/><path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/><path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/><path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/></svg>agentstack</a>
     <nav class="top" aria-label="Project links">
-      <a class="refline" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">reference</a>
-      <a href="library.html">library&nbsp;guide</a>
-      <a class="ghost" href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
+      <a href="#enforced">what's&nbsp;enforced</a>
+      <a class="refline" href="library.html">library&nbsp;guide</a>
+      <a class="refline" href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
+      <a class="ghost" href="start.html">Get&nbsp;started&nbsp;→</a>
     </nav>
   </div>
 </header>
@@ -357,8 +398,8 @@
       <strong>secrets stay references, setups travel.</strong>
     </p>
     <div class="cta">
-      <a class="btn primary" href="#install">Install agentstack</a>
-      <a class="btn secondary" href="https://github.com/Tarekkharsa/agentstack">Star on GitHub</a>
+      <a class="btn primary" href="start.html">Get started · 10 min →</a>
+      <a class="btn secondary" href="#install">Install</a>
     </div>
 
     <div class="term">
@@ -417,12 +458,14 @@
   </section>
 
   <section id="start" class="reveal">
-    <p class="eyebrow">Getting started</p>
+    <p class="eyebrow">Portable config · the other way in</p>
     <h2>From your current setup to every CLI</h2>
     <p>
-      You don't start from a blank page. <code>init</code> reads the agent
-      config already on your machine and turns it into a manifest you can
-      review, commit, and share. (Nothing installed yet? <code>init</code>
+      The <a href="start.html">10-minute Get&nbsp;started journey</a> is the live
+      gateway path — zero files copied. If you'd rather render native config
+      files instead, you don't start from a blank page either: <code>init</code> reads
+      the agent config already on your machine and turns it into a manifest you
+      can review, commit, and share. (Nothing installed yet? <code>init</code>
       writes a commented starter manifest instead — no dead ends on a clean
       machine.)
     </p>
@@ -535,7 +578,7 @@ default = ["claude-code", "codex"]</code></pre>
     </p>
     <dl class="modes">
       <div>
-        <dt>--sandbox <small>proxy-enforced</small></dt>
+        <dt>--sandbox <small>proxied · direct route open</small></dt>
         <dd>The container gets an ordinary bridge network with its
             <code>HTTPS_PROXY</code> pointed at the agentstack proxy: configured
             egress is filtered and recorded. A process that ignores the proxy
@@ -566,6 +609,71 @@ default = ["claude-code", "codex"]</code></pre>
       are closed, the rest tracked in the open. Honest scope: hosts you allow
       stay allowed — the claim is <em>unapproved egress is blocked</em>,
       never "exfiltration is impossible."
+    </p>
+  </section>
+
+  <section id="enforced" class="reveal">
+    <p class="eyebrow">What's enforced where</p>
+    <h2>"Trusted" is not "confined." Here's the difference.</h2>
+    <p class="muted">
+      Trusting a bundle asserts one thing: <strong>this exact content was
+      reviewed and approved</strong> — a claim about bytes, not about a running
+      process. What actually <em>confines</em> a run is its execution mode. Each
+      mode carries a posture label, so a host run and a lockdown run never read
+      the same:
+    </p>
+    <div class="posture-legend">
+      <div><div class="lab">host — <span class="slug">HOST / ADVISORY</span></div><small>No container. The gateway still brokers tool calls, but nothing confines the process's own egress or filesystem.</small></div>
+      <div><div class="lab">gateway — <span class="slug">GATEWAY / BROKERED</span></div><small>Every MCP call routes through the in-process broker: firewalled and audited, but the process runs on the bare machine.</small></div>
+      <div><div class="lab">--sandbox — <span class="slug">SANDBOX / PROXIED · DIRECT ROUTE OPEN</span></div><small>Proxied HTTPS egress is checked against your compiled policy — but the container keeps an ordinary bridge, so a proxy-ignoring process can still dial out. <code>--lockdown</code> closes that route.</small></div>
+      <div><div class="lab">--lockdown — <span class="slug">ENFORCED · NO DIRECT ROUTE</span></div><small>Container on an internal-only network whose sole peer is the egress sidecar. Enforced <em>and</em> topologically confined.</small></div>
+    </div>
+
+    <div class="matrix-wrap">
+      <table class="matrix">
+        <caption class="small muted" style="text-align:left;padding:0.7rem 0.8rem;caption-side:top">Derived from <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">docs/ENFORCEMENT.md</a>, which is checked against the source per cell.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Dimension</th>
+            <th scope="col"><span class="mode">host</span><small>ADVISORY</small></th>
+            <th scope="col"><span class="mode">gateway</span><small>BROKERED</small></th>
+            <th scope="col"><span class="mode">--sandbox</span><small>PROXIED</small></th>
+            <th scope="col"><span class="mode">--lockdown</span><small>NO ROUTE</small></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Tools</th>
+            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell un">unsupported</span></td><td><span class="cell un">unsupported</span></td></tr>
+          <tr><th scope="row">Egress</th>
+            <td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">enforced&thinsp;*</span></td><td><span class="cell e">enforced</span></td></tr>
+          <tr><th scope="row">Secrets</th>
+            <td><span class="cell e">enforced</span></td><td><span class="cell e">enforced</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
+          <tr><th scope="row">Filesystem — write</th>
+            <td><span class="cell un">unsupported</span></td><td><span class="cell un">unsupported</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
+          <tr><th scope="row">Filesystem — read</th>
+            <td><span class="cell un">unsupported</span></td><td><span class="cell un">unsupported</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
+          <tr><th scope="row">Audit / recording</th>
+            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="matrix-key">
+      <span><i class="e"></i><strong>enforced</strong>&nbsp;— a runtime mechanism prevents the disallowed action</span>
+      <span><i class="co"></i><strong>coarse</strong>&nbsp;— a real check runs, at coarser granularity than the policy expresses</span>
+      <span><i class="un"></i><strong>unsupported</strong>&nbsp;— no code path consults the policy here; no check happens</span>
+      <span><i class="co"></i><strong>enforced&thinsp;*</strong>&nbsp;— for proxied traffic only: <code>--sandbox</code>'s bridge network leaves a direct route a proxy-ignoring process could use; <code>--lockdown</code> removes it</span>
+    </div>
+    <p class="small muted" style="margin-top:1.1rem">
+      Read every "enforced" with the ceiling in mind: it means the disallowed
+      action is prevented at runtime — never that the <em>allowed</em> action is
+      safe. An enforced egress allowlist blocks hosts you didn't approve; it
+      doesn't inspect payloads, and it permits traffic to every host you did
+      approve (the model API included). <strong>agentstack restricts destinations
+      and records decisions; it can't guarantee sensitive content never leaves
+      through an allowed destination.</strong> The full per-cell reasoning —
+      including where <code>--sandbox</code>'s bridge network stops short of
+      <code>--lockdown</code>'s topological confinement — is in the
+      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">enforcement matrix</a>.
     </p>
   </section>
 

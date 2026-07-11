@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get started — agentstack</title>
+<meta name="description" content="The ten-minute path: take an unfamiliar agent repo from untrusted → reviewed → confined run → readable report. Every step, the exact command, and what you should see.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:title" content="Get started — agentstack">
+<meta property="og:description" content="The ten-minute path: take an unfamiliar agent repo from untrusted → reviewed → confined run → readable report. Every step, the exact command, and what you should see.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://tarekkharsa.github.io/agentstack/start.html">
+<meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Get started — agentstack">
+<meta name="twitter:description" content="The ten-minute path: untrusted repo → reviewed → confined run → readable report. Exact commands and expected output.">
+<meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
+<style>
+  :root {
+    --paper: #FBFAF7;
+    --surface: #FFFFFF;
+    --ink: #1B1F24;
+    --muted: #5B6570;
+    --faint: #69727C;
+    --accent: #B4540A;
+    --accent-ink: #FFFFFF;
+    --accent-soft: rgba(180, 84, 10, 0.10);
+    --accent-line: rgba(180, 84, 10, 0.28);
+    --line: #E7E2D9;
+    --line-soft: #EFEBE3;
+    --term: #14181C;
+    --term-ink: #D7DEE4;
+    --term-dim: #97A1AD;
+    --term-green: #7CC08B;
+    --term-red: #E5786B;
+    --term-amber: #E0B04A;
+    --code-bg: #F3F0EA;
+    --shadow-sm: 0 1px 2px rgba(20,24,28,0.05), 0 1px 1px rgba(20,24,28,0.03);
+    --shadow-md: 0 4px 14px rgba(20,24,28,0.07), 0 1px 3px rgba(20,24,28,0.05);
+    --shadow-lg: 0 24px 60px -18px rgba(16,22,30,0.28), 0 8px 22px -12px rgba(16,22,30,0.20);
+    --radius: 14px;
+    --radius-sm: 9px;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --wrap: 54rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14171B;
+      --surface: #1A1E23;
+      --ink: #E9E7E2;
+      --muted: #9AA3AC;
+      --faint: #737C85;
+      --accent: #F0975A;
+      --accent-ink: #1A1206;
+      --accent-soft: rgba(240,151,90,0.12);
+      --accent-line: rgba(240,151,90,0.30);
+      --line: #292E34;
+      --line-soft: #23282E;
+      --code-bg: #1E2329;
+      --term: #0E1114;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.30);
+      --shadow-md: 0 6px 18px rgba(0,0,0,0.32);
+      --shadow-lg: 0 30px 70px -20px rgba(0,0,0,0.60), 0 10px 24px -12px rgba(0,0,0,0.45);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 17px/1.65 var(--sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  ::selection { background: var(--accent-soft); }
+
+  .skip { position: absolute; left: -9999px; top: 0; z-index: 100; background: var(--accent); color: var(--accent-ink); padding: 0.5rem 0.9rem; border-radius: 0 0 var(--radius-sm) 0; }
+  .skip:focus { left: 0; }
+
+  /* ---------- sticky nav ---------- */
+  header.site {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--paper) 78%, transparent);
+    -webkit-backdrop-filter: saturate(1.4) blur(12px);
+    backdrop-filter: saturate(1.4) blur(12px);
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  header.site.scrolled { border-bottom-color: var(--line); box-shadow: var(--shadow-sm); }
+  .bar {
+    max-width: var(--wrap); margin: 0 auto; padding: 0.8rem 1.35rem;
+    display: flex; align-items: center; gap: 1.1rem;
+  }
+  .wordmark {
+    font-family: var(--mono); font-weight: 700; font-size: 1.02rem; color: var(--ink);
+    display: inline-flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em;
+  }
+  .wordmark:hover { text-decoration: none; }
+  .wordmark .mark {
+    height: 26px; width: auto; flex: none; display: block;
+    filter: drop-shadow(0 1px 1.5px rgba(20,24,28,0.18));
+  }
+  nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.15rem; flex-wrap: wrap; }
+  nav.top a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+  nav.top a:hover { color: var(--accent); text-decoration: none; }
+  nav.top a[aria-current="page"] { color: var(--accent); }
+  nav.top .ghost {
+    padding: 0.34rem 0.7rem; border: 1px solid var(--line); border-radius: 7px;
+    color: var(--ink);
+  }
+  nav.top .ghost:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+
+  /* ---------- layout ---------- */
+  main { max-width: var(--wrap); margin: 0 auto; padding: 0 1.35rem 6rem; }
+  section { margin-top: 4.5rem; scroll-margin-top: 5rem; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
+    letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent);
+    margin: 0 0 0.7rem; display: inline-flex; align-items: center; gap: 0.55rem;
+  }
+  .eyebrow::before { content: ""; width: 1.6rem; height: 1px; background: var(--accent-line); }
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(1.8rem, 5.2vw, 2.7rem);
+    line-height: 1.14; letter-spacing: -0.03em; font-weight: 700;
+    margin: 1.1rem 0 1.1rem;
+  }
+  h1 .accent { color: var(--accent); }
+  h2 {
+    font-family: var(--mono); font-size: 1.28rem; letter-spacing: -0.015em; font-weight: 700;
+    margin: 0 0 0.9rem;
+  }
+  h3 { font-family: var(--mono); font-size: 1rem; font-weight: 700; margin: 1.6rem 0 0.6rem; }
+  p { margin: 0 0 1rem; }
+  .lede { font-size: 1.14rem; line-height: 1.6; color: var(--muted); max-width: 44rem; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .muted { color: var(--muted); }
+  .small { font-size: 0.86rem; }
+
+  /* ---------- callout ---------- */
+  .callout {
+    border: 1px solid var(--accent-line); background: var(--accent-soft);
+    border-radius: var(--radius-sm); padding: 1rem 1.15rem; margin: 1.5rem 0 0;
+    font-size: 0.95rem;
+  }
+  .callout b { font-family: var(--mono); font-size: 0.82rem; letter-spacing: 0.02em; }
+  .callout p { margin: 0.4rem 0 0; color: var(--muted); }
+  .callout p:first-of-type { margin-top: 0.35rem; }
+
+  /* ---------- code + terminal ---------- */
+  code {
+    font-family: var(--mono); font-size: 0.86em;
+    background: var(--code-bg); padding: 0.12em 0.36em; border-radius: 5px;
+    border: 1px solid var(--line-soft);
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 1rem 1.15rem; overflow-x: auto; margin: 0 0 1rem;
+    font: 0.84rem/1.6 var(--mono);
+  }
+  pre code { background: none; padding: 0; border: 0; font-size: 1em; }
+
+  .term {
+    background: var(--term); color: var(--term-ink);
+    border-radius: var(--radius); margin: 0.9rem 0 0.5rem;
+    box-shadow: var(--shadow-md);
+    border: 1px solid rgba(255,255,255,0.06);
+    overflow: hidden;
+  }
+  .term-head {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.6rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.015);
+  }
+  .term-head i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .term-head .r { background: var(--term-red); }
+  .term-head .y { background: var(--term-amber); }
+  .term-head .g { background: var(--term-green); }
+  .term-head b {
+    margin-left: auto; font: 600 0.7rem var(--mono); color: var(--term-dim); letter-spacing: 0.06em;
+  }
+  .term pre {
+    background: none; border: 0; margin: 0; padding: 1.05rem 1.25rem 1.2rem;
+    color: inherit; font-size: 0.85rem; line-height: 1.62;
+  }
+  .term .p { color: var(--accent); user-select: none; font-weight: 600; }
+  .term .c { color: var(--term-dim); }
+  .term .ok { color: var(--term-green); }
+  .term .no { color: var(--term-red); }
+  .term .am { color: var(--term-amber); }
+
+  .copywrap { position: relative; }
+  .copybtn {
+    position: absolute; top: 0.5rem; right: 0.5rem;
+    font: 600 0.68rem var(--mono); letter-spacing: 0.04em;
+    color: var(--muted); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 0.28rem 0.6rem; cursor: pointer; transition: color 0.14s, border-color 0.14s;
+  }
+  .copybtn:hover { color: var(--accent); border-color: var(--accent-line); }
+
+  /* ---------- numbered steps ---------- */
+  ol.walk { list-style: none; counter-reset: step; margin: 2.5rem 0 0; padding: 0; }
+  ol.walk > li {
+    counter-increment: step; position: relative;
+    padding: 0 0 2.5rem 3.4rem; border-left: 1px solid var(--line);
+    margin-left: 1.1rem;
+  }
+  ol.walk > li:last-child { border-left-color: transparent; padding-bottom: 0.5rem; }
+  ol.walk > li::before {
+    content: counter(step); position: absolute; left: -1.1rem; top: -0.15rem;
+    width: 2.2rem; height: 2.2rem; border-radius: 50%;
+    background: var(--surface); border: 1px solid var(--accent-line);
+    color: var(--accent); font: 700 0.95rem var(--mono);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: var(--shadow-sm);
+  }
+  ol.walk > li > h2 { margin-top: -0.1rem; font-size: 1.14rem; }
+  ol.walk .expect {
+    font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--faint); margin: 1.1rem 0 0.1rem;
+  }
+
+  /* ---------- next cards ---------- */
+  .cards { margin: 1.6rem 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
+  .fcard {
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+    padding: 1.15rem 1.25rem; box-shadow: var(--shadow-sm);
+    transition: transform 0.14s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+    display: flex; flex-direction: column;
+  }
+  .fcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--accent-line); }
+  .fcard h3 { margin: 0 0 0.5rem; font-size: 0.98rem; }
+  .fcard h3 a { color: var(--ink); }
+  .fcard h3 a:hover { color: var(--accent); }
+  .fcard p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.55; }
+
+  /* ---------- footer ---------- */
+  footer { border-top: 1px solid var(--line); margin-top: 6rem; background: var(--line-soft); }
+  footer .bar { padding: 1.6rem 1.35rem; font-size: 0.85rem; color: var(--muted); }
+  footer nav { margin-left: auto; display: flex; gap: 1.1rem; }
+  footer nav a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+  footer nav a:hover { color: var(--accent); }
+
+  @media (max-width: 620px) {
+    body { font-size: 16px; }
+    .cards { grid-template-columns: 1fr; }
+    nav.top { gap: 0.85rem; }
+    nav.top .refline { display: none; }
+    section { margin-top: 3.5rem; }
+    ol.walk > li { padding-left: 2.9rem; }
+  }
+</style>
+<link rel="canonical" href="https://tarekkharsa.github.io/agentstack/start.html">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site" id="site-header">
+  <div class="bar">
+    <a class="wordmark" href="./"><svg class="mark" viewBox="24 18 72 85" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="navTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F5A968"/><stop offset="1" stop-color="#E7864A"/></linearGradient></defs><path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/><path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/><path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/><path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/><path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/><path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/><path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#navTop)"/><path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/><path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/><path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/></svg>agentstack</a>
+    <nav class="top" aria-label="Project links">
+      <a href="index.html#enforced">what's enforced</a>
+      <a href="start.html" aria-current="page">get&nbsp;started</a>
+      <a class="refline" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">reference</a>
+      <a class="ghost" href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section id="intro" style="margin-top:3.25rem">
+    <p class="eyebrow">Get started · ~10 minutes</p>
+    <h1>Take an unfamiliar repo from <span class="accent">untrusted</span> to a confined run you can read back.</h1>
+    <p class="lede">
+      This is the whole journey, in order: install, point agentstack at an
+      agent-enabled repo, watch it stay <strong>inert</strong> until you review
+      and trust the exact content, run it <strong>confined</strong>, then read
+      the flight recorder. Every step below is the exact command and what you
+      should see. <strong>Steps 1–5 need nothing but the binary; the confined
+      run in step 6 needs Docker.</strong>
+    </p>
+    <div class="callout">
+      <b>What needs Docker, and what doesn't</b>
+      <p>The trust gate, the tool firewall, secret resolution, and the call
+        audit log all run natively — no container, no Docker. Only the
+        <code>--sandbox</code> / <code>--lockdown</code> runs in step 6 spawn a
+        container, so those are the only steps that need Docker installed and
+        running. If you don't have Docker, stop after step 5: you'll still have
+        a fully trust-gated, firewalled, audited setup.</p>
+    </div>
+  </section>
+
+  <ol class="walk">
+
+    <li id="s-install">
+      <h2>Install the binary</h2>
+      <p class="muted">
+        The installer downloads the release tarball for your platform and
+        verifies it against the <code>checksums.txt</code> published with the
+        release before installing. One static binary, no runtime dependencies.
+      </p>
+      <div class="copywrap">
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</code></pre>
+        <button class="copybtn" data-copy="curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh">copy</button>
+      </div>
+      <p class="small muted">
+        Prefer to build it yourself? From a checkout: <code>cargo build
+        --release</code>, then <code>./target/release/agentstack self link</code>
+        to symlink it onto your <code>PATH</code>. Release binaries are built
+        with sandbox support compiled in, so <code>run --sandbox</code> works
+        out of the box; a bare <code>cargo build</code> omits it unless you pass
+        <code>--features sandbox</code>.
+      </p>
+      <p class="expect">You should see</p>
+      <div class="term">
+        <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>verify version</b></div>
+        <pre><code><span class="p">$</span> agentstack --version
+<span class="c">agentstack 0.8.x</span></code></pre>
+      </div>
+    </li>
+
+    <li id="s-connect">
+      <h2>Register the gateway, once</h2>
+      <p class="muted">
+        One registration teaches every installed agent CLI to reach its MCP
+        servers <em>through</em> agentstack instead of directly. No files are
+        copied into any repo — the gateway serves each project live, behind the
+        trust gate you're about to meet. <code>connect</code> without
+        <code>--write</code> is a dry run that shows the exact config diff first.
+      </p>
+      <div class="copywrap">
+        <pre><code>agentstack connect --all            # dry run: shows what would change
+agentstack connect --all --write    # write it into each harness's global MCP config</code></pre>
+        <button class="copybtn" data-copy="agentstack connect --all --write">copy</button>
+      </div>
+      <p class="small muted">
+        Undo any time with <code>agentstack disconnect</code>; verify with
+        <code>agentstack doctor</code>.
+      </p>
+    </li>
+
+    <li id="s-clone">
+      <h2>Clone a repo — and watch it stay inert</h2>
+      <p class="muted">
+        Grab any repo that ships its own agent setup. (No repo in mind? The
+        runnable <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/trust-gate-demo.sh"><code>docs/trust-gate-demo.sh</code></a>
+        builds a tiny one for you.) Before you've reviewed it, ask an agent what
+        it can use here — the answer is <em>nothing</em>. No MCP server is
+        spawned or contacted, no secret is resolved, no skill enters context.
+        That inert-until-trusted invariant is property-tested in the trust crate.
+      </p>
+      <p class="expect">You should see</p>
+      <div class="term">
+        <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>untrusted → inert</b></div>
+        <pre><code><span class="p">$</span> git clone https://github.com/some/agent-repo &amp;&amp; cd agent-repo
+<span class="p">$</span> agentstack mcp --auto-project     <span class="c"># an agent asks: what can I touch here?</span>
+<span class="no">  ✗ untrusted — no servers spawned, no secrets resolved, nothing in context</span></code></pre>
+      </div>
+    </li>
+
+    <li id="s-trust">
+      <h2>Review what it declares, then trust it</h2>
+      <p class="muted">
+        <code>trust</code> shows you exactly what the repo declares — the
+        servers it would spawn and the commands behind them — <em>before</em> you
+        authorize anything. Trust pins a content digest of the
+        <strong>manifest and lockfile</strong>, not the arbitrary code they point
+        at, so read any referenced script as part of the review (the same
+        discipline as reading a <code>.envrc</code> before <code>direnv allow</code>).
+        Any later edit to the manifest or lock re-gates the repo — new pins mean
+        fresh consent.
+      </p>
+      <div class="copywrap">
+        <pre><code>agentstack trust .</code></pre>
+        <button class="copybtn" data-copy="agentstack trust .">copy</button>
+      </div>
+      <p class="expect">You should see</p>
+      <div class="term">
+        <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>review → consent</b></div>
+        <pre><code><span class="p">$</span> agentstack trust .
+<span class="c">  ▶ demo: runs `python3 ./server.py`</span>   <span class="c"># exactly what it would run</span>
+<span class="ok">  ✓</span> trusted at sha256:945b4b…             <span class="c"># editing the manifest re-gates it</span></code></pre>
+      </div>
+      <p class="small muted">
+        Now the same <code>agentstack mcp --auto-project</code> serves the repo's
+        servers live — and every brokered call passes two firewall layers (the
+        repo's <code>[policy.tools]</code> and your machine-level rules, which no
+        repo can loosen) and lands in <code>~/.agentstack/audit/calls.jsonl</code>.
+      </p>
+    </li>
+
+    <li id="s-secret">
+      <h2>Store any secret it needs — in your keychain</h2>
+      <p class="muted">
+        If the repo references a token (as a <code>${REF}</code>), store it once.
+        It goes into your OS keychain, never into the manifest or any committed
+        file. Resolution is fail-closed: if a referenced secret can't resolve, the
+        write or run is blocked rather than emitting a placeholder into live config.
+      </p>
+      <div class="copywrap">
+        <pre><code>agentstack bootstrap            # names any missing secret
+agentstack secret set GH_PAT    # store it in the OS keychain</code></pre>
+        <button class="copybtn" data-copy="agentstack secret set GH_PAT">copy</button>
+      </div>
+      <p class="small muted">
+        <code>agentstack doctor</code> confirms every server, skill, and secret
+        is wired up, and names the exact fix for anything that isn't.
+      </p>
+    </li>
+
+    <li id="s-run">
+      <h2>Run it confined <span class="small muted" style="font-weight:400">— needs Docker</span></h2>
+      <p class="muted">
+        The trust gate decides what the agent <em>may</em> do.
+        <code>run --sandbox</code> decides what it <em>can</em> do: the harness
+        runs in a container whose egress is filtered by your machine
+        <code>[policy.egress]</code>, and <code>--lockdown</code> goes further —
+        the container's only network peer is the egress-proxy sidecar, so an
+        agent that ignores the proxy reaches <em>nothing</em>. Preview the exact
+        enforcement plan and posture first with <code>--plan</code>, then launch.
+      </p>
+      <div class="callout">
+        <b>Prerequisites for this step</b>
+        <p>Docker installed and running. The container runs <em>your</em>
+          harness, so <code>--sandbox</code> needs a runner image that carries
+          it — build one from
+          <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docker/sandbox.Dockerfile"><code>docker/sandbox.Dockerfile</code></a>
+          and point <code>AGENTSTACK_SANDBOX_IMAGE</code> at it. The
+          <code>--lockdown</code> egress sidecar needs no setup: each release
+          publishes it to GHCR and the binary pulls the version-pinned tag on
+          first use.</p>
+      </div>
+      <div class="copywrap">
+        <pre><code>agentstack run claude-code --sandbox --lockdown --plan   # preview posture + enforcement
+agentstack run claude-code --sandbox --lockdown          # launch confined</code></pre>
+        <button class="copybtn" data-copy="agentstack run claude-code --sandbox --lockdown">copy</button>
+      </div>
+      <p class="expect">You should see</p>
+      <div class="term">
+        <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>lockdown / enforced · no direct route</b></div>
+        <pre><code><span class="p">$</span> agentstack run claude-code --sandbox --lockdown
+<span class="am">  ▲ LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span>   <span class="c"># the posture, once, up front</span>
+<span class="c">  container on an internal-only network → sole peer is the egress proxy</span>
+<span class="ok">  ✓</span> api.anthropic.com:443   <span class="c">allowed by [policy.egress] — recorded</span>
+<span class="no">  ✗</span> evil.example.com:443    <span class="c">denied — no such host in policy — recorded</span></code></pre>
+      </div>
+      <figure style="margin:1.5rem 0 0">
+        <img src="lockdown.gif" alt="Terminal recording: a lockdown container with no host route tries a direct connection and reaches nothing; a proxied request to a denied host is blocked and recorded" style="max-width:100%;border-radius:var(--radius);border:1px solid var(--line);box-shadow:var(--shadow-md);display:block" width="961" height="764" loading="lazy">
+        <figcaption class="small muted" style="margin-top:0.7rem">Runnable end to end (needs Docker): <a href="https://github.com/Tarekkharsa/agentstack/blob/main/agentstack-test/demo-lockdown.sh"><code>agentstack-test/demo-lockdown.sh</code></a>.</figcaption>
+      </figure>
+      <p class="small muted">
+        Honest scope: hosts you allow stay reachable. agentstack
+        <strong>restricts destinations and records every decision</strong> — it
+        does not inspect payloads, so it can't guarantee sensitive content never
+        leaves through a host you approved. The claim is <em>unapproved egress is
+        blocked</em>, never "exfiltration is impossible."
+      </p>
+    </li>
+
+    <li id="s-report">
+      <h2>Read the flight recorder</h2>
+      <p class="muted">
+        Nothing trusted runs unobserved. A sandbox run fails closed if its run log
+        can't be created; that log captures the container lifecycle and every
+        egress decision, tagged with the run's posture.
+        <code>agentstack report</code> reads it back.
+      </p>
+      <div class="copywrap">
+        <pre><code>agentstack report              # the latest run's decisions
+agentstack report &lt;run&gt; --json # machine-readable, carries the posture slug</code></pre>
+        <button class="copybtn" data-copy="agentstack report">copy</button>
+      </div>
+      <p class="expect">You should see</p>
+      <div class="term">
+        <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>agentstack report</b></div>
+        <pre><code><span class="p">$</span> agentstack report
+<span class="c">  run 2026-07-11T…  posture: LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span>
+<span class="c">  ├─ SandboxStarted   image=…  network=internal-only</span>
+<span class="ok">  ├─ egress ✓</span> api.anthropic.com:443   allowed
+<span class="no">  ├─ egress ✗</span> evil.example.com:443    denied
+<span class="c">  └─ SandboxExited    code=0</span></code></pre>
+      </div>
+      <p class="small muted">
+        Ran in host or gateway mode instead of a container? There's no flight
+        recorder, but every brokered tool call is still in the call audit log —
+        <code>~/.agentstack/audit/calls.jsonl</code>, one line per call (tool ·
+        outcome · latency), storing an argument <em>digest</em> only, never raw
+        values or resolved secrets. The run log fills out to cover individual
+        tool calls and secret refs in a later phase — see the
+        <a href="index.html#enforced">enforcement matrix</a> for exactly what each
+        mode records today.
+      </p>
+    </li>
+
+  </ol>
+
+  <section id="next">
+    <p class="eyebrow">Where to go next</p>
+    <h2>You've done the loop. Here's the rest.</h2>
+    <div class="cards">
+      <div class="fcard">
+        <h3><a href="index.html#enforced">What's enforced where</a></h3>
+        <p>The compact, code-grounded matrix: for host, gateway, sandbox, and
+           lockdown, exactly which of tools, egress, secrets, filesystem, and
+           audit are enforced, coarse, or unsupported.</p>
+      </div>
+      <div class="fcard">
+        <h3><a href="index.html#start">Render config for 13 CLIs</a></h3>
+        <p>Prefer native config files over the live gateway?
+           <code>init → apply</code> turns one manifest into the native setup for
+           Claude Code, Codex, Cursor, and ten more — secrets stay references.</p>
+      </div>
+      <div class="fcard">
+        <h3><a href="library.html">Central library</a></h3>
+        <p>Install a skill or server once into your machine-wide library, then
+           reference it by name from any project — no copying files between repos,
+           every add content-scanned first.</p>
+      </div>
+      <div class="fcard">
+        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Feature reference</a></h3>
+        <p>The complete tested inventory: machine-policy presets, vendor packs,
+           the MCP firewall, <code>optimize</code>, plugin recipes, live runs,
+           code mode, and every command and flag.</p>
+      </div>
+      <div class="fcard">
+        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">Enforcement matrix (full)</a></h3>
+        <p>The authoritative, per-cell source — checked against the code, with the
+           claim-discipline ceiling stated up front and every mechanism named.</p>
+      </div>
+      <div class="fcard">
+        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">The no-terminal path</a></h3>
+        <p>The whole lifecycle — discover, add, secrets, apply, verify, undo —
+           from a local, token-gated dashboard, with read-only Proxy and Insights
+           panels.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="bar">
+    <span>MIT or Apache-2.0, at your option.</span>
+    <nav aria-label="Footer links">
+      <a href="index.html">home</a>
+      <a href="https://github.com/Tarekkharsa/agentstack">source</a>
+      <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
+      <a href="security-review-2026-07-11.html">security&nbsp;review</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+  document.documentElement.classList.add("js");
+  for (const btn of document.querySelectorAll(".copybtn")) {
+    btn.setAttribute("aria-live", "polite");
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copy);
+        btn.textContent = "copied";
+        setTimeout(() => (btn.textContent = "copy"), 1600);
+      } catch { btn.textContent = "select + copy"; }
+    });
+  }
+  const header = document.getElementById("site-header");
+  const onScroll = () => header.classList.toggle("scrolled", window.scrollY > 8);
+  addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+</script>
+
+</body>
+</html>
