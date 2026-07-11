@@ -225,6 +225,17 @@ is a security-review event, not a refactor. (Rendered-config modes hand the
 transport to the harness itself and are governed at write time — the
 advisory framing above.)
 
+**One enforcement-plan boundary for a sandbox run:** `run --sandbox` assembles
+its security model in exactly one seam, `ExecutionPlan::build` — it checks
+trust, compiles the effective (machine ∩ bundle) policy, resolves the mounts +
+command, and picks the egress mode, returning one immutable plan. A command then
+`execute`s that plan (which creates the fail-closed run log and the per-run proxy
+token once, then dispatches to the mode) or `display`s it (`--plan`: a
+Docker-free dry run that names the trust state, mode, and exact command). The
+mode executors no longer re-derive any of it, so a run can't skip a check by
+taking a different path — the same discipline as the single gateway dispatch,
+applied to run assembly.
+
 **Sandbox mode** (Phase 2): `agentstack run --sandbox` launches the CLI in a
 container via the Docker API (`bollard`). Its only route out is the **egress
 proxy**, which enforces the compiled ruleset and emits one event per decision

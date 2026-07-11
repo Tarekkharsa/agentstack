@@ -238,11 +238,17 @@ tracked to closure so this plan and the report can't drift apart:
   (L3 — latency, not correctness); `trust`
   still carries `anyhow` + `toml` (L5 code half, TODO-tracked for the Phase 1
   rule-6 sweep).
-- **Structural recommendation, unscheduled:** the reviewers' "one
-  enforcement-plan boundary" — a library API that turns a trusted, resolved
-  bundle into one immutable plan that commands execute or display, instead of
-  re-assembling the security model per command in the large `cli` files.
-  Worth its own design session before Phase 3 grows the surface further.
+- **Structural recommendation — DONE for the sandbox run path:** the reviewers'
+  "one enforcement-plan boundary" now exists for `run --sandbox`.
+  `ExecutionPlan::build` is the single seam that assembles a run — checks trust
+  (the previously-missing "verified content identity"), compiles the effective
+  policy, resolves mounts + command, picks the mode — and returns an immutable
+  plan that commands `execute` (one fail-closed run log + one proxy token,
+  created once, no per-mode duplication) or `display` (`--plan`, a Docker-free
+  dry run that names trust state, mode, and the exact command). Three
+  independent reviewers (Codex + two workflow checkers) confirmed the run is
+  behavior-preserved. Extending the same boundary to the host-mode run and the
+  gateway remains future work.
 
 ## Phase 3 — Flight recorder surface
 

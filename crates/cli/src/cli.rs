@@ -448,6 +448,13 @@ pub struct RunArgs {
     #[arg(long)]
     pub lockdown: bool,
 
+    /// Print the fully-assembled execution plan — trust state, effective policy
+    /// mount, egress mode, and the exact command — then exit WITHOUT running
+    /// anything. The one auditable description of what a sandbox run would do.
+    /// Works without Docker or the `sandbox` feature.
+    #[arg(long)]
+    pub plan: bool,
+
     /// Extra arguments passed through to the harness (after `--`).
     #[arg(
         trailing_var_arg = true,
