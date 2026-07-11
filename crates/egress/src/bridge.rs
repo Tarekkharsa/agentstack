@@ -10,7 +10,7 @@
 //! is the runtime's remaining Docker-dependent step.
 
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use agentstack_policy::CompiledRuleset;
@@ -34,11 +34,23 @@ pub struct EgressBridge {
 }
 
 impl EgressBridge {
-    /// Bind and start one proxy per server (on loopback ephemeral ports),
-    /// each filtering for its own server name against the shared compiled
-    /// ruleset and reporting to `sink`. Returns the bridge (keep it alive for
-    /// the run) and the endpoints to route each server's traffic to.
+    /// Bind and start one proxy per server on loopback ephemeral ports — the
+    /// convenience for tests and single-host use.
     pub async fn start(
+        servers: &[String],
+        ruleset: CompiledRuleset,
+        sink: EventSink,
+    ) -> io::Result<(EgressBridge, Vec<ProxyEndpoint>)> {
+        Self::start_on(IpAddr::V4(Ipv4Addr::LOCALHOST), servers, ruleset, sink).await
+    }
+
+    /// Bind and start one proxy per server on `bind` (ephemeral ports), each
+    /// filtering for its own server name against the shared compiled ruleset
+    /// and reporting to `sink`. Returns the bridge (keep it alive for the run)
+    /// and the endpoints to route each server's traffic to. A sandbox binds
+    /// `0.0.0.0` so a container can reach the proxies via `host.docker.internal`.
+    pub async fn start_on(
+        bind: IpAddr,
         servers: &[String],
         ruleset: CompiledRuleset,
         sink: EventSink,
@@ -46,7 +58,7 @@ impl EgressBridge {
         let mut tasks = Vec::new();
         let mut endpoints = Vec::new();
         for server in servers {
-            let listener = TcpListener::bind("127.0.0.1:0").await?;
+            let listener = TcpListener::bind((bind, 0)).await?;
             let addr = listener.local_addr()?;
             let proxy = ServerProxy::new(
                 server.clone(),

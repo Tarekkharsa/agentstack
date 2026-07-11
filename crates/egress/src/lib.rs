@@ -24,12 +24,14 @@
 
 #![forbid(unsafe_code)]
 
+pub mod blocking;
 pub mod bridge;
 pub mod connect;
 pub mod decide;
 pub mod proxy;
 pub mod sni;
 
+pub use blocking::BlockingBridge;
 pub use bridge::{EgressBridge, ProxyEndpoint};
 pub use connect::{parse_connect_target, Target};
 pub use decide::{Decision, EgressGuard};
