@@ -78,18 +78,30 @@ That's the whole everyday loop. Two habits worth keeping:
 
 ## Why
 
-Setting up AI agents by hand has three problems:
+Every skill, MCP server, and agent config you adopt is **unreviewed code plus
+instructions**, wired into a process that holds your credentials, your shell,
+and the network. Installing one is `npm install` with an agent attached —
+except with no lockfile, no review gate, and no record of what it did. Three
+gaps follow:
 
-1. **Every CLI spells the same thing differently** — one MCP server, six
-   config syntaxes.
-2. **Setups drift and don't travel** — a new laptop or teammate means redoing
-   everything, slightly differently.
-3. **Secrets end up in the wrong places** — real tokens pasted into files that
-   were never meant to be shared.
+1. **Anything a repo declares can run.** Clone it, start an agent session,
+   and its MCP servers want to spawn — commands you never read, with your
+   keychain in reach. Here a clone is *inert* until you trust its exact
+   bytes, and any edit re-gates it.
+2. **Nothing narrows or records what agents do.** Consent today is
+   all-or-nothing and unlogged; an injected prompt can turn a legitimate tool
+   against you. Here your *machine policy* — which no repo can loosen —
+   fences tools, secrets, and egress; every brokered call lands in an audit
+   log; `--lockdown` removes the network route entirely. (Honest scope: what
+   each mode enforces is spelled out in the
+   [enforcement matrix](docs/ENFORCEMENT.md).)
+3. **Every CLI spells the same setup differently** — six config syntaxes,
+   drifting copies, real tokens pasted into files that were never meant to be
+   shared. Here one reviewed manifest renders them all, secrets stay
+   references, and a lockfile makes it reproducible.
 
-One reviewed file fixes all three: secrets stay references, a lockfile makes
-setups reproducible, and one `apply` renders everything everywhere. If you use
-a single agent with one hand-managed server, you probably don't need this yet.
+If you use a single agent with one hand-managed server, you may not need this
+yet. The moment capabilities come from repos you didn't write, you do.
 
 ## A manifest at a glance
 

@@ -474,6 +474,58 @@
     </div>
   </section>
 
+  <section id="why" class="reveal">
+    <p class="eyebrow">Why this exists</p>
+    <h2>Your agents run whatever your repos tell them to.</h2>
+    <p class="muted">
+      Every skill, MCP server, and agent config you adopt is
+      <strong style="color:var(--ink)">unreviewed code plus instructions</strong>,
+      wired into a process that holds your credentials, your shell, and the
+      network. Installing one is <code>npm install</code> with an agent
+      attached — except with no lockfile, no review gate, and no record of
+      what it did. Three gaps follow from that:
+    </p>
+    <div class="cards">
+      <div class="fcard">
+        <h3>One clone away</h3>
+        <p>A repo can declare MCP servers, and the moment an agent session
+           starts, they want to run — commands you never read, with your
+           keychain in reach.<br>
+           <span style="color:var(--accent)">→</span> Here, a clone is
+           <strong>inert</strong> until you trust its exact bytes. Any edit
+           re-gates it.</p>
+      </div>
+      <div class="fcard">
+        <h3>One prompt away</h3>
+        <p>An injected instruction can steer a well-behaved agent into using a
+           legitimate tool against you — deleting, leaking, phoning home.<br>
+           <span style="color:var(--accent)">→</span> Here, your
+           <strong>machine policy</strong> — which no repo can loosen — fences
+           tools, secrets, and egress; <code>--lockdown</code> removes the
+           network route entirely.</p>
+      </div>
+      <div class="fcard">
+        <h3>Invisible afterwards</h3>
+        <p>When something does go wrong, most setups can't answer the first
+           question a reviewer asks: <em>what did the agent actually
+           call?</em><br>
+           <span style="color:var(--accent)">→</span> Here, every brokered
+           call, denial, and secret touch lands in an
+           <strong>audit log</strong> you can read back per run.</p>
+      </div>
+      <div class="fcard">
+        <h3>Honestly scoped</h3>
+        <p>No tool can make agent use risk-free: hosts you allow stay allowed,
+           and payloads aren't inspected.<br>
+           <span style="color:var(--accent)">→</span> That's why every mode
+           carries an <a href="#enforced">honest posture label</a> — and if
+           you run one agent with one hand-managed server, you may not need
+           this yet. The moment capabilities come from repos you didn't
+           write, you do.</p>
+      </div>
+    </div>
+  </section>
+
   <section id="install" class="reveal">
     <p class="eyebrow">Install</p>
     <div class="copywrap">
