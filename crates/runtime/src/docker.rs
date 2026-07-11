@@ -97,6 +97,11 @@ impl Sandbox for DockerSandbox {
         };
         let body = ContainerCreateBody {
             image: Some(spec.image.clone()),
+            // The spec's command is the FULL argv the sandbox should run, so
+            // clear any image entrypoint that would otherwise prepend to it —
+            // `command` is authoritative regardless of which image is used
+            // (e.g. `curlimages/curl`, whose entrypoint is `curl`).
+            entrypoint: Some(vec![]),
             cmd: Some(spec.command.clone()),
             working_dir: Some(spec.workdir.clone()),
             env: Some(env),
