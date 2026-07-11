@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  packages: write   # push the egress-proxy sidecar image to GHCR
 
 env:
   # Resilience against flaky crates.io fetches on the runners.
@@ -87,3 +88,36 @@ jobs:
             assets/agentstack-*.tar.gz
             assets/agentstack-*.zip
             assets/checksums.txt
+
+  # The egress-proxy sidecar image `--lockdown` needs, published so lockdown
+  # works without users hand-building it. Namespace derives from the repo owner
+  # (no hardcoded org), and GHCR pushes with the built-in token — no secrets to
+  # set up. Users then pull it and set AGENTSTACK_EGRESS_IMAGE to the tag.
+  #
+  # Decision left to the maintainer: to make lockdown work with NO env var,
+  # publish instead to Docker Hub `agentstack/egress-proxy` (the code's default
+  # tag) — that needs the `agentstack` org + DOCKERHUB_* secrets; swap the
+  # registry/login below. A companion sandbox RUNNER image is intentionally not
+  # published: it must carry the user's chosen harness (see docker/sandbox.Dockerfile).
+  egress-image:
+    name: publish egress-proxy image (GHCR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lowercase owner (GHCR requires lowercase paths)
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/egress-proxy.Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/agentstack-egress-proxy:${{ github.ref_name }}
+            ghcr.io/${{ env.OWNER_LC }}/agentstack-egress-proxy:latest

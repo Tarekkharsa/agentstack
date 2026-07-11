@@ -25,6 +25,13 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
+      # The default clippy/test above do NOT compile the feature-gated
+      # enforcement code (the Docker sandbox backend + the cli sandbox path), so
+      # a regression there would otherwise pass CI green. Lint them explicitly.
+      - name: Clippy (enforcement features)
+        run: |
+          cargo clippy -p agentstack-runtime --features docker --all-targets -- -D warnings
+          cargo clippy -p agentstack --features sandbox --all-targets -- -D warnings
       - name: Test
         run: cargo test --all
       - name: Conformance classifier self-test
@@ -35,3 +42,25 @@ jobs:
         run: |
           cargo build --release
           bash examples/malicious-repo-demo/run-demo.sh
+
+  # The flagship security feature — the sandbox + egress proxy + lockdown — only
+  # exists behind the `sandbox`/`docker` features and is proven against a real
+  # Docker daemon. GitHub's ubuntu runners ship Docker, so run the end-to-end
+  # enforcement suite here: a regression that lets a sandboxed container reach a
+  # denied host, or that breaks the no-direct-route lockdown, MUST fail CI.
+  sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Sidecar image + policy enforcement (Docker)
+        run: cargo test -p agentstack-egress --test sidecar_image -- --nocapture
+      - name: Sandbox egress + lockdown end-to-end (Docker)
+        run: |
+          cargo test -p agentstack --features sandbox \
+            --test sandbox_egress \
+            --test sandbox_cli_e2e \
+            --test sandbox_fs \
+            --test sandbox_lockdown \
+            -- --nocapture

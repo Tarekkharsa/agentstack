@@ -47,7 +47,26 @@ repo `tarekkh/homebrew-tap`, then:
 brew install Tarekkharsa/tap/agentstack
 ```
 
-## 4. crates.io (optional)
+## 4. Container images (sandbox / lockdown)
+
+The tag also builds and pushes the **egress-proxy sidecar** image `--lockdown`
+needs, to `ghcr.io/<owner>/agentstack-egress-proxy:{tag,latest}` (see the
+`egress-image` job in `release.yml`, GHCR, no secrets). After a release, lockdown
+users pull it and set `AGENTSTACK_EGRESS_IMAGE` to that tag.
+
+**One decision before v1:** the code's default egress tag is
+`agentstack/egress-proxy:latest` (Docker Hub). Either (a) keep GHCR and tell
+users to set `AGENTSTACK_EGRESS_IMAGE`, or (b) publish to Docker Hub
+`agentstack/egress-proxy` so lockdown works with no env var — that needs the
+`agentstack` org + `DOCKERHUB_*` secrets; swap the registry in the `egress-image`
+job.
+
+The **sandbox runner** image (the harness cage) is *not* published: it must carry
+your chosen harness. Users build it from
+[`docker/sandbox.Dockerfile`](docker/sandbox.Dockerfile) and set
+`AGENTSTACK_SANDBOX_IMAGE`.
+
+## 5. crates.io (optional)
 
 ```sh
 cargo publish --dry-run   # verify the package

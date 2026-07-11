@@ -286,7 +286,16 @@ fn run_container_to_completion(
         }
     };
 
-    let exit = agentstack_runtime::run(backend, spec, &mut on_output, &mut on_event)?;
+    let exit = agentstack_runtime::run(backend, spec, &mut on_output, &mut on_event).with_context(
+        || {
+            format!(
+                "running the sandbox container (image `{}`). If that image is \
+                 missing, build a runner from docker/sandbox.Dockerfile and set \
+                 AGENTSTACK_SANDBOX_IMAGE to its tag.",
+                spec.image
+            )
+        },
+    )?;
     match exit.code {
         Some(0) => {
             println!("\n{} sandbox exited cleanly.", "✓".green());
