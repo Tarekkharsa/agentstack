@@ -29,7 +29,7 @@ pub enum AdapterSource {
 }
 
 /// One CLI's full descriptor, deserialized from `adapters/<id>.yaml`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct AdapterDescriptor {
     pub id: String,
     pub display: String,

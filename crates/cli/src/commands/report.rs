@@ -256,7 +256,21 @@ pub fn report_text(run_id: &str) -> String {
 /// Render the report as JSON.
 pub fn report_json(run_id: &str) -> Result<String> {
     let events = RunLog::read(run_id);
-    let calls = calls_for(run_id);
+    // `calls` is the FALLBACK tool-call source, mirroring `tool_rows`'
+    // all-or-nothing preference: a run whose own `events.jsonl` already carries
+    // `ToolCall` events (every sandboxed run now does, once its MCP traffic
+    // routes through the gateway) has the same calls in both logs, so emitting
+    // both would double-count them. When events carry tool calls, the audit-log
+    // fallback is redundant and omitted; only older runs (no ToolCall events)
+    // surface `calls` here.
+    let has_tool_events = events
+        .iter()
+        .any(|e| matches!(e, RunEvent::ToolCall { .. }));
+    let calls = if has_tool_events {
+        Vec::new()
+    } else {
+        calls_for(run_id)
+    };
     Ok(serde_json::to_string_pretty(&serde_json::json!({
         "run": run_id,
         // Additive field: the recorded enforcement posture slug, or null for a
@@ -329,6 +343,79 @@ mod tests {
             assert!(text.contains("evil.example") && text.contains("[policy.egress] denied"));
             assert!(text.contains("web-search__search") && text.contains("12ms"));
             assert!(text.contains("Exit") && text.contains('0'));
+        });
+    }
+
+    /// A run whose gateway mirrored its calls into `events.jsonl` (every
+    /// sandboxed run now) must not ALSO list them from the audit log in JSON —
+    /// that would double-count. `calls` is the fallback, superseded by events.
+    #[test]
+    fn report_json_does_not_double_count_tool_calls() {
+        with_home(|| {
+            let log = RunLog::create("r-dedup").unwrap();
+            // The same call, in BOTH logs (as the gateway writes it).
+            log.append(&RunEvent::ToolCall {
+                ts: 5,
+                server: "figma".into(),
+                tool: "get_file".into(),
+                outcome: "ok".into(),
+                args_digest: "abc".into(),
+                detail: None,
+                ms: 9,
+            });
+            agentstack_recorder::record(&CallRecord {
+                ts: 5,
+                run: Some("r-dedup".into()),
+                pid: 1,
+                project: None,
+                server: "figma".into(),
+                tool: "get_file".into(),
+                args_digest: "abc".into(),
+                outcome: "ok".into(),
+                detail: None,
+                ms: 9,
+            });
+
+            let v: serde_json::Value =
+                serde_json::from_str(&report_json("r-dedup").unwrap()).unwrap();
+            // The tool call appears once (as an event); the redundant audit-log
+            // fallback is omitted.
+            assert_eq!(v["calls"].as_array().unwrap().len(), 0, "{v}");
+            let tool_events = v["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["event"] == "tool_call")
+                .count();
+            assert_eq!(tool_events, 1, "{v}");
+        });
+    }
+
+    /// An OLDER run with no `ToolCall` events still surfaces its audit-log
+    /// calls in JSON (the fallback path).
+    #[test]
+    fn report_json_keeps_calls_for_event_less_runs() {
+        with_home(|| {
+            let log = RunLog::create("r-old").unwrap();
+            log.append(&RunEvent::SandboxExited {
+                ts: 2,
+                code: Some(0),
+            });
+            agentstack_recorder::record(&CallRecord {
+                ts: 1,
+                run: Some("r-old".into()),
+                pid: 1,
+                project: None,
+                server: "figma".into(),
+                tool: "get_file".into(),
+                args_digest: "abc".into(),
+                outcome: "ok".into(),
+                detail: None,
+                ms: 9,
+            });
+            let v: serde_json::Value =
+                serde_json::from_str(&report_json("r-old").unwrap()).unwrap();
+            assert_eq!(v["calls"].as_array().unwrap().len(), 1, "{v}");
         });
     }
 

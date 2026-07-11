@@ -21,7 +21,7 @@
 //! API, HTTP MCP servers); an allowed host still reaches out — the honest claim
 //! is *unapproved egress is blocked*, not that exfiltration is impossible.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
@@ -213,6 +213,14 @@ pub struct ExecutionPlan {
     pub trust: agentstack_trust::TrustState,
     /// Why the workspace mounts read-only, if it does (for the banner/display).
     pub fs_readonly_reason: Option<String>,
+    /// The project/manifest dir this run executes — needed to rebuild the
+    /// gateway (`Gateway::from_plan`) that brokers the sandbox's MCP traffic.
+    pub manifest_dir: PathBuf,
+    /// The harness adapter descriptor, cloned at plan time so the gateway
+    /// wiring can render a single MCP entry into the harness's own config
+    /// format (per-adapter field names + transport tag) without re-consulting
+    /// the registry inside the feature-gated executor.
+    pub harness_desc: crate::adapter::AdapterDescriptor,
 }
 
 impl ExecutionPlan {
@@ -265,6 +273,8 @@ impl ExecutionPlan {
             lockdown: args.lockdown,
             trust,
             fs_readonly_reason,
+            manifest_dir: ctx.dir.clone(),
+            harness_desc: desc.clone(),
         })
     }
 
@@ -448,6 +458,248 @@ fn mint_proxy_token() -> String {
         })
 }
 
+/// The container's home directory — where the harness reads its GLOBAL
+/// (user-scope) MCP config. The gateway entry is rendered there rather than at
+/// project scope, because project-scope MCP entries sit behind an interactive
+/// "approve this server" prompt no one can answer inside a container (spike
+/// finding, `docs/spikes/2026-07-11-gateway-http-transport.md`). Defaults to
+/// `/root` (the shipped `docker/sandbox.Dockerfile` runs as root); override
+/// with `AGENTSTACK_SANDBOX_HOME` for an image whose harness user differs.
+#[cfg(feature = "sandbox")]
+fn container_home() -> String {
+    std::env::var("AGENTSTACK_SANDBOX_HOME").unwrap_or_else(|_| "/root".to_string())
+}
+
+/// The rendered configs and their in-container destinations for routing a
+/// harness through the gateway. Pure over the descriptor + URL + token (no I/O,
+/// no live endpoint), so the render is unit-testable.
+#[cfg(feature = "sandbox")]
+struct GatewayConfig {
+    /// The harness's global (user-scope) config, containing exactly the one
+    /// gateway entry, and where it mounts in the container (e.g.
+    /// `/root/.claude.json`).
+    global_body: String,
+    global_container: String,
+    /// An EMPTY project-scope config, and where to mount it to SHADOW any
+    /// direct entries a prior `agentstack apply` left in the workspace (with
+    /// baked secrets) — else the harness reaches those upstreams around the
+    /// gateway. `None` when the harness has no project-scope config.
+    empty_body: String,
+    project_container: Option<String>,
+}
+
+/// Render the gateway entry into the harness's own config format. Returns
+/// `None` when the harness has no MCP config, or can't represent an HTTP entry
+/// (e.g. a stdio-only adapter).
+#[cfg(feature = "sandbox")]
+fn render_gateway_config(
+    desc: &crate::adapter::AdapterDescriptor,
+    home: &str,
+    url: &str,
+    token: &str,
+) -> Result<Option<GatewayConfig>> {
+    use crate::adapter::descriptor::Format;
+    use crate::adapter::render_server;
+    use crate::manifest::{Server, ServerType};
+    use crate::render::{merge_json, merge_toml};
+    use crate::secret::MapResolver;
+
+    let (Some(config), Some(mcp)) = (desc.config.as_ref(), desc.mcp.as_ref()) else {
+        return Ok(None);
+    };
+
+    // ONE synthetic HTTP entry, rendered through the harness's own adapter so
+    // it lands in that CLI's native field names + transport tag. The token is a
+    // literal header value (not a `${REF}`), so an empty resolver renders it
+    // verbatim.
+    let gw_server = Server {
+        server_type: ServerType::Http,
+        url: Some(url.to_string()),
+        command: None,
+        args: Vec::new(),
+        cwd: None,
+        targets: crate::manifest::model::all_targets(),
+        owner: None,
+        // Field type (`IndexMap<String, String>`) drives the collect — no need
+        // to name the import.
+        headers: [("X-Agentstack-Token".to_string(), token.to_string())]
+            .into_iter()
+            .collect(),
+        env: Default::default(),
+        extra: Default::default(),
+    };
+    let rendered = render_server(desc, &gw_server, &MapResolver::default());
+    if !rendered.representable {
+        return Ok(None);
+    }
+
+    let entries = vec![("agentstack-gateway".to_string(), rendered.value)];
+    let (global_body, empty_body) = match config.format {
+        Format::Json => (
+            merge_json::merge("", &mcp.location, &entries)?,
+            merge_json::merge("", &mcp.location, &[])?,
+        ),
+        Format::Toml => (
+            merge_toml::merge_with_removals(
+                "",
+                &mcp.location,
+                &entries,
+                &[],
+                mcp.headers_as_subtable,
+            )?,
+            merge_toml::merge_with_removals("", &mcp.location, &[], &[], mcp.headers_as_subtable)?,
+        ),
+    };
+
+    // The global config's basename (e.g. `.claude.json` from `~/.claude.json`)
+    // under the container's home; the project-scope path under the workspace.
+    let global_name = Path::new(&config.path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".mcp.json".to_string());
+    let project_container = desc
+        .project
+        .as_ref()
+        .map(|p| format!("{WORKSPACE}/{}", p.config));
+
+    Ok(Some(GatewayConfig {
+        global_body,
+        global_container: format!("{home}/{global_name}"),
+        empty_body,
+        project_container,
+    }))
+}
+
+/// The live gateway wiring for one sandboxed run: the HTTP endpoint the
+/// container talks to, plus the temp dir holding the rendered config mounted
+/// into it. Held for the run's lifetime; dropping it removes the temp dir.
+#[cfg(feature = "sandbox")]
+struct SandboxGateway {
+    /// The token-gated HTTP MCP endpoint. Its serve thread owns the
+    /// `Arc<Gateway>`, so upstream connections (and lazily spawned stdio
+    /// children) live until this process exits — the run's lifetime.
+    _endpoint: crate::gateway_http::GatewayHttp,
+    /// Run-scoped dir holding the rendered config files bind-mounted into the
+    /// container; removed after the run.
+    tempdir: PathBuf,
+}
+
+/// Route the sandbox's MCP traffic through the in-process gateway so
+/// `[policy.tools]` is enforced and every tool call lands in this run's
+/// `events.jsonl` — the gateway-unification milestone.
+///
+/// Trade-off (accepted at plan time): the gateway resolves `${REF}` secrets
+/// and, for stdio servers, spawns children on the HOST. So it is HARD
+/// trust-gated (`Gateway::from_plan` — an untrusted bundle yields an empty
+/// gateway and this returns `None`, leaving the run exactly as it was before
+/// this milestone), and its endpoint is token-gated per request. Resolved
+/// secrets never enter the container — it sees only the endpoint URL + token.
+///
+/// Returns `None` (leaving `spec` untouched) when there is nothing to route:
+/// an untrusted/empty bundle, a harness that can't host an HTTP MCP entry, or
+/// (for now) lockdown mode — the container there has no host route, so
+/// reaching a host-side endpoint needs the sidecar relay a later session adds.
+#[cfg(feature = "sandbox")]
+fn wire_sandbox_gateway(
+    manifest_dir: &Path,
+    desc: &crate::adapter::AdapterDescriptor,
+    run_id: &str,
+    lockdown: bool,
+    spec: &mut SandboxSpec,
+) -> Result<Option<SandboxGateway>> {
+    use std::sync::Arc;
+
+    // Lockdown has no host route to a host-side endpoint; the sidecar relay
+    // that bridges it is a later session. Until then lockdown keeps its
+    // pre-milestone behavior (harness talks to upstreams directly).
+    if lockdown {
+        eprintln!(
+            "  {} gateway tool-policy routing is not yet wired for --lockdown; \
+             this run enforces egress but not [policy.tools]",
+            "note:".dimmed()
+        );
+        return Ok(None);
+    }
+
+    // Build the run's gateway from the SAME compiled ruleset the plan carries
+    // (never recompiled) and hard trust-gate it: untrusted → empty → no
+    // routing, no secret resolution, no host children.
+    let gateway =
+        crate::gateway::Gateway::from_plan(Some(manifest_dir), spec.ruleset.clone(), None, run_id);
+    if gateway.is_empty() {
+        return Ok(None);
+    }
+
+    // Start the endpoint first so the rendered config can carry its real port +
+    // token. Bind broadly (0.0.0.0) so the container reaches it via
+    // host.docker.internal — the token is the gate, per the endpoint's own
+    // contract, exactly like the egress proxy's broad bind.
+    let endpoint = crate::gateway_http::start(Arc::new(gateway), "0.0.0.0:0")
+        .context("starting the gateway HTTP endpoint")?;
+    let url = format!("http://host.docker.internal:{}/mcp", endpoint.port);
+
+    let Some(cfg) = render_gateway_config(desc, &container_home(), &url, &endpoint.token)? else {
+        eprintln!(
+            "  {} {} can't host an HTTP MCP entry; running without tool-policy routing",
+            "note:".dimmed(),
+            desc.display
+        );
+        return Ok(None);
+    };
+
+    // Stage the rendered configs in a run-scoped 0700 dir (0600 files — the
+    // global one carries the live endpoint token), bind-mounted read-only.
+    // Removed after the run, mirroring the lockdown ruleset staging.
+    let tempdir = std::env::temp_dir().join(format!("agentstack-gw-{run_id}"));
+    std::fs::create_dir_all(&tempdir).context("creating the gateway config staging dir")?;
+    crate::util::restrict(&tempdir, true);
+    let global_host = tempdir.join("global-config");
+    std::fs::write(&global_host, &cfg.global_body).context("writing the gateway config")?;
+    crate::util::restrict(&global_host, false);
+    spec.mounts.push(Mount {
+        host: global_host.display().to_string(),
+        container: cfg.global_container,
+        read_only: true,
+    });
+
+    // Shadow the project-scope config — but ONLY when one actually exists in
+    // the workspace. If there's no such file, there's nothing stale to hide,
+    // and mounting a file over a nonexistent path inside a read-only workspace
+    // fails the run (Docker can't create the mountpoint). When it does exist,
+    // the mountpoint exists too, so the read-only overlay works.
+    if let (Some(project_container), Some(proj)) = (cfg.project_container, desc.project.as_ref()) {
+        if manifest_dir.join(&proj.config).exists() {
+            let empty_host = tempdir.join("project-shadow");
+            std::fs::write(&empty_host, &cfg.empty_body)
+                .context("writing the project shadow config")?;
+            crate::util::restrict(&empty_host, false);
+            spec.mounts.push(Mount {
+                host: empty_host.display().to_string(),
+                container: project_container,
+                read_only: true,
+            });
+        }
+    }
+
+    // Carve the gateway host out of the container's proxy env: its plain-HTTP
+    // request to host.docker.internal must go DIRECT, not through the
+    // CONNECT-only egress proxy (which would 400 it). Verified necessary in the
+    // spike. Real upstream egress (other hosts) still goes through the proxy.
+    for key in ["NO_PROXY", "no_proxy"] {
+        spec.env
+            .push((key.to_string(), "host.docker.internal".to_string()));
+    }
+
+    println!(
+        "  {} MCP tool calls routed through the gateway (tool policy enforced, calls recorded)",
+        "✓".green()
+    );
+    Ok(Some(SandboxGateway {
+        _endpoint: endpoint,
+        tempdir,
+    }))
+}
+
 /// Execute an assembled [`ExecutionPlan`]. Creates the run's flight-recorder log
 /// ONCE (fail closed — "nothing trusted runs unobserved") and mints ONE per-run
 /// proxy token, then dispatches to the mode's executor. The executors no longer
@@ -477,11 +729,30 @@ fn execute_plan(plan: ExecutionPlan) -> Result<()> {
     // bind — is what stops anything else that can route to it from using it.
     let token = mint_proxy_token();
 
-    if plan.lockdown {
-        execute_lockdown(plan.spec, &plan.run_id, &plan.server, log, token)
+    // Route MCP traffic through the gateway (secrets resolved host-side, tool
+    // policy enforced, calls recorded). Held alive across the run; its temp dir
+    // is removed afterward. A distinct credential from the egress `token` above
+    // — one tunnels bytes, the other executes tools with resolved secrets.
+    let mut spec = plan.spec;
+    let gateway = wire_sandbox_gateway(
+        &plan.manifest_dir,
+        &plan.harness_desc,
+        &plan.run_id,
+        plan.lockdown,
+        &mut spec,
+    )?;
+
+    let result = if plan.lockdown {
+        execute_lockdown(spec, &plan.run_id, &plan.server, log, token)
     } else {
-        execute_proxy(plan.spec, &plan.server, log, token)
+        execute_proxy(spec, &plan.server, log, token)
+    };
+
+    // Tear down the gateway staging after the run releases its mounts.
+    if let Some(g) = gateway {
+        let _ = std::fs::remove_dir_all(&g.tempdir);
     }
+    result
 }
 
 /// Host-process-proxy mode (`--sandbox`): the container gets an ordinary bridge
@@ -661,6 +932,8 @@ mod tests {
             lockdown: true,
             trust: agentstack_trust::TrustState::Untrusted,
             fs_readonly_reason: Some("no write scope".into()),
+            manifest_dir: PathBuf::from("/proj"),
+            harness_desc: Default::default(),
         };
         // --plan view includes the command.
         let out = plan.display(Path::new("/proj"), true);
@@ -691,6 +964,8 @@ mod tests {
             lockdown: false,
             trust: agentstack_trust::TrustState::Trusted,
             fs_readonly_reason: None,
+            manifest_dir: PathBuf::from("/proj"),
+            harness_desc: Default::default(),
         };
         let out2 = plan2.display(Path::new("/proj"), true);
         assert!(out2.contains("trusted"), "{out2}");
@@ -765,6 +1040,8 @@ mod tests {
             lockdown,
             trust: agentstack_trust::TrustState::Trusted,
             fs_readonly_reason: None,
+            manifest_dir: PathBuf::from("/proj"),
+            harness_desc: Default::default(),
         };
         assert_eq!(plan(true).posture(), Posture::Lockdown);
         assert_eq!(plan(false).posture(), Posture::Sandbox);
@@ -805,6 +1082,8 @@ mod tests {
             lockdown: false,
             trust: agentstack_trust::TrustState::Trusted,
             fs_readonly_reason: None,
+            manifest_dir: PathBuf::from("/proj"),
+            harness_desc: Default::default(),
         };
         let out = plan.display(Path::new("/proj"), true);
         assert!(out.contains("posture:"), "{out}");
@@ -812,6 +1091,45 @@ mod tests {
             out.contains("SANDBOX / PROXIED · DIRECT ROUTE OPEN"),
             "{out}"
         );
+    }
+
+    /// The gateway entry renders into the harness's real config format: a
+    /// single HTTP server carrying the endpoint URL + token header at the
+    /// container home path, plus an empty project-scope shadow that neutralizes
+    /// any direct entries a prior `apply` left in the workspace.
+    #[cfg(feature = "sandbox")]
+    #[test]
+    fn gateway_config_renders_into_the_harness_format() {
+        let reg = crate::adapter::Registry::load().unwrap();
+        let desc = reg.get("claude-code").expect("claude-code descriptor");
+        let cfg = render_gateway_config(
+            desc,
+            "/root",
+            "http://host.docker.internal:12345/mcp",
+            "tok-abc",
+        )
+        .unwrap()
+        .expect("claude-code hosts HTTP MCP entries");
+
+        // Global config: mounts at the container home, carries the one gateway
+        // entry with its URL and token header.
+        assert_eq!(cfg.global_container, "/root/.claude.json");
+        let v: serde_json::Value = serde_json::from_str(&cfg.global_body).unwrap();
+        let entry = &v["mcpServers"]["agentstack-gateway"];
+        assert_eq!(entry["url"], "http://host.docker.internal:12345/mcp");
+        assert_eq!(entry["headers"]["X-Agentstack-Token"], "tok-abc");
+        // The token appears ONLY in the mounted config, never leaks elsewhere.
+        assert!(cfg.global_body.contains("tok-abc"));
+
+        // Project shadow: an empty server map at the workspace project path, so
+        // stale direct entries in the repo can't route around the gateway.
+        assert_eq!(
+            cfg.project_container.as_deref(),
+            Some("/workspace/.mcp.json")
+        );
+        let empty: serde_json::Value = serde_json::from_str(&cfg.empty_body).unwrap();
+        assert_eq!(empty["mcpServers"], serde_json::json!({}));
+        assert!(!cfg.empty_body.contains("tok-abc"));
     }
 
     /// `read_recorded_posture` refuses run ids that aren't a single safe path
