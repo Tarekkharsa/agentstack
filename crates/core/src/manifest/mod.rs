@@ -13,6 +13,6 @@ pub use load::{
     MANIFEST_SUBDIR, SUPPORTED_MANIFEST_VERSION,
 };
 pub use model::{
-    glob_match, Hook, Instruction, Manifest, PluginRecipe, Policy, Profile, Server, ServerType,
-    Skill, SkillSource,
+    glob_match, FsPolicy, Hook, Instruction, Manifest, PluginRecipe, Policy, Profile, Server,
+    ServerType, Skill, SkillSource,
 };

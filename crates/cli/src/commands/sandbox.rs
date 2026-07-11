@@ -8,8 +8,10 @@
 //! clear rebuild hint rather than pretending.
 //!
 //! What it does with the feature on: mounts the project as the container's
-//! workspace, stands up the egress proxy (one identity for the sandbox) from
-//! the effective compiled policy, points the container's `HTTPS_PROXY` at it,
+//! workspace (read-only unless `[policy.filesystem]` write covers it — the
+//! kernel enforces the bind mode, not the harness), stands up the egress
+//! proxy (one identity for the sandbox) from the effective compiled policy,
+//! points the container's `HTTPS_PROXY` at it,
 //! and records the run's lifecycle + every egress decision to the run's
 //! flight-recorder log (readable with `agentstack report <run>`). The proxy is
 //! a CONNECT forward proxy, so it gates the container's HTTPS egress (the model
@@ -36,24 +38,31 @@ fn sandbox_image() -> String {
         .unwrap_or_else(|_| "agentstack/sandbox:latest".to_string())
 }
 
-/// Build the sandbox spec for one run: mount the project as a read-write
-/// workspace, run `command` there routed through the egress proxy, carry the
-/// run id in the env (like host-mode `run`), and attach the effective compiled
-/// ruleset the proxy enforces. The `HTTPS_PROXY` env is added later, once the
-/// proxy's port is known.
+/// Build the sandbox spec for one run: mount the project as the workspace,
+/// run `command` there routed through the egress proxy, carry the run id in
+/// the env (like host-mode `run`), and attach the effective compiled ruleset
+/// the proxy enforces. The `HTTPS_PROXY` env is added later, once the proxy's
+/// port is known.
+///
+/// The workspace mounts read-only unless the effective `[policy.filesystem]`
+/// write scope covers it — sandbox writes are deny-by-default (the semantics
+/// live in `CompiledRuleset::workspace_write_decision`; this function just
+/// asks). The backend turns `read_only` into a `:ro` bind, so the kernel
+/// enforces it, not the harness.
 pub fn build_sandbox_spec(
     workspace_host: &Path,
     command: Vec<String>,
     ruleset: CompiledRuleset,
     run_id: &str,
 ) -> SandboxSpec {
+    let read_only = ruleset.workspace_write_decision().is_err();
     SandboxSpec {
         image: sandbox_image(),
         command,
         mounts: vec![Mount {
             host: workspace_host.display().to_string(),
             container: WORKSPACE.to_string(),
-            read_only: false,
+            read_only,
         }],
         workdir: WORKSPACE.to_string(),
         env: vec![(
@@ -87,6 +96,9 @@ pub fn run_sandboxed(dir: Option<&Path>, args: &RunArgs) -> Result<()> {
     command.extend(args.args.iter().cloned());
 
     let ruleset = crate::render::ruleset_for(manifest);
+    // Resolve the mount decision before the ruleset moves into the spec, so
+    // the banner can say WHY the workspace is read-only.
+    let fs_refusal = ruleset.workspace_write_decision().err();
     let run_id = crate::runs::gen_id();
     let spec = build_sandbox_spec(&ctx.dir, command, ruleset, &run_id);
 
@@ -96,11 +108,20 @@ pub fn run_sandboxed(dir: Option<&Path>, args: &RunArgs) -> Result<()> {
         args.harness.bold(),
         run_id.dimmed()
     );
-    println!(
-        "  workspace: {} → {}",
-        ctx.dir.display(),
-        WORKSPACE.dimmed()
-    );
+    match &fs_refusal {
+        Some(why) => println!(
+            "  workspace: {} → {} {} — {why}",
+            ctx.dir.display(),
+            WORKSPACE.dimmed(),
+            "read-only".yellow()
+        ),
+        None => println!(
+            "  workspace: {} → {} {} ([policy.filesystem] write covers it)",
+            ctx.dir.display(),
+            WORKSPACE.dimmed(),
+            "read-write".green()
+        ),
+    }
     println!(
         "  {} egress is routed through the AgentStack proxy; \
          review it after with `agentstack report {}`.",
@@ -196,6 +217,19 @@ fn execute_sandbox(_spec: SandboxSpec, _run_id: &str, _server: &str) -> Result<(
 mod tests {
     use super::*;
 
+    /// A ruleset whose effective `[policy.filesystem]` write scope is exactly
+    /// `scopes` (as a machine-layer grant).
+    fn ruleset_with_write(scopes: &[&str]) -> CompiledRuleset {
+        let machine = agentstack_core::manifest::Policy {
+            filesystem: agentstack_core::manifest::FsPolicy {
+                read: vec![],
+                write: scopes.iter().map(|s| s.to_string()).collect(),
+            },
+            ..Default::default()
+        };
+        agentstack_policy::compile(&machine, &Default::default(), &[])
+    }
+
     #[test]
     fn spec_mounts_workspace_and_routes_egress_through_the_proxy() {
         let spec = build_sandbox_spec(
@@ -210,7 +244,6 @@ mod tests {
         let m = &spec.mounts[0];
         assert_eq!(m.host, "/home/me/proj");
         assert_eq!(m.container, WORKSPACE);
-        assert!(!m.read_only, "workspace is read-write");
         assert!(
             matches!(spec.network, NetworkPolicy::ProxyOnly { .. }),
             "egress routes through the proxy, not open network"
@@ -221,5 +254,41 @@ mod tests {
             .iter()
             .any(|(k, v)| k == agentstack_recorder::RUN_ID_ENV && v == "r-abc"));
         assert_eq!(spec.workspace(), "/home/me/proj");
+    }
+
+    /// Sandbox workspace writes are deny-by-default: no `[policy.filesystem]`
+    /// write scope → the mount is read-only.
+    #[test]
+    fn workspace_mounts_read_only_without_a_write_scope() {
+        let spec = build_sandbox_spec(
+            Path::new("/home/me/proj"),
+            vec!["claude".into()],
+            CompiledRuleset::default(),
+            "r-abc",
+        );
+        assert!(
+            spec.mounts[0].read_only,
+            "no write scope must mean a read-only workspace"
+        );
+        // A partial scope doesn't cover the workspace root either.
+        let spec = build_sandbox_spec(
+            Path::new("/home/me/proj"),
+            vec!["claude".into()],
+            ruleset_with_write(&["src/**"]),
+            "r-abc",
+        );
+        assert!(spec.mounts[0].read_only, "partial scopes round down to ro");
+    }
+
+    /// A write scope covering the workspace root flips the mount to rw.
+    #[test]
+    fn workspace_mounts_read_write_when_the_write_scope_covers_it() {
+        let spec = build_sandbox_spec(
+            Path::new("/home/me/proj"),
+            vec!["claude".into()],
+            ruleset_with_write(&["./**"]),
+            "r-abc",
+        );
+        assert!(!spec.mounts[0].read_only, "./** grants the workspace");
     }
 }

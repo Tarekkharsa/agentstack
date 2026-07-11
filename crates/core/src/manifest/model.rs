@@ -90,9 +90,11 @@ pub struct Policy {
     /// config, not into a gateway upstream.
     #[serde(default)]
     pub secrets: IndexMap<String, Vec<String>>,
-    /// Bundle-global filesystem scopes (path globs). Advisory in Phase 1 —
-    /// carried, reviewed, and compiled, but path matching is enforced only by
-    /// the Phase-2 sandbox mounts.
+    /// Bundle-global filesystem scopes (path globs). The `write` scope is
+    /// enforced in sandbox mode — the workspace mounts read-only unless the
+    /// effective scope covers it (deny-by-default; see
+    /// `CompiledRuleset::workspace_write_decision` in the policy crate).
+    /// `read` scopes are informational, and host mode enforces neither.
     #[serde(default, skip_serializing_if = "FsPolicy::is_empty")]
     pub filesystem: FsPolicy,
 }

@@ -400,6 +400,89 @@ mod tests {
         }
     }
 
+    // ── Workspace write decision (sandbox mount ro/rw) ──────────────────────
+
+    /// Build a `Policy` with these `[policy.filesystem]` write scopes.
+    fn fs_write(scopes: &[&str]) -> Policy {
+        Policy {
+            filesystem: agentstack_core::manifest::FsPolicy {
+                read: vec![],
+                write: scopes.iter().map(|s| s.to_string()).collect(),
+            },
+            ..Policy::default()
+        }
+    }
+
+    /// The sandbox workspace mount is deny-by-default and grants rw only when
+    /// a scope covers the workspace root — partial scopes round DOWN to ro.
+    #[test]
+    fn workspace_write_is_deny_by_default_and_needs_root_coverage() {
+        let none = Policy::default();
+        // No write scope anywhere → read-only, and the refusal says why.
+        let err = compile(&none, &none, &[])
+            .workspace_write_decision()
+            .unwrap_err();
+        assert!(err.contains("deny-by-default"), "{err}");
+
+        // Each root-covering spelling grants rw, from either layer alone.
+        for scope in ["./**", "./*", "*", ".", "./"] {
+            assert!(
+                compile(&fs_write(&[scope]), &none, &[])
+                    .workspace_write_decision()
+                    .is_ok(),
+                "machine scope {scope:?} should grant the workspace"
+            );
+            assert!(
+                compile(&none, &fs_write(&[scope]), &[])
+                    .workspace_write_decision()
+                    .is_ok(),
+                "bundle scope {scope:?} should grant the workspace"
+            );
+        }
+
+        // A partial scope constrains without covering the root → read-only.
+        let err = compile(&fs_write(&["src/**"]), &none, &[])
+            .workspace_write_decision()
+            .unwrap_err();
+        assert!(err.contains("[policy.filesystem]"), "{err}");
+    }
+
+    /// Rule 2 on the fs dimension: a bundle cannot widen the workspace mount
+    /// past the machine layer. Machine grants only a subpath → ro, whatever
+    /// the bundle asks for — and the refusal names the machine layer.
+    #[test]
+    fn bundle_cannot_widen_workspace_write_past_machine() {
+        let machine = fs_write(&["src/**"]);
+        let bundle = fs_write(&["./**"]);
+        let err = compile(&machine, &bundle, &[])
+            .workspace_write_decision()
+            .unwrap_err();
+        assert!(err.contains("machine policy"), "{err}");
+    }
+
+    proptest! {
+        /// For ALL bundle write scopes: if the machine layer constrains
+        /// writes without covering the workspace root, the mount stays
+        /// read-only. (The fs restatement of effective(B, M) ⊆ M.)
+        /// NEVER delete or weaken this test.
+        #[test]
+        fn workspace_write_never_more_permissive_than_machine(
+            machine_scopes in proptest::collection::vec("[a-z./*]{0,8}", 1..4),
+            bundle_scopes in proptest::collection::vec("[a-z./*]{0,8}", 0..4),
+        ) {
+            let machine = fs_write(&machine_scopes.iter().map(String::as_str).collect::<Vec<_>>());
+            let bundle = fs_write(&bundle_scopes.iter().map(String::as_str).collect::<Vec<_>>());
+            let machine_only = compile(&machine, &Policy::default(), &[]);
+            let both = compile(&machine, &bundle, &[]);
+            if machine_only.workspace_write_decision().is_err() {
+                prop_assert!(
+                    both.workspace_write_decision().is_err(),
+                    "machine kept the workspace read-only but the bundle made it writable"
+                );
+            }
+        }
+    }
+
     /// Guard semantics pinned as plain unit checks: denies win, every
     /// allowlist bound applies (AND across lists), machine refusals name
     /// their layer, and an empty guard allows (uniform allow-by-default).

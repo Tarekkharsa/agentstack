@@ -258,7 +258,9 @@ fn grant(base: &Path) -> Result<()> {
 
 /// Print what the project's `[policy]` requests, per dimension. Bundles can
 /// only narrow, so this is review signal, not a gate. Filesystem scopes are
-/// labelled honestly: advisory until the Phase 2 sandbox mounts enforce them.
+/// labelled honestly: the write scope decides the sandbox workspace mount
+/// (ro unless covered); read scopes are informational, and host mode
+/// enforces neither.
 fn review_policy(p: &crate::manifest::Policy) {
     if p.tools.is_empty() && p.egress.is_empty() && p.secrets.is_empty() && p.filesystem.is_empty()
     {
@@ -275,13 +277,17 @@ fn review_policy(p: &crate::manifest::Policy) {
             println!("  · {label:<7} {server}: {}", rules.join(", "));
         }
     }
-    for (label, scopes) in [("read", &p.filesystem.read), ("write", &p.filesystem.write)] {
-        if !scopes.is_empty() {
-            println!(
-                "  · filesystem {label} {} (advisory — enforced by the Phase 2 sandbox)",
-                scopes.join(", ")
-            );
-        }
+    if !p.filesystem.read.is_empty() {
+        println!(
+            "  · filesystem read {} (informational — the sandbox mounts one whole workspace)",
+            p.filesystem.read.join(", ")
+        );
+    }
+    if !p.filesystem.write.is_empty() {
+        println!(
+            "  · filesystem write {} (sandbox mode mounts the workspace read-only unless this covers it; advisory in host mode)",
+            p.filesystem.write.join(", ")
+        );
     }
 }
 

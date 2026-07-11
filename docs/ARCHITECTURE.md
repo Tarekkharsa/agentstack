@@ -175,9 +175,15 @@ Enforcement honesty, per dimension (today):
   hidden behind an unresolved `${REF}` fails closed if the server is
   constrained at all. Runtime filtering of arbitrary in-flight traffic is
   the Phase-2 egress proxy's job — not yet built.
-- **Filesystem** — advisory only: scopes are carried, reviewed, and compiled,
-  but no code path matches paths against them yet. Enforcement is Phase 2's
-  sandbox mounts. Never present these scopes as enforced before then.
+- **Filesystem** — write scope enforced in sandbox mode: the workspace mounts
+  read-only unless the effective write scope covers the workspace root
+  (deny-by-default — the one dimension where absence means deny, because a
+  sandbox grants nothing the policy doesn't name; a partial scope like
+  `src/**` rounds DOWN to read-only, since the workspace is one all-or-nothing
+  mount). The kernel enforces the `:ro` bind, not the harness. The semantics
+  live in one place, `CompiledRuleset::workspace_write_decision`. Read scopes
+  are informational while the only mount is the whole workspace, and host
+  mode enforces neither — never present those as enforced.
 
 Invariant (property-tested): for all bundle policies B and machine policies M,
 `effective(B, M) ⊆ M`, across every dimension. This test is never deleted or

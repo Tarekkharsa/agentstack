@@ -113,9 +113,10 @@ fn fold_layer(map: &IndexMap<String, Vec<String>>, name: &str) -> LayerRules {
     }
 }
 
-/// Filesystem lists have no deny grammar in Phase 1 — the globs are carried
-/// verbatim as a single allow bound (matching semantics land with Phase 2's
-/// mount code).
+/// Filesystem lists have no deny grammar — the globs are carried verbatim as
+/// a single allow bound. The matching semantics live in
+/// `CompiledRuleset::workspace_write_decision`, which relies on the no-deny
+/// property here (see its doc comment before adding `!` support).
 fn fs_layer(globs: &[String]) -> LayerRules {
     if globs.is_empty() {
         return LayerRules::default();

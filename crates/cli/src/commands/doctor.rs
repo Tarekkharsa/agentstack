@@ -1209,15 +1209,16 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
         manifest,
         report,
     );
-    // [policy.filesystem] scopes are bundle-global (not per-server) and, in
-    // Phase 1, advisory only — path matching is real only once Phase 2's
-    // sandbox mounts exist to enforce against. Never present these as
-    // enforced.
+    // [policy.filesystem] scopes are bundle-global (not per-server). The
+    // write scope is enforced in sandbox mode (the workspace mounts
+    // read-only unless it covers the workspace root — deny-by-default);
+    // host mode remains advisory, and read scopes stay informational while
+    // the only mount is the whole workspace.
     if !manifest.policy.filesystem.read.is_empty() {
         report.line(
             Level::Ok,
             format!(
-                "[policy.filesystem] read — {} scope(s) — advisory, enforced by the Phase 2 sandbox",
+                "[policy.filesystem] read — {} scope(s) — informational (the sandbox mounts one whole workspace)",
                 manifest.policy.filesystem.read.len()
             ),
         );
@@ -1226,7 +1227,7 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
         report.line(
             Level::Ok,
             format!(
-                "[policy.filesystem] write — {} scope(s) — advisory, enforced by the Phase 2 sandbox",
+                "[policy.filesystem] write — {} scope(s) — enforced in sandbox mode (workspace mounts read-only unless covered); advisory in host mode",
                 manifest.policy.filesystem.write.len()
             ),
         );
@@ -1696,11 +1697,12 @@ mod tests {
             && m.contains("no such server")));
     }
 
-    /// [policy.filesystem] scopes are surfaced but never claimed as
-    /// enforced — Phase 1 carries them, Phase 2's sandbox mounts are the
-    /// only thing that actually matches paths against them.
+    /// [policy.filesystem] scopes are surfaced with honest enforcement
+    /// labels: the write scope is enforced by the sandbox's workspace mount
+    /// (advisory in host mode); read scopes are informational while the only
+    /// mount is the whole workspace.
     #[test]
-    fn filesystem_scopes_reported_as_advisory_only() {
+    fn filesystem_scopes_reported_with_honest_enforcement_labels() {
         let manifest: Manifest = toml::from_str(
             "version = 1\n[policy.filesystem]\nread = [\"/tmp/**\"]\nwrite = [\"/tmp/out/**\"]\n",
         )
@@ -1708,14 +1710,13 @@ mod tests {
         let mut report = Report::quiet();
         check_policy(&manifest, &mut report);
         let lines = report_lines(&report);
-        assert!(lines.iter().any(|(l, m)| *l == "ok"
-            && m.contains("read")
-            && m.contains("advisory")
-            && m.contains("Phase 2 sandbox")));
+        assert!(lines
+            .iter()
+            .any(|(l, m)| *l == "ok" && m.contains("read") && m.contains("informational")));
         assert!(lines.iter().any(|(l, m)| *l == "ok"
             && m.contains("write")
-            && m.contains("advisory")
-            && m.contains("Phase 2 sandbox")));
+            && m.contains("enforced in sandbox mode")
+            && m.contains("advisory in host mode")));
     }
 
     /// The EFFECTIVE (machine ∩ project) ruleset cross-check: a server's own

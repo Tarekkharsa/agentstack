@@ -141,9 +141,10 @@ impl ServerRules {
 }
 
 /// Filesystem scopes are bundle-global (a sandbox mount is per-run, not
-/// per-server). Carried verbatim in Phase 1 — the path-matching semantics are
-/// deliberately NOT implemented until Phase 2's mount code has something
-/// concrete to match against.
+/// per-server). The `write` guard is enforced by the sandbox's workspace
+/// mount via [`CompiledRuleset::workspace_write_decision`]; `read` scopes
+/// remain informational while the only mount is the whole workspace (there
+/// is no finer-grained mount for them to narrow yet).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FsRules {
     #[serde(default, skip_serializing_if = "Guard::is_empty")]
@@ -216,6 +217,45 @@ impl CompiledRuleset {
         self.rules_for(server)
             .secrets
             .check("[policy.secrets]", reference)
+    }
+
+    /// Whether the sandbox may mount the run's workspace read-WRITE, per the
+    /// compiled `[policy.filesystem]` write scope. This is where the fs
+    /// path-matching semantics live — the sandbox mount code just asks.
+    ///
+    /// Unlike the other dimensions this is DENY-by-default: a sandbox grants
+    /// nothing the policy doesn't name, so with no write scope anywhere the
+    /// workspace mounts read-only. With one, the scope must cover the
+    /// workspace *root* — spelled `./` or `.` in a glob's eyes (so `"./**"`,
+    /// `"./*"`, `"*"`, or a literal `"."`/`"./"` all grant it). A partial
+    /// scope like `"src/**"` does NOT: the workspace is one all-or-nothing
+    /// mount, and enforcement rounds DOWN (read-only), never up.
+    ///
+    /// The OR over the two root spellings is sound today because
+    /// `compile` gives fs scopes no deny grammar (no `!` patterns, unlike the
+    /// keyed dimensions) — if that ever changes, "any spelling passes" must
+    /// be revisited, since a deny could match one spelling and not the other.
+    pub fn workspace_write_decision(&self) -> Result<(), String> {
+        if self.filesystem.write.is_empty() {
+            return Err("no [policy.filesystem] write scope covers the workspace \
+                 (sandbox workspace writes are deny-by-default)"
+                .to_string());
+        }
+        let mut refusal = String::new();
+        for subject in ["./", "."] {
+            match self
+                .filesystem
+                .write
+                .check("[policy.filesystem] write", subject)
+            {
+                Ok(()) => return Ok(()),
+                // Keep the first refusal: `./` is the canonical spelling, so
+                // its error is the one worth showing.
+                Err(e) if refusal.is_empty() => refusal = e,
+                Err(_) => {}
+            }
+        }
+        Err(refusal)
     }
 
     /// Whether ANY egress rule constrains `server`. Write-time checks use

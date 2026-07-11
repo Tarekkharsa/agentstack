@@ -108,8 +108,10 @@ binary still works end to end.
    M`, for all inputs, never deleted or weakened). Secret access is enforced
    fail-closed at both substitution sites (adapter render + gateway
    resolver); egress is enforced against each server's declared host at
-   write/spawn time. Filesystem scopes are carried and compiled but stay
-   advisory until Phase 2's sandbox mounts.
+   write/spawn time. Filesystem write scopes are enforced by the Phase 2
+   sandbox's workspace mount (read-only unless covered, deny-by-default;
+   Docker-verified in `sandbox_fs.rs`); read scopes stay informational, and
+   host mode enforces neither.
 4. `adapters`: already shipped (13 CLIs, data-driven YAML) — keep behavior,
    verify blocked writes when any `${REF}` is unresolved (keychain/varlock,
    fail closed).
@@ -143,12 +145,15 @@ the container↔proxy routing and the recorded demo — flagged per item below.
    set. DNS is gated implicitly (the proxy resolves only allowed hosts).
    Verified end to end on loopback AND against a real container (item 4).
    `BlockingBridge` is the sync facade the cli drives (tokio stays in egress).
-   Filesystem scopes in the ruleset become enforceable via the mounts (item 1).
 3. **[done]** `agentstack run --sandbox <bundle>`: builds the `SandboxSpec`
    (tested), stands up the egress proxy from the effective policy, injects
    `HTTPS_PROXY` into the container, and records lifecycle + egress decisions
    to the run log (readable via `agentstack report`). Execution behind the cli
-   `sandbox` feature; verified through the real binary on Docker.
+   `sandbox` feature; verified through the real binary on Docker. The
+   workspace mount enforces the `[policy.filesystem]` write scope: read-only
+   unless the effective scope covers the workspace (deny-by-default), the
+   `:ro` bind enforced by the kernel — Docker-verified through the real
+   binary in `crates/cli/tests/sandbox_fs.rs`.
 4. **[done — verified on real Docker]** The demo, proven two ways on Docker
    25.0.3: (a) a real `curl` container exfiltrates to a host reachable only
    through the proxy — blocked under a deny policy (sink gets nothing), tunneled
