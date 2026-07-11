@@ -425,7 +425,9 @@
 <span class="ok">  ✓</span> trusted at sha256:945b4b…
 
 <span class="c">  agent → demo.echo        </span><span class="ok">✓ ok</span><span class="c">      brokered, logged</span>
-<span class="c">  agent → demo.delete_all  </span><span class="no">✗ denied</span><span class="c">  YOUR machine policy</span></code></pre>
+<span class="c">  agent → demo.delete_all  </span><span class="no">✗ denied</span><span class="c">  rule "!delete_*" — YOUR machine policy</span>
+
+<span class="c">  # both calls are in the audit log — nothing trusted runs unobserved</span></code></pre>
     </div>
     <div class="journey" aria-label="What agentstack does, in order">
       <a href="#trust">
