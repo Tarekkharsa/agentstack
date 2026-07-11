@@ -288,6 +288,19 @@
   .posture-legend .lab .slug { color: var(--accent); }
   .posture-legend small { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
 
+  /* ---------- hero journey strip — the page's spine ---------- */
+  .journey { margin: 1.9rem 0 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; }
+  .journey a {
+    display: block; padding: 0.8rem 0.9rem; border: 1px solid var(--line);
+    border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-sm);
+    text-decoration: none; transition: transform 0.14s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+  }
+  .journey a:hover { transform: translateY(-2px); border-color: var(--accent-line); box-shadow: var(--shadow-md); }
+  .journey .jn { font-family: var(--mono); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em; color: var(--accent); }
+  .journey b { display: block; margin-top: 0.2rem; font-family: var(--mono); font-size: 0.85rem; color: var(--ink); letter-spacing: -0.01em; }
+  .journey small { display: block; margin-top: 0.3rem; color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
+  @media (max-width: 760px) { .journey { grid-template-columns: 1fr 1fr; } }
+
   .matrix-wrap { margin: 1.6rem 0 0; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
   table.matrix { border-collapse: collapse; width: 100%; min-width: 34rem; background: var(--surface); font-size: 0.88rem; }
   table.matrix th, table.matrix td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid var(--line-soft); }
@@ -341,8 +354,8 @@
 
   /* ---------- footer ---------- */
   footer { border-top: 1px solid var(--line); margin-top: 6rem; background: var(--line-soft); }
-  footer .bar { padding: 1.6rem 1.35rem; font-size: 0.85rem; color: var(--muted); }
-  footer nav { margin-left: auto; display: flex; gap: 1.1rem; }
+  footer .bar { padding: 1.6rem 1.35rem; font-size: 0.85rem; color: var(--muted); flex-wrap: wrap; }
+  footer nav { margin-left: auto; display: flex; gap: 1.1rem; flex-wrap: wrap; }
   footer nav a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
   footer nav a:hover { color: var(--accent); }
 
@@ -389,13 +402,11 @@
     <p class="eyebrow">One binary · trust gate · firewall · sandbox · 13 agent CLIs</p>
     <h1>Trust it. Firewall it. Sandbox it.<br>Run any agent.<span class="cursor" aria-hidden="true"></span></h1>
     <p class="lede">
-      The local control plane for AI coding agents. <strong>Nothing a repo
-      declares runs until you review and trust it.</strong> Every MCP call
-      passes your firewall and lands in the log. And when you trust an agent
-      less than that, it runs in a container <strong>whose only way out is
-      your policy</strong>. One manifest renders native config for Claude
-      Code, Codex, Cursor, and ten more —
-      <strong>secrets stay references, setups travel.</strong>
+      The local control plane for AI coding agents.
+      <strong>Nothing a repo declares runs until you review and trust it</strong> —
+      then every MCP call passes your firewall and lands in the log, and an
+      agent you trust less than that runs in a container
+      <strong>whose only way out is your policy</strong>.
     </p>
     <div class="cta">
       <a class="btn primary" href="start.html">Get started · 10 min →</a>
@@ -416,32 +427,27 @@
 <span class="c">  agent → demo.echo        </span><span class="ok">✓ ok</span><span class="c">      brokered, logged</span>
 <span class="c">  agent → demo.delete_all  </span><span class="no">✗ denied</span><span class="c">  YOUR machine policy</span></code></pre>
     </div>
-    <p class="small muted">
-      Two ways in: the <a href="#trust">runtime control plane</a>
-      (<code>connect → trust →</code> firewalled calls, zero files copied) — or
-      <a href="#start">portable configuration</a> (<code>init → apply</code>
-      renders every CLI's native config from one manifest). Either way,
-      <a href="#sandbox"><code>run --lockdown</code></a> can put the agent in a
-      container with no route out but the policy proxy.
-    </p>
-
-    <div class="clis">
-      <p class="lbl">Serves — and renders native config for —</p>
-      <div class="chips">
-        <span class="chip">Claude Code</span>
-        <span class="chip">Codex CLI</span>
-        <span class="chip">Cursor</span>
-        <span class="chip">Windsurf</span>
-        <span class="chip">Gemini CLI</span>
-        <span class="chip">VS Code</span>
-        <span class="chip">GitHub Copilot CLI</span>
-        <span class="chip">Claude Desktop</span>
-        <span class="chip">OpenCode</span>
-        <span class="chip">Antigravity</span>
-        <span class="chip">Junie</span>
-        <span class="chip">Kiro</span>
-        <span class="chip">Pi</span>
-      </div>
+    <div class="journey" aria-label="What agentstack does, in order">
+      <a href="#trust">
+        <span class="jn">01 · TRUST</span>
+        <b>Clone anything, safely</b>
+        <small>A repo's servers stay inert until you approve the exact bytes.</small>
+      </a>
+      <a href="#sandbox">
+        <span class="jn">02 · CONFINE</span>
+        <b>Take away the network</b>
+        <small><code>run --lockdown</code>: the only route out is your policy proxy.</small>
+      </a>
+      <a href="#enforced">
+        <span class="jn">03 · PROVE</span>
+        <b>Know what's enforced</b>
+        <small>The honest matrix — per mode, per policy dimension, no green-washing.</small>
+      </a>
+      <a href="#start">
+        <span class="jn">04 · CARRY</span>
+        <b>One manifest, 13 CLIs</b>
+        <small>The same reviewed file renders every CLI's native config.</small>
+      </a>
     </div>
   </section>
 
@@ -454,68 +460,6 @@
     <p class="small muted">
       One static binary, no runtime dependencies. From a checkout:
       <code>cargo build --release &amp;&amp; target/release/agentstack self link</code>.
-    </p>
-  </section>
-
-  <section id="start" class="reveal">
-    <p class="eyebrow">Portable config · the other way in</p>
-    <h2>From your current setup to every CLI</h2>
-    <p>
-      The <a href="start.html">10-minute Get&nbsp;started journey</a> is the live
-      gateway path — zero files copied. If you'd rather render native config
-      files instead, you don't start from a blank page either: <code>init</code> reads
-      the agent config already on your machine and turns it into a manifest you
-      can review, commit, and share. (Nothing installed yet? <code>init</code>
-      writes a commented starter manifest instead — no dead ends on a clean
-      machine.)
-    </p>
-    <ol class="steps">
-      <li>
-        <b>agentstack init</b>
-        <p>Imports the servers and skills you already have; inline tokens become <code>${REF}</code>s in your OS keychain.</p>
-      </li>
-      <li>
-        <b>agentstack bootstrap</b>
-        <p>Preflight: which CLIs are installed, which skills and secrets are missing, what would change.</p>
-      </li>
-      <li>
-        <b>agentstack apply</b>
-        <p>Preview each CLI's config diff, confirm to write. Writes are atomic, backed up, and tracked — <code>restore</code> undoes them.</p>
-      </li>
-      <li>
-        <b>agentstack doctor</b>
-        <p>Any time something feels off. Every warning names the exact fix command.</p>
-      </li>
-    </ol>
-    <figure>
-      <img src="firstrun.gif" alt="Terminal recording of agentstack init, bootstrap, and apply on a fresh machine" width="691" height="490" loading="lazy">
-      <figcaption>The first run, end to end.</figcaption>
-    </figure>
-  </section>
-
-  <section id="manifest" class="reveal">
-    <p class="eyebrow">The manifest</p>
-    <h2>One file, reviewed like code</h2>
-    <pre><code>version = 1
-
-[servers.github]
-type = "stdio"
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-github"]
-env = { GITHUB_TOKEN = "${GH_PAT}" }   # resolved per machine, never stored
-
-[profiles.backend]
-servers = ["github", "kibana"]
-skills  = ["sql-review"]               # resolves from your central library
-
-[targets]
-default = ["claude-code", "codex"]</code></pre>
-    <p class="muted">
-      Secrets resolve locally — process env, <a href="https://varlock.dev">varlock</a>,
-      OS keychain, or <code>.env</code> — and unresolved secrets block writes,
-      so placeholders never leak into live config. A lockfile pins every skill
-      and server by digest; <code>install --locked</code> reproduces the setup
-      in CI.
     </p>
   </section>
 
@@ -661,8 +605,12 @@ default = ["claude-code", "codex"]</code></pre>
       <span><i class="e"></i><strong>enforced</strong>&nbsp;— a runtime mechanism prevents the disallowed action</span>
       <span><i class="co"></i><strong>coarse</strong>&nbsp;— a real check runs, at coarser granularity than the policy expresses</span>
       <span><i class="un"></i><strong>unsupported</strong>&nbsp;— no code path consults the policy here; no check happens</span>
-      <span><i class="co"></i><strong>enforced&thinsp;*</strong>&nbsp;— for proxied traffic only: <code>--sandbox</code>'s bridge network leaves a direct route a proxy-ignoring process could use; <code>--lockdown</code> removes it</span>
     </div>
+    <p class="small muted" style="margin-top:1.1rem">
+      <strong>enforced&thinsp;*</strong> — for proxied traffic only:
+      <code>--sandbox</code>'s bridge network leaves a direct route a
+      proxy-ignoring process could use; <code>--lockdown</code> removes it.
+    </p>
     <p class="small muted" style="margin-top:1.1rem">
       Read every "enforced" with the ceiling in mind: it means the disallowed
       action is prevented at runtime — never that the <em>allowed</em> action is
@@ -674,6 +622,86 @@ default = ["claude-code", "codex"]</code></pre>
       including where <code>--sandbox</code>'s bridge network stops short of
       <code>--lockdown</code>'s topological confinement — is in the
       <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">enforcement matrix</a>.
+    </p>
+  </section>
+
+  <section id="start" class="reveal">
+    <p class="eyebrow">Portable config</p>
+    <h2>The same reviewed file, rendered into every CLI</h2>
+    <p>
+      Everything above runs through the live gateway — zero files copied. When
+      you want native config files instead (or as well), the same manifest
+      renders them. And you don't start from a blank page: <code>init</code>
+      reads the agent config already on your machine and turns it into a
+      manifest you can review, commit, and share. (Nothing installed yet?
+      <code>init</code> writes a commented starter manifest instead — no dead
+      ends on a clean machine.)
+    </p>
+    <div class="clis">
+      <p class="lbl">Serves — and renders native config for —</p>
+      <div class="chips">
+        <span class="chip">Claude Code</span>
+        <span class="chip">Codex CLI</span>
+        <span class="chip">Cursor</span>
+        <span class="chip">Windsurf</span>
+        <span class="chip">Gemini CLI</span>
+        <span class="chip">VS Code</span>
+        <span class="chip">GitHub Copilot CLI</span>
+        <span class="chip">Claude Desktop</span>
+        <span class="chip">OpenCode</span>
+        <span class="chip">Antigravity</span>
+        <span class="chip">Junie</span>
+        <span class="chip">Kiro</span>
+        <span class="chip">Pi</span>
+      </div>
+    </div>
+    <ol class="steps">
+      <li>
+        <b>agentstack init</b>
+        <p>Imports the servers and skills you already have; inline tokens become <code>${REF}</code>s in your OS keychain.</p>
+      </li>
+      <li>
+        <b>agentstack bootstrap</b>
+        <p>Preflight: which CLIs are installed, which skills and secrets are missing, what would change.</p>
+      </li>
+      <li>
+        <b>agentstack apply</b>
+        <p>Preview each CLI's config diff, confirm to write. Writes are atomic, backed up, and tracked — <code>restore</code> undoes them.</p>
+      </li>
+      <li>
+        <b>agentstack doctor</b>
+        <p>Any time something feels off. Every warning names the exact fix command.</p>
+      </li>
+    </ol>
+    <figure>
+      <img src="firstrun.gif" alt="Terminal recording of agentstack init, bootstrap, and apply on a fresh machine" width="691" height="490" loading="lazy">
+      <figcaption>The first run, end to end.</figcaption>
+    </figure>
+  </section>
+
+  <section id="manifest" class="reveal">
+    <p class="eyebrow">The manifest</p>
+    <h2>One file, reviewed like code</h2>
+    <pre><code>version = 1
+
+[servers.github]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_TOKEN = "${GH_PAT}" }   # resolved per machine, never stored
+
+[profiles.backend]
+servers = ["github", "kibana"]
+skills  = ["sql-review"]               # resolves from your central library
+
+[targets]
+default = ["claude-code", "codex"]</code></pre>
+    <p class="muted">
+      Secrets resolve locally — process env, <a href="https://varlock.dev">varlock</a>,
+      OS keychain, or <code>.env</code> — and unresolved secrets block writes,
+      so placeholders never leak into live config. A lockfile pins every skill
+      and server by digest; <code>install --locked</code> reproduces the setup
+      in CI.
     </p>
   </section>
 

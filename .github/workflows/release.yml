@@ -174,5 +174,9 @@ jobs:
           body="$(gh api "repos/${GITHUB_REPOSITORY}/releases/$rid" --jq '.body // ""')"
           printf '%s\n\nEgress proxy image: `ghcr.io/%s/agentstack-egress-proxy@%s`\n' \
             "$body" "${OWNER_LC}" "${{ steps.push.outputs.digest }}" > /tmp/release-body.md
+          # tag_name is re-asserted on every PATCH: the v0.9.0 release run
+          # showed a draft's tag_name can end up as a GitHub-internal
+          # "untagged-…" placeholder, and publishing such a draft would mint
+          # a garbage tag. Idempotent when it's already correct.
           gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$rid" \
-            -F body=@/tmp/release-body.md --silent
+            -F body=@/tmp/release-body.md -f tag_name="${GITHUB_REF_NAME}" --silent
