@@ -6,6 +6,7 @@
 
 **[Website](https://tarekkharsa.github.io/agentstack/)** ·
 [Feature reference](docs/reference.md) ·
+[Enforcement matrix](docs/ENFORCEMENT.md) ·
 [Central library](https://tarekkharsa.github.io/agentstack/library.html) ·
 [Dashboard](docs/dashboard.md) ·
 [Releases](https://github.com/Tarekkharsa/agentstack/releases)
@@ -345,6 +346,11 @@ Details and trade-offs: [feature reference → three modes](docs/reference.md#wh
   [`docker/egress-proxy.Dockerfile`](docker/egress-proxy.Dockerfile) build).
   Runnable demo (needs Docker):
   [`agentstack-test/demo-lockdown.sh`](agentstack-test/demo-lockdown.sh).
+
+  What each mode actually enforces — and where it stops — is spelled out per
+  dimension in the [enforcement matrix](docs/ENFORCEMENT.md). AgentStack
+  restricts destinations and records decisions; it cannot guarantee sensitive
+  content never leaves through a host you *allowed*.
 
 ![agentstack lockdown: a container with no host route — its only egress is the AgentStack proxy sidecar, which blocks a denied host and records it](docs/lockdown.gif)
 

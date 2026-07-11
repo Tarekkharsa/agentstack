@@ -67,16 +67,14 @@ verified against the source, 2026-07-10):
   `gateway.rs`/`mcp_server.rs` → `policy`, as the seed of the intersection
   engine. Enforcement call sites stay in `cli` and call into it.
 - `src/adapter/` + the 13 `adapters/*.yaml` (and their `include_dir` embed +
-  build.rs rerun) → `adapters`. **Correction (2026-07-10):** this bullet
-  originally claimed `adapter::render` depends on `resolve`/`library`/`store`
-  and called it "the one non-mechanical seam." Per-file reading showed that
-  was a grep artifact — those imports belong to `manifest/validate.rs`; the
-  adapter module's only non-core dependency was the `Resolver` trait, which
-  moved to `core::secret`. The pipeline (`render/apply.rs`) already resolves
-  before it renders; the boundary followed the data all along.
-  **Meta-lesson, standing rule:** coupling claims made from combined grep
-  sweeps are hypotheses. Before design work is scheduled on an asserted
-  "X depends on Y," the session verifies it per-file against the source.
+  build.rs rerun) → `adapters`. The `adapters` crate depends on `core` only:
+  its sole non-core dependency was the `Resolver` trait, which moved to
+  `core::secret`, and the pipeline (`render/apply.rs`) resolves before it
+  renders. (An earlier draft asserted a `render → resolve/library/store`
+  coupling that turned out to be a grep artifact — see [`HISTORY.md`](HISTORY.md).)
+  **Standing rule:** coupling claims made from combined grep sweeps are
+  hypotheses; before design work is scheduled on an asserted "X depends on Y,"
+  the session verifies it per-file against the source.
 - `src/calllog.rs` (audit-log writer) → `recorder`, seeding the event types.
 - Everything else (library, plugins, dashboard, analyze, codemode, the
   observation proxy, resolve/store) stays in `cli` for now.
@@ -206,63 +204,49 @@ on a future ruleset version).
 `docs/security-review-2026-07-11.html`).** The two-reviewer audit's findings,
 tracked to closure so this plan and the report can't drift apart:
 
-- **Closed — Highs (H1–H5):** lockdown network (H1), hostname normalization
-  (H2), enforced SNI-equals-CONNECT (H3), anti-SSRF IP-class guard +
-  dial-the-validated-address (H4), literal-IP CONNECTs through the same guard
-  (H5).
-- **Closed — Mediums:** ruleset version gate fails closed at the decision
-  boundary and in the sidecar (M1); length-framed trust digest segments (M2);
-  single-write atomic run-log appends (M3); per-run proxy peer-auth token —
-  the broad bind is no longer an open relay, and the same token authenticates
-  the sandbox to the lockdown sidecar (M4); per-step proxy timeouts (M6);
-  v2 dir digests skip symlinks and cap recursion depth (M7).
-- **Closed — Lows:** bounded reads for hostile manifest/lockfile input plus
-  hostile-input tests for the `${REF}` scanner (most of L4); digest paths
-  hashed as raw bytes with `/` separators on unix (L2, unix half); the stale
-  `adapters → policy` dependency edge withdrawn from CLAUDE.md and
-  ARCHITECTURE.md (L5, doc half); a sandbox run now fails closed if its run log
-  can't be created — "nothing trusted runs unobserved" (L4 remainder).
-- **Closed — M5 (port-scoped egress):** egress patterns gained an optional
-  `:port` (`api.example.com:443` scopes to that port; a bare host still means
-  any port), matched by a shared `egress_match` threaded through the same
-  intersection check so tools/secrets are untouched; the proxy enforces the
-  exact CONNECT port, write-time checks defer the port to runtime. The grammar
-  change bumped `RULESET_VERSION` to 2 so an older enforcer fails closed rather
-  than misread `!host:port`. An adversarial verification pass (a Codex review +
-  three invariant checkers) proved (machine ∩ bundle) still only narrows, drove
-  the version bump, and closed two parser holes (malformed bracketed patterns no
-  longer widen to any-port; port 0 is refused at CONNECT).
-- **Open, accepted and tracked:** the stat-based digest
-  cache stays off every verification path — that containment IS the fix, keep
-  it true (L1); the event-sink append is synchronous inside the async proxy
-  (L3 — latency, not correctness); `trust`
-  still carries `anyhow` + `toml` (L5 code half, TODO-tracked for the Phase 1
-  rule-6 sweep).
-- **Structural recommendation — DONE for the sandbox run path:** the reviewers'
-  "one enforcement-plan boundary" now exists for `run --sandbox`.
-  `ExecutionPlan::build` is the single seam that assembles a run — checks trust
-  (the previously-missing "verified content identity"), compiles the effective
-  policy, resolves mounts + command, picks the mode — and returns an immutable
-  plan that commands `execute` (one fail-closed run log + one proxy token,
-  created once, no per-mode duplication) or `display` (`--plan`, a Docker-free
-  dry run that names trust state, mode, and the exact command). Three
-  independent reviewers (Codex + two workflow checkers) confirmed the run is
-  behavior-preserved. Extending the same boundary to the host-mode run and the
-  gateway remains future work.
+- **Closed — Highs (H1–H5), Mediums (M1–M7), Lows (L2/L4/L5-doc), and M5
+  (port-scoped egress).** All landed; the per-finding detail (mechanism + commit
+  context) is archived in [`HISTORY.md`](HISTORY.md) so it stops competing with
+  the live plan for attention here.
+- **Structural recommendation — DONE for the sandbox run path.** The reviewers'
+  "one enforcement-plan boundary" now exists for `run --sandbox`
+  (`ExecutionPlan::build`); detail in [`HISTORY.md`](HISTORY.md). Extending the
+  same boundary to the host-mode run and the gateway remains future work.
+- **Open, accepted and tracked:** the stat-based digest cache stays off every
+  verification path — that containment IS the fix, keep it true (L1); the
+  event-sink append is synchronous inside the async proxy (L3 — latency, not
+  correctness); `trust` still carries `anyhow` + `toml` (L5 code half,
+  TODO-tracked for the Phase 1 rule-6 sweep).
 
 ## Phase 3 — Flight recorder surface
 
-- `recorder`: fill out the run log (tool calls + args, blocks, secret refs
-  touched, trust-store mutations, cost/tokens, wall time) fed by egress +
-  adapter + CLI stream events.
-- `agentstack report <run>`: readable run report.
+- **[done]** `agentstack report <run>`: readable run report (human-readable +
+  `--json`), reading the run's `events.jsonl` plus the audit log filtered by run
+  id (`crates/cli/src/commands/report.rs`).
+- `recorder`: fill out the run log itself. Today `RunEvent` has only three
+  variants (`SandboxStarted`, `Egress`, `SandboxExited`); tool calls surface in
+  `report` via the *separate* global audit log filtered by run id, not from the
+  run's own event stream, and secret refs touched, trust-store mutations,
+  cost/tokens, and wall time are not yet recorded per-run. Add those event types
+  (fed by egress + adapter + CLI stream events) so a run is self-describing from
+  its own log. This is what flips the sandbox/lockdown audit cells in
+  [`ENFORCEMENT.md`](ENFORCEMENT.md) from *coarse* toward *enforced*.
 - Keep scope: log + viewer. No dashboards.
 
-Done when: every sandbox run produces a report a security reviewer could read.
+Done when: the run log itself carries tool calls (attributed natively, not via
+the separate audit log), secret refs touched, trust-store mutations, and
+cost/wall-time — so every sandbox run produces a self-contained report a security
+reviewer could read. (The viewer is done; the log fill-out is what remains.)
 
 ## Phase 4 — Distribution (only after real users)
 
-- ed25519 signing of lockfiles; `agentstack verify`.
+- **[done — primitive]** ed25519 signing of lockfiles: `agentstack sign` derives
+  a fresh key, signs `agentstack.lock`, writes a detached `agentstack.lock.sig`,
+  and prints the public key; `agentstack verify` checks the lockfile against a
+  published public key and signature (`crates/trust/src/sign.rs`,
+  `crates/cli/src/commands/verify_cmd.rs`). This is the distribution primitive;
+  durable key management, key distribution, and the registry stay deferred until
+  there are real users.
 - Curated Git repo of signed bundles as registry v0.
 - Real registry infrastructure only when pull numbers justify it.
 

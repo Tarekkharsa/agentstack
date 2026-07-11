@@ -114,8 +114,11 @@ machine but is not the claim itself; the claim stays digest-shaped.)
 **Honest limitation:** the trust store and machine policy live under
 `~/.agentstack/`, which is writable by the user — and in host mode the agent
 CLI runs *as* the user, so a compromised agent could modify them and
-self-trust a bundle. Only sandbox mode removes this. As mitigation, the
-recorder logs every trust-store mutation as tamper evidence.
+self-trust a bundle. Only sandbox mode removes this. The intended mitigation —
+having the recorder log every trust-store mutation as tamper evidence — is
+**not yet wired** (the trust command and `crates/trust` call no recorder today);
+until it is, treat it as planned, not a shipped guarantee. See
+[`ENFORCEMENT.md`](ENFORCEMENT.md) for the exact per-mode enforcement status.
 
 This layer must work standalone — valuable with no sandbox, no registry.
 
@@ -168,19 +171,24 @@ not part of the trust digest**: one of its two inputs (machine policy) lives
 outside the pinned bundle by design, so folding it into the digest would
 create a second, machine-varying source of trust truth.
 
-Enforcement honesty, per dimension (today):
+Enforcement honesty, per dimension (today) — the authoritative,
+mode-by-dimension breakdown lives in [`ENFORCEMENT.md`](ENFORCEMENT.md); this is
+the policy-engine summary:
 - **Tools** — enforced: the gateway checks every call before dispatch
   (Layer 4's single enforcement point).
 - **Secrets** — enforced, fail-closed: a denied `${REF}` never resolves,
   at both adapter render and the gateway's per-server resolver.
 - **Egress** — enforced in sandbox mode: the egress proxy (host-process or
   lockdown sidecar, Layer 4) filters in-flight traffic against the compiled
-  ruleset, Docker-verified end to end. In host mode it is write/spawn-time
+  ruleset, Docker-verified end to end, and matches the exact CONNECT
+  **host:port** (`[policy.egress]` supports `host:port` patterns, RULESET_VERSION
+  2; see the dimension paragraph above). In host mode it is write/spawn-time
   only: a server's *declared* URL host is checked (render and gateway
   upstream construction), and a host hidden behind an unresolved `${REF}`
-  fails closed if the server is constrained at all. One known gap either
-  way: the decision matches the *host*, not the port — an allowed host is
-  reachable on any port, and an HTTPS-only intent is not yet expressible.
+  fails closed if the server is constrained at all. The remaining host-mode
+  gap: the write/spawn-time check matches only the declared *host* and defers
+  the port to runtime, so an HTTPS-only intent isn't verifiable until the CLI
+  actually connects.
 - **Filesystem** — write scope enforced in sandbox mode: the workspace mounts
   read-only unless the effective write scope covers the workspace root
   (deny-by-default — the one dimension where absence means deny, because a
@@ -210,10 +218,17 @@ alter how configs render and are trusted *because the user placed them*,
 unlike bundle content, which is hostile. Inside a container that dir is
 simply absent, which is expected and correct.
 
+The four runtime modes (host, gateway, sandbox, lockdown) enforce different
+dimensions to different depths; [`ENFORCEMENT.md`](ENFORCEMENT.md) is the
+authoritative per-cell matrix. This section describes the mechanisms behind it.
+
 **Host mode** (Phase 1): adapters write configs onto the bare machine.
 Honest framing: advisory enforcement — the trust gate governs what gets
 written, but a CLI on the host could bypass policy, and could in principle
-tamper with the trust store itself (Layer 2).
+tamper with the trust store itself (Layer 2). Per dimension, host mode enforces
+only secrets (fail-closed at the write boundary); tools, filesystem, and
+audit are unsupported on this path, and egress is a coarse write-time host
+check — see [`ENFORCEMENT.md`](ENFORCEMENT.md).
 
 **Single enforcement point (declared, not just observed):** every MCP tool
 call agentstack itself brokers — the gateway serve loop, the `agentstack mcp`
@@ -341,11 +356,10 @@ egress   → core, policy, recorder
 cli      → everything
 ```
 
-(The 2026-07-11 security review flagged that this table once granted
-`adapters → policy` while the crate never used it — the fail-closed secret
-check happens *before* render, in the caller. The edge is withdrawn to match
-reality; re-granting it is a deliberate architecture change, not a Cargo.toml
-edit.)
+`adapters` deliberately does **not** depend on `policy`: the fail-closed secret
+check happens *before* render, in the caller. Re-granting that edge is a
+deliberate architecture change, not a Cargo.toml edit. (This edge was once
+listed and withdrawn — see [`HISTORY.md`](HISTORY.md).)
 
 `core` depends on nothing internal; nothing depends on `cli`. `trust` and
 `policy` are the security-critical crates: they depend on `core` only, stay

@@ -10,7 +10,7 @@ over-simplified; this document pins the model that would make it safe.
 Every adapter declares `secret_mode: literal`: `apply` resolves `${REF}`s and
 writes the values into native configs (atomic, backed up, gitignored by
 default). The renderer already has a `passthrough` mode
-(`src/adapter/render.rs`) but no adapter uses it. The gateway path avoids the
+(`crates/adapters/src/render.rs`) but no adapter uses it. The gateway path avoids the
 problem entirely — secrets resolve at call time and never touch disk — which
 is one reason it's the preferred mode.
 
