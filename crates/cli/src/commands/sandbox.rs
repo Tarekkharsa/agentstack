@@ -551,12 +551,18 @@ fn render_gateway_config(
         ),
     };
 
-    // The global config's basename (e.g. `.claude.json` from `~/.claude.json`)
-    // under the container's home; the project-scope path under the workspace.
-    let global_name = Path::new(&config.path)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| ".mcp.json".to_string());
+    // The global config path RELATIVE to home, intermediate dirs preserved:
+    // `~/.claude.json` → `.claude.json`, `~/.codex/config.toml` →
+    // `.codex/config.toml` (Docker creates the parent dir in the writable
+    // container home). Flattening to the basename would mount codex's config at
+    // `/root/config.toml`, a path it never reads — silently losing routing for
+    // every non-claude-code adapter. A non-`~` (absolute) path is unusual for an
+    // HTTP-capable adapter; fall back to stripping the leading `/`.
+    let rel = config
+        .path
+        .strip_prefix("~/")
+        .or_else(|| config.path.strip_prefix('~'))
+        .unwrap_or_else(|| config.path.trim_start_matches('/'));
     let project_container = desc
         .project
         .as_ref()
@@ -564,7 +570,7 @@ fn render_gateway_config(
 
     Ok(Some(GatewayConfig {
         global_body,
-        global_container: format!("{home}/{global_name}"),
+        global_container: format!("{home}/{rel}"),
         empty_body,
         project_container,
     }))
@@ -622,7 +628,21 @@ fn wire_sandbox_gateway(
         return Ok(None);
     }
 
-    // Start the endpoint first so the rendered config can carry its real port +
+    // Cheap pre-check: a harness that can't host an HTTP MCP entry (no config,
+    // or a stdio-only adapter with no `url` field) can't be routed — bail
+    // BEFORE binding an endpoint we'd otherwise leak for the run.
+    let can_host_http =
+        desc.config.is_some() && desc.mcp.as_ref().is_some_and(|m| m.fields.url.is_some());
+    if !can_host_http {
+        eprintln!(
+            "  {} {} can't host an HTTP MCP entry; running without tool-policy routing",
+            "note:".dimmed(),
+            desc.display
+        );
+        return Ok(None);
+    }
+
+    // Start the endpoint so the rendered config can carry its real port +
     // token. Bind broadly (0.0.0.0) so the container reaches it — the token is
     // the gate, per the endpoint's own contract, like the egress proxy's bind.
     let endpoint = crate::gateway_http::start(Arc::new(gateway), "0.0.0.0:0")
@@ -1152,6 +1172,26 @@ mod tests {
         let empty: serde_json::Value = serde_json::from_str(&cfg.empty_body).unwrap();
         assert_eq!(empty["mcpServers"], serde_json::json!({}));
         assert!(!cfg.empty_body.contains("tok-abc"));
+    }
+
+    /// A NESTED global config path (`~/.codex/config.toml`) must keep its
+    /// intermediate dir in the container — flattening to the basename would
+    /// mount at a path the harness never reads, silently losing routing. This
+    /// guards every non-claude-code adapter (claude-code's flat path can't
+    /// catch it).
+    #[cfg(feature = "sandbox")]
+    #[test]
+    fn gateway_config_preserves_nested_global_path() {
+        let reg = crate::adapter::Registry::load().unwrap();
+        let desc = reg.get("codex").expect("codex descriptor");
+        assert!(
+            desc.config.as_ref().unwrap().path.contains('/'),
+            "test premise: codex's global config path is nested"
+        );
+        let cfg = render_gateway_config(desc, "/root", "http://egress-proxy:19080/mcp", "t")
+            .unwrap()
+            .expect("codex hosts HTTP MCP entries");
+        assert_eq!(cfg.global_container, "/root/.codex/config.toml");
     }
 
     /// `read_recorded_posture` refuses run ids that aren't a single safe path

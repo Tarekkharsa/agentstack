@@ -95,7 +95,7 @@ fn strip_ansi(s: &str) -> String {
 
 /// Machine home with the tool-denying policy and the `node` throwaway harness
 /// (whose adapter renders an HTTP MCP entry, so the gateway config lands in
-/// `/root/.gwtest.json`). Returns (home, as_home).
+/// `/root/.config/gwtest.json`). Returns (home, as_home).
 fn machine_home(tmp: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
     let home = tmp.join("home");
     let as_home = home.join(".agentstack");
@@ -108,13 +108,15 @@ fn machine_home(tmp: &std::path::Path) -> (std::path::PathBuf, std::path::PathBu
     )
     .unwrap();
     // A throwaway harness: launch binary `node`, and an adapter that renders an
-    // HTTP MCP entry into `~/.gwtest.json` (→ container `/root/.gwtest.json`).
+    // HTTP MCP entry into `~/.gwtest.json` (→ container `/root/.config/gwtest.json`).
+    // A NESTED global config path (like codex's ~/.codex/config.toml) — proves
+    // the container mount preserves the intermediate dir and Docker creates it.
     fs::write(
         as_home.join("adapters/gwtest.yaml"),
         "id: gwtest\n\
          display: GW Test\n\
          detect:\n  bin: node\n\
-         config:\n  path: ~/.gwtest.json\n  format: json\n\
+         config:\n  path: ~/.config/gwtest.json\n  format: json\n\
          mcp:\n  location: mcpServers\n  fields:\n    url: url\n    headers: headers\n\
          project:\n  config: .mcp.json\n",
     )
@@ -130,7 +132,7 @@ fn machine_home(tmp: &std::path::Path) -> (std::path::PathBuf, std::path::PathBu
 /// reads the URL from the config, so it doesn't care which route it takes.
 const CLIENT_SCRIPT: &str = r#"
 const fs=require('fs');
-const c=JSON.parse(fs.readFileSync('/root/.gwtest.json','utf8'));
+const c=JSON.parse(fs.readFileSync('/root/.config/gwtest.json','utf8'));
 const s=c.mcpServers['agentstack-gateway'];
 const body=JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'figma__post_comment',arguments:{}}});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));

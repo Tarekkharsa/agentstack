@@ -85,9 +85,13 @@ reaches an upstream host *directly* — any host on `--sandbox`'s open route, or
 an egress-*allowed* host under `--lockdown` — bypasses the gateway. Denying the
 container direct egress to upstream hosts (leaving the relay the only path to
 them) is the remaining step for an unconditional cell; until then this is
-"enforced for what transits the gateway," not "impossible to evade." An
-*untrusted* bundle is not routed at all (empty gateway), so its cell is
-`unsupported` — no tool policy, but also no secrets and no server spawn.
+"enforced for what transits the gateway," not "impossible to evade." A run is
+*not* routed at all — cell degrades to `unsupported` — in three cases, each
+surfaced on stderr at run time: an *untrusted* bundle (empty gateway — no tool
+policy, but also no secrets and no server spawn), a bundle with no proxied
+servers, or a harness whose adapter *can't host an HTTP MCP entry* (stdio-only
+config). The same three non-routed cases apply to the ‡ (secrets) and §
+(audit) cells below.
 
 ‡ **for gateway-routed runs.** The host-side gateway resolves `${REF}` secrets
 in its own memory and hands the container only the endpoint URL + a per-run
@@ -184,14 +188,19 @@ Docker container behind the egress proxy.
   every `${REF}` through `secret_decision`; a ref outside `[policy.secrets]` fails
   to resolve, and the call is refused outright if any refs remain unresolved for
   that server. Same mechanism as host mode. (`crates/cli/src/gateway.rs`)
-- **sandbox / lockdown — coarse.** The sandbox path never resolves or injects
-  secrets itself. Secrets reach the container the same way as host mode: a prior
-  `agentstack apply` on the host resolved `${REF}`s fail-closed (the enforced host
-  mechanism) and wrote literal values into the config under the project directory,
-  which is then bind-mounted into the container. The fail-closed check *is*
-  enforced (it's the host path), but there is no per-run, per-server secret
-  injection specific to the sandbox — it inherits whatever was already written to
-  disk and mounts it. (`crates/cli/src/commands/sandbox.rs`)
+- **sandbox / lockdown — enforced, for a gateway-routed run.** A trusted run
+  routes MCP through the host-side gateway (`Gateway::from_plan`), which resolves
+  `${REF}`s fail-closed in its own memory via the same per-server `ScopedResolver`
+  as gateway mode. Resolved secret *values* stay on the host — the container
+  receives only the gateway's endpoint URL and a per-run bearer token. A prior
+  `agentstack apply` that baked literal secrets into the project config is
+  actively neutralized: `wire_sandbox_gateway` mounts an empty config over that
+  path (shadowing it), so those bytes never reach the container either.
+  **Fallback:** a run that is *not* gateway-routed — an untrusted bundle, a
+  harness with no servers, or one that can't host an HTTP MCP entry — has no
+  host-side resolution and, if a stale rendered config sits in the workspace, the
+  container sees whatever was baked there. That path is coarse, as before.
+  (`crates/cli/src/gateway.rs`, `crates/cli/src/commands/sandbox.rs`)
 
 ### Filesystem — write
 
