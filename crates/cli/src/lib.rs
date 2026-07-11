@@ -25,6 +25,7 @@ pub mod dashboard;
 pub mod discover;
 pub mod footprint;
 pub mod gateway;
+pub mod gateway_http;
 pub mod history;
 pub mod library;
 // TODO(phase-1): re-export shims — migrate callers to agentstack_core:: paths

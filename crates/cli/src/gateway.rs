@@ -445,6 +445,21 @@ pub struct Gateway {
     /// to the egress proxy.
     ruleset: agentstack_policy::CompiledRuleset,
     project: Option<String>,
+    /// Run attribution, pinned at CONSTRUCTION: the audit mirror and
+    /// `CallRecord.run` use this field and never re-read the environment.
+    /// `from_manifest` inherits `RUN_ID_ENV` (host-mode `agentstack run`
+    /// spawned us); `from_plan` receives the run id explicitly.
+    run_id: Option<String>,
+}
+
+/// How the constructor decides the profile fence: inherit the ambient
+/// session (interactive `agentstack mcp`) or pin exactly what the caller's
+/// plan says (sandboxed runs — ambient host state must not leak in).
+/// (An enum + `match` here is a TS discriminated union with exhaustive
+/// switch: adding a variant forces every decision site to handle it.)
+enum Fence {
+    AmbientSession,
+    Pinned(Option<String>),
 }
 
 impl Gateway {
@@ -453,17 +468,94 @@ impl Gateway {
     /// empty gateway if the manifest can't load. HTTP and stdio servers are both
     /// proxied; stdio children spawn lazily, on the first message that needs one.
     pub fn from_manifest(dir: Option<&std::path::Path>) -> Gateway {
+        // Host-mode `agentstack run` spawns the harness with RUN_ID_ENV set and
+        // the harness spawns us — inherit the attribution once, at construction.
+        let run_id = std::env::var(crate::calllog::RUN_ID_ENV).ok();
+        Self::build(dir, Fence::AmbientSession, None, run_id, false)
+    }
+
+    /// Build for one sandboxed run (gateway-unification Session 1).
+    ///
+    /// Differences from [`Gateway::from_manifest`], each one a review finding:
+    /// - **Hard trust gate.** `run --sandbox` only *warns* on an unreviewed
+    ///   bundle — containment is its argument. The gateway has no such
+    ///   argument: it resolves secrets and spawns upstream children on the
+    ///   HOST. Anything but `Trusted` (re-checked here, so a manifest edit
+    ///   after plan-build fails closed) yields an empty gateway — no secret
+    ///   resolves, no child spawns, nothing is served.
+    /// - **One plan, one ruleset.** The caller passes the `CompiledRuleset`
+    ///   its `ExecutionPlan` already compiled; it is never recompiled from
+    ///   disk here, so tool policy and the plan's egress/filesystem policy
+    ///   cannot drift apart (TOCTOU between plan-build and gateway-build).
+    /// - **No ambient state.** The profile fence is pinned by the caller and
+    ///   the run id is explicit — host session files and env vars read at
+    ///   call time have no say in what a sandboxed run may reach.
+    pub fn from_plan(
+        dir: Option<&std::path::Path>,
+        ruleset: agentstack_policy::CompiledRuleset,
+        profile: Option<&str>,
+        run_id: &str,
+    ) -> Gateway {
+        Self::build(
+            dir,
+            Fence::Pinned(profile.map(str::to_string)),
+            Some(ruleset),
+            Some(run_id.to_string()),
+            true,
+        )
+    }
+
+    /// Shared constructor body. `require_trust` is the sandboxed-run hard
+    /// gate; `ruleset_override` skips the two-layer compile when the caller
+    /// already holds the run's compiled artifact.
+    fn build(
+        dir: Option<&std::path::Path>,
+        fence: Fence,
+        ruleset_override: Option<agentstack_policy::CompiledRuleset>,
+        run_id: Option<String>,
+        require_trust: bool,
+    ) -> Gateway {
         let mut upstreams = Vec::new();
         if let Ok(ctx) = crate::commands::load(dir) {
+            if require_trust {
+                let root = crate::manifest::project_root_of(&ctx.dir);
+                let state = crate::trust::check(&root);
+                if state != agentstack_trust::TrustState::Trusted {
+                    let why = match state {
+                        agentstack_trust::TrustState::Changed => {
+                            "its content changed since it was trusted"
+                        }
+                        _ => "it has not been reviewed and trusted",
+                    };
+                    eprintln!(
+                        "gateway: refusing to serve this bundle — {why}. Nothing \
+                         is proxied, no secret resolves, no server spawns. Review \
+                         it with `agentstack trust .`"
+                    );
+                    return Gateway {
+                        upstreams,
+                        cache: std::sync::Mutex::new(Some(std::sync::Arc::new(Vec::new()))),
+                        ruleset: agentstack_policy::CompiledRuleset::default(),
+                        project: None,
+                        run_id,
+                    };
+                }
+            }
             // When a session is active, fence the proxied surface to that
             // session's profile servers — the same fence a profile already puts
             // on skills, extended to runtime tools (PLAN code-mode Phase 3).
             // A vanished profile means no fence rather than fencing to nothing.
-            let session = crate::session::active(&ctx.dir);
-            let profile = session
-                .as_ref()
-                .map(|s| s.profile.as_str())
-                .filter(|p| ctx.loaded.manifest.profiles.contains_key(*p));
+            // Sandboxed runs pin the fence instead: ambient host session state
+            // must not decide what a run may reach.
+            let profile_owned: Option<String> = match &fence {
+                Fence::AmbientSession => crate::session::active(&ctx.dir)
+                    .map(|s| s.profile)
+                    .filter(|p| ctx.loaded.manifest.profiles.contains_key(p.as_str())),
+                Fence::Pinned(p) => p
+                    .clone()
+                    .filter(|p| ctx.loaded.manifest.profiles.contains_key(p.as_str())),
+            };
+            let profile = profile_owned.as_deref();
             // Name refs resolve through the same inline-first/central-library
             // path as rendering, so a server declared only in the library is
             // proxied like an inline one.
@@ -506,11 +598,16 @@ impl Gateway {
             // consumers never re-derive the two-layer merge. `project` is
             // audit-log context.
             let server_names: Vec<&str> = servers.iter().map(|(n, _)| n.as_str()).collect();
-            let ruleset = agentstack_policy::compile(
-                &crate::manifest::machine_policy(),
-                &ctx.loaded.manifest.policy,
-                &server_names,
-            );
+            // A sandboxed run hands us its plan's already-compiled artifact —
+            // never recompiled here, so one run has exactly one ruleset.
+            let ruleset = match ruleset_override {
+                Some(r) => r,
+                None => agentstack_policy::compile(
+                    &crate::manifest::machine_policy(),
+                    &ctx.loaded.manifest.policy,
+                    &server_names,
+                ),
+            };
             let project = Some(ctx.dir.display().to_string());
             // Per-server secret-ref NAMES resolved during construction (values
             // are never kept). Emitted as run-scoped `SecretAccess` events below
@@ -664,11 +761,14 @@ impl Gateway {
             // outside a run.
             for (srv, refs) in &secret_touches {
                 for r in refs {
-                    Self::record_run_event(&crate::calllog::RunEvent::SecretAccess {
-                        ts: crate::calllog::now_epoch(),
-                        server: srv.clone(),
-                        reference: r.clone(),
-                    });
+                    Self::record_run_event_for(
+                        run_id.as_deref(),
+                        &crate::calllog::RunEvent::SecretAccess {
+                            ts: crate::calllog::now_epoch(),
+                            server: srv.clone(),
+                            reference: r.clone(),
+                        },
+                    );
                 }
             }
             return Gateway {
@@ -676,6 +776,7 @@ impl Gateway {
                 cache: std::sync::Mutex::new(None),
                 ruleset,
                 project,
+                run_id,
             };
         }
         Gateway {
@@ -683,16 +784,21 @@ impl Gateway {
             cache: std::sync::Mutex::new(None),
             ruleset: agentstack_policy::CompiledRuleset::default(),
             project: None,
+            run_id,
         }
     }
 
     /// An empty gateway (no upstreams) — used as a default and in tests.
+    /// Inherits ambient run attribution like `from_manifest`, so a fallback
+    /// gateway inside an `agentstack run` still attributes what little it
+    /// logs to the right run.
     pub fn empty() -> Gateway {
         Gateway {
             upstreams: Vec::new(),
             cache: std::sync::Mutex::new(Some(std::sync::Arc::new(Vec::new()))),
             ruleset: agentstack_policy::CompiledRuleset::default(),
             project: None,
+            run_id: std::env::var(crate::calllog::RUN_ID_ENV).ok(),
         }
     }
 
@@ -800,7 +906,7 @@ impl Gateway {
         // 1) The cross-project diagnostic log — byte-identical to before.
         crate::calllog::record(&crate::calllog::CallRecord {
             ts,
-            run: std::env::var(crate::calllog::RUN_ID_ENV).ok(),
+            run: self.run_id.clone(),
             pid: std::process::id(),
             project: self.project.clone(),
             server: server.to_string(),
@@ -816,7 +922,7 @@ impl Gateway {
         // run's ACTIONS from its own events.jsonl — not only the cross-project
         // audit log. Best-effort, exactly like the audit write: a recorder
         // hiccup never fails the call, and calls.jsonl above is untouched.
-        Self::record_run_event(&crate::calllog::RunEvent::ToolCall {
+        self.record_run_event(&crate::calllog::RunEvent::ToolCall {
             ts,
             server: server.to_string(),
             tool: tool.to_string(),
@@ -828,16 +934,21 @@ impl Gateway {
     }
 
     /// Mirror one event into the launching run's flight recorder — but only
-    /// when this process was started by `agentstack run` (RUN_ID_ENV set).
-    /// Best-effort and additive: a no-op outside a run, and any failure is
-    /// swallowed (same contract as the audit write). `RunLog::create` only
-    /// prepares/reuses the run's already-existing directory; it opens no new
-    /// state a plain `agentstack mcp` launch wouldn't.
-    fn record_run_event(ev: &crate::calllog::RunEvent) {
-        let Ok(run_id) = std::env::var(crate::calllog::RUN_ID_ENV) else {
-            return;
-        };
-        if let Some(log) = crate::calllog::RunLog::create(&run_id) {
+    /// when this gateway carries run attribution (inherited from RUN_ID_ENV
+    /// at construction, or passed explicitly by `from_plan`). Best-effort and
+    /// additive: a no-op outside a run, and any failure is swallowed (same
+    /// contract as the audit write). `RunLog::create` only prepares/reuses
+    /// the run's already-existing directory; it opens no new state a plain
+    /// `agentstack mcp` launch wouldn't.
+    fn record_run_event(&self, ev: &crate::calllog::RunEvent) {
+        Self::record_run_event_for(self.run_id.as_deref(), ev);
+    }
+
+    /// The construction-time variant: `SecretAccess` events are emitted while
+    /// the `Gateway` value doesn't exist yet, so attribution is passed in.
+    fn record_run_event_for(run_id: Option<&str>, ev: &crate::calllog::RunEvent) {
+        let Some(run_id) = run_id else { return };
+        if let Some(log) = crate::calllog::RunLog::create(run_id) {
             log.append(ev);
         }
     }
@@ -937,6 +1048,7 @@ impl Gateway {
             cache: std::sync::Mutex::new(Some(std::sync::Arc::new(tools))),
             ruleset: agentstack_policy::CompiledRuleset::default(),
             project: None,
+            run_id: None,
         }
     }
 }
@@ -1061,6 +1173,7 @@ mod tests {
             cache: std::sync::Mutex::new(Some(std::sync::Arc::new(Vec::new()))),
             ruleset: agentstack_policy::compile(&machine, &project, &["figma"]),
             project: None,
+            run_id: None,
         };
         let err = gw.tool_allowed("figma", "post_comment").unwrap_err();
         assert!(err.contains("machine policy"), "{err}");
@@ -1167,7 +1280,10 @@ mod tests {
         );
 
         // Outside a run, only the audit log is written — no run log appears.
+        // Attribution is a CONSTRUCTION-time property now: a fresh gateway
+        // built after the env var is gone carries no run id.
         std::env::remove_var(crate::calllog::RUN_ID_ENV);
+        let gw = Gateway::empty();
         gw.log_call(
             "figma",
             "get_file",
@@ -1180,6 +1296,98 @@ mod tests {
             crate::calllog::RunLog::read("r-none").is_empty(),
             "no run log without RUN_ID_ENV"
         );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// `from_plan` is the sandboxed-run constructor. Its hard gate: a bundle
+    /// that is not `Trusted` yields an EMPTY gateway — no secret resolves, no
+    /// upstream exists — even though `run --sandbox` itself only warns
+    /// (containment is the sandbox's argument; the gateway executes on the
+    /// host and has none). Trusting the same bundle flips it live, with the
+    /// caller's ruleset and run id riding in — never recompiled, never
+    /// re-read from the environment.
+    #[test]
+    fn from_plan_refuses_untrusted_bundles_and_serves_trusted_ones() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        std::env::remove_var(crate::calllog::RUN_ID_ENV);
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
+            .unwrap();
+        let compile = || {
+            agentstack_policy::compile(
+                &crate::manifest::Policy::default(),
+                &crate::manifest::Policy::default(),
+                &["x"],
+            )
+        };
+
+        // Untrusted → empty, regardless of what the plan's ruleset allows.
+        let gw = Gateway::from_plan(Some(proj.path()), compile(), None, "r-plan");
+        assert!(gw.is_empty(), "untrusted bundle must serve nothing");
+
+        // Trusted → the same call proxies the manifest, attributed to the run.
+        crate::trust::trust(proj.path()).unwrap();
+        let gw = Gateway::from_plan(Some(proj.path()), compile(), None, "r-plan");
+        assert!(!gw.is_empty(), "trusted bundle must be proxied");
+        assert_eq!(
+            gw.run_id.as_deref(),
+            Some("r-plan"),
+            "attribution is the explicit run id, not the environment"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// The HTTP endpoint enforces `[policy.tools]` through the SAME
+    /// `try_call` site as every other surface: a machine-denied tool is
+    /// refused with the layer named, and the upstream is never contacted —
+    /// the fixture's command is `/bin/false`, so any spawn attempt would
+    /// surface as a spawn error, not a policy denial.
+    #[test]
+    fn http_endpoint_denies_by_policy_before_touching_the_upstream() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        std::env::remove_var(crate::calllog::RUN_ID_ENV);
+
+        let machine: crate::manifest::Policy =
+            toml::from_str("[tools]\nfigma = [\"!post_*\"]").unwrap();
+        let project = crate::manifest::Policy::default();
+        let gw = Gateway {
+            upstreams: vec![UpstreamSlot::new(Upstream::stdio(
+                "figma".into(),
+                "/bin/false".into(),
+                Vec::new(),
+                Vec::new(),
+                std::path::PathBuf::from("/"),
+                Vec::new(),
+            ))],
+            cache: std::sync::Mutex::new(None),
+            ruleset: agentstack_policy::compile(&machine, &project, &["figma"]),
+            project: None,
+            run_id: None,
+        };
+        let req = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": "figma__post_comment", "arguments": {} }
+        });
+        let (status, body) = crate::gateway_http::handle_mcp_post(&gw, &req.to_string());
+        assert_eq!(status, 200);
+        let v: Value = serde_json::from_str(&body.unwrap()).unwrap();
+        assert_eq!(v["result"]["isError"], true);
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("call refused"), "{text}");
+        assert!(text.contains("machine policy"), "{text}");
 
         std::env::remove_var("AGENTSTACK_HOME");
     }
