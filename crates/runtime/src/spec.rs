@@ -4,6 +4,7 @@
 
 use agentstack_policy::CompiledRuleset;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// A host directory made visible inside the container.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +43,39 @@ pub enum NetworkPolicy {
     Lockdown { network: String },
 }
 
+/// Kernel/container hardening controls. The default preserves existing agent
+/// CLI sandbox behavior; hostile generated-code execution opts into
+/// [`SandboxSecurity::hardened_executor`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SandboxSecurity {
+    pub user: Option<String>,
+    pub read_only_root: bool,
+    pub memory_bytes: Option<i64>,
+    pub nano_cpus: Option<i64>,
+    pub pids_limit: Option<i64>,
+    pub drop_all_capabilities: bool,
+    pub no_new_privileges: bool,
+    pub tmpfs: BTreeMap<String, String>,
+}
+
+impl SandboxSecurity {
+    pub fn hardened_executor() -> Self {
+        Self {
+            user: Some("65532:65532".into()),
+            read_only_root: true,
+            memory_bytes: Some(128 * 1024 * 1024),
+            nano_cpus: Some(1_000_000_000),
+            pids_limit: Some(32),
+            drop_all_capabilities: true,
+            no_new_privileges: true,
+            tmpfs: BTreeMap::from([(
+                "/tmp".into(),
+                "rw,noexec,nosuid,nodev,size=16m,mode=1777".into(),
+            )]),
+        }
+    }
+}
+
 /// The full description of one sandboxed run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxSpec {
@@ -62,6 +96,8 @@ pub struct SandboxSpec {
     /// (2.2) can enforce it from inside the container boundary without
     /// re-deriving anything — the identical artifact the gateway consumes.
     pub ruleset: CompiledRuleset,
+    /// Container hardening independent of policy interpretation.
+    pub security: SandboxSecurity,
 }
 
 impl SandboxSpec {

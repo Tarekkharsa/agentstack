@@ -1,0 +1,1125 @@
+//! Host-mode destructive-command guard — the engine behind `agentstack guard`.
+//!
+//! Each agent CLI is wired (via `agentstack guard install`) to run
+//! `agentstack guard check` as a pre-tool-use hook. The hook receives the
+//! pending tool call on stdin, and this module decides allow/deny from the
+//! machine's own config: `[policy.filesystem] deny` globs (never readable or
+//! writable) and `[guard] allow_roots` (where writes are allowed beyond the
+//! workspace). Denials are recorded to the audit log.
+//!
+//! Claim discipline (mirrors ENFORCEMENT.md): this is COOPERATIVE
+//! enforcement — it protects against an agent's *accidents* in everyday host
+//! use, because the harness chooses to consult the hook. A malicious agent
+//! or a harness that ignores its own hook protocol bypasses it entirely; the
+//! kernel-enforced story is `run --sandbox` / `--lockdown`. Never describe
+//! this dimension as "enforced".
+//!
+//! The engine is pure (no I/O): [`GuardContext`] carries everything a
+//! decision needs, so the whole surface is unit-testable. Protocol
+//! translation (each CLI's payload/response dialect) lives in
+//! [`Protocol`]; the shell-command analysis is a conservative tokenizer,
+//! not a full parser — bounded, allocation-light, and honest about its
+//! limits (a `cd` in one segment does not re-anchor relative paths in the
+//! next).
+
+use std::path::{Component, Path, PathBuf};
+
+use agentstack_policy::CompiledRuleset;
+use serde_json::{json, Value};
+
+/// What the pending tool call is, once a protocol has parsed its payload.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GuardEvent {
+    /// A shell command (the high-risk surface).
+    Bash { command: String },
+    /// A read-shaped file tool (Read / Glob / Grep …).
+    FileRead { path: String },
+    /// A write-shaped file tool (Write / Edit / NotebookEdit …).
+    FileWrite { path: String },
+    /// Anything else — allowed (the guard constrains files and shells, not
+    /// e.g. web fetches; egress is the proxy's dimension).
+    Other,
+}
+
+/// Everything a decision needs, resolved once by the caller.
+pub struct GuardContext {
+    /// The workspace the agent is working in (the hook payload's `cwd`).
+    pub workspace: PathBuf,
+    /// The user's home directory (deleting it, or `/`, is always refused).
+    pub home: PathBuf,
+    /// Temp directories writes are always allowed in.
+    pub tmp: Vec<PathBuf>,
+    /// `[guard] allow_roots` — extra write roots beyond the workspace.
+    pub allow_roots: Vec<PathBuf>,
+    /// Compiled policy; only `[policy.filesystem] deny` is consulted here.
+    pub ruleset: CompiledRuleset,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Decision {
+    Allow,
+    Deny { reason: String },
+}
+
+impl Decision {
+    fn deny(reason: impl Into<String>) -> Self {
+        Decision::Deny {
+            reason: reason.into(),
+        }
+    }
+    pub fn is_deny(&self) -> bool {
+        matches!(self, Decision::Deny { .. })
+    }
+}
+
+// ── The decision engine ─────────────────────────────────────────────────────
+
+/// The one entry point: decide a parsed event against the context.
+pub fn check_event(ctx: &GuardContext, event: &GuardEvent) -> Decision {
+    match event {
+        GuardEvent::Other => Decision::Allow,
+        GuardEvent::FileRead { path } => deny_glob_check(ctx, path),
+        GuardEvent::FileWrite { path } => write_target_check(ctx, path),
+        GuardEvent::Bash { command } => check_bash(ctx, command),
+    }
+}
+
+/// `[policy.filesystem] deny` for one path, matched in every spelling we
+/// know (absolute, workspace-relative, bare file name) — more spellings can
+/// only make a blocklist stricter.
+fn deny_glob_check(ctx: &GuardContext, path: &str) -> Decision {
+    let abs = normalize(path, &ctx.workspace, &ctx.home);
+    let mut spellings: Vec<String> = vec![abs.to_string_lossy().into_owned()];
+    if let Ok(rel) = abs.strip_prefix(&ctx.workspace) {
+        spellings.push(rel.to_string_lossy().into_owned());
+    }
+    if let Some(name) = abs.file_name() {
+        spellings.push(name.to_string_lossy().into_owned());
+    }
+    let refs: Vec<&str> = spellings.iter().map(String::as_str).collect();
+    match ctx.ruleset.fs_deny_decision(&refs) {
+        Ok(()) => Decision::Allow,
+        Err(rule) => Decision::deny(format!("{path}: {rule}")),
+    }
+}
+
+/// Writes are confined to the workspace, `[guard] allow_roots`, and temp
+/// dirs — deny-by-default everywhere else (that "everywhere else" includes
+/// the rest of the home directory).
+fn write_scope_check(ctx: &GuardContext, path: &str) -> Decision {
+    let abs = normalize(path, &ctx.workspace, &ctx.home);
+    if within(&abs, &ctx.workspace)
+        || ctx.allow_roots.iter().any(|r| within(&abs, r))
+        || ctx.tmp.iter().any(|r| within(&abs, r))
+    {
+        return Decision::Allow;
+    }
+    Decision::deny(format!(
+        "write outside the workspace: {} (allowed: the workspace, [guard] allow_roots, temp dirs)",
+        abs.display()
+    ))
+}
+
+/// Every operation that can modify or delete a path must pass both the
+/// machine/project deny globs and the writable-root boundary. Keeping this as
+/// one primitive prevents spelling-specific command handlers from omitting
+/// half of the check.
+fn write_target_check(ctx: &GuardContext, path: &str) -> Decision {
+    if let d @ Decision::Deny { .. } = deny_glob_check(ctx, path) {
+        return d;
+    }
+    write_scope_check(ctx, path)
+}
+
+/// Lexical normalization: make `path` absolute against `base`, expand `~`
+/// and `$HOME`, resolve `.`/`..` without touching the filesystem (the
+/// target may not exist yet, and a symlink-following canonicalize would
+/// answer about the wrong moment anyway — the hook runs before the call).
+fn normalize(path: &str, base: &Path, home: &Path) -> PathBuf {
+    let expanded: PathBuf = if path == "~" || path == "$HOME" || path == "${HOME}" {
+        home.to_path_buf()
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        home.join(rest)
+    } else if let Some(rest) = path.strip_prefix("$HOME/") {
+        home.join(rest)
+    } else if let Some(rest) = path.strip_prefix("${HOME}/") {
+        home.join(rest)
+    } else {
+        PathBuf::from(path)
+    };
+    let joined = if expanded.is_absolute() {
+        expanded
+    } else {
+        base.join(expanded)
+    };
+    let mut out = PathBuf::new();
+    for comp in joined.components() {
+        match comp {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Component-wise prefix check (string prefixes would let `/tmp2` pass as
+/// inside `/tmp`).
+fn within(path: &Path, root: &Path) -> bool {
+    path.strip_prefix(root).is_ok()
+}
+
+// ── Shell-command analysis ──────────────────────────────────────────────────
+
+/// Wrappers that just run another command: strip them and judge what they
+/// run. (`xargs` is handled separately — its targets come from stdin, so
+/// they are unknowable here.)
+const WRAPPERS: &[&str] = &[
+    "sudo", "env", "nohup", "time", "nice", "ionice", "command", "builtin", "exec", "stdbuf",
+];
+
+fn check_bash(ctx: &GuardContext, command: &str) -> Decision {
+    for segment in split_segments(command) {
+        let tokens = tokenize(&segment);
+        if tokens.is_empty() {
+            continue;
+        }
+        // Any token naming a deny-globbed path blocks the whole command —
+        // this is what catches `cat .env`, `source .env`, `cp .env /tmp`.
+        for tok in &tokens {
+            if !tok.starts_with('-') {
+                if let d @ Decision::Deny { .. } = deny_glob_check(ctx, tok) {
+                    return d;
+                }
+            }
+        }
+        // Redirections write: `> file`, `>> file`, `2> file`, `>file`.
+        for target in redirect_targets(&tokens) {
+            if target.starts_with("/dev/") {
+                if !matches!(target.as_str(), "/dev/null" | "/dev/stdout" | "/dev/stderr") {
+                    return Decision::deny(format!("redirect into a device: > {target}"));
+                }
+                continue;
+            }
+            if let d @ Decision::Deny { .. } = write_target_check(ctx, &target) {
+                return d;
+            }
+        }
+        let (program, rest, via_xargs) = strip_wrappers(&tokens);
+        let Some(program) = program else { continue };
+        let d = match program.as_str() {
+            "rm" => check_rm(ctx, &rest, via_xargs),
+            "git" => check_git(&rest),
+            "find" => check_find(ctx, &rest),
+            "shred" => Decision::deny("shred irrecoverably destroys file contents"),
+            "dd" => check_dd(&rest),
+            "diskutil" => check_diskutil(&rest),
+            "chmod" | "chown" => check_chmod_chown(ctx, program.as_str(), &rest),
+            "truncate" => check_write_targets(ctx, program.as_str(), &rest),
+            "mv" | "cp" => check_mv_cp(ctx, program.as_str(), &rest),
+            p if p.starts_with("mkfs") => Decision::deny(format!(
+                "{p} formats a filesystem — never allowed via a hook"
+            )),
+            _ => Decision::Allow,
+        };
+        if d.is_deny() {
+            return d;
+        }
+    }
+    Decision::Allow
+}
+
+/// Split a command line into independently judged segments on `;`, `&&`,
+/// `||`, `|`, `&`, newlines, and command substitution boundaries — outside
+/// quotes. Substitution contents become their own segments, so
+/// `echo $(rm -rf /)` is judged as `rm -rf /`.
+fn split_segments(command: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut chars = command.chars().peekable();
+    let mut quote: Option<char> = None;
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                }
+                current.push(c);
+            }
+            None => match c {
+                '\'' | '"' => {
+                    quote = Some(c);
+                    current.push(c);
+                }
+                ';' | '\n' | '|' | '&' | '`' => {
+                    segments.push(std::mem::take(&mut current));
+                    // Swallow the doubled operator char (&&, ||).
+                    if (c == '&' || c == '|') && chars.peek() == Some(&c) {
+                        chars.next();
+                    }
+                }
+                '$' if chars.peek() == Some(&'(') => {
+                    chars.next();
+                    segments.push(std::mem::take(&mut current));
+                }
+                ')' => segments.push(std::mem::take(&mut current)),
+                _ => current.push(c),
+            },
+        }
+    }
+    segments.push(current);
+    segments.retain(|s| !s.trim().is_empty());
+    segments
+}
+
+/// Whitespace tokenizer that honors (and strips) single/double quotes.
+fn tokenize(segment: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    for c in segment.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => current.push(c),
+            None => match c {
+                '\'' | '"' => quote = Some(c),
+                c if c.is_whitespace() => {
+                    if !current.is_empty() {
+                        tokens.push(std::mem::take(&mut current));
+                    }
+                }
+                _ => current.push(c),
+            },
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// Skip env assignments and wrapper programs; returns the effective program
+/// (basename), its args, and whether it runs under `xargs` (targets unknown).
+fn strip_wrappers(tokens: &[String]) -> (Option<String>, Vec<String>, bool) {
+    let mut i = 0;
+    let mut via_xargs = false;
+    while i < tokens.len() {
+        let t = &tokens[i];
+        let base = Path::new(t)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| t.clone());
+        if t.contains('=') && !t.starts_with('-') && !t.starts_with('/') && i == 0 {
+            // Leading VAR=value assignment.
+            i += 1;
+        } else if WRAPPERS.contains(&base.as_str()) {
+            i += 1;
+            // `env` and `sudo` may be followed by more assignments/flags.
+            while i < tokens.len() && (tokens[i].contains('=') || tokens[i].starts_with('-')) {
+                i += 1;
+            }
+        } else if base == "xargs" {
+            via_xargs = true;
+            i += 1;
+            while i < tokens.len() && tokens[i].starts_with('-') {
+                i += 1;
+            }
+        } else {
+            return (Some(base), tokens[i + 1..].to_vec(), via_xargs);
+        }
+    }
+    (None, Vec::new(), via_xargs)
+}
+
+/// Extract write targets of `>`/`>>` redirections (with optional fd digits).
+fn redirect_targets(tokens: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut expect_target = false;
+    for t in tokens {
+        if expect_target {
+            out.push(t.clone());
+            expect_target = false;
+            continue;
+        }
+        let stripped = t.trim_start_matches(|c: char| c.is_ascii_digit());
+        if stripped == ">" || stripped == ">>" {
+            expect_target = true;
+        } else if let Some(rest) = stripped.strip_prefix(">>") {
+            if !rest.is_empty() && !rest.starts_with('&') {
+                out.push(rest.to_string());
+            }
+        } else if let Some(rest) = stripped.strip_prefix('>') {
+            if !rest.is_empty() && !rest.starts_with('&') && !rest.starts_with('(') {
+                out.push(rest.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// The targets of a command: everything not flag-shaped (after `--`,
+/// everything).
+fn targets_of(args: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut after_dashdash = false;
+    for a in args {
+        if a == "--" {
+            after_dashdash = true;
+        } else if after_dashdash || !a.starts_with('-') {
+            out.push(a.clone());
+        }
+    }
+    out
+}
+
+fn combined_flags(args: &[String]) -> String {
+    args.iter()
+        .take_while(|a| *a != "--")
+        .filter(|a| a.starts_with('-') && !a.starts_with("--"))
+        .flat_map(|a| a.chars().skip(1))
+        .collect()
+}
+
+fn check_rm(ctx: &GuardContext, args: &[String], via_xargs: bool) -> Decision {
+    let flags = combined_flags(args);
+    let recursive =
+        flags.contains('r') || flags.contains('R') || args.iter().any(|a| a == "--recursive");
+    if recursive && via_xargs {
+        return Decision::deny(
+            "recursive rm via xargs — targets come from stdin and cannot be checked",
+        );
+    }
+    for t in targets_of(args) {
+        let abs = normalize(&t, &ctx.workspace, &ctx.home);
+        if abs == Path::new("/") || abs == ctx.home || abs == ctx.workspace {
+            return Decision::deny(format!(
+                "rm of {} — refusing to delete a root",
+                abs.display()
+            ));
+        }
+        // Deletion is a write: confined to the workspace + allow_roots + tmp.
+        if let d @ Decision::Deny { .. } = write_target_check(ctx, &t) {
+            return d;
+        }
+    }
+    Decision::Allow
+}
+
+fn check_git(args: &[String]) -> Decision {
+    // Skip global flags (`-C <dir>`, `-c a=b`) to find the subcommand.
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-C" | "-c" => i += 2,
+            a if a.starts_with('-') => i += 1,
+            _ => break,
+        }
+    }
+    let Some(sub) = args.get(i) else {
+        return Decision::Allow;
+    };
+    let rest = &args[i + 1..];
+    let flags = combined_flags(rest);
+    match sub.as_str() {
+        "reset" if rest.iter().any(|a| a == "--hard") => Decision::deny(
+            "git reset --hard discards uncommitted work irrecoverably — stash or commit first",
+        ),
+        "clean" if flags.contains('f') || rest.iter().any(|a| a == "--force") => {
+            Decision::deny("git clean -f deletes untracked files irrecoverably")
+        }
+        "checkout" if rest.iter().any(|a| a == ".") => {
+            Decision::deny("git checkout . discards all working-tree changes — stash first")
+        }
+        "restore" if rest.iter().any(|a| a == ".") && !rest.iter().any(|a| a == "--staged") => {
+            Decision::deny("git restore . discards all working-tree changes — stash first")
+        }
+        "push"
+            if (flags.contains('f') || rest.iter().any(|a| a == "--force"))
+                && !rest.iter().any(|a| a.starts_with("--force-with-lease")) =>
+        {
+            Decision::deny("git push --force without --force-with-lease can destroy remote history")
+        }
+        "stash" if rest.first().map(String::as_str) == Some("clear") => {
+            Decision::deny("git stash clear drops every stash irrecoverably")
+        }
+        _ => Decision::Allow,
+    }
+}
+
+fn check_find(ctx: &GuardContext, args: &[String]) -> Decision {
+    if !args.iter().any(|a| a == "-delete") {
+        return Decision::Allow;
+    }
+    // find's roots come before the first expression token.
+    let roots: Vec<&String> = args
+        .iter()
+        .take_while(|a| !a.starts_with('-') && *a != "(")
+        .collect();
+    if roots.is_empty() {
+        return Decision::Allow; // implicit `.` — inside the workspace
+    }
+    for r in roots {
+        if let d @ Decision::Deny { .. } = write_target_check(ctx, r) {
+            return d;
+        }
+        let abs = normalize(r, &ctx.workspace, &ctx.home);
+        if abs == Path::new("/") || abs == ctx.home {
+            return Decision::deny(format!("find {} -delete — refusing a root", abs.display()));
+        }
+    }
+    Decision::Allow
+}
+
+fn check_dd(args: &[String]) -> Decision {
+    for a in args {
+        if let Some(of) = a.strip_prefix("of=") {
+            if of.starts_with("/dev/") && of != "/dev/null" {
+                return Decision::deny(format!("dd writing to a device: {a}"));
+            }
+        }
+    }
+    Decision::Allow
+}
+
+fn check_diskutil(args: &[String]) -> Decision {
+    match args.first().map(String::as_str) {
+        Some("eraseDisk") | Some("eraseVolume") | Some("partitionDisk") | Some("zeroDisk") => {
+            Decision::deny("diskutil erase/partition destroys a volume")
+        }
+        _ => Decision::Allow,
+    }
+}
+
+fn check_chmod_chown(ctx: &GuardContext, program: &str, args: &[String]) -> Decision {
+    let recursive = combined_flags(args).contains('R') || args.iter().any(|a| a == "--recursive");
+    if !recursive {
+        return Decision::Allow;
+    }
+    for t in targets_of(args).iter().skip(1) {
+        // skip(1): the mode/owner argument
+        let abs = normalize(t, &ctx.workspace, &ctx.home);
+        if abs == Path::new("/") || abs == ctx.home {
+            return Decision::deny(format!("{program} -R on {}", abs.display()));
+        }
+        if let d @ Decision::Deny { .. } = write_target_check(ctx, t) {
+            return d;
+        }
+    }
+    Decision::Allow
+}
+
+fn check_write_targets(ctx: &GuardContext, program: &str, args: &[String]) -> Decision {
+    for t in targets_of(args) {
+        if let Decision::Deny { reason } = write_target_check(ctx, &t) {
+            return Decision::deny(format!("{program}: {reason}"));
+        }
+    }
+    Decision::Allow
+}
+
+fn check_mv_cp(ctx: &GuardContext, program: &str, args: &[String]) -> Decision {
+    let targets = targets_of(args);
+    if targets.len() < 2 {
+        return Decision::Allow;
+    }
+    // The destination is a write; for `mv`, sources are deletions too.
+    let (sources, dest) = targets.split_at(targets.len() - 1);
+    if let Decision::Deny { reason } = write_target_check(ctx, &dest[0]) {
+        return Decision::deny(format!("{program} destination: {reason}"));
+    }
+    for s in sources {
+        if let d @ Decision::Deny { .. } = deny_glob_check(ctx, s) {
+            return d;
+        }
+        if program == "mv" {
+            if let Decision::Deny { reason } = write_target_check(ctx, s) {
+                return Decision::deny(format!("mv source (a deletion): {reason}"));
+            }
+        }
+    }
+    Decision::Allow
+}
+
+// ── Protocols: each CLI's payload / response dialect ────────────────────────
+
+/// The hook dialect `guard check --protocol <x>` speaks. `Claude` covers
+/// Claude Code AND VS Code agent mode (same envelope); OpenCode and Pi are
+/// bridged to `Claude` by the generated plugin/extension files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Protocol {
+    Claude,
+    Codex,
+    Gemini,
+    Cursor,
+    Copilot,
+    Antigravity,
+    Windsurf,
+}
+
+impl Protocol {
+    pub fn parse(name: &str) -> Option<Protocol> {
+        Some(match name {
+            "claude" => Protocol::Claude,
+            "codex" => Protocol::Codex,
+            "gemini" => Protocol::Gemini,
+            "cursor" => Protocol::Cursor,
+            "copilot" => Protocol::Copilot,
+            "antigravity" => Protocol::Antigravity,
+            "windsurf" => Protocol::Windsurf,
+            _ => return None,
+        })
+    }
+
+    /// Payload-shape sniffing for hooks installed without `--protocol`
+    /// (or by hand). Discriminators per the per-CLI wire formats.
+    pub fn detect(payload: &Value) -> Protocol {
+        if payload.get("toolCall").is_some() {
+            Protocol::Antigravity
+        } else if payload.get("tool_info").is_some() || payload.get("agent_action_name").is_some() {
+            Protocol::Windsurf
+        } else if payload.get("toolArgs").is_some() {
+            Protocol::Copilot
+        } else if payload.get("command").is_some() && payload.get("tool_name").is_none() {
+            Protocol::Cursor
+        } else if payload
+            .get("turn_id")
+            .and_then(Value::as_str)
+            .is_some_and(|t| !t.is_empty())
+        {
+            Protocol::Codex
+        } else {
+            Protocol::Claude
+        }
+    }
+
+    /// Parse a payload into (event, cwd-if-given). `None` = a shape we
+    /// don't recognize — the caller allows (fail-open for unknown shapes;
+    /// blocking on every parse hiccup would wedge the harness).
+    pub fn parse_event(&self, payload: &Value) -> Option<(GuardEvent, Option<String>)> {
+        let str_at = |v: &Value, key: &str| v.get(key)?.as_str().map(str::to_string);
+        match self {
+            Protocol::Claude | Protocol::Codex | Protocol::Gemini => {
+                let tool = str_at(payload, "tool_name")
+                    .or_else(|| str_at(payload, "toolName"))
+                    .unwrap_or_default();
+                let input = payload
+                    .get("tool_input")
+                    .or_else(|| payload.get("toolInput"))
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let cwd = str_at(payload, "cwd");
+                Some((classify_tool(&tool, &input), cwd))
+            }
+            Protocol::Copilot => {
+                let tool = str_at(payload, "toolName").unwrap_or_default();
+                let input = payload.get("toolArgs").cloned().unwrap_or(Value::Null);
+                let cwd = str_at(payload, "cwd");
+                Some((classify_tool(&tool, &input), cwd))
+            }
+            Protocol::Cursor => {
+                let command = str_at(payload, "command")?;
+                let cwd = str_at(payload, "cwd");
+                Some((GuardEvent::Bash { command }, cwd))
+            }
+            Protocol::Antigravity => {
+                let call = payload.get("toolCall")?;
+                let args = call.get("args").cloned().unwrap_or(Value::Null);
+                let cwd = args.get("Cwd").and_then(Value::as_str).map(str::to_string);
+                if let Some(cmd) = args.get("CommandLine").and_then(Value::as_str) {
+                    return Some((
+                        GuardEvent::Bash {
+                            command: cmd.to_string(),
+                        },
+                        cwd,
+                    ));
+                }
+                let tool = call.get("name").and_then(Value::as_str).unwrap_or_default();
+                Some((classify_tool(tool, &args), cwd))
+            }
+            Protocol::Windsurf => {
+                let info = payload.get("tool_info").cloned().unwrap_or(Value::Null);
+                let cwd = info.get("cwd").and_then(Value::as_str).map(str::to_string);
+                if let Some(cmd) = info.get("command_line").and_then(Value::as_str) {
+                    return Some((
+                        GuardEvent::Bash {
+                            command: cmd.to_string(),
+                        },
+                        cwd,
+                    ));
+                }
+                let action = str_at(payload, "agent_action_name").unwrap_or_default();
+                if let Some(path) = path_from_input(&info) {
+                    let write = action.contains("write");
+                    return Some((
+                        if write {
+                            GuardEvent::FileWrite { path }
+                        } else {
+                            GuardEvent::FileRead { path }
+                        },
+                        cwd,
+                    ));
+                }
+                Some((GuardEvent::Other, cwd))
+            }
+        }
+    }
+
+    /// Render the decision in this dialect: (stdout, stderr, exit code).
+    pub fn respond(&self, decision: &Decision) -> (Option<String>, Option<String>, i32) {
+        let reason = match decision {
+            Decision::Allow => None,
+            Decision::Deny { reason } => Some(format!("agentstack guard blocked this: {reason}")),
+        };
+        match self {
+            Protocol::Claude => match reason {
+                None => (None, None, 0),
+                Some(r) => (
+                    Some(
+                        json!({"hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": r,
+                        }})
+                        .to_string(),
+                    ),
+                    None,
+                    0,
+                ),
+            },
+            // Codex rejects unknown JSON fields on stdout — deny is exit 2
+            // + stderr, the one form its parser can't misread.
+            Protocol::Codex | Protocol::Windsurf => match reason {
+                None => (None, None, 0),
+                Some(r) => (None, Some(r), 2),
+            },
+            Protocol::Gemini => match reason {
+                None => (None, None, 0),
+                Some(r) => (
+                    Some(json!({"decision": "deny", "reason": r, "systemMessage": r}).to_string()),
+                    None,
+                    0,
+                ),
+            },
+            Protocol::Cursor => match reason {
+                None => (
+                    Some(json!({"permission": "allow", "continue": true}).to_string()),
+                    None,
+                    0,
+                ),
+                Some(r) => (
+                    Some(
+                        json!({
+                            "permission": "deny", "continue": false,
+                            "userMessage": r, "agentMessage": r,
+                            "user_message": r, "agent_message": r,
+                        })
+                        .to_string(),
+                    ),
+                    None,
+                    0,
+                ),
+            },
+            Protocol::Copilot => match reason {
+                None => (
+                    Some(json!({"permissionDecision": "allow"}).to_string()),
+                    None,
+                    0,
+                ),
+                Some(r) => (
+                    Some(
+                        json!({
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": r,
+                            "continue": false, "stopReason": r,
+                        })
+                        .to_string(),
+                    ),
+                    None,
+                    0,
+                ),
+            },
+            // agy ignores exit codes — the JSON body is the only reliable
+            // block signal, so always exit 0.
+            Protocol::Antigravity => match reason {
+                None => (None, None, 0),
+                Some(r) => (
+                    Some(json!({"decision": "block", "reason": r}).to_string()),
+                    None,
+                    0,
+                ),
+            },
+        }
+    }
+}
+
+/// Map (tool name, tool input) to an event. Tool names come from each
+/// harness; unknown tools with a path are treated as reads (deny globs still
+/// apply — the safe default that can't wedge legitimate tools).
+fn classify_tool(tool: &str, input: &Value) -> GuardEvent {
+    if let Some(cmd) = input.get("command").and_then(Value::as_str) {
+        // Shell-shaped input regardless of the tool's name (Bash,
+        // run_shell_command, execute_bash, run_in_terminal …).
+        return GuardEvent::Bash {
+            command: cmd.to_string(),
+        };
+    }
+    let Some(path) = path_from_input(input) else {
+        return GuardEvent::Other;
+    };
+    const WRITERS: &[&str] = &[
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "NotebookEdit",
+        "write_file",
+        "replace",
+        "edit_file",
+        "fs_write",
+        "create_file",
+        "str_replace_editor",
+    ];
+    if WRITERS.iter().any(|w| tool.eq_ignore_ascii_case(w)) {
+        GuardEvent::FileWrite { path }
+    } else {
+        GuardEvent::FileRead { path }
+    }
+}
+
+fn path_from_input(input: &Value) -> Option<String> {
+    for key in [
+        "file_path",
+        "filePath",
+        "path",
+        "notebook_path",
+        "target_file",
+    ] {
+        if let Some(p) = input.get(key).and_then(Value::as_str) {
+            return Some(p.to_string());
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agentstack_core::manifest::{FsPolicy, Policy};
+
+    fn ctx() -> GuardContext {
+        let machine = Policy {
+            filesystem: FsPolicy {
+                read: vec![],
+                write: vec![],
+                deny: vec![".env".into(), ".env.local".into(), "id_rsa".into()],
+            },
+            ..Policy::default()
+        };
+        GuardContext {
+            workspace: PathBuf::from("/work/proj"),
+            home: PathBuf::from("/Users/me"),
+            tmp: vec![PathBuf::from("/tmp"), PathBuf::from("/private/tmp")],
+            allow_roots: vec![PathBuf::from("/Users/me/Documents/GitHub")],
+            ruleset: agentstack_policy::compile(&machine, &Policy::default(), &[]),
+        }
+    }
+
+    fn bash(cmd: &str) -> GuardEvent {
+        GuardEvent::Bash {
+            command: cmd.into(),
+        }
+    }
+
+    fn denied(d: Decision) -> bool {
+        d.is_deny()
+    }
+
+    // ── file tools ──────────────────────────────────────────────────────
+
+    #[test]
+    fn env_files_are_unreadable_and_unwritable_anywhere() {
+        let c = ctx();
+        for ev in [
+            GuardEvent::FileRead {
+                path: ".env".into(),
+            },
+            GuardEvent::FileRead {
+                path: "sub/dir/.env".into(),
+            },
+            GuardEvent::FileRead {
+                path: "/anywhere/else/.env".into(),
+            },
+            GuardEvent::FileWrite {
+                path: ".env".into(),
+            },
+            GuardEvent::FileRead {
+                path: "/Users/me/.ssh/id_rsa".into(),
+            },
+        ] {
+            assert!(denied(check_event(&c, &ev)), "{ev:?} should be denied");
+        }
+        // Non-secret files pass.
+        assert_eq!(
+            check_event(
+                &c,
+                &GuardEvent::FileRead {
+                    path: "src/main.rs".into()
+                }
+            ),
+            Decision::Allow
+        );
+    }
+
+    #[test]
+    fn writes_are_confined_to_workspace_allow_roots_and_tmp() {
+        let c = ctx();
+        let allow = |p: &str| {
+            assert_eq!(
+                check_event(&c, &GuardEvent::FileWrite { path: p.into() }),
+                Decision::Allow,
+                "{p} should be writable"
+            )
+        };
+        let deny = |p: &str| {
+            assert!(
+                denied(check_event(&c, &GuardEvent::FileWrite { path: p.into() })),
+                "{p} should be blocked"
+            )
+        };
+        allow("src/new.rs"); // relative → workspace
+        allow("/work/proj/deep/file.txt");
+        allow("/Users/me/Documents/GitHub/other/file.txt"); // allow_root
+        allow("/tmp/scratch.txt");
+        deny("/Users/me/.zshrc"); // home, outside roots
+        deny("/etc/hosts");
+        deny("../outside.txt"); // .. escapes the workspace
+                                // Reads outside the workspace stay allowed (host mode can't confine
+                                // reads without breaking the harness itself — sandbox mode does that).
+        assert_eq!(
+            check_event(
+                &c,
+                &GuardEvent::FileRead {
+                    path: "/etc/hosts".into()
+                }
+            ),
+            Decision::Allow
+        );
+    }
+
+    // ── bash: rm ────────────────────────────────────────────────────────
+
+    #[test]
+    fn rm_outside_roots_or_of_roots_is_denied() {
+        let c = ctx();
+        for cmd in [
+            "rm -rf /",
+            "rm -rf ~",
+            "rm -rf $HOME",
+            "rm -rf /work/proj", // the workspace root itself
+            "rm -rf /Users/me/Desktop",
+            "rm ../sibling.txt",
+            "sudo rm -rf /etc",
+            "find / -name x | xargs rm -rf",
+            "rm .env",
+        ] {
+            assert!(
+                denied(check_event(&c, &bash(cmd))),
+                "{cmd} should be denied"
+            );
+        }
+        for cmd in [
+            "rm -rf target", // inside the workspace
+            "rm -rf ./build",
+            "rm /tmp/scratch.txt",
+            "rm -rf /Users/me/Documents/GitHub/old-project/dist", // allow_root
+        ] {
+            assert_eq!(check_event(&c, &bash(cmd)), Decision::Allow, "{cmd}");
+        }
+    }
+
+    // ── bash: git ───────────────────────────────────────────────────────
+
+    #[test]
+    fn destructive_git_is_denied_and_safe_git_passes() {
+        let c = ctx();
+        for cmd in [
+            "git reset --hard HEAD~3",
+            "git clean -fdx",
+            "git checkout .",
+            "git checkout -- .",
+            "git restore .",
+            "git push --force origin main",
+            "git push -f",
+            "git stash clear",
+            "git -C /work/proj reset --hard",
+        ] {
+            assert!(
+                denied(check_event(&c, &bash(cmd))),
+                "{cmd} should be denied"
+            );
+        }
+        for cmd in [
+            "git status",
+            "git reset --soft HEAD~1",
+            "git checkout -b feature",
+            "git checkout main",
+            "git restore --staged .",
+            "git push --force-with-lease origin main",
+            "git stash pop",
+            "git clean -n",
+        ] {
+            assert_eq!(check_event(&c, &bash(cmd)), Decision::Allow, "{cmd}");
+        }
+    }
+
+    // ── bash: misc destructive ──────────────────────────────────────────
+
+    #[test]
+    fn disk_and_misc_destroyers_are_denied() {
+        let c = ctx();
+        for cmd in [
+            "dd if=/dev/zero of=/dev/disk2",
+            "mkfs.ext4 /dev/sda1",
+            "diskutil eraseDisk JHFS+ Blank /dev/disk2",
+            "shred secrets.txt",
+            "find /Users/me -name '*.log' -delete",
+            "chmod -R 777 /",
+            "chmod -R 777 id_rsa",
+            "chown -R me id_rsa",
+            "echo x > /Users/me/.zshrc",
+            "echo x >.env",
+            "cat secret > /dev/sda",
+            "mv src/main.rs /Users/me/Desktop/",
+            "cp data.txt /etc/",
+            "echo KEY=1 >> .env",
+            "cat .env",
+            "source .env",
+            "cp .env /tmp/exfil",
+        ] {
+            assert!(
+                denied(check_event(&c, &bash(cmd))),
+                "{cmd} should be denied"
+            );
+        }
+        for cmd in [
+            "dd if=in.img of=out.img",
+            "find . -name '*.tmp' -delete",
+            "chmod -R 755 ./scripts",
+            "echo hi > notes.txt",
+            "echo hi > /dev/null",
+            "cargo build --release",
+            "ls -la",
+            "mv old.rs new.rs",
+        ] {
+            assert_eq!(check_event(&c, &bash(cmd)), Decision::Allow, "{cmd}");
+        }
+    }
+
+    #[test]
+    fn segments_and_substitutions_are_each_judged() {
+        let c = ctx();
+        for cmd in [
+            "ls && rm -rf /",
+            "true; git reset --hard",
+            "echo $(cat .env)",
+            "ls | xargs rm -rf",
+            "echo `git clean -fd`",
+        ] {
+            assert!(
+                denied(check_event(&c, &bash(cmd))),
+                "{cmd} should be denied"
+            );
+        }
+        // Quoted operators are not separators; a quoted ".env"-free command
+        // survives its own strings.
+        assert_eq!(
+            check_event(&c, &bash("echo 'rm -rf / is a bad idea'")),
+            Decision::Allow
+        );
+    }
+
+    // ── protocols ───────────────────────────────────────────────────────
+
+    #[test]
+    fn protocol_detection_and_parsing_cover_each_dialect() {
+        let claude = json!({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": "/w"});
+        assert_eq!(Protocol::detect(&claude), Protocol::Claude);
+        let (ev, cwd) = Protocol::Claude.parse_event(&claude).unwrap();
+        assert_eq!(
+            ev,
+            GuardEvent::Bash {
+                command: "ls".into()
+            }
+        );
+        assert_eq!(cwd.as_deref(), Some("/w"));
+
+        let codex = json!({"tool_name": "shell", "tool_input": {"command": "ls"}, "turn_id": "t1"});
+        assert_eq!(Protocol::detect(&codex), Protocol::Codex);
+
+        let cursor = json!({"command": "rm -rf /", "cwd": "/w"});
+        assert_eq!(Protocol::detect(&cursor), Protocol::Cursor);
+        let (ev, _) = Protocol::Cursor.parse_event(&cursor).unwrap();
+        assert!(matches!(ev, GuardEvent::Bash { .. }));
+
+        let agy = json!({"toolCall": {"name": "run_command",
+            "args": {"CommandLine": "ls", "Cwd": "/w"}}, "conversationId": "c"});
+        assert_eq!(Protocol::detect(&agy), Protocol::Antigravity);
+        let (ev, cwd) = Protocol::Antigravity.parse_event(&agy).unwrap();
+        assert_eq!(
+            ev,
+            GuardEvent::Bash {
+                command: "ls".into()
+            }
+        );
+        assert_eq!(cwd.as_deref(), Some("/w"));
+
+        let windsurf = json!({"agent_action_name": "pre_run_command",
+            "tool_info": {"command_line": "ls", "cwd": "/w"}});
+        assert_eq!(Protocol::detect(&windsurf), Protocol::Windsurf);
+
+        let copilot = json!({"toolName": "bash", "toolArgs": {"command": "ls"}, "cwd": "/w"});
+        assert_eq!(Protocol::detect(&copilot), Protocol::Copilot);
+
+        let write = json!({"tool_name": "Write",
+            "tool_input": {"file_path": "/x/.env", "content": ""}});
+        let (ev, _) = Protocol::Claude.parse_event(&write).unwrap();
+        assert_eq!(
+            ev,
+            GuardEvent::FileWrite {
+                path: "/x/.env".into()
+            }
+        );
+    }
+
+    #[test]
+    fn responses_match_each_harness_block_contract() {
+        let deny = Decision::deny("nope");
+        // Claude: stdout JSON envelope, exit 0.
+        let (out, err, code) = Protocol::Claude.respond(&deny);
+        assert!(out.unwrap().contains("\"permissionDecision\":\"deny\""));
+        assert_eq!((err, code), (None, 0));
+        // Codex/Windsurf: stderr + exit 2, stdout EMPTY (strict parser).
+        for p in [Protocol::Codex, Protocol::Windsurf] {
+            let (out, err, code) = p.respond(&deny);
+            assert_eq!(out, None);
+            assert!(err.unwrap().contains("nope"));
+            assert_eq!(code, 2);
+        }
+        // Gemini: flat decision JSON.
+        let (out, _, code) = Protocol::Gemini.respond(&deny);
+        assert!(out.unwrap().contains("\"decision\":\"deny\""));
+        assert_eq!(code, 0);
+        // Antigravity: block JSON, ALWAYS exit 0.
+        let (out, _, code) = Protocol::Antigravity.respond(&deny);
+        assert!(out.unwrap().contains("\"decision\":\"block\""));
+        assert_eq!(code, 0);
+        // Cursor and Copilot emit explicit allow bodies.
+        let (out, _, _) = Protocol::Cursor.respond(&Decision::Allow);
+        assert!(out.unwrap().contains("\"permission\":\"allow\""));
+        let (out, _, _) = Protocol::Copilot.respond(&Decision::Allow);
+        assert!(out.unwrap().contains("\"permissionDecision\":\"allow\""));
+        // Allow on claude-family: silent success.
+        assert_eq!(Protocol::Claude.respond(&Decision::Allow), (None, None, 0));
+    }
+}

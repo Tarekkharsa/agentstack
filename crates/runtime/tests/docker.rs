@@ -31,6 +31,7 @@ fn busybox_run_streams_output_and_exits_clean() {
         env: vec![],
         network: NetworkPolicy::None,
         ruleset: agentstack_policy::CompiledRuleset::default(),
+        security: agentstack_runtime::SandboxSecurity::default(),
     };
 
     let mut stdout = Vec::new();

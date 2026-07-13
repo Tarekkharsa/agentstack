@@ -52,6 +52,12 @@ impl HooksPlan {
 /// Build the hooks plan for one target in a scope. `previously_managed` = did we
 /// own this target's hooks last run (so an emptied set prunes the key). Returns
 /// `None` when the CLI has no hooks destination for this scope.
+///
+/// `machine_hooks` are machine-layer entries (today: the `[guard]` hook when
+/// enabled) rendered ALONGSIDE the manifest's — apply owns the whole hooks
+/// key, so without this a global-scope apply would silently strip the guard
+/// the user installed. The caller passes them only at global scope: machine
+/// protection never lands in a repo's committed config.
 pub fn plan_hooks(
     manifest: &Manifest,
     desc: &AdapterDescriptor,
@@ -59,16 +65,22 @@ pub fn plan_hooks(
     previously_managed: bool,
     scope: Scope,
     project_dir: &Path,
+    machine_hooks: &[(String, Hook)],
 ) -> Result<Option<HooksPlan>> {
     let Some((path, format)) = desc.hooks_for(scope, project_dir) else {
         return Ok(None);
     };
     let spec = desc.hooks.as_ref().unwrap();
-    let selected: Vec<(&String, &Hook)> = manifest
+    let mut selected: Vec<(&String, &Hook)> = manifest
         .hooks
         .iter()
         .filter(|(_, h)| h.targets.iter().any(|t| t == "*" || t == &desc.id))
         .collect();
+    for (name, hook) in machine_hooks {
+        if hook.targets.iter().any(|t| t == "*" || t == &desc.id) {
+            selected.push((name, hook));
+        }
+    }
     if selected.is_empty() && !previously_managed {
         return Ok(None);
     }

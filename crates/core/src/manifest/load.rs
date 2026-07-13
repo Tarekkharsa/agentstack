@@ -215,11 +215,32 @@ pub fn machine_policy() -> crate::manifest::Policy {
 /// project-only policy, which stderr alone won't reliably surface (harnesses
 /// log it away).
 pub fn machine_policy_health() -> Option<Result<crate::manifest::Policy>> {
+    Some(machine_manifest()?.map(|m| m.policy))
+}
+
+/// The machine manifest's `[guard]`, same tri-state as
+/// [`machine_policy_health`]: `None` = no machine manifest, `Some(Err)` =
+/// one exists but can't be read. The guard's `check` treats `Some(Err)` as
+/// DENY (fail closed): an installed hook proves the guard was configured, so
+/// silently allowing everything because the config rotted is the one wrong
+/// answer.
+pub fn machine_guard_health() -> Option<Result<crate::manifest::GuardConfig>> {
+    Some(machine_manifest()?.map(|m| m.guard))
+}
+
+/// Machine-owned experimental feature flags. A repository manifest can never
+/// enable an execution primitive on the user's behalf.
+pub fn machine_experimental_health() -> Option<Result<crate::manifest::ExperimentalConfig>> {
+    Some(machine_manifest()?.map(|m| m.experimental))
+}
+
+/// Load `~/.agentstack/agentstack.toml` whole. Only a genuinely absent file
+/// means "no machine layer" (`None`). Any other read failure (permissions,
+/// I/O, parse, future version) is a real error — folding it into `None`
+/// would silently drop the user's own firewall with no warning and no
+/// doctor finding.
+fn machine_manifest() -> Option<Result<Manifest>> {
     let path = crate::util::paths::agentstack_home().join(MANIFEST_FILE);
-    // Only a genuinely absent file means "no machine layer". Any other read
-    // failure (permissions, I/O) is a real error — folding it into `None`
-    // would silently drop the user's own firewall with no warning and no
-    // doctor finding.
     let text = match fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
@@ -244,7 +265,7 @@ pub fn machine_policy_health() -> Option<Result<crate::manifest::Policy>> {
     ) {
         return Some(Err(e));
     }
-    Some(Ok(manifest.policy))
+    Some(Ok(manifest))
 }
 
 /// A missing or unparseable machine layer is a silent no-op — a broken

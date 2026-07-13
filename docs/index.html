@@ -656,6 +656,41 @@
     </p>
   </section>
 
+  <section id="tools-execute" class="reveal">
+    <p class="eyebrow">Experimental execution primitive</p>
+    <h2>Let generated code compose tools—not inherit your machine.</h2>
+    <p class="muted">
+      A sandbox-enabled build can expose <code>tools_execute</code>: one bounded
+      TypeScript program receives JSON input and only the exact MCP tools named
+      in its grant. It runs non-root in a read-only, resource-limited Docker
+      container with no workspace, credentials, package installation, or
+      direct network route. Calls return through the same policy-enforcing
+      gateway and appear beneath the execution in <code>agentstack report</code>.
+    </p>
+    <div class="term" style="margin-top:1.4rem">
+      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>machine-owned opt-in</b></div>
+      <pre><code><span class="row"><span class="c"># ~/.agentstack/agentstack.toml</span></span>
+<span class="row"><span class="c">[experimental]</span></span>
+<span class="row"><span class="ok">tools_execute = true</span></span>
+<span class="row"> </span>
+<span class="row"><span class="c">[experimental.tools_execute_limits]</span></span>
+<span class="row">timeout_ms = 30000</span>
+<span class="row">max_calls = 40</span>
+<span class="row">max_output_bytes = 131072</span>
+<span class="row"> </span>
+<span class="row"><span class="c">allowTools = ["github__get_issue"]</span><span class="c">  # exact names, no wildcards</span></span>
+<span class="row"><span class="ok">✓ x-… → github__get_issue</span><span class="c">      # gateway checked + recorded</span></span></code></pre>
+    </div>
+    <p class="small muted" style="margin-top:0.9rem">
+      Off by default, Docker-only, and never enabled by a repository manifest.
+      A focused implementation review and regression-hardening pass completed
+      on 2026-07-13. It remains experimental while executor-specific
+      SBOM/attestation and longer-running soak evidence are outstanding.
+      Read the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#experimental-tools_execute">exact contract</a>
+      and <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md#experimental-tools_execute">enforcement matrix</a>.
+    </p>
+  </section>
+
   <section id="enforced" class="reveal">
     <p class="eyebrow">What's enforced where</p>
     <h2>"Trusted" is not "confined." Here's the difference.</h2>

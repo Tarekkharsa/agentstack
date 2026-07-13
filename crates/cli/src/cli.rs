@@ -164,6 +164,14 @@ pub enum Command {
     #[command(hide = true)]
     Hook(HookArgs),
 
+    /// Machine-level destructive-command guard: wires `agentstack guard
+    /// check` into every detected agent CLI as a pre-tool-use hook. Blocks
+    /// destructive commands (rm -rf, git reset --hard, …), reads/writes of
+    /// `[policy.filesystem] deny` paths (.env and friends), and writes
+    /// outside the workspace + `[guard] allow_roots`. Cooperative accident
+    /// protection — the kernel-enforced story is `run --sandbox`.
+    Guard(GuardArgs),
+
     // ── Zero-files bridge ────────────────────────────────────────────────
     /// Register the agentstack gateway once, globally, in a harness's MCP
     /// config — after that, every trusted repo brings its own servers through
@@ -488,6 +496,40 @@ pub struct HookArgs {
     /// Which shell to emit the hook for.
     #[arg(value_enum)]
     pub shell: Shell,
+}
+
+#[derive(Args, Debug)]
+pub struct GuardArgs {
+    #[command(subcommand)]
+    pub cmd: GuardCmd,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum GuardCmd {
+    /// The hook entrypoint (agent CLIs call this; you rarely will): reads
+    /// one tool-call payload from stdin, answers in the CLI's own dialect.
+    #[command(hide = true)]
+    Check {
+        /// Payload/response dialect: claude, codex, gemini, cursor,
+        /// copilot, antigravity, windsurf. Omitted → detected from the
+        /// payload shape.
+        #[arg(long)]
+        protocol: Option<String>,
+    },
+    /// Judge a shell command against the current guard policy and exit
+    /// nonzero on deny — try `agentstack guard test rm -rf /`.
+    Test {
+        /// The command (quoted or as trailing words).
+        #[arg(trailing_var_arg = true, required = true)]
+        command: Vec<String>,
+    },
+    /// Wire the guard into every detected hook-capable CLI (global scope)
+    /// and seed [guard] + [policy.filesystem] deny in the machine manifest.
+    Install {},
+    /// Remove every hook `install` wrote and set [guard] enabled = false.
+    Uninstall {},
+    /// Show guard config and per-CLI installation state.
+    Status {},
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]

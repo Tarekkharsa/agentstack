@@ -1,18 +1,18 @@
 [package]
-name = "agentstack-recorder"
+name = "agentstack-executor"
 version = "0.10.0"
 edition = "2021"
 rust-version = "1.80"
-description = "agentstack append-only run/call log: event types, digest-keyed audit records"
+description = "Governed ephemeral code-execution domain for agentstack"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Tarekkharsa/agentstack"
 publish = false
 
 [dependencies]
-agentstack-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
+thiserror = "1"
 
 [dev-dependencies]
-assert_fs = "1"
+proptest = "1"

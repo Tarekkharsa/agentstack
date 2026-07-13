@@ -454,6 +454,19 @@ mod tests {
             filesystem: agentstack_core::manifest::FsPolicy {
                 read: vec![],
                 write: scopes.iter().map(|s| s.to_string()).collect(),
+                deny: vec![],
+            },
+            ..Policy::default()
+        }
+    }
+
+    /// Build a `Policy` with these `[policy.filesystem]` deny globs.
+    fn fs_deny(globs: &[&str]) -> Policy {
+        Policy {
+            filesystem: agentstack_core::manifest::FsPolicy {
+                read: vec![],
+                write: vec![],
+                deny: globs.iter().map(|s| s.to_string()).collect(),
             },
             ..Policy::default()
         }
@@ -504,6 +517,62 @@ mod tests {
             .workspace_write_decision()
             .unwrap_err();
         assert!(err.contains("machine policy"), "{err}");
+    }
+
+    // ── Filesystem deny globs (`[policy.filesystem] deny`) ──────────────────
+
+    /// Deny globs block a path in ANY spelling the caller knows for it, and
+    /// the machine layer's refusal names the layer.
+    #[test]
+    fn fs_deny_blocks_any_matching_spelling() {
+        let rs = compile(&fs_deny(&[".env*"]), &Policy::default(), &[]);
+        // Basename spelling catches a nested .env even though the relative
+        // path alone wouldn't match the pattern.
+        let err = rs.fs_deny_decision(&["sub/dir/.env", ".env"]).unwrap_err();
+        assert!(err.contains("machine policy"), "{err}");
+        // Variants covered by the glob.
+        assert!(rs.fs_deny_decision(&[".env.local"]).is_err());
+        // Non-matching paths pass; empty deny set allows everything.
+        assert!(rs.fs_deny_decision(&["src/main.rs", "main.rs"]).is_ok());
+        let none = compile(&Policy::default(), &Policy::default(), &[]);
+        assert!(none.fs_deny_decision(&[".env"]).is_ok());
+    }
+
+    /// A bundle can ADD deny globs (union) but its layer is named — and it
+    /// can never remove a machine deny.
+    #[test]
+    fn fs_deny_is_the_union_of_machine_and_bundle() {
+        let rs = compile(&fs_deny(&[".env*"]), &fs_deny(&["*.pem"]), &[]);
+        // Machine entry still denies, naming its layer.
+        let err = rs.fs_deny_decision(&[".env"]).unwrap_err();
+        assert!(err.contains("machine policy"), "{err}");
+        // Bundle entry denies too — its refusal does NOT claim machine.
+        let err = rs.fs_deny_decision(&["server.pem"]).unwrap_err();
+        assert!(!err.contains("machine policy"), "{err}");
+    }
+
+    proptest! {
+        /// For ALL bundle deny lists: a path the machine-only compilation
+        /// denies stays denied when the bundle layer is added. (The deny-glob
+        /// restatement of effective(B, M) ⊆ M — a bundle can only add.)
+        /// NEVER delete or weaken this test.
+        #[test]
+        fn fs_deny_never_weakened_by_a_bundle(
+            machine_globs in proptest::collection::vec("[a-z./*]{0,8}", 1..4),
+            bundle_globs in proptest::collection::vec("[a-z./*]{0,8}", 0..4),
+            subject in "[a-z./]{1,12}",
+        ) {
+            let machine = fs_deny(&machine_globs.iter().map(String::as_str).collect::<Vec<_>>());
+            let bundle = fs_deny(&bundle_globs.iter().map(String::as_str).collect::<Vec<_>>());
+            let machine_only = compile(&machine, &Policy::default(), &[]);
+            let both = compile(&machine, &bundle, &[]);
+            if machine_only.fs_deny_decision(&[&subject]).is_err() {
+                prop_assert!(
+                    both.fs_deny_decision(&[&subject]).is_err(),
+                    "machine denied {subject} but adding a bundle layer allowed it"
+                );
+            }
+        }
     }
 
     proptest! {

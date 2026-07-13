@@ -254,6 +254,41 @@ pub fn now_epoch() -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum RunEvent {
+    /// A governed ephemeral-code execution started. Digests identify the
+    /// source, input, runtime, and frozen authority without recording their
+    /// sensitive contents.
+    ExecutionStarted {
+        ts: u64,
+        execution_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_run_id: Option<String>,
+        source_digest: String,
+        input_digest: String,
+        authority_digest: String,
+        runtime_digest: String,
+        granted_tools: Vec<String>,
+        limits: Value,
+    },
+    /// Terminal evidence for one governed execution. The result is represented
+    /// by digest only; raw source, input, output, and secrets are never events.
+    ExecutionFinished {
+        ts: u64,
+        execution_id: String,
+        outcome: String,
+        duration_ms: u64,
+        calls: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        result_digest: Option<String>,
+        stdout_bytes: usize,
+        stderr_bytes: usize,
+    },
+    /// One hard executor limit ended or rejected an execution.
+    ExecutionLimitHit {
+        ts: u64,
+        execution_id: String,
+        limit: String,
+        observed: u64,
+    },
     /// The sandbox container was created and started.
     SandboxStarted {
         ts: u64,
@@ -281,6 +316,10 @@ pub enum RunEvent {
     /// on a failure — never upstream-authored text.
     ToolCall {
         ts: u64,
+        /// Governed execution that caused this call, when the gateway call
+        /// came from the ephemeral executor rather than the ambient agent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        execution_id: Option<String>,
         server: String,
         tool: String,
         outcome: String,
@@ -587,6 +626,7 @@ mod tests {
             let events = vec![
                 RunEvent::ToolCall {
                     ts: 10,
+                    execution_id: None,
                     server: "figma".into(),
                     tool: "get_file".into(),
                     outcome: "ok".into(),
@@ -596,6 +636,7 @@ mod tests {
                 },
                 RunEvent::ToolCall {
                     ts: 11,
+                    execution_id: Some("exec-1".into()),
                     server: "figma".into(),
                     tool: "delete_file".into(),
                     outcome: "denied".into(),
@@ -635,14 +676,22 @@ mod tests {
             let legacy = "\
 {\"event\":\"sandbox_started\",\"ts\":1,\"image\":\"img\",\"workspace\":\"/w\"}
 {\"event\":\"egress\",\"ts\":2,\"server\":\"s\",\"host\":\"h\",\"allowed\":true}
+{\"event\":\"tool_call\",\"ts\":2,\"server\":\"s\",\"tool\":\"t\",\"outcome\":\"ok\",\"args_digest\":\"abc\",\"ms\":1}
 {\"event\":\"sandbox_exited\",\"ts\":3,\"code\":0}
 ";
             fs::write(log.path(), legacy).unwrap();
             let events = RunLog::read("r-old");
-            assert_eq!(events.len(), 3, "all three legacy rows parse");
+            assert_eq!(events.len(), 4, "all legacy rows parse");
             assert!(matches!(events[0], RunEvent::SandboxStarted { .. }));
             assert!(matches!(
                 events[2],
+                RunEvent::ToolCall {
+                    execution_id: None,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                events[3],
                 RunEvent::SandboxExited { code: Some(0), .. }
             ));
         });

@@ -452,6 +452,14 @@ pub struct Gateway {
     run_id: Option<String>,
 }
 
+struct CallAudit<'a> {
+    outcome: &'a str,
+    detail: Option<&'a str>,
+    started: Instant,
+    run_id: Option<&'a str>,
+    execution_id: Option<&'a str>,
+}
+
 /// How the constructor decides the profile fence: inherit the ambient
 /// session (interactive `agentstack mcp`) or pin exactly what the caller's
 /// plan says (sandboxed runs — ambient host state must not leak in).
@@ -806,6 +814,14 @@ impl Gateway {
         self.upstreams.is_empty()
     }
 
+    /// The immutable effective ruleset captured at gateway construction.
+    /// Execution uses this exact artifact for its lockdown topology instead of
+    /// re-reading either manifest layer.
+    #[cfg(feature = "sandbox")]
+    pub(crate) fn ruleset(&self) -> agentstack_policy::CompiledRuleset {
+        self.ruleset.clone()
+    }
+
     /// Discover every upstream's tools, namespaced `<server>__<tool>`. Cached
     /// after the first call. Per-server failures are skipped (logged to stderr)
     /// so one slow/down server can't fail the whole list.
@@ -851,11 +867,51 @@ impl Gateway {
     /// call — after the `[policy.tools]` firewall, and with every outcome
     /// (ok / error / denied) appended to the audit log.
     pub fn try_call(&self, name: &str, args: &Value) -> Option<Result<Value>> {
+        self.try_call_attributed(name, args, self.run_id.as_deref(), None)
+    }
+
+    /// Execute one gateway call on behalf of a governed ephemeral execution.
+    /// The parent run owns the event log when present, while `execution_id`
+    /// keeps the nested call unambiguously attributable inside that log.
+    #[cfg(feature = "sandbox")]
+    pub(crate) fn try_call_for_execution(
+        &self,
+        name: &str,
+        args: &Value,
+        execution_id: &str,
+        parent_run_id: Option<&str>,
+    ) -> Option<Result<Value>> {
+        self.try_call_attributed(
+            name,
+            args,
+            parent_run_id.or(Some(execution_id)),
+            Some(execution_id),
+        )
+    }
+
+    fn try_call_attributed(
+        &self,
+        name: &str,
+        args: &Value,
+        run_id: Option<&str>,
+        execution_id: Option<&str>,
+    ) -> Option<Result<Value>> {
         let (server, tool) = name.split_once("__")?;
         let slot = self.upstreams.iter().find(|u| u.name == server)?;
         let started = Instant::now();
         if let Err(rule) = self.tool_allowed(server, tool) {
-            self.log_call(server, tool, args, "denied", Some(&rule), started);
+            self.log_call(
+                server,
+                tool,
+                args,
+                CallAudit {
+                    outcome: "denied",
+                    detail: Some(&rule),
+                    started,
+                    run_id,
+                    execution_id,
+                },
+            );
             return Some(Err(anyhow!("{server}__{tool}: call refused — {rule}")));
         }
         // Lock ONLY this server for the round trip: a 60s call here does not
@@ -863,11 +919,33 @@ impl Gateway {
         // queue — one stdio pipe, one HTTP session.
         let result = slot.lock().call_tool(tool, args.clone());
         match &result {
-            Ok(_) => self.log_call(server, tool, args, "ok", None, started),
+            Ok(_) => self.log_call(
+                server,
+                tool,
+                args,
+                CallAudit {
+                    outcome: "ok",
+                    detail: None,
+                    started,
+                    run_id,
+                    execution_id,
+                },
+            ),
             // The full error goes back to the caller; the log gets only a
             // fixed class — error text can embed upstream-authored content,
             // and a malicious server must not write into the call log.
-            Err(e) => self.log_call(server, tool, args, "error", Some(error_class(e)), started),
+            Err(e) => self.log_call(
+                server,
+                tool,
+                args,
+                CallAudit {
+                    outcome: "error",
+                    detail: Some(error_class(e)),
+                    started,
+                    run_id,
+                    execution_id,
+                },
+            ),
         }
         Some(result)
     }
@@ -883,22 +961,14 @@ impl Gateway {
 
     /// Append one audit record (best-effort; never fails the call). Only the
     /// argument *digest* is stored — never values, never resolved secrets.
-    fn log_call(
-        &self,
-        server: &str,
-        tool: &str,
-        args: &Value,
-        outcome: &str,
-        detail: Option<&str>,
-        started: Instant,
-    ) {
+    fn log_call(&self, server: &str, tool: &str, args: &Value, audit: CallAudit<'_>) {
         // Compute the shared, non-sensitive fields once — the machine-global
         // audit record and the run-scoped mirror below carry the exact same
         // digest, class, timing, and timestamp.
         let ts = crate::calllog::now_epoch();
-        let ms = started.elapsed().as_millis() as u64;
+        let ms = audit.started.elapsed().as_millis() as u64;
         let args_digest = crate::calllog::digest_args(args);
-        let detail = detail.map(|d| {
+        let detail = audit.detail.map(|d| {
             let mut d = d.to_string();
             d.truncate(200);
             d
@@ -906,13 +976,13 @@ impl Gateway {
         // 1) The cross-project diagnostic log — byte-identical to before.
         crate::calllog::record(&crate::calllog::CallRecord {
             ts,
-            run: self.run_id.clone(),
+            run: audit.run_id.map(str::to_owned),
             pid: std::process::id(),
             project: self.project.clone(),
             server: server.to_string(),
             tool: tool.to_string(),
             args_digest: args_digest.clone(),
-            outcome: outcome.to_string(),
+            outcome: audit.outcome.to_string(),
             detail: detail.clone(),
             ms,
         });
@@ -922,15 +992,19 @@ impl Gateway {
         // run's ACTIONS from its own events.jsonl — not only the cross-project
         // audit log. Best-effort, exactly like the audit write: a recorder
         // hiccup never fails the call, and calls.jsonl above is untouched.
-        self.record_run_event(&crate::calllog::RunEvent::ToolCall {
-            ts,
-            server: server.to_string(),
-            tool: tool.to_string(),
-            outcome: outcome.to_string(),
-            args_digest,
-            detail,
-            ms,
-        });
+        Self::record_run_event_for(
+            audit.run_id,
+            &crate::calllog::RunEvent::ToolCall {
+                ts,
+                execution_id: audit.execution_id.map(str::to_owned),
+                server: server.to_string(),
+                tool: tool.to_string(),
+                outcome: audit.outcome.to_string(),
+                args_digest,
+                detail,
+                ms,
+            },
+        );
     }
 
     /// Mirror one event into the launching run's flight recorder — but only
@@ -940,10 +1014,6 @@ impl Gateway {
     /// contract as the audit write). `RunLog::create` only prepares/reuses
     /// the run's already-existing directory; it opens no new state a plain
     /// `agentstack mcp` launch wouldn't.
-    fn record_run_event(&self, ev: &crate::calllog::RunEvent) {
-        Self::record_run_event_for(self.run_id.as_deref(), ev);
-    }
-
     /// The construction-time variant: `SecretAccess` events are emitted while
     /// the `Gateway` value doesn't exist yet, so attribution is passed in.
     fn record_run_event_for(run_id: Option<&str>, ev: &crate::calllog::RunEvent) {
@@ -1255,9 +1325,13 @@ mod tests {
             "figma",
             "get_file",
             &json!({ "id": 1 }),
-            "ok",
-            None,
-            Instant::now(),
+            CallAudit {
+                outcome: "ok",
+                detail: None,
+                started: Instant::now(),
+                run_id: Some("r-gw"),
+                execution_id: None,
+            },
         );
 
         // 1) The cross-project audit log still records it (unchanged path).
@@ -1288,9 +1362,13 @@ mod tests {
             "figma",
             "get_file",
             &json!({ "id": 2 }),
-            "ok",
-            None,
-            Instant::now(),
+            CallAudit {
+                outcome: "ok",
+                detail: None,
+                started: Instant::now(),
+                run_id: None,
+                execution_id: None,
+            },
         );
         assert!(
             crate::calllog::RunLog::read("r-none").is_empty(),

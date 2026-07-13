@@ -54,6 +54,7 @@ crates/
   recorder/   # append-only run log, event types, run reports
   runtime/    # sandbox orchestration via bollard (Phase 2)
   egress/     # egress proxy enforcing compiled policy (Phase 2, async)
+  executor/   # policy-agnostic governed code-execution domain
   cli/        # the `agentstack` binary composing everything
 ```
 
@@ -70,6 +71,7 @@ Exact internal dependency edges (nothing else is permitted):
 - `adapters` → `core` (the `policy` edge was withdrawn 2026-07-11 — the crate never used it; secrets are checked fail-closed before render, in the caller. Re-granting it is an architecture change, not a Cargo.toml edit)
 - `runtime` → `core`, `policy`, `recorder`
 - `egress` → `core`, `policy`, `recorder`
+- `executor` → `core`, `runtime`, `recorder`
 - `cli` → everything
 
 In particular: `trust` and `policy` depend on `core` only, and nothing depends on `cli`.

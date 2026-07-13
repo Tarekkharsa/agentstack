@@ -34,7 +34,8 @@ cargo build --release
 ./target/release/agentstack self link   # symlink onto your PATH
 ```
 
-One static binary, no runtime dependencies.
+One static binary for the core workflows. Docker is required only for
+`run --sandbox` / `--lockdown` and experimental `tools_execute`.
 
 ## Start in 60 seconds
 
@@ -75,6 +76,33 @@ That's the whole everyday loop. Two habits worth keeping:
   you're in.
 - `agentstack doctor` verifies everything is wired up and names the exact fix
   for anything that isn't.
+
+### Experimental: governed TypeScript execution
+
+Sandbox-enabled builds can expose `tools_execute`: one bounded TypeScript
+program can call a small, exact set of MCP tools through the existing gateway.
+The program runs as a non-root process in a read-only, resource-limited Docker
+container with no workspace, ambient credentials, package installation, or
+direct network route. Every allowed call is re-checked by the gateway and
+attributed in `agentstack report`.
+
+It is off by default and only the machine owner can enable it in
+`~/.agentstack/agentstack.toml`:
+
+```toml
+[experimental]
+tools_execute = true
+
+# Optional machine-owned defaults; requests may only narrow them.
+[experimental.tools_execute_limits]
+timeout_ms = 30000
+max_calls = 40
+max_output_bytes = 131072
+```
+
+This is an experimental Docker-only surface, not a host-execution fallback.
+See the [exact request contract](docs/reference.md#experimental-tools_execute)
+and [enforcement matrix](docs/ENFORCEMENT.md#experimental-tools_execute).
 
 ## Why
 

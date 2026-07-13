@@ -825,15 +825,80 @@ server you add), the proxied surface collapses behind two stable tools:
 agentstack emits the bindings and brokers the real MCP calls over a loopback,
 token-gated endpoint (`${REF}`s are resolved once per gateway session, at
 launch — never emitted into bindings or logs); the agent's code runs in the
-**harness's** own sandbox — never inside agentstack, which stays a compiler, not a
-runtime. (A full Code Mode in the [TanStack](https://tanstack.com/ai/latest/docs/code-mode/code-mode)
-sense — a sandboxed `execute_typescript` executor — is reserved for a future
-hosted `tools_execute`.) Materialize the client to `.agentstack/codemode/` with:
+**harness's** own sandbox. Materialize the client to `.agentstack/codemode/` with:
 
 ```bash
 agentstack codemode            # dry-run: what would be generated
 agentstack codemode --write    # write client.ts + agentstack-runtime.ts (+ .gitignore)
 ```
+
+### Experimental `tools_execute`
+
+Sandbox-enabled release builds can also host the program themselves. The MCP
+tool is advertised only when the machine manifest—not a repository—contains:
+
+```toml
+[experimental]
+tools_execute = true
+
+# Optional machine-owned defaults; each must remain within the hard ceiling.
+[experimental.tools_execute_limits]
+timeout_ms = 30000
+max_calls = 40
+max_output_bytes = 131072
+```
+
+Request schema:
+
+```json
+{
+  "code": "import { tools, input } from 'agentstack:runtime'; export default await tools.github.get_issue({ number: input.number });",
+  "allowTools": ["github__get_issue"],
+  "input": { "number": 42 },
+  "limits": { "timeoutMs": 15000, "maxCalls": 20, "maxOutputBytes": 65536 }
+}
+```
+
+`code` and `allowTools` are required. Grants are exact namespaced tool names;
+wildcards, empty grants, unknown tools, and extra request fields fail closed.
+`input` is JSON and defaults to `null`. Request limits can only narrow the
+machine defaults:
+
+| Limit | Default | Hard ceiling |
+|---|---:|---:|
+| source | — | 256 KiB |
+| input JSON | — | 1 MiB |
+| timeout | 15 s | 60 s |
+| gateway calls | 20 | 100 |
+| stdout + stderr | 64 KiB | 256 KiB |
+| result JSON | — | 1 MiB |
+| granted tools | — | 100 |
+
+The default export becomes the JSON result. Imports are offline: no npm/package
+installation or arbitrary module fetch exists. The runtime is the pinned
+official Node 22 slim image; guest code runs as uid/gid `65532`, with a
+read-only root, 16 MiB `noexec` tmpfs, all Linux capabilities dropped,
+`no-new-privileges`, 128 MiB memory, one CPU, and 32 PIDs. Its only network peer
+is the egress sidecar. The normal proxy port requires a credential the guest
+does not receive; the separate execution relay requires a per-run token and
+enforces the exact grant and call count before dispatching to the same
+`Arc<Gateway>` used by ordinary MCP calls.
+
+The policy ruleset is mounted only into the egress sidecar, outside the guest's
+`/app`. The default export is written to a separate, pre-created result-file
+bind capped at 1 MiB, so result size does not consume the stdout/stderr budget.
+The host relay listens on host interfaces because Docker's host bridge cannot
+reach a host loopback listener; it exists only for the execution lifetime and
+accepts no request without the per-run token.
+
+There is no host fallback. Missing trust, the sandbox build feature, Docker,
+the pinned image, the sidecar, relay authentication, recording, or teardown
+returns a stable non-sensitive error. Source, input, result, tokens, and secret
+values are not recorded; their digests, limits, timings, outcomes, and
+attributed tool calls are. A focused implementation review and regression-
+hardening pass completed on 2026-07-13. This surface remains experimental while
+image provenance/SBOM publication and longer-running soak evidence remain
+outstanding.
 
 ## Optimize (`agentstack optimize`)
 
@@ -880,7 +945,9 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 `connect`/`disconnect` (`connect`: `--all`, `--transparent`, `--write`),
 `trust` (`--list`, `--revoke` — pins the manifest layers **and lockfile**;
 re-locking re-gates), `codemode` (`--write`), `analyze` (`--json`,
-`--transcripts`), `hook`, `run` (`--sandbox`)/`runs`/`kill`, `report` (`--json`),
+`--transcripts`), `hook`, `guard` (`install|uninstall|status|test|check` —
+the machine-level destructive-command hook for every agent CLI; cooperative,
+see ENFORCEMENT.md), `run` (`--sandbox`)/`runs`/`kill`, `report` (`--json`),
 `sign`/`verify` (`--pubkey`, `--signature` — detached ed25519 lockfile
 signatures, Phase 4), `self link|which`.
 

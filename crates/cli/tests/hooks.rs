@@ -66,6 +66,7 @@ fn hooks_render_prune_and_preserve() {
         false,
         Scope::Global,
         proj,
+        &[],
     )
     .unwrap()
     .unwrap();
@@ -92,15 +93,99 @@ fn hooks_render_prune_and_preserve() {
 
     // Empty manifest + previously-managed → prune the hooks key, keep model.
     let empty: Manifest = toml::from_str("version = 1\n").unwrap();
-    let prune = plan_hooks(&empty, claude(&reg), &resolver, true, Scope::Global, proj)
-        .unwrap()
-        .unwrap();
+    let prune = plan_hooks(
+        &empty,
+        claude(&reg),
+        &resolver,
+        true,
+        Scope::Global,
+        proj,
+        &[],
+    )
+    .unwrap()
+    .unwrap();
     prune.write().unwrap();
     let v2: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(home.join(".claude/settings.json")).unwrap())
             .unwrap();
     assert!(v2.get("hooks").is_none());
     assert_eq!(v2["model"], "opus");
+}
+
+/// Machine-layer hooks (the guard) render alongside the manifest's — a
+/// global-scope apply that owns the whole hooks key must re-emit the guard
+/// entry, not strip it. And with NO manifest hooks at all, machine hooks
+/// alone are enough to produce a plan.
+#[test]
+fn machine_hooks_ride_along_and_survive_the_manifest() {
+    let _guard = env_lock();
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let reg = Registry::load().unwrap();
+    let resolver = MapResolver::from([("TOK", "sekret")]);
+    let proj = tmp.path();
+    let machine = vec![(
+        "agentstack-guard".to_string(),
+        agentstack::manifest::Hook {
+            event: "PreToolUse".into(),
+            matcher: None,
+            command: "/bin/agentstack guard check --protocol claude".into(),
+            args: vec![],
+            timeout: Some(10),
+            targets: vec!["claude-code".into()],
+        },
+    )];
+
+    // Manifest hooks + machine hook → both render.
+    let manifest: Manifest = toml::from_str(
+        "version = 1\n[hooks.fmt]\nevent = \"PostToolUse\"\ncommand = \"prettier --write\"\n",
+    )
+    .unwrap();
+    let plan = plan_hooks(
+        &manifest,
+        claude(&reg),
+        &resolver,
+        false,
+        Scope::Global,
+        proj,
+        &machine,
+    )
+    .unwrap()
+    .unwrap();
+    plan.write().unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".claude/settings.json")).unwrap())
+            .unwrap();
+    assert!(v["hooks"].get("PostToolUse").is_some());
+    assert_eq!(
+        v["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        "/bin/agentstack guard check --protocol claude"
+    );
+
+    // Empty manifest, previously managed → the guard hook still renders
+    // (only the manifest's own hooks are pruned).
+    let empty: Manifest = toml::from_str("version = 1\n").unwrap();
+    let plan = plan_hooks(
+        &empty,
+        claude(&reg),
+        &resolver,
+        true,
+        Scope::Global,
+        proj,
+        &machine,
+    )
+    .unwrap()
+    .unwrap();
+    plan.write().unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".claude/settings.json")).unwrap())
+            .unwrap();
+    assert!(v["hooks"].get("PostToolUse").is_none());
+    assert!(v["hooks"].get("PreToolUse").is_some());
 }
 
 #[test]
@@ -141,6 +226,7 @@ fn codex_hooks_render_to_config_toml_and_preserve_mcp() {
         false,
         Scope::Global,
         proj,
+        &[],
     )
     .unwrap()
     .unwrap();
@@ -157,9 +243,17 @@ fn codex_hooks_render_to_config_toml_and_preserve_mcp() {
     assert!(parsed.get("hooks").is_some());
 
     let empty: Manifest = toml::from_str("version = 1\n").unwrap();
-    let prune = plan_hooks(&empty, codex(&reg), &resolver, true, Scope::Global, proj)
-        .unwrap()
-        .unwrap();
+    let prune = plan_hooks(
+        &empty,
+        codex(&reg),
+        &resolver,
+        true,
+        Scope::Global,
+        proj,
+        &[],
+    )
+    .unwrap()
+    .unwrap();
     prune.write().unwrap();
     let pruned = fs::read_to_string(home.join(".codex/config.toml")).unwrap();
     assert!(!pruned.contains("[hooks]"));

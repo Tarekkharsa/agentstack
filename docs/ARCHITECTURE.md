@@ -2,7 +2,8 @@
 
 ## Vision
 
-AgentStack packages, runs, and governs AI agents — skills, tools, and MCP servers — as trusted, portable bundles.
+AgentStack packages, runs, and governs AI agents — skills, tools, MCP servers,
+and ephemeral generated capabilities — as trusted, portable bundles.
 
 The strategic frame: the **agent bundle** is the standard unit (the way the image was Docker's unit). Everything else in the system gates it, constrains it, records it, or distributes it. Config unification across agent CLIs is the adoption wedge; the trust gate, firewall, and audit trail are the durable value. The registry/marketplace is the endgame, only viable because trust and signing exist first.
 
@@ -19,6 +20,13 @@ bundle (inert) → trust gate → policy engine → sandboxed runtime → flight
                                     ↑                  ↑
                              machine rules      secrets resolver
 ```
+
+Generated code follows the same path through a policy-agnostic execution
+domain: the CLI freezes an exact tool grant and limits into an immutable plan;
+the executor runs it inside the sandbox; and every capability call returns to
+the existing gateway. The executor never reads or interprets policy. The
+gateway remains the sole tool authority, the runtime owns isolation, the
+egress crate owns asynchronous relay transport, and the recorder owns evidence.
 
 A bundle arrives (cloned, pulled, copied) and is inert by construction. `agentstack review` renders a human-readable diff of everything the bundle declares. Trusting it pins the lockfile digest into the machine-local trust store. At run time, the policy engine intersects the bundle's requested policy with the machine's rules, compiles a ruleset, and hands it to the runtime. In sandbox mode the agent CLI runs in a container routed through an egress proxy enforcing that ruleset — and in lockdown mode the proxy sidecar is topologically the *only* route out. Every tool call, block, secret resolution, and cost figure streams into an append-only run log.
 
@@ -353,8 +361,15 @@ recorder → core
 adapters → core
 runtime  → core, policy, recorder
 egress   → core, policy, recorder
+executor → core, runtime, recorder
 cli      → everything
 ```
+
+The experimental execution boundary is specified in the
+[`tools_execute` threat model](design/tools-execute-threat-model.md) and
+[runtime/ownership ADR](design/adr-tools-execute-runtime.md). Its user-visible
+claims are intentionally narrower than this architecture description and live
+in [`ENFORCEMENT.md`](ENFORCEMENT.md#experimental-tools_execute).
 
 `adapters` deliberately does **not** depend on `policy`: the fail-closed secret
 check happens *before* render, in the caller. Re-granting that edge is a

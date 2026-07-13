@@ -59,14 +59,19 @@ Modes are columns; policy dimensions are rows. Legend:
   dimension; the dimension has **no effect** here. (Stated bluntly rather than
   softened to "advisory": for these cells no check happens at all, so there is
   nothing to bypass.)
+- **cooperative** — a real per-call check runs, but only because the harness
+  chooses to consult it (a pre-tool-use hook). Protects against an agent's
+  *accidents*; a harness that ignores its own hook protocol, or a process the
+  harness never routes through hooks, bypasses it entirely. Strictly weaker
+  than **enforced** and never to be described as enforcement.
 
 | Dimension | `host` | `gateway` | `--sandbox` | `--lockdown` |
 |---|---|---|---|---|
 | **Tools** | unsupported | **enforced** | **enforced**† | **enforced**† |
 | **Egress** | coarse | coarse | **enforced**\* | **enforced** |
 | **Secrets** | **enforced** | **enforced** | **enforced**‡ | **enforced**‡ |
-| **Filesystem — write** | unsupported | unsupported | coarse | coarse |
-| **Filesystem — read** | unsupported | unsupported | coarse | coarse |
+| **Filesystem — write** | cooperative¶ | cooperative¶ | coarse | coarse |
+| **Filesystem — read** | cooperative¶ | cooperative¶ | coarse | coarse |
 | **Audit / recording** | unsupported | **enforced** | **enforced**§ | **enforced**§ |
 
 \* **for proxied traffic only.** Plain `--sandbox` points `HTTPS_PROXY` at the
@@ -204,11 +209,25 @@ Docker container behind the egress proxy.
 
 ### Filesystem — write
 
-- **host / gateway — unsupported.** No sandbox, no mount, no path-scoping touches
-  either path. `runs.rs` spawns the harness against the real filesystem; the
-  gateway is an in-process broker with no mount logic. `workspace_write_decision`
-  is never consulted, and stdio MCP children run with the ambient user's full
-  filesystem permissions. (`crates/cli/src/runs.rs`, `crates/cli/src/gateway.rs`)
+- **host / gateway — cooperative (¶), when the guard is installed.** No
+  sandbox, no mount, no kernel path-scoping touches either path — `runs.rs`
+  spawns the harness against the real filesystem, and stdio MCP children run
+  with the ambient user's full permissions. What DOES run is the host guard:
+  `agentstack guard install` wires `agentstack guard check` into each
+  detected CLI's own pre-tool-use hook (Claude Code, Codex, Gemini, Cursor,
+  Windsurf, Copilot CLI, Antigravity, OpenCode, Pi; VS Code agent mode reads
+  the Claude-format user hooks). Per tool call it blocks: destructive
+  commands (`rm -rf` outside the workspace, `git reset --hard`, `git clean
+  -f`, disk writes, …), any access to `[policy.filesystem] deny` globs
+  (machine ∪ project — a repo can only add), and file-tool writes outside
+  the workspace + `[guard] allow_roots` + temp. Denials are recorded to the
+  audit log (`host-guard` entries in `calls.jsonl`). The ceiling is the
+  legend's: the harness must honor its own hook protocol — this catches
+  accidents, not malice, and Claude Desktop / Junie expose no hook surface
+  at all (their cells are effectively *unsupported*). Config unreadable →
+  the hook fails CLOSED; unrecognized payload shapes fail open (a guard
+  that wedges the harness gets uninstalled, not fixed).
+  (`crates/cli/src/guard.rs`, `crates/cli/src/commands/guard.rs`)
 - **sandbox / lockdown — coarse.** The whole workspace is one bind mount, mounted
   `:ro` unless the effective write scope covers the workspace root
   (deny-by-default — the one dimension where absence means deny). A partial scope
@@ -219,8 +238,14 @@ Docker container behind the egress proxy.
 
 ### Filesystem — read
 
-- **host / gateway — unsupported.** Same paths as filesystem-write; `FsRules.read`
-  is never consulted. (`crates/cli/src/runs.rs`, `crates/cli/src/gateway.rs`)
+- **host / gateway — cooperative (¶), deny globs only.** The same hook guard
+  checks every file-tool read and shell token against `[policy.filesystem]
+  deny` (`.env`, key files, …) — so `cat .env`, `Read(.env)`, and `cp .env
+  /tmp` are blocked in everyday host use. Reads are otherwise NOT confined
+  to the workspace (confine-all-reads would break the harness itself; that
+  is what the sandbox's mount boundary is for), and `FsRules.read` scopes
+  are still never consulted on these paths.
+  (`crates/cli/src/guard.rs`, `crates/cli/src/commands/guard.rs`)
 - **sandbox / lockdown — coarse.** The whole workspace is visible inside the
   container and nothing outside the mounted workspace directory is — so the
   workspace boundary itself is a real, kernel-level read scope. But no finer mount
@@ -261,6 +286,26 @@ evidence, as mitigation for the host-mode self-trust risk. **As of this writing
 that is intended, not implemented** — the trust command and `crates/trust` call no
 recorder. Treat it as a planned mitigation, not a shipped guarantee, until a
 run/audit event for trust mutations exists.
+
+## Experimental `tools_execute`
+
+This is a separate, machine-opt-in mode with a narrower runtime surface than a
+whole harness sandbox. It is available only in builds with the `sandbox`
+feature and has no host fallback.
+
+| Property | Status | Mechanism and honest limit |
+|---|---|---|
+| Project identity | **enforced** | Current project digest must be in the trust store before files, Docker, relay, or upstream dispatch. Trust covers AgentStack manifest layers/lockfile, not every arbitrary repository file. |
+| Enablement | **enforced** | Only `[experimental] tools_execute = true` in the machine manifest is consulted. The same table in a repo cannot enable it. |
+| Tool authority | **enforced** | Immutable, exact namespaced grant; per-run authenticated relay checks membership and count; the existing gateway re-applies compiled machine ∩ project tool policy. Allowed tools can still have side effects. |
+| Secrets | **enforced** | No resolved secret, gateway environment, or relay credential appears in guest env/result/events. Upstream processes still receive secrets that their declared server configuration authorizes. |
+| Filesystem read | **enforced** | Guest sees only a private read-only `/app` mount containing source, JSON input, bootstrap, generated bindings, and relay token. The policy ruleset is mounted only into the sidecar. The guest does not receive workspace, AgentStack home, Docker socket, or host home mounts. Container/kernel escape is outside this claim. |
+| Filesystem write | **enforced** | Read-only root and `/app`; only a 16 MiB `noexec,nosuid,nodev` `/tmp` tmpfs and one pre-created, 1 MiB-capped result-file bind are writable. |
+| Direct egress | **enforced** | Internal Docker network has only the egress sidecar as peer. Its ordinary proxy requires an undisclosed separate token; the fixed raw relay reaches only the host execution relay. The host relay must bind host interfaces because Docker's host bridge cannot reach host loopback; its random token, exact grant, bounded protocol, and execution-scoped lifetime are the control. No payload/content inspection occurs on allowed tool results. |
+| Process isolation | **enforced** | Non-root uid/gid 65532, capabilities dropped, `no-new-privileges`, 128 MiB memory, one CPU, 32 PIDs. Docker's configured/default seccomp policy, Docker itself, and the host kernel remain trusted computing base; AgentStack does not yet ship a custom executor seccomp profile. |
+| Limits | **enforced** | Machine-owned timeout, output, and call defaults are configurable only below compiled hard ceilings; requests may only narrow them. Aggregate stdout/stderr and separate result/source/input bytes, granted-tool count, and relay call count are bounded. A tool call already dispatched upstream cannot be revoked atomically. |
+| Recording | **enforced** | Run log creation is required. Events store digests and metadata, never source/input/result/secret values; tool calls carry execution IDs and render beneath the execution in `agentstack report`. Recording is evidence, not tamper-proof remote attestation. |
+| Runtime supply chain | **partial** | Node image is pinned by repository digest. AgentStack does not yet publish an executor-specific SBOM, attestation, or independent scan, so the feature remains experimental. |
 
 ## See also
 

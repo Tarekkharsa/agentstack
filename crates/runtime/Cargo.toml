@@ -1,6 +1,6 @@
 [package]
 name = "agentstack-runtime"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 rust-version = "1.80"
 description = "agentstack sandbox runtime: container lifecycle (Phase 2)"

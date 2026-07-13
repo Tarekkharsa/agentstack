@@ -262,6 +262,17 @@ existing phases, none of it scaffolded early):
    hosts (a separate container-scope egress ruleset) so the gateway is the only
    path to them — until then an agent reaching an egress-allowed upstream host
    directly bypasses the gateway, and the cells stay qualified.
+1b. **Host guard — DONE (maintainer-directed, 2026-07-12).** `agentstack
+   guard install` wires `agentstack guard check` into every detected CLI's
+   own pre-tool-use hook (9 CLIs; Claude Desktop and Junie have no hook
+   surface, Kiro's is per-agent-config and deferred). Blocks destructive
+   commands, `[policy.filesystem] deny` access (new dimension: deny globs,
+   machine ∪ bundle, proptest-pinned), and writes outside the workspace +
+   `[guard] allow_roots`; denials audited. Labelled **cooperative** in
+   ENFORCEMENT.md — accident protection, never "enforced". Remaining
+   (Session B): kernel-level deny-glob mask mounts + finer `:ro`/`:rw`
+   write scopes in the sandbox, which moves the fs cells there past coarse.
+
 2. **Hero command: `agentstack run --locked <bundle-or-repo>`.** One command
    composing existing pieces: resolve + content-pin → review → trust gate
    (re-gate on any changed byte) → gateway + lockdown → ephemeral secret

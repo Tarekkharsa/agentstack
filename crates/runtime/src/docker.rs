@@ -12,6 +12,7 @@
 //! current-thread tokio runtime and `block_on`s each call — keeping every
 //! async detail inside this file.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use bollard::models::{ContainerCreateBody, HostConfig};
@@ -117,6 +118,26 @@ impl Sandbox for DockerSandbox {
             binds: Some(binds),
             network_mode,
             extra_hosts,
+            readonly_rootfs: Some(spec.security.read_only_root),
+            memory: spec.security.memory_bytes,
+            memory_swap: spec.security.memory_bytes,
+            nano_cpus: spec.security.nano_cpus,
+            pids_limit: spec.security.pids_limit,
+            cap_drop: spec
+                .security
+                .drop_all_capabilities
+                .then(|| vec!["ALL".into()]),
+            security_opt: spec
+                .security
+                .no_new_privileges
+                .then(|| vec!["no-new-privileges:true".into()]),
+            tmpfs: (!spec.security.tmpfs.is_empty()).then(|| {
+                spec.security
+                    .tmpfs
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect::<HashMap<_, _>>()
+            }),
             ..Default::default()
         };
         let body = ContainerCreateBody {
@@ -128,6 +149,7 @@ impl Sandbox for DockerSandbox {
             entrypoint: Some(vec![]),
             cmd: Some(spec.command.clone()),
             working_dir: Some(spec.workdir.clone()),
+            user: spec.security.user.clone(),
             env: Some(env),
             host_config: Some(host_config),
             ..Default::default()
@@ -140,14 +162,23 @@ impl Sandbox for DockerSandbox {
                 .create_container(Some(CreateContainerOptionsBuilder::default().build()), body)
                 .await
                 .map_err(backend)?;
-            docker
+            if let Err(error) = docker
                 .start_container(&created.id, None::<StartContainerOptions>)
                 .await
-                .map_err(backend)?;
+            {
+                let opts = RemoveContainerOptionsBuilder::default().force(true).build();
+                let _ = docker.remove_container(&created.id, Some(opts)).await;
+                return Err(backend(error));
+            }
             Ok::<String, RuntimeError>(created.id)
         })?;
 
-        Ok(Box::new(DockerHandle { rt, docker, id }))
+        Ok(Box::new(DockerHandle {
+            rt,
+            docker,
+            id,
+            removed: false,
+        }))
     }
 }
 
@@ -155,6 +186,7 @@ struct DockerHandle {
     rt: Arc<Runtime>,
     docker: Docker,
     id: String,
+    removed: bool,
 }
 
 impl SandboxHandle for DockerHandle {
@@ -191,15 +223,97 @@ impl SandboxHandle for DockerHandle {
         })
     }
 
+    fn wait_streaming_bounded(
+        &mut self,
+        timeout: std::time::Duration,
+        max_output_bytes: usize,
+        on_output: &mut dyn FnMut(StreamChunk),
+    ) -> Result<Exit> {
+        let docker = self.docker.clone();
+        let id = self.id.clone();
+        let future = async move {
+            let opts = LogsOptionsBuilder::default()
+                .follow(true)
+                .stdout(true)
+                .stderr(true)
+                .build();
+            let mut logs = docker.logs(&id, Some(opts));
+            let mut observed = 0usize;
+            while let Some(next) = logs.next().await {
+                let out = next.map_err(backend)?;
+                let (stream, bytes) = classify(out);
+                observed = observed.saturating_add(bytes.len());
+                if observed > max_output_bytes {
+                    return Err(RuntimeError::OutputLimit);
+                }
+                if !bytes.is_empty() {
+                    on_output(StreamChunk { stream, bytes });
+                }
+            }
+            let mut waits = docker.wait_container(&id, None::<WaitContainerOptions>);
+            let mut code = None;
+            while let Some(next) = waits.next().await {
+                if let Ok(resp) = next {
+                    code = Some(resp.status_code as i32);
+                }
+            }
+            Ok(Exit { code })
+        };
+        match self
+            .rt
+            .block_on(async { tokio::time::timeout(timeout, future).await })
+        {
+            Ok(result) => result,
+            Err(_) => Err(RuntimeError::Timeout),
+        }
+    }
+
     fn teardown(&mut self) -> Result<()> {
         let docker = self.docker.clone();
         let id = self.id.clone();
-        self.rt
-            .block_on(async move {
-                let opts = RemoveContainerOptionsBuilder::default().force(true).build();
-                docker.remove_container(&id, Some(opts)).await
-            })
-            .map_err(|e| RuntimeError::Teardown(e.to_string()))
+        let result = self.rt.block_on(async move {
+            let opts = RemoveContainerOptionsBuilder::default().force(true).build();
+            match docker.remove_container(&id, Some(opts)).await {
+                Ok(())
+                | Err(bollard::errors::Error::DockerResponseServerError {
+                    status_code: 404, ..
+                }) => Ok(()),
+                Err(_) => {
+                    // One immediate retry absorbs a transient daemon race
+                    // without weakening the postcondition: execution remains
+                    // failed if forced removal still cannot be established.
+                    let opts = RemoveContainerOptionsBuilder::default().force(true).build();
+                    docker.remove_container(&id, Some(opts)).await
+                }
+            }
+        });
+        match result {
+            Ok(())
+            | Err(bollard::errors::Error::DockerResponseServerError {
+                status_code: 404, ..
+            }) => {
+                // Removal is idempotent: "already absent" establishes the
+                // same postcondition as a successful force-remove.
+                self.removed = true;
+                Ok(())
+            }
+            Err(error) => Err(RuntimeError::Teardown(error.to_string())),
+        }
+    }
+}
+
+impl Drop for DockerHandle {
+    fn drop(&mut self) {
+        if self.removed {
+            return;
+        }
+        let docker = self.docker.clone();
+        let id = self.id.clone();
+        let _ = self.rt.block_on(async move {
+            let opts = RemoveContainerOptionsBuilder::default().force(true).build();
+            docker.remove_container(&id, Some(opts)).await
+        });
+        self.removed = true;
     }
 }
 

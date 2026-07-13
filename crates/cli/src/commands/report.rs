@@ -34,6 +34,7 @@ fn calls_for(run_id: &str) -> Vec<CallRecord> {
 /// events or a fallback `CallRecord` from the audit log) so the renderer treats
 /// them identically.
 struct ToolRow {
+    execution_id: Option<String>,
     server: String,
     tool: String,
     outcome: String,
@@ -50,6 +51,7 @@ fn tool_rows(events: &[RunEvent], calls: &[CallRecord]) -> Vec<ToolRow> {
         .iter()
         .filter_map(|e| match e {
             RunEvent::ToolCall {
+                execution_id,
                 server,
                 tool,
                 outcome,
@@ -57,6 +59,7 @@ fn tool_rows(events: &[RunEvent], calls: &[CallRecord]) -> Vec<ToolRow> {
                 ms,
                 ..
             } => Some(ToolRow {
+                execution_id: execution_id.clone(),
                 server: server.clone(),
                 tool: tool.clone(),
                 outcome: outcome.clone(),
@@ -72,6 +75,7 @@ fn tool_rows(events: &[RunEvent], calls: &[CallRecord]) -> Vec<ToolRow> {
     calls
         .iter()
         .map(|c| ToolRow {
+            execution_id: None,
             server: c.server.clone(),
             tool: c.tool.clone(),
             outcome: c.outcome.clone(),
@@ -168,6 +172,92 @@ pub fn report_text(run_id: &str) -> String {
         }
     }
 
+    let rows = tool_rows(&events, &calls);
+
+    // Governed generated-code executions are child activities of the run.
+    // Their source/input/results remain digest-only; the report shows the
+    // frozen grant and terminal evidence.
+    let executions: Vec<&RunEvent> = events
+        .iter()
+        .filter(|event| matches!(event, RunEvent::ExecutionStarted { .. }))
+        .collect();
+    if !executions.is_empty() {
+        o.push_str(&format!("  {}\n", "Executions".bold()));
+        for event in executions {
+            if let RunEvent::ExecutionStarted {
+                execution_id,
+                granted_tools,
+                ..
+            } = event
+            {
+                let finish = events.iter().find_map(|candidate| match candidate {
+                    RunEvent::ExecutionFinished {
+                        execution_id: id,
+                        outcome,
+                        duration_ms,
+                        calls,
+                        ..
+                    } if id == execution_id => Some((outcome, *duration_ms, *calls)),
+                    _ => None,
+                });
+                match finish {
+                    Some((outcome, duration_ms, calls)) => {
+                        let mark = if outcome == "ok" {
+                            "✓".green().to_string()
+                        } else {
+                            "✗".red().to_string()
+                        };
+                        o.push_str(&format!(
+                            "    {mark} {execution_id}  {duration_ms}ms · {calls} call{} · {} granted\n",
+                            if calls == 1 { "" } else { "s" },
+                            granted_tools.len()
+                        ));
+                    }
+                    None => o.push_str(&format!(
+                        "    {} {execution_id}  incomplete · {} granted\n",
+                        "⚠".yellow(),
+                        granted_tools.len()
+                    )),
+                }
+                for row in rows
+                    .iter()
+                    .filter(|row| row.execution_id.as_deref() == Some(execution_id))
+                {
+                    let mark = match row.outcome.as_str() {
+                        "ok" => "✓".green().to_string(),
+                        "denied" => "✗".red().to_string(),
+                        _ => "⚠".yellow().to_string(),
+                    };
+                    let why = row
+                        .detail
+                        .as_deref()
+                        .map(|detail| format!("  ({detail})"))
+                        .unwrap_or_default();
+                    o.push_str(&format!(
+                        "      {mark} {}__{}  {}ms{why}\n",
+                        row.server, row.tool, row.ms
+                    ));
+                }
+                for limit in events.iter().filter_map(|candidate| match candidate {
+                    RunEvent::ExecutionLimitHit {
+                        execution_id: id,
+                        limit,
+                        observed,
+                        ..
+                    } if id == execution_id => Some((limit, observed)),
+                    _ => None,
+                }) {
+                    o.push_str(&format!(
+                        "      {} limit {} reached (observed {})\n",
+                        "✗".red(),
+                        limit.0,
+                        limit.1
+                    ));
+                }
+            }
+        }
+    }
+
     // Egress decisions — allow and block both shown; a report is what the
     // sandbox reached, not only what it was denied.
     let egress: Vec<&RunEvent> = events
@@ -202,10 +292,13 @@ pub fn report_text(run_id: &str) -> String {
     // Tool calls the run's agent made (digest only, never argument values).
     // Sourced from the run's OWN events.jsonl when the gateway mirrored them
     // there; older runs fall back to the cross-project audit log.
-    let rows = tool_rows(&events, &calls);
-    if !rows.is_empty() {
+    let ambient_rows: Vec<&ToolRow> = rows
+        .iter()
+        .filter(|row| row.execution_id.is_none())
+        .collect();
+    if !ambient_rows.is_empty() {
         o.push_str(&format!("  {}\n", "Tool calls".bold()));
-        for r in &rows {
+        for r in ambient_rows {
             let mark = match r.outcome.as_str() {
                 "ok" => "✓".green().to_string(),
                 "denied" => "✗".red().to_string(),
@@ -373,6 +466,7 @@ mod tests {
             // The same call, in BOTH logs (as the gateway writes it).
             log.append(&RunEvent::ToolCall {
                 ts: 5,
+                execution_id: None,
                 server: "figma".into(),
                 tool: "get_file".into(),
                 outcome: "ok".into(),
@@ -437,6 +531,67 @@ mod tests {
     }
 
     #[test]
+    fn renders_execution_with_attributed_child_calls_and_limits() {
+        with_home(|| {
+            let log = RunLog::create("r-execution").unwrap();
+            log.append(&RunEvent::ExecutionStarted {
+                ts: 1,
+                execution_id: "x-child".into(),
+                parent_run_id: Some("r-execution".into()),
+                source_digest: "source".into(),
+                input_digest: "input".into(),
+                authority_digest: "authority".into(),
+                runtime_digest: "runtime".into(),
+                granted_tools: vec!["github__get_issue".into()],
+                limits: serde_json::json!({"timeoutMs": 1000, "maxCalls": 2}),
+            });
+            log.append(&RunEvent::ToolCall {
+                ts: 2,
+                execution_id: Some("x-child".into()),
+                server: "github".into(),
+                tool: "get_issue".into(),
+                outcome: "ok".into(),
+                args_digest: "abc".into(),
+                detail: None,
+                ms: 8,
+            });
+            log.append(&RunEvent::ExecutionLimitHit {
+                ts: 3,
+                execution_id: "x-child".into(),
+                limit: "timeoutMs".into(),
+                observed: 1000,
+            });
+            log.append(&RunEvent::ExecutionFinished {
+                ts: 3,
+                execution_id: "x-child".into(),
+                outcome: "timeout".into(),
+                duration_ms: 1001,
+                calls: 1,
+                result_digest: None,
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+            });
+
+            let text = report_text("r-execution");
+            assert!(
+                text.contains("Executions") && text.contains("x-child"),
+                "{text}"
+            );
+            assert!(
+                text.contains("github__get_issue") && text.contains("8ms"),
+                "{text}"
+            );
+            assert!(
+                text.contains("timeoutMs") && text.contains("observed 1000"),
+                "{text}"
+            );
+            // The attributed child call is nested, not repeated in the ambient
+            // Tool calls section.
+            assert!(!text.contains("Tool calls\n"), "{text}");
+        });
+    }
+
+    #[test]
     fn posture_line_shown_when_recorded() {
         with_home(|| {
             let log = RunLog::create("r-post").unwrap();
@@ -467,6 +622,7 @@ mod tests {
             });
             log.append(&RunEvent::ToolCall {
                 ts: 101,
+                execution_id: None,
                 server: "figma".into(),
                 tool: "get_file".into(),
                 outcome: "ok".into(),
@@ -476,6 +632,7 @@ mod tests {
             });
             log.append(&RunEvent::ToolCall {
                 ts: 102,
+                execution_id: None,
                 server: "figma".into(),
                 tool: "delete_file".into(),
                 outcome: "denied".into(),

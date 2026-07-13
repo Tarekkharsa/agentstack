@@ -68,6 +68,7 @@ mod tests {
             env: vec![],
             network: NetworkPolicy::None,
             ruleset: agentstack_policy::CompiledRuleset::default(),
+            security: crate::SandboxSecurity::default(),
         }
     }
 

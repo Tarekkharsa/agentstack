@@ -95,6 +95,7 @@ pub fn build_sandbox_spec(
             endpoint: "host.docker.internal".to_string(),
         },
         ruleset,
+        security: agentstack_runtime::SandboxSecurity::default(),
     }
 }
 
@@ -1019,6 +1020,7 @@ mod tests {
             filesystem: agentstack_core::manifest::FsPolicy {
                 read: vec![],
                 write: scopes.iter().map(|s| s.to_string()).collect(),
+                deny: vec![],
             },
             ..Default::default()
         };

@@ -73,6 +73,8 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
             default: detected.clone(),
         },
         policy: Default::default(),
+        guard: Default::default(),
+        experimental: Default::default(),
     };
     let toml_text = toml::to_string_pretty(&manifest).context("serializing manifest")?;
     crate::util::atomic::write(&manifest_path, &toml_text)?;
@@ -418,6 +420,8 @@ version = 1
             default: detected.clone(),
         },
         policy: Default::default(),
+        guard: Default::default(),
+        experimental: Default::default(),
     };
     let toml_text = toml::to_string_pretty(&manifest).context("serializing manifest to TOML")?;
 

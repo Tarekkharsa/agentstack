@@ -418,8 +418,23 @@ fn render(
         }
 
         // Lifecycle hooks (compiled into the harness's native hooks config).
+        // At global scope the machine's guard hook rides along so owning the
+        // whole hooks key doesn't strip it (see `guard::machine_hooks_for_apply`).
+        let machine_hooks = if scope == Scope::Global {
+            crate::commands::guard::machine_hooks_for_apply()
+        } else {
+            Vec::new()
+        };
         let prev_hooks = !state.managed_hooks(&key).is_empty();
-        if let Some(hp) = plan_hooks(manifest, desc, &ctx.resolver, prev_hooks, scope, &ctx.dir)? {
+        if let Some(hp) = plan_hooks(
+            manifest,
+            desc,
+            &ctx.resolver,
+            prev_hooks,
+            scope,
+            &ctx.dir,
+            &machine_hooks,
+        )? {
             for u in &hp.unresolved {
                 println!("  {} unresolved secret {} (hook)", "✗".red(), u);
                 error_count += 1;

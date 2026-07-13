@@ -55,6 +55,82 @@ pub struct Manifest {
     /// Optional governance: required/forbidden capabilities + source allowlist.
     #[serde(default, skip_serializing_if = "Policy::is_empty")]
     pub policy: Policy,
+
+    /// Host-mode hook guard (`agentstack guard`) configuration. Only the
+    /// MACHINE manifest's `[guard]` is consulted — a repo manifest can never
+    /// enable, disable, or widen the guard (same trust posture as `[policy]`,
+    /// but guard-specific knobs are host concerns, so they live outside it).
+    #[serde(default, skip_serializing_if = "GuardConfig::is_empty")]
+    pub guard: GuardConfig,
+
+    /// Machine-owned experimental runtime features. Repository manifests are
+    /// parsed for portability but never consulted as authority for these flags.
+    #[serde(default, skip_serializing_if = "ExperimentalConfig::is_empty")]
+    pub experimental: ExperimentalConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ExperimentalConfig {
+    /// Advertise and permit the isolated `tools_execute` MCP primitive.
+    #[serde(default)]
+    pub tools_execute: bool,
+    /// Optional machine-owned ceilings. Requests may only narrow these.
+    #[serde(default, skip_serializing_if = "ExperimentalExecuteLimits::is_empty")]
+    pub tools_execute_limits: ExperimentalExecuteLimits,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ExperimentalExecuteLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_calls: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_bytes: Option<usize>,
+}
+
+impl ExperimentalExecuteLimits {
+    pub fn is_empty(&self) -> bool {
+        self.timeout_ms.is_none() && self.max_calls.is_none() && self.max_output_bytes.is_none()
+    }
+}
+
+impl ExperimentalConfig {
+    pub fn is_empty(&self) -> bool {
+        !self.tools_execute && self.tools_execute_limits.is_empty()
+    }
+}
+
+/// `[guard]` — the machine-level destructive-command guard wired into each
+/// agent CLI as a pre-tool-use hook. Enforcement is cooperative (the CLI must
+/// honor its own hook protocol), aimed at accidents, not malice — the
+/// kernel-enforced story is `run --sandbox`/`--lockdown`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GuardConfig {
+    /// Master switch. `None` (absent) means the guard is not configured;
+    /// `Some(false)` is an explicit opt-out that also prunes installed hooks
+    /// on the next `guard install`/`apply`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Absolute path prefixes (after `~` expansion) where writes and deletes
+    /// are allowed BEYOND the current workspace — e.g. a projects folder.
+    /// The workspace itself and the system temp dirs are always writable;
+    /// everything else is deny-by-default for writes/deletes.
+    #[serde(default)]
+    pub allow_roots: Vec<String>,
+}
+
+impl GuardConfig {
+    pub fn is_empty(&self) -> bool {
+        self.enabled.is_none() && self.allow_roots.is_empty()
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled == Some(true)
+    }
 }
 
 /// Team/org governance (PLAN §9e, D18). Off by default; enforced by `doctor`.
@@ -110,11 +186,21 @@ pub struct FsPolicy {
     pub read: Vec<String>,
     #[serde(default)]
     pub write: Vec<String>,
+    /// Path globs no tool call may touch at all — read or write. Unlike
+    /// `read`/`write` (allow scopes), `deny` is a pure blocklist and the
+    /// effective set is the UNION of the machine and bundle layers: a repo
+    /// can add denies but never remove the machine's. Patterns are matched
+    /// against the workspace-relative path, the absolute path, AND the bare
+    /// file name, so `".env*"` catches a `.env` anywhere in the tree.
+    /// Enforced by the host-mode hook guard (`agentstack guard`); the
+    /// sandbox mask-mount enforcement is tracked for a later session.
+    #[serde(default)]
+    pub deny: Vec<String>,
 }
 
 impl FsPolicy {
     pub fn is_empty(&self) -> bool {
-        self.read.is_empty() && self.write.is_empty()
+        self.read.is_empty() && self.write.is_empty() && self.deny.is_empty()
     }
 }
 

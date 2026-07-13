@@ -14,6 +14,7 @@ pub mod consolidate;
 pub mod diff;
 pub mod doctor;
 pub mod explain;
+pub mod guard;
 pub mod hook;
 pub mod init;
 pub mod install;

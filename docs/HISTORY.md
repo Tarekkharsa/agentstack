@@ -8,6 +8,25 @@ memory, not authority.
 
 ## Dated corrections
 
+### 2026-07-13 — governed ephemeral execution landed experimentally
+
+The earlier capability-layer proposal was implemented as a machine-opt-in MCP
+primitive, `tools_execute`, behind the sandbox build feature. A new
+policy-agnostic `executor` crate freezes request bytes, exact grants, limits,
+runtime identity, and digests; asynchronous framed transport lives in `egress`;
+the CLI alone composes both with the existing gateway; and the recorder now
+attributes child calls to execution IDs. The Docker backend gained non-root,
+read-only-root, tmpfs, capability, CPU, memory, PID, timeout, output, and
+teardown controls.
+
+The claim was deliberately kept experimental. The implementation pins the
+official Node image by digest and passes focused real-Docker isolation, relay,
+timeout, output, trust, and advertisement tests. A focused implementation
+review and regression-hardening pass completed on 2026-07-13. It does not yet
+ship a project-specific executor image attestation/SBOM or longer-running soak
+evidence; `ENFORCEMENT.md` records those limits rather than calling the feature
+production-ready.
+
 ### 2026-07-10 — the `adapter::render` coupling was a grep artifact
 
 An early extraction plan claimed `adapter::render` depended on

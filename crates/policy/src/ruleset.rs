@@ -164,18 +164,29 @@ impl ServerRules {
 /// per-server). The `write` guard is enforced by the sandbox's workspace
 /// mount via [`CompiledRuleset::workspace_write_decision`]; `read` scopes
 /// remain informational while the only mount is the whole workspace (there
-/// is no finer-grained mount for them to narrow yet).
+/// is no finer-grained mount for them to narrow yet). `deny` is the pure
+/// blocklist from `[policy.filesystem] deny`: its two layers carry deny
+/// entries only (no allow bounds), so the effective set is the union —
+/// deny is monotonic, a bundle can only add. Consumed by the host-mode
+/// hook guard via [`CompiledRuleset::fs_deny_decision`].
+///
+/// `deny` is an additive field, so no `RULESET_VERSION` bump: the only
+/// cross-process consumer today is the egress sidecar, which reads the
+/// egress dimension exclusively — an older sidecar ignoring an fs field it
+/// never consults loses nothing. Revisit if fs rules ever cross the wire.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FsRules {
     #[serde(default, skip_serializing_if = "Guard::is_empty")]
     pub read: Guard,
     #[serde(default, skip_serializing_if = "Guard::is_empty")]
     pub write: Guard,
+    #[serde(default, skip_serializing_if = "Guard::is_empty")]
+    pub deny: Guard,
 }
 
 impl FsRules {
     pub fn is_empty(&self) -> bool {
-        self.read.is_empty() && self.write.is_empty()
+        self.read.is_empty() && self.write.is_empty() && self.deny.is_empty()
     }
 }
 
@@ -285,6 +296,20 @@ impl CompiledRuleset {
             }
         }
         Err(refusal)
+    }
+
+    /// Whether a path may be touched at all per `[policy.filesystem] deny`.
+    /// The caller passes every spelling it knows for the path (relative,
+    /// absolute, bare file name) and the path is denied if ANY spelling
+    /// matches ANY deny glob — more spellings can only make the check
+    /// stricter, the safe direction for a blocklist. Machine denies are
+    /// checked first so the refusal names the layer.
+    pub fn fs_deny_decision(&self, spellings: &[&str]) -> Result<(), String> {
+        self.filesystem
+            .deny
+            .check_with("[policy.filesystem] deny", &|pat| {
+                spellings.iter().any(|s| glob_match(pat, s))
+            })
     }
 
     /// Whether ANY egress rule constrains `server`. Write-time checks use

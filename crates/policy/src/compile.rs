@@ -58,6 +58,10 @@ pub fn compile(machine: &Policy, bundle: &Policy, servers: &[&str]) -> CompiledR
                 machine: fs_layer(&machine.filesystem.write),
                 bundle: fs_layer(&bundle.filesystem.write),
             },
+            deny: Guard {
+                machine: fs_deny_layer(&machine.filesystem.deny),
+                bundle: fs_deny_layer(&bundle.filesystem.deny),
+            },
         },
     }
 }
@@ -113,10 +117,12 @@ fn fold_layer(map: &IndexMap<String, Vec<String>>, name: &str) -> LayerRules {
     }
 }
 
-/// Filesystem lists have no deny grammar — the globs are carried verbatim as
-/// a single allow bound. The matching semantics live in
+/// Filesystem read/write lists have no deny grammar — the globs are carried
+/// verbatim as a single allow bound. The matching semantics live in
 /// `CompiledRuleset::workspace_write_decision`, which relies on the no-deny
-/// property here (see its doc comment before adding `!` support).
+/// property here (see its doc comment before adding `!` support). The
+/// blocklist dimension is `[policy.filesystem] deny`, compiled separately by
+/// [`fs_deny_layer`] — never folded into these guards.
 fn fs_layer(globs: &[String]) -> LayerRules {
     if globs.is_empty() {
         return LayerRules::default();
@@ -127,5 +133,19 @@ fn fs_layer(globs: &[String]) -> LayerRules {
     LayerRules {
         deny: Vec::new(),
         allow_all_of: vec![sorted],
+    }
+}
+
+/// `[policy.filesystem] deny` is the inverse shape: every glob is a deny
+/// entry, there are no allow bounds. With denies in both layers unioned at
+/// check time, the effective blocklist is machine ∪ bundle — a bundle can
+/// add denies, never subtract (deny is monotonic, CLAUDE.md rule 2).
+fn fs_deny_layer(globs: &[String]) -> LayerRules {
+    let mut sorted = globs.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    LayerRules {
+        deny: sorted,
+        allow_all_of: Vec::new(),
     }
 }

@@ -35,7 +35,7 @@ pub mod lockdown;
 
 pub use orchestrate::run;
 pub use sandbox::{Exit, Sandbox, SandboxHandle, Stream, StreamChunk};
-pub use spec::{Mount, NetworkPolicy, SandboxSpec};
+pub use spec::{Mount, NetworkPolicy, SandboxSecurity, SandboxSpec};
 
 #[cfg(feature = "docker")]
 pub use lockdown::{Lockdown, LockdownSink, GATEWAY_RELAY_PORT, PROXY_ALIAS, PROXY_BASE_PORT};
@@ -48,6 +48,10 @@ pub enum RuntimeError {
     Backend(String),
     #[error("sandbox teardown failed: {0}")]
     Teardown(String),
+    #[error("sandbox exceeded its wall-time limit")]
+    Timeout,
+    #[error("sandbox exceeded its output limit")]
+    OutputLimit,
 }
 
 pub type Result<T> = std::result::Result<T, RuntimeError>;

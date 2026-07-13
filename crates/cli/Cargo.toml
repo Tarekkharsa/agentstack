@@ -1,6 +1,6 @@
 [package]
 name = "agentstack"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 rust-version = "1.80"
 description = "One portable manifest, every agent CLI. Manage MCP servers + skills across Claude Code, Codex, and more."
@@ -32,6 +32,7 @@ agentstack-recorder = { path = "../recorder" }
 # no bollard. The `sandbox` feature turns on the Docker backend so
 # `agentstack run --sandbox` can actually launch a container.
 agentstack-runtime = { path = "../runtime", default-features = false }
+agentstack-executor = { path = "../executor" }
 # The egress proxy — pulled in only with the `sandbox` feature (it brings
 # tokio); the default cli build doesn't compile it.
 agentstack-egress = { path = "../egress", optional = true }

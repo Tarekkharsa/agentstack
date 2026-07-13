@@ -5,6 +5,7 @@
 
 use crate::spec::SandboxSpec;
 use crate::Result;
+use std::time::Duration;
 
 /// Which stream a chunk of the container's output came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +41,20 @@ pub trait SandboxHandle {
     /// Block until the container exits, delivering each chunk of its
     /// stdout/stderr to `on_output` as it arrives.
     fn wait_streaming(&mut self, on_output: &mut dyn FnMut(StreamChunk)) -> Result<Exit>;
+
+    /// Wait with hard wall-time and combined output limits. Backends must
+    /// override this to support hostile code; the default fails closed rather
+    /// than treating a post-hoc counter as enforcement.
+    fn wait_streaming_bounded(
+        &mut self,
+        _timeout: Duration,
+        _max_output_bytes: usize,
+        _on_output: &mut dyn FnMut(StreamChunk),
+    ) -> Result<Exit> {
+        Err(crate::RuntimeError::Backend(
+            "bounded execution is unsupported by this sandbox backend".into(),
+        ))
+    }
 
     /// Remove the container and release its resources. Idempotent and
     /// best-effort-safe to call after a failed `wait_streaming` — the

@@ -142,6 +142,7 @@ fn curl_spec(world: &World) -> SandboxSpec {
             endpoint: "host.docker.internal".into(),
         },
         ruleset: CompiledRuleset::default(),
+        security: agentstack_runtime::SandboxSecurity::default(),
     }
 }
 
