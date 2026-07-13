@@ -3,11 +3,11 @@
 Build strictly in phase order. Do not scaffold future phases early — the
 boundaries in ARCHITECTURE.md exist so later phases slot in without rework.
 
-Standing context: the shipped v0.8.x binary already implements v0 of the
-trust gate, policy, audit log, secrets, and all 13 adapters. Phases 0–1 are
-**extraction and hardening** of that code, not new construction. There are no
-external users — breaking changes to formats, paths, and CLI surface are free.
-No migration shims.
+Standing context: v0.10.1 is a nine-crate workspace with Phases 0–2 shipped:
+the bundle/compiler path, trust and policy core, all 13 adapters, Docker
+sandbox and lockdown, egress enforcement, and the first recorder surface.
+Historical phase text remains below for design traceability; status labels and
+the Phase 3 section are the live guide to remaining work.
 
 ## Session types — supervision policy
 
@@ -92,10 +92,10 @@ binary still works end to end.
 1. `core`: settle the bundle format starting from the shipped
    `agentstack.toml` (semantics per ARCHITECTURE Layer 1; breaking changes
    fine). Defensive parsing: size bounds, unknown-field rejection.
-2. `trust`: extend pinning from manifest + lockfile to **content pinning** of
-   everything referenced — skills, instructions, scripts — closing the v0.8.x
-   gap where an edit to a referenced file did not re-gate. `agentstack review`
-   diff rendering (manifest, skill content, MCP defs, policy).
+2. **[done]** `trust`: extend pinning from manifest + lockfile to **content pinning** of
+   resolved server definitions, skills, and instructions — closing the v0.8.x
+   gap where an edit to a referenced file did not re-gate. `agentstack trust`
+   renders the declared runtime surface before confirmation.
    Property test: any single-byte change in any pinned file → untrusted.
 3. `policy`: **done.** Generalized the machine-first tool check into a real
    (machine ∩ bundle) intersection engine; added `[policy.egress]`,
@@ -122,18 +122,16 @@ Ship this. Announce this.
 
 ## Phase 2 — Enforcement (sandbox + egress proxy)
 
-Status: every component is built and tested to the limit of a Docker-less
-environment (654+ tests, loopback-verified where a daemon isn't needed). The
-only remaining work is behavior-verification against a real Docker daemon —
-the container↔proxy routing and the recorded demo — flagged per item below.
+Status: complete, including behavior verification against a real Docker
+daemon for container↔proxy routing, filesystem enforcement, lockdown topology,
+the sidecar image, and the recorded attack demo.
 
 0. **[done]** `recorder`: `RunEvent` + `RunLog` — a per-run `events.jsonl` sink
    for lifecycle + egress decisions (the report viewer is Phase 3).
-1. **[done, bollard behavior gated]** `runtime`: `Sandbox` trait +
+1. **[done, Docker-verified]** `runtime`: `Sandbox` trait +
    orchestrator (create, mount workspace, no-network, stream output,
    teardown), unit-tested against a fake; a `bollard` backend behind an opt-in
-   `docker` feature, compile-verified with a daemon-gated integration test.
-   *Remaining (Docker):* the `NetworkPolicy::ProxyOnly` container wiring.
+   `docker` feature, verified with daemon-gated integration tests.
 2. **[done, loopback-verified]** `egress` (tokio confined here): CONNECT-target
    + TLS-SNI parsing (bounds-checked); `EgressGuard` consumes the
    **`CompiledRuleset` artifact** (the identical value the gateway reads) and
@@ -223,20 +221,17 @@ tracked to closure so this plan and the report can't drift apart:
 - **[done]** `agentstack report <run>`: readable run report (human-readable +
   `--json`), reading the run's `events.jsonl` plus the audit log filtered by run
   id (`crates/cli/src/commands/report.rs`).
-- `recorder`: fill out the run log itself. Today `RunEvent` has only three
-  variants (`SandboxStarted`, `Egress`, `SandboxExited`); tool calls surface in
-  `report` via the *separate* global audit log filtered by run id, not from the
-  run's own event stream, and secret refs touched, trust-store mutations,
-  cost/tokens, and wall time are not yet recorded per-run. Add those event types
-  (fed by egress + adapter + CLI stream events) so a run is self-describing from
-  its own log. This is what flips the sandbox/lockdown audit cells in
-  [`ENFORCEMENT.md`](ENFORCEMENT.md) from *coarse* toward *enforced*.
+- **[partly done]** `recorder`: `RunEvent` now has execution
+  start/finish/limit, sandbox start/exit, egress, brokered `ToolCall`, and
+  `SecretAccess` variants. Tool calls carry argument digests; secret events
+  carry reference names, never values. Remaining: trust-store mutations and
+  per-run cost/token events. Keep the separate global call audit as a legacy
+  and cross-project evidence source, not the only source for new runs.
 - Keep scope: log + viewer. No dashboards.
 
-Done when: the run log itself carries tool calls (attributed natively, not via
-the separate audit log), secret refs touched, trust-store mutations, and
-cost/wall-time — so every sandbox run produces a self-contained report a security
-reviewer could read. (The viewer is done; the log fill-out is what remains.)
+Done when: the remaining trust-store mutation and cost/token events make every
+sandbox run self-contained for security and spend review. The viewer, tool
+calls, secret refs, lifecycle, limits, and wall-time derivation are shipped.
 
 ## Adopted from the 2026-07-11 strategy reviews
 

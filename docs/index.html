@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>agentstack — trust, firewall, and sandbox every agent CLI</title>
-<meta name="description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call — or run the agent in a lockdown sandbox with no route out but the policy proxy. One manifest renders into 13 agent CLIs. Secrets stay references.">
+<title>agentstack — build, govern, and run your agent stack</title>
+<meta name="description" content="One local control plane for your coding-agent stack. Define capabilities and configuration once, compile them across 13 agent CLIs, enforce machine-owned policy, run with optional lockdown, and audit what happened.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta property="og:title" content="agentstack — trust, firewall, and sandbox every agent CLI">
-<meta property="og:description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call — or sandbox the agent with no route out but the policy proxy. One manifest renders into 13 agent CLIs.">
+<meta property="og:title" content="agentstack — build, govern, and run your agent stack">
+<meta property="og:description" content="Define the agent stack once, compile it across 13 CLIs, govern it with machine-owned policy, and run it with an audit trail.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://tarekkharsa.github.io/agentstack/">
 <meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
@@ -18,8 +18,8 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="agentstack — the local control plane for your AI agent CLIs">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="agentstack — trust, firewall, and sandbox every agent CLI">
-<meta name="twitter:description" content="A local control plane for AI coding agents: trust-gate, firewall, and audit every MCP tool call — or sandbox the agent with no route out. One manifest renders into 13 agent CLIs.">
+<meta name="twitter:title" content="agentstack — build, govern, and run your agent stack">
+<meta name="twitter:description" content="Define the agent stack once, compile it across 13 CLIs, govern it with machine-owned policy, and run it with an audit trail.">
 <meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <style>
   :root {
@@ -420,14 +420,14 @@
 <main id="main">
 
   <section id="hero" style="margin-top:3.5rem">
-    <p class="eyebrow">One binary · trust gate · firewall · sandbox · 13 agent CLIs</p>
-    <h1>Trust it. Firewall it. Sandbox it.<br>Run any agent.<span class="cursor" aria-hidden="true"></span></h1>
+    <p class="eyebrow">Configure · package · govern · run · observe · 13 agent CLIs</p>
+    <h1>Build, govern, and run<br>your agent stack.<span class="cursor" aria-hidden="true"></span></h1>
     <p class="lede">
-      The local control plane for AI coding agents.
-      <strong>Nothing a repo declares runs until you review and trust it</strong> —
-      then every MCP call passes your firewall and lands in the log, and an
-      agent you trust less than that runs in a container
-      <strong>whose only way out is your policy</strong>.
+      Define servers, skills, instructions, settings, hooks, plugins, profiles,
+      and secrets once. AgentStack turns that source of truth into native config
+      across 13 agent CLIs, installs and pins capabilities, activates profiles
+      per task, enforces machine-owned policy, runs agents under optional
+      lockdown, and records the evidence you need to audit and optimize the stack.
     </p>
     <div class="cta">
       <a class="btn primary" href="start.html">Get started · 10 min →</a>
@@ -448,28 +448,28 @@
 <span class="row" data-d="450"><span class="c">  agent → demo.echo        </span><span class="ok">✓ ok</span><span class="c">      brokered, logged</span></span>
 <span class="row" data-d="800"><span class="c">  agent → demo.delete_all  </span><span class="no">✗ denied</span><span class="c">  rule "!delete_*" — YOUR machine policy</span></span>
 <span class="row" data-d="500"> </span>
-<span class="row"><span class="c">  # both calls are in the audit log — nothing trusted runs unobserved</span></span></code></pre>
+<span class="row"><span class="c">  # both brokered outcomes are in the audit log</span></span></code></pre>
     </div>
     <div class="journey" aria-label="What agentstack does, in order">
+      <a href="#start">
+        <span class="jn">01 · DEFINE</span>
+        <b>One source of truth</b>
+        <small>Capabilities, configuration, instructions, and profiles in one manifest.</small>
+      </a>
+      <a href="#more">
+        <span class="jn">02 · PACKAGE</span>
+        <b>Carry the whole stack</b>
+        <small>Pin skills and servers; share libraries, packs, and native plugins.</small>
+      </a>
       <a href="#trust">
-        <span class="jn">01 · TRUST</span>
-        <b>Clone anything, safely</b>
-        <small>A repo's servers stay inert until you approve the exact bytes.</small>
+        <span class="jn">03 · GOVERN</span>
+        <b>Review before authority</b>
+        <small>Scan, trust, sign, and intersect repo requests with machine policy.</small>
       </a>
       <a href="#sandbox">
-        <span class="jn">02 · CONFINE</span>
-        <b>Take away the network</b>
-        <small><code>run --lockdown</code>: the only route out is your policy proxy.</small>
-      </a>
-      <a href="#enforced">
-        <span class="jn">03 · PROVE</span>
-        <b>Know what's enforced</b>
-        <small>The honest matrix — per mode, per policy dimension, no green-washing.</small>
-      </a>
-      <a href="#start">
-        <span class="jn">04 · CARRY</span>
-        <b>One manifest, 13 CLIs</b>
-        <small>The same reviewed file renders every CLI's native config.</small>
+        <span class="jn">04 · RUN &amp; LEARN</span>
+        <b>Contain, record, improve</b>
+        <small>Reversible sessions, optional lockdown, reports, and optimization.</small>
       </a>
     </div>
   </section>
@@ -540,14 +540,14 @@
 
   <section id="trust" class="reveal">
     <p class="eyebrow">The trust gate</p>
-    <h2>Clone anything. Nothing runs until you say so.</h2>
+    <h2>Repo-declared servers wait for your consent.</h2>
     <p class="muted">
       Register the gateway once (<code>agentstack connect --all --write</code>)
       and every repo you open brings its own servers — no files copied in. But
       a repo you haven't reviewed is <strong>inert</strong>: none of its MCP
       servers are spawned or contacted, no secrets resolved. You review what it
-      declares, <code>trust</code> it (pinned to a content digest of the
-      manifest <em>and lockfile</em>, so any later edit re-gates it), and from
+      declares, <code>trust</code> it (pinned to a consent digest of the
+      manifest, local overlay, <em>and lockfile</em>, so any later edit re-gates it), and from
       then on every brokered call passes <strong>two firewall layers</strong> —
       the repo's <code>[policy.tools]</code>, and your own machine-level rules
       that no repo can see, shadow, or loosen — and lands in the call log.
@@ -555,7 +555,7 @@
     <div class="term">
       <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → review → trust → firewalled → audited</b></div>
       <pre><code><span class="p">$</span> git clone some-repo &amp;&amp; cd some-repo   <span class="c"># declares servers you've never seen</span>
-<span class="p">$</span> agentstack mcp --auto-project        <span class="c"># an agent asks: what can I touch here?</span>
+<span class="p">$</span> agentstack mcp --auto-project        <span class="c"># an agent asks: which project servers can I use?</span>
 <span class="no">  ✗ untrusted — none of its servers are spawned or contacted</span>
 
 <span class="p">$</span> agentstack trust .
@@ -649,8 +649,8 @@
       address is refused (no SSRF into your own network), and a per-run
       credential means only its own sandbox can use it. This boundary was
       swept by a <a href="security-review-2026-07-11.html">two-reviewer
-      security review</a> — all five High findings and six of seven Mediums
-      are closed, the rest tracked in the open. Honest scope: hosts you allow
+      security review</a> — all five High and all seven Medium findings are
+      closed; the remaining accepted debt is tracked. Honest scope: hosts you allow
       stay allowed — the claim is <em>unapproved egress is blocked</em>,
       never "exfiltration is impossible."
     </p>
@@ -695,9 +695,10 @@
     <p class="eyebrow">What's enforced where</p>
     <h2>"Trusted" is not "confined." Here's the difference.</h2>
     <p class="muted">
-      Trusting a bundle asserts one thing: <strong>this exact content was
-      reviewed and approved</strong> — a claim about bytes, not about a running
-      process. What actually <em>confines</em> a run is its execution mode. Each
+      Trusting a project approves its current
+      <strong>manifest, local overlay, and lockfile consent digest</strong> for
+      automatic loading on this machine; lock verification separately catches
+      pinned capability drift. What actually <em>confines</em> a run is its execution mode. Each
       mode carries a posture label, so a host run and a lockdown run never read
       the same:
     </p>
@@ -934,7 +935,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
       </div>
       <div class="fcard">
         <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">The no-terminal path</a></h3>
-        <p>The whole lifecycle — discover, add, secrets, apply, verify, undo — from a
+        <p>The dashboard lifecycle — discover, add, secrets, apply, verify, undo — from a
            local, token-gated dashboard, with read-only Proxy and Insights panels.</p>
         <a class="tag" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">Dashboard guide</a>
       </div>

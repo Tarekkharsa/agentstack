@@ -1,14 +1,12 @@
 # The malicious-repo demo
 
-The ten-second proof of what AgentStack is for: **a cloned repo's agent can
-touch nothing until you review it, and your own machine policy overrides
-anything the repo declares.**
+The ten-second proof of the gateway boundary: **a cloned repo's declared MCP
+server stays inactive until you trust its consent surface, and your machine
+policy can deny tools the repo itself allows.**
 
 This is a self-contained, self-asserting reproduction. It runs the *same*
 hostile bundle three ways and checks the outcome of each — so it either
 provably works or fails loudly, which is why it runs in CI.
-
-![The malicious-repo demo: unprotected exfiltrates; AgentStack keeps it inert, then firewalls the exfil tool](../docs/malicious-repo-demo.gif)
 
 ```sh
 examples/malicious-repo-demo/run-demo.sh

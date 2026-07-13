@@ -7,19 +7,31 @@ and ephemeral generated capabilities — as trusted, portable bundles.
 
 The strategic frame: the **agent bundle** is the standard unit (the way the image was Docker's unit). Everything else in the system gates it, constrains it, records it, or distributes it. Config unification across agent CLIs is the adoption wedge; the trust gate, firewall, and audit trail are the durable value. The registry/marketplace is the endgame, only viable because trust and signing exist first.
 
-Core principle: **nothing runs until it's trusted, and nothing trusted runs unobserved.**
+Core principle: **nothing executes automatically until its content is trusted;
+governed execution is constrained and recorded.**
 
 ## Where this starts
 
-This is not a greenfield design. The shipped v0.8.x binary already implements v0 of most layers: manifest + lockfile digests, a trust gate that pins the manifest and lockfile and re-gates on edit, a machine-first tool policy no repo can loosen, a call audit log, fail-closed secret resolution, and 13 data-driven CLI adapters. This document describes the target shape that code is extracted and hardened into — the deltas are called out per layer.
+The current v0.10.1 implementation is a nine-crate Rust workspace. It ships the
+manifest and lock resolver, 13 CLI adapters, a central capability library,
+content-bound trust, machine-first policy, a single-dispatch MCP gateway,
+Docker sandbox and lockdown runtimes, egress enforcement, per-run recording,
+and an experimental frozen-plan executor. This document describes the current
+boundaries. [`ROADMAP.md`](ROADMAP.md) names what remains future work.
 
 ## The flow
 
 ```
-bundle (inert) → trust gate → policy engine → sandboxed runtime → flight recorder
-                                    ↑                  ↑
-                             machine rules      secrets resolver
+manifest + library → resolve + lock → adapters → native CLI config
+                            │
+                            └→ trust → policy → gateway/runtime → recorder
+                                            ↑
+                                      machine rules
 ```
+
+Static config compilation and governed execution are sibling paths. A normal
+`apply` is an explicit, non-executing render operation; trust gates automatic
+project loading and execution paths, not every config write.
 
 Generated code follows the same path through a policy-agnostic execution
 domain: the CLI freezes an exact tool grant and limits into an immutable plan;
@@ -28,7 +40,14 @@ the existing gateway. The executor never reads or interprets policy. The
 gateway remains the sole tool authority, the runtime owns isolation, the
 egress crate owns asynchronous relay transport, and the recorder owns evidence.
 
-A bundle arrives (cloned, pulled, copied) and is inert by construction. `agentstack review` renders a human-readable diff of everything the bundle declares. Trusting it pins the lockfile digest into the machine-local trust store. At run time, the policy engine intersects the bundle's requested policy with the machine's rules, compiles a ruleset, and hands it to the runtime. In sandbox mode the agent CLI runs in a container routed through an egress proxy enforcing that ruleset — and in lockdown mode the proxy sidecar is topologically the *only* route out. Every tool call, block, secret resolution, and cost figure streams into an append-only run log.
+A bundle arrives (cloned, pulled, copied) and is inert by construction.
+`agentstack trust` displays its declared runtime surface, verifies its lock, and
+pins the current manifest/local/lock digest in the machine-local trust store.
+At run time, the policy engine intersects the bundle's requested policy with
+the machine's rules and compiles the effective ruleset. In sandbox mode the
+CLI's configured HTTP(S) traffic goes through the enforcing proxy; lockdown
+makes the proxy sidecar topologically the only route out. Lifecycle, limit,
+egress, brokered tool-call, and secret-reference events enter the per-run log.
 
 ## Layer 1 — The bundle (`crates/core`)
 
@@ -36,88 +55,72 @@ A bundle is a directory. It is **declarative and inert**: pure data, nothing exe
 
 ```
 my-agent/
-  agent.yaml          # manifest
-  agent.lock          # content digests of everything referenced
-  instructions/       # system prompt / instruction files
-  skills/             # skill files (treated as untrusted input)
+  .agentstack/
+    agentstack.toml        # preferred manifest
+    agentstack.local.toml  # optional gitignored overlay
+    agentstack.lock        # resolved, content-pinned inputs
+    instructions/         # instruction files
+    skills/               # skill directories (untrusted input)
 ```
 
-`agent.yaml` (sketch — this shows the required *semantics*; the concrete format starts from the shipped `agentstack.toml` and is settled during Phase 1, with breaking changes free):
+Minimal `agentstack.toml` sketch:
 
-```yaml
-name: research-agent
-version: 0.3.0
+```toml
+version = 1
 
-instructions:
-  - instructions/main.md
+[servers.web-search]
+type = "stdio"
+command = "npx"
+args = ["-y", "@example/search-mcp"]
+env = { SEARCH_API_KEY = "${SEARCH_API_KEY}" }
 
-skills:
-  - skills/summarize.md
-  - skills/cite-sources.md
+[skills.summarize]
+path = "./skills/summarize"
 
-mcp:
-  - name: web-search
-    command: ["npx", "-y", "@example/search-mcp"]
-    env:
-      SEARCH_API_KEY: ${SEARCH_API_KEY}     # secret ref, never a literal
+[instructions.team]
+path = "./instructions/team.md"
 
-policy:
-  tools:
-    web-search: ["!*_delete"]
-  egress:
-    web-search: ["api.search.example"]
-  secrets:
-    web-search: ["SEARCH_API_KEY"]
-  filesystem:
-    read: ["./workspace"]
-    write: ["./workspace/out"]
-
-runtime:
-  clis: [claude-code, cursor]               # adapters to materialize
+[policy.tools]
+web-search = ["*", "!*_delete"]
 ```
 
-`agent.lock` pins every referenced file and every MCP definition to a SHA-256
-digest, plus a digest of the manifest itself. The lockfile digest is the
-bundle's identity fingerprint. An optional detached signature
-(ed25519 over the lockfile) enables registry distribution later.
+`agentstack.lock` pins resolved server definitions, skill-directory content,
+and instruction bytes to SHA-256 digests. Trust separately binds the manifest,
+local overlay, and lockfile into one consent digest. Detached ed25519 signing
+and verification of the lockfile are available as distribution primitives.
 
 Key decisions:
-- Skills are content-pinned like code, because skill files are a
-  prompt-injection delivery mechanism. Reviewing a bundle means reviewing
-  skill *content*, not just the file list. (Delta from v0.8.x, which pins
-  the manifest and lockfile but not the content of referenced files —
-  closing that gap is Phase 1 work.)
+- Skills and instructions are content-pinned like code because they can alter
+  agent behavior. Inline skills cannot be trusted until they are lock-pinned;
+  library server drift likewise blocks trust and governed execution.
 - Secrets appear only as `${REF}` placeholders, resolved by the OS keychain
   (`keyring`) or varlock. Resolution happens in memory at run time.
   Unresolvable secret → fail closed.
 
 ## Layer 2 — Trust gate (`crates/trust`)
 
-Machine-local trust store: `bundle identity → trusted lockfile digest`
-(plus who trusted it, when, and optionally the publisher key).
+Machine-local trust store: `canonical project path → trusted consent digest +
+timestamp`. Publisher signatures are verified separately from this local
+consent record.
 
-States: **untrusted** (default for anything new or changed) → **reviewed** →
-**trusted**. Untrusted means: no MCP spawn, no skill enters context, no secret
-resolves, no adapter output is written.
+The implemented states are **untrusted** and **trusted**. Before confirmation,
+`agentstack trust` summarizes the exact stdio commands, HTTP contacts, secret
+references, and skill pin status. Trust binds to the consent digest, so a
+manifest, local-overlay, or lockfile change re-gates automatically. Automatic
+project loading and experimental execution refuse untrusted content; an
+explicit static `apply` remains a separate user-authorized operation.
 
-`agentstack review` shows the diff since the last trusted digest: manifest
-changes, skill content changes, MCP definition changes, policy changes.
-Trust binds to the digest, so any byte change anywhere re-gates automatically.
+Invariant: changing any byte in the manifest/local/lock consent surface changes
+the trust digest. Changing lock-pinned skill, instruction, or library-server
+content fails lock verification until the project is deliberately re-locked
+and re-trusted.
 
-Invariant (property-tested): flipping any single byte in any pinned file
-produces a digest mismatch and an untrusted state.
-
-**Principle — trust is a portable claim about content, never a fact about a
-machine.** A trust decision asserts "this exact content (this digest, and in
-Phase 4 this signature) was reviewed and approved" — it must carry no
-assumption about *where* that approval happened or where it will be honored.
-The party that trusts a bundle and the machine that runs it may be different
-parties: a maintainer signs, CI verifies, a runtime executes, an auditor
-reads the record. No code may couple trust to local identity — machine
-hostnames, local usernames, or absolute local paths must never become part
-of what a trust claim *means*. (Shipped delta: the v0 store keys entries by
-canonicalized local project path, which is fine as a lookup key on one
-machine but is not the claim itself; the claim stays digest-shaped.)
+**Principle — content identity and local consent are separate.** The consent
+digest is content-shaped, but the trust decision is deliberately stored under
+the project's canonical path on one machine. Detached signatures provide the
+portable claim: a maintainer signs lockfile bytes, CI or a recipient verifies
+them, and the recipient still makes its own local trust decision. Hostnames and
+usernames never enter the content digest.
 
 **Honest limitation:** the trust store and machine policy live under
 `~/.agentstack/`, which is writable by the user — and in host mode the agent
@@ -213,11 +216,12 @@ weakened.
 
 ## Layer 4 — Runtime (`crates/adapters`, `crates/runtime`, `crates/egress`)
 
-**Adapters** are one-way compilers from bundle → native config for each
-supported agent CLI (Claude Code, Cursor, Codex, …). Generated fresh per run,
-never hand-edited, never read back. The 13 data-driven YAML adapters shipped
-in v0.8.x move here as-is; writes stay blocked while any `${REF}` is
-unresolved. Resolution completes *before* the compiler runs: render receives
+**Adapters** compile a bundle into native config for each supported agent CLI
+(Claude Code, Cursor, Codex, …). Normal rendering is one-way and
+non-destructive; explicit `init`, `adopt`, and owned-server workflows can read
+native state back into the manifest. The 13 adapters are data-driven YAML
+descriptors, and writes stay blocked while any `${REF}` is unresolved.
+Resolution completes *before* the compiler runs: render receives
 a concrete server and a resolver, never a library or store to consult — which
 is what lets a sandbox runtime materialize configs from core + adapters
 alone. One trust note, stated plainly: user drop-in adapter descriptors
@@ -230,9 +234,10 @@ The four runtime modes (host, gateway, sandbox, lockdown) enforce different
 dimensions to different depths; [`ENFORCEMENT.md`](ENFORCEMENT.md) is the
 authoritative per-cell matrix. This section describes the mechanisms behind it.
 
-**Host mode** (Phase 1): adapters write configs onto the bare machine.
-Honest framing: advisory enforcement — the trust gate governs what gets
-written, but a CLI on the host could bypass policy, and could in principle
+**Host mode:** adapters write configs onto the bare machine. Honest framing:
+advisory enforcement — static apply is user-invoked rather than trust-gated,
+while render-time policy and fail-closed secret checks govern what gets
+written. A CLI on the host can still bypass that config and could in principle
 tamper with the trust store itself (Layer 2). Per dimension, host mode enforces
 only secrets (fail-closed at the write boundary); tools, filesystem, and
 audit are unsupported on this path, and egress is a coarse write-time host
@@ -259,11 +264,10 @@ mode executors no longer re-derive any of it, so a run can't skip a check by
 taking a different path — the same discipline as the single gateway dispatch,
 applied to run assembly.
 
-**Sandbox mode** (Phase 2): `agentstack run --sandbox` launches the CLI in a
-container via the Docker API (`bollard`). Its only route out is the **egress
-proxy**, which enforces the compiled ruleset and emits one event per decision
-(allow/block, host, server, tool). The container boundary is what upgrades
-policy from advisory to enforced. Two confinement strengths ship:
+**Sandbox mode:** `agentstack run --sandbox` launches the CLI in a container
+via the Docker API (`bollard`). Its configured HTTP(S) traffic is pointed at
+the **egress proxy**, which enforces the compiled ruleset and emits one event
+per decision (allow/block, host, server, tool). Two confinement strengths ship:
 
 - **`--sandbox`** (host-process proxy): the container gets an ordinary bridge
   network and its `HTTPS_PROXY` points at a proxy on the host
@@ -320,8 +324,9 @@ async learning curve. Known-hard sub-problems, stated up front:
 **Scope honesty — exfiltration through allowed channels:** even a perfectly
 enforced allowlist permits traffic to allowed hosts, including the model API
 itself — a prompt-injected agent can leak data through any host the policy
-allows. AgentStack's claim is *untrusted code stays inert and unapproved
-egress is blocked* — not that exfiltration is impossible.
+allows. AgentStack's claim is *untrusted declarations are not auto-activated
+and unapproved egress is blocked on the enforced paths* — not that
+exfiltration is impossible.
 
 (The shipped `agentstack proxy` token-observation relay is unrelated to this
 crate and keeps its name; the enforcement crate is `egress`.)
@@ -331,14 +336,14 @@ strategy, and event hooks are good prior art for orchestration shape.
 
 ## Layer 5 — Flight recorder (`crates/recorder`)
 
-Append-only, per-run JSONL log fed by egress-proxy events, adapter events, and
-the CLI output stream: every tool call with arguments, every policy block,
-every secret resolution (which ref, never the value), every trust-store
-mutation, token/cost, wall time. `agentstack report <run>` renders a
-human-readable run report.
+Append-only, per-run JSONL records execution start/finish/limits, sandbox
+lifecycle, egress decisions, brokered tool calls (with argument digests), and
+secret-reference access (reference names, never values). `agentstack report
+<run>` renders that evidence for humans or JSON consumers and can supplement
+older runs from the separate global call audit log.
 
-The shipped call audit log (`~/.agentstack/audit/calls.jsonl`) is the v0 of
-this layer and seeds the event types.
+Trust-store mutations and per-run token/cost events are not yet wired. The
+JSONL is append-only by convention, not cryptographically tamper-evident.
 
 Scope discipline: a log with a good viewer, not an observability platform.
 

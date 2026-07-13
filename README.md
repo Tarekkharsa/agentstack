@@ -1,8 +1,9 @@
 <img alt="agentstack" src="docs/logo.svg" width="380">
 
-> **A local control plane for your AI agents' MCP tools** — trust-gate,
-> firewall, and audit every tool call; define servers, skills, instructions,
-> and profiles once, for every agent CLI you use.
+> **Build, govern, and run your agent stack from one local control plane.**
+> Define servers, skills, instructions, settings, hooks, plugins, profiles,
+> and secrets once; compile them across agent CLIs; then trust, constrain,
+> run, audit, and optimize the result.
 
 **[Website](https://tarekkharsa.github.io/agentstack/)** ·
 [Feature reference](docs/reference.md) ·
@@ -11,12 +12,13 @@
 [Dashboard](docs/dashboard.md) ·
 [Releases](https://github.com/Tarekkharsa/agentstack/releases)
 
-Define your stack once in `.agentstack/agentstack.toml`. Serve it live through
-a trust-gated gateway (zero files copied anywhere), or render it into the
-native config of 13 agent CLIs — Claude Code, Claude Desktop, Codex, Cursor,
-Windsurf, Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode, Antigravity,
-Junie, Kiro, and Pi. Secrets stay `${REFERENCES}` that resolve per machine, so
-the file is safe to commit and share.
+Define your stack once in `.agentstack/agentstack.toml`. AgentStack resolves
+and pins capabilities, activates task-specific profiles, and either serves the
+stack live through a trust-gated gateway or compiles it into the native config
+of 13 agent CLIs — Claude Code, Claude Desktop, Codex, Cursor, Windsurf,
+Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro,
+and Pi. Secrets stay `${REFERENCES}` that resolve per machine, so the source of
+truth is safe to commit and share.
 
 ## Install
 
@@ -278,13 +280,15 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@v0.8.1   # pin a release tag, not @main
+  - uses: Tarekkharsa/agentstack@v0.10.1  # pin a release tag, not @main
 ```
 
 ## The trust gate — clone anyone's repo, safely
 
-Clone any repo and its agents can touch **nothing** until you review and trust
-it — every call after that is firewalled and audited.
+Register the AgentStack gateway, then clone a repo: its declared MCP servers
+remain inactive until you inspect their runtime surface and trust the current
+manifest/lock consent digest. Calls brokered after that are firewalled and
+audited.
 
 ![The trust gate: clone → inert → review → trust → firewalled → audited — and the library sync gate blocking a literal secret](docs/trust-gate.svg)
 
@@ -303,7 +307,7 @@ agentstack trust .               # you SEE what it declares before authorizing:
 #   ✓ trusted at sha256:…        (editing the manifest re-gates it)
 ```
 
-Trust pins the **manifest and lockfile**, not arbitrary code they point at —
+Trust pins the **manifest, local overlay, and lockfile**, not arbitrary code they point at —
 which also means running `agentstack lock` re-gates the project (new pins =
 new consent); expect to re-run `trust .` after locking. And:
 you're authorizing the command `python3 ./server.py`, and a later edit to
@@ -324,8 +328,11 @@ agent → demo.secret_read  ✗ denied    # blocked by [policy.tools]
 every call → ~/.agentstack/audit/calls.jsonl   (tool · outcome · latency)
 ```
 
-No files in the repo, nothing an agent can touch that you didn't review. The
-whole thing is a runnable 60-second demo: [`docs/trust-gate-demo.sh`](docs/trust-gate-demo.sh).
+No generated config files in the repo, and no untrusted repo-declared server is
+auto-started by the gateway. This does not sandbox arbitrary repo code; use
+`run --sandbox --lockdown` when the agent process itself needs confinement.
+The whole thing is a runnable 60-second demo:
+[`docs/trust-gate-demo.sh`](docs/trust-gate-demo.sh).
 
 ## Where rendered files live — pick a mode
 
@@ -355,8 +362,8 @@ Details and trade-offs: [feature reference → three modes](docs/reference.md#wh
 - **[Feature reference](docs/reference.md)** — the complete tested inventory:
   central library, vendor packs, MCP firewall, call audit log, `optimize`,
   plugin recipes, live runs, code mode, every command and flag.
-- **[The no-terminal path](docs/dashboard.md)** — the full lifecycle done
-  entirely from the dashboard UI.
+- **[The no-terminal path](docs/dashboard.md)** — the dashboard's capability
+  lifecycle, from discovery through undo.
 - **Vendor packs** — `agentstack add from git:github.com/acme/pack@v1.2.0`
   installs a versioned MCP + skills + house-rules bundle, policy-gated and
   content-scanned before anything is written.
@@ -422,7 +429,7 @@ binary in a shell function or alias — those exist only in interactive shells,
 so agent harnesses and scripts won't see them.
 
 Adding a CLI is one YAML descriptor — copy `crates/adapters/descriptors/codex.yaml`, check it with
-`agentstack adapters validate my-agent.yaml`, then drop it into
+`agentstack adapters validate my-adapter.yaml`, then drop it into
 `~/.agentstack/adapters/` (no rebuild). `agentstack adapters list` marks which
 adapters are yours; a broken drop-in is skipped with a warning, never fatal.
 

@@ -12,8 +12,9 @@ that sensitive content never leaves through an allowed destination.** An enforce
 egress allowlist blocks connections to hosts you did not approve — it does not
 inspect payloads, and it permits traffic to every host you *did* approve,
 including the model API itself. A prompt-injected agent can still exfiltrate
-through any allowed channel. The honest claim is: *untrusted code stays inert,
-and unapproved egress is blocked* — never "exfiltration is impossible."
+through any allowed channel. The honest claim is: *untrusted project
+declarations are not auto-activated, and unapproved egress is blocked on the
+enforced paths* — never "exfiltration is impossible."
 
 Read every cell below with that ceiling in mind. "Enforced" means the disallowed
 action is *prevented at runtime* (by the kernel, the container boundary, or the
@@ -21,9 +22,11 @@ proxy); it never means the allowed action is *safe*.
 
 ## What "trusted" does and does not mean
 
-Trusting a bundle asserts exactly one thing: **this exact content — this lockfile
-digest, and in the distribution path this signature — was reviewed and approved.**
-It is a claim about *bytes*, not about a machine, a user, or a runtime.
+Trusting a project asserts exactly one thing: **the current manifest, local
+overlay, and lockfile consent digest was approved for automatic loading on this
+machine.** The lockfile separately pins resolved server definitions, skills,
+and instructions; drift in those inputs fails verification. Detached
+signatures attest to lockfile bytes but do not silently create local trust.
 
 Trusted does **not** mean:
 
@@ -31,20 +34,22 @@ Trusted does **not** mean:
   its skills enter context, and its secrets resolve. It does not confine what a
   running agent then does — that is the job of policy and the sandbox, per the
   matrix below.
-- **Vetted for correctness or intent.** Review shows you the diff (manifest,
-  skill content, MCP definitions, policy) so *you* can judge it. AgentStack
-  verifies the content is the content you approved; it does not vouch for what
-  that content does.
+- **Vetted for correctness or intent.** `agentstack trust` summarizes the
+  runtime surface—commands, HTTP contacts, secret refs, and skill pin status—so
+  *you* can judge it. AgentStack verifies the consent digest and lock pins; it
+  does not vouch for what the referenced code does.
 - **Tamper-proof against a compromised host agent.** In host mode the agent CLI
   runs as you, so it can in principle reach the user-writable trust store under
   `~/.agentstack/` and self-trust a bundle. Only the sandbox removes this. (A
   recorder-backed tamper log for trust-store mutations is *intended* but not yet
   wired — see the audit/recording row.)
 
-Conversely, **untrusted means fully inert**: no MCP server is spawned or
-contacted, no skill content enters any agent context, no secret resolves, no
-adapter config is written. That invariant *is* enforced (property-tested in
-`crates/trust`).
+Conversely, **untrusted project declarations are inert on automatic and
+experimental execution paths**: the auto-project gateway does not spawn or
+contact their MCP servers or resolve their secrets, and `tools_execute` refuses
+to begin. This does not sandbox arbitrary repository code, prevent a user from
+running it manually, or block an explicit static `agentstack apply`; those are
+separate authorization and execution paths.
 
 ## The matrix
 

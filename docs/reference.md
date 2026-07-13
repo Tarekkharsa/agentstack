@@ -5,7 +5,7 @@ The complete, implemented-and-tested feature inventory. The
 
 **Contents:** [Core engine](#core-engine) ·
 [Where rendered files live](#where-rendered-files-live-three-modes) ·
-[Secrets and trust](#secrets-and-trust) ·
+[Governance, trust, and secrets](#secrets-and-trust) ·
 [The central library](#the-central-library) ·
 [Capabilities](#capabilities) ·
 [Drift](#drift-adopt-or-apply) ·
@@ -949,7 +949,7 @@ re-locking re-gates), `codemode` (`--write`), `analyze` (`--json`,
 the machine-level destructive-command hook for every agent CLI; cooperative,
 see ENFORCEMENT.md), `run` (`--sandbox`)/`runs`/`kill`, `report` (`--json`),
 `sign`/`verify` (`--pubkey`, `--signature` — detached ed25519 lockfile
-signatures, Phase 4), `self link|which`.
+signatures), `self link|which`.
 
 This inventory is checked by a test against the CLI's own command list
 (`tests/docs_commands.rs`) — a new subcommand fails CI until it's documented
@@ -972,4 +972,8 @@ native Claude Code/Codex packages + marketplaces) · atomic writes + backups ·
 nightly adapter-conformance CI · zero-copy bridge (`connect` + `mcp
 --auto-project` + digest-pinned `trust`) · `optimize` (evidence-backed
 recommendations from usage/audit/cost signals, safe-class `--write`) ·
-fail-closed `lib sync` secret gate (all server fields + outgoing history).
+fail-closed `lib sync` secret gate (all server fields + outgoing history) ·
+machine-level destructive-command `guard` · Docker `run --sandbox` and
+no-direct-route `--lockdown` with compiled egress/filesystem policy · per-run
+`report` (lifecycle, limits, egress, tool calls, secret refs) · detached
+`sign`/`verify` · experimental frozen-plan `tools_execute`.

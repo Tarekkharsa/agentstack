@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Get started — agentstack</title>
-<meta name="description" content="The ten-minute path: take an unfamiliar agent repo from untrusted → reviewed → confined run → readable report. Every step, the exact command, and what you should see.">
+<title>Get started — build or govern your agent stack</title>
+<meta name="description" content="Start in ten minutes: consolidate the agent setup already on your machine, or take an unfamiliar repo from untrusted to a confined run with a readable report.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta property="og:title" content="Get started — agentstack">
-<meta property="og:description" content="The ten-minute path: take an unfamiliar agent repo from untrusted → reviewed → confined run → readable report. Every step, the exact command, and what you should see.">
+<meta property="og:description" content="Consolidate your current agent setup, or take an unfamiliar repo from untrusted to a confined, auditable run.">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://tarekkharsa.github.io/agentstack/start.html">
 <meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
@@ -284,16 +284,23 @@
 <main id="main">
 
   <section id="intro" style="margin-top:3.25rem">
-    <p class="eyebrow">Get started · ~10 minutes</p>
-    <h1>Take an unfamiliar repo from <span class="accent">untrusted</span> to a confined run you can read back.</h1>
+    <p class="eyebrow">Get started · two paths · ~10 minutes</p>
+    <h1>Unify the stack you have—or test its strongest boundary.</h1>
     <p class="lede">
-      This is the whole journey, in order: install, point agentstack at an
-      agent-enabled repo, watch it stay <strong>inert</strong> until you review
-      and trust the exact content, run it <strong>confined</strong>, then read
-      the flight recorder. Every step below is the exact command and what you
-      should see. <strong>Steps 1–5 need nothing but the binary; the confined
-      run in step 6 needs Docker.</strong>
+      For everyday setup, let <code>agentstack setup</code> import what your
+      CLIs already use, preview one portable manifest, and compile it back into
+      their native formats. The detailed walkthrough below follows the security
+      path: open an unfamiliar repo, keep it inert until review, run it
+      <strong>confined</strong>, then read the evidence. <strong>Only the
+      confined run needs Docker.</strong>
     </p>
+    <div class="callout">
+      <b>Fast path: consolidate your existing setup</b>
+      <p><code>agentstack setup</code> runs the guided
+        <code>init → bootstrap → apply → doctor</code> loop. It imports existing
+        CLI configuration, lifts inline secrets into references, previews every
+        write, and leaves you with one source of truth for all detected CLIs.</p>
+    </div>
     <div class="callout">
       <b>What needs Docker, and what doesn't</b>
       <p>The trust gate, the tool firewall, secret resolution, and the call
@@ -330,7 +337,7 @@
       <div class="term">
         <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>verify version</b></div>
         <pre><code><span class="p">$</span> agentstack --version
-<span class="c">agentstack 0.9.x</span></code></pre>
+<span class="c">agentstack 0.10.x</span></code></pre>
       </div>
     </li>
 
@@ -368,7 +375,7 @@ agentstack connect --all --write    # write it into each harness's global MCP co
       <div class="term">
         <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>untrusted → inert</b></div>
         <pre><code><span class="p">$</span> git clone https://github.com/some/agent-repo &amp;&amp; cd agent-repo
-<span class="p">$</span> agentstack mcp --auto-project     <span class="c"># an agent asks: what can I touch here?</span>
+<span class="p">$</span> agentstack mcp --auto-project     <span class="c"># an agent asks: which project servers can I use?</span>
 <span class="no">  ✗ untrusted — no servers spawned, no secrets resolved, nothing in context</span></code></pre>
       </div>
     </li>
@@ -379,7 +386,7 @@ agentstack connect --all --write    # write it into each harness's global MCP co
         <code>trust</code> shows you exactly what the repo declares — the
         servers it would spawn and the commands behind them — <em>before</em> you
         authorize anything. Trust pins a content digest of the
-        <strong>manifest and lockfile</strong>, not the arbitrary code they point
+        <strong>manifest, local overlay, and lockfile</strong>, not the arbitrary code they point
         at, so read any referenced script as part of the review (the same
         discipline as reading a <code>.envrc</code> before <code>direnv allow</code>).
         Any later edit to the manifest or lock re-gates the repo — new pins mean
@@ -473,8 +480,9 @@ agentstack run claude-code --sandbox --lockdown          # launch confined</code
       <h2>Read the flight recorder</h2>
       <p class="muted">
         Nothing trusted runs unobserved. A sandbox run fails closed if its run log
-        can't be created; that log captures the container lifecycle and every
-        egress decision, tagged with the run's posture.
+        can't be created; that log captures the container lifecycle, egress
+        decisions, brokered tool calls, and secret-reference names, tagged with
+        the run's posture. It never stores argument values or secret values.
         <code>agentstack report</code> reads it back.
       </p>
       <div class="copywrap">
@@ -497,8 +505,8 @@ agentstack report &lt;run&gt; --json # machine-readable, carries the posture slu
         recorder, but every brokered tool call is still in the call audit log —
         <code>~/.agentstack/audit/calls.jsonl</code>, one line per call (tool ·
         outcome · latency), storing an argument <em>digest</em> only, never raw
-        values or resolved secrets. The run log fills out to cover individual
-        tool calls and secret refs in a later phase — see the
+        values or resolved secrets. Trust-store mutations and per-run token/cost
+        accounting are not yet wired into the flight recorder; see the
         <a href="index.html#enforced">enforcement matrix</a> for exactly what each
         mode records today.
       </p>
@@ -541,7 +549,7 @@ agentstack report &lt;run&gt; --json # machine-readable, carries the posture slu
       </div>
       <div class="fcard">
         <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">The no-terminal path</a></h3>
-        <p>The whole lifecycle — discover, add, secrets, apply, verify, undo —
+        <p>The dashboard lifecycle — discover, add, secrets, apply, verify, undo —
            from a local, token-gated dashboard, with read-only Proxy and Insights
            panels.</p>
       </div>

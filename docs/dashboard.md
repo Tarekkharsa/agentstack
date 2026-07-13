@@ -1,7 +1,7 @@
 # The no-terminal path
 
-The dashboard is not a viewer — it is the full product for people who don't
-live in a terminal. This page walks the complete capability lifecycle —
+The dashboard is the main operating surface for people who don't live in a
+terminal. This page walks its complete capability lifecycle —
 **discover → add → secrets → enable per CLI → apply → verify → remove →
 undo** — without typing a single command after launch. Every step below names
 the exact pane and button, and each mutation goes through the same gates as
