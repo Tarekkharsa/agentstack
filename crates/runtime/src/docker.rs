@@ -76,6 +76,35 @@ impl DockerSandbox {
     pub(crate) fn client(&self) -> Docker {
         self.docker.clone()
     }
+
+    /// The gateway IP of Docker's default `bridge` network (`docker0`, e.g.
+    /// `172.17.0.1`) — the address `host.docker.internal:host-gateway` resolves
+    /// to on a *native* Linux daemon, and therefore the narrowest host
+    /// interface the per-execution tool-call relay can bind to while staying
+    /// reachable from the sandbox sidecar.
+    ///
+    /// Returns `None` on any failure — no daemon, no such network, no IPv4
+    /// gateway, or an unparseable address — so the caller can fall back rather
+    /// than fail the run. Note the returned address is meaningful for binding
+    /// only when the daemon is a native Linux daemon; on Docker Desktop this
+    /// gateway lives inside the VM (see `egress::relay_bind_address`).
+    pub fn default_bridge_gateway(&self) -> Option<std::net::IpAddr> {
+        let inspect = self
+            .rt
+            .block_on(self.docker.inspect_network(
+                "bridge",
+                None::<bollard::query_parameters::InspectNetworkOptions>,
+            ))
+            .ok()?;
+        // IPAM.config is a list of {subnet, gateway, …}; take the first entry
+        // that carries a parseable gateway. `?` on each `Option` short-circuits
+        // to `None`, which the caller treats as "unknown, fall back".
+        inspect
+            .ipam?
+            .config?
+            .into_iter()
+            .find_map(|cfg| cfg.gateway?.parse::<std::net::IpAddr>().ok())
+    }
 }
 
 impl Sandbox for DockerSandbox {

@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -38,6 +38,50 @@ pub enum RelayCallError {
 }
 
 pub type ExecutionCall = Arc<dyn Fn(&str, Value) -> Result<Value, RelayCallError> + Send + Sync>;
+
+/// Decide the narrowest host interface the per-execution relay can bind to
+/// while staying reachable from the sandbox's sidecar, which dials the host
+/// through `host.docker.internal`. The goal is defence-in-depth: never expose
+/// the token-authenticated relay on a LAN-facing interface (the `0.0.0.0`
+/// wildcard did exactly that), yet keep the one Docker path in reach.
+///
+/// The right answer is platform-specific, because `host.docker.internal`
+/// resolves differently depending on where the daemon runs:
+///
+/// * **Linux, native daemon** — the sidecar's `--add-host
+///   host.docker.internal:host-gateway` resolves to the Docker bridge gateway
+///   (the `docker0` address, e.g. `172.17.0.1`), which is a real *host*
+///   interface on a private, non-routable bridge subnet. Binding there is
+///   reachable from any Docker container via the gateway but never from other
+///   LAN hosts. `docker_bridge_gateway` carries that address (looked up by the
+///   caller); when it is unknown we fall back to the wildcard so the feature
+///   keeps working (documented residual exposure).
+/// * **macOS / Windows, Docker Desktop** — the daemon runs inside a VM, so the
+///   bridge gateway (`172.17.0.1`) lives in that VM, *not* on the host, and
+///   cannot be bound here. Docker Desktop instead forwards
+///   `host.docker.internal` to the host's **loopback**, so `127.0.0.1` is both
+///   reachable from containers and the tightest possible bind — narrower even
+///   than the Linux case (empirically verified against Docker Desktop). We
+///   ignore any reported bridge gateway on these platforms.
+///
+/// This is a pure function of the two inputs so the decision can be unit
+/// tested without a Docker daemon; the actual bind (and the "not assignable"
+/// fallback for Docker-Desktop-on-Linux) lives in
+/// [`BlockingExecutionRelay::start_on_or_unspecified`].
+pub fn relay_bind_address(os: &str, docker_bridge_gateway: Option<IpAddr>) -> IpAddr {
+    match os {
+        // Docker Desktop's VM forwards host.docker.internal to the host
+        // loopback; the in-VM bridge gateway is not a host interface.
+        "macos" | "windows" => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        // Native Linux: bind the docker0 gateway when known, else keep working
+        // on the wildcard. Loopback is intentionally NOT a fallback here — a
+        // container cannot reach the host loopback via host-gateway on native
+        // Linux, so binding it would silently break tool calls.
+        "linux" => docker_bridge_gateway.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+        // Unknown platform: stay functional on the wildcard rather than guess.
+        _ => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+    }
+}
 
 struct Shared {
     token: String,
@@ -242,6 +286,49 @@ impl BlockingExecutionRelay {
         })
     }
 
+    /// Bind to `preferred`, transparently falling back to the wildcard
+    /// (`0.0.0.0`) when that address is not assignable on this host. The
+    /// fallback covers Docker-Desktop-on-Linux, where [`relay_bind_address`]
+    /// hands back the in-VM bridge gateway (`172.17.0.1`) that has no host
+    /// interface — binding it fails with `AddrNotAvailable`, and re-widening to
+    /// the wildcard keeps the feature working (documented residual exposure).
+    /// Loopback and native-Linux gateway binds never hit this path.
+    ///
+    /// `token`/`grant` are cloned before the first attempt so the fallback can
+    /// re-issue them; `call` is an `Arc`, so its clone is just a refcount bump.
+    pub fn start_on_or_unspecified(
+        preferred: IpAddr,
+        token: String,
+        grant: BTreeSet<String>,
+        max_calls: u32,
+        call: ExecutionCall,
+    ) -> io::Result<Self> {
+        let wildcard = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+        match Self::start_on(
+            preferred,
+            token.clone(),
+            grant.clone(),
+            max_calls,
+            Arc::clone(&call),
+        ) {
+            Ok(relay) => Ok(relay),
+            // Only a genuinely-unassignable preferred address earns the
+            // fallback; any other error (invalid authority, port exhaustion)
+            // is real and propagates. If `preferred` already was the wildcard,
+            // there is nothing narrower to retry — surface the original error.
+            Err(error)
+                if error.kind() == io::ErrorKind::AddrNotAvailable && preferred != wildcard =>
+            {
+                eprintln!(
+                    "tools_execute: relay bind to {preferred} unavailable ({error}); \
+                     falling back to 0.0.0.0 (LAN-reachable for this execution)"
+                );
+                Self::start_on(wildcard, token, grant, max_calls, call)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }
@@ -291,6 +378,50 @@ mod tests {
             Arc::new(|tool, args| Ok(json!({"tool":tool,"args":args}))),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn bind_address_is_never_the_wildcard_when_a_narrow_route_exists() {
+        let gw: IpAddr = "172.17.0.1".parse().unwrap();
+        // Native Linux with a known bridge gateway → bind that gateway.
+        assert_eq!(relay_bind_address("linux", Some(gw)), gw);
+        // Linux without a discoverable gateway → wildcard fallback (functional,
+        // documented residual exposure).
+        assert_eq!(
+            relay_bind_address("linux", None),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        );
+        // Docker Desktop forwards host.docker.internal to the host loopback;
+        // the reported in-VM gateway must be ignored.
+        assert_eq!(
+            relay_bind_address("macos", Some(gw)),
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        );
+        assert_eq!(
+            relay_bind_address("windows", None),
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        );
+        // Unknown platform stays functional on the wildcard rather than guess.
+        assert_eq!(
+            relay_bind_address("freebsd", Some(gw)),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        );
+    }
+
+    #[test]
+    fn unassignable_preferred_bind_falls_back_to_the_wildcard() {
+        // 203.0.113.9 is TEST-NET-3 (RFC 5737): guaranteed not assigned to any
+        // local interface, so the preferred bind fails and we fall back.
+        let unassignable: IpAddr = "203.0.113.9".parse().unwrap();
+        let relay = BlockingExecutionRelay::start_on_or_unspecified(
+            unassignable,
+            "a".repeat(64),
+            BTreeSet::from(["github__get_issue".into()]),
+            1,
+            Arc::new(|_, _| Ok(Value::Null)),
+        )
+        .expect("fallback should bind the wildcard");
+        assert_eq!(relay.addr().ip(), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
     }
 
     #[test]

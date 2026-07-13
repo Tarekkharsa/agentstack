@@ -38,7 +38,9 @@ pub use blocking::BlockingBridge;
 pub use bridge::{EgressBridge, ProxyEndpoint};
 pub use connect::{parse_connect_target, Target};
 pub use decide::{Decision, EgressGuard};
-pub use execution_relay::{BlockingExecutionRelay, ExecutionCall, RelayCallError};
+pub use execution_relay::{
+    relay_bind_address, BlockingExecutionRelay, ExecutionCall, RelayCallError,
+};
 pub use proxy::{EventSink, ServerProxy};
 pub use relay::start_relay;
 pub use sni::extract_sni;

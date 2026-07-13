@@ -155,7 +155,6 @@ mod hosted {
     use super::*;
     use std::collections::BTreeSet;
     use std::fs;
-    use std::net::{IpAddr, Ipv4Addr};
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
@@ -258,14 +257,37 @@ mod hosted {
             .iter()
             .map(str::to_string)
             .collect::<BTreeSet<_>>();
+
+        // Connect to Docker before binding the relay: the narrowest safe bind
+        // depends on the daemon's bridge gateway, so the listener must learn it
+        // first.
+        let backend = setup!(
+            DockerSandbox::connect()
+                .map_err(|error| runtime_unavailable("connecting to Docker", error)),
+            "runtime-unavailable"
+        );
+
+        // Bind the per-execution tool-call relay to the narrowest host
+        // interface that the sandbox sidecar can still reach via
+        // host.docker.internal — NOT the `0.0.0.0` wildcard, which exposed the
+        // token-authenticated relay on every (including LAN-facing) interface.
+        // On a native Linux daemon the reachable-yet-narrow address is the
+        // docker0 bridge gateway (a private, non-routable host interface); on
+        // Docker Desktop it is the host loopback. The bridge gateway is only
+        // looked up on Linux, because on Docker Desktop that gateway lives
+        // inside the daemon's VM and is not a host interface. The per-run random
+        // token, exact grant, call cap, and bounded frames remain the authority
+        // boundary regardless of bind scope.
+        let bridge_gateway = if std::env::consts::OS == "linux" {
+            backend.default_bridge_gateway()
+        } else {
+            None
+        };
+        let relay_bind =
+            agentstack_egress::relay_bind_address(std::env::consts::OS, bridge_gateway);
         let relay = setup!(
-            // Docker reaches the host through host.docker.internal, which
-            // does not route to a host loopback listener. The relay therefore
-            // binds host interfaces for this short lifetime; the per-run
-            // random token, exact grant, call cap, and bounded frames remain
-            // the authority boundary.
-            agentstack_egress::BlockingExecutionRelay::start_on(
-                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            agentstack_egress::BlockingExecutionRelay::start_on_or_unspecified(
+                relay_bind,
                 token,
                 grant,
                 plan.limits.max_calls,
@@ -282,12 +304,6 @@ mod hosted {
         );
         setup!(write_file(&files.ruleset, &ruleset_json), "setup-error");
         setup!(make_app_readonly(&files.app), "setup-error");
-
-        let backend = setup!(
-            DockerSandbox::connect()
-                .map_err(|error| runtime_unavailable("connecting to Docker", error)),
-            "runtime-unavailable"
-        );
         let sink_log = agentstack_recorder::RunLog::create(log_id);
         let sink: agentstack_runtime::LockdownSink = Arc::new(move |line| {
             if let (Some(run_log), Ok(event)) = (
