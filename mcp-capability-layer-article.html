@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>I was wrong about MCPs — the capability layer</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #0f1419;
+      --muted: #536471;
+      --accent: #1d9bf0;
+      --rule: #e1e8ed;
+      --quote-bar: #1d9bf0;
+      --quote-bg: #f7f9fa;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #15202b;
+        --fg: #e7e9ea;
+        --muted: #8b98a5;
+        --accent: #1d9bf0;
+        --rule: #38444d;
+        --quote-bar: #1d9bf0;
+        --quote-bg: #1c2732;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      font-size: 18px;
+    }
+    main {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 48px 20px 96px;
+    }
+    header.article-head {
+      border-bottom: 1px solid var(--rule);
+      padding-bottom: 24px;
+      margin-bottom: 32px;
+    }
+    header.article-head h1 {
+      font-size: 2rem;
+      line-height: 1.2;
+      margin: 0 0 12px;
+      letter-spacing: -0.01em;
+    }
+    header.article-head .byline {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    header.article-head .byline a { color: var(--accent); text-decoration: none; }
+    h2 {
+      font-size: 1.45rem;
+      line-height: 1.3;
+      margin: 44px 0 4px;
+      letter-spacing: -0.01em;
+    }
+    p { margin: 20px 0; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    strong { font-weight: 700; }
+    ul {
+      margin: 20px 0;
+      padding-left: 1.4em;
+    }
+    li { margin: 8px 0; }
+    figure {
+      margin: 28px 0;
+    }
+    figure img {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 14px;
+      border: 1px solid var(--rule);
+    }
+    blockquote {
+      margin: 28px 0;
+      padding: 14px 20px;
+      border-left: 4px solid var(--quote-bar);
+      background: var(--quote-bg);
+      border-radius: 0 8px 8px 0;
+      color: var(--fg);
+    }
+    blockquote p { margin: 0; }
+  </style>
+</head>
+<body>
+<main>
+  <header class="article-head">
+    <h1>I was wrong about MCPs</h1>
+    <div class="byline">by <a href="https://x.com/_overment" target="_blank" rel="noopener noreferrer">@_overment</a> · MCP as a capability layer, not just a connector</div>
+  </header>
+
+  <p>MCP servers often focus on <strong>integrating a single service</strong>, giving the agent new tools and/or context. But what if we shift our perspective and break a few familiar patterns, turning MCP into a set of new capabilities the agent can use however it needs?</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND4S1dXYAA7s2E?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND4S1dXYAA7s2E?format=png&name=large" alt="Illustration: MCP as capabilities" loading="lazy">
+    </a>
+  </figure>
+
+  <p>To be clear - MCPs and CLIs built around a single service work perfectly well for many use cases. What follows is a different approach, one that reaches far beyond direct integrations. Whether or not you find it useful, it may change how you think about the programmer&rsquo;s role in the AI era.</p>
+
+  <h2>Concept behind Model Context Protocol</h2>
+
+  <p>If you haven't come across it yet: the Model Context Protocol (MCP) standardizes how AI agents, like ChatGPT, Claude, OpenCode, or Amp, connect to external systems. The protocol does more, but its core use case is simple: <strong>delivering JSON Schemas that describe which tools an agent can select, and what arguments to call them with.</strong></p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND4b73XMAAtChS?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND4b73XMAAtChS?format=png&name=large" alt="MCP tool schema diagram" loading="lazy">
+    </a>
+  </figure>
+
+  <p>In practice, an existing API, say Resend's, can be translated into a set of tools optimized for AI agents, letting them send emails, manage contacts, or launch campaigns, for example.</p>
+
+  <p>Compared to the raw API, MCP tools provide context LLMs lack by default: descriptions and hints that increase the odds an action succeeds, or that the agent recovers when it doesn't. Below is a scenario where the agent gets stuck using the raw API to send an email, due to a missing property. In the MCP scenario, it gets a clear hint on how to recover from the error.</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND4kKUWwAAhzRW?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND4kKUWwAAhzRW?format=png&name=large" alt="Raw API vs MCP error recovery" loading="lazy">
+    </a>
+  </figure>
+
+  <p>When an agent uses a well-known service like GitHub, it already knows the interface. There's little value in additional context here. But with less popular services, the agent either fails and learns from errors, or has to find the latest docs first to learn how to use it.</p>
+
+  <p>For coding agents, CLI tools are often more convenient than MCPs: they have native access to bash and, through it, to the entire device they control. This works well for a single user and simple integrations, but the advantage fades the moment you go beyond a single-user context or move remote. <strong>So the whole "MCPs vs CLIs" debate doesn't really make sense, we're talking about different use cases.</strong></p>
+
+  <p>Knowing all this, let's broaden the perspective and think about MCPs beyond integrations alone.</p>
+
+  <h2>Moving beyond integrating services</h2>
+
+  <p>To explore what MCPs can really do, let's look at <a href="https://github.com/kentcdodds/kody" target="_blank" rel="noopener noreferrer">Kody</a> a personal assistant built by <a href="https://x.com/kentcdodds" target="_blank" rel="noopener noreferrer">Kent C. Dodds</a> (&amp; contributors), that focuses on <strong>generalized capabilities</strong> rather than direct integrations.</p>
+
+  <p>Running on Cloudflare, Kody can remotely connect to any agentic harness that supports MCP, or work in the background, on a schedule or in response to events. In practice, the assistant is available wherever the user is: OpenAI Codex, Anthropic Claude Code, or any custom UI.</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND46WoXUAAXw1z?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND46WoXUAAXw1z?format=png&name=large" alt="Kody architecture overview" loading="lazy">
+    </a>
+  </figure>
+
+  <p>At its core, the assistant comes down to just two tools:</p>
+
+  <ul>
+    <li><strong>search</strong>: finds and/or loads Kody's capabilities</li>
+    <li><strong>execute</strong>: runs TypeScript code inside Kody's runtime, with direct access to all its features.</li>
+  </ul>
+
+  <p>Together, they let the agent explore available capabilities, including ones created during previous interactions, and use them within scripts. Sounds powerful. But why?</p>
+
+  <p>Well, ask a typical agent to "prepare a weekly email report" and it has to perform a whole series of actions to get there. And since LLMs are non-deterministic, the risk of something going wrong compounds with every additional step!</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND5FzrWIAAIrG_?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND5FzrWIAAIrG_?format=png&name=large" alt="Multi-step agent flow" loading="lazy">
+    </a>
+  </figure>
+
+  <p>Kody takes a different path. <strong>It writes and tests a script that fetches all messages once, then saves it as a Package.</strong> From then on, it simply reuses the Package. Since code is mostly deterministic, the results remain consistent unless the script calls an LLM, for example, to summarize the messages, or contains other logic that introduces randomness or produces unpredictable results.</p>
+
+  <p>Either way, this approach is far more reliable and efficient.</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND5LWkWMAEWWLE?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND5LWkWMAEWWLE?format=png&name=large" alt="Package reuse flow" loading="lazy">
+    </a>
+  </figure>
+
+  <p>Code execution is just the tip of the iceberg. What makes this MCP special are its native components, and they're generalized in a way that goes well beyond a typical integration.</p>
+
+  <blockquote>
+    <p>Note: what follows matters not just for MCP, but for working with AI agents in general.</p>
+  </blockquote>
+
+  <p>So instead of thinking in terms of <strong>every single feature</strong>, we should elevate our thinking toward <strong>system design and product engineering</strong>. That shifts our focus away from details AI already handles with ease, toward the high-level concepts that shape the environment agents operate in. This won't come out of thin air, though: it requires a deep understanding of user context and possible use cases, far beyond a simple requirements doc describing a given feature.</p>
+
+  <p>Let&rsquo;s consider a few examples here, by looking closer at Kody&rsquo;s architecture.</p>
+
+  <h2>#1 Packages</h2>
+
+  <p>As mentioned, an assistant can either perform every action step by step each time, or write a script to save and reuse later.</p>
+
+  <p>In an example below, the user asks the agent for a podcast that highlights the most important news. The logic for it is then designed, tested and stored. It may be even shared with others! And from now on, whenever the users asks for the podcast, the agent simply picks the right package and executes it.</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND99idW8AAO-Zu?format=jpg&name=900x900" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND99idW8AAO-Zu?format=jpg&name=900x900" alt="Podcast package example" loading="lazy">
+    </a>
+  </figure>
+
+  <p>From a technical perspective:</p>
+
+  <ul>
+    <li>D1 Database keeps track of the package and its details.</li>
+    <li>Cloudflare Artifacts holds the original, versioned source code</li>
+    <li>Cloudflare KV stores the package&rsquo;s ready-to-run bundles.</li>
+    <li>Cloudflare Workers provide an isolated environment in which the code runs.</li>
+    <li>Cloudflare Durable Objects preserve data and support realtime sessions or long-running services when needed.</li>
+  </ul>
+
+  <p>Packages are a clever way to leverage how good AI has become at programming, letting agents work smart instead of hard. I don&rsquo;t need to mention this saves tons of tokens, meaning your money.</p>
+
+  <h2>#2 Integrations</h2>
+
+  <p>The way of connecting agents with external apps and services is another of Kody's components, and another example of how we can shift our programming mindset. Instead of building dedicated integrations with communicators, email, calendars, issue trackers, maps, or various devices, Kody provides generalized primitives for OAuth, API credentials, OpenAPI specifications, external MCP servers, and private-network connectors. Then it exposes their functionality to the "execute" tool's runtime.</p>
+
+  <p>This makes the agent independent enough that when it faces a task requiring an integration it doesn't have, it simply creates one, asking the user to log in or securely provide an API key.</p>
+
+  <p>The example below shows two scenarios:</p>
+
+  <ul>
+    <li>one where a missing integration stops the agent cold,</li>
+    <li>and one where the agent configures a connection and builds reusable behavior around it, simply asking the user for help with authorization.</li>
+  </ul>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND5qaOXMAAnyqT?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND5qaOXMAAnyqT?format=png&name=large" alt="Integration scenarios" loading="lazy">
+    </a>
+  </figure>
+
+  <p>From a technical perspective, Kody owns the reusable authentication machinery, so the agent doesn't have to rebuild everything from scratch every time. Instead, it focuses on supplying the provider-specific configuration and deciding what to do with the resulting connection. The diagram below shows this in action.</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND5vYJWUAAsaEw?format=jpg&name=900x900" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND5vYJWUAAsaEw?format=jpg&name=900x900" alt="Authentication machinery diagram" loading="lazy">
+    </a>
+  </figure>
+
+  <p>This is the reality we live in. Many of us remember when building an OAuth integration took hours. Now agents generate them on the fly, needing only a little steering. Realizing this is what moved Kent's assistant from one that needs integrations built by hand to one that builds them on its own!</p>
+
+  <p>And there's a bonus here: <strong>the assistant generally improves automatically with every upgrade of the LLM it runs on</strong>. And "the acceleration is accelerating", as you've probably noticed.</p>
+
+  <h2>#3 Jobs and Workflows</h2>
+
+  <p>Purely reactive agents, ones that only act when prompted, still have their uses, but they're starting to feel like a relic. Today, an agent shouldn't just respond to what we say - it should also act when we're not around.</p>
+
+  <p>With the Packages Kody can build, background tasks naturally come to mind. After all, once the code is written, it can run automatically, without involving the LLM at all. And since the Jobs and Workflows are Kody&rsquo;s native capabilities, it can manage them on its own.</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND55RaXsAABnN6?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND55RaXsAABnN6?format=png&name=large" alt="Jobs and Workflows architecture" loading="lazy">
+    </a>
+  </figure>
+
+  <p>From a technical perspective:</p>
+
+  <ul>
+    <li><strong>D1</strong> tracks Job schedules, Workflow statuses, and executions</li>
+    <li><strong>Cloudflare Artifacts</strong> keep the source code for Jobs and Packages</li>
+    <li><strong>JobManager Durable Objects</strong> wake Kody up for scheduled Jobs</li>
+    <li><strong>Workflows</strong> manage durable runs, including waits and retries</li>
+    <li><strong>Workers</strong> execute Job packages and inline Workflow code</li>
+    <li><strong>StorageRunner Durable Objects</strong> preserve Job data between runs</li>
+    <li><strong>After execution, D1</strong> records the outcome and, for recurring Jobs, the next run time</li>
+  </ul>
+
+  <p>Here's how Jobs and Workflows differ:</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND6MU0XoAAMzJb?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND6MU0XoAAMzJb?format=png&name=large" alt="Jobs vs Workflows comparison" loading="lazy">
+    </a>
+  </figure>
+
+  <p>Jobs, in a nutshell, pair a one-time or recurring schedule with code to execute, either a standalone snippet or a package-owned job entry. They're great for automations like sending follow-ups or generating reports.</p>
+
+  <p>Workflows, in turn, rely on Cloudflare Workflows to manage individual durable executions. They come in handy when work needs to wait, continue beyond the original request, avoid duplicate runs, or retry after a failure, which makes them a natural fit for multi-step tasks.</p>
+
+  <h2>#4 Memory</h2>
+
+  <p>Agents need memory so they can act without being handed every detail each time. And while agentic memory remains an open problem, some promising strategies are already out there, like the <a href="https://x.com/quarqlabs/status/2061571757488972153" target="_blank" rel="noopener noreferrer">Quarq Agent</a> and <a href="https://mastra.ai/blog/observational-memory" target="_blank" rel="noopener noreferrer">Observational Memory</a> which can be combined and achieve impressive results.</p>
+
+  <p>Kody keeps it simpler: <strong>a search tool</strong> with <strong>hybrid search</strong> underneath, combining lexical matching and vector search, plus some filtering and re-ranking on top.</p>
+
+  <p>In practice, you can ask the agent to remember something, and it prepares a new entry candidate and compares it against existing records. Based on that, the agent decides whether to store a new memory or update an existing one.</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND6f2dXwAAsvQ3?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND6f2dXwAAsvQ3?format=png&name=large" alt="Memory store/update flow" loading="lazy">
+    </a>
+  </figure>
+
+  <p>And since memory is just another capability, it combines easily with other actions, including those performed through Packages. Say we tell the assistant about our favorite places, later, we can simply ask for directions to that restaurant we enjoyed last time.</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND6muSWUAAYYNq?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND6muSWUAAYYNq?format=png&name=large" alt="Memory combined with directions" loading="lazy">
+    </a>
+  </figure>
+
+  <p>It&rsquo;s worth noting that "agentic memory" doesn&rsquo;t necessarily work like human memory. Depending on the implementation, an agent may not realize it knows something and, even when asked about it directly, may fail to retrieve the relevant memories. This can lead to confabulations or degraded performance.</p>
+
+  <h2>#5 Values</h2>
+
+  <p>Some code snippets, Package apps, Jobs, or Workflows need stable configuration that can be read again later. Kody provides the Values capability for storing small, readable settings within the context of a session, app, or user.</p>
+
+  <p>Unlike Memory, Values are retrieved deterministically by name rather than contextually by meaning or pattern matching. They are intended primarily for non-sensitive configuration, such as a time zone, selected workspace, report format, or default project.</p>
+
+  <p>For example, if a Package includes a UI, an app-scoped Value can preserve the user&rsquo;s settings between sessions.</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND6t31XsAAjDFV?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND6t31XsAAjDFV?format=png&name=large" alt="Values configuration example" loading="lazy">
+    </a>
+  </figure>
+
+  <p>This simple primitive can support many useful scenarios. For example, a background Job could periodically update a user-scoped <strong>currentCity</strong> Value. A Package or agent could then retrieve it explicitly when answering a question such as, "Where can I find good food nearby?"</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND6yEQXMAAfJga?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND6yEQXMAAfJga?format=png&name=large" alt="currentCity value scenario" loading="lazy">
+    </a>
+  </figure>
+
+  <p>Values are best suited to the latest small configuration value. Location history or a larger collection of records would belong in Storage instead.</p>
+
+  <h2>#6 Storage</h2>
+
+  <p>A Package, Job, service, app, or execution <strong>may need its own private database for runtime state and accumulated records.</strong></p>
+
+  <p>Instead of representing this information as individual Values in Kody&rsquo;s central D1 database, Kody assigns the runtime a StorageRunner Durable Object.</p>
+
+  <p>Technically, Kody Storage is a private, durable database tied to a single runtime identity. The Worker executing the code is temporary; the data it writes persists.</p>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND68vHWAAARsnj?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND68vHWAAARsnj?format=png&name=large" alt="Storage architecture" loading="lazy">
+    </a>
+  </figure>
+
+  <h2>#7 Remote Connectors and External MCP Servers</h2>
+
+  <p>As mentioned, Kody is an MCP server that exposes two tools, <strong>search and execute</strong>, along with a set of capabilities. Agents acting as MCP clients can connect to Kody and interact with these tools. But Kody can also extend its capability registry with tools provided by external systems.</p>
+
+  <p>It supports two connection models:</p>
+
+  <ul>
+    <li>Kody can act as MCP Client itself and access external MCP Server tools through kody.mcp interface</li>
+    <li>Local processes can reach Kody and expose their tools through kody.remote interface</li>
+  </ul>
+
+  <figure>
+    <a href="https://pbs.twimg.com/media/HND7HrpXgAAoOFy?format=png&name=large" target="_blank" rel="noopener noreferrer">
+      <img src="https://pbs.twimg.com/media/HND7HrpXgAAoOFy?format=png&name=large" alt="Remote connectors and external MCP servers" loading="lazy">
+    </a>
+  </figure>
+
+  <p>In both cases, the additional tools become part of the user&rsquo;s isolated Kody environment. The agent can discover them through <strong>search</strong> and invoke them from <strong>execute</strong>, just like Kody&rsquo;s built-in capabilities.</p>
+
+  <h2>Takeaway</h2>
+
+  <p>Shifting the perspective from <strong>a connector</strong> to <strong>a capability layer</strong> makes the concept of an MCP server far more flexible and, in many ways, truly AI-native. Rather than viewing an agent&rsquo;s capabilities through the lens of old programming habits, where everything had to be built by hand, Kent draws on nearly everything AI can do today to create an assistant that overcomes many of the limitations typical agents face. Most importantly, his assistant improves as the underlying models improve - something worth keeping in mind whenever we design for AI.</p>
+
+  <p>Here are a few points worth taking away:</p>
+
+  <ul>
+    <li><strong>Code mode:</strong> Reasoning models can generate useful code. Rather than forcing every task through predefined tools, give agents a sandboxed runtime where appropriate. Dedicated tools still matter when stable interfaces, permissions, and auditability are required.</li>
+    <li><strong>Determinism:</strong> LLM behavior can vary, especially when sampling is used. Instead of trying to remove that variability entirely, use it during generation and evaluation. An agent can generate an implementation, test it, and revise it. Once validated, running that implementation is usually faster, cheaper, and more reliable than repeating the full reasoning process each time.</li>
+    <li><strong>Generalization:</strong> Instead of implementing every action ourselves, we can shape environments where agents create and execute task specific actions, while code enforces constraints and verifies outcomes deterministically.</li>
+    <li><strong>Primitives:</strong> Components designed around one narrow use case limit agents. Prefer small capabilities with clear contracts that can support several use cases without becoming vague or unsafe.</li>
+    <li><strong>Composition:</strong> Agents can compose primitives when their interfaces, permissions, and failure modes are explicit. Instead of building each workflow ourselves, we need to give agents reusable components they can safely assemble into new workflows.</li>
+    <li><strong>Control:</strong> Agents generating their own capabilities creates legitimate engineering risks. The answer is not to ignore them or stop exploring, but to constrain execution through sandboxing, least privilege, validation, observability, approval gates, and rollback.</li>
+    <li><strong>Verification:</strong> Deterministic execution does not guarantee a correct outcome. Verification must test explicit invariants, permissions, and expected effects. Where success cannot be formalized, use evaluation, human review, or bounded uncertainty.</li>
+  </ul>
+
+  <p>That's it. I was wrong about MCPs. I used to think of them as connectors with a few extra features coming from the protocol itself, and assumed the entire capability layer had to be tied directly to the host.</p>
+
+  <p>I&rsquo;m curious what you think about all this, so feel free to leave a comment or repost it if you find it useful.</p>
+
+</main>
+</body>
+</html>
