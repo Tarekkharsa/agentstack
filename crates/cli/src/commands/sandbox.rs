@@ -635,6 +635,26 @@ fn render_gateway_config(
     }))
 }
 
+/// Make a bind-mounted config file readable by the container's user, whatever
+/// uid that is. These files live in a 0700 staging dir, which already gates
+/// other HOST users from reaching them by path; the file's OWN mode only decides
+/// whether the CONTAINER process — which bind-mounts the file directly, not via
+/// the dir tree — can read it. A 0600 file owned by the host user is UNREADABLE
+/// by a non-root container user on Linux (Docker Desktop's file sharing masks
+/// this, so it only bites on a native daemon): the agent's token read comes back
+/// empty and it can't authenticate to the gateway. 0644 fixes that and exposes
+/// nothing, because the 0700 parent still blocks host users. No-op off unix.
+#[cfg(feature = "sandbox")]
+fn mount_readable(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644));
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
 /// Render EMPTY harness configs (no gateway entry) for the shadow-only path — a
 /// lockdown run with nothing to route. `None` when the harness config can't be
 /// mapped into the container home, so the caller refuses the lockdown run.
@@ -714,7 +734,7 @@ fn shadow_native_config(
     // Empty global config shadows any user-scope native entry.
     let global_host = gw.tempdir.join("global-config");
     std::fs::write(&global_host, &cfg.global_body).context("writing the empty global shadow")?;
-    crate::util::restrict(&global_host, false);
+    mount_readable(&global_host);
     spec.mounts.push(Mount {
         host: global_host.display().to_string(),
         container: cfg.global_container,
@@ -735,7 +755,7 @@ fn shadow_native_config(
             let empty_host = gw.tempdir.join("project-shadow");
             std::fs::write(&empty_host, &cfg.empty_body)
                 .context("writing the project shadow config")?;
-            crate::util::restrict(&empty_host, false);
+            mount_readable(&empty_host);
             spec.mounts.push(Mount {
                 host: empty_host.display().to_string(),
                 container: project_container,
@@ -969,8 +989,11 @@ fn wire_sandbox_gateway(
         return Ok(None);
     };
 
-    // Stage the rendered configs in a run-scoped 0700 dir (0600 files — the
-    // global one carries the live endpoint token), bind-mounted read-only.
+    // Stage the rendered configs in a run-scoped 0700 dir, bind-mounted
+    // read-only. The dir is owner-only (host-user protection for the live
+    // endpoint token in the global config); the files inside are 0644 via
+    // `mount_readable` so a non-root container user can still read them — see
+    // that helper for why the file mode, not the dir, is what the container sees.
     let tempdir = std::env::temp_dir().join(format!("agentstack-gw-{run_id}"));
     std::fs::create_dir_all(&tempdir).context("creating the gateway config staging dir")?;
     crate::util::restrict(&tempdir, true);
@@ -985,7 +1008,7 @@ fn wire_sandbox_gateway(
 
     let global_host = gw.tempdir.join("global-config");
     std::fs::write(&global_host, &cfg.global_body).context("writing the gateway config")?;
-    crate::util::restrict(&global_host, false);
+    mount_readable(&global_host);
     spec.mounts.push(Mount {
         host: global_host.display().to_string(),
         container: cfg.global_container,
@@ -1009,7 +1032,7 @@ fn wire_sandbox_gateway(
             let empty_host = gw.tempdir.join("project-shadow");
             std::fs::write(&empty_host, &cfg.empty_body)
                 .context("writing the project shadow config")?;
-            crate::util::restrict(&empty_host, false);
+            mount_readable(&empty_host);
             spec.mounts.push(Mount {
                 host: empty_host.display().to_string(),
                 container: project_container,
