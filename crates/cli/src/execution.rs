@@ -297,8 +297,33 @@ mod hosted {
             "relay-error"
         );
 
+        // D4: the executor is always a lockdown run, so it gets the identical
+        // gateway-only fence as `run --lockdown`. A selected server that can't
+        // be dispatched to (resolve/pin failure, denied egress host, unbuildable
+        // transport) means the run can't reach a tool it was asked for — refuse
+        // rather than run a half-wired lockdown container. Route through `setup!`
+        // so the refusal still appends the terminal ExecutionFinished event —
+        // `ExecutionStarted` was already recorded above, and every exit from this
+        // function must close the run (no started-without-terminal audit gap).
+        setup!(
+            refuse_if_servers_skipped(&authority.gateway),
+            "lockdown-refused"
+        );
+        // Classify the D4 gateway-only fence from the gateway's FROZEN set with
+        // the SAME function `run --lockdown` uses — one fence source, one
+        // extractor, and fail-closed if any selected HTTP server has no
+        // classifiable host or is unavailable. No second derivation from the
+        // built upstreams. The literal-IP / non-TLS transport guards are already
+        // on via `AGENTSTACK_LOCKDOWN`. Also through `setup!` so a fence-
+        // classification failure closes the audit record.
+        let mut executor_ruleset = authority.gateway.ruleset();
+        executor_ruleset.gateway_only_hosts = setup!(
+            crate::resolve::gateway_only_hosts(authority.gateway.frozen())
+                .map_err(|e| runtime_unavailable("classifying gateway-only hosts", e)),
+            "lockdown-refused"
+        );
         let ruleset_json = setup!(
-            serde_json::to_string(&authority.gateway.ruleset())
+            serde_json::to_string(&executor_ruleset)
                 .map_err(|_| ExecuteError::runtime_unavailable()),
             "setup-error"
         );
@@ -362,7 +387,7 @@ mod hosted {
             network: NetworkPolicy::Lockdown {
                 network: lockdown.internal_network().into(),
             },
-            ruleset: authority.gateway.ruleset(),
+            ruleset: executor_ruleset,
             security: SandboxSecurity::hardened_executor(),
         };
 
@@ -643,6 +668,28 @@ mod hosted {
         })
     }
 
+    /// Refuse a lockdown executor run when the gateway skipped a selected server
+    /// (D4). The gateway-only fence is now classified from the frozen set, so a
+    /// skipped server's host is still fenced — but a skipped server also can't be
+    /// dispatched to, so the run couldn't reach a tool it was asked for. Fail
+    /// closed, naming the skipped servers, rather than run a half-wired
+    /// container.
+    pub(super) fn refuse_if_servers_skipped(gateway: &Gateway) -> Result<(), ExecuteError> {
+        let skipped = gateway.skipped_servers();
+        if skipped.is_empty() {
+            return Ok(());
+        }
+        Err(runtime_unavailable(
+            "lockdown executor refusing to run",
+            format!(
+                "{} selected server(s) could not be served and would escape the \
+                 gateway-only fence: {}",
+                skipped.len(),
+                skipped.join(", ")
+            ),
+        ))
+    }
+
     fn runtime_unavailable(context: &str, error: impl std::fmt::Display) -> ExecuteError {
         eprintln!("tools_execute: {context}: {error}");
         ExecuteError::runtime_unavailable()
@@ -713,6 +760,62 @@ mod tests {
     use super::*;
     use assert_fs::prelude::*;
     use serde_json::json;
+
+    /// A selected server the gateway could NOT serve (here: an unresolvable
+    /// frozen entry) leaves a non-empty `skipped_servers()`, and the lockdown
+    /// executor must refuse — the skipped host would escape the gateway-only
+    /// fence. An all-served gateway does not refuse.
+    #[test]
+    fn skipped_selected_server_refuses_the_lockdown_executor() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        std::env::remove_var(crate::calllog::RUN_ID_ENV);
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
+            .unwrap();
+        crate::trust::trust(proj.path()).unwrap();
+        let ruleset = || {
+            agentstack_policy::compile(
+                &crate::manifest::Policy::default(),
+                &crate::manifest::Policy::default(),
+                &["x"],
+            )
+        };
+
+        // An unresolvable frozen entry → the gateway skips it → refuse.
+        let skipped = crate::gateway::Gateway::from_frozen(
+            Some(proj.path()),
+            ruleset(),
+            vec![("x".to_string(), Err("resolve failed".to_string()))],
+            "r-skip",
+        );
+        assert_eq!(skipped.skipped_servers(), ["x"]);
+        assert!(super::hosted::refuse_if_servers_skipped(&skipped).is_err());
+
+        // The same server served → nothing skipped → no refusal.
+        let served = crate::gateway::Gateway::from_frozen(
+            Some(proj.path()),
+            ruleset(),
+            vec![(
+                "x".to_string(),
+                Ok(crate::resolve::ResolvedServer {
+                    name: "x".into(),
+                    origin: crate::resolve::ServerOrigin::Inline,
+                    server: toml::from_str("type = \"http\"\nurl = \"https://x/mcp\"\n").unwrap(),
+                    checksum: String::new(),
+                    provenance: None,
+                }),
+            )],
+            "r-ok",
+        );
+        assert!(served.skipped_servers().is_empty());
+        assert!(super::hosted::refuse_if_servers_skipped(&served).is_ok());
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
 
     #[test]
     fn machine_manifest_configures_execute_limits_with_hard_ceiling_validation() {

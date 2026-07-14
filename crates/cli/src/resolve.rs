@@ -276,6 +276,138 @@ pub fn effective_runtime_servers(
         .collect()
 }
 
+/// One entry of a [`frozen_runtime_servers`] set: a resolved, pin-verified
+/// server definition, or a fail-closed skip reason. The SAME frozen entries
+/// feed both D4 classification and gateway dispatch — never a second, possibly
+/// different resolution.
+pub type FrozenServer = (String, Result<ResolvedServer, String>);
+
+/// Verify a resolved server's library pin against the lock. Inline servers pass
+/// (their definition is inside the trust digest). A library server must match
+/// its `agentstack.lock` pin; drift, a missing pin, or an unreadable lock is a
+/// fail-closed reason. Extracted so the frozen resolution and the ordinary
+/// gateway path apply the identical check.
+pub fn verify_library_pin(
+    resolved: &ResolvedServer,
+    lock: Option<&Lock>,
+    name: &str,
+) -> Result<(), String> {
+    if resolved.origin != ServerOrigin::Library {
+        return Ok(());
+    }
+    let Some(lock) = lock else {
+        return Err(
+            "library-referenced and the lockfile is unreadable — its pin can't be verified"
+                .to_string(),
+        );
+    };
+    match lock.get_server(name) {
+        Some(entry) if entry.checksum != resolved.checksum => Err(format!(
+            "library definition drifted from agentstack.lock (locked {}, current {}) — \
+             review it and re-run `agentstack lock`",
+            entry.checksum, resolved.checksum
+        )),
+        Some(_) => Ok(()),
+        None => Err(
+            "library server is not pinned in agentstack.lock — pin it with `agentstack lock`"
+                .to_string(),
+        ),
+    }
+}
+
+/// Resolve the profile-fenced runtime server set ONE time for a sandbox/lockdown
+/// run, freezing the exact definitions that will feed BOTH D4 classification and
+/// the gateway's dispatch — eliminating the classification/dispatch mismatch of
+/// a second, independent resolution ([`Gateway::from_frozen`]).
+///
+/// Guarantees the D4 contract requires of the frozen input:
+/// - **Strict profile fencing.** A pinned profile absent from the manifest is a
+///   hard error — it must NEVER broaden to every server.
+/// - **Library-pin verification up front.** A drift / missing pin / unreadable
+///   lock becomes a per-server `Err` here (via [`verify_library_pin`]), so both
+///   consumers see the identical accepted set.
+///
+/// Per-server errors are preserved rather than dropped: the gateway skips them
+/// (host-proxy semantics), while a lockdown classification fails the whole run
+/// rather than leave a selected endpoint reachable.
+pub fn frozen_runtime_servers(
+    manifest: &Manifest,
+    library: &Library,
+    lib_home: &Path,
+    dir: &Path,
+    profile: Option<&str>,
+) -> anyhow::Result<Vec<FrozenServer>> {
+    if let Some(p) = profile {
+        if !manifest.profiles.contains_key(p) {
+            anyhow::bail!(
+                "profile '{p}' is not defined in the manifest — refusing to serve any \
+                 servers (a missing pinned profile must never broaden to all servers)"
+            );
+        }
+    }
+    let lock = Lock::load(dir).ok();
+    Ok(
+        effective_runtime_servers(manifest, library, lib_home, profile)
+            .into_iter()
+            .map(|(name, resolved)| {
+                let out = match resolved {
+                    Ok(rs) => verify_library_pin(&rs, lock.as_ref(), &name).map(|()| rs),
+                    Err(e) => Err(e.to_string()),
+                };
+                (name, out)
+            })
+            .collect(),
+    )
+}
+
+/// Derive the D4 gateway-only host set for a **lockdown** run from a
+/// [`frozen_runtime_servers`] set: the normalized host of every HTTP-transport
+/// server. Under lockdown a container may reach these hosts only through the
+/// gateway relay, never by direct egress.
+///
+/// Fails the whole lockdown run — rather than silently omitting a server — if:
+/// - a selected server is unavailable (unresolved, or a pin failure): its
+///   endpoint might still be reachable directly, so dropping it would leave a
+///   hole in the fence; or
+/// - a selected HTTP server has no classifiable host (empty/malformed URL, or an
+///   unresolved `${REF}` in the host portion).
+///
+/// stdio servers contribute nothing: they are host-side subprocesses with no
+/// network endpoint an internal-network container could reach, so they are
+/// inherently gateway-only.
+pub fn gateway_only_hosts(
+    servers: &[FrozenServer],
+) -> anyhow::Result<std::collections::BTreeSet<String>> {
+    use agentstack_core::manifest::{host_from_url, normalize_host, ServerType};
+    let mut hosts = std::collections::BTreeSet::new();
+    for (name, resolved) in servers {
+        let server = match resolved {
+            Ok(r) => &r.server,
+            Err(reason) => anyhow::bail!(
+                "lockdown: server '{name}' is not available ({reason}) — refusing to \
+                 start; a selected server that might still be reachable directly must \
+                 not be silently omitted from the gateway-only fence"
+            ),
+        };
+        if server.server_type != ServerType::Http {
+            continue; // stdio: host-side subprocess, inherently gateway-only
+        }
+        let url = server.url.as_deref().unwrap_or("");
+        // The ONE shared extractor (`core::manifest::host_from_url`) — the same
+        // one the write-time egress check uses — so the fence and every other
+        // reader of a declared URL can never disagree on a host.
+        let host = host_from_url(url).ok_or_else(|| {
+            anyhow::anyhow!(
+                "lockdown: HTTP server '{name}' has no classifiable host in its URL \
+                 {url:?} (empty, malformed, or an unresolved ${{REF}} in the host) — \
+                 refusing to start"
+            )
+        })?;
+        hosts.insert(normalize_host(&host));
+    }
+    Ok(hosts)
+}
+
 /// The names of [`effective_runtime_servers`] without resolving them — for
 /// surfaces (doctor, say) that only need to know whether a runtime surface is
 /// declared, without touching the library on disk.
@@ -546,6 +678,95 @@ mod tests {
     use super::*;
     use crate::library::LibrarySkill;
     use assert_fs::prelude::*;
+
+    fn server_from_toml(toml_src: &str) -> agentstack_core::manifest::Server {
+        toml::from_str(toml_src).unwrap()
+    }
+
+    fn resolved_ok(name: &str, server: agentstack_core::manifest::Server) -> FrozenServer {
+        (
+            name.to_string(),
+            Ok(ResolvedServer {
+                name: name.to_string(),
+                origin: ServerOrigin::Inline,
+                server,
+                checksum: String::new(),
+                provenance: None,
+            }),
+        )
+    }
+
+    #[test]
+    fn gateway_only_hosts_are_http_only_normalized_and_deduped() {
+        let servers = vec![
+            resolved_ok(
+                "a",
+                server_from_toml("type = \"http\"\nurl = \"https://MCP.Example.Com./mcp\"\n"),
+            ),
+            resolved_ok(
+                "b",
+                server_from_toml("type = \"http\"\nurl = \"https://mcp.example.com/other\"\n"),
+            ),
+            resolved_ok(
+                "s",
+                server_from_toml("type = \"stdio\"\ncommand = \"node\"\n"),
+            ),
+        ];
+        let hosts = gateway_only_hosts(&servers).unwrap();
+        // Case/trailing-dot normalized, and the two HTTP entries dedupe to one;
+        // the stdio server contributes nothing.
+        assert_eq!(
+            hosts.into_iter().collect::<Vec<_>>(),
+            vec!["mcp.example.com".to_string()]
+        );
+    }
+
+    #[test]
+    fn gateway_only_fails_closed_on_unclassifiable_or_unresolved_server() {
+        // An HTTP server whose host is an unresolved ${REF} must fail the run.
+        let unclassifiable = vec![resolved_ok(
+            "x",
+            server_from_toml("type = \"http\"\nurl = \"https://${HOST}/mcp\"\n"),
+        )];
+        assert!(gateway_only_hosts(&unclassifiable).is_err());
+
+        // A selected server that can't resolve at all — or whose pin failed —
+        // must also fail closed, never silently omitted.
+        let broken: Vec<FrozenServer> =
+            vec![("y".into(), Err("server 'y' is not defined".to_string()))];
+        assert!(gateway_only_hosts(&broken).is_err());
+    }
+
+    #[test]
+    fn frozen_runtime_servers_strict_fences_a_missing_profile() {
+        // A pinned profile that does not exist must be a hard error — never a
+        // silent broadening to every declared server.
+        let manifest: Manifest = toml::from_str(
+            "version = 1\n\
+             [servers.a]\ntype = \"http\"\nurl = \"https://a/mcp\"\n\
+             [profiles.real]\nservers = [\"a\"]\n",
+        )
+        .unwrap();
+        let lib = Library::default();
+        let home = assert_fs::TempDir::new().unwrap();
+        let err = frozen_runtime_servers(
+            &manifest,
+            &lib,
+            home.path(),
+            home.path(),
+            Some("does-not-exist"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("never broaden"), "{err}");
+
+        // The real profile resolves to exactly its one server.
+        let frozen =
+            frozen_runtime_servers(&manifest, &lib, home.path(), home.path(), Some("real"))
+                .unwrap();
+        let names: Vec<&str> = frozen.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["a"]);
+    }
 
     /// A library home with one path-source skill body written under
     /// `lib/skills/<name>/`, plus an index entry pointing at it.

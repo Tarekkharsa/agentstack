@@ -226,6 +226,12 @@ pub struct ExecutionPlan {
     /// that profile's servers, so a sandboxed run scoped to a profile only
     /// exposes that profile's servers (same scoping the host path applies).
     pub profile: Option<String>,
+    /// The profile-fenced runtime servers resolved ONCE at plan build (D4):
+    /// strictly fenced (a missing profile errors, never broadens) and
+    /// library-pin-verified. The SAME frozen definitions feed both the gateway's
+    /// dispatch (`Gateway::from_frozen`) and, under lockdown, the gateway-only
+    /// host classification — so the two can never diverge.
+    pub frozen_servers: Vec<crate::resolve::FrozenServer>,
 }
 
 impl ExecutionPlan {
@@ -266,7 +272,27 @@ impl ExecutionPlan {
         // The effective compiled policy the proxy enforces (its version is
         // baked in). The read-only mount decision is read off it here so the
         // plan can explain it without recompiling downstream.
-        let ruleset = crate::render::ruleset_for(&ctx.loaded.manifest)?;
+        let mut ruleset = crate::render::ruleset_for(&ctx.loaded.manifest)?;
+        // Resolve the profile-fenced runtime servers ONCE (strict fence, library
+        // pins verified) and freeze them — the SAME definitions feed both the
+        // gateway's dispatch and, under lockdown, D4 classification, so a
+        // classification/dispatch mismatch is impossible.
+        let library = crate::library::Library::load_default_or_warn();
+        let frozen_servers = crate::resolve::frozen_runtime_servers(
+            &ctx.loaded.manifest,
+            &library,
+            &crate::util::paths::lib_home(),
+            &ctx.dir,
+            args.profile.as_deref(),
+        )?;
+        if args.lockdown {
+            // Under lockdown the container may reach declared HTTP MCP upstreams
+            // only through the gateway relay, never by direct egress. Classify
+            // the frozen set's HTTP hosts and fence them in the ruleset the
+            // sidecar enforces; an unclassifiable or unavailable selected server
+            // fails the run here (`?`) rather than leaving a direct route open.
+            ruleset.gateway_only_hosts = crate::resolve::gateway_only_hosts(&frozen_servers)?;
+        }
         let fs_readonly_reason = ruleset.workspace_write_decision().err();
         let run_id = crate::runs::gen_id();
         let spec = build_sandbox_spec(&ctx.dir, command, ruleset, &run_id);
@@ -281,6 +307,7 @@ impl ExecutionPlan {
             manifest_dir: ctx.dir.clone(),
             harness_desc: desc.clone(),
             profile: args.profile.clone(),
+            frozen_servers,
         })
     }
 
@@ -608,6 +635,122 @@ fn render_gateway_config(
     }))
 }
 
+/// Render EMPTY harness configs (no gateway entry) for the shadow-only path — a
+/// lockdown run with nothing to route. `None` when the harness config can't be
+/// mapped into the container home, so the caller refuses the lockdown run.
+#[cfg(feature = "sandbox")]
+fn render_shadow_config(
+    desc: &crate::adapter::AdapterDescriptor,
+    home: &str,
+) -> Result<Option<GatewayConfig>> {
+    use crate::adapter::descriptor::Format;
+    use crate::render::{merge_json, merge_toml};
+
+    let (Some(config), Some(mcp)) = (desc.config.as_ref(), desc.mcp.as_ref()) else {
+        return Ok(None);
+    };
+    let Some(rel) = container_rel_path(&config.path) else {
+        return Ok(None);
+    };
+    let render = |fmt: Format| -> Result<String> {
+        Ok(match fmt {
+            Format::Json => merge_json::merge("", &mcp.location, &[])?,
+            Format::Toml => merge_toml::merge_with_removals(
+                "",
+                &mcp.location,
+                &[],
+                &[],
+                mcp.headers_as_subtable,
+            )?,
+        })
+    };
+    let project_fmt = desc
+        .project
+        .as_ref()
+        .and_then(|p| p.format)
+        .unwrap_or(config.format);
+    Ok(Some(GatewayConfig {
+        global_body: render(config.format)?,
+        global_container: format!("{home}/{rel}"),
+        empty_body: render(project_fmt)?,
+        project_container: desc
+            .project
+            .as_ref()
+            .map(|p| format!("{WORKSPACE}/{}", p.config)),
+    }))
+}
+
+/// Shadow the harness's native MCP config with EMPTY configs for a lockdown run
+/// that has nothing to route (empty gateway: untrusted, or no proxied servers).
+/// The container then finds zero MCP servers, so a stale native entry can't
+/// reach an upstream around the absent gateway. Refuses (Err) when the harness
+/// config can't be mapped into the container — there is no safe un-shadowed
+/// fallback under lockdown.
+#[cfg(feature = "sandbox")]
+fn shadow_native_config(
+    desc: &crate::adapter::AdapterDescriptor,
+    manifest_dir: &Path,
+    run_id: &str,
+    spec: &mut SandboxSpec,
+) -> Result<SandboxGateway> {
+    let Some(cfg) = render_shadow_config(desc, &container_home())? else {
+        anyhow::bail!(
+            "lockdown: {} has no mappable MCP config to shadow, so a stale native \
+             entry could reach an upstream directly — refusing to start",
+            desc.display
+        );
+    };
+    let tempdir = std::env::temp_dir().join(format!("agentstack-gw-{run_id}"));
+    std::fs::create_dir_all(&tempdir).context("creating the shadow config staging dir")?;
+    crate::util::restrict(&tempdir, true);
+    // Own the tempdir in the RAII handle from HERE (no endpoint, no relay), so a
+    // later `?` still cleans it up.
+    let gw = SandboxGateway {
+        _endpoint: None,
+        tempdir,
+        relay_dest: None,
+    };
+
+    // Empty global config shadows any user-scope native entry.
+    let global_host = gw.tempdir.join("global-config");
+    std::fs::write(&global_host, &cfg.global_body).context("writing the empty global shadow")?;
+    crate::util::restrict(&global_host, false);
+    spec.mounts.push(Mount {
+        host: global_host.display().to_string(),
+        container: cfg.global_container,
+        read_only: true,
+    });
+
+    // Empty project config shadows a workspace-scope native entry, but only when
+    // one exists (mounting over a nonexistent read-only path fails the run).
+    if let (Some(project_container), Some(proj)) = (cfg.project_container, desc.project.as_ref()) {
+        // COUPLING NOTE: this roots the project-config existence check at
+        // `manifest_dir`, which aligns with the current `/workspace` mount
+        // (`ctx.dir`). If that mount is ever corrected to the true project root,
+        // BOTH shadow existence checks here must move to
+        // `project_root_of(manifest_dir).join(&proj.config)` in lockstep — else a
+        // root-scope native MCP config would go un-shadowed under lockdown (a
+        // direct-route shadow bypass). Keep the two checks identical.
+        if manifest_dir.join(&proj.config).exists() {
+            let empty_host = gw.tempdir.join("project-shadow");
+            std::fs::write(&empty_host, &cfg.empty_body)
+                .context("writing the project shadow config")?;
+            crate::util::restrict(&empty_host, false);
+            spec.mounts.push(Mount {
+                host: empty_host.display().to_string(),
+                container: project_container,
+                read_only: true,
+            });
+        }
+    }
+
+    println!(
+        "  {} no servers to route; native MCP config scrubbed (zero MCP under lockdown)",
+        "✓".green()
+    );
+    Ok(gw)
+}
+
 /// The live gateway wiring for one sandboxed run: the HTTP endpoint the
 /// container talks to, plus the temp dir holding the rendered config mounted
 /// into it. Held for the run's lifetime; its `Drop` removes the temp dir (RAII,
@@ -617,7 +760,9 @@ struct SandboxGateway {
     /// The token-gated HTTP MCP endpoint. Its serve thread owns the
     /// `Arc<Gateway>`, so upstream connections (and lazily spawned stdio
     /// children) live until this process exits — the run's lifetime.
-    _endpoint: crate::gateway_http::GatewayHttp,
+    /// `None` for a shadow-only run (empty gateway under lockdown): native MCP
+    /// config is scrubbed but there is nothing to route, so no endpoint exists.
+    _endpoint: Option<crate::gateway_http::GatewayHttp>,
     /// Run-scoped dir holding the rendered config files bind-mounted into the
     /// container; removed on drop.
     tempdir: PathBuf,
@@ -660,25 +805,39 @@ fn wire_sandbox_gateway(
     desc: &crate::adapter::AdapterDescriptor,
     run_id: &str,
     lockdown: bool,
-    profile: Option<&str>,
+    frozen: Vec<crate::resolve::FrozenServer>,
     spec: &mut SandboxSpec,
 ) -> Result<Option<SandboxGateway>> {
     use std::sync::Arc;
 
     // Build the run's gateway from the SAME compiled ruleset the plan carries
-    // (never recompiled) and hard trust-gate it: untrusted → empty → no
+    // (never recompiled) and the SAME frozen server set the plan classified
+    // (never re-resolved), then hard trust-gate it: untrusted → empty → no
     // routing, no secret resolution, no host children.
-    let gateway = crate::gateway::Gateway::from_plan(
+    let gateway = crate::gateway::Gateway::from_frozen(
         Some(manifest_dir),
         spec.ruleset.clone(),
-        profile,
+        frozen,
         run_id,
     );
     if gateway.is_empty() {
-        // An empty gateway means either an untrusted bundle (from_plan already
+        // An empty gateway means either an untrusted bundle (from_frozen already
         // printed "gateway: refusing to serve …") or a TRUSTED bundle with no
-        // proxied servers. Surface the latter so a run that silently isn't
-        // routed always has a stderr reason (the untrusted case already does).
+        // proxied servers.
+        if lockdown {
+            // D4 one-route: even with nothing to route, a lockdown container
+            // must not read stale native MCP config (a prior `agentstack apply`
+            // may have left entries with baked secrets) and reach an upstream
+            // around the absent gateway. Scrub it by shadowing the harness's
+            // native config with empty ones; if the config can't be mapped
+            // there is no way to scrub it, so refuse rather than run un-shadowed.
+            return Ok(Some(shadow_native_config(
+                desc,
+                manifest_dir,
+                run_id,
+                spec,
+            )?));
+        }
         let root = crate::manifest::project_root_of(manifest_dir);
         if crate::trust::check(&root) == agentstack_trust::TrustState::Trusted {
             eprintln!(
@@ -700,8 +859,58 @@ fn wire_sandbox_gateway(
         .is_some_and(|c| container_rel_path(&c.path).is_some())
         && desc.mcp.as_ref().is_some_and(|m| m.fields.url.is_some());
     if !can_host_http {
+        if lockdown {
+            // D4 one-route: under lockdown the gateway relay must be the ONLY
+            // MCP route, which means installing a gateway entry into the
+            // harness's config and shadowing any native one. An adapter that
+            // can't host an HTTP MCP entry can be neither routed nor reliably
+            // shadowed, so there is no safe direct-route fallback — refuse to
+            // start rather than run the container with an un-shadowed config.
+            anyhow::bail!(
+                "lockdown: {} cannot host an HTTP MCP entry, so the gateway can't be \
+                 made the only MCP route and its native config can't be shadowed — \
+                 refusing to start (no direct-route fallback exists under lockdown)",
+                desc.display
+            );
+        }
         eprintln!(
             "  {} {} can't host an HTTP MCP entry; running without tool-policy routing",
+            "note:".dimmed(),
+            desc.display
+        );
+        return Ok(None);
+    }
+
+    // Preflight: the gateway endpoint is token-gated, and the per-run bearer
+    // token rides in the `X-Agentstack-Token` HTTP header of the injected
+    // config entry. `render_server` only emits that header when the adapter
+    // declares a `mcp.fields.headers` mapping (see `agentstack_adapters::render`)
+    // — without it the token is silently dropped and EVERY routed tool call is
+    // rejected 401. Catch that here, before we bind an endpoint and launch a
+    // container, instead of surfacing it as a confusing runtime auth failure.
+    // Every shipped HTTP-capable adapter declares this field; the guard protects
+    // a future one that forgets it.
+    let can_carry_token = desc
+        .mcp
+        .as_ref()
+        .is_some_and(|m| m.fields.headers.is_some());
+    if !can_carry_token {
+        if lockdown {
+            // D4 one-route: the relay is the only MCP route, so a config that
+            // can't carry the auth token isn't "degraded routing" — it's a
+            // container that can reach nothing. Fail closed with a fix.
+            anyhow::bail!(
+                "lockdown: {} has no `mcp.fields.headers` mapping, so the gateway's \
+                 per-run auth token can't be injected into its config — every routed \
+                 tool call would be rejected (401). Add a `headers` field to the \
+                 adapter's `mcp.fields`. Refusing to start (the gateway relay is the \
+                 only MCP route under lockdown).",
+                desc.display
+            );
+        }
+        eprintln!(
+            "  {} {} has no MCP headers field to carry the gateway auth token; \
+             running without tool-policy routing",
             "note:".dimmed(),
             desc.display
         );
@@ -742,6 +951,16 @@ fn wire_sandbox_gateway(
         .to_string();
 
     let Some(cfg) = render_gateway_config(desc, &container_home(), &url, &endpoint.token)? else {
+        if lockdown {
+            // Same one-route contract as the pre-check above: if the gateway
+            // config can't actually be rendered for this harness, we can't make
+            // the relay the sole route or shadow native config — fail closed.
+            anyhow::bail!(
+                "lockdown: could not render a gateway config for {} — refusing to \
+                 start rather than run with an un-shadowed native MCP config",
+                desc.display
+            );
+        }
         eprintln!(
             "  {} {} can't host an HTTP MCP entry; running without tool-policy routing",
             "note:".dimmed(),
@@ -759,7 +978,7 @@ fn wire_sandbox_gateway(
     // config write) drops it and removes the token-bearing dir — no leak on the
     // error path.
     let gw = SandboxGateway {
-        _endpoint: endpoint,
+        _endpoint: Some(endpoint),
         tempdir,
         relay_dest,
     };
@@ -779,6 +998,13 @@ fn wire_sandbox_gateway(
     // fails the run (Docker can't create the mountpoint). When it does exist,
     // the mountpoint exists too, so the read-only overlay works.
     if let (Some(project_container), Some(proj)) = (cfg.project_container, desc.project.as_ref()) {
+        // COUPLING NOTE: this roots the project-config existence check at
+        // `manifest_dir`, which aligns with the current `/workspace` mount
+        // (`ctx.dir`). If that mount is ever corrected to the true project root,
+        // BOTH shadow existence checks here must move to
+        // `project_root_of(manifest_dir).join(&proj.config)` in lockstep — else a
+        // root-scope native MCP config would go un-shadowed under lockdown (a
+        // direct-route shadow bypass). Keep the two checks identical.
         if manifest_dir.join(&proj.config).exists() {
             let empty_host = gw.tempdir.join("project-shadow");
             std::fs::write(&empty_host, &cfg.empty_body)
@@ -846,7 +1072,7 @@ fn execute_plan(plan: ExecutionPlan) -> Result<()> {
         &plan.harness_desc,
         &plan.run_id,
         plan.lockdown,
-        plan.profile.as_deref(),
+        plan.frozen_servers,
         &mut spec,
     )?;
 
@@ -897,6 +1123,9 @@ fn execute_proxy(
             Some("1") | Some("true") | Some("yes")
         ),
         auth_token: Some(proxy_token.clone()),
+        // Host-proxy mode is `--sandbox`, the weaker posture with a direct route
+        // still open; D4's literal-IP / non-TLS restrictions are lockdown-only.
+        lockdown: false,
     };
     let bridge = agentstack_egress::BlockingBridge::start_on_with(
         IpAddr::V4(Ipv4Addr::UNSPECIFIED),
@@ -1048,6 +1277,7 @@ mod tests {
             manifest_dir: PathBuf::from("/proj"),
             harness_desc: Default::default(),
             profile: None,
+            frozen_servers: Vec::new(),
         };
         // --plan view includes the command.
         let out = plan.display(Path::new("/proj"), true);
@@ -1081,6 +1311,7 @@ mod tests {
             manifest_dir: PathBuf::from("/proj"),
             harness_desc: Default::default(),
             profile: None,
+            frozen_servers: Vec::new(),
         };
         let out2 = plan2.display(Path::new("/proj"), true);
         assert!(out2.contains("trusted"), "{out2}");
@@ -1158,6 +1389,7 @@ mod tests {
             manifest_dir: PathBuf::from("/proj"),
             harness_desc: Default::default(),
             profile: None,
+            frozen_servers: Vec::new(),
         };
         assert_eq!(plan(true).posture(), Posture::Lockdown);
         assert_eq!(plan(false).posture(), Posture::Sandbox);
@@ -1201,6 +1433,7 @@ mod tests {
             manifest_dir: PathBuf::from("/proj"),
             harness_desc: Default::default(),
             profile: None,
+            frozen_servers: Vec::new(),
         };
         let out = plan.display(Path::new("/proj"), true);
         assert!(out.contains("posture:"), "{out}");

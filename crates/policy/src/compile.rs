@@ -63,6 +63,9 @@ pub fn compile(machine: &Policy, bundle: &Policy, servers: &[&str]) -> CompiledR
                 bundle: fs_deny_layer(&bundle.filesystem.deny),
             },
         },
+        // Derived from resolved server URLs, not from policy + names, so the
+        // CLI populates it post-compile for lockdown runs (D4). Empty here.
+        gateway_only_hosts: Default::default(),
     }
 }
 

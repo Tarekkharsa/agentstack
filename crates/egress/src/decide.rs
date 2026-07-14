@@ -46,6 +46,17 @@ impl EgressGuard {
                  (max {RULESET_VERSION}) — failing closed",
                 self.ruleset.version
             ))
+        } else if self.ruleset.is_gateway_only_host(host) {
+            // Structural confinement (D4): a declared MCP upstream is reachable
+            // only through the gateway relay under lockdown. Checked BEFORE —
+            // and winning over — ordinary `[policy.egress]`, so a repo or
+            // machine allow can never re-open a direct route around the
+            // gateway. The set is populated only for lockdown runs, so this
+            // branch is inert for sandbox/host-proxy runs.
+            Err(format!(
+                "'{host}' is a declared MCP upstream — reachable only through the \
+                 gateway relay under lockdown, not by direct egress"
+            ))
         } else {
             // The proxy has the real CONNECT port, so `host:port` egress
             // patterns are enforced exactly here.
@@ -172,5 +183,30 @@ mod tests {
         // Whatever a repo names its server, the machine wildcard deny holds.
         assert!(!guard.decide("renamed-server", "db.internal", 443).allowed);
         assert!(!guard.decide("another-name", "svc.internal", 443).allowed);
+    }
+
+    /// A declared MCP upstream (gateway-only) is blocked EVEN when ordinary
+    /// egress policy would allow it — the D4 fence wins over any allow, so a
+    /// repo or machine `[policy.egress]` allow can never re-open a direct route
+    /// around the gateway. NEVER weaken this.
+    #[test]
+    fn gateway_only_host_wins_over_an_egress_allow() {
+        // Allow-by-default egress (nothing constrains web-search)…
+        let mut rs = CompiledRuleset::default();
+        // …but this host is a declared MCP upstream.
+        rs.gateway_only_hosts.insert("mcp.example.com".to_string());
+        let guard = EgressGuard::new(rs);
+
+        let d = guard.decide("web-search", "mcp.example.com", 443);
+        assert!(!d.allowed, "gateway-only wins over the egress allow");
+        match d.event {
+            RunEvent::Egress { rule, .. } => {
+                let rule = rule.expect("the block names its reason");
+                assert!(rule.contains("gateway relay"), "{rule}");
+            }
+            other => panic!("expected Egress, got {other:?}"),
+        }
+        // A host NOT in the set is still allowed by default — the fence is exact.
+        assert!(guard.decide("web-search", "api.example.com", 443).allowed);
     }
 }

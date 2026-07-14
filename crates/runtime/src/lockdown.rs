@@ -320,6 +320,14 @@ async fn start_sidecar(
         format!("AGENTSTACK_RULESET={RULESET_IN}"),
         format!("AGENTSTACK_SERVERS={servers_env}"),
         format!("AGENTSTACK_PROXY_BASE_PORT={PROXY_BASE_PORT}"),
+        // D4: this sidecar exists ONLY for a lockdown run (the no-direct-route
+        // topology is lockdown by definition), so the proxy's lockdown
+        // transport hardening — refuse literal-IP CONNECT targets and non-TLS
+        // tunnels — is always on here. Set at this single point so every
+        // lockdown entry (run --lockdown and the executor) inherits it, and it
+        // never leaks into the host-proxy `--sandbox` mode, which never starts
+        // this sidecar.
+        "AGENTSTACK_LOCKDOWN=1".to_string(),
     ];
     // Propagate the anti-SSRF opt-out into the sidecar when the host set it to a
     // TRUTHY value (the demo dials the host gateway). A mere-presence check would

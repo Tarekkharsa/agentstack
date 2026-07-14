@@ -64,6 +64,15 @@ pub struct ProxyConfig {
     /// 407, and every allowed connection is provably the sandbox's. `None`
     /// disables the check (unit tests / fixtures that drive the proxy directly).
     pub auth_token: Option<String>,
+    /// Lockdown transport hardening (D4): when set, refuse a literal-IP CONNECT
+    /// target and a non-TLS first flight. The gateway-only fence is by
+    /// hostname, so an agent could otherwise dodge it by dialing an upstream's
+    /// IP directly, or by opening a plaintext tunnel the SNI check never
+    /// inspects. Driven by the explicit lockdown flag — NOT inferred from a
+    /// nonempty gateway-only set, since an all-stdio lockdown run has an empty
+    /// set yet still needs these restrictions. Off for `--sandbox` (proxy-only)
+    /// and dev/tests.
+    pub lockdown: bool,
 }
 
 /// A forward proxy dedicated to one MCP server.
@@ -145,6 +154,32 @@ impl ServerProxy {
             }
         }
 
+        // Lockdown transport guard (D4): refuse a literal-IP CONNECT target.
+        // The gateway-only fence matches by hostname, so an agent that dialed a
+        // declared upstream by its IP would never hit the set; under lockdown
+        // all legitimate egress is to named hosts (the gateway relay is a
+        // separate listener), so a literal IP is refused outright. Detection is
+        // LEXICAL and fail-closed (`is_numeric_host`): Rust's `IpAddr` parse only
+        // catches the canonical dotted-decimal / colon-hex forms, but the
+        // platform resolver also accepts octal, hex, shortened, and
+        // single-integer encodings — every one of which is a numeric bypass of
+        // the hostname fence. We do NOT resolve DNS to decide (that would invite
+        // rebinding / TOCTOU). Gated on the explicit lockdown flag, never
+        // inferred from the host set — an all-stdio run has an empty set but
+        // still needs this. After the auth check so an unauthenticated client
+        // still gets the 407 first.
+        if self.config.lockdown && crate::connect::is_numeric_host(&target.host) {
+            (self.on_event)(guard_block_event(
+                &self.server,
+                &target.host,
+                "literal-IP (numeric-host) CONNECT target refused under lockdown — \
+                 reach declared hosts by name through the gateway"
+                    .to_string(),
+            ));
+            let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n").await;
+            return Ok(());
+        }
+
         // Policy layer: does the machine/bundle ruleset allow this host? Hold
         // the decision — we emit exactly one event reflecting the FINAL outcome,
         // so a policy-allow that a transport guard later refuses is recorded as
@@ -189,7 +224,26 @@ impl ServerProxy {
         let flight = match read_client_hello(&mut client).await? {
             // Not TLS — no SNI concept, and we already dialed the validated
             // CONNECT host. Forward whatever it sent and splice.
-            FirstFlight::NonTls(bytes) => bytes,
+            FirstFlight::NonTls(bytes) => {
+                // Lockdown transport guard (D4): a non-TLS tunnel carries no SNI
+                // for the domain-fronting check to verify and could ferry
+                // arbitrary plaintext to a permitted host. Under lockdown all
+                // egress must be TLS, so refuse it. (Off elsewhere: sandbox/dev
+                // may legitimately speak plaintext.) This belongs here in
+                // first-flight, not in the policy decision — TLS-vs-not is known
+                // only after the CONNECT succeeds and the client speaks.
+                if self.config.lockdown {
+                    (self.on_event)(guard_block_event(
+                        &self.server,
+                        &target.host,
+                        "non-TLS tunnel refused under lockdown — only TLS egress is \
+                         permitted"
+                            .to_string(),
+                    ));
+                    return Ok(()); // tunnel established; drop it
+                }
+                bytes
+            }
             // A complete ClientHello: assert SNI == CONNECT host (absent SNI is
             // fine — the client isn't claiming a different host).
             FirstFlight::Tls(bytes) => {
@@ -643,6 +697,7 @@ mod tests {
             ProxyConfig {
                 allow_local_targets: true,
                 auth_token: Some("s3cr3t-token".to_string()),
+                ..ProxyConfig::default()
             },
         )
         .await;
@@ -712,5 +767,135 @@ mod tests {
         let mut b = [0u8; 64];
         let n = c.read(&mut b).await.unwrap();
         assert!(n > 0, "matching-SNI tunnel forwards bytes");
+    }
+
+    /// Under lockdown, a literal-IP CONNECT target is refused (403) and
+    /// recorded — the gateway-only fence matches by hostname, so dialing an
+    /// upstream by its IP must not be a way around it. A GLOBAL-unicast IP is
+    /// used so the block is provably the lockdown guard, not the SSRF check.
+    #[tokio::test]
+    async fn lockdown_refuses_literal_ip_connect() {
+        let (paddr, events) = start_proxy_cfg(
+            CompiledRuleset::default(),
+            ProxyConfig {
+                lockdown: true,
+                ..ProxyConfig::default()
+            },
+        )
+        .await;
+
+        let mut c = TcpStream::connect(paddr).await.unwrap();
+        // Global-unicast IP literal — refused before any resolve/dial happens.
+        c.write_all(b"CONNECT 93.184.216.34:443 HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
+        assert!(
+            read_some(&mut c).await.contains("403"),
+            "literal-IP CONNECT refused under lockdown"
+        );
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let evs = events.lock().unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                RunEvent::Egress { allowed: false, rule: Some(r), .. } if r.contains("literal-IP")
+            )),
+            "literal-IP block recorded: {evs:?}"
+        );
+    }
+
+    /// Under lockdown, a NON-canonical numeric host — a single-integer IPv4
+    /// (`2130706433` = 127.0.0.1) that Rust's `IpAddr::parse` rejects but the
+    /// platform resolver accepts — is still refused (403) and recorded. This is
+    /// the bypass the lexical `is_numeric_host` guard closes over a bare
+    /// `parse::<IpAddr>()`; refused BEFORE any resolve/dial, so no rebinding
+    /// window opens.
+    #[tokio::test]
+    async fn lockdown_refuses_non_canonical_numeric_host() {
+        let (paddr, events) = start_proxy_cfg(
+            CompiledRuleset::default(),
+            ProxyConfig {
+                lockdown: true,
+                ..ProxyConfig::default()
+            },
+        )
+        .await;
+
+        let mut c = TcpStream::connect(paddr).await.unwrap();
+        // Single-integer IPv4 literal — not a canonical IpAddr, but inet_aton
+        // would resolve it to 127.0.0.1. Must be refused lexically.
+        c.write_all(b"CONNECT 2130706433:443 HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
+        assert!(
+            read_some(&mut c).await.contains("403"),
+            "non-canonical numeric CONNECT refused under lockdown"
+        );
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let evs = events.lock().unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                RunEvent::Egress { allowed: false, rule: Some(r), .. } if r.contains("numeric-host")
+            )),
+            "numeric-host block recorded: {evs:?}"
+        );
+    }
+
+    /// Under lockdown, a non-TLS first flight is refused (the tunnel opens, then
+    /// is dropped) and recorded — a plaintext tunnel carries no SNI for the
+    /// domain-fronting check. CONNECT by hostname so the literal-IP guard above
+    /// doesn't fire first.
+    #[tokio::test]
+    async fn lockdown_refuses_non_tls_first_flight() {
+        // Bind the upstream on whatever "localhost" resolves to FIRST, so the
+        // proxy's own resolve_validated (which also takes the first address)
+        // dials a listener that actually exists — avoids an IPv4/IPv6 family
+        // mismatch that would 502 before the non-TLS check is reached.
+        let first_ip = tokio::net::lookup_host(("localhost", 0))
+            .await
+            .unwrap()
+            .next()
+            .unwrap()
+            .ip();
+        let upstream = TcpListener::bind((first_ip, 0)).await.unwrap();
+        let uport = upstream.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((_s, _)) = upstream.accept().await { /* hold the socket open */ }
+        });
+        let (paddr, events) = start_proxy_cfg(
+            CompiledRuleset::default(),
+            ProxyConfig {
+                allow_local_targets: true,
+                lockdown: true,
+                ..ProxyConfig::default()
+            },
+        )
+        .await;
+
+        let mut c = TcpStream::connect(paddr).await.unwrap();
+        // "localhost" is a name (not an IP literal), so the literal-IP guard
+        // doesn't fire; it resolves to the loopback upstream above.
+        c.write_all(format!("CONNECT localhost:{uport} HTTP/1.1\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        assert!(read_some(&mut c).await.contains("200"), "tunnel opens");
+
+        // Speak plaintext HTTP, not TLS (first byte != 0x16).
+        c.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let evs = events.lock().unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                RunEvent::Egress { allowed: false, rule: Some(r), .. } if r.contains("non-TLS")
+            )),
+            "non-TLS block recorded: {evs:?}"
+        );
     }
 }

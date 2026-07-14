@@ -362,26 +362,15 @@ pub fn ruleset_for(manifest: &Manifest) -> Result<agentstack_policy::CompiledRul
 }
 
 /// The host of a DECLARED server URL, statically: scheme stripped, userinfo
-/// dropped, port dropped. `None` when the host segment contains a `${REF}`
-/// (not knowable at write time) or the URL is malformed. Boring string
-/// parsing on purpose — no URL crate, no surprises.
+/// dropped, port dropped. `None` when the URL isn't HTTP(S), has no host, or the
+/// host segment contains a `${REF}` (not knowable at write time).
+///
+/// Delegates to the ONE shared extractor in `core` so the write-time egress
+/// check here and the D4 gateway-only fence classifier read every URL
+/// identically — divergent parsers were exactly the seam that let a host be
+/// fenced one way and checked another.
 pub(crate) fn declared_host(url: &str) -> Option<String> {
-    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
-    let host_port = authority
-        .rsplit_once('@')
-        .map(|(_, h)| h)
-        .unwrap_or(authority);
-    // IPv6 literals keep their brackets out of the port split.
-    let host = if let Some(stripped) = host_port.strip_prefix('[') {
-        stripped.split_once(']').map(|(h, _)| h).unwrap_or(stripped)
-    } else {
-        host_port.split(':').next().unwrap_or(host_port)
-    };
-    if host.is_empty() || host.contains("${") {
-        return None;
-    }
-    Some(host.to_string())
+    agentstack_core::manifest::host_from_url(url)
 }
 
 /// Resolve a selection into an ordered list of server names that exist in the

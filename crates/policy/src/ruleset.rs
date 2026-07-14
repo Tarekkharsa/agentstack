@@ -26,9 +26,9 @@
 //! keeps each layer's rules and ANDs them at check time. Denies union exactly
 //! (deny is monotonic).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use agentstack_core::manifest::{egress_match, glob_match};
+use agentstack_core::manifest::{egress_match, glob_match, normalize_host};
 use serde::{Deserialize, Serialize};
 
 /// Bump ONLY on an incompatible semantic change. Additive fields ride on
@@ -39,7 +39,14 @@ use serde::{Deserialize, Serialize};
 /// `!evil.example:443` as a hostname glob and fail to deny it — so the version
 /// gate must make an older enforcer fail closed rather than misread a v2
 /// ruleset.
-pub const RULESET_VERSION: u32 = 2;
+///
+/// v3: added `gateway_only_hosts` (D4) — the declared HTTP MCP upstream hosts a
+/// lockdown container may reach only through the gateway relay. Unlike a field a
+/// stale consumer can safely ignore (an fs rule it never consults), an older
+/// sidecar that dropped this set would fail OPEN, serving the very direct route
+/// the field exists to close. So this is a semantic-incompatibility bump: the
+/// version gate must make an older enforcer fail closed, not silently omit it.
+pub const RULESET_VERSION: u32 = 3;
 
 /// Default action when no rule constrains a subject. Uniform allow-by-default
 /// across dimensions (maintainer ruling): least privilege is an explicit
@@ -208,6 +215,14 @@ pub struct CompiledRuleset {
     pub any: ServerRules,
     #[serde(default, skip_serializing_if = "FsRules::is_empty")]
     pub filesystem: FsRules,
+    /// Declared HTTP MCP upstream hosts a lockdown container may reach ONLY
+    /// through the gateway relay, never by direct egress (D4). Each host is
+    /// normalized (lowercased, trailing dot stripped); the `BTreeSet` keeps the
+    /// artifact sorted + deduplicated (byte-deterministic wire form). Populated
+    /// ONLY for lockdown runs — empty everywhere else, so it constrains nothing
+    /// outside lockdown. Host-exact and port-agnostic.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub gateway_only_hosts: BTreeSet<String>,
 }
 
 impl Default for CompiledRuleset {
@@ -218,6 +233,7 @@ impl Default for CompiledRuleset {
             servers: BTreeMap::new(),
             any: ServerRules::default(),
             filesystem: FsRules::default(),
+            gateway_only_hosts: BTreeSet::new(),
         }
     }
 }
@@ -318,5 +334,64 @@ impl CompiledRuleset {
     /// (allow-by-default), a constrained one must be verifiable.
     pub fn egress_constrained(&self, server: &str) -> bool {
         !self.rules_for(server).egress.is_empty()
+    }
+
+    /// Whether `host` is a declared MCP upstream that a lockdown container may
+    /// reach only through the gateway relay — never by direct egress (D4).
+    /// Evaluated BEFORE ordinary `[policy.egress]`, and it wins over any allow:
+    /// this is structural confinement derived from the frozen run plan, not
+    /// user-authored policy that a repo could re-open. Host-exact and
+    /// port-agnostic (an upstream has no legitimate direct route on any port);
+    /// the query host is normalized so a casing/trailing-dot variant can't
+    /// slip the set. Always `false` when the set is empty, so this constrains
+    /// nothing outside a lockdown run.
+    pub fn is_gateway_only_host(&self, host: &str) -> bool {
+        if self.gateway_only_hosts.is_empty() {
+            return false;
+        }
+        self.gateway_only_hosts.contains(&normalize_host(host))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_gateway_only(hosts: &[&str]) -> CompiledRuleset {
+        CompiledRuleset {
+            gateway_only_hosts: hosts.iter().map(|h| h.to_string()).collect(),
+            ..CompiledRuleset::default()
+        }
+    }
+
+    #[test]
+    fn gateway_only_is_host_exact_port_agnostic_and_normalized() {
+        let rs = with_gateway_only(&["mcp.example.com"]);
+        // The method takes no port, so the match is port-agnostic by
+        // construction — an upstream has no legitimate direct route on any port.
+        assert!(rs.is_gateway_only_host("mcp.example.com"));
+        // A casing / trailing-root-dot variant must not slip the set: the query
+        // host is normalized before the lookup.
+        assert!(rs.is_gateway_only_host("MCP.Example.Com."));
+        // A different declared host (or a general-egress host) is not fenced.
+        assert!(!rs.is_gateway_only_host("api.example.com"));
+    }
+
+    #[test]
+    fn empty_gateway_only_set_constrains_nothing() {
+        // Sandbox / host paths carry no set — the check must be inert, never
+        // block a host merely because the field exists.
+        assert!(!CompiledRuleset::default().is_gateway_only_host("mcp.example.com"));
+    }
+
+    #[test]
+    fn gateway_only_hosts_serialize_sorted_and_roundtrip() {
+        // Byte-determinism: a BTreeSet serializes sorted, and the field
+        // round-trips through the wire form the sidecar reads.
+        let rs = with_gateway_only(&["b.example", "a.example", "b.example"]);
+        let json = serde_json::to_string(&rs).unwrap();
+        assert!(json.contains("[\"a.example\",\"b.example\"]"), "{json}");
+        let back: CompiledRuleset = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, rs);
     }
 }

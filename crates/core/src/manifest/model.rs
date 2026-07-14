@@ -322,6 +322,86 @@ pub fn egress_match(pattern: &str, host: &str, port: Option<u16>) -> bool {
     }
 }
 
+/// Canonicalize a hostname for policy matching and gateway-only
+/// classification: strip a single trailing `.` (the DNS root label —
+/// `a.example.` and `a.example` are the same host) and ASCII-lowercase it (DNS
+/// is case-insensitive). One shared implementation so the CLI that builds the
+/// gateway-only host set, the egress proxy that parses a CONNECT target, and
+/// the ruleset lookup all normalize identically — a mismatch between producer
+/// and enforcer would be a fence bypass, not just a cosmetic difference.
+pub fn normalize_host(host: &str) -> String {
+    host.strip_suffix('.').unwrap_or(host).to_ascii_lowercase()
+}
+
+/// Extract the host from an MCP server URL. `None` when the host can't be
+/// determined statically OR can't be trusted to stay fixed — a scheme that
+/// isn't HTTP(S), no host segment, an unresolved `${REF}` anywhere in the
+/// authority, or a non-canonical host spelling (non-ASCII / percent-encoded).
+/// The returned host is RAW-but-ASCII (not normalized); callers normalize with
+/// [`normalize_host`] where they need canonical form.
+///
+/// This is the ONE host extractor shared by every producer of a host from a
+/// declared URL — the write-time egress check in the CLI (`declared_host`) and
+/// the D4 gateway-only fence classifier both call it, so a URL can never be
+/// read two different ways. Deliberately small: MCP URLs are
+/// `scheme://host[:port]/path`; no URL crate, no surprises.
+///
+/// Two fail-closed rules matter for the security fence and are intentional:
+/// - **No `${REF}` anywhere in the authority.** A placeholder in userinfo or the
+///   port — not just the host label — can resolve to a value carrying `@` and
+///   re-parse the authority to a DIFFERENT host after the fence is frozen. The
+///   host is only statically known when the whole authority is literal.
+/// - **Canonical ASCII host only.** `normalize_host` lowercases ASCII and strips
+///   a trailing dot but does NOT percent-decode or IDNA-canonicalize, while the
+///   resolver/HTTP client that dispatches the request does. A non-ASCII or
+///   percent-encoded host would be fenced under one spelling and reached under
+///   another. Reject it so a lockdown run fails closed rather than fences a host
+///   the agent can still reach by its canonical name.
+pub fn host_from_url(url: &str) -> Option<String> {
+    // Require a valid HTTP(S) URL shape (scheme case-insensitive). A scheme-less
+    // or other-scheme string is NOT a bare host — reject it rather than
+    // classify garbage. A `${REF}` before the authority delimiter can't sneak a
+    // scheme past this because a placeholder never spells `http(s)://`.
+    let lower = url.to_ascii_lowercase();
+    let rest = if lower.starts_with("https://") {
+        &url["https://".len()..]
+    } else if lower.starts_with("http://") {
+        &url["http://".len()..]
+    } else {
+        return None;
+    };
+    // Authority is everything before the first path/query/fragment delimiter.
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() {
+        return None;
+    }
+    // A `${REF}` ANYWHERE in the authority (userinfo, host, or port) is
+    // unclassifiable: its resolved value could re-target the effective host
+    // (e.g. a port ref resolving to `443@evil.example`). Fail closed on the
+    // whole authority, not just the host label. A ref in a path/query — already
+    // stripped above — can't change the host, so it's fine.
+    if authority.contains("${") {
+        return None;
+    }
+    // Drop any userinfo (`user:pass@host`) now that we know it holds no ref.
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = if let Some(inner) = authority.strip_prefix('[') {
+        // Bracketed IPv6 literal `[::1]:443` → `::1`.
+        inner.split_once(']').map(|(h, _)| h.to_string())?
+    } else {
+        // `host` or `host:port` → `host`.
+        authority.split(':').next().unwrap_or(authority).to_string()
+    };
+    // The host must be canonical ASCII with no percent-encoding — see the
+    // doc comment. `normalize_host` can't reconcile these spellings, so a
+    // non-canonical host is a fence seam; reject it (fail closed).
+    if host.is_empty() || !host.is_ascii() || host.contains('%') {
+        None
+    } else {
+        Some(host)
+    }
+}
+
 /// Split an egress pattern into its host part and an optional pinned port.
 /// `host:443` → (`host`, Some(443)); `host` or `host:*` → (`host`, None);
 /// `[::1]:443` → (`::1`, Some(443)); a bare `::1` → (`::1`, None).
@@ -824,6 +904,64 @@ mod tests {
                 "malformed pattern {bad} must not match any port"
             );
         }
+    }
+
+    #[test]
+    fn host_from_url_extracts_host_dropping_scheme_port_path_and_userinfo() {
+        assert_eq!(
+            host_from_url("https://mcp.example.com/mcp/"),
+            Some("mcp.example.com".into())
+        );
+        assert_eq!(
+            host_from_url("https://mcp.example.com:8443/x"),
+            Some("mcp.example.com".into())
+        );
+        assert_eq!(
+            host_from_url("https://user:pass@mcp.example.com/mcp"),
+            Some("mcp.example.com".into())
+        );
+        assert_eq!(
+            host_from_url("https://[2001:db8::1]:443/x"),
+            Some("2001:db8::1".into())
+        );
+        // Scheme is case-insensitive.
+        assert_eq!(
+            host_from_url("HTTPS://mcp.example.com/mcp"),
+            Some("mcp.example.com".into())
+        );
+        // A placeholder in the HOST is unclassifiable…
+        assert_eq!(host_from_url("https://${HOST}/mcp"), None);
+        assert_eq!(host_from_url("https://${HOST}:443/mcp"), None);
+        // …and so is a placeholder ANYWHERE else in the authority: a port or
+        // userinfo ref can resolve to a value carrying `@` and re-target the
+        // effective host after the fence is frozen, so fail closed.
+        assert_eq!(host_from_url("https://mcp.example.com:${PORT}/mcp"), None);
+        assert_eq!(
+            host_from_url("https://user:${PASS}@mcp.example.com/mcp"),
+            None
+        );
+        // A placeholder in a path/query (already stripped) can't change the
+        // host, so the host is still classifiable.
+        assert_eq!(
+            host_from_url("https://mcp.example.com/tenants/${TENANT}"),
+            Some("mcp.example.com".into())
+        );
+        // A non-canonical host spelling — non-ASCII (IDN) or percent-encoded —
+        // must fail closed: `normalize_host` can't reconcile it with the
+        // canonical form the resolver dials, so it would be a fence seam. The
+        // first host uses a Cyrillic homoglyph of `s`.
+        assert_eq!(host_from_url("https://\u{0455}cp.example.com/mcp"), None);
+        assert_eq!(host_from_url("https://mcp%2eexample.com/mcp"), None);
+        // Punycode is already ASCII — the canonical wire form — so it is fine.
+        assert_eq!(
+            host_from_url("https://xn--e1afmkfd.example/mcp"),
+            Some("xn--e1afmkfd.example".into())
+        );
+        // Require a real HTTP(S) URL shape — a scheme-less or other-scheme
+        // string must NOT be accepted as a bare host.
+        assert_eq!(host_from_url("mcp.example.com/mcp"), None);
+        assert_eq!(host_from_url("ftp://mcp.example.com/mcp"), None);
+        assert_eq!(host_from_url("https:///onlypath"), None);
     }
 
     #[test]

@@ -448,8 +448,19 @@ pub struct Gateway {
     /// Run attribution, pinned at CONSTRUCTION: the audit mirror and
     /// `CallRecord.run` use this field and never re-read the environment.
     /// `from_manifest` inherits `RUN_ID_ENV` (host-mode `agentstack run`
-    /// spawned us); `from_plan` receives the run id explicitly.
+    /// spawned us); `from_frozen` receives the run id explicitly.
     run_id: Option<String>,
+    /// Names of selected runtime servers that were NOT served — dropped for a
+    /// resolve/pin failure, a denied egress host, or an unbuildable upstream.
+    /// The lockdown executor fails closed when this is non-empty
+    /// ([`Gateway::skipped_servers`]): a skipped server can't be dispatched to.
+    skipped: Vec<String>,
+    /// The FROZEN server set this gateway was built from (resolved,
+    /// library-pin-verified [`crate::resolve::FrozenServer`] entries, or their
+    /// skip reasons). The SOLE source of the D4 gateway-only fence — classified
+    /// by [`crate::resolve::gateway_only_hosts`], the same function and frozen
+    /// definitions `run --lockdown` uses ([`Gateway::frozen`]).
+    frozen: Vec<crate::resolve::FrozenServer>,
 }
 
 struct CallAudit<'a> {
@@ -483,7 +494,7 @@ impl Gateway {
         // Host-mode `agentstack run` spawns the harness with RUN_ID_ENV set and
         // the harness spawns us — inherit the attribution once, at construction.
         let run_id = std::env::var(crate::calllog::RUN_ID_ENV).ok();
-        Self::build(dir, Fence::AmbientSession, None, run_id, false)
+        Self::build(dir, Fence::AmbientSession, None, run_id, false, None)
     }
 
     /// Build the live gateway for one process-local MCP profile lease. The
@@ -491,10 +502,17 @@ impl Gateway {
     /// materialization. A missing profile yields an empty gateway.
     pub fn from_manifest_lease(dir: Option<&std::path::Path>, profile: &str) -> Gateway {
         let run_id = std::env::var(crate::calllog::RUN_ID_ENV).ok();
-        Self::build(dir, Fence::Lease(profile.to_string()), None, run_id, false)
+        Self::build(
+            dir,
+            Fence::Lease(profile.to_string()),
+            None,
+            run_id,
+            false,
+            None,
+        )
     }
 
-    /// Build for one sandboxed run (gateway-unification Session 1).
+    /// Build for one sandboxed run from the plan's **frozen** server set.
     ///
     /// Differences from [`Gateway::from_manifest`], each one a review finding:
     /// - **Hard trust gate.** `run --sandbox` only *warns* on an unreviewed
@@ -507,33 +525,41 @@ impl Gateway {
     ///   its `ExecutionPlan` already compiled; it is never recompiled from
     ///   disk here, so tool policy and the plan's egress/filesystem policy
     ///   cannot drift apart (TOCTOU between plan-build and gateway-build).
-    /// - **No ambient state.** The profile fence is pinned by the caller and
-    ///   the run id is explicit — host session files and env vars read at
-    ///   call time have no say in what a sandboxed run may reach.
-    pub fn from_plan(
+    /// - **One resolution (D4).** The caller passes the SAME frozen,
+    ///   strictly-fenced, pin-verified server set it used for classification;
+    ///   the gateway consumes it verbatim and never re-resolves the manifest,
+    ///   so dispatch and the gateway-only host fence cannot diverge. Trust is
+    ///   still re-checked here; only the server *definitions* are frozen.
+    pub fn from_frozen(
         dir: Option<&std::path::Path>,
         ruleset: agentstack_policy::CompiledRuleset,
-        profile: Option<&str>,
+        frozen: Vec<crate::resolve::FrozenServer>,
         run_id: &str,
     ) -> Gateway {
         Self::build(
             dir,
-            Fence::Pinned(profile.map(str::to_string)),
+            // The fence is irrelevant when a frozen set is supplied (it already
+            // fenced the profile); Pinned(None) is inert here.
+            Fence::Pinned(None),
             Some(ruleset),
             Some(run_id.to_string()),
             true,
+            Some(frozen),
         )
     }
 
     /// Shared constructor body. `require_trust` is the sandboxed-run hard
     /// gate; `ruleset_override` skips the two-layer compile when the caller
-    /// already holds the run's compiled artifact.
+    /// already holds the run's compiled artifact; `frozen` (D4) supplies a
+    /// pre-resolved, pin-verified server set so the sandbox path never resolves
+    /// the manifest a second time (`fence` is then ignored for resolution).
     fn build(
         dir: Option<&std::path::Path>,
         fence: Fence,
         ruleset_override: Option<agentstack_policy::CompiledRuleset>,
         run_id: Option<String>,
         require_trust: bool,
+        frozen: Option<Vec<crate::resolve::FrozenServer>>,
     ) -> Gateway {
         let mut upstreams = Vec::new();
         if let Ok(ctx) = crate::commands::load(dir) {
@@ -558,72 +584,99 @@ impl Gateway {
                         ruleset: agentstack_policy::CompiledRuleset::default(),
                         project: None,
                         run_id,
+                        skipped: Vec::new(),
+                        frozen: Vec::new(),
                     };
                 }
             }
-            // When a session is active, fence the proxied surface to that
-            // session's profile servers — the same fence a profile already puts
-            // on skills, extended to runtime tools (PLAN code-mode Phase 3).
-            // A vanished profile means no fence rather than fencing to nothing.
-            // Sandboxed runs pin the fence instead: ambient host session state
-            // must not decide what a run may reach.
-            let invalid_lease = matches!(
-                &fence,
-                Fence::Lease(p) if !ctx.loaded.manifest.profiles.contains_key(p.as_str())
-            );
-            let profile_owned: Option<String> = match &fence {
-                Fence::AmbientSession => crate::session::active(&ctx.dir)
-                    .map(|s| s.profile)
-                    .filter(|p| ctx.loaded.manifest.profiles.contains_key(p.as_str())),
-                Fence::Pinned(p) => p
-                    .clone()
-                    .filter(|p| ctx.loaded.manifest.profiles.contains_key(p.as_str())),
-                Fence::Lease(p) => (!invalid_lease).then(|| p.clone()),
-            };
-            let profile = profile_owned.as_deref();
-            // Name refs resolve through the same inline-first/central-library
-            // path as rendering, so a server declared only in the library is
-            // proxied like an inline one.
-            let library = crate::library::Library::load_default_or_warn();
-            let servers = if invalid_lease {
-                eprintln!(
-                    "gateway: MCP lease profile does not exist — serving no upstream servers"
-                );
-                Vec::new()
-            } else {
-                crate::resolve::effective_runtime_servers(
-                    &ctx.loaded.manifest,
-                    &library,
-                    &crate::util::paths::lib_home(),
-                    profile,
-                )
-            };
-            if matches!(fence, Fence::Lease(_)) {
-                eprintln!(
-                    "gateway: MCP profile lease active — proxying only this profile's {} server(s)",
-                    servers.len()
-                );
-            } else if profile.is_some() {
-                eprintln!(
-                    "gateway: session active — proxying only this profile's {} server(s)",
-                    servers.len()
-                );
-            }
-            // Library definitions are outside the trust digest (it covers the
-            // manifest layers + lockfile), so they are integrity-checked here
-            // against the lock's pinned definition digests before being served.
-            // Fail closed on every unverifiable state: drifted pins skip, a
-            // missing pin skips (an unpinned definition was never part of what
-            // the human trusted — `agentstack lock` is the acceptance act),
-            // and a lockfile that exists but can't be read (parse error,
-            // future schema) skips too, since its pins are unknowable.
-            let lock = match crate::lock::Lock::load(&ctx.dir) {
-                Ok(l) => Some(l),
-                Err(e) => {
-                    eprintln!(
-                        "gateway: agentstack.lock is unreadable ({e:#}) — library-referenced servers will NOT be served until it is fixed"
+            // The runtime server set as uniform [`crate::resolve::FrozenServer`]
+            // entries — a resolved, library-pin-verified definition or a
+            // fail-closed skip reason. A sandbox/lockdown run hands us the SAME
+            // frozen set its plan classified (D4), so classification and
+            // dispatch can never diverge and the definitions are never re-read.
+            // The host/session/lease path resolves here and applies the identical
+            // pin verification, so both paths produce one shape.
+            let servers: Vec<crate::resolve::FrozenServer> = match frozen {
+                Some(f) => {
+                    if !f.is_empty() {
+                        eprintln!(
+                            "gateway: proxying {} frozen server(s) from the run plan",
+                            f.len()
+                        );
+                    }
+                    f
+                }
+                None => {
+                    // When a session is active, fence the proxied surface to that
+                    // session's profile servers — the same fence a profile puts
+                    // on skills, extended to runtime tools. A vanished session
+                    // profile means no fence rather than fencing to nothing;
+                    // sandboxed runs pin their fence in the frozen set above, so
+                    // ambient host session state never decides what a run reaches.
+                    let invalid_lease = matches!(
+                        &fence,
+                        Fence::Lease(p) if !ctx.loaded.manifest.profiles.contains_key(p.as_str())
                     );
-                    None
+                    let profile_owned: Option<String> = match &fence {
+                        Fence::AmbientSession => crate::session::active(&ctx.dir)
+                            .map(|s| s.profile)
+                            .filter(|p| ctx.loaded.manifest.profiles.contains_key(p.as_str())),
+                        Fence::Pinned(p) => p
+                            .clone()
+                            .filter(|p| ctx.loaded.manifest.profiles.contains_key(p.as_str())),
+                        Fence::Lease(p) => (!invalid_lease).then(|| p.clone()),
+                    };
+                    let profile = profile_owned.as_deref();
+                    // Name refs resolve inline-first, then central library.
+                    let library = crate::library::Library::load_default_or_warn();
+                    let raw = if invalid_lease {
+                        eprintln!(
+                            "gateway: MCP lease profile does not exist — serving no upstream servers"
+                        );
+                        Vec::new()
+                    } else {
+                        crate::resolve::effective_runtime_servers(
+                            &ctx.loaded.manifest,
+                            &library,
+                            &crate::util::paths::lib_home(),
+                            profile,
+                        )
+                    };
+                    if matches!(fence, Fence::Lease(_)) {
+                        eprintln!(
+                            "gateway: MCP profile lease active — proxying only this profile's {} server(s)",
+                            raw.len()
+                        );
+                    } else if profile.is_some() {
+                        eprintln!(
+                            "gateway: session active — proxying only this profile's {} server(s)",
+                            raw.len()
+                        );
+                    }
+                    // Library definitions are outside the trust digest, so they
+                    // are integrity-checked against the lock's pinned digests
+                    // before being served. Fail closed on every unverifiable
+                    // state (drift, missing pin, unreadable lock) — the same
+                    // check the frozen resolution applies, so both paths agree.
+                    let lock = crate::lock::Lock::load(&ctx.dir)
+                        .map_err(|e| {
+                            eprintln!(
+                                "gateway: agentstack.lock is unreadable ({e:#}) — library-referenced servers will NOT be served until it is fixed"
+                            );
+                        })
+                        .ok();
+                    raw.into_iter()
+                        .map(|(name, r)| {
+                            let out = match r {
+                                Ok(rs) => {
+                                    crate::resolve::verify_library_pin(&rs, lock.as_ref(), &name)
+                                        .map(|()| rs)
+                                }
+                                Err(e) => Err(e.to_string()),
+                            };
+                            (name, out)
+                        })
+                        .collect()
                 }
             };
             // Relative server paths (`cwd`) anchor at the project root — the
@@ -635,6 +688,14 @@ impl Gateway {
             // consumers never re-derive the two-layer merge. `project` is
             // audit-log context.
             let server_names: Vec<&str> = servers.iter().map(|(n, _)| n.as_str()).collect();
+            // The selected server names, owned, so we can report which ones were
+            // NOT served after the loop consumes `servers` (D4 executor fence).
+            let intended_names: Vec<String> = servers.iter().map(|(n, _)| n.clone()).collect();
+            // The frozen set, retained verbatim so a lockdown run can classify
+            // the D4 gateway-only fence from the SAME definitions this gateway
+            // serves (`crate::resolve::gateway_only_hosts`) — one fence source,
+            // never a second derivation from the built upstreams.
+            let frozen: Vec<crate::resolve::FrozenServer> = servers.clone();
             // A sandboxed run hands us its plan's already-compiled artifact —
             // never recompiled here, so one run has exactly one ruleset.
             let ruleset = match ruleset_override {
@@ -653,6 +714,8 @@ impl Gateway {
                             ruleset: agentstack_policy::CompiledRuleset::default(),
                             project: None,
                             run_id,
+                            skipped: Vec::new(),
+                            frozen: Vec::new(),
                         };
                     }
                 },
@@ -663,39 +726,13 @@ impl Gateway {
             // when this gateway is built inside an `agentstack run` sandbox.
             let mut secret_touches: Vec<(String, Vec<String>)> = Vec::new();
             for (name, resolved) in servers {
+                // Pin verification already ran when the frozen set was built (or
+                // in the None branch above), so an `Ok` here is an accepted
+                // definition and an `Err` is its fail-closed skip reason.
                 let s = match resolved {
-                    Ok(r) => {
-                        if r.origin == crate::resolve::ServerOrigin::Library {
-                            let Some(lock) = &lock else {
-                                eprintln!(
-                                    "gateway: skipping '{name}': library-referenced and the lockfile is unreadable — its pin can't be verified"
-                                );
-                                continue;
-                            };
-                            match lock.get_server(&name) {
-                                Some(entry) if entry.checksum != r.checksum => {
-                                    eprintln!(
-                                        "gateway: skipping '{name}': library definition drifted from agentstack.lock \
-                                         (locked {}, current {}) — review it and re-run `agentstack lock`",
-                                        entry.checksum, r.checksum
-                                    );
-                                    continue;
-                                }
-                                Some(_) => {}
-                                None => {
-                                    eprintln!(
-                                        "gateway: skipping '{name}': library server is not pinned in agentstack.lock — \
-                                         its definition isn't covered by the trust digest, so it can't be served unverified; \
-                                         pin it with `agentstack lock`"
-                                    );
-                                    continue;
-                                }
-                            }
-                        }
-                        r.server
-                    }
-                    Err(e) => {
-                        eprintln!("gateway: skipping '{name}': {e}");
+                    Ok(rs) => rs.server,
+                    Err(reason) => {
+                        eprintln!("gateway: skipping '{name}': {reason}");
                         continue;
                     }
                 };
@@ -820,12 +857,20 @@ impl Gateway {
                     );
                 }
             }
+            // A selected server that never became an upstream was skipped
+            // (resolve/pin failure, denied egress host, unbuildable transport).
+            let skipped: Vec<String> = intended_names
+                .into_iter()
+                .filter(|n| !upstreams.iter().any(|u| &u.name == n))
+                .collect();
             return Gateway {
                 upstreams,
                 cache: std::sync::Mutex::new(None),
                 ruleset,
                 project,
                 run_id,
+                skipped,
+                frozen,
             };
         }
         Gateway {
@@ -834,6 +879,8 @@ impl Gateway {
             ruleset: agentstack_policy::CompiledRuleset::default(),
             project: None,
             run_id,
+            skipped: Vec::new(),
+            frozen: Vec::new(),
         }
     }
 
@@ -848,6 +895,8 @@ impl Gateway {
             ruleset: agentstack_policy::CompiledRuleset::default(),
             project: None,
             run_id: std::env::var(crate::calllog::RUN_ID_ENV).ok(),
+            skipped: Vec::new(),
+            frozen: Vec::new(),
         }
     }
 
@@ -1140,6 +1189,28 @@ impl Gateway {
             .collect()
     }
 
+    /// The FROZEN server set this gateway was built from — resolved,
+    /// library-pin-verified [`crate::resolve::FrozenServer`] entries (or their
+    /// fail-closed skip reasons). This is the single source the D4 gateway-only
+    /// fence is derived from: a lockdown run classifies it with
+    /// [`crate::resolve::gateway_only_hosts`], the SAME function and the SAME
+    /// frozen definitions `run --lockdown` uses — so the executor never
+    /// re-derives a fence from a different source (served upstreams) with weaker
+    /// fail-closed semantics.
+    pub fn frozen(&self) -> &[crate::resolve::FrozenServer] {
+        &self.frozen
+    }
+
+    /// Names of selected runtime servers this gateway did NOT serve (skipped for
+    /// a resolve/pin failure, a denied egress host, or an unbuildable upstream).
+    /// The gateway-only fence itself now comes from the frozen set (so a skipped
+    /// server's host is still fenced), but a skipped server also can't be
+    /// dispatched to — so the lockdown executor refuses rather than run a
+    /// container that silently can't reach a selected tool.
+    pub fn skipped_servers(&self) -> &[String] {
+        &self.skipped
+    }
+
     /// Generate the code-mode client (typed TS client + runtime shim) for the
     /// proxied surface. Secret-free: the client only carries tool names; secrets
     /// are resolved here, per call, when the shim forwards through `try_call`.
@@ -1160,6 +1231,8 @@ impl Gateway {
             ruleset: agentstack_policy::CompiledRuleset::default(),
             project: None,
             run_id: None,
+            skipped: Vec::new(),
+            frozen: Vec::new(),
         }
     }
 }
@@ -1285,6 +1358,8 @@ mod tests {
             ruleset: agentstack_policy::compile(&machine, &project, &["figma"]),
             project: None,
             run_id: None,
+            skipped: Vec::new(),
+            frozen: Vec::new(),
         };
         let err = gw.tool_allowed("figma", "post_comment").unwrap_err();
         assert!(err.contains("machine policy"), "{err}");
@@ -1419,15 +1494,15 @@ mod tests {
         std::env::remove_var("AGENTSTACK_HOME");
     }
 
-    /// `from_plan` is the sandboxed-run constructor. Its hard gate: a bundle
+    /// `from_frozen` is the sandboxed-run constructor. Its hard gate: a bundle
     /// that is not `Trusted` yields an EMPTY gateway — no secret resolves, no
     /// upstream exists — even though `run --sandbox` itself only warns
     /// (containment is the sandbox's argument; the gateway executes on the
-    /// host and has none). Trusting the same bundle flips it live, with the
-    /// caller's ruleset and run id riding in — never recompiled, never
-    /// re-read from the environment.
+    /// host and has none). Trusting the same bundle flips it live, serving the
+    /// caller's FROZEN server set — never re-resolved — with the caller's
+    /// ruleset and run id riding in.
     #[test]
-    fn from_plan_refuses_untrusted_bundles_and_serves_trusted_ones() {
+    fn from_frozen_refuses_untrusted_bundles_and_serves_trusted_ones() {
         use assert_fs::prelude::*;
         let _guard = crate::util::TEST_ENV_LOCK
             .lock()
@@ -1447,14 +1522,26 @@ mod tests {
                 &["x"],
             )
         };
+        let frozen = || -> Vec<crate::resolve::FrozenServer> {
+            vec![(
+                "x".to_string(),
+                Ok(crate::resolve::ResolvedServer {
+                    name: "x".into(),
+                    origin: crate::resolve::ServerOrigin::Inline,
+                    server: toml::from_str("type = \"http\"\nurl = \"https://x/mcp\"\n").unwrap(),
+                    checksum: String::new(),
+                    provenance: None,
+                }),
+            )]
+        };
 
         // Untrusted → empty, regardless of what the plan's ruleset allows.
-        let gw = Gateway::from_plan(Some(proj.path()), compile(), None, "r-plan");
+        let gw = Gateway::from_frozen(Some(proj.path()), compile(), frozen(), "r-plan");
         assert!(gw.is_empty(), "untrusted bundle must serve nothing");
 
-        // Trusted → the same call proxies the manifest, attributed to the run.
+        // Trusted → the same call proxies the frozen set, attributed to the run.
         crate::trust::trust(proj.path()).unwrap();
-        let gw = Gateway::from_plan(Some(proj.path()), compile(), None, "r-plan");
+        let gw = Gateway::from_frozen(Some(proj.path()), compile(), frozen(), "r-plan");
         assert!(!gw.is_empty(), "trusted bundle must be proxied");
         assert_eq!(
             gw.run_id.as_deref(),
@@ -1495,6 +1582,8 @@ mod tests {
             ruleset: agentstack_policy::compile(&machine, &project, &["figma"]),
             project: None,
             run_id: None,
+            skipped: Vec::new(),
+            frozen: Vec::new(),
         };
         let req = serde_json::json!({
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",

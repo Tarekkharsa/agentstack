@@ -82,6 +82,11 @@ fn run() -> Result<(), String> {
         auth_token: std::env::var("AGENTSTACK_PROXY_TOKEN")
             .ok()
             .filter(|t| !t.is_empty()),
+        // Lockdown transport hardening (D4): the host sets this for `--lockdown`
+        // runs so the sidecar refuses literal-IP and non-TLS bypasses of the
+        // hostname-based gateway-only fence. Explicit flag, not inferred from
+        // the ruleset's host set.
+        lockdown: env_flag("AGENTSTACK_LOCKDOWN"),
     };
 
     let rt = tokio::runtime::Builder::new_multi_thread()
