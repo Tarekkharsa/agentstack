@@ -311,7 +311,8 @@
         <code>--sandbox</code> / <code>--lockdown</code> runs in step 6 spawn a
         container, so those are the only steps that need Docker installed and
         running. If you don't have Docker, stop after step 5: you'll still have
-        a fully trust-gated, firewalled, audited setup.</p>
+        a trust-gated, firewalled, audited setup for brokered MCP capabilities;
+        the host agent process itself is not confined.</p>
     </div>
   </section>
 
@@ -577,6 +578,7 @@ agentstack report &lt;run-id&gt; --json # machine-readable, carries the posture 
     <nav aria-label="Footer links">
       <a href="index.html">home</a>
       <a href="primitives.html">primitives</a>
+      <a href="plan.html">plan</a>
       <a href="https://github.com/Tarekkharsa/agentstack">source</a>
       <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
       <a href="security-review-2026-07-11.html">security&nbsp;review</a>

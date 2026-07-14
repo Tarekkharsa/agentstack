@@ -63,7 +63,7 @@ Two things worth knowing before you go further:
   instructions, and hooks; `agentstack use <profile> --write` materializes
   that profile's skills. (`apply` will remind you if the manifest has skills.)
 - Prefer **no rendered files at all**? Skip `apply` entirely and jump to
-  [the trust gate](#the-trust-gate--clone-anyones-repo-safely) — one gateway
+  [the trust gate](#the-trust-gate--keep-repo-declared-capabilities-inert-until-review) — one gateway
   registration serves every repo live.
 
 If `bootstrap` reports a missing secret, store it once — it goes in your OS
@@ -123,7 +123,8 @@ gaps follow:
    all-or-nothing and unlogged; an injected prompt can turn a legitimate tool
    against you. Here your *machine policy* — which no repo can loosen —
    fences tools, secrets, and egress; every brokered call lands in an audit
-   log; `--lockdown` removes the network route entirely. (Honest scope: what
+   log; `--lockdown` removes the agent's direct network route while approved
+   traffic can still pass through the enforcing proxy. (Honest scope: what
    each mode enforces is spelled out in the
    [enforcement matrix](docs/ENFORCEMENT.md).)
 3. **Every CLI spells the same setup differently** — six config syntaxes,
@@ -283,7 +284,7 @@ steps:
   - uses: Tarekkharsa/agentstack@v0.10.1  # pin a release tag, not @main
 ```
 
-## The trust gate — clone anyone's repo, safely
+## The trust gate — keep repo-declared capabilities inert until review
 
 Register the AgentStack gateway, then clone a repo: its declared MCP servers
 remain inactive until you inspect their runtime surface and trust the current

@@ -221,7 +221,7 @@
     <p class="eyebrow">1 · How capabilities reach the agent</p>
     <h2>Choose a delivery mode and a lifetime</h2>
     <p class="muted">
-      A <strong>profile</strong> answers “what is allowed for this kind of work?”
+      A <strong>profile</strong> answers “which capabilities does this task select?”
       The delivery mode answers “how does it reach the agent?” The lifetime
       answers “when does it go away?” Keeping those questions separate makes
       the rest of AgentStack much easier to reason about.
@@ -462,7 +462,7 @@
       <div class="flow">
         <div class="node"><p class="t">connect once</p><p class="d">register the global gateway</p></div>
         <span class="arrow">→</span>
-        <div class="node hot"><p class="t">lease_open(profile)</p><p class="d">authorize this MCP connection in memory</p></div>
+        <div class="node hot"><p class="t">lease_open(profile)</p><p class="d">fence this MCP connection to one selection</p></div>
         <span class="arrow">→</span>
         <div class="node"><p class="t">list → load → call</p><p class="d">fenced, verified, and audited</p></div>
         <span class="arrow">→</span>
@@ -500,6 +500,7 @@
       <a href="index.html">home</a>
       <a href="examples.html">examples</a>
       <a href="primitives.html">primitives</a>
+      <a href="plan.html">plan</a>
       <a href="start.html">get&nbsp;started</a>
       <a href="https://github.com/Tarekkharsa/agentstack">source</a>
     </nav>

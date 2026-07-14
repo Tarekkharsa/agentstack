@@ -495,17 +495,19 @@
            starts, they want to run — commands you never read, with your
            keychain in reach.<br>
            <span style="color:var(--accent)">→</span> Here, a clone is
-           <strong>inert</strong> until you trust its exact bytes. Any edit
-           re-gates it.</p>
+           <strong>inert</strong> until you approve its consent surface. Any
+           manifest, local-overlay, or lockfile edit re-gates it; referenced
+           local code must still be reviewed separately.</p>
       </div>
       <div class="fcard">
         <h3>One prompt away</h3>
         <p>An injected instruction can steer a well-behaved agent into using a
            legitimate tool against you — deleting, leaking, phoning home.<br>
            <span style="color:var(--accent)">→</span> Here, your
-           <strong>machine policy</strong> — which no repo can loosen — fences
-           tools, secrets, and egress; <code>--lockdown</code> removes the
-           network route entirely.</p>
+           <strong>machine policy</strong> — which no valid repo policy can
+           loosen — fences tools, secrets, and egress; <code>--lockdown</code>
+           removes the agent's direct network route while approved traffic can
+           still pass through the enforcing proxy.</p>
       </div>
       <div class="fcard">
         <h3>Invisible afterwards</h3>
@@ -513,8 +515,8 @@
            question a reviewer asks: <em>what did the agent actually
            call?</em><br>
            <span style="color:var(--accent)">→</span> Here, every brokered
-           call, denial, and secret touch lands in an
-           <strong>audit log</strong> you can read back per run.</p>
+           call and denial lands in the call audit; gateway-routed sandbox runs
+           also record secret-reference access in their per-run evidence.</p>
       </div>
       <div class="fcard">
         <h3>Honestly scoped</h3>
@@ -581,9 +583,10 @@
       <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/trust-gate-demo.sh"><code>docs/trust-gate-demo.sh</code></a>.
     </p>
     <p class="small muted">
-      The whole story, in one binary: an untrusted repo's agents can touch
-      nothing you didn't review, and every capability call is firewallable
-      and logged (<a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#secrets-and-trust">the documented limits</a> say exactly what trust does and doesn't cover). Prefer a drop-in proxy? <code>--transparent</code>
+      The whole story, in one binary: an untrusted repo exposes no
+      project-declared capability through the auto-project gateway, and every
+      brokered capability call is firewallable and logged
+      (<a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#secrets-and-trust">the documented limits</a> say exactly what trust does and doesn't cover). Prefer a drop-in proxy? <code>--transparent</code>
       advertises every policy-filtered upstream tool straight in
       <code>tools/list</code>, so any standard MCP client works with zero
       agentstack knowledge — the default compact mode keeps them behind one
@@ -726,29 +729,36 @@
         </thead>
         <tbody>
           <tr><th scope="row">Tools</th>
-            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell un">unsupported</span></td><td><span class="cell un">unsupported</span></td></tr>
+            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;†</span></td><td><span class="cell e">enforced&thinsp;†</span></td></tr>
           <tr><th scope="row">Egress</th>
             <td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">enforced&thinsp;*</span></td><td><span class="cell e">enforced</span></td></tr>
           <tr><th scope="row">Secrets</th>
-            <td><span class="cell e">enforced</span></td><td><span class="cell e">enforced</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
+            <td><span class="cell e">enforced</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;‡</span></td><td><span class="cell e">enforced&thinsp;‡</span></td></tr>
           <tr><th scope="row">Filesystem — write</th>
-            <td><span class="cell un">unsupported</span></td><td><span class="cell un">unsupported</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
+            <td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
           <tr><th scope="row">Filesystem — read</th>
-            <td><span class="cell un">unsupported</span></td><td><span class="cell un">unsupported</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
+            <td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
           <tr><th scope="row">Audit / recording</th>
-            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
+            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;§</span></td><td><span class="cell e">enforced&thinsp;§</span></td></tr>
         </tbody>
       </table>
     </div>
     <div class="matrix-key">
       <span><i class="e"></i><strong>enforced</strong>&nbsp;— a runtime mechanism prevents the disallowed action</span>
       <span><i class="co"></i><strong>coarse</strong>&nbsp;— a real check runs, at coarser granularity than the policy expresses</span>
+      <span><i class="co"></i><strong>cooperative</strong>&nbsp;— a harness hook checks it; this is accident protection, not isolation</span>
       <span><i class="un"></i><strong>unsupported</strong>&nbsp;— no code path consults the policy here; no check happens</span>
     </div>
     <p class="small muted" style="margin-top:1.1rem">
       <strong>enforced&thinsp;*</strong> — for proxied traffic only:
       <code>--sandbox</code>'s bridge network leaves a direct route a
       proxy-ignoring process could use; <code>--lockdown</code> removes it.
+    </p>
+    <p class="small muted" style="margin-top:.65rem">
+      <strong>† ‡ §</strong> — for trusted, gateway-routed sandbox runs. If a
+      bundle is untrusted, has no proxied servers, or its adapter cannot host an
+      HTTP MCP entry, these cells degrade as described in the authoritative
+      matrix. <strong>¶</strong> — only when the guard hook is installed.
     </p>
     <p class="small muted" style="margin-top:1.1rem">
       Read every "enforced" with the ceiling in mind: it means the disallowed
@@ -915,6 +925,13 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
     <h2>When you want more than the loop</h2>
     <div class="cards">
       <div class="fcard">
+        <h3><a href="plan.html">Recommendations &amp; implementation plan</a></h3>
+        <p>The reviewed next steps for claim consistency, policy failure
+           handling, unified capability grants, local-code integrity, and
+           stronger lockdown routing—with explicit decision gates.</p>
+        <a class="tag" href="plan.html">Review the plan</a>
+      </div>
+      <div class="fcard">
         <h3><a href="primitives.html">Choose the right boundary</a></h3>
         <p>Our recommendation for composing profiles, delivery, trust, policy,
            isolation, and evidence—plus the cases where the default should change.</p>
@@ -993,6 +1010,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
       <a href="https://github.com/Tarekkharsa/agentstack/issues">issues</a>
       <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
       <a href="primitives.html">primitives</a>
+      <a href="plan.html">plan</a>
       <a href="security-review-2026-07-11.html">security&nbsp;review</a>
     </nav>
   </div>

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentStack recommendations and implementation plan</title>
+<meta name="description" content="A reviewable, decision-gated plan for AgentStack documentation, policy resilience, capability grants, local-code integrity, and lockdown routing.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="canonical" href="https://tarekkharsa.github.io/agentstack/plan.html">
+<style>
+  :root{--paper:#fbfaf7;--surface:#fff;--ink:#1b1f24;--muted:#5b6570;--faint:#737b84;--accent:#b4540a;--line:#e7e2d9;--soft:#f3f0ea;--good:#267a50;--warn:#a66a13;--stop:#b94031;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--wrap:62rem}
+  @media(prefers-color-scheme:dark){:root{--paper:#14171b;--surface:#1a1e23;--ink:#e9e7e2;--muted:#9aa3ac;--faint:#77808a;--accent:#f0975a;--line:#2b3036;--soft:#1e2329;--good:#58c08a;--warn:#e1ad54;--stop:#e5786b}}
+  *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 var(--sans);-webkit-font-smoothing:antialiased}a{color:var(--accent);text-decoration:none}a:hover,a:focus-visible{text-decoration:underline;text-underline-offset:3px}:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.skip{position:absolute;left:-9999px}.skip:focus{left:1rem;top:1rem;background:var(--accent);color:var(--paper);padding:.5rem .8rem;z-index:9}.site{position:sticky;top:0;background:color-mix(in srgb,var(--paper) 88%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);z-index:4}.bar{max-width:var(--wrap);margin:auto;padding:.8rem 1.35rem;display:flex;align-items:center;gap:1rem}.wordmark{color:var(--ink);font:700 1rem var(--mono)}nav{margin-left:auto;display:flex;gap:1rem;flex-wrap:wrap}nav a{color:var(--muted);font:.78rem var(--mono)}nav a[aria-current]{color:var(--accent)}main{max-width:var(--wrap);margin:auto;padding:0 1.35rem 6rem}.hero{padding:6rem 0 3.5rem;border-bottom:1px solid var(--line)}.eyebrow{color:var(--accent);font:600 .72rem var(--mono);letter-spacing:.14em;text-transform:uppercase}h1{max-width:54rem;margin:.7rem 0 1rem;font:700 clamp(2.2rem,6vw,4.4rem)/1.03 var(--mono);letter-spacing:-.055em}h2{margin:0 0 .8rem;font:700 clamp(1.4rem,3vw,2rem)/1.2 var(--mono)}h3{margin:0 0 .35rem;font:700 1rem var(--mono)}p{margin:.2rem 0 1rem}.lede{max-width:48rem;color:var(--muted);font-size:1.15rem}.status{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1.5rem}.pill{border:1px solid var(--line);border-radius:999px;padding:.28rem .62rem;color:var(--muted);font:.72rem var(--mono)}.pill.done{color:var(--good)}.pill.gate{color:var(--warn)}section{margin-top:4.5rem;scroll-margin-top:5rem}.intro{max-width:48rem;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-top:1.4rem}.card{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:1.1rem}.card p{color:var(--muted);font-size:.94rem;margin:.4rem 0 0}.id{display:block;color:var(--accent);font:600 .7rem var(--mono);letter-spacing:.1em;margin-bottom:.45rem}.table{overflow-x:auto;border-block:1px solid var(--line);margin-top:1.4rem}table{width:100%;border-collapse:collapse;min-width:48rem}th,td{text-align:left;vertical-align:top;padding:.85rem .7rem;border-bottom:1px solid var(--line)}th{color:var(--faint);font:600 .68rem var(--mono);letter-spacing:.08em;text-transform:uppercase}td{font-size:.91rem}td:first-child{font:700 .78rem var(--mono);color:var(--accent)}.phase{display:grid;grid-template-columns:9rem 1fr;gap:1.5rem;padding:1.35rem 0;border-top:1px solid var(--line)}.phase:last-child{border-bottom:1px solid var(--line)}.phase-name{color:var(--accent);font:700 .78rem var(--mono);text-transform:uppercase;letter-spacing:.08em}.phase p,.phase li{color:var(--muted);font-size:.94rem}.phase ul{margin:.45rem 0 0;padding-left:1.2rem}.callout{margin-top:1.5rem;border-left:3px solid var(--warn);background:linear-gradient(90deg,color-mix(in srgb,var(--warn) 10%,transparent),transparent 75%);padding:1rem 1.1rem}.callout p{color:var(--muted);margin:0}.code{font-family:var(--mono);background:var(--soft);border-radius:4px;padding:.1em .3em}footer{border-top:1px solid var(--line);padding:1.5rem;color:var(--muted);font-size:.84rem}footer .bar{padding:0}@media(max-width:720px){body{font-size:16px}.grid{grid-template-columns:1fr}.phase{grid-template-columns:1fr;gap:.35rem}.hero{padding-top:4rem}.site nav a:nth-child(-n+2){display:none}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site"><div class="bar"><a class="wordmark" href="./">agentstack</a><nav aria-label="Project links"><a href="how-it-works.html">how it works</a><a href="primitives.html">primitives</a><a href="examples.html">examples</a><a href="plan.html" aria-current="page">plan</a><a href="start.html">get started →</a></nav></div></header>
+<main id="main">
+  <header class="hero">
+    <p class="eyebrow">Review document · 14 July 2026</p>
+    <h1>Make the boundaries easier to trust—and harder to bypass.</h1>
+    <p class="lede">This is the working implementation plan produced from the documentation and code review. Small claim corrections can land immediately. Changes to security behavior remain explicit decision gates: review the contract first, then implement and prove it.</p>
+    <div class="status"><span class="pill done">content corrections · started</span><span class="pill gate">runtime semantics · review required</span><span class="pill">no compatibility promise implied</span></div>
+  </header>
+
+  <section id="direction">
+    <p class="eyebrow">Product direction</p>
+    <h2>Keep AgentStack the capability control plane.</h2>
+    <p class="intro">The durable product is not a general assistant or another agent framework. It is the portable security contract beneath many harnesses: define a capability surface, deliver it, constrain it, and preserve evidence. The public model should lead with three workflows.</p>
+    <div class="grid">
+      <article class="card"><span class="id">01 · COMPILE</span><h3>Intent → native configuration</h3><p>Use the manifest as the reviewed source of truth and render it across supported harnesses.</p></article>
+      <article class="card"><span class="id">02 · BROKER</span><h3>Small live capability surface</h3><p>Use the gateway and profile leases to discover, fence, enforce, and record capabilities at runtime.</p></article>
+      <article class="card"><span class="id">03 · CONFINE</span><h3>Process and network boundary</h3><p>Use sandbox and lockdown when the process itself—not only its brokered tool calls—must be constrained.</p></article>
+      <article class="card"><span class="id">SUPPORTING SYSTEMS</span><h3>Integrity, packaging, and evidence</h3><p>Locks, signatures, libraries, packs, reports, and optimization strengthen the three primary workflows.</p></article>
+    </div>
+  </section>
+
+  <section id="decisions">
+    <p class="eyebrow">Decision gates</p>
+    <h2>Approve behavior changes one boundary at a time.</h2>
+    <div class="table"><table><thead><tr><th>ID</th><th>Decision</th><th>Recommendation</th><th>Why it is gated</th></tr></thead><tbody>
+      <tr><td>D1</td><td>Unreadable machine policy</td><td>Use last-known-good policy; otherwise refuse protected activation instead of falling back to project-only policy.</td><td>Changes availability and failure semantics.</td></tr>
+      <tr><td>D2</td><td>Unified resolved grant</td><td>Extend the immutable execution-plan boundary across gateway, native session, and sandbox paths.</td><td>Touches trust, policy composition, secret resolution, and dispatch.</td></tr>
+      <tr><td>D3</td><td>Local executable integrity</td><td>Allow manifests to declare local integrity inputs; pin them in the lock and warn when local commands are unpinned.</td><td>Changes lock schema and trust-review expectations.</td></tr>
+      <tr><td>D4</td><td>Lockdown MCP routing</td><td>Prevent the agent container from reaching upstream MCP endpoints directly; make the gateway the only MCP authority.</td><td>Changes networking and may require endpoint classification.</td></tr>
+      <tr><td>D5</td><td>Sandbox default posture</td><td>Make confined networking the eventual default meaning of sandbox, with the weaker bridge mode explicit.</td><td>Behavioral and compatibility change.</td></tr>
+      <tr><td>D6</td><td>Lease capture naming</td><td>Prefer <span class="code">lease_capture</span> or <span class="code">lease_save_profile</span>; keep a deprecated alias if the MCP tool is already public.</td><td>Public tool-name compatibility.</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section id="sequence">
+    <p class="eyebrow">Implementation sequence</p>
+    <h2>Reduce ambiguity before expanding capability.</h2>
+    <div class="phase"><div class="phase-name">Phase 0 · now</div><div><h3>One claim, one source</h3><p>Correct visible inconsistencies and prevent recurrence.</p><ul><li>Reconcile the website matrix with the authoritative enforcement matrix.</li><li>Scope trust, audit, and network claims to the paths that provide them.</li><li>Use selection/fence for profiles and leases; reserve authority for policy.</li><li>Add Stable, Experimental, Design, Historical, and Archived status labels.</li><li>Generate published HTML from technical Markdown instead of maintaining duplicate prose.</li><li>Add claim tests for matrix cells, CLI examples, versions, adapter counts, and feature status.</li></ul></div></div>
+    <div class="phase"><div class="phase-name">Phase 1 · D1</div><div><h3>Make the machine floor resilient</h3><p>Validate and atomically persist a last-known-good compiled machine policy. A broken edit uses that policy; if none exists, capability-serving and execution paths fail closed with a repair command. Inspection and repair remain available.</p></div></div>
+    <div class="phase"><div class="phase-name">Phase 2 · D2</div><div><h3>Resolve one capability grant</h3><p>Build one immutable artifact containing selected identities, verified pins, trust state, effective policy, secret grants, delivery/lifetime, confinement posture, and evidence identity. Native render, sessions, leases, sandbox, and experimental execution consume that artifact instead of independently rebuilding decisions.</p></div></div>
+    <div class="phase"><div class="phase-name">Phase 3 · D3</div><div><h3>Pin declared local code</h3><p>Add optional local integrity inputs for stdio servers and other executable assets. Include their digests in the lock, surface them during trust review, and have doctor warn—not silently claim coverage—when a local path is executable but unpinned.</p></div></div>
+    <div class="phase"><div class="phase-name">Phase 4 · D4/D5</div><div><h3>Close the remaining route around the gateway</h3><p>Under lockdown, allow the container to reach the model and approved general egress through the proxy, but not upstream MCP endpoints directly. Route MCP only through the token-gated gateway relay. After compatibility evidence, make confined networking the ordinary sandbox posture.</p></div></div>
+    <div class="phase"><div class="phase-name">Phase 5 · D6</div><div><h3>Polish the lifecycle language</h3><p>Rename lease freeze to capture/save because the operation proposes a mutable manifest profile and does not lock it. Distinguish static activation, native session, MCP lease, and execution plan by delivery mechanism and lifetime.</p></div></div>
+  </section>
+
+  <section id="proof">
+    <p class="eyebrow">Required proof</p>
+    <h2>Every changed promise needs an executable witness.</h2>
+    <div class="grid">
+      <article class="card"><span class="id">POLICY ROT</span><h3>Last-known-good survives a bad edit</h3><p>A valid deny remains effective after the machine manifest becomes malformed; first-run malformed state refuses activation and names the repair.</p></article>
+      <article class="card"><span class="id">PATH CONSISTENCY</span><h3>Every delivery path consumes the same grant</h3><p>Property and integration tests prove policy can only narrow and no path reconstructs authority independently.</p></article>
+      <article class="card"><span class="id">LOCAL CODE</span><h3>A pinned script edit changes identity</h3><p>A one-byte change fails lock verification and returns the project to review; an intentionally unpinned script is labelled as such.</p></article>
+      <article class="card"><span class="id">ROUTE CLOSURE</span><h3>Direct MCP is unreachable in lockdown</h3><p>A direct connection to every known upstream endpoint fails while the same tool call succeeds through the gateway and is recorded.</p></article>
+      <article class="card"><span class="id">DOC CLAIMS</span><h3>Published matrices cannot drift</h3><p>The website table is generated or tested against the same structured facts used by the authoritative specification.</p></article>
+      <article class="card"><span class="id">COMPATIBILITY</span><h3>Old lifecycle names remain understandable</h3><p>Deprecated aliases return migration guidance, and examples identify whether they are tested fixtures or illustrative snippets.</p></article>
+    </div>
+    <div class="callout"><p><strong>Review rule:</strong> D1–D5 should each be its own implementation and review unit. They touch distinct security boundaries and should not be bundled with documentation, catalog transport, or unrelated guard changes.</p></div>
+  </section>
+
+  <section id="non-goals">
+    <p class="eyebrow">Non-goals</p>
+    <h2>What this plan deliberately does not turn AgentStack into.</h2>
+    <p class="intro">No personal memory platform, scheduler, background job system, general OAuth product, prompt-inspection firewall, or claim that approved destinations are safe. AgentStack remains the control plane beneath assistants, not the assistant itself.</p>
+  </section>
+</main>
+<footer><div class="bar"><span>Review this plan alongside the <a href="primitives.html">primitives</a> and authoritative <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">enforcement matrix</a>.</span><nav><a href="./">home</a><a href="examples.html">examples</a><a href="https://github.com/Tarekkharsa/agentstack">source</a></nav></div></footer>
+</body>
+</html>

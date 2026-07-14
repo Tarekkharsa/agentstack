@@ -159,7 +159,7 @@ rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled `CLAUDE.md`
   injected by `agentstack run` / `session start` and reverted on exit;
   `agentstack lock` pins name refs without rendering, so `git status` stays
   silent.
-- **Zero-copy** — no persistent per-project provider artifacts. `agentstack
+- **Zero files / MCP** — no persistent per-project provider artifacts. `agentstack
   connect` registers the gateway once per harness (one write to each
   harness's global config) and every **trusted** repo serves its own stack
   live. `agentstack_lease_open(profile)` can fence one MCP connection to a
@@ -168,9 +168,9 @@ rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled `CLAUDE.md`
   a manifest profile (review it, then run `agentstack lock`), and close/process
   exit drops it. A machine-local
   `codemode/endpoint.json` coordinate may exist for the connection's duration — see
-  [the zero-copy bridge](#the-zero-copy-bridge---auto-project--trust).
+  [the zero-file bridge](#the-zero-file-bridge---auto-project--trust).
 
-**Recommendation:** prefer the zero-copy lease path for interactive work when
+**Recommendation:** prefer the zero-file lease path for interactive work when
 the harness supports MCP; use static or clean-at-rest delivery when the harness
 must read native skill/instruction files. Add `--sandbox --lockdown` when the
 agent process itself needs isolation—a lease is a capability fence, not a
@@ -742,7 +742,7 @@ the `listChanged` capability and sends `notifications/tools/list_changed`
 once the (trust-gated) gateway comes up — clients re-fetch `tools/list` and
 see the upstream tools without ever calling a control-plane tool first.
 
-### The zero-copy bridge (`--auto-project` + `trust`)
+### The zero-file bridge (`--auto-project` + `trust`)
 
 With `--auto-project`, one global registration serves **every** repo: at session
 start the gateway discovers the active project — MCP client roots → cwd walk-up →
@@ -807,8 +807,8 @@ project's own `using-agentstack` skill overrides it). An agent that can reach
 the gateway can always learn how to drive it.
 
 Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
-skills-over-MCP (`agentstack_list_loadable`/`agentstack_load`) are fully
-zero-copy. Native skill folders and instruction files (`CLAUDE.md`/`AGENTS.md`)
+skills-over-MCP (`agentstack_list_loadable`/`agentstack_load`) create no
+per-project native artifacts. Native skill folders and instruction files (`CLAUDE.md`/`AGENTS.md`)
 are read from disk by the harnesses themselves and still need render mode
 (`apply`/`use`) — `connect` prints this per harness.
 
@@ -1023,7 +1023,7 @@ native Claude Code/Codex packages + marketplaces) · atomic writes + backups ·
 `export`/`import` · `hook` · agent-operable `mcp` server · local dashboard
 (server/skill matrices, Discover, add-skill, settings editor) · live runs
 (`run`/`runs`/`kill` + dashboard Runs panel) · GitHub Action trust gate ·
-nightly adapter-conformance CI · zero-copy bridge (`connect` + `mcp
+nightly adapter-conformance CI · zero-file bridge (`connect` + `mcp
 --auto-project` + digest-pinned `trust`) · `optimize` (evidence-backed
 recommendations from usage/audit/cost signals, safe-class `--write`) ·
 fail-closed `lib sync` secret gate (all server fields + outgoing history) ·

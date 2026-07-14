@@ -1,4 +1,9 @@
-<title>AgentStack — Security Review Findings</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentStack — Historical security review findings</title>
 <style>
   :root {
     --ground: #f7f5f1;
@@ -88,6 +93,12 @@
   }
   .meta-row b { color: var(--muted); font-weight: 600; }
   .gate-ok { color: var(--good); }
+  .archive {
+    margin: 28px 0 0; padding: 16px 18px; border: 1px solid var(--good);
+    border-radius: 9px; background: var(--good-soft); color: var(--muted);
+    font-size: 14px;
+  }
+  .archive b { color: var(--good); font-family: var(--mono); }
 
   /* Verdict / thesis */
   .thesis {
@@ -198,6 +209,8 @@
     .agree { margin-left: 0; width: 100%; }
   }
 </style>
+</head>
+<body>
 
 <div class="wrap">
   <header>
@@ -211,6 +224,14 @@
       <span><b>Sandbox e2e</b> <span class="gate-ok">verified live on Docker 25.0.3</span></span>
     </div>
   </header>
+
+  <div class="archive"><b>HISTORICAL REVIEW · v0.8.1</b><br>
+    This page preserves what was found on 2026-07-11; it is not the current
+    enforcement specification. All five High and all seven Medium findings were
+    subsequently closed. Read the current <a href="ENFORCEMENT.md">enforcement
+    matrix</a> for shipped guarantees and <a href="HISTORY.md">history</a> for
+    closure details.
+  </div>
 
   <div class="thesis">
     <div class="label">Convergent verdict — both reviewers, independently</div>
@@ -388,3 +409,5 @@
     <p>Line/column references point at <span class="mono">v0.8.1</span> as reviewed on 2026-07-11. Severities describe the security-tool threat model (hostile bundle content, a hostile sandboxed process), not the current single-user deployment where most are latent.</p>
   </footer>
 </div>
+</body>
+</html>

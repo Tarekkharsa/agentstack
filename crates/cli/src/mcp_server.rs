@@ -900,7 +900,7 @@ fn tool_defs() -> Value {
                 "type": "object",
                 "required": ["profile"],
                 "properties": {
-                    "profile": { "type": "string", "description": "Existing manifest profile to authorize for this MCP connection" }
+                    "profile": { "type": "string", "description": "Existing manifest profile to select and fence for this MCP connection" }
                 }
             }
         },

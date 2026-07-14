@@ -161,10 +161,12 @@ calls it, so a repo can't dodge a machine rule by renaming a server):
 - `[policy.filesystem]` — bundle-global `read`/`write` path globs (`FsPolicy`;
   no per-server split — a sandbox mount is per-run, not per-server).
 
-All four are **uniform allow-by-default**: an absent key constrains nothing.
-Least privilege is an explicit machine opt-in, not a per-dimension special
-case — e.g. `[policy.tools] * = ["!*"]` to deny everything unless a bundle's
-own allowlist narrows further. (No approval/confirm channel exists yet;
+Tools, egress, and secrets are **allow-by-default**: an absent key constrains
+nothing. Filesystem writes are the deliberate exception on sandboxed paths:
+an absent effective write scope leaves the workspace read-only, as described
+below. Least privilege for the other dimensions is an explicit machine opt-in
+— e.g. `[policy.tools] * = ["!*"]` to deny everything unless a bundle's own
+allowlist narrows further. (No approval/confirm channel exists yet;
 a future "confirm before calling" tier is unbuilt work, not a shipped
 dimension.)
 

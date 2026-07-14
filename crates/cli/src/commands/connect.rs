@@ -322,7 +322,7 @@ fn print_limits(desc: &AdapterDescriptor) {
     }
     if !native.is_empty() {
         println!(
-            "  {} zero-copy limit: {} still need render mode (`apply`/`use`); \
+            "  {} zero-file limit: {} still need render mode (`apply`/`use`); \
              skills also load over MCP via agentstack_list_loadable/agentstack_load",
             "·".dimmed(),
             native.join(" and ")

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# AgentStack — the zero-copy trust gate, in 60 seconds.
+# AgentStack — the zero-file trust gate, in 60 seconds.
 #
 #   "Clone any repo. Its agents' capabilities are INERT until you review and
 #    trust it. Every brokered call is firewalled and audited."
@@ -90,7 +90,7 @@ for l in sys.stdin:
         print('  '+m[:180])
 " "$1" "$SBXC" "$SBX"; }
 
-printf '\033[1;36m  agentstack — the zero-copy trust gate\033[0m\n'
+printf '\033[1;36m  agentstack — the zero-file trust gate\033[0m\n'
 say "You just cloned some repo. It declares MCP servers. What can its agent touch?"
 run "agentstack mcp --auto-project   # (an agent asks the gateway what tools exist)"
 note "→ untrusted, so:"; search

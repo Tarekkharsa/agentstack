@@ -158,6 +158,7 @@
   h3.ex { display: flex; align-items: baseline; gap: 0.65rem; margin-top: 2.4rem; scroll-margin-top: 5rem; }
   h3.ex:first-of-type { margin-top: 1.6rem; }
   h3.ex .num { color: var(--accent); font-variant-numeric: tabular-nums; }
+  h3.ex .evidence { margin-left:auto; color:var(--good); font:600 .65rem var(--mono); letter-spacing:.07em; text-transform:uppercase; }
   .result { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); margin: 1rem 0 0.15rem; }
   .intent { color: var(--muted); max-width: 42rem; }
 
@@ -252,15 +253,23 @@
     <h1>AgentStack, <span class="accent">by example</span>.</h1>
     <p class="lede">
       Twenty-five copy-paste examples, building from a one-line manifest to
-      sandboxed, governed execution. Everything you author lives in
-      <strong>one file</strong> — <code>.agentstack/agentstack.toml</code>, the
-      intent, safe to commit. Relative paths anchor at that file's directory;
-      only <code>cwd</code> anchors at the project root.
+      sandboxed, governed execution. The manifest is the source of truth and
+      may reference instruction files and skill directories; generated native
+      configuration remains compiled output. Relative paths anchor at the
+      manifest's directory; only <code>cwd</code> anchors at the project root.
     </p>
 
     <div class="callout">
       <b>Our default recommendation</b>
       <p>For interactive work in an MCP-capable harness: commit the manifest + lock, connect the gateway once, trust each reviewed repo, and open the smallest useful profile as an MCP lease. Choose native rendering only when the harness must read native files; add lockdown when the agent process needs isolation. <a href="#choose">See why and when to choose differently.</a></p>
+    </div>
+
+    <div class="callout">
+      <b>How to read the evidence</b>
+      <p>Unless a heading is marked <strong>runnable fixture</strong>, treat its
+        code as a focused, CLI-validated recipe rather than a self-asserting
+        end-to-end proof. Runnable fixtures isolate your real configuration and
+        fail loudly when the claimed boundary does not hold.</p>
     </div>
 
     <div class="toc" aria-label="Contents">
@@ -584,7 +593,7 @@ github = ["get_*", "list_*"]            <span class="cm"># servers NAMED github 
 allowed_sources = ["git:github.com/acme/*"]   <span class="cm"># only these origins may be installed</span>
 forbid = ["network-broker"]                    <span class="cm"># never allow this capability</span></code></pre>
 
-    <h3 class="ex" id="e13"><span class="num">13</span> Zero files: the trust gate</h3>
+    <h3 class="ex" id="e13"><span class="num">13</span> Zero files: the trust gate <span class="evidence">runnable fixtures</span></h3>
     <p class="intent">Skip rendered files entirely. Register the gateway once; every <strong>trusted</strong> repo then serves its own servers live — an unreviewed repo is <strong>inert</strong>.</p>
     <div class="viz" data-viz>
       <p class="viz-cap"><span class="d"></span>clone → inert → trusted → audited</p>
@@ -702,7 +711,7 @@ agentstack plugins install cloudflare --target claude-code --write</code></pre>
     <p class="eyebrow">Runtime</p>
     <h2>Confine, observe, and measure a run</h2>
 
-    <h3 class="ex" id="e18"><span class="num">18</span> Sandboxed runs with egress policy</h3>
+    <h3 class="ex" id="e18"><span class="num">18</span> Sandboxed runs with egress policy <span class="evidence">runnable · Docker</span></h3>
     <p class="intent">Run the agent in a container with <strong>no host route and no internet</strong> — its only way out is the egress-proxy sidecar, which enforces your machine <code>[policy.egress]</code>.</p>
     <div class="viz" data-viz>
       <p class="viz-cap"><span class="d"></span>the only way out is the proxy</p>
@@ -869,6 +878,7 @@ owner = "codex"                                 <span class="cm"># codex owns th
       <a href="index.html">home</a>
       <a href="start.html">get&nbsp;started</a>
       <a href="primitives.html">primitives</a>
+      <a href="plan.html">plan</a>
       <a href="https://github.com/Tarekkharsa/agentstack">source</a>
       <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
     </nav>
