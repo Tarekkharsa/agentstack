@@ -266,7 +266,7 @@ impl ExecutionPlan {
         // The effective compiled policy the proxy enforces (its version is
         // baked in). The read-only mount decision is read off it here so the
         // plan can explain it without recompiling downstream.
-        let ruleset = crate::render::ruleset_for(&ctx.loaded.manifest);
+        let ruleset = crate::render::ruleset_for(&ctx.loaded.manifest)?;
         let fs_readonly_reason = ruleset.workspace_write_decision().err();
         let run_id = crate::runs::gen_id();
         let spec = build_sandbox_spec(&ctx.dir, command, ruleset, &run_id);

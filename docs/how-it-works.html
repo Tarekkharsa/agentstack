@@ -353,6 +353,17 @@
       </div>
     </div>
 
+    <div class="callout">
+      <b>The machine floor does not disappear after a bad edit.</b>
+      <p>A valid machine policy refreshes a secret-free last-known-good
+        snapshot. If the source later becomes unreadable, protected paths keep
+        enforcing that snapshot and report <strong>DEGRADED</strong>. With no
+        valid snapshot they report <strong>BLOCKED</strong> and refuse
+        activation; only a genuinely absent machine manifest is the benign
+        <strong>UNCONFIGURED</strong> state. <code>doctor</code> and
+        <code>explain</code> remain available for diagnosis.</p>
+    </div>
+
     <div class="callout stop">
       <b>Recovery and exactness</b>
       <p>If the parent <code>agentstack run</code> process is force-killed or the

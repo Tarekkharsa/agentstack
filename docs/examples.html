@@ -840,6 +840,7 @@ agentstack adapters list                        <span class="cm"># marks which a
     <pre><code>[servers.codex-native]
 owner = "codex"                                 <span class="cm"># codex owns this entry; apply follows it</span></code></pre>
     <p class="muted small">When the app rewrites its own entry (a self-update), <code>apply</code> refreshes the manifest and fans the fresh values out to every other CLI instead of reverting the app.</p>
+    <p class="muted small">Machine policy is resilient to accidental bad edits: a validated policy continues from a secret-free last-known-good snapshot and reports <strong>DEGRADED</strong>; first-run corruption reports <strong>BLOCKED</strong> and protected activation refuses to continue. Run <code>agentstack doctor</code> for the exact state and repair details.</p>
   </section>
 
   <section id="next">

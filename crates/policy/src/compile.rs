@@ -1,7 +1,7 @@
 //! `compile` — collapse (machine ∩ bundle) into the [`CompiledRuleset`].
 //!
-//! Pure, no I/O: the caller loads the two `Policy` values
-//! (`manifest::machine_policy()` + the project manifest) and passes the
+//! Pure, no I/O: the caller loads the two `Policy` values (the CLI's
+//! fail-closed machine-policy provider + the project manifest) and passes the
 //! trusted bundle's server names. The output is canonical (sorted keys,
 //! sorted glob lists, empties dropped) so identical inputs always produce
 //! identical bytes.

@@ -171,51 +171,24 @@ pub fn load_from_dir(dir: &Path) -> Result<LoadedManifest> {
     })
 }
 
-/// Merge the machine-level manifest's `[instructions]` — and ONLY those —
-/// beneath an already-loaded project manifest. Layer order is user → project
-/// → project-local (the project side of that chain is already collapsed in
-/// `loaded`), so a project fragment of the same name wins outright: a project
-/// that redefines a fragment fully owns it, which is more predictable than a
-/// field-by-field splice of personal and team content. Inherited fragments
-/// are flagged `from_user_layer` (compiled at global scope only, see
-/// `render::instructions`), listed FIRST (machine-wide rules before project
-/// rules), and their relative paths are re-anchored at the machine layer.
-///
-/// Servers, skills, settings, and hooks are deliberately NOT inherited:
-/// personal capabilities must never auto-inject into a team project, and the
-/// trust digest doesn't cover this layer — it must never widen the runtime
-/// surface. Called by `commands::load` (every command's context), not by
-/// [`load_from_dir`], so primitive loads (trust review, the machine layer
-/// itself) stay single-layer.
-///
-/// The machine manifest's `[policy]` — the user's own firewall layer, loaded
-/// separately from [`merge_user_layer`] so a repo manifest can never see or
-/// shadow it. The runtime gateway enforces it WITH deny precedence: a call
-/// must pass both this policy and the project's, so a cloned repo cannot
-/// loosen what the machine forbids.
-///
-/// Unlike the instructions merge, a broken machine manifest is warned about
-/// (stderr), not silent: silently dropping the user's own deny rules would
-/// fail open on exactly the file that exists to say no. Still non-fatal — the
-/// project policy continues to apply.
-pub fn machine_policy() -> crate::manifest::Policy {
-    match machine_policy_health() {
-        None => crate::manifest::Policy::default(),
-        Some(Ok(policy)) => policy,
-        Some(Err(e)) => {
-            eprintln!("warning: machine policy unavailable ({e:#}); only project policy applies");
-            crate::manifest::Policy::default()
-        }
-    }
+/// One successfully parsed machine-policy source. The digest is computed from
+/// the exact manifest bytes parsed into `policy`, so the CLI can persist a
+/// last-known-good snapshot without a second read/parse TOCTOU window.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MachinePolicySource {
+    pub policy: crate::manifest::Policy,
+    pub source_digest: String,
 }
 
 /// The machine policy's load result, for health surfaces (`doctor`): `None`
 /// when no machine manifest exists, `Some(Err)` when one exists but is
-/// unreadable or future-versioned — the state where the runtime fails OPEN to
-/// project-only policy, which stderr alone won't reliably surface (harnesses
-/// log it away).
-pub fn machine_policy_health() -> Option<Result<crate::manifest::Policy>> {
-    Some(machine_manifest()?.map(|m| m.policy))
+/// unreadable or future-versioned. Runtime consumers must handle that error;
+/// this core surface never substitutes an empty policy.
+pub fn machine_policy_health() -> Option<Result<MachinePolicySource>> {
+    Some(machine_manifest()?.map(|m| MachinePolicySource {
+        policy: m.manifest.policy,
+        source_digest: m.source_digest,
+    }))
 }
 
 /// The machine manifest's `[guard]`, same tri-state as
@@ -225,13 +198,18 @@ pub fn machine_policy_health() -> Option<Result<crate::manifest::Policy>> {
 /// silently allowing everything because the config rotted is the one wrong
 /// answer.
 pub fn machine_guard_health() -> Option<Result<crate::manifest::GuardConfig>> {
-    Some(machine_manifest()?.map(|m| m.guard))
+    Some(machine_manifest()?.map(|m| m.manifest.guard))
 }
 
 /// Machine-owned experimental feature flags. A repository manifest can never
 /// enable an execution primitive on the user's behalf.
 pub fn machine_experimental_health() -> Option<Result<crate::manifest::ExperimentalConfig>> {
-    Some(machine_manifest()?.map(|m| m.experimental))
+    Some(machine_manifest()?.map(|m| m.manifest.experimental))
+}
+
+struct MachineManifestSource {
+    manifest: Manifest,
+    source_digest: String,
 }
 
 /// Load `~/.agentstack/agentstack.toml` whole. Only a genuinely absent file
@@ -239,11 +217,13 @@ pub fn machine_experimental_health() -> Option<Result<crate::manifest::Experimen
 /// I/O, parse, future version) is a real error — folding it into `None`
 /// would silently drop the user's own firewall with no warning and no
 /// doctor finding.
-fn machine_manifest() -> Option<Result<Manifest>> {
+fn machine_manifest() -> Option<Result<MachineManifestSource>> {
     let path = crate::util::paths::agentstack_home().join(MANIFEST_FILE);
-    let text = match fs::read_to_string(&path) {
+    if !path.exists() {
+        return None;
+    }
+    let text = match crate::util::read_to_string_bounded(&path, crate::util::MAX_CONFIG_BYTES) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
         Err(e) => {
             return Some(Err(anyhow::anyhow!("reading {}: {e}", path.display())));
         }
@@ -265,12 +245,30 @@ fn machine_manifest() -> Option<Result<Manifest>> {
     ) {
         return Some(Err(e));
     }
-    Some(Ok(manifest))
+    Some(Ok(MachineManifestSource {
+        manifest,
+        source_digest: crate::digest::sha256_hex(text.as_bytes()),
+    }))
 }
 
-/// A missing or unparseable machine layer is a silent no-op — a broken
-/// personal file must not take every project down — as is loading the machine
-/// manifest itself.
+/// Merge the machine-level manifest's `[instructions]` — and ONLY those —
+/// beneath an already-loaded project manifest. Layer order is user → project
+/// → project-local (the project side of that chain is already collapsed in
+/// `loaded`), so a project fragment of the same name wins outright: a project
+/// that redefines a fragment fully owns it, which is more predictable than a
+/// field-by-field splice of personal and team content. Inherited fragments
+/// are flagged `from_user_layer` (compiled at global scope only, see
+/// `render::instructions`), listed FIRST (machine-wide rules before project
+/// rules), and their relative paths are re-anchored at the machine layer.
+///
+/// Servers, skills, settings, and hooks are deliberately NOT inherited:
+/// personal capabilities must never auto-inject into a team project, and the
+/// trust digest doesn't cover this layer — it must never widen the runtime
+/// surface. Called by `commands::load` (every command's context), not by
+/// [`load_from_dir`], so primitive loads (trust review, the machine layer
+/// itself) stay single-layer. A missing or unparseable machine instruction
+/// layer is a no-op here; enforcement consumers independently use the
+/// fail-closed machine-policy provider.
 pub fn merge_user_layer(loaded: &mut LoadedManifest) {
     let home = crate::util::paths::agentstack_home();
     let user_manifest = home.join(MANIFEST_FILE);
@@ -435,9 +433,8 @@ mod tests {
         assert_eq!(discover_project_base_below(&inner, Some(&home)), Some(proj));
     }
 
-    /// The machine `[policy]` loads from the machine manifest; a broken or
-    /// future-version file degrades to an empty policy (warned on stderr, not
-    /// fatal) — the project policy still applies either way.
+    /// The machine `[policy]` health surface distinguishes absence, a valid
+    /// source, and corruption. It never turns corruption into empty policy.
     #[test]
     fn machine_policy_loads_from_the_machine_manifest() {
         let _guard = crate::util::TEST_ENV_LOCK
@@ -447,8 +444,8 @@ mod tests {
         std::env::set_var("AGENTSTACK_HOME", tmp.path());
         let path = tmp.path().join(MANIFEST_FILE);
 
-        // No machine manifest → empty policy.
-        assert!(machine_policy().is_empty());
+        // No machine manifest is explicit absence.
+        assert!(machine_policy_health().is_none());
 
         // A [policy.tools] rule loads.
         fs::write(
@@ -456,15 +453,16 @@ mod tests {
             "version = 1\n[policy.tools]\nfigma = [\"!delete_*\"]\n",
         )
         .unwrap();
-        let policy = machine_policy();
-        assert!(policy.tool_allowed("figma", "delete_file").is_err());
-        assert!(policy.tool_allowed("figma", "get_file").is_ok());
+        let source = machine_policy_health().unwrap().unwrap();
+        assert!(source.policy.tool_allowed("figma", "delete_file").is_err());
+        assert!(source.policy.tool_allowed("figma", "get_file").is_ok());
+        assert_eq!(source.source_digest.len(), 64);
 
-        // Unreadable / future-version files degrade to empty, not panic/fatal.
+        // Unreadable / future-version files remain errors.
         fs::write(&path, "not toml {{{").unwrap();
-        assert!(machine_policy().is_empty());
+        assert!(matches!(machine_policy_health(), Some(Err(_))));
         fs::write(&path, "version = 99\n[policy.tools]\nfigma = [\"!x\"]\n").unwrap();
-        assert!(machine_policy().is_empty());
+        assert!(matches!(machine_policy_health(), Some(Err(_))));
 
         // Health distinguishes the states doctor needs: broken file = Err…
         assert!(matches!(machine_policy_health(), Some(Err(_))));

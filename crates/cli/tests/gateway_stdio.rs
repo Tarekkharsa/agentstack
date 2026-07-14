@@ -317,6 +317,22 @@ fn machine_policy_denies_with_precedence_over_the_project() {
         gw.namespaced_tools().is_empty(),
         "machine-denied tool must not be discoverable"
     );
+
+    // The first validated load persisted the secret-free policy input. If the
+    // source subsequently rots, a fresh gateway must retain the deny from that
+    // last-known-good snapshot rather than falling back to project-only policy.
+    drop(gw);
+    std::fs::write(agentstack_home.join("agentstack.toml"), "not toml {{{").unwrap();
+    let cached = Gateway::from_manifest(Some(&proj));
+    let err = cached
+        .try_call("fix__echo", &json!({ "msg": "hi" }))
+        .expect("routed")
+        .expect_err("last-known-good machine policy must retain the deny");
+    assert!(err.to_string().contains("machine policy"), "{err}");
+    assert!(
+        cached.namespaced_tools().is_empty(),
+        "last-known-good denied tool must remain undiscoverable"
+    );
 }
 
 /// The serialization fix: a slow call to one upstream must not block a call to

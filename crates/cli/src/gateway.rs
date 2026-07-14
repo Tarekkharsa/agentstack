@@ -639,11 +639,23 @@ impl Gateway {
             // never recompiled here, so one run has exactly one ruleset.
             let ruleset = match ruleset_override {
                 Some(r) => r,
-                None => agentstack_policy::compile(
-                    &crate::manifest::machine_policy(),
-                    &ctx.loaded.manifest.policy,
-                    &server_names,
-                ),
+                None => match crate::machine_policy::load() {
+                    Ok(machine) => agentstack_policy::compile(
+                        &machine,
+                        &ctx.loaded.manifest.policy,
+                        &server_names,
+                    ),
+                    Err(error) => {
+                        eprintln!("gateway: {error:#}");
+                        return Gateway {
+                            upstreams: Vec::new(),
+                            cache: std::sync::Mutex::new(Some(std::sync::Arc::new(Vec::new()))),
+                            ruleset: agentstack_policy::CompiledRuleset::default(),
+                            project: None,
+                            run_id,
+                        };
+                    }
+                },
             };
             let project = Some(ctx.dir.display().to_string());
             // Per-server secret-ref NAMES resolved during construction (values

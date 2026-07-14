@@ -173,7 +173,7 @@ fn render(
     println!("Scope: {scope}");
     // The effective (machine ∩ project) policy artifact, compiled once for
     // every render-time check this pass makes (secret scoping, egress).
-    let ruleset = crate::render::ruleset_for(manifest);
+    let ruleset = crate::render::ruleset_for(manifest)?;
     let mut state = State::load()?;
     let identity = crate::state::manifest_identity(&ctx.dir);
     let mut changed_count = 0;

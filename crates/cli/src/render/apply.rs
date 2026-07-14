@@ -183,7 +183,7 @@ pub fn plan_target(
             (n, s)
         })
         .collect();
-    let ruleset = ruleset_for(manifest);
+    let ruleset = ruleset_for(manifest)?;
     plan_target_with_servers(
         desc,
         resolver,
@@ -351,9 +351,14 @@ pub fn plan_target_with_servers(
 /// the inline `[servers.*]` table; names either policy layer mentions are
 /// folded in by `compile` itself, and anything else routes to the rename-
 /// proof `any` bucket, so library-resolved names are covered either way.
-pub fn ruleset_for(manifest: &Manifest) -> agentstack_policy::CompiledRuleset {
+pub fn ruleset_for(manifest: &Manifest) -> Result<agentstack_policy::CompiledRuleset> {
     let names: Vec<&str> = manifest.servers.keys().map(String::as_str).collect();
-    agentstack_policy::compile(&crate::manifest::machine_policy(), &manifest.policy, &names)
+    let machine = crate::machine_policy::load()?;
+    Ok(agentstack_policy::compile(
+        &machine,
+        &manifest.policy,
+        &names,
+    ))
 }
 
 /// The host of a DECLARED server URL, statically: scheme stripped, userinfo

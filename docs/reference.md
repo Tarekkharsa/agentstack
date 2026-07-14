@@ -248,10 +248,13 @@ github = ["get_*", "list_*"]          # servers NAMED github are read-only
 
 The layer is loaded once per gateway launch (like everything else — "the
 manifest is resolved once per launch"), so tightening it mid-session takes
-effect on the next session. A broken machine manifest is warned about on
-stderr and **fails open** to project-only policy (failing closed would brick
-every project over one bad TOML edit) — `doctor` flags that state reliably,
-since harnesses often swallow stderr.
+effect on the next session. Each valid load stores a secret-free,
+digest-labelled last-known-good policy snapshot. If a later edit is malformed,
+the gateway enforces that snapshot and reports **DEGRADED**; if the first load
+is malformed or the snapshot is unusable, protected activation is **BLOCKED**
+instead of silently falling back to project-only policy. A genuinely absent
+machine manifest is the separate, benign **UNCONFIGURED** state. `doctor`
+distinguishes all three conditions.
 
 ### Call log
 

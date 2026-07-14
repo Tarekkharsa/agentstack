@@ -80,6 +80,20 @@ fn check(protocol: Option<&str>) -> Result<()> {
         Some(Ok(cfg)) => cfg,
     };
 
+    // Active guard checks use the same fail-closed machine-policy input as
+    // apply and the gateway. A broken first run denies; a previously validated
+    // policy may continue from its LKG. A disabled/removed guard remains inert
+    // because enablement was resolved first.
+    let machine_policy = match crate::machine_policy::load() {
+        Ok(policy) => policy,
+        Err(error) => {
+            let deny = Decision::Deny {
+                reason: format!("machine policy unavailable — failing closed ({error:#})"),
+            };
+            finish(fallback_proto, &deny, None);
+        }
+    };
+
     let raw = match read_payload(std::io::stdin()) {
         Ok(raw) => raw,
         Err(error) => {
@@ -94,17 +108,6 @@ fn check(protocol: Option<&str>) -> Result<()> {
         Err(_) => std::process::exit(0), // unknown shape → fail-open
     };
     let proto = requested_proto.unwrap_or_else(|| Protocol::detect(&payload));
-    let machine_policy = match manifest::machine_policy_health() {
-        Some(Err(e)) => {
-            let deny = Decision::Deny {
-                reason: format!("machine policy unreadable — failing closed ({e:#})"),
-            };
-            finish(proto, &deny, None);
-        }
-        Some(Ok(p)) => p,
-        None => Default::default(),
-    };
-
     let Some((event, cwd)) = proto.parse_event(&payload) else {
         finish(proto, &Decision::Allow, None);
     };
@@ -238,7 +241,7 @@ fn test(command: &str) -> Result<()> {
         Some(Err(e)) => anyhow::bail!("machine config unreadable: {e:#}"),
         None => Default::default(),
     };
-    let machine_policy = manifest::machine_policy();
+    let machine_policy = crate::machine_policy::load()?;
     let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
     let project_policy = manifest::load_from_dir(&workspace)
         .map(|l| l.manifest.policy)
@@ -618,31 +621,58 @@ fn uninstall() -> Result<()> {
 }
 
 fn status() -> Result<()> {
-    let cfg = match manifest::machine_guard_health() {
-        Some(Ok(c)) => c,
-        Some(Err(e)) => {
-            println!("{} machine config unreadable: {e:#}", "✗".red());
-            return Ok(());
-        }
-        None => Default::default(),
+    let (cfg, guard_error) = match manifest::machine_guard_health() {
+        Some(Ok(c)) => (Some(c), None),
+        Some(Err(e)) => (None, Some(format!("{e:#}"))),
+        None => (Some(Default::default()), None),
     };
-    let policy = manifest::machine_policy();
+    let inspected = crate::machine_policy::inspect();
     println!(
         "guard: {}",
-        if cfg.enabled() {
-            "enabled".green().to_string()
-        } else {
-            "disabled (run `agentstack guard install`)"
+        match (&cfg, &guard_error) {
+            (_, Some(error)) =>
+                format!("{} — machine config unreadable ({error})", "BLOCKED".red()),
+            (Some(cfg), None) if cfg.enabled() => "enabled".green().to_string(),
+            _ => "disabled (run `agentstack guard install`)"
                 .yellow()
-                .to_string()
+                .to_string(),
         }
     );
-    println!(
-        "  deny globs ({}): {}",
-        policy.filesystem.deny.len(),
-        policy.filesystem.deny.join(", ")
-    );
-    println!("  allow_roots: {}", cfg.allow_roots.join(", "));
+    match &inspected.status {
+        crate::machine_policy::Status::Unconfigured => {
+            println!("  machine policy: unconfigured");
+        }
+        crate::machine_policy::Status::Current { .. } => {
+            println!("  machine policy: current");
+        }
+        crate::machine_policy::Status::LastKnownGood { source_error, .. } => {
+            println!(
+                "  machine policy: {} — source unreadable ({source_error})",
+                "DEGRADED (last-known-good)".yellow()
+            );
+        }
+        crate::machine_policy::Status::Blocked {
+            source_error,
+            snapshot_error,
+        } => {
+            println!(
+                "  machine policy: {} — source: {source_error}; snapshot: {snapshot_error}",
+                "BLOCKED".red()
+            );
+        }
+    }
+    if let Some(policy) = &inspected.policy {
+        println!(
+            "  deny globs ({}): {}",
+            policy.filesystem.deny.len(),
+            policy.filesystem.deny.join(", ")
+        );
+    }
+    if let Some(cfg) = &cfg {
+        println!("  allow_roots: {}", cfg.allow_roots.join(", "));
+    } else {
+        println!("  allow_roots: unavailable");
+    }
     for t in targets() {
         let detected = paths::expand_tilde(t.detect).exists();
         let installed = detected && target_installed(&t);

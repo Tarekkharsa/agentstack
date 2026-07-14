@@ -273,18 +273,45 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
             ),
         );
     }
-    let machine = crate::manifest::machine_policy();
-    for key in [name, "*"] {
-        if let Some(rules) = machine.tools.get(key) {
-            let scope = if key == "*" { " (via \"*\")" } else { "" };
-            kv(
-                &mut o,
-                "Tool policy (machine)",
-                &format!(
-                    "{}{scope} — from ~/.agentstack/agentstack.toml, checked before project policy; this project cannot loosen it",
-                    rule_summary(rules)
-                ),
-            );
+    let machine = crate::machine_policy::inspect();
+    match &machine.status {
+        crate::machine_policy::Status::Unconfigured => {}
+        crate::machine_policy::Status::Current {
+            cache_error: Some(error),
+            ..
+        } => kv(
+            &mut o,
+            "Machine policy status",
+            &format!("current, but the resilience snapshot could not refresh ({error})"),
+        ),
+        crate::machine_policy::Status::Current { .. } => {}
+        crate::machine_policy::Status::LastKnownGood { source_error, .. } => kv(
+            &mut o,
+            "Machine policy status",
+            &format!("DEGRADED — enforcing last-known-good policy because the source is unreadable ({source_error})"),
+        ),
+        crate::machine_policy::Status::Blocked {
+            source_error,
+            snapshot_error,
+        } => kv(
+            &mut o,
+            "Machine policy status",
+            &format!("✗ BLOCKED — source: {source_error}; snapshot: {snapshot_error}"),
+        ),
+    }
+    if let Some(machine) = &machine.policy {
+        for key in [name, "*"] {
+            if let Some(rules) = machine.tools.get(key) {
+                let scope = if key == "*" { " (via \"*\")" } else { "" };
+                kv(
+                    &mut o,
+                    "Tool policy (machine)",
+                    &format!(
+                        "{}{scope} — from ~/.agentstack/agentstack.toml, checked before project policy; this project cannot loosen it",
+                        rule_summary(rules)
+                    ),
+                );
+            }
         }
     }
     // The sibling per-server dimensions, same two-layer display. Egress is
@@ -311,27 +338,29 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
             ),
         );
     }
-    for key in [name, "*"] {
-        let scope = if key == "*" { " (via \"*\")" } else { "" };
-        if let Some(rules) = machine.egress.get(key) {
-            kv(
-                &mut o,
-                "Egress (machine)",
-                &format!(
-                    "{}{scope} — this project cannot loosen it",
-                    rule_summary(rules)
-                ),
-            );
-        }
-        if let Some(rules) = machine.secrets.get(key) {
-            kv(
-                &mut o,
-                "Secret access (machine)",
-                &format!(
-                    "{}{scope} — this project cannot loosen it",
-                    rule_summary(rules)
-                ),
-            );
+    if let Some(machine) = &machine.policy {
+        for key in [name, "*"] {
+            let scope = if key == "*" { " (via \"*\")" } else { "" };
+            if let Some(rules) = machine.egress.get(key) {
+                kv(
+                    &mut o,
+                    "Egress (machine)",
+                    &format!(
+                        "{}{scope} — this project cannot loosen it",
+                        rule_summary(rules)
+                    ),
+                );
+            }
+            if let Some(rules) = machine.secrets.get(key) {
+                kv(
+                    &mut o,
+                    "Secret access (machine)",
+                    &format!(
+                        "{}{scope} — this project cannot loosen it",
+                        rule_summary(rules)
+                    ),
+                );
+            }
         }
     }
 
@@ -348,16 +377,20 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
             // Annotate the declared host against the effective egress policy
             // when one constrains this server — the same check apply/gateway
             // enforce at write/spawn time.
-            let verdict = if ruleset.egress_constrained(name) {
-                match crate::render::declared_host(server.url.as_deref().unwrap_or("")) {
-                    Some(h) => match ruleset.egress_decision(name, &h, None) {
-                        Ok(()) => " — passes [policy.egress]",
-                        Err(_) => " — ✗ BLOCKED by [policy.egress] at write/spawn time",
-                    },
-                    None => " — host not statically verifiable; fails closed at write/spawn time",
+            let verdict = match ruleset {
+                Err(_) => " — ✗ BLOCKED: effective policy unavailable",
+                Ok(ruleset) if ruleset.egress_constrained(name) => {
+                    match crate::render::declared_host(server.url.as_deref().unwrap_or("")) {
+                        Some(h) => match ruleset.egress_decision(name, &h, None) {
+                            Ok(()) => " — passes [policy.egress]",
+                            Err(_) => " — ✗ BLOCKED by [policy.egress] at write/spawn time",
+                        },
+                        None => {
+                            " — host not statically verifiable; fails closed at write/spawn time"
+                        }
+                    }
                 }
-            } else {
-                ""
+                Ok(_) => "",
             };
             bullet(
                 &mut o,

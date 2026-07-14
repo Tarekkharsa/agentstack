@@ -319,7 +319,18 @@ fn run_checks(
             ),
         );
     }
-    let ruleset = crate::render::ruleset_for(manifest);
+    let ruleset = match crate::render::ruleset_for(manifest) {
+        Ok(ruleset) => Some(ruleset),
+        Err(error) => {
+            report.line(
+                Level::Error,
+                format!(
+                    "effective machine policy unavailable — drift rendering is BLOCKED ({error:#})"
+                ),
+            );
+            None
+        }
+    };
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
@@ -354,10 +365,13 @@ fn run_checks(
                 kept_report.push(k.clone());
             }
         }
+        let Some(ruleset) = ruleset.as_ref() else {
+            continue;
+        };
         let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
-            &ruleset,
+            ruleset,
             &server_map,
             &previously,
             Scope::Global,
@@ -876,7 +890,7 @@ fn run_checks(
 
     // Project policy is optional; the machine layer applies either way, so the
     // "Policy" section shows whenever EITHER has something to report.
-    let machine_policy = crate::manifest::machine_policy_health();
+    let machine_policy = crate::machine_policy::inspect();
     // Machine-policy posture: one honest word (open / mixed / restrictive) for
     // how locked-down THIS machine's own firewall layer is — shown even when
     // there's no machine policy at all, because "open" is the case most worth
@@ -890,7 +904,7 @@ fn run_checks(
         if !manifest.policy.is_empty() {
             check_policy(manifest, report);
         }
-        check_machine_policy(machine_policy, report);
+        check_machine_policy(&machine_policy, report);
         // The EFFECTIVE (machine ∩ project) ruleset, not just the project
         // layer — a machine-only deny must surface here too, same as it
         // would bite at apply/gateway time.
@@ -1323,7 +1337,16 @@ fn server_secret_refs(server: &Server) -> Vec<String> {
 /// Warn when this particular server IS actually egress-constrained (an
 /// unconstrained server passes regardless, so silence is correct there).
 fn check_effective_policy(manifest: &Manifest, report: &mut Report) {
-    let ruleset = ruleset_for(manifest);
+    let ruleset = match ruleset_for(manifest) {
+        Ok(ruleset) => ruleset,
+        Err(error) => {
+            report.line(
+                Level::Error,
+                format!("effective policy is BLOCKED — {error:#}"),
+            );
+            return;
+        }
+    };
     for (name, server) in &manifest.servers {
         for r in server_secret_refs(server) {
             if let Err(rule) = ruleset.secret_decision(name, &r) {
@@ -1365,12 +1388,15 @@ fn check_effective_policy(manifest: &Manifest, report: &mut Report) {
 
 /// Whether the machine policy layer has anything for `doctor` to report — a
 /// non-empty `[policy.tools]`/`[policy.egress]`/`[policy.secrets]`, or an
-/// unreadable machine manifest (which fails OPEN and must be surfaced). Used
+/// degraded/blocked machine-policy state that must be surfaced. Used
 /// to decide whether the "Policy" section is warranted at all when the
 /// project declares no policy of its own.
-fn machine_policy_reports(machine: &Option<Result<crate::manifest::Policy>>) -> bool {
-    matches!(machine, Some(Ok(p)) if !p.tools.is_empty() || !p.egress.is_empty() || !p.secrets.is_empty())
-        || matches!(machine, Some(Err(_)))
+fn machine_policy_reports(machine: &crate::machine_policy::Inspection) -> bool {
+    !matches!(machine.status, crate::machine_policy::Status::Unconfigured)
+        || machine
+            .policy
+            .as_ref()
+            .is_some_and(|policy| !policy.is_empty())
 }
 
 /// One machine-layer dimension's summary + rename-dodge lint: an Ok line
@@ -1402,8 +1428,13 @@ fn report_machine_dimension(
 /// `doctor`. Deliberately simple — this is a one-line headline, not the section
 /// detail below it:
 ///
-/// - **open** — no machine manifest, an empty `[policy]`, or (fail-open) an
-///   unreadable one: nothing on this machine narrows what a cloned repo may do.
+/// - **unconfigured** — no machine manifest exists; this is a benign explicit
+///   absence, not corruption.
+/// - **degraded** — the source is unreadable and a validated last-known-good
+///   policy is being enforced.
+/// - **blocked** — both source and snapshot are unusable, so enforcement paths
+///   refuse to proceed.
+/// - **open** — the current machine manifest has an empty `[policy]`.
 /// - **restrictive** — at least one dimension carries a rename-proof `"*"` rule
 ///   (tools/egress/secrets), or a `[policy.filesystem]` scope is set: the
 ///   firewall binds every server, whatever a repo renames it to.
@@ -1413,41 +1444,51 @@ fn report_machine_dimension(
 /// Never overstates: a `"*"` rule earns "restrictive", not "locked down" — a
 /// `"*"` allowlist can still be broad. Pure (takes a borrow, returns static
 /// strings) so it is unit-testable without a `Report` or a real machine file.
-fn classify_machine_posture(
-    machine: &Option<Result<crate::manifest::Policy>>,
-) -> (&'static str, &'static str) {
-    let policy = match machine {
-        None => {
+fn classify_machine_posture(machine: &crate::machine_policy::Inspection) -> (&'static str, String) {
+    match &machine.status {
+        crate::machine_policy::Status::Unconfigured => {
             return (
-                "open",
-                "no machine policy file — every project runs with its own policy only",
-            )
+                "unconfigured",
+                "no machine policy file — projects use their own policy".into(),
+            );
         }
-        Some(Err(_)) => {
+        crate::machine_policy::Status::LastKnownGood { source_error, .. } => {
             return (
-                "open",
-                "machine policy is unreadable — the gateway fails open to project-only policy",
-            )
+                "degraded",
+                format!("enforcing last-known-good policy; source unreadable ({source_error})"),
+            );
         }
-        Some(Ok(p)) => p,
+        crate::machine_policy::Status::Blocked {
+            source_error,
+            snapshot_error,
+        } => {
+            return (
+                "blocked",
+                format!("source unreadable ({source_error}); snapshot unusable ({snapshot_error})"),
+            );
+        }
+        crate::machine_policy::Status::Current { .. } => {}
+    }
+    let Some(policy) = machine.policy.as_ref() else {
+        return ("blocked", "validated machine policy is unavailable".into());
     };
     let dims = [&policy.tools, &policy.egress, &policy.secrets];
     if dims.iter().all(|m| m.is_empty()) && policy.filesystem.is_empty() {
         return (
             "open",
-            "machine [policy] is empty — nothing here narrows what a project may do",
+            "machine [policy] is empty — nothing here narrows what a project may do".into(),
         );
     }
     let has_wildcard = dims.iter().any(|m| m.contains_key("*"));
     if has_wildcard || !policy.filesystem.is_empty() {
         (
             "restrictive",
-            "a rename-proof \"*\" rule (or a filesystem scope) constrains every server",
+            "a rename-proof \"*\" rule (or a filesystem scope) constrains every server".into(),
         )
     } else {
         (
             "mixed",
-            "only named-server rules — a repo can dodge them by renaming its server",
+            "only named-server rules — a repo can dodge them by renaming its server".into(),
         )
     }
 }
@@ -1458,23 +1499,47 @@ fn classify_machine_posture(
 /// project, so gating it behind a project policy would hide it exactly when
 /// a machine-only firewall is the whole setup. Takes the pre-computed health
 /// so the caller reads the machine manifest once.
-fn check_machine_policy(machine: Option<Result<crate::manifest::Policy>>, report: &mut Report) {
-    // The machine layer fails OPEN when its manifest is broken (project-only
-    // policy, stderr warning only) — doctor is the reliable signal for that.
-    match machine {
-        None => {}
-        Some(Ok(p)) if p.tools.is_empty() && p.egress.is_empty() && p.secrets.is_empty() => {}
-        Some(Ok(p)) => {
-            report_machine_dimension("tools", &p.tools, report);
-            report_machine_dimension("egress", &p.egress, report);
-            report_machine_dimension("secrets", &p.secrets, report);
-        }
-        Some(Err(e)) => report.line(
+fn check_machine_policy(machine: &crate::machine_policy::Inspection, report: &mut Report) {
+    match &machine.status {
+        crate::machine_policy::Status::Unconfigured => {}
+        crate::machine_policy::Status::Current {
+            source_digest,
+            cache_error: Some(error),
+            ..
+        } => report.line(
             Level::Warn,
+            format!("machine policy CURRENT — source {source_digest}; snapshot refresh failed ({error})"),
+        ),
+        crate::machine_policy::Status::Current {
+            source_digest,
+            snapshot_synced,
+            ..
+        } => report.line(
+            Level::Ok,
             format!(
-                "machine policy is unreadable — the gateway runs with PROJECT POLICY ONLY ↳ fix it ({e:#})"
+                "machine policy CURRENT — source {source_digest}; snapshot {}",
+                if *snapshot_synced { "in sync" } else { "not in sync" }
             ),
         ),
+        crate::machine_policy::Status::LastKnownGood {
+            source_error,
+            source_digest,
+        } => report.line(
+            Level::Warn,
+            format!("machine policy DEGRADED — enforcing last-known-good source {source_digest}; current source unreadable ({source_error})"),
+        ),
+        crate::machine_policy::Status::Blocked {
+            source_error,
+            snapshot_error,
+        } => report.line(
+            Level::Error,
+            format!("machine policy BLOCKED — source: {source_error}; snapshot: {snapshot_error}"),
+        ),
+    }
+    if let Some(policy) = &machine.policy {
+        report_machine_dimension("tools", &policy.tools, report);
+        report_machine_dimension("egress", &policy.egress, report);
+        report_machine_dimension("secrets", &policy.secrets, report);
     }
 }
 
@@ -1733,33 +1798,49 @@ mod tests {
             m.policy
         };
 
-        // No machine file at all → open.
-        assert_eq!(classify_machine_posture(&None).0, "open");
-        // Unreadable machine file → open (fails open to project-only policy).
-        assert_eq!(
-            classify_machine_posture(&Some(Err(anyhow::anyhow!("boom")))).0,
-            "open"
-        );
+        let current = |policy| crate::machine_policy::Inspection {
+            policy: Some(policy),
+            status: crate::machine_policy::Status::Current {
+                source_digest: "a".repeat(64),
+                snapshot_synced: true,
+                cache_error: None,
+            },
+        };
+        // No machine file at all → benign but explicit unconfigured state.
+        let unconfigured = crate::machine_policy::Inspection {
+            policy: Some(Default::default()),
+            status: crate::machine_policy::Status::Unconfigured,
+        };
+        assert_eq!(classify_machine_posture(&unconfigured).0, "unconfigured");
+        // Unreadable machine file without a snapshot → blocked, never open.
+        let blocked = crate::machine_policy::Inspection {
+            policy: None,
+            status: crate::machine_policy::Status::Blocked {
+                source_error: "boom".into(),
+                snapshot_error: "missing".into(),
+            },
+        };
+        assert_eq!(classify_machine_posture(&blocked).0, "blocked");
         // Present but empty [policy] → open.
-        assert_eq!(classify_machine_posture(&Some(Ok(policy("")))).0, "open");
+        assert_eq!(classify_machine_posture(&current(policy(""))).0, "open");
         // Only a named-server rule → mixed (a repo can rename its server).
         assert_eq!(
-            classify_machine_posture(&Some(Ok(policy(
+            classify_machine_posture(&current(policy(
                 "[policy.tools]\ngithub = [\"!delete_*\"]\n"
-            ))))
+            )))
             .0,
             "mixed"
         );
         // A rename-proof "*" rule → restrictive.
         assert_eq!(
-            classify_machine_posture(&Some(Ok(policy("[policy.egress]\n\"*\" = [\"!*\"]\n")))).0,
+            classify_machine_posture(&current(policy("[policy.egress]\n\"*\" = [\"!*\"]\n"))).0,
             "restrictive"
         );
         // A filesystem scope alone → restrictive (bundle-global, no server key).
         assert_eq!(
-            classify_machine_posture(&Some(Ok(policy(
+            classify_machine_posture(&current(policy(
                 "[policy.filesystem]\nwrite = [\"./**\"]\n"
-            ))))
+            )))
             .0,
             "restrictive"
         );

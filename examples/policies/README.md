@@ -32,9 +32,11 @@ agentstack doctor        # confirm it loads; read the "Machine policy posture" l
 ```
 
 The layer is read once per gateway launch, so tightening it takes effect on the
-next session. A broken machine manifest **fails open** to project-only policy
-(one bad edit must not brick every project) and stderr-warns — `agentstack
-doctor` flags that state reliably, since harnesses often swallow stderr.
+next session. A valid load refreshes a secret-free last-known-good policy
+snapshot. A later broken edit runs **DEGRADED** with that snapshot; broken
+first-run state (or a corrupt snapshot) is **BLOCKED**, never project-only.
+No machine manifest at all is the benign **UNCONFIGURED** state. `agentstack
+doctor` names the state and repair details.
 
 ## The grammar (quick reference)
 

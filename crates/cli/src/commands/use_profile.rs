@@ -153,7 +153,7 @@ pub fn activate(
     }
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
-    let ruleset = crate::render::ruleset_for(manifest);
+    let ruleset = crate::render::ruleset_for(manifest)?;
     println!(
         "Activating profile '{}' (scope: {scope}) — {} server(s), {} skill(s)",
         args.profile.bold(),

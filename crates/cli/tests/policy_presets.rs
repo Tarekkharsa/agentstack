@@ -42,8 +42,8 @@ fn every_preset_parses_with_the_real_loader() {
         std::env::remove_var("AGENTSTACK_HOME");
 
         match health {
-            Some(Ok(policy)) => assert!(
-                !policy.is_empty(),
+            Some(Ok(source)) => assert!(
+                !source.policy.is_empty(),
                 "preset {name} parsed but produced an empty [policy] — it should set some rules"
             ),
             Some(Err(e)) => panic!("preset {name}.toml failed the real loader: {e:#}"),

@@ -7,8 +7,8 @@
 //! repo declares can loosen the machine layer.
 //!
 //! Everything in this crate is pure — no I/O, no config loading. The
-//! call sites load the two `Policy` values (`manifest::machine_policy()`
-//! and the project manifest) and hand them in. That purity is what makes
+//! call sites load the two `Policy` values (the CLI's fail-closed machine
+//! provider and the project manifest) and hand them in. That purity is what makes
 //! the property test below meaningful: the whole decision surface is a
 //! function of its arguments.
 
