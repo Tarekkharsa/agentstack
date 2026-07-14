@@ -275,6 +275,9 @@
     <nav class="top" aria-label="Project links">
       <a href="index.html#enforced">what's enforced</a>
       <a href="start.html" aria-current="page">get&nbsp;started</a>
+      <a class="refline" href="how-it-works.html">how&nbsp;it&nbsp;works</a>
+      <a class="refline" href="primitives.html">primitives</a>
+      <a class="refline" href="examples.html">examples</a>
       <a class="refline" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">reference</a>
       <a class="ghost" href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
     </nav>
@@ -409,6 +412,16 @@ agentstack connect --all --write    # write it into each harness's global MCP co
         repo's <code>[policy.tools]</code> and your machine-level rules, which no
         repo can loosen) and lands in <code>~/.agentstack/audit/calls.jsonl</code>.
       </p>
+      <div class="callout">
+        <b>Optional: select one profile without writing project files</b>
+        <p>Inside the agent session, call
+          <code>agentstack_lease_open({ "profile": "backend" })</code>. That MCP
+          connection sees only the profile's servers and loadable skills. Inspect
+          it with <code>agentstack_lease_status</code>; close it with
+          <code>agentstack_lease_close</code>, or simply end the MCP process. This
+          is process-local state—there is no native config to restore. See the
+          <a href="examples.html#e13">complete example</a>.</p>
+      </div>
     </li>
 
     <li id="s-secret">
@@ -483,17 +496,17 @@ agentstack run claude-code --sandbox --lockdown          # launch confined</code
         can't be created; that log captures the container lifecycle, egress
         decisions, brokered tool calls, and secret-reference names, tagged with
         the run's posture. It never stores argument values or secret values.
-        <code>agentstack report</code> reads it back.
+        <code>agentstack report &lt;run-id&gt;</code> reads it back.
       </p>
       <div class="copywrap">
-        <pre><code>agentstack report              # the latest run's decisions
-agentstack report &lt;run&gt; --json # machine-readable, carries the posture slug</code></pre>
-        <button class="copybtn" data-copy="agentstack report">copy</button>
+        <pre><code>agentstack report &lt;run-id&gt;        # that run's decisions
+agentstack report &lt;run-id&gt; --json # machine-readable, carries the posture slug</code></pre>
+        <button class="copybtn" data-copy="agentstack report &lt;run-id&gt;">copy</button>
       </div>
       <p class="expect">You should see</p>
       <div class="term">
         <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>agentstack report</b></div>
-        <pre><code><span class="p">$</span> agentstack report
+        <pre><code><span class="p">$</span> agentstack report r-0859dcee73
 <span class="c">  run 2026-07-11T…  posture: LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span>
 <span class="c">  ├─ SandboxStarted   image=…  network=internal-only</span>
 <span class="ok">  ├─ egress ✓</span> api.anthropic.com:443   allowed
@@ -563,6 +576,7 @@ agentstack report &lt;run&gt; --json # machine-readable, carries the posture slu
     <span>MIT or Apache-2.0, at your option.</span>
     <nav aria-label="Footer links">
       <a href="index.html">home</a>
+      <a href="primitives.html">primitives</a>
       <a href="https://github.com/Tarekkharsa/agentstack">source</a>
       <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
       <a href="security-review-2026-07-11.html">security&nbsp;review</a>

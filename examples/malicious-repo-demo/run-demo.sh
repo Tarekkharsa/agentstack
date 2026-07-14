@@ -17,8 +17,8 @@
 # unattended: the demo either provably works or fails loudly.
 #
 # What this demo does NOT claim: that exfiltration is impossible. A trusted
-# repo can still reach any host its policy allows. Per-host egress blocking is
-# Phase 2 (the egress crate); see the marked slot near the end.
+# repo can still use any allowed channel. This demo proves trust + tool-policy;
+# `run --sandbox --lockdown` is the separate enforced-egress primitive.
 #
 # Requires: `agentstack` on PATH (or AGENTSTACK_BIN=...) and python3.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -26,6 +26,11 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 AS="${AGENTSTACK_BIN:-agentstack}"
+if [[ "$AS" == */* ]]; then
+  AS="$(cd "$(dirname "$AS")" && pwd -P)/$(basename "$AS")"
+else
+  AS="$(command -v "$AS")"
+fi
 PASS=0
 FAIL=0
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
@@ -93,6 +98,7 @@ printf '\n\033[1m2) AgentStack, not yet trusted: the server is inert\033[0m\n'
 pause
 reset_sink
 cd "$REPO"
+"$AS" lock --manifest-dir "$REPO" >/dev/null
 TOOLS_OUT="$(printf '%s\n%s\n' "$INIT" \
   '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"tools_search","arguments":{"query":"exfiltrate"}}}' \
   | "$AS" mcp --auto-project 2>/dev/null || true)"
@@ -136,12 +142,9 @@ else
   bad "a firewalled repo still phoned home"
 fi
 
-# ── Phase 2 (not yet built): per-host egress block ───────────────────────────
-# When the egress crate lands, a trusted repo calling an ALLOWED tool that
-# connects out to an UNAPPROVED host is blocked at the egress boundary, and the
-# block is recorded. That assertion slots in HERE. It is deliberately absent:
-# today's build has no egress enforcement, and this demo only claims what it can
-# prove — unreviewed repos stay inert, and unapproved *tools* are blocked.
+# This fixture intentionally stops at the gateway boundary. Enforced per-host
+# egress is a separate composition exercised by `run --sandbox --lockdown`;
+# adding it here would turn a fast trust/firewall proof into a Docker demo.
 
 pause
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASS" "$FAIL"

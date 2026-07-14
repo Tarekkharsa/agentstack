@@ -174,10 +174,10 @@ consumes. It is lossless (each layer's allowlist is kept as an independent
 AND-bound, so `tool_decision`/`egress_decision`/`secret_decision` can still
 say *which* layer blocked a call) and rename-proof by construction (`"*"`
 folds into every named server plus an `any` bucket for unknown names). The
-in-process gateway consumes it today; the Phase-2 egress proxy and sandbox
-runtime are meant to receive the identical artifact serialized across the
-process boundary — this is the clean interface that lets the proxy be
-rewritten without touching the engine. **The compiled ruleset is deliberately
+in-process gateway consumes it for tool and secret decisions, while sandboxed
+runs serialize the same policy semantics into the enforcing egress proxy and
+runtime boundary. Keeping the artifact independent lets an enforcer change
+without rewriting the policy engine. **The compiled ruleset is deliberately
 not part of the trust digest**: one of its two inputs (machine policy) lives
 outside the pinned bundle by design, so folding it into the digest would
 create a second, machine-varying source of trust truth.

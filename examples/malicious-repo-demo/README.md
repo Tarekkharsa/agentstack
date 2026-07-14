@@ -46,12 +46,12 @@ It claims exactly this: **unreviewed repos stay inert, and tools your machine
 policy forbids are blocked and audited.**
 
 It does **not** claim that exfiltration is impossible. A *trusted* repo can
-still reach any host its policy allows — a prompt-injected agent could leak
-data through an approved channel, including the model API itself. Blocking a
-trusted repo from connecting to an *unapproved host* (per-host egress
-enforcement) is **Phase 2**, the egress crate, and is not in this build. The
-script marks the exact spot where that assertion will slot in once it exists.
-The demo is deliberately scoped to what today's build can prove.
+still leak through an approved channel, including the model API itself. This
+particular demo exercises the trust and tool-firewall primitives; it does not
+exercise egress confinement. For unapproved-host blocking, run a trusted bundle
+with `agentstack run --sandbox --lockdown`: lockdown removes the direct route
+and makes the enforcing egress proxy the only path out. Even then, an allowed
+destination remains allowed—the proxy restricts destinations, not payloads.
 
 ## Files
 

@@ -11,6 +11,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 AS="${AGENTSTACK_BIN:-agentstack}"
+if [[ "$AS" == */* ]]; then
+  AS="$(cd "$(dirname "$AS")" && pwd -P)/$(basename "$AS")"
+else
+  AS="$(command -v "$AS")"
+fi
 PAUSE="${DEMO_PAUSE:-0.6}"
 say()  { printf '\n\033[1;35m▎ %s\033[0m\n' "$*"; sleep "$PAUSE"; }
 run()  { printf '\033[2m$ %s\033[0m\n' "$*"; sleep "$PAUSE"; }
@@ -60,6 +65,7 @@ tools = { demo = ["!secret_read"] }
 servers = ["demo"]
 EOF
 cd "$REPO"
+"$AS" lock --manifest-dir "$REPO" >/dev/null
 
 # helpers to drive the gateway (agentstack mcp) over stdio like an agent would
 mcp() { "$AS" mcp --auto-project 2>/dev/null; }

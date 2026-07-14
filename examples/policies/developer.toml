@@ -26,7 +26,7 @@ version = 1
 ]
 
 # ── Egress (outbound host allow/deny, checked at write/spawn + enforced by the
-# Phase-2 proxy). Same grammar as tools; a "host:port" pattern scopes the port,
+# lockdown proxy). Same grammar as tools; a "host:port" pattern scopes the port,
 # a bare host means any port. ──────────────────────────────────────────────────
 [policy.egress]
 # Deny-list for every server: block cloud metadata endpoints (SSRF target) and

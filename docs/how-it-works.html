@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How AgentStack works — the runtime model</title>
+<meta name="description" content="The mental model the reference leaves implicit: config is read at launch, how profiles and sessions actually load and revert, why Ctrl+C isn't session end, and which policy layers block at runtime versus only fail a check.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:title" content="How AgentStack works — the runtime model">
+<meta property="og:description" content="Config is read at launch, profiles/sessions load and revert, and which policy layers actually block at runtime.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://tarekkharsa.github.io/agentstack/how-it-works.html">
+<meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="How AgentStack works">
+<meta name="twitter:description" content="The runtime model: launch-time config, session lifecycle, and what actually stops what.">
+<style>
+  :root {
+    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570; --faint: #69727C;
+    --accent: #B4540A; --accent-ink: #FFFFFF; --accent-soft: rgba(180,84,10,0.10); --accent-line: rgba(180,84,10,0.28);
+    --line: #E7E2D9; --line-soft: #EFEBE3;
+    --term: #14181C; --term-ink: #D7DEE4; --term-dim: #97A1AD; --term-green: #7CC08B; --term-red: #E5786B; --term-amber: #E0B04A;
+    --code-bg: #F3F0EA;
+    --ok: #2C8F5B; --warn: #B3801D; --stop: #C1462F; --info: #2F6FB0;
+    --shadow-sm: 0 1px 2px rgba(20,24,28,0.05), 0 1px 1px rgba(20,24,28,0.03);
+    --shadow-md: 0 4px 14px rgba(20,24,28,0.07), 0 1px 3px rgba(20,24,28,0.05);
+    --radius: 14px; --radius-sm: 9px;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --wrap: 56rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC; --faint: #737C85;
+      --accent: #F0975A; --accent-ink: #1A1206; --accent-soft: rgba(240,151,90,0.12); --accent-line: rgba(240,151,90,0.30);
+      --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329; --term: #0E1114;
+      --ok: #58C08A; --warn: #E0B04A; --stop: #E5786B; --info: #6BA6DE;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.30); --shadow-md: 0 6px 18px rgba(0,0,0,0.32);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC; --faint: #737C85;
+    --accent: #F0975A; --accent-ink: #1A1206; --accent-soft: rgba(240,151,90,0.12); --accent-line: rgba(240,151,90,0.30);
+    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329; --term: #0E1114;
+    --ok: #58C08A; --warn: #E0B04A; --stop: #E5786B; --info: #6BA6DE;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.30); --shadow-md: 0 6px 18px rgba(0,0,0,0.32);
+  }
+  :root[data-theme="light"] {
+    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570; --faint: #69727C;
+    --accent: #B4540A; --accent-ink: #FFFFFF; --accent-soft: rgba(180,84,10,0.10); --accent-line: rgba(180,84,10,0.28);
+    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA; --term: #14181C;
+    --ok: #2C8F5B; --warn: #B3801D; --stop: #C1462F; --info: #2F6FB0;
+    --shadow-sm: 0 1px 2px rgba(20,24,28,0.05), 0 1px 1px rgba(20,24,28,0.03); --shadow-md: 0 4px 14px rgba(20,24,28,0.07), 0 1px 3px rgba(20,24,28,0.05);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.65 var(--sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  ::selection { background: var(--accent-soft); }
+  .skip { position: absolute; left: -9999px; top: 0; z-index: 100; background: var(--accent); color: var(--accent-ink); padding: 0.5rem 0.9rem; border-radius: 0 0 var(--radius-sm) 0; }
+  .skip:focus { left: 0; }
+
+  header.site { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--paper) 78%, transparent); -webkit-backdrop-filter: saturate(1.4) blur(12px); backdrop-filter: saturate(1.4) blur(12px); border-bottom: 1px solid transparent; transition: border-color .2s ease, box-shadow .2s ease; }
+  header.site.scrolled { border-bottom-color: var(--line); box-shadow: var(--shadow-sm); }
+  .bar { max-width: var(--wrap); margin: 0 auto; padding: .8rem 1.35rem; display: flex; align-items: center; gap: 1.1rem; }
+  .wordmark { font-family: var(--mono); font-weight: 700; font-size: 1.02rem; color: var(--ink); display: inline-flex; align-items: center; gap: .5rem; letter-spacing: -.01em; }
+  .wordmark:hover { text-decoration: none; }
+  .wordmark .mark { height: 26px; width: auto; flex: none; display: block; filter: drop-shadow(0 1px 1.5px rgba(20,24,28,0.18)); }
+  nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.15rem; flex-wrap: wrap; }
+  nav.top a { font-family: var(--mono); font-size: .8rem; color: var(--muted); }
+  nav.top a:hover { color: var(--accent); text-decoration: none; }
+  nav.top a[aria-current="page"] { color: var(--accent); }
+  nav.top .ghost { padding: .34rem .7rem; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); }
+  nav.top .ghost:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+
+  main { max-width: var(--wrap); margin: 0 auto; padding: 0 1.35rem 6rem; }
+  section { margin-top: 4.5rem; scroll-margin-top: 5rem; }
+  .eyebrow { font-family: var(--mono); font-size: .72rem; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); margin: 0 0 .7rem; display: inline-flex; align-items: center; gap: .55rem; }
+  .eyebrow::before { content: ""; width: 1.6rem; height: 1px; background: var(--accent-line); }
+  h1 { font-family: var(--mono); font-size: clamp(1.8rem,5.2vw,2.7rem); line-height: 1.14; letter-spacing: -.03em; font-weight: 700; margin: 1.1rem 0; }
+  h1 .accent { color: var(--accent); }
+  h2 { font-family: var(--mono); font-size: 1.28rem; letter-spacing: -.015em; font-weight: 700; margin: 0 0 .9rem; }
+  h3 { font-family: var(--mono); font-size: 1rem; font-weight: 700; margin: 1.6rem 0 .6rem; }
+  p { margin: 0 0 1rem; }
+  .lede { font-size: 1.14rem; line-height: 1.6; color: var(--muted); max-width: 46rem; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .muted { color: var(--muted); } .small { font-size: .86rem; }
+  code { font-family: var(--mono); font-size: .86em; background: var(--code-bg); padding: .12em .36em; border-radius: 5px; border: 1px solid var(--line-soft); }
+
+  .callout { border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--radius-sm); padding: 1rem 1.15rem; margin: 1.3rem 0 0; font-size: .95rem; }
+  .callout b { font-family: var(--mono); font-size: .82rem; letter-spacing: .02em; }
+  .callout p { margin: .4rem 0 0; color: var(--muted); }
+  .callout.stop { border-color: color-mix(in srgb, var(--stop) 40%, var(--line)); background: color-mix(in srgb, var(--stop) 8%, var(--surface)); }
+  .callout.stop b { color: var(--stop); }
+
+  /* ---------- diagram primitives ---------- */
+  .fig { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 1.5rem 1.4rem 1.6rem; margin: 1.4rem 0 0; box-shadow: var(--shadow-sm); }
+  .fig-cap { font-family: var(--mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin: 0 0 1.2rem; }
+  .flow { display: flex; align-items: stretch; gap: .55rem; flex-wrap: wrap; }
+  .node { flex: 1 1 0; min-width: 8.5rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper); padding: .8rem .85rem; }
+  .node .t { font-family: var(--mono); font-size: .78rem; font-weight: 700; margin: 0 0 .25rem; color: var(--ink); }
+  .node .d { font-size: .8rem; line-height: 1.4; color: var(--muted); margin: 0; }
+  .node.hot { border-color: var(--accent-line); background: var(--accent-soft); }
+  .node.stop { border-color: color-mix(in srgb, var(--stop) 42%, var(--line)); background: color-mix(in srgb, var(--stop) 8%, var(--paper)); }
+  .node.stop .t { color: var(--stop); }
+  .node.good { border-color: color-mix(in srgb, var(--ok) 42%, var(--line)); background: color-mix(in srgb, var(--ok) 8%, var(--paper)); }
+  .node.good .t { color: var(--ok); }
+  .arrow { align-self: center; font-family: var(--mono); color: var(--accent); font-weight: 700; flex: 0 0 auto; }
+  .lane-label { font-family: var(--mono); font-size: .72rem; letter-spacing: .04em; color: var(--faint); margin: 1.3rem 0 .5rem; display: flex; align-items: center; gap: .5rem; }
+  .lane-label b { color: var(--ink); }
+  .restart { margin: 1rem 0 .2rem; padding: .7rem .9rem; border: 1px dashed var(--accent-line); border-radius: var(--radius-sm); font-size: .88rem; color: var(--muted); background: color-mix(in srgb, var(--accent) 4%, transparent); }
+  .restart b { color: var(--accent); font-family: var(--mono); font-size: .82rem; }
+
+  /* two-path grid */
+  .paths { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .path { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper); padding: 1rem 1.1rem 1.1rem; }
+  .path h4 { font-family: var(--mono); font-size: .86rem; margin: 0 0 .2rem; }
+  .path .sub { font-size: .78rem; color: var(--faint); margin: 0 0 .9rem; }
+  .path ol { list-style: none; counter-reset: s; margin: 0; padding: 0; display: grid; gap: .5rem; }
+  .path li { counter-increment: s; position: relative; padding-left: 1.9rem; font-size: .87rem; color: var(--muted); line-height: 1.45; }
+  .path li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 1.35rem; height: 1.35rem; border-radius: 50%; background: var(--surface); border: 1px solid var(--accent-line); color: var(--accent); font: 700 .72rem var(--mono); display: flex; align-items: center; justify-content: center; }
+  .path li b { color: var(--ink); }
+  .path li.stop b { color: var(--stop); }
+  .path li.good b { color: var(--ok); }
+
+  /* delivery modes: one comparison surface, not three floating cards */
+  .modes { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; background: var(--paper); }
+  .mode { padding: 1rem 1.05rem 1.1rem; min-width: 0; }
+  .mode + .mode { border-left: 1px solid var(--line); }
+  .mode .k { font: 700 .7rem var(--mono); letter-spacing: .09em; text-transform: uppercase; color: var(--accent); margin: 0 0 .45rem; }
+  .mode h4 { font: 700 .88rem var(--mono); margin: 0 0 .45rem; }
+  .mode p { font-size: .82rem; line-height: 1.5; color: var(--muted); margin: 0; }
+  .mode .cmd { display: block; margin-top: .8rem; padding-top: .7rem; border-top: 1px solid var(--line-soft); font: .72rem/1.5 var(--mono); color: var(--ink); overflow-wrap: anywhere; }
+
+  .review-note { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1rem; margin: 1.2rem 0; }
+  .review-note p { margin: .35rem 0 0; color: var(--muted); }
+
+  /* layers table */
+  .layers { display: grid; gap: .6rem; margin-top: 1.4rem; }
+  .layer { display: grid; grid-template-columns: 12rem 1fr auto; gap: .9rem; align-items: center; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); padding: .85rem 1rem; }
+  .layer .name { font-family: var(--mono); font-size: .82rem; color: var(--ink); font-weight: 600; }
+  .layer .mech { font-size: .86rem; color: var(--muted); }
+  .layer .chip { font-family: var(--mono); font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; padding: .3rem .6rem; border-radius: 999px; white-space: nowrap; border: 1px solid; justify-self: end; }
+  .chip.validate { color: var(--info); border-color: color-mix(in srgb, var(--info) 45%, var(--line)); background: color-mix(in srgb, var(--info) 8%, transparent); }
+  .chip.enforced { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); background: color-mix(in srgb, var(--ok) 8%, transparent); }
+  .chip.cooperative { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+
+  .term { background: var(--term); color: var(--term-ink); border-radius: var(--radius); margin: 1.1rem 0 .4rem; box-shadow: var(--shadow-md); border: 1px solid rgba(255,255,255,0.06); overflow: hidden; }
+  .term-head { display: flex; align-items: center; gap: .5rem; padding: .6rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.07); background: rgba(255,255,255,0.015); }
+  .term-head i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .term-head .r { background: var(--term-red); } .term-head .y { background: var(--term-amber); } .term-head .g { background: var(--term-green); }
+  .term-head b { margin-left: auto; font: 600 .7rem var(--mono); color: var(--term-dim); letter-spacing: .06em; }
+  .term pre { background: none; border: 0; margin: 0; padding: 1.05rem 1.25rem 1.2rem; color: inherit; font: .84rem/1.62 var(--mono); overflow-x: auto; }
+  .term .p { color: var(--accent); user-select: none; font-weight: 600; } .term .c { color: var(--term-dim); } .term .ok { color: var(--term-green); } .term .no { color: var(--term-red); }
+
+  footer { border-top: 1px solid var(--line); margin-top: 6rem; background: var(--line-soft); }
+  footer .bar { padding: 1.6rem 1.35rem; font-size: .85rem; color: var(--muted); flex-wrap: wrap; }
+  footer nav { margin-left: auto; display: flex; gap: 1.1rem; flex-wrap: wrap; }
+  footer nav a { font-family: var(--mono); font-size: .8rem; color: var(--muted); }
+  footer nav a:hover { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    .paths, .layer, .modes { grid-template-columns: 1fr; }
+    .mode + .mode { border-left: 0; border-top: 1px solid var(--line); }
+    .layer .chip { justify-self: start; }
+    .flow { flex-direction: column; } .arrow { transform: rotate(90deg); align-self: center; }
+    nav.top .refline { display: none; }
+    section { margin-top: 3.5rem; }
+  }
+</style>
+<link rel="canonical" href="https://tarekkharsa.github.io/agentstack/how-it-works.html">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site" id="site-header">
+  <div class="bar">
+    <a class="wordmark" href="./"><svg class="mark" viewBox="24 18 72 85" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="navTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F5A968"/><stop offset="1" stop-color="#E7864A"/></linearGradient></defs><path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/><path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/><path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/><path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/><path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/><path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/><path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#navTop)"/><path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/><path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/><path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/></svg>agentstack</a>
+    <nav class="top" aria-label="Project links">
+      <a href="index.html#enforced">what's&nbsp;enforced</a>
+      <a href="start.html">get&nbsp;started</a>
+      <a href="how-it-works.html" aria-current="page">how&nbsp;it&nbsp;works</a>
+      <a class="refline" href="primitives.html">primitives</a>
+      <a class="refline" href="examples.html">examples</a>
+      <a class="ghost" href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section id="intro" style="margin-top:3.25rem">
+    <p class="eyebrow">The runtime model · files, sessions, and live MCP</p>
+    <h1>How AgentStack <span class="accent">actually runs</span>.</h1>
+    <p class="lede">
+      The examples show <em>what</em> to write. This page shows <em>how it
+      behaves</em>: the three ways capabilities reach an agent, when a profile
+      takes effect, why <code>session end</code> exists apart from Ctrl+C, and
+      which policy layers <strong>block at runtime</strong> versus only
+      <strong>fail a check</strong>.
+    </p>
+    <div class="callout">
+      <b>One product, two delivery mechanisms</b>
+      <p>AgentStack can <strong>compile intent into a CLI's native files</strong>,
+        or <strong>serve capabilities live through its MCP gateway</strong>.
+        Native-file changes normally take effect when the CLI launches; the
+        gateway can discover and load capabilities during a running session.</p>
+    </div>
+  </section>
+
+  <!-- ===== 1. THREE DELIVERY MODES ===== -->
+  <section id="delivery">
+    <p class="eyebrow">1 · How capabilities reach the agent</p>
+    <h2>Choose a delivery mode and a lifetime</h2>
+    <p class="muted">
+      A <strong>profile</strong> answers “what is allowed for this kind of work?”
+      The delivery mode answers “how does it reach the agent?” The lifetime
+      answers “when does it go away?” Keeping those questions separate makes
+      the rest of AgentStack much easier to reason about.
+    </p>
+
+    <div class="fig">
+      <p class="fig-cap">the three supported operating modes</p>
+      <div class="modes">
+        <div class="mode">
+          <p class="k">native · persistent</p>
+          <h4>Static</h4>
+          <p>Servers and selected skills are rendered into the CLI's native
+            project files. They remain until another activation changes them.</p>
+          <span class="cmd">agentstack use backend --scope project --write</span>
+        </div>
+        <div class="mode">
+          <p class="k">native · temporary</p>
+          <h4>Clean at rest</h4>
+          <p>The same native files appear for a bounded session, then AgentStack
+            restores the previous server config and removes skills it added.</p>
+          <span class="cmd">agentstack run claude-code --profile backend</span>
+        </div>
+        <div class="mode">
+          <p class="k">gateway · live</p>
+          <h4>Zero files / MCP</h4>
+          <p>Servers are proxied live. Skills are progressively disclosed:
+            browse metadata first, then load only the instructions the task needs.</p>
+          <span class="cmd">agentstack_list_loadable → agentstack_load</span>
+        </div>
+      </div>
+    </div>
+
+    <h3>How progressive skill loading works today</h3>
+    <div class="fig">
+      <p class="fig-cap">small context first; verified instructions on demand</p>
+      <div class="flow">
+        <div class="node"><p class="t">profile / library</p><p class="d">names, pins, and sources</p></div>
+        <span class="arrow">→</span>
+        <div class="node"><p class="t">list_loadable</p><p class="d">names + one-line descriptions only</p></div>
+        <span class="arrow">→</span>
+        <div class="node hot"><p class="t">load(name, reason)</p><p class="d">verify the pin, then return SKILL.md</p></div>
+        <span class="arrow">→</span>
+        <div class="node good"><p class="t">lease context</p><p class="d">sticky and recorded in memory for this MCP connection</p></div>
+      </div>
+      <div class="restart">
+        <b>trust gate →</b> in auto-project mode, an untrusted or changed repo
+        exposes no project skill body and starts no project MCP server. A human
+        reviews and trusts the manifest and lock before that runtime surface opens.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 2. LAUNCH-TIME CONFIG ===== -->
+  <section id="launch">
+    <p class="eyebrow">2 · Native-file activation</p>
+    <h2>A native-file switch normally needs a restart</h2>
+    <p class="muted">
+      AgentStack assumes harness-native configuration is established when the
+      CLI launches. <code>use</code> and <code>session start</code> write a
+      profile's native MCP config and skills. A CLI that's already running may
+      not see that change until it is relaunched.
+    </p>
+
+    <div class="fig">
+      <p class="fig-cap">the launch-time read</p>
+      <div class="flow">
+        <div class="node"><p class="t">manifest</p><p class="d">.agentstack/agentstack.toml — your intent</p></div>
+        <span class="arrow">→</span>
+        <div class="node"><p class="t">use / session start</p><p class="d">writes the profile's config + skills to disk</p></div>
+        <span class="arrow">→</span>
+        <div class="node"><p class="t">CLI launches</p><p class="d">establishes its native configuration</p></div>
+        <span class="arrow">→</span>
+        <div class="node hot"><p class="t">running: profile A</p><p class="d">locked in for this process</p></div>
+      </div>
+      <div class="restart">
+        <b>switch while running →</b> <code>use profile-B --write</code> rewrites
+        the files on disk, but do not assume a running harness has reloaded them.
+        Relaunch it for a deterministic switch. Live discovery belongs to the MCP path above.
+      </div>
+    </div>
+
+    <h3>Which command for which job</h3>
+    <div class="layers">
+      <div class="layer"><span class="name">apply --write</span><span class="mech">Render manifest-wide servers, instructions, settings, and hooks. <strong>It never materializes skills</strong>; skills activate through a profile.</span><span class="chip validate">persistent</span></div>
+      <div class="layer"><span class="name">use &lt;profile&gt; --write</span><span class="mech">Activate one profile's servers + skills, persistently, until you switch again. Global scope by default.</span><span class="chip validate">persistent</span></div>
+      <div class="layer"><span class="name">session start &lt;p&gt;</span><span class="mech">Activate a profile <em>and record how to undo it</em>, so <code>session end</code> restores the previous server config and removes skills the session added. Manual bookends.</span><span class="chip cooperative">ephemeral</span></div>
+      <div class="layer"><span class="name">run &lt;cli&gt; --profile &lt;p&gt;</span><span class="mech">Apply a profile, launch the CLI as a child, and auto-revert after a normal or managed child exit. Recovery is still available after an interrupted parent process.</span><span class="chip enforced">auto-revert</span></div>
+    </div>
+  </section>
+
+  <!-- ===== 3. SESSIONS ===== -->
+  <section id="sessions">
+    <p class="eyebrow">3 · Native-file sessions</p>
+    <h2>Why Ctrl+C isn't <code>session end</code></h2>
+    <p class="muted">
+      <code>session start</code> is a <strong>one-shot command</strong>: it writes
+      the profile's files, records an undo entry in
+      <code>~/.agentstack/sessions.json</code>, and <strong>exits</strong>. It
+      never holds your CLI — you launch that yourself, as a separate, unrelated
+      process. So there are two very different lifecycles:
+    </p>
+
+    <div class="fig">
+      <p class="fig-cap">two ways to run a profile ephemerally</p>
+      <div class="paths">
+        <div class="path">
+          <h4>session start … end</h4>
+          <p class="sub">manual bookends — you launch the CLI yourself</p>
+          <ol>
+            <li><code>session start backend</code> — writes files, records undo, <b>then exits</b></li>
+            <li>you launch <code>claude</code> yourself (unrelated process)</li>
+            <li class="stop"><b>Ctrl+C kills only the CLI.</b> agentstack isn't running — the injected files <b>stay on disk</b></li>
+            <li class="good"><code>session end</code> — the revert: restores config, removes added skills</li>
+          </ol>
+        </div>
+        <div class="path">
+          <h4>run --profile</h4>
+          <p class="sub">one command holds the whole lifecycle</p>
+          <ol>
+            <li><code>run claude-code --profile backend</code> — applies the profile…</li>
+            <li>…<b>spawns the CLI as a child</b> and waits on it</li>
+            <li>you quit the CLI (or it exits)</li>
+            <li class="good"><b>auto-revert</b> fires after a normal or managed child exit (<code>--keep</code> opts out)</li>
+          </ol>
+        </div>
+      </div>
+      <div class="restart" style="border-style:solid;">
+        <b>so:</b> <code>session end</code> is the <b>undo button</b> for a <code>session start</code>. Ctrl+C ends the CLI process; it does not undo the file changes agentstack made. Prefer <code>run --profile</code> when you want that undo to be automatic. <code>session end --all</code> is the safety hatch for any session you forgot to close.
+      </div>
+    </div>
+
+    <div class="callout stop">
+      <b>Recovery and exactness</b>
+      <p>If the parent <code>agentstack run</code> process is force-killed or the
+        machine stops, cleanup cannot execute; use <code>session end</code> or
+        <code>session end --all</code>. Server files are snapshotted. For skills,
+        the current implementation records names newly added by the session;
+        replacing an already-managed skill with the same name is an edge case
+        that should be snapshotted before the documentation promises a perfectly
+        exact restore.</p>
+    </div>
+
+    <div class="term">
+      <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>the manual pair</b></div>
+      <pre><span class="p">$</span> agentstack session start backend   <span class="c"># writes profile files, records undo, exits</span>
+<span class="p">$</span> claude                              <span class="c"># you launch it; Ctrl+C later kills only this</span>
+<span class="p">$</span> agentstack session list             <span class="c"># still active — files are still applied</span>
+<span class="p">$</span> agentstack session end               <span class="c"># NOW your prior config is restored</span></pre>
+    </div>
+  </section>
+
+  <!-- ===== 4. WHAT STOPS WHAT ===== -->
+  <section id="enforcement">
+    <p class="eyebrow">4 · The part people get wrong</p>
+    <h2>What actually stops what</h2>
+    <p class="muted">
+      Not every <code>[policy…]</code> block is a runtime firewall. Some
+      <strong>block a call as it happens</strong>; one only <strong>fails a
+      check</strong>. Reading them as the same thing is the most common — and most
+      dangerous — misunderstanding.
+    </p>
+
+    <div class="fig">
+      <p class="fig-cap">policy layers by what they actually do</p>
+      <div class="layers">
+        <div class="layer">
+          <span class="name">[policy]<br>require / forbid<br>allowed_sources</span>
+          <span class="mech"><b>Governance.</b> Checked by <code>doctor --ci</code> (fails the build) and blocks <code>agentstack add</code> (install path). It never sits in front of a running agent — <code>Gateway::try_call</code> doesn't consult it.</span>
+          <span class="chip validate">validation · not runtime</span>
+        </div>
+        <div class="layer">
+          <span class="name">[policy.tools]</span>
+          <span class="mech"><b>The MCP firewall.</b> The gateway refuses a denied tool call before it reaches the upstream server, and hides it from discovery. Machine layer ∩ repo layer; no repo can loosen it.</span>
+          <span class="chip enforced">enforced · runtime</span>
+        </div>
+        <div class="layer">
+          <span class="name">[policy.filesystem]<br>deny</span>
+          <span class="mech"><b>Reads/writes of denied paths.</b> In host/gateway mode a pre-tool-use hook checks each one — but only because the harness <em>chooses</em> to call it. Under <code>--sandbox</code> the workspace is a kernel mount (coarse).</span>
+          <span class="chip cooperative">cooperative · bypassable</span>
+        </div>
+        <div class="layer">
+          <span class="name">[policy.egress]</span>
+          <span class="mech"><b>Outbound network.</b> Under <code>--lockdown</code> the container's only route out is the egress-proxy sidecar, which allows/denies each host and records it. Confinement is topological.</span>
+          <span class="chip enforced">enforced · lockdown</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout stop">
+      <b>"If I put it in global config, can no CLI access it?"</b>
+      <p>Not from <code>[policy]</code> governance — that only fails
+        <code>add</code> / <code>doctor --ci</code>; it places no runtime block on
+        anything. And if an agent <strong>directly reads a file</strong>, that's
+        <code>[policy.filesystem] deny</code>, which in host mode is only the
+        <strong>cooperative</strong> guard hook: it stops honest
+        <em>accidents</em>, but <em>"a malicious agent, or a harness that ignores
+        its own hook protocol, bypasses it entirely"</em> — that's the guard's own
+        code comment. The only <strong>kernel-enforced</strong> guarantee is
+        running the agent under <code>agentstack run --sandbox</code> /
+        <code>--lockdown</code>.</p>
+    </div>
+    <p class="small muted" style="margin-top:1rem">
+      The full, per-cell honesty — enforced vs. cooperative vs. coarse vs.
+      unsupported, for host, gateway, sandbox, and lockdown — is the
+      <a href="index.html#enforced">enforcement matrix</a>.
+    </p>
+  </section>
+
+  <section id="mcp-lease">
+    <p class="eyebrow">5 · Zero-file profile leases</p>
+    <h2>A live MCP session can now be genuinely zero-file</h2>
+    <p class="muted">
+      An MCP lease selects one profile for the lifetime of the current
+      <code>agentstack mcp</code> process. It fences both proxied servers and
+      loadable skills, records on-demand skill loads in memory, and writes no
+      native harness configuration, skill directory, or
+      <code>sessions.json</code> entry.
+    </p>
+
+    <div class="review-note">
+      <b>Two session types, two cleanup contracts</b>
+      <p><code>session start</code> is still the native-file session and needs an
+        undo. <code>agentstack_lease_open</code> is connection-local state; close
+        it explicitly or let the MCP process exit. There are no native files to restore.</p>
+    </div>
+
+    <div class="review-note">
+      <b>If trust changes, activity stops but the proposal trail can remain</b>
+      <p>A manifest or lock edit empties the live auto-project gateway. The
+        in-memory lease may remain inspectable, and <code>lease_freeze</code> may
+        still propose a manifest profile because it serves no bundle content,
+        resolves no secret, spawns no server, and applies no file. Renewed
+        activity still requires review, locking where needed, and fresh trust.</p>
+    </div>
+
+    <div class="fig">
+      <p class="fig-cap">live zero-file lifecycle</p>
+      <div class="flow">
+        <div class="node"><p class="t">connect once</p><p class="d">register the global gateway</p></div>
+        <span class="arrow">→</span>
+        <div class="node hot"><p class="t">lease_open(profile)</p><p class="d">authorize this MCP connection in memory</p></div>
+        <span class="arrow">→</span>
+        <div class="node"><p class="t">list → load → call</p><p class="d">fenced, verified, and audited</p></div>
+        <span class="arrow">→</span>
+        <div class="node good"><p class="t">lease_close / disconnect</p><p class="d">lease disappears; no generated files</p></div>
+      </div>
+    </div>
+
+    <p class="small muted" style="margin-top:1rem">
+      Use <code>agentstack_lease_status</code> to inspect the in-memory trail and
+      <code>agentstack_lease_freeze</code> to promote the skills actually loaded
+      into a named profile for deterministic replay. Review the manifest change,
+      then run <code>agentstack lock</code> to refresh the lockfile. The MCP control plane
+      refuses to open a lease over an active native-file session (or vice
+      versa). Because a lease is process-local, a separate shell cannot inspect
+      it.
+    </p>
+  </section>
+
+  <section id="next">
+    <p class="eyebrow">Keep going</p>
+    <h2>Now the examples make sense.</h2>
+    <p class="muted">With the runtime model in hand, the
+      <a href="examples.html">25 examples</a> read differently — you can see which
+      ones write files, which serve live, and which actually enforce. Or walk the
+      <a href="start.html">10-minute path</a> end to end. For the recommendation
+      layer, use the <a href="primitives.html">primitives decision guide</a>.</p>
+  </section>
+
+</main>
+
+<footer>
+  <div class="bar">
+    <span>MIT or Apache-2.0, at your option.</span>
+    <nav aria-label="Footer links">
+      <a href="index.html">home</a>
+      <a href="examples.html">examples</a>
+      <a href="primitives.html">primitives</a>
+      <a href="start.html">get&nbsp;started</a>
+      <a href="https://github.com/Tarekkharsa/agentstack">source</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+  document.documentElement.classList.add("js");
+  const header = document.getElementById("site-header");
+  const onScroll = () => header.classList.toggle("scrolled", window.scrollY > 8);
+  addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+</script>
+
+</body>
+</html>

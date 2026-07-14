@@ -468,6 +468,10 @@ struct CallAudit<'a> {
 enum Fence {
     AmbientSession,
     Pinned(Option<String>),
+    /// One MCP connection selected this profile in memory. Unlike
+    /// `AmbientSession`, this never consults `sessions.json`; unlike the
+    /// sandbox `Pinned` form, a missing profile fails closed to no servers.
+    Lease(String),
 }
 
 impl Gateway {
@@ -480,6 +484,14 @@ impl Gateway {
         // the harness spawns us — inherit the attribution once, at construction.
         let run_id = std::env::var(crate::calllog::RUN_ID_ENV).ok();
         Self::build(dir, Fence::AmbientSession, None, run_id, false)
+    }
+
+    /// Build the live gateway for one process-local MCP profile lease. The
+    /// profile is a strict runtime fence and causes no native config or skill
+    /// materialization. A missing profile yields an empty gateway.
+    pub fn from_manifest_lease(dir: Option<&std::path::Path>, profile: &str) -> Gateway {
+        let run_id = std::env::var(crate::calllog::RUN_ID_ENV).ok();
+        Self::build(dir, Fence::Lease(profile.to_string()), None, run_id, false)
     }
 
     /// Build for one sandboxed run (gateway-unification Session 1).
@@ -555,6 +567,10 @@ impl Gateway {
             // A vanished profile means no fence rather than fencing to nothing.
             // Sandboxed runs pin the fence instead: ambient host session state
             // must not decide what a run may reach.
+            let invalid_lease = matches!(
+                &fence,
+                Fence::Lease(p) if !ctx.loaded.manifest.profiles.contains_key(p.as_str())
+            );
             let profile_owned: Option<String> = match &fence {
                 Fence::AmbientSession => crate::session::active(&ctx.dir)
                     .map(|s| s.profile)
@@ -562,19 +578,32 @@ impl Gateway {
                 Fence::Pinned(p) => p
                     .clone()
                     .filter(|p| ctx.loaded.manifest.profiles.contains_key(p.as_str())),
+                Fence::Lease(p) => (!invalid_lease).then(|| p.clone()),
             };
             let profile = profile_owned.as_deref();
             // Name refs resolve through the same inline-first/central-library
             // path as rendering, so a server declared only in the library is
             // proxied like an inline one.
             let library = crate::library::Library::load_default_or_warn();
-            let servers = crate::resolve::effective_runtime_servers(
-                &ctx.loaded.manifest,
-                &library,
-                &crate::util::paths::lib_home(),
-                profile,
-            );
-            if profile.is_some() {
+            let servers = if invalid_lease {
+                eprintln!(
+                    "gateway: MCP lease profile does not exist — serving no upstream servers"
+                );
+                Vec::new()
+            } else {
+                crate::resolve::effective_runtime_servers(
+                    &ctx.loaded.manifest,
+                    &library,
+                    &crate::util::paths::lib_home(),
+                    profile,
+                )
+            };
+            if matches!(fence, Fence::Lease(_)) {
+                eprintln!(
+                    "gateway: MCP profile lease active — proxying only this profile's {} server(s)",
+                    servers.len()
+                );
+            } else if profile.is_some() {
                 eprintln!(
                     "gateway: session active — proxying only this profile's {} server(s)",
                     servers.len()
@@ -1589,6 +1618,41 @@ mod tests {
         std::env::remove_var("AGENTSTACK_HOME");
         let names: Vec<&str> = gw.upstreams.iter().map(|u| u.name.as_str()).collect();
         assert_eq!(names, ["alpha", "kibana"]);
+    }
+
+    #[test]
+    fn mcp_lease_gateway_is_strictly_profile_fenced() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let project = assert_fs::TempDir::new().unwrap();
+        project
+            .child("agentstack.toml")
+            .write_str(
+                "version = 1\n\
+                 [servers.alpha]\ntype = \"http\"\nurl = \"https://alpha/mcp\"\n\
+                 [servers.beta]\ntype = \"http\"\nurl = \"https://beta/mcp\"\n\
+                 [profiles.backend]\nservers = [\"beta\"]\n",
+            )
+            .unwrap();
+
+        let gateway = Gateway::from_manifest_lease(Some(project.path()), "backend");
+        let names: Vec<&str> = gateway
+            .upstreams
+            .iter()
+            .map(|upstream| upstream.name.as_str())
+            .collect();
+        assert_eq!(names, ["beta"]);
+
+        let missing = Gateway::from_manifest_lease(Some(project.path()), "missing");
+        assert!(
+            missing.upstreams.is_empty(),
+            "a vanished lease profile must fail closed, never expand to all servers"
+        );
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     /// Library definitions live outside the trust digest; the lock's pinned

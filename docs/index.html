@@ -410,6 +410,9 @@
     <a class="wordmark" href="./"><svg class="mark" viewBox="24 18 72 85" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="navTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F5A968"/><stop offset="1" stop-color="#E7864A"/></linearGradient></defs><path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/><path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/><path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/><path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/><path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/><path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/><path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#navTop)"/><path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/><path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/><path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/></svg>agentstack</a>
     <nav class="top" aria-label="Project links">
       <a href="#enforced">what's&nbsp;enforced</a>
+      <a class="refline" href="how-it-works.html">how&nbsp;it&nbsp;works</a>
+      <a class="refline" href="primitives.html">primitives</a>
+      <a class="refline" href="examples.html">examples</a>
       <a class="refline" href="library.html">library&nbsp;guide</a>
       <a class="refline" href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
       <a class="ghost" href="start.html">Get&nbsp;started&nbsp;→</a>
@@ -840,10 +843,9 @@
     <pre><code>version = 1
 
 [servers.github]
-type = "stdio"
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-github"]
-env = { GITHUB_TOKEN = "${GH_PAT}" }   # resolved per machine, never stored
+type = "http"
+url = "https://api.githubcopilot.com/mcp/"
+headers = { Authorization = "Bearer ${GH_PAT}" } # resolved per machine, never stored
 
 [profiles.backend]
 servers = ["github", "kibana"]
@@ -912,6 +914,12 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
     <p class="eyebrow">Going further</p>
     <h2>When you want more than the loop</h2>
     <div class="cards">
+      <div class="fcard">
+        <h3><a href="primitives.html">Choose the right boundary</a></h3>
+        <p>Our recommendation for composing profiles, delivery, trust, policy,
+           isolation, and evidence—plus the cases where the default should change.</p>
+        <a class="tag" href="primitives.html">Decision guide</a>
+      </div>
       <div class="fcard">
         <h3><a href="library.html">Central library</a></h3>
         <p>One managed home for skills and servers; projects select by name and stay
@@ -984,6 +992,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
       <a href="https://github.com/Tarekkharsa/agentstack">source</a>
       <a href="https://github.com/Tarekkharsa/agentstack/issues">issues</a>
       <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
+      <a href="primitives.html">primitives</a>
       <a href="security-review-2026-07-11.html">security&nbsp;review</a>
     </nav>
   </div>

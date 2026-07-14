@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentStack primitives — choose the boundary you need</title>
+<meta name="description" content="AgentStack's recommended operating model: compose manifest, lock, profiles, delivery, trust, policy, isolation, and evidence without confusing their guarantees.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:title" content="AgentStack primitives">
+<meta property="og:description" content="Choose the boundary you need—and know what it does not replace.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://tarekkharsa.github.io/agentstack/primitives.html">
+<meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
+<style>
+  :root {
+    --paper:#FBFAF7; --surface:#FFFFFF; --ink:#1B1F24; --muted:#5B6570;
+    --faint:#717982; --accent:#B4540A; --accent-ink:#FFFFFF;
+    --accent-soft:rgba(180,84,10,.10); --accent-line:rgba(180,84,10,.30);
+    --line:#E7E2D9; --line-soft:#EFEBE3; --code:#F3F0EA;
+    --good:#267A50; --good-soft:rgba(38,122,80,.08);
+    --stop:#B94031; --stop-soft:rgba(185,64,49,.08);
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --wrap:58rem; --radius:14px;
+  }
+  @media (prefers-color-scheme:dark) {
+    :root {
+      --paper:#14171B; --surface:#1A1E23; --ink:#E9E7E2; --muted:#9AA3AC;
+      --faint:#747D86; --accent:#F0975A; --accent-ink:#1A1206;
+      --accent-soft:rgba(240,151,90,.12); --accent-line:rgba(240,151,90,.32);
+      --line:#2B3036; --line-soft:#23282E; --code:#1E2329;
+      --good:#58C08A; --good-soft:rgba(88,192,138,.09);
+      --stop:#E5786B; --stop-soft:rgba(229,120,107,.09);
+    }
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  @media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } }
+  body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.65 var(--sans); -webkit-font-smoothing:antialiased; }
+  a { color:var(--accent); text-decoration:none; }
+  a:hover,a:focus-visible { text-decoration:underline; text-underline-offset:3px; }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
+  .skip { position:absolute; left:-9999px; top:0; z-index:100; background:var(--accent); color:var(--accent-ink); padding:.5rem .9rem; }
+  .skip:focus { left:0; }
+  header.site { position:sticky; top:0; z-index:40; background:color-mix(in srgb,var(--paper) 82%,transparent); backdrop-filter:blur(12px) saturate(1.4); border-bottom:1px solid transparent; }
+  header.site.scrolled { border-bottom-color:var(--line); }
+  .bar { max-width:var(--wrap); margin:auto; padding:.8rem 1.35rem; display:flex; align-items:center; gap:1rem; }
+  .wordmark { color:var(--ink); display:inline-flex; align-items:center; gap:.55rem; font:700 1.02rem var(--mono); }
+  .wordmark:hover { text-decoration:none; }
+  .mark { width:25px; height:29px; display:block; }
+  nav.top { margin-left:auto; display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+  nav.top a { color:var(--muted); font:500 .78rem var(--mono); }
+  nav.top a:hover,nav.top a[aria-current="page"] { color:var(--accent); text-decoration:none; }
+  nav.top .ghost { border:1px solid var(--line); border-radius:7px; padding:.34rem .68rem; color:var(--ink); }
+  main { max-width:var(--wrap); margin:auto; padding:0 1.35rem 6rem; }
+  section { margin-top:4.6rem; scroll-margin-top:5rem; }
+  .hero { min-height:calc(92svh - 58px); display:flex; flex-direction:column; justify-content:center; padding:3rem 0 4rem; margin-top:0; }
+  .eyebrow { margin:0 0 .8rem; color:var(--accent); font:600 .72rem var(--mono); letter-spacing:.15em; text-transform:uppercase; }
+  h1 { max-width:48rem; margin:0 0 1.15rem; font:700 clamp(2.1rem,6vw,4.1rem)/1.04 var(--mono); letter-spacing:-.055em; }
+  h1 span { color:var(--accent); }
+  h2 { margin:0 0 .9rem; font:700 clamp(1.4rem,3vw,2rem)/1.2 var(--mono); letter-spacing:-.025em; }
+  h3 { margin:0 0 .35rem; font:700 1rem/1.35 var(--mono); }
+  p { margin:0 0 1rem; }
+  .lede { max-width:45rem; color:var(--muted); font-size:1.16rem; }
+  code { font:inherit var(--mono); font-size:.88em; background:var(--code); border:1px solid var(--line-soft); border-radius:5px; padding:.12em .34em; }
+  .stack { margin-top:2.2rem; display:grid; grid-template-columns:repeat(5,1fr); align-items:stretch; border-block:1px solid var(--line); }
+  .stack div { position:relative; padding:1rem .75rem; border-right:1px solid var(--line); }
+  .stack div:last-child { border-right:0; }
+  .stack b { display:block; color:var(--accent); font:.72rem var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .stack span { display:block; margin-top:.25rem; font-size:.82rem; color:var(--muted); line-height:1.4; }
+  .lockdown { margin-top:1rem; border-left:3px solid var(--stop); padding:.75rem 1rem; background:var(--stop-soft); color:var(--muted); }
+  .lockdown strong { color:var(--ink); }
+  .rows { margin-top:1.5rem; border-top:1px solid var(--line); }
+  .row { display:grid; grid-template-columns:9rem 1.25fr 1fr; gap:1.2rem; padding:1.15rem 0; border-bottom:1px solid var(--line); align-items:start; }
+  .row .name { color:var(--accent); font:700 .86rem var(--mono); }
+  .row p { margin:0; color:var(--muted); font-size:.94rem; }
+  .row .limit { color:var(--faint); }
+  .choice { margin-top:1.5rem; overflow-x:auto; border-block:1px solid var(--line); }
+  table { width:100%; border-collapse:collapse; min-width:44rem; }
+  th,td { padding:.9rem .75rem; text-align:left; vertical-align:top; border-bottom:1px solid var(--line-soft); }
+  th { color:var(--faint); font:600 .7rem var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+  td { font-size:.92rem; }
+  td:first-child { font:700 .82rem var(--mono); color:var(--ink); }
+  td:nth-child(2) { color:var(--accent); font-weight:600; }
+  .proof { display:grid; grid-template-columns:1fr 1fr; gap:0 2rem; margin-top:1.4rem; border-top:1px solid var(--line); }
+  .proof article { padding:1.2rem 0; border-bottom:1px solid var(--line); }
+  .proof p { color:var(--muted); font-size:.92rem; margin:.25rem 0 .55rem; }
+  .proof .not { color:var(--stop); font:600 .73rem var(--mono); }
+  .trust-note { margin-top:1.4rem; padding:1.2rem 0 1.2rem 1.2rem; border-left:3px solid var(--good); background:linear-gradient(90deg,var(--good-soft),transparent 70%); }
+  .trust-note p { max-width:45rem; color:var(--muted); margin:0; }
+  .cta { display:flex; justify-content:space-between; gap:2rem; align-items:end; padding-top:2rem; border-top:1px solid var(--line); }
+  .cta p { color:var(--muted); max-width:36rem; }
+  .button { display:inline-block; flex:none; background:var(--accent); color:var(--accent-ink); border-radius:8px; padding:.65rem .9rem; font:700 .8rem var(--mono); }
+  .button:hover { text-decoration:none; transform:translateY(-1px); }
+  footer { border-top:1px solid var(--line); background:var(--line-soft); }
+  footer .bar { padding:1.5rem 1.35rem; color:var(--muted); font-size:.84rem; flex-wrap:wrap; }
+  footer nav { margin-left:auto; display:flex; gap:1rem; }
+  footer nav a { color:var(--muted); font:.78rem var(--mono); }
+  .js .reveal { opacity:0; transform:translateY(12px); transition:opacity .5s ease,transform .5s ease; }
+  .js .reveal.in { opacity:1; transform:none; }
+  @media (max-width:760px) {
+    body { font-size:16px; }
+    nav.top .optional { display:none; }
+    .hero { min-height:auto; padding:4rem 0 2rem; }
+    .stack { grid-template-columns:1fr 1fr; }
+    .stack div { border-bottom:1px solid var(--line); }
+    .stack div:nth-child(2n) { border-right:0; }
+    .stack div:last-child { grid-column:1/-1; border-bottom:0; }
+    .row { grid-template-columns:1fr; gap:.35rem; }
+    .proof { grid-template-columns:1fr; }
+    .cta { align-items:start; flex-direction:column; }
+  }
+</style>
+<link rel="canonical" href="https://tarekkharsa.github.io/agentstack/primitives.html">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site" id="site-header">
+  <div class="bar">
+    <a class="wordmark" href="./"><img class="mark" src="logo-mark.svg" alt="">agentstack</a>
+    <nav class="top" aria-label="Project links">
+      <a class="optional" href="index.html#enforced">what's enforced</a>
+      <a class="optional" href="how-it-works.html">how it works</a>
+      <a href="primitives.html" aria-current="page">primitives</a>
+      <a class="optional" href="examples.html">examples</a>
+      <a class="ghost" href="start.html">Get started →</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero reveal">
+    <p class="eyebrow">Operating model · recommendation</p>
+    <h1>Choose the boundary <span>you actually need.</span></h1>
+    <p class="lede">A profile lease is the recommended delivery primitive for MCP-capable interactive work. It is strongest when composed with integrity, consent, policy, and evidence—and dangerous when mistaken for isolation.</p>
+    <div class="stack" aria-label="Recommended interactive composition">
+      <div><b>manifest + lock</b><span>intent and reviewed bytes</span></div>
+      <div><b>trust</b><span>local consent to auto-activate</span></div>
+      <div><b>profile lease</b><span>smallest live task surface</span></div>
+      <div><b>machine policy</b><span>floor no repo can loosen</span></div>
+      <div><b>audit</b><span>evidence of brokered calls</span></div>
+    </div>
+    <p class="lockdown"><strong>Add lockdown when repository code or direct network access needs confinement.</strong> A lease narrows AgentStack's gateway; it does not sandbox arbitrary processes.</p>
+  </section>
+
+  <section id="model" class="reveal">
+    <p class="eyebrow">The primitives</p>
+    <h2>One question per boundary</h2>
+    <p class="lede">Keeping these responsibilities separate prevents the common category errors: a lock is not trust, trust is not policy, and audit is not enforcement.</p>
+    <div class="rows">
+      <div class="row"><div class="name">Bundle</div><p>What intent is declared? <code>agentstack.toml</code> names servers, skills, profiles, and requested policy.</p><p class="limit">Does not certify referenced code as safe.</p></div>
+      <div class="row"><div class="name">Integrity</div><p>Which capability bytes were reviewed? <code>agentstack.lock</code> pins resolved inputs; signatures can attest to the lock bytes.</p><p class="limit">Does not grant local consent to execute.</p></div>
+      <div class="row"><div class="name">Selection</div><p>What does this task need? A profile names the intended server and skill set.</p><p class="limit">Does not decide how the harness receives it.</p></div>
+      <div class="row"><div class="name">Delivery</div><p>How does selection reach the harness? Static render, native session, or MCP lease.</p><p class="limit">Does not confine the agent process.</p></div>
+      <div class="row"><div class="name">Consent</div><p>May this repo auto-activate here? <code>agentstack trust</code> binds local approval to manifest + overlay + lock.</p><p class="limit">Does not mean “safe to run unsandboxed.”</p></div>
+      <div class="row"><div class="name">Authority</div><p>Which tools, hosts, secrets, and paths are allowed? Machine and project policy intersect with deny precedence.</p><p class="limit">Does not create process isolation by itself.</p></div>
+      <div class="row"><div class="name">Isolation</div><p>Where may the process run and connect? Sandbox and lockdown provide the runtime boundary.</p><p class="limit">Allowed destinations can still receive sensitive data.</p></div>
+      <div class="row"><div class="name">Evidence</div><p>What happened? Call audit, run reports, and analysis record brokered activity and outcomes.</p><p class="limit">Recording is not prevention.</p></div>
+    </div>
+  </section>
+
+  <section id="choose" class="reveal">
+    <p class="eyebrow">Decision table</p>
+    <h2>Our recommendation—and the exceptions</h2>
+    <div class="choice">
+      <table>
+        <thead><tr><th>Situation</th><th>Use</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>MCP-capable interactive work</td><td>Profile lease</td><td>Smallest live surface, no project-native cleanup, policy and audit remain on the path.</td></tr>
+          <tr><td>Native skills or instruction files</td><td><code>use --write</code></td><td>The harness reads those files itself; MCP cannot inject native files.</td></tr>
+          <tr><td>Native, but clean between sessions</td><td><code>session start/end</code></td><td>Temporary compatibility with an explicit restore contract.</td></tr>
+          <tr><td>Stable offline launches</td><td>Static render</td><td>No live gateway dependency; native config is ready at startup.</td></tr>
+          <tr><td>Unfamiliar repository</td><td>Trust gate first</td><td>Selection must never grant consent. Unreviewed auto-project bundles stay inert.</td></tr>
+          <tr><td>High-risk code or strict egress</td><td>Policy + lockdown</td><td>Policy defines authority; lockdown removes direct routes and confines the process.</td></tr>
+          <tr><td>CI</td><td><code>install --locked</code> + <code>doctor --ci</code></td><td>Checks reproducibility, policy, drift, and content without interactive trust.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="proofs" class="reveal">
+    <p class="eyebrow">Examples by primitive</p>
+    <h2>Run the proof that matches the claim</h2>
+    <div class="proof">
+      <article><h3><a href="examples.html#e13">MCP profile lease</a></h3><p>Proves connection-local profile fencing, in-memory skill loads, freeze, and zero native artifacts.</p><span class="not">Does not prove process isolation.</span></article>
+      <article><h3><a href="examples.html#e13">Trust + machine firewall</a></h3><p>Proves an untrusted auto-project stays inert and machine policy can deny a repo-allowed tool.</p><span class="not">Does not prove payload safety.</span></article>
+      <article><h3><a href="examples.html#e10">Policy presets</a></h3><p>Use the developer posture for daily work; compatible is a migration step, locked-down is for confinement, and CI is runner-only.</p><span class="not">Policy is not a sandbox.</span></article>
+      <article><h3><a href="examples.html#e18">Sandbox + lockdown</a></h3><p>Proves destination restriction and runtime confinement when the proxy is the only network route.</p><span class="not">Allowed destinations remain allowed.</span></article>
+      <article><h3><a href="examples.html#e20">Audit + report</a></h3><p>Shows brokered tool outcomes, denials, latency, and per-run egress decisions without argument or secret values.</p><span class="not">Evidence is not prevention.</span></article>
+      <article><h3><a href="examples.html#e23">CI verification</a></h3><p>Proves lock drift, policy, and unsafe content can fail a pipeline deterministically.</p><span class="not">CI does not grant runtime consent.</span></article>
+    </div>
+  </section>
+
+  <section id="trust-change" class="reveal">
+    <p class="eyebrow">Lease edge case</p>
+    <h2>Trust can fail closed without erasing the proposal trail</h2>
+    <div class="trust-note">
+      <p>If manifest or lock bytes change during an auto-project connection, AgentStack replaces the live gateway with an empty one. The in-memory lease may remain inspectable, and <code>agentstack_lease_freeze</code> may still propose a manifest profile because it serves no bundle content, resolves no secrets, spawns no server, and applies no files. Restoring an active gateway still requires review, locking where needed, and renewed trust.</p>
+    </div>
+  </section>
+
+  <section class="cta reveal">
+    <div><p class="eyebrow">Apply the model</p><h2>See every primitive in context.</h2><p>Use the examples to move from declaration through selection, consent, enforcement, isolation, and evidence without overstating any boundary.</p></div>
+    <a class="button" href="examples.html">Explore the examples →</a>
+  </section>
+</main>
+
+<footer><div class="bar"><span>MIT or Apache-2.0, at your option.</span><nav aria-label="Footer links"><a href="./">home</a><a href="how-it-works.html">how it works</a><a href="examples.html">examples</a><a href="https://github.com/Tarekkharsa/agentstack">source</a></nav></div></footer>
+<script>
+  document.documentElement.classList.add('js');
+  const header=document.getElementById('site-header');
+  const onScroll=()=>header.classList.toggle('scrolled',window.scrollY>8);
+  onScroll(); addEventListener('scroll',onScroll,{passive:true});
+  const io=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}}),{threshold:.08});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>

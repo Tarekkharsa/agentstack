@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentStack by example — from a one-line manifest to sandboxed execution</title>
+<meta name="description" content="Every capability by example, simplest to most advanced: manifests, secrets, skills, profiles, the tool firewall, the trust gate, the central library, sandboxed lockdown runs, and governed TypeScript execution.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:title" content="AgentStack by example">
+<meta property="og:description" content="Every capability by example, from a one-line manifest up to sandboxed, governed execution.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://tarekkharsa.github.io/agentstack/examples.html">
+<meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="AgentStack by example">
+<meta name="twitter:description" content="From a one-line manifest to sandboxed governed execution — 25 copy-paste examples.">
+<meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
+<style>
+  :root {
+    --paper: #FBFAF7;
+    --surface: #FFFFFF;
+    --ink: #1B1F24;
+    --muted: #5B6570;
+    --faint: #69727C;
+    --accent: #B4540A;
+    --accent-ink: #FFFFFF;
+    --accent-soft: rgba(180, 84, 10, 0.10);
+    --accent-line: rgba(180, 84, 10, 0.28);
+    --line: #E7E2D9;
+    --line-soft: #EFEBE3;
+    --term: #14181C;
+    --term-ink: #D7DEE4;
+    --term-dim: #97A1AD;
+    --term-green: #7CC08B;
+    --term-red: #E5786B;
+    --term-amber: #E0B04A;
+    --code-bg: #F3F0EA;
+    --shadow-sm: 0 1px 2px rgba(20,24,28,0.05), 0 1px 1px rgba(20,24,28,0.03);
+    --shadow-md: 0 4px 14px rgba(20,24,28,0.07), 0 1px 3px rgba(20,24,28,0.05);
+    --shadow-lg: 0 24px 60px -18px rgba(16,22,30,0.28), 0 8px 22px -12px rgba(16,22,30,0.20);
+    --radius: 14px;
+    --radius-sm: 9px;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --wrap: 54rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14171B;
+      --surface: #1A1E23;
+      --ink: #E9E7E2;
+      --muted: #9AA3AC;
+      --faint: #737C85;
+      --accent: #F0975A;
+      --accent-ink: #1A1206;
+      --accent-soft: rgba(240,151,90,0.12);
+      --accent-line: rgba(240,151,90,0.30);
+      --line: #292E34;
+      --line-soft: #23282E;
+      --code-bg: #1E2329;
+      --term: #0E1114;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.30);
+      --shadow-md: 0 6px 18px rgba(0,0,0,0.32);
+      --shadow-lg: 0 30px 70px -20px rgba(0,0,0,0.60), 0 10px 24px -12px rgba(0,0,0,0.45);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 17px/1.65 var(--sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  ::selection { background: var(--accent-soft); }
+
+  .skip { position: absolute; left: -9999px; top: 0; z-index: 100; background: var(--accent); color: var(--accent-ink); padding: 0.5rem 0.9rem; border-radius: 0 0 var(--radius-sm) 0; }
+  .skip:focus { left: 0; }
+
+  header.site {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--paper) 78%, transparent);
+    -webkit-backdrop-filter: saturate(1.4) blur(12px); backdrop-filter: saturate(1.4) blur(12px);
+    border-bottom: 1px solid transparent; transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  header.site.scrolled { border-bottom-color: var(--line); box-shadow: var(--shadow-sm); }
+  .bar { max-width: var(--wrap); margin: 0 auto; padding: 0.8rem 1.35rem; display: flex; align-items: center; gap: 1.1rem; }
+  .wordmark { font-family: var(--mono); font-weight: 700; font-size: 1.02rem; color: var(--ink); display: inline-flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em; }
+  .wordmark:hover { text-decoration: none; }
+  .wordmark .mark { height: 26px; width: auto; flex: none; display: block; filter: drop-shadow(0 1px 1.5px rgba(20,24,28,0.18)); }
+  nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.15rem; flex-wrap: wrap; }
+  nav.top a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+  nav.top a:hover { color: var(--accent); text-decoration: none; }
+  nav.top a[aria-current="page"] { color: var(--accent); }
+  nav.top .ghost { padding: 0.34rem 0.7rem; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); }
+  nav.top .ghost:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+
+  main { max-width: var(--wrap); margin: 0 auto; padding: 0 1.35rem 6rem; }
+  section { margin-top: 4.5rem; scroll-margin-top: 5rem; }
+
+  .eyebrow { font-family: var(--mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); margin: 0 0 0.7rem; display: inline-flex; align-items: center; gap: 0.55rem; }
+  .eyebrow::before { content: ""; width: 1.6rem; height: 1px; background: var(--accent-line); }
+  h1 { font-family: var(--mono); font-size: clamp(1.8rem, 5.2vw, 2.7rem); line-height: 1.14; letter-spacing: -0.03em; font-weight: 700; margin: 1.1rem 0 1.1rem; }
+  h1 .accent { color: var(--accent); }
+  h2 { font-family: var(--mono); font-size: 1.28rem; letter-spacing: -0.015em; font-weight: 700; margin: 0 0 0.9rem; }
+  h3 { font-family: var(--mono); font-size: 1rem; font-weight: 700; margin: 1.6rem 0 0.6rem; }
+  p { margin: 0 0 1rem; }
+  .lede { font-size: 1.14rem; line-height: 1.6; color: var(--muted); max-width: 44rem; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .muted { color: var(--muted); }
+  .small { font-size: 0.86rem; }
+
+  .callout { border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--radius-sm); padding: 1rem 1.15rem; margin: 1.1rem 0 0; font-size: 0.95rem; }
+  .callout b { font-family: var(--mono); font-size: 0.82rem; letter-spacing: 0.02em; }
+  .callout p { margin: 0.4rem 0 0; color: var(--muted); }
+
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--code-bg); padding: 0.12em 0.36em; border-radius: 5px; border: 1px solid var(--line-soft); }
+  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 1rem 1.15rem; overflow-x: auto; margin: 0 0 1rem; font: 0.84rem/1.6 var(--mono); }
+  pre code { background: none; padding: 0; border: 0; font-size: 1em; }
+  pre .cm { color: var(--faint); }
+  pre .kw { color: var(--accent); }
+
+  .term { background: var(--term); color: var(--term-ink); border-radius: var(--radius); margin: 0.9rem 0 0.5rem; box-shadow: var(--shadow-md); border: 1px solid rgba(255,255,255,0.06); overflow: hidden; }
+  .term-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.07); background: rgba(255,255,255,0.015); }
+  .term-head i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .term-head .r { background: var(--term-red); } .term-head .y { background: var(--term-amber); } .term-head .g { background: var(--term-green); }
+  .term-head b { margin-left: auto; font: 600 0.7rem var(--mono); color: var(--term-dim); letter-spacing: 0.06em; }
+  .term pre { background: none; border: 0; margin: 0; padding: 1.05rem 1.25rem 1.2rem; color: inherit; font-size: 0.85rem; line-height: 1.62; }
+  .term .p { color: var(--accent); user-select: none; font-weight: 600; }
+  .term .c { color: var(--term-dim); }
+  .term .ok { color: var(--term-green); }
+  .term .no { color: var(--term-red); }
+  .term .am { color: var(--term-amber); }
+
+  .copywrap { position: relative; }
+  .copybtn { position: absolute; top: 0.5rem; right: 0.5rem; font: 600 0.68rem var(--mono); letter-spacing: 0.04em; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 0.28rem 0.6rem; cursor: pointer; transition: color 0.14s, border-color 0.14s; }
+  .copybtn:hover { color: var(--accent); border-color: var(--accent-line); }
+
+  /* ---- examples-page specifics ---- */
+  .toc { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 1.2rem 1.4rem 1.35rem; margin: 2rem 0 0; box-shadow: var(--shadow-sm); }
+  .toc h2 { font-size: 0.82rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); margin: 0 0 0.9rem; }
+  .toc-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem 2rem; }
+  .toc-groups .g > span { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 0.35rem; }
+  .toc-groups ol { margin: 0; padding-left: 1.4rem; font-size: 0.9rem; }
+  .toc-groups li { margin: 0.15rem 0; }
+  .toc-groups a { color: var(--ink); }
+  .toc-groups a:hover { color: var(--accent); }
+
+  .grp { margin-top: 4rem; padding-top: 0.4rem; border-top: 1px solid var(--line-soft); }
+  h3.ex { display: flex; align-items: baseline; gap: 0.65rem; margin-top: 2.4rem; scroll-margin-top: 5rem; }
+  h3.ex:first-of-type { margin-top: 1.6rem; }
+  h3.ex .num { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .result { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); margin: 1rem 0 0.15rem; }
+  .intent { color: var(--muted); max-width: 42rem; }
+
+  .cards { margin: 1.6rem 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
+  .fcard { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 1.15rem 1.25rem; box-shadow: var(--shadow-sm); transition: transform 0.14s ease, box-shadow 0.16s ease, border-color 0.16s ease; display: flex; flex-direction: column; }
+  .fcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--accent-line); }
+  .fcard h3 { margin: 0 0 0.5rem; font-size: 0.98rem; }
+  .fcard h3 a { color: var(--ink); }
+  .fcard h3 a:hover { color: var(--accent); }
+  .fcard p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.55; }
+
+  /* ---- animated example viz (scroll-triggered) ---- */
+  .viz { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 1.4rem 1.3rem 1.5rem; margin: 1.2rem 0 0.4rem; box-shadow: var(--shadow-sm); }
+  .viz-cap { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); margin: 0 0 1.15rem; display: flex; align-items: center; gap: 0.5rem; }
+  .viz-cap .d { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: inline-block; }
+  .pipe { display: flex; align-items: stretch; gap: 0; position: relative; }
+  .pipe .stage { flex: 1 1 0; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper); padding: 0.75rem 0.6rem; text-align: center; }
+  .pipe .stage .ic { font-family: var(--mono); font-weight: 700; color: var(--accent); font-size: 1rem; line-height: 1; }
+  .pipe .stage .lbl { font-family: var(--mono); font-size: 0.72rem; color: var(--ink); margin-top: 0.3rem; font-weight: 600; }
+  .pipe .stage .sub { font-size: 0.66rem; color: var(--muted); margin-top: 0.15rem; line-height: 1.3; }
+  .pipe .conn { flex: 0 0 1.9rem; align-self: center; height: 2px; background: var(--line); position: relative; }
+  .pipe .conn::after { content: ""; position: absolute; right: -1px; top: -3px; border-left: 6px solid var(--line); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+  .viz-note { font-size: 0.8rem; color: var(--muted); margin: 1rem 0 0; }
+  .viz-note b { color: var(--accent); font-family: var(--mono); font-size: 0.76rem; }
+  @media (prefers-reduced-motion: no-preference) {
+    html.js .viz .stage { opacity: 0; transform: translateY(9px); }
+    html.js .viz .conn { transform: scaleX(0); transform-origin: left; }
+    html.js .viz .conn::after { opacity: 0; }
+    html.js .viz .packet { position: absolute; top: 1.4rem; left: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); opacity: 0; }
+    html.js .viz.in .stage { animation: vizStage 0.5s cubic-bezier(.2,.7,.2,1) forwards; animation-delay: var(--d); }
+    html.js .viz.in .conn { animation: vizConn 0.34s ease forwards; animation-delay: var(--d); }
+    html.js .viz.in .conn::after { animation: vizFade 0.2s ease forwards; animation-delay: var(--d); }
+    html.js .viz.in .packet { animation: vizTravel 2.3s 0.5s ease-in-out forwards; }
+    @keyframes vizStage { to { opacity: 1; transform: none; } }
+    @keyframes vizConn { to { transform: scaleX(1); } }
+    @keyframes vizFade { to { opacity: 1; } }
+    @keyframes vizTravel { 0% { opacity: 0; left: 11%; } 9% { opacity: 1; } 91% { opacity: 1; } 100% { opacity: 0; left: 87%; } }
+  }
+
+  /* theme-aware allow/deny colors for diagram stages */
+  :root { --good: #2C8F5B; --stop: #C1462F; }
+  @media (prefers-color-scheme: dark) { :root { --good: #58C08A; --stop: #E5786B; } }
+  :root[data-theme="dark"] { --good: #58C08A; --stop: #E5786B; }
+  :root[data-theme="light"] { --good: #2C8F5B; --stop: #C1462F; }
+  .pipe .stage.hot { border-color: var(--accent-line); background: var(--accent-soft); }
+  .pipe .stage.good { border-color: color-mix(in srgb, var(--good) 42%, var(--line)); background: color-mix(in srgb, var(--good) 8%, var(--paper)); }
+  .pipe .stage.good .ic { color: var(--good); }
+  .pipe .stage.stop { border-color: color-mix(in srgb, var(--stop) 42%, var(--line)); background: color-mix(in srgb, var(--stop) 8%, var(--paper)); }
+  .pipe .stage.stop .ic { color: var(--stop); }
+  .pipe .stage .oc { font-family: var(--mono); font-size: 0.63rem; margin-top: 0.3rem; line-height: 1.55; }
+  .pipe .stage .oc .y { color: var(--good); }
+  .pipe .stage .oc .n { color: var(--stop); }
+
+  footer { border-top: 1px solid var(--line); margin-top: 6rem; background: var(--line-soft); }
+  footer .bar { padding: 1.6rem 1.35rem; font-size: 0.85rem; color: var(--muted); flex-wrap: wrap; }
+  footer nav { margin-left: auto; display: flex; gap: 1.1rem; flex-wrap: wrap; }
+  footer nav a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+  footer nav a:hover { color: var(--accent); }
+
+  @media (max-width: 620px) {
+    body { font-size: 16px; }
+    .cards, .toc-groups { grid-template-columns: 1fr; }
+    nav.top { gap: 0.85rem; }
+    nav.top .refline { display: none; }
+    section { margin-top: 3.5rem; }
+  }
+</style>
+<link rel="canonical" href="https://tarekkharsa.github.io/agentstack/examples.html">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site" id="site-header">
+  <div class="bar">
+    <a class="wordmark" href="./"><svg class="mark" viewBox="24 18 72 85" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="navTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F5A968"/><stop offset="1" stop-color="#E7864A"/></linearGradient></defs><path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/><path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/><path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/><path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/><path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/><path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/><path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#navTop)"/><path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/><path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/><path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/></svg>agentstack</a>
+    <nav class="top" aria-label="Project links">
+      <a href="index.html#enforced">what's&nbsp;enforced</a>
+      <a href="start.html">get&nbsp;started</a>
+      <a href="how-it-works.html">how&nbsp;it&nbsp;works</a>
+      <a class="refline" href="primitives.html">primitives</a>
+      <a href="examples.html" aria-current="page">examples</a>
+      <a class="refline" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">reference</a>
+      <a class="ghost" href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section id="intro" style="margin-top:3.25rem">
+    <p class="eyebrow">By example · simplest → most advanced</p>
+    <h1>AgentStack, <span class="accent">by example</span>.</h1>
+    <p class="lede">
+      Twenty-five copy-paste examples, building from a one-line manifest to
+      sandboxed, governed execution. Everything you author lives in
+      <strong>one file</strong> — <code>.agentstack/agentstack.toml</code>, the
+      intent, safe to commit. Relative paths anchor at that file's directory;
+      only <code>cwd</code> anchors at the project root.
+    </p>
+
+    <div class="callout">
+      <b>Our default recommendation</b>
+      <p>For interactive work in an MCP-capable harness: commit the manifest + lock, connect the gateway once, trust each reviewed repo, and open the smallest useful profile as an MCP lease. Choose native rendering only when the harness must read native files; add lockdown when the agent process needs isolation. <a href="#choose">See why and when to choose differently.</a></p>
+    </div>
+
+    <div class="toc" aria-label="Contents">
+      <h2>Contents</h2>
+      <div class="toc-groups">
+        <div class="g"><span>Basics</span>
+          <ol>
+            <li><a href="#e1">The smallest manifest</a></li>
+            <li><a href="#e2">Fan out to several CLIs</a></li>
+            <li><a href="#e3">Keep secrets out of the file</a></li>
+            <li><a href="#e4">An HTTP server with auth</a></li>
+            <li><a href="#e5">Per-CLI native passthrough</a></li>
+          </ol>
+        </div>
+        <div class="g"><span>Structure</span>
+          <ol start="6">
+            <li><a href="#e6">Add skills</a></li>
+            <li><a href="#e7">Task-specific profiles</a></li>
+            <li><a href="#e8">Instruction files</a></li>
+            <li><a href="#e9">The everyday loop</a></li>
+          </ol>
+        </div>
+        <div class="g"><span>Security</span>
+          <ol start="10">
+            <li><a href="#e10">The MCP tool firewall</a></li>
+            <li><a href="#e11">The machine layer</a></li>
+            <li><a href="#e12">Governance</a></li>
+            <li><a href="#e13">Zero files: the trust gate</a></li>
+          </ol>
+        </div>
+        <div class="g"><span>Scale</span>
+          <ol start="14">
+            <li><a href="#e14">The central library</a></li>
+            <li><a href="#e15">Sync across machines</a></li>
+            <li><a href="#e16">Versioned vendor packs</a></li>
+            <li><a href="#e17">Adopt a native plugin</a></li>
+          </ol>
+        </div>
+        <div class="g"><span>Runtime</span>
+          <ol start="18">
+            <li><a href="#e18">Sandboxed runs + egress</a></li>
+            <li><a href="#e19">Other policy dimensions</a></li>
+            <li><a href="#e20">Audit, analyze, report</a></li>
+            <li><a href="#e21">See what your tools cost</a></li>
+            <li><a href="#e22">Governed TypeScript</a></li>
+          </ol>
+        </div>
+        <div class="g"><span>Operate</span>
+          <ol start="23">
+            <li><a href="#e23">The CI trust gate</a></li>
+            <li><a href="#e24">Add a CLI in one file</a></li>
+            <li><a href="#e25">Personal layer &amp; owned servers</a></li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="grp" id="choose">
+    <p class="eyebrow">Choose before copying</p>
+    <h2>Compose primitives; do not ask one boundary to do every job</h2>
+    <p class="lede">A profile chooses capabilities. Delivery puts them into a harness. Trust grants local consent. Policy limits authority. Lockdown confines the process. Audit records evidence. They are strongest when composed—and dangerous when confused.</p>
+    <div class="cards">
+      <div class="fcard">
+        <h3>Connected interactive work</h3>
+        <p><strong>Recommended:</strong> trust + machine policy + MCP profile lease. You get the smallest live surface and no per-project native artifacts.</p>
+      </div>
+      <div class="fcard">
+        <h3>Native skills or instructions</h3>
+        <p>Use static <code>use --write</code>, or <code>session start/end</code> when files should exist only temporarily. Harnesses read these files themselves.</p>
+      </div>
+      <div class="fcard">
+        <h3>High-risk repository code</h3>
+        <p>Use trust + policy + <code>run --sandbox --lockdown</code>. A lease narrows MCP capabilities; it does not isolate arbitrary processes or direct host activity.</p>
+      </div>
+      <div class="fcard">
+        <h3>CI and reproducibility</h3>
+        <p>Use <code>install --locked</code> + <code>doctor --ci</code>. CI verifies pins and policy; it does not need interactive machine trust.</p>
+      </div>
+    </div>
+    <p class="small muted" style="margin-top:1rem">Full decision table: <a href="primitives.html">AgentStack primitives and recommendations</a>.</p>
+  </section>
+
+  <!-- ============ BASICS ============ -->
+  <section class="grp" id="basics">
+    <p class="eyebrow">Basics</p>
+    <h2>Get a server into your tools</h2>
+
+    <h3 class="ex" id="e1"><span class="num">1</span> The smallest manifest</h3>
+    <p class="intent">One MCP server, one CLI — the whole thing at its simplest.</p>
+
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>how it flows · manifest → your CLI</p>
+      <div class="pipe">
+        <div class="stage" style="--d:.05s"><div class="ic">◈</div><div class="lbl">manifest</div><div class="sub">agentstack.toml</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage" style="--d:.55s"><div class="ic">⚙</div><div class="lbl">apply --write</div><div class="sub">renders config</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage" style="--d:1.05s"><div class="ic">▤</div><div class="lbl">.mcp.json</div><div class="sub">written to disk</div></div>
+        <div class="conn" style="--d:1.4s"></div>
+        <div class="stage" style="--d:1.55s"><div class="ic">▷</div><div class="lbl">Claude&nbsp;Code</div><div class="sub">reads at launch</div></div>
+        <span class="packet" aria-hidden="true"></span>
+      </div>
+      <p class="viz-note"><b>note →</b> the CLI reads that file <b>once, at launch</b> — change the manifest and re-run <code>apply</code>, then restart the CLI to pick it up.</p>
+    </div>
+
+    <pre><code><span class="cm"># .agentstack/agentstack.toml</span>
+version = 1
+
+[servers.time]
+type = "stdio"
+command = "uvx"
+args = ["mcp-server-time"]
+
+[targets]
+default = ["claude-code"]</code></pre>
+    <div class="copywrap">
+      <pre><code>agentstack apply --write   <span class="cm"># writes Claude Code's native .mcp.json for you</span></code></pre>
+      <button class="copybtn" data-copy="agentstack apply --write">copy</button>
+    </div>
+    <p class="result">Result</p>
+    <p class="muted small">Claude Code now has the current <a href="https://github.com/modelcontextprotocol/servers/tree/main/src/time">official Time reference server</a>, generated from your manifest — you never hand-edited its config.</p>
+
+    <h3 class="ex" id="e2"><span class="num">2</span> Fan out to several CLIs</h3>
+    <p class="intent">The same server, spelled correctly for every tool. Add names to <code>targets</code>.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>one manifest · many CLIs</p>
+      <div class="pipe">
+        <div class="stage" style="--d:.05s"><div class="ic">◈</div><div class="lbl">manifest</div><div class="sub">one source of truth</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage" style="--d:.55s"><div class="ic">⚙</div><div class="lbl">apply --write</div><div class="sub">compiles each format</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage hot" style="--d:1.05s"><div class="ic">⇉</div><div class="lbl">native config</div><div class="oc">claude-code · codex<br>cursor · gemini…</div></div>
+      </div>
+    </div>
+    <pre><code>[targets]
+default = ["claude-code", "codex", "cursor", "gemini-cli"]</code></pre>
+    <p class="result">Result</p>
+    <p class="muted small">Four CLIs, four native config formats, one source of truth. No drift, no copy-paste. (13 CLIs supported — <code>agentstack adapters list</code>.)</p>
+
+    <h3 class="ex" id="e3"><span class="num">3</span> Keep secrets out of the file</h3>
+    <p class="intent">Never paste a token in. Reference it as <code>${NAME}</code>; it resolves per machine through the configured secret chain (environment, varlock, OS keychain, then <code>.env</code>).</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>a secret, resolved at runtime</p>
+      <div class="pipe">
+        <div class="stage" style="--d:.05s"><div class="ic">${ }</div><div class="lbl">manifest</div><div class="sub">holds ${GH_PAT} only</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage" style="--d:.55s"><div class="ic">🔑</div><div class="lbl">OS keychain</div><div class="sub">secret set — real value</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage hot" style="--d:1.05s"><div class="ic">⚡</div><div class="lbl">per call</div><div class="sub">gateway injects it</div></div>
+        <div class="conn" style="--d:1.4s"></div>
+        <div class="stage good" style="--d:1.55s"><div class="ic">→</div><div class="lbl">server</div><div class="sub">gets the token</div></div>
+      </div>
+      <p class="viz-note"><b>note →</b> the committed file never contains a real secret; if a ref can't resolve, the write/run is <b>blocked</b>, not left with a placeholder.</p>
+    </div>
+    <pre><code>[servers.github]
+type = "http"
+url = "https://api.githubcopilot.com/mcp/"
+headers = { Authorization = "Bearer ${GH_PAT}" } <span class="cm"># a reference, never the value</span></code></pre>
+    <div class="copywrap">
+      <pre><code>agentstack secret set GH_PAT           <span class="cm"># stored in the OS keychain, not a file</span>
+agentstack bootstrap                   <span class="cm"># flags a referenced secret that's missing</span></code></pre>
+      <button class="copybtn" data-copy="agentstack secret set GH_PAT">copy</button>
+    </div>
+    <p class="result">Result</p>
+    <p class="muted small">The committed manifest is safe to share. A missing secret <strong>blocks the write</strong> rather than leaking a placeholder into live config. This uses GitHub's <a href="https://github.com/github/github-mcp-server">current official MCP endpoint</a>, not the archived reference npm server.</p>
+
+    <h3 class="ex" id="e4"><span class="num">4</span> An HTTP server with auth</h3>
+    <p class="intent">Remote MCP servers use <code>type = "http"</code>, a <code>url</code>, and <code>headers</code>.</p>
+    <pre><code>[servers.kibana]
+type = "http"
+url = "https://kibana-mcp.example.com/mcp"
+headers = { Authorization = "Bearer ${KIBANA_TOKEN}" }</code></pre>
+    <div class="copywrap">
+      <pre><code>agentstack doctor --live               <span class="cm"># real MCP handshake: name + tool count, or the exact error</span></code></pre>
+      <button class="copybtn" data-copy="agentstack doctor --live">copy</button>
+    </div>
+
+    <h3 class="ex" id="e5"><span class="num">5</span> Per-CLI native passthrough</h3>
+    <p class="intent">When one CLI needs a native key another doesn't, pass it through verbatim under <code>extra.&lt;cli&gt;</code>.</p>
+    <pre><code>[servers.filesystem]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "./"]
+
+[servers.filesystem.extra.codex]
+startup_timeout_sec = 20               <span class="cm"># Codex sees this; the others don't</span></code></pre>
+  </section>
+
+  <!-- ============ STRUCTURE ============ -->
+  <section class="grp" id="structure">
+    <p class="eyebrow">Structure</p>
+    <h2>Organize capabilities by task</h2>
+
+    <h3 class="ex" id="e6"><span class="num">6</span> Add skills</h3>
+    <p class="intent">Skills are reusable instruction/tool bundles. Point at a local directory:</p>
+    <pre><code>[skills.sql-review]
+path = "./skills/sql-review"           <span class="cm"># lives at .agentstack/skills/sql-review</span></code></pre>
+    <p class="muted small">Skills activate through <strong>profiles</strong> (next), not <code>apply</code>. Materialize one directly with <code>agentstack use &lt;profile&gt; --write</code>.</p>
+
+    <h3 class="ex" id="e7"><span class="num">7</span> Task-specific profiles</h3>
+    <p class="intent">A profile is a named bundle of servers + skills you switch on for a kind of work.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>load only what the task needs</p>
+      <div class="pipe">
+        <div class="stage" style="--d:.05s"><div class="ic">▤</div><div class="lbl">profile: backend</div><div class="sub">github, kibana + sql-review</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage" style="--d:.55s"><div class="ic">⚙</div><div class="lbl">use backend</div><div class="sub">--write</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage good" style="--d:1.05s"><div class="ic">✓</div><div class="lbl">loaded</div><div class="oc"><span class="y">just backend's set</span><br>others stay off</div></div>
+      </div>
+      <p class="viz-note"><b>why →</b> fewer tools on the wire = fewer tokens billed <b>every turn</b>.</p>
+    </div>
+    <pre><code>[profiles.backend]
+servers = ["github", "kibana"]
+skills  = ["sql-review"]
+
+[profiles.docs]
+servers = ["github"]
+skills  = ["writing-style"]</code></pre>
+    <div class="copywrap">
+      <pre><code>agentstack use backend --write         <span class="cm"># activate the backend profile</span></code></pre>
+      <button class="copybtn" data-copy="agentstack use backend --write">copy</button>
+    </div>
+    <p class="result">Result</p>
+    <p class="muted small">Load only what the task needs — fewer tools on the wire means fewer tokens billed every turn (see <a href="#e21">§21</a>).</p>
+
+    <h3 class="ex" id="e8"><span class="num">8</span> Instruction files (house rules)</h3>
+    <p class="intent">Compile shared instructions into each CLI's native file (<code>CLAUDE.md</code>, <code>AGENTS.md</code>…) from one source.</p>
+    <pre><code>[instructions.house_rules]
+path = "./house-rules.md"
+<span class="cm"># targets = ["*"]   # optional: which CLIs get it (default: all)</span></code></pre>
+
+    <h3 class="ex" id="e9"><span class="num">9</span> The everyday loop</h3>
+    <p class="intent">The four commands you'll actually run.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>the everyday loop</p>
+      <div class="pipe">
+        <div class="stage" style="--d:.05s"><div class="ic">1</div><div class="lbl">init</div><div class="sub">configs → manifest</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage" style="--d:.55s"><div class="ic">2</div><div class="lbl">bootstrap</div><div class="sub">what's missing?</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage" style="--d:1.05s"><div class="ic">3</div><div class="lbl">apply</div><div class="sub">preview → write</div></div>
+        <div class="conn" style="--d:1.4s"></div>
+        <div class="stage good" style="--d:1.55s"><div class="ic">4</div><div class="lbl">doctor</div><div class="sub">verify + fix</div></div>
+      </div>
+    </div>
+    <div class="copywrap">
+      <pre><code>agentstack init         <span class="cm"># reverse-engineer a manifest from configs you already have</span>
+agentstack bootstrap    <span class="cm"># installed CLIs? missing skills/secrets? pending diff?</span>
+agentstack diff         <span class="cm"># read-only: exactly what would change</span>
+agentstack apply        <span class="cm"># preview only</span>
+agentstack apply --write <span class="cm"># after review: render the native files</span>
+agentstack doctor       <span class="cm"># verify wiring; every warning names its exact fix</span></code></pre>
+      <button class="copybtn" data-copy="agentstack init">copy</button>
+    </div>
+    <div class="callout">
+      <b>Two habits worth keeping</b>
+      <p><code>agentstack</code> with no arguments tells you the single next step for the directory you're in. <code>agentstack doctor --ci</code> fails a build on errors, drift, policy, or unsafe content.</p>
+    </div>
+  </section>
+
+  <!-- ============ SECURITY ============ -->
+  <section class="grp" id="security">
+    <p class="eyebrow">Security</p>
+    <h2>Constrain what agents may do</h2>
+
+    <h3 class="ex" id="e10"><span class="num">10</span> The MCP tool firewall</h3>
+    <p class="intent">Restrict which tools a server may expose. Plain globs allow; a leading <code>!</code> denies. Any allow pattern makes the list an allowlist.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>the firewall, on every call</p>
+      <div class="pipe">
+        <div class="stage" style="--d:.05s"><div class="ic">▷</div><div class="lbl">agent</div><div class="sub">calls a tool</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage hot" style="--d:.55s"><div class="ic">⛨</div><div class="lbl">gateway</div><div class="sub">[policy.tools]</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage" style="--d:1.05s"><div class="ic">⇥</div><div class="lbl">decision</div><div class="oc"><span class="y">✓ get_issue</span><br><span class="n">✗ list_secrets</span></div></div>
+      </div>
+      <p class="viz-note"><b>enforced →</b> a denied tool is refused before it reaches the server, and hidden from discovery entirely.</p>
+    </div>
+    <pre><code>[policy.tools]
+github = ["get_*", "list_*", "!list_secrets"]   <span class="cm"># read-only, minus one tool</span></code></pre>
+    <p class="result">Result</p>
+    <p class="muted small">A denied tool is <strong>invisible</strong> — filtered from discovery — and refused with the rule named if called anyway. <code>agentstack explain github</code> shows the effective policy.</p>
+
+    <h3 class="ex" id="e11"><span class="num">11</span> The machine layer — rules no repo can loosen</h3>
+    <p class="intent">Your standing rules live in <code>~/.agentstack/agentstack.toml</code> and are checked <strong>before</strong> any project's. A call must pass both layers.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>policy is an intersection</p>
+      <div class="pipe">
+        <div class="stage hot" style="--d:.05s"><div class="ic">⛨</div><div class="lbl">machine policy</div><div class="sub">your standing rules</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage" style="--d:.55s"><div class="ic">∩</div><div class="lbl">repo policy</div><div class="sub">can only add, not loosen</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage good" style="--d:1.05s"><div class="ic">=</div><div class="lbl">effective</div><div class="sub">never more permissive<br>than the machine layer</div></div>
+      </div>
+    </div>
+    <pre><code><span class="cm"># ~/.agentstack/agentstack.toml — applies to every project on this machine</span>
+[policy.tools]
+"*"    = ["!delete_*"]                  <span class="cm"># no server, under any name, may delete_*</span>
+github = ["get_*", "list_*"]            <span class="cm"># servers NAMED github are read-only</span></code></pre>
+    <p class="result">Result</p>
+    <p class="muted small">The effective policy is always the <strong>intersection</strong> of machine and repo policy — never more permissive than your machine layer. The <code>"*"</code> key is rename-proof.</p>
+
+    <h3 class="ex" id="e12"><span class="num">12</span> Governance — require, forbid, allowed sources</h3>
+    <p class="intent">Gate where capabilities may come from and what must / mustn't be present — enforced by <code>doctor --ci</code>.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>a check, not a runtime firewall</p>
+      <div class="pipe">
+        <div class="stage" style="--d:.05s"><div class="ic">[ ]</div><div class="lbl">[policy]</div><div class="sub">require / forbid / sources</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage hot" style="--d:.55s"><div class="ic">✔</div><div class="lbl">doctor --ci · add</div><div class="sub">validation gate</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage" style="--d:1.05s"><div class="ic">⇥</div><div class="lbl">build</div><div class="oc"><span class="y">✓ passes</span> / <span class="n">✗ fails</span></div></div>
+        <div class="conn" style="--d:1.4s"></div>
+        <div class="stage stop" style="--d:1.55s"><div class="ic">✗</div><div class="lbl">a running agent</div><div class="sub">NOT consulted</div></div>
+      </div>
+      <p class="viz-note"><b>read this carefully →</b> governance fails <code>add</code> / CI. It places <b>no runtime block</b> on anything — that's <a href="#e10">[policy.tools]</a>.</p>
+    </div>
+    <pre><code>[policy]
+allowed_sources = ["git:github.com/acme/*"]   <span class="cm"># only these origins may be installed</span>
+forbid = ["network-broker"]                    <span class="cm"># never allow this capability</span></code></pre>
+
+    <h3 class="ex" id="e13"><span class="num">13</span> Zero files: the trust gate</h3>
+    <p class="intent">Skip rendered files entirely. Register the gateway once; every <strong>trusted</strong> repo then serves its own servers live — an unreviewed repo is <strong>inert</strong>.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>clone → inert → trusted → audited</p>
+      <div class="pipe">
+        <div class="stage stop" style="--d:.05s"><div class="ic">◌</div><div class="lbl">clone</div><div class="sub">inert — nothing spawns</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage hot" style="--d:.55s"><div class="ic">👁</div><div class="lbl">trust .</div><div class="sub">review, then pin bytes</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage good" style="--d:1.05s"><div class="ic">⛨</div><div class="lbl">firewalled</div><div class="sub">servers serve live</div></div>
+        <div class="conn" style="--d:1.4s"></div>
+        <div class="stage" style="--d:1.55s"><div class="ic">▤</div><div class="lbl">audited</div><div class="sub">every call logged</div></div>
+      </div>
+      <p class="viz-note"><b>re-gates →</b> edit the manifest or lock and it drops back to <b>inert</b> until you review again.</p>
+    </div>
+    <div class="copywrap">
+      <pre><code>agentstack connect --all --write       <span class="cm"># register the gateway with your harnesses (once)</span>
+
+git clone &lt;some-repo&gt; &amp;&amp; cd &lt;some-repo&gt;
+agentstack mcp --auto-project          <span class="cm"># an agent asks what's here → nothing (untrusted)</span>
+agentstack trust .                     <span class="cm"># SEE what it declares, then authorize</span></code></pre>
+      <button class="copybtn" data-copy="agentstack trust .">copy</button>
+    </div>
+    <div class="term">
+      <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>review → firewalled → audited</b></div>
+      <pre><code><span class="p">$</span> agentstack trust .
+<span class="c">  ▶ demo: runs `python3 ./server.py`</span>       <span class="c"># exactly what it would run</span>
+<span class="ok">  ✓</span> trusted at sha256:945b4b…                 <span class="c"># editing the manifest/lock re-gates it</span>
+
+<span class="c"># now its servers serve live, through the firewall:</span>
+agent → demo.echo         <span class="ok">✓ ok</span>
+agent → demo.secret_read  <span class="no">✗ denied</span>  <span class="c">[policy.tools]</span></code></pre>
+    </div>
+    <p class="muted small">Any pinned byte changing (manifest, overlay, or lock) re-gates the bundle. Every brokered call lands in <code>~/.agentstack/audit/calls.jsonl</code>.</p>
+
+    <h4>Fence one MCP connection to a profile</h4>
+    <p class="intent">After trust, the agent can choose a profile without rendering native configs. These are MCP tool calls made inside the agent session—not terminal commands:</p>
+    <pre><code><span class="cm"># agent → agentstack control plane</span>
+agentstack_lease_open({ "profile": "backend" })
+agentstack_list_loadable({})
+agentstack_load({
+  "name": "sql-review",
+  "reason": "review the migration in this task"
+})
+agentstack_lease_status({})
+agentstack_lease_close({})</code></pre>
+    <p class="result">Result</p>
+    <p class="muted small">Only <code>backend</code> servers and skills are reachable on that connection. Loads are recorded in memory, repeat loads do not duplicate the trail, and close/process exit needs no restore because no <code>.mcp.json</code>, skill folder, or <code>sessions.json</code> entry was written.</p>
+    <div class="callout">
+      <b>Keep what the task actually used</b>
+      <p>Call <code>agentstack_lease_freeze({ "name": "backend-observed" })</code> to propose a normal manifest profile from the observed skill set. Review that edit, then run <code>agentstack lock</code>; freeze never applies or renders the profile. Try the <a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/mcp-profile-lease">runnable end-to-end fixture</a>.</p>
+    </div>
+  </section>
+
+  <!-- ============ SCALE ============ -->
+  <section class="grp" id="scale">
+    <p class="eyebrow">Scale</p>
+    <h2>Reuse capabilities everywhere</h2>
+
+    <h3 class="ex" id="e14"><span class="num">14</span> The central library</h3>
+    <p class="intent">Install a capability <strong>once</strong> into your machine-wide library (<code>~/.agentstack/lib</code>), then reference it <strong>by name</strong> from any project.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>install once · reference by name</p>
+      <div class="pipe">
+        <div class="stage" style="--d:.05s"><div class="ic">+</div><div class="lbl">lib add</div><div class="sub">content-scanned first</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage hot" style="--d:.55s"><div class="ic">◫</div><div class="lbl">~/.agentstack/lib</div><div class="sub">machine-wide</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage good" style="--d:1.05s"><div class="ic">⇉</div><div class="lbl">by name</div><div class="oc">project A · B · C<br>no files copied</div></div>
+      </div>
+    </div>
+    <div class="copywrap">
+      <pre><code>agentstack search codex                          <span class="cm"># find shipped skills + registry servers</span>
+agentstack lib add sql-review --path ./skills/sql-review --write
+
+<span class="cm"># straight from a git repo, including monorepo subdirs:</span>
+agentstack lib add improve --git https://github.com/acme/skills \
+    --subpath skills/improve --write
+
+agentstack lib list                              <span class="cm"># what's installed, with provenance</span></code></pre>
+      <button class="copybtn" data-copy="agentstack lib list">copy</button>
+    </div>
+    <p class="muted small">Then in any profile: <code>skills = ["sql-review"]</code> resolves from the library. Every add is content-scanned (hidden-Unicode / prompt-injection) before it lands.</p>
+
+    <h3 class="ex" id="e15"><span class="num">15</span> Sync the library across machines</h3>
+    <p class="intent">Version the library as a git repo. A fail-closed gate scans every server field <strong>and the outgoing commits</strong> for secrets before pushing.</p>
+    <div class="copywrap">
+      <pre><code>agentstack lib sync --init --remote git@github.com:you/agent-lib.git
+agentstack lib sync                              <span class="cm"># commit local changes, pull, push</span></code></pre>
+      <button class="copybtn" data-copy="agentstack lib sync">copy</button>
+    </div>
+    <p class="result">Result</p>
+    <p class="muted small">A literal secret in a definition — or a definition it can't parse — <strong>blocks the sync</strong> rather than slipping through.</p>
+
+    <h3 class="ex" id="e16"><span class="num">16</span> Versioned vendor packs</h3>
+    <p class="intent">Install a pinned bundle of MCP + skills + house-rules in one shot, policy-gated and content-scanned first.</p>
+    <div class="copywrap">
+      <pre><code>agentstack add from git:github.com/acme/pack@v1.2.0</code></pre>
+      <button class="copybtn" data-copy="agentstack add from git:github.com/acme/pack@v1.2.0">copy</button>
+    </div>
+    <p class="muted small">Upgrading is just the next tag — the lockfile records exactly what you got.</p>
+
+    <h3 class="ex" id="e17"><span class="num">17</span> Adopt a native plugin</h3>
+    <p class="intent">Lift a plugin you installed in one CLI into the manifest so it travels everywhere — skills copied to the library with provenance, servers carried as <code>${REF}</code>s.</p>
+    <div class="copywrap">
+      <pre><code>agentstack plugins adopt cloudflare --harness codex --write
+agentstack plugins sync --write                  <span class="cm"># generate native packages + marketplaces</span>
+agentstack plugins install cloudflare --target claude-code --write</code></pre>
+      <button class="copybtn" data-copy="agentstack plugins adopt cloudflare --harness codex --write">copy</button>
+    </div>
+    <p class="muted small">The harness you adopted <em>from</em> stays satisfied by its native install — <code>status</code>/<code>doctor</code> report it up to date and flag drift, never double-installing.</p>
+  </section>
+
+  <!-- ============ RUNTIME ============ -->
+  <section class="grp" id="runtime">
+    <p class="eyebrow">Runtime</p>
+    <h2>Confine, observe, and measure a run</h2>
+
+    <h3 class="ex" id="e18"><span class="num">18</span> Sandboxed runs with egress policy</h3>
+    <p class="intent">Run the agent in a container with <strong>no host route and no internet</strong> — its only way out is the egress-proxy sidecar, which enforces your machine <code>[policy.egress]</code>.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>the only way out is the proxy</p>
+      <div class="pipe">
+        <div class="stage stop" style="--d:.05s"><div class="ic">▣</div><div class="lbl">container</div><div class="sub">no host route, no net</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage hot" style="--d:.55s"><div class="ic">⛨</div><div class="lbl">egress sidecar</div><div class="sub">[policy.egress]</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage" style="--d:1.05s"><div class="ic">⇥</div><div class="lbl">per host</div><div class="oc"><span class="y">✓ api.github.com</span><br><span class="n">✗ evil.example</span></div></div>
+      </div>
+      <p class="viz-note"><b>topological →</b> ignoring the proxy reaches nothing — it's the network shape, not an honor system. Needs Docker + <code>--features sandbox</code>.</p>
+    </div>
+    <pre><code><span class="cm"># ~/.agentstack/agentstack.toml — same glob grammar as the tool firewall, over hosts</span>
+[policy.egress]
+"*"    = ["!*"]                         <span class="cm"># deny everything by default</span>
+github = ["api.github.com:443"]         <span class="cm"># a server named github may reach only this</span></code></pre>
+    <div class="copywrap">
+      <pre><code>agentstack run claude-code --sandbox --lockdown --profile backend
+agentstack report &lt;run-id&gt;              <span class="cm"># the run's flight recorder: every egress decision</span></code></pre>
+      <button class="copybtn" data-copy="agentstack run claude-code --sandbox --lockdown --profile backend">copy</button>
+    </div>
+    <p class="result">Result</p>
+    <p class="muted small">Ignoring the proxy reaches nothing — confinement is topological. It filters by host, requires a TLS connection's SNI to match the dialed host (no domain fronting), and refuses names resolving to loopback/private/link-local/metadata addresses (no SSRF). Needs Docker + <code>--features sandbox</code>.</p>
+
+    <h3 class="ex" id="e19"><span class="num">19</span> The other policy dimensions</h3>
+    <p class="intent">The same two-layer intersection and <code>"*"</code> grammar apply beyond tools and egress.</p>
+    <pre><code>[policy.secrets]
+github = ["GH_*"]                       <span class="cm"># server named github may resolve only GH_* refs</span>
+
+[policy.filesystem]                     <span class="cm"># bundle-global path globs</span>
+read  = ["./src/**", "./docs/**"]
+write = ["./out/**", "!**/.env"]        <span class="cm"># never write a .env, even under an allowed root</span></code></pre>
+    <p class="muted small">Enforcement depends on execution mode: host/gateway filesystem guards are cooperative harness hooks; sandbox/lockdown use coarse workspace mounts. See <a href="index.html#enforced">the enforcement matrix</a> before making a security claim.</p>
+
+    <h3 class="ex" id="e20"><span class="num">20</span> See what happened — audit, analyze, report</h3>
+    <p class="intent">Every brokered call is recorded (digests and outcomes, never argument values or secrets). Turn that into insight.</p>
+    <div class="copywrap">
+      <pre><code>agentstack audit --calls --since 7            <span class="cm"># recent brokered calls: tool · outcome · latency</span>
+agentstack report &lt;run-id&gt;                    <span class="cm"># per-run tree, incl. sandbox egress decisions</span>
+agentstack analyze                            <span class="cm"># what you actually call; flags installed-but-unused</span>
+agentstack analyze --transcripts              <span class="cm"># + cross-harness reach from local session logs</span></code></pre>
+      <button class="copybtn" data-copy="agentstack report &lt;run-id&gt;">copy</button>
+    </div>
+
+    <h3 class="ex" id="e21"><span class="num">21</span> See what your tools cost</h3>
+    <p class="intent">Every tool/server/skill you load is re-billed as input tokens <strong>every turn</strong>. Measure it with the passive wire proxy — observe only, cache stays warm.</p>
+    <div class="copywrap">
+      <pre><code>export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+agentstack proxy start                        <span class="cm"># in one shell, then use your agent normally</span>
+agentstack proxy report                       <span class="cm"># ranks tokens/turn vs. how often each was called</span></code></pre>
+      <button class="copybtn" data-copy="agentstack proxy start">copy</button>
+    </div>
+    <p class="muted small">A server that's expensive but never used is flagged <code>drop / lazy</code> — data-driven pruning that closes the loop with the profiles you manage.</p>
+
+    <h3 class="ex" id="e22"><span class="num">22</span> Experimental: governed TypeScript</h3>
+    <p class="intent"><code>tools_execute</code> lets one bounded TypeScript program call a small, exact set of MCP tools through the gateway — as a non-root process in a read-only, resource-limited Docker container with no workspace, credentials, package install, or direct network. <strong>Off by default</strong>; only the machine owner enables it.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>governed code, sandboxed</p>
+      <div class="pipe">
+        <div class="stage" style="--d:.05s"><div class="ic">{ }</div><div class="lbl">TS program</div><div class="sub">exact tool grant</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage stop" style="--d:.55s"><div class="ic">▣</div><div class="lbl">sandbox</div><div class="sub">no net, no creds</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage hot" style="--d:1.05s"><div class="ic">⛨</div><div class="lbl">gateway</div><div class="sub">re-checks each call</div></div>
+        <div class="conn" style="--d:1.4s"></div>
+        <div class="stage good" style="--d:1.55s"><div class="ic">→</div><div class="lbl">result</div><div class="sub">attributed in report</div></div>
+      </div>
+      <p class="viz-note"><b>experimental →</b> Docker-only, off by default, and never a host-execution fallback.</p>
+    </div>
+    <pre><code><span class="cm"># ~/.agentstack/agentstack.toml</span>
+[experimental]
+tools_execute = true
+
+<span class="cm"># optional machine-owned ceilings; a request may only narrow them</span>
+[experimental.tools_execute_limits]
+timeout_ms       = 30000
+max_calls        = 40
+max_output_bytes = 131072</code></pre>
+    <p class="muted small">Every allowed call is re-checked by the gateway and attributed in <code>agentstack report</code>. Docker-only; never a host-execution fallback.</p>
+  </section>
+
+  <!-- ============ OPERATE ============ -->
+  <section class="grp" id="operate">
+    <p class="eyebrow">Operate</p>
+    <h2>CI, extension, and the personal layer</h2>
+
+    <h3 class="ex" id="e23"><span class="num">23</span> The CI trust gate</h3>
+    <p class="intent">Two commands make a pipeline fail on drift or unsafe content — or use the pinned Action.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>fail the build on drift</p>
+      <div class="pipe">
+        <div class="stage" style="--d:.05s"><div class="ic">⇩</div><div class="lbl">install --locked</div><div class="sub">fail on source drift</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage hot" style="--d:.55s"><div class="ic">✔</div><div class="lbl">doctor --ci</div><div class="sub">policy · unsafe content</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage" style="--d:1.05s"><div class="ic">⇥</div><div class="lbl">build</div><div class="oc"><span class="y">✓ green</span> / <span class="n">✗ blocked</span></div></div>
+      </div>
+    </div>
+    <div class="copywrap">
+      <pre><code>agentstack install --locked                   <span class="cm"># fail if sources drifted from the pinned lock</span>
+agentstack doctor --ci                         <span class="cm"># fail on errors, drift, policy, unsafe content</span></code></pre>
+      <button class="copybtn" data-copy="agentstack install --locked">copy</button>
+    </div>
+    <pre><code>steps:
+  - uses: actions/checkout@v4
+  - uses: Tarekkharsa/agentstack@v0.10.1        <span class="cm"># pin a release tag, not @main</span></code></pre>
+
+    <h3 class="ex" id="e24"><span class="num">24</span> Extend it — add a CLI in one file</h3>
+    <p class="intent">Support a new CLI with a single YAML descriptor — no rebuild.</p>
+    <div class="copywrap">
+      <pre><code>cp crates/adapters/descriptors/codex.yaml my-adapter.yaml
+<span class="cm"># edit it, then:</span>
+agentstack adapters validate my-adapter.yaml
+cp my-adapter.yaml ~/.agentstack/adapters/      <span class="cm"># picked up on next run</span>
+agentstack adapters list                        <span class="cm"># marks which adapters are yours</span></code></pre>
+      <button class="copybtn" data-copy="agentstack adapters validate my-adapter.yaml">copy</button>
+    </div>
+    <p class="muted small">A broken drop-in is skipped with a warning, never fatal.</p>
+
+    <h3 class="ex" id="e25"><span class="num">25</span> The personal layer &amp; app-owned servers</h3>
+    <p class="intent">Machine-wide instructions that merge beneath every project without landing in any repo; and letting an app's own config be the source of truth.</p>
+    <div class="copywrap">
+      <pre><code>agentstack init --global                        <span class="cm"># a home for your machine-wide rules</span></code></pre>
+      <button class="copybtn" data-copy="agentstack init --global">copy</button>
+    </div>
+    <pre><code>[servers.codex-native]
+owner = "codex"                                 <span class="cm"># codex owns this entry; apply follows it</span></code></pre>
+    <p class="muted small">When the app rewrites its own entry (a self-update), <code>apply</code> refreshes the manifest and fans the fresh values out to every other CLI instead of reverting the app.</p>
+  </section>
+
+  <section id="next">
+    <p class="eyebrow">Where to go next</p>
+    <h2>Beyond the examples.</h2>
+    <div class="cards">
+      <div class="fcard">
+        <h3><a href="start.html">Get started · 10 min</a></h3>
+        <p>The guided walkthrough: take an unfamiliar repo from untrusted to a confined, auditable run — with the exact commands and expected output.</p>
+      </div>
+      <div class="fcard">
+        <h3><a href="index.html#enforced">What's enforced where</a></h3>
+        <p>The compact, code-grounded matrix: for host, gateway, sandbox, and lockdown, exactly which of tools, egress, secrets, filesystem, and audit are enforced.</p>
+      </div>
+      <div class="fcard">
+        <h3><a href="library.html">Central library</a></h3>
+        <p>Install a skill or server once into your machine-wide library, then reference it by name from any project — every add content-scanned first.</p>
+      </div>
+      <div class="fcard">
+        <h3><a href="primitives.html">Primitives &amp; recommendations</a></h3>
+        <p>Choose static, session, lease, trust, policy, or lockdown from the boundary you need—not from one universal mode.</p>
+      </div>
+      <div class="fcard">
+        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Feature reference</a></h3>
+        <p>The complete tested inventory: machine-policy presets, vendor packs, the MCP firewall, plugin recipes, live runs, and every command and flag.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="bar">
+    <span>MIT or Apache-2.0, at your option.</span>
+    <nav aria-label="Footer links">
+      <a href="index.html">home</a>
+      <a href="start.html">get&nbsp;started</a>
+      <a href="primitives.html">primitives</a>
+      <a href="https://github.com/Tarekkharsa/agentstack">source</a>
+      <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+  document.documentElement.classList.add("js");
+  for (const btn of document.querySelectorAll(".copybtn")) {
+    btn.setAttribute("aria-live", "polite");
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copy);
+        btn.textContent = "copied";
+        setTimeout(() => (btn.textContent = "copy"), 1600);
+      } catch { btn.textContent = "select + copy"; }
+    });
+  }
+  const header = document.getElementById("site-header");
+  const onScroll = () => header.classList.toggle("scrolled", window.scrollY > 8);
+  addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  // Scroll-triggered example animations. Toggling `.in` on enter/exit lets the
+  // pipeline replay each time it scrolls back into view. No-op under
+  // prefers-reduced-motion (the CSS simply shows the final state).
+  const vizObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) e.target.classList.toggle("in", e.isIntersecting);
+  }, { threshold: 0.4 });
+  for (const v of document.querySelectorAll("[data-viz]")) vizObserver.observe(v);
+</script>
+
+</body>
+</html>

@@ -162,9 +162,19 @@ rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled `CLAUDE.md`
 - **Zero-copy** — no persistent per-project provider artifacts. `agentstack
   connect` registers the gateway once per harness (one write to each
   harness's global config) and every **trusted** repo serves its own stack
-  live at session start; a machine-local `codemode/endpoint.json` coordinate
-  may exist for the session's duration — see
+  live. `agentstack_lease_open(profile)` can fence one MCP connection to a
+  profile without rendering native files; `agentstack_lease_status` shows its
+  in-memory load trail, `agentstack_lease_freeze` promotes the observed set to
+  a manifest profile (review it, then run `agentstack lock`), and close/process
+  exit drops it. A machine-local
+  `codemode/endpoint.json` coordinate may exist for the connection's duration — see
   [the zero-copy bridge](#the-zero-copy-bridge---auto-project--trust).
+
+**Recommendation:** prefer the zero-copy lease path for interactive work when
+the harness supports MCP; use static or clean-at-rest delivery when the harness
+must read native skill/instruction files. Add `--sandbox --lockdown` when the
+agent process itself needs isolation—a lease is a capability fence, not a
+sandbox. See [the primitives and decision table](https://tarekkharsa.github.io/agentstack/primitives.html).
 
 The managed `.gitignore` block is anchored to **outcomes, not declarations**:
 an entry exists only for a file agentstack actually wrote or still manages
@@ -801,6 +811,50 @@ skills-over-MCP (`agentstack_list_loadable`/`agentstack_load`) are fully
 zero-copy. Native skill folders and instruction files (`CLAUDE.md`/`AGENTS.md`)
 are read from disk by the harnesses themselves and still need render mode
 (`apply`/`use`) — `connect` prints this per harness.
+
+### MCP profile leases: one connection, one capability fence
+
+An MCP profile lease is process-local state owned by one `agentstack mcp`
+process. It is the zero-file counterpart of a native `session start`, but the
+cleanup contract is different: a lease never renders harness config, creates a
+native skill folder, or writes `sessions.json`, so close/process exit has
+nothing to restore.
+
+The normal agent-side sequence is:
+
+```text
+agentstack_lease_open({ "profile": "backend" })
+agentstack_list_loadable({})
+agentstack_load({ "name": "sql-review", "reason": "review this migration" })
+agentstack_lease_status({})
+agentstack_lease_close({})
+```
+
+These are MCP tool calls, not CLI shell commands. While the lease is active:
+
+- the live gateway exposes only servers from the selected profile;
+- `agentstack_list_loadable` and `agentstack_load` expose only that profile's
+  skills (plus the embedded `using-agentstack` manual);
+- the first load of each skill is recorded with its reason, while repeated
+  loads return the body without duplicating the trail;
+- trust, lock/digest verification, machine policy, project policy, and call
+  auditing continue to apply.
+
+`agentstack_lease_freeze({ "name": "backend-observed" })` converts the leased
+profile's server list plus the skills actually loaded into a new manifest
+profile. It is a manifest-only proposal: review the edit, then run
+`agentstack lock` to refresh the lockfile. It never applies or renders the new
+profile.
+
+The MCP control plane refuses to place a lease over an active native session,
+or start a native session over its active lease. The lease is deliberately
+invisible to separate processes, however: another terminal cannot inspect it.
+Use `agentstack_lease_status` from the same MCP connection. Opening a different
+valid profile replaces the current lease and starts a fresh in-memory load
+trail.
+
+See [`examples/mcp-profile-lease`](../examples/mcp-profile-lease/) for a
+runnable stdio lifecycle with assertions that no native artifacts are created.
 
 ### Compact proxied surface + code mode
 

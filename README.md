@@ -6,6 +6,7 @@
 > run, audit, and optimize the result.
 
 **[Website](https://tarekkharsa.github.io/agentstack/)** ·
+[Examples](https://tarekkharsa.github.io/agentstack/examples.html) ·
 [Feature reference](docs/reference.md) ·
 [Enforcement matrix](docs/ENFORCEMENT.md) ·
 [Central library](https://tarekkharsa.github.io/agentstack/library.html) ·
@@ -139,10 +140,9 @@ yet. The moment capabilities come from repos you didn't write, you do.
 version = 1
 
 [servers.github]
-type = "stdio"
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-github"]
-env = { GITHUB_TOKEN = "${GH_PAT}" }        # resolved per machine, never stored
+type = "http"
+url = "https://api.githubcopilot.com/mcp/"
+headers = { Authorization = "Bearer ${GH_PAT}" } # resolved per machine, never stored
 
 [servers.github.extra.codex]                 # native keys one CLI needs pass
 startup_timeout_sec = 20                     # through verbatim, per adapter
@@ -351,17 +351,42 @@ artifacts (`.mcp.json`, `.claude/skills/`, and the compiled `CLAUDE.md` /
 - **Zero files** — `agentstack connect` registers the gateway once per
   harness; every **trusted** repo then brings its own servers through
   `agentstack mcp --auto-project`, with a tool firewall and call audit log
-  included. Untrusted repos are inert until you review and `agentstack trust .`
+  included. `agentstack_lease_open(profile)` selects a process-local profile
+  fence for servers and progressively loaded skills without creating native
+  files or `sessions.json`; close it or end the MCP process to drop it.
+  Untrusted repos are inert until you review and `agentstack trust .`
+
+Inside the connected agent session, the zero-file lifecycle is:
+
+```text
+agentstack_lease_open({ "profile": "backend" })
+agentstack_list_loadable({})
+agentstack_load({ "name": "sql-review", "reason": "review this migration" })
+agentstack_lease_status({})
+agentstack_lease_close({})
+```
+
+These are MCP tool calls, not shell commands. To preserve the observed skill
+set, call `agentstack_lease_freeze({ "name": "backend-observed" })`, review the
+manifest edit, then run `agentstack lock`. A
+[runnable stdio example](examples/mcp-profile-lease/) verifies the complete
+lifecycle and the absence of native artifacts.
 
 Details and trade-offs: [feature reference → three modes](docs/reference.md#where-rendered-files-live-three-modes).
 
 ## Going further
 
+- **[Examples](https://tarekkharsa.github.io/agentstack/examples.html)** — every
+  capability by example, from a one-line manifest up to sandboxed governed
+  execution.
 - **[Docs site](https://tarekkharsa.github.io/agentstack/)** — the visual
   getting-started walkthrough.
 - **[Feature reference](docs/reference.md)** — the complete tested inventory:
   central library, vendor packs, MCP firewall, call audit log, `optimize`,
   plugin recipes, live runs, code mode, every command and flag.
+- **[Primitives and recommendations](https://tarekkharsa.github.io/agentstack/primitives.html)** — when to use a
+  static render, native session, MCP lease, trust, policy, or lockdown—and why
+  none of those boundaries substitutes for another.
 - **[The no-terminal path](docs/dashboard.md)** — the dashboard's capability
   lifecycle, from discovery through undo.
 - **Vendor packs** — `agentstack add from git:github.com/acme/pack@v1.2.0`

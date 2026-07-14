@@ -37,7 +37,8 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
         // connections / stdio children per process, not one per surface).
         // No global lock: the gateway is Sync with per-upstream mutexes, so
         // concurrent calls to different servers proceed in parallel.
-        let gateway = std::sync::Arc::new(crate::gateway::Gateway::from_manifest(dir.as_deref()));
+        let mut gateway =
+            std::sync::Arc::new(crate::gateway::Gateway::from_manifest(dir.as_deref()));
         if !gateway.is_empty() {
             eprintln!("agentstack mcp: gateway active — proxying this project's MCP servers");
         }
@@ -45,7 +46,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
         // Code mode (Phase 2): expose a loopback, token-gated endpoint the generated
         // client POSTs to. Best-effort and contained — None when there's nothing to
         // proxy. agentstack only brokers the call here; it never runs the agent's code.
-        let runtime =
+        let mut runtime =
             crate::codemode::endpoint::start(dir.as_deref(), std::sync::Arc::clone(&gateway));
         if let Some(rt) = &runtime {
             eprintln!(
@@ -56,6 +57,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
 
         let out = std::sync::Arc::new(std::sync::Mutex::new(out));
         let mut workers = WorkerPool::new();
+        let lease = new_lease_store();
         for line in stdin.lock().lines() {
             let line = line?;
             if line.trim().is_empty() {
@@ -64,6 +66,11 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
             let Ok(req) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
+            if is_lease_mutation(&req) {
+                // A tighter/looser profile boundary must not race an in-flight
+                // call through the previous gateway.
+                workers.join_all();
+            }
             if req.get("method").and_then(Value::as_str) == Some("tools/call")
                 && is_upstream_call(&req)
             {
@@ -74,13 +81,45 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
                 let gw = std::sync::Arc::clone(&gateway);
                 let out = std::sync::Arc::clone(&out);
                 let dir = dir.clone();
+                let lease = std::sync::Arc::clone(&lease);
                 workers.spawn(move || {
-                    if let Some(resp) = handle(&req, dir.as_deref(), &gw, None, transparent) {
+                    if let Some(resp) =
+                        handle_with_lease(&req, dir.as_deref(), &gw, None, transparent, &lease)
+                    {
                         respond(&out, &resp);
                     }
                 });
-            } else if let Some(resp) = handle(&req, dir.as_deref(), &gateway, None, transparent) {
-                respond(&out, &resp);
+            } else {
+                let before = lease_profile(&lease);
+                let resp =
+                    handle_with_lease(&req, dir.as_deref(), &gateway, None, transparent, &lease);
+                let after = lease_profile(&lease);
+                if before != after {
+                    if let Some(rt) = runtime.take() {
+                        rt.shutdown();
+                    }
+                    gateway = match after.as_deref() {
+                        Some(profile) => std::sync::Arc::new(
+                            crate::gateway::Gateway::from_manifest_lease(dir.as_deref(), profile),
+                        ),
+                        None => std::sync::Arc::new(crate::gateway::Gateway::from_manifest(
+                            dir.as_deref(),
+                        )),
+                    };
+                    runtime = crate::codemode::endpoint::start(
+                        dir.as_deref(),
+                        std::sync::Arc::clone(&gateway),
+                    );
+                    if transparent {
+                        respond(
+                            &out,
+                            &json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }),
+                        );
+                    }
+                }
+                if let Some(resp) = resp {
+                    respond(&out, &resp);
+                }
             }
         }
         // stdin EOF: drain in-flight calls before exiting, or their responses
@@ -103,6 +142,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
     let mut auto = AutoProject::new(dir);
     let out = std::sync::Arc::new(std::sync::Mutex::new(out));
     let mut workers = WorkerPool::new();
+    let lease = new_lease_store();
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -129,6 +169,10 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
+        let tool_name = req.pointer("/params/name").and_then(Value::as_str);
+        if is_lease_mutation(&req) {
+            workers.join_all();
+        }
         match method.as_str() {
             "initialize" => auto.note_client_capabilities(&req),
             "notifications/initialized" => {
@@ -143,7 +187,14 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
                 notify_if_gateway_appears(&mut auto, &out);
             }
             "tools/call" => {
-                if transparent {
+                if tool_name == Some("agentstack_lease_open") {
+                    // Resolve + trust-check only. The validated lease profile
+                    // becomes the first gateway fence below, so compact
+                    // zero-file mode never constructs the unrestricted surface
+                    // merely to select a profile.
+                    auto.ensure_project();
+                    auto.refresh_trust();
+                } else if transparent {
                     notify_if_gateway_appears(&mut auto, &out);
                 } else {
                     auto.ensure_gateway();
@@ -158,20 +209,42 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
             let out = std::sync::Arc::clone(&out);
             let dir = auto.dir().map(Path::to_path_buf);
             let note = auto.trust_note();
+            let lease = std::sync::Arc::clone(&lease);
             workers.spawn(move || {
-                if let Some(resp) = handle(&req, dir.as_deref(), &gw, note.as_deref(), transparent)
-                {
+                if let Some(resp) = handle_with_lease(
+                    &req,
+                    dir.as_deref(),
+                    &gw,
+                    note.as_deref(),
+                    transparent,
+                    &lease,
+                ) {
                     respond(&out, &resp);
                 }
             });
-        } else if let Some(resp) = handle(
-            &req,
-            auto.dir(),
-            auto.gateway(),
-            auto.trust_note().as_deref(),
-            transparent,
-        ) {
-            respond(&out, &resp);
+        } else {
+            let before = lease_profile(&lease);
+            let resp = handle_with_lease(
+                &req,
+                auto.dir(),
+                auto.gateway(),
+                auto.trust_note().as_deref(),
+                transparent,
+                &lease,
+            );
+            let after = lease_profile(&lease);
+            if before != after {
+                auto.rebuild_for_lease(after.as_deref());
+                if transparent {
+                    respond(
+                        &out,
+                        &json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }),
+                    );
+                }
+            }
+            if let Some(resp) = resp {
+                respond(&out, &resp);
+            }
         }
     }
     // stdin EOF: drain in-flight calls before tearing the session down.
@@ -195,6 +268,52 @@ fn respond(out: &std::sync::Mutex<Box<dyn Write + Send>>, frame: &Value) {
 /// set bounded by concurrent — not total — calls.
 struct WorkerPool {
     handles: Vec<std::thread::JoinHandle<()>>,
+}
+
+/// One zero-file profile selection owned by this MCP stdio process. It is
+/// intentionally separate from `crate::session::Session`: no native files are
+/// written, so there is no undo record to persist across processes.
+#[derive(Debug, Clone)]
+struct McpLease {
+    profile: String,
+    started_unix: u64,
+    loads: Vec<McpLeaseLoad>,
+}
+
+#[derive(Debug, Clone)]
+struct McpLeaseLoad {
+    name: String,
+    reason: String,
+    ts: u64,
+}
+
+type LeaseStore = std::sync::Arc<std::sync::Mutex<Option<McpLease>>>;
+
+fn new_lease_store() -> LeaseStore {
+    std::sync::Arc::new(std::sync::Mutex::new(None))
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn lease_snapshot(store: &LeaseStore) -> Option<McpLease> {
+    store.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+fn lease_profile(store: &LeaseStore) -> Option<String> {
+    lease_snapshot(store).map(|l| l.profile)
+}
+
+fn is_lease_mutation(req: &Value) -> bool {
+    req.get("method").and_then(Value::as_str) == Some("tools/call")
+        && matches!(
+            req.pointer("/params/name").and_then(Value::as_str),
+            Some("agentstack_lease_open" | "agentstack_lease_close")
+        )
 }
 
 impl WorkerPool {
@@ -272,6 +391,7 @@ struct AutoProject {
     /// one per surface. No outer mutex: the gateway is Sync with per-upstream
     /// locking.
     gateway: std::sync::Arc<crate::gateway::Gateway>,
+    resolved: bool,
     built: bool,
     runtime: Option<crate::codemode::endpoint::RuntimeHandle>,
 }
@@ -286,6 +406,7 @@ impl AutoProject {
             dir: None,
             trust: None,
             gateway: std::sync::Arc::new(crate::gateway::Gateway::empty()),
+            resolved: false,
             built: false,
             runtime: None,
         }
@@ -318,7 +439,7 @@ impl AutoProject {
     /// The one request we send: ask the client for its workspace roots, right
     /// after `notifications/initialized` (the earliest the protocol allows).
     fn roots_request(&mut self) -> Option<Value> {
-        if !self.client_has_roots || self.roots_requested || self.built {
+        if !self.client_has_roots || self.roots_requested || self.resolved {
             return None;
         }
         self.roots_requested = true;
@@ -345,16 +466,17 @@ impl AutoProject {
         true
     }
 
-    /// Resolve the project and build the gateway, once. Runs on the first
-    /// tools/call — by then a roots-capable client has long since answered.
-    fn ensure_gateway(&mut self) {
-        if self.built {
+    /// Resolve and trust-check the project without constructing any upstream
+    /// gateway. Lease-open uses this split phase so selecting a profile never
+    /// first resolves secrets for the unrestricted surface.
+    fn ensure_project(&mut self) {
+        if self.resolved {
             return;
         }
-        self.built = true;
+        self.resolved = true;
 
         if let Some(dir) = self.explicit.clone() {
-            self.activate(&dir);
+            self.dir = Some(dir);
             return;
         }
         let Some(base) = self.discover() else {
@@ -367,7 +489,7 @@ impl AutoProject {
         let state = crate::trust::check(&base);
         self.trust = Some(state.clone());
         match state {
-            crate::trust::TrustState::Trusted => self.activate(&base),
+            crate::trust::TrustState::Trusted => {}
             crate::trust::TrustState::Changed => eprintln!(
                 "agentstack mcp: {} was trusted but its manifest or lockfile CHANGED since — control-plane tools only. Review it, then re-run `agentstack trust {}`.",
                 base.display(),
@@ -379,6 +501,69 @@ impl AutoProject {
                 base.display()
             ),
         }
+    }
+
+    /// Resolve the project and build the ordinary unleased gateway once.
+    fn ensure_gateway(&mut self) {
+        if self.built {
+            return;
+        }
+        self.ensure_project();
+        let Some(base) = self.dir.clone() else {
+            self.built = true;
+            return;
+        };
+        let allowed = self.explicit.is_some()
+            || self.trust.as_ref() == Some(&crate::trust::TrustState::Trusted);
+        if allowed {
+            self.activate(&base, None);
+        } else {
+            self.built = true;
+        }
+    }
+
+    /// Re-check auto-project trust against the current manifest + lock bytes.
+    /// A commit-safe control-plane edit can invalidate trust during one MCP
+    /// connection; no later lease transition may reuse the earlier decision.
+    fn refresh_trust(&mut self) {
+        if self.explicit.is_some() {
+            return;
+        }
+        if let Some(base) = &self.dir {
+            let state = crate::trust::check(base);
+            self.trust = Some(state.clone());
+            if state != crate::trust::TrustState::Trusted {
+                if let Some(rt) = self.runtime.take() {
+                    rt.shutdown();
+                }
+                self.gateway = std::sync::Arc::new(crate::gateway::Gateway::empty());
+                self.built = true;
+            }
+        }
+    }
+
+    /// Swap the live gateway after a lease opens or closes. Trust was decided
+    /// by `ensure_project`; an untrusted auto-project remains inert.
+    fn rebuild_for_lease(&mut self, profile: Option<&str>) {
+        self.ensure_project();
+        self.refresh_trust();
+        let Some(base) = self.dir.clone() else {
+            return;
+        };
+        let allowed = self.explicit.is_some()
+            || self.trust.as_ref() == Some(&crate::trust::TrustState::Trusted);
+        if !allowed {
+            if let Some(rt) = self.runtime.take() {
+                rt.shutdown();
+            }
+            self.gateway = std::sync::Arc::new(crate::gateway::Gateway::empty());
+            self.built = true;
+            return;
+        }
+        if let Some(rt) = self.runtime.take() {
+            rt.shutdown();
+        }
+        self.activate(&base, profile);
     }
 
     /// Why the proxied surface is empty, when the reason is the trust gate.
@@ -421,11 +606,18 @@ impl AutoProject {
         None
     }
 
-    fn activate(&mut self, base: &Path) {
+    fn activate(&mut self, base: &Path, lease_profile: Option<&str>) {
         self.dir = Some(base.to_path_buf());
         // One gateway per process: the code-mode endpoint shares it instead of
         // building (and connecting/spawning) its own copy of every upstream.
-        self.gateway = std::sync::Arc::new(crate::gateway::Gateway::from_manifest(Some(base)));
+        self.gateway = match lease_profile {
+            Some(profile) => std::sync::Arc::new(crate::gateway::Gateway::from_manifest_lease(
+                Some(base),
+                profile,
+            )),
+            None => std::sync::Arc::new(crate::gateway::Gateway::from_manifest(Some(base))),
+        };
+        self.built = true;
         if !self.gateway().is_empty() {
             eprintln!(
                 "agentstack mcp: gateway active for {} — proxying its MCP servers",
@@ -481,12 +673,34 @@ fn protocol_writer() -> Box<dyn Write + Send> {
     crate::sys::reserve_stdout_for_protocol()
 }
 
+#[cfg(test)]
 fn handle(
     req: &Value,
     dir: Option<&Path>,
     gateway: &std::sync::Arc<crate::gateway::Gateway>,
     trust_note: Option<&str>,
     transparent: bool,
+) -> Option<Value> {
+    // Unit tests and non-session helpers keep the historical stateless entry
+    // point. The stdio server uses `handle_with_lease` with one store shared
+    // across every request in that MCP connection.
+    handle_with_lease(
+        req,
+        dir,
+        gateway,
+        trust_note,
+        transparent,
+        &new_lease_store(),
+    )
+}
+
+fn handle_with_lease(
+    req: &Value,
+    dir: Option<&Path>,
+    gateway: &std::sync::Arc<crate::gateway::Gateway>,
+    trust_note: Option<&str>,
+    transparent: bool,
+    lease: &LeaseStore,
 ) -> Option<Value> {
     let id = req.get("id").cloned();
     let method = req.get("method")?.as_str()?;
@@ -590,7 +804,7 @@ fn handle(
                     ),
                 });
             }
-            let (text, is_error) = match run_tool(name, &args, dir, trust_note) {
+            let (text, is_error) = match run_tool_with_lease(name, &args, dir, trust_note, lease) {
                 Ok(t) => (t, false),
                 Err(e) => (format!("Error: {e}"), true),
             };
@@ -664,18 +878,49 @@ fn tool_defs() -> Value {
         },
         {
             "name": "agentstack_list_loadable",
-            "description": "List the skills you're allowed to load right now, each with a one-line description (the cheap catalog — not the full instructions). When a session is active the list is fenced to that session's profile. agentstack's own manual (using-agentstack) is always listed — load it when a task involves changing an agent's servers/skills/setup. Call this first, read the descriptions, then load only what the task needs.",
+            "description": "List the skills you're allowed to load right now, each with a one-line description (the cheap catalog — not the full instructions). An MCP lease takes precedence as the profile fence; a native session is the fallback. agentstack's own manual (using-agentstack) is always listed. Call this first, read the descriptions, then load only what the task needs.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "agentstack_load",
-            "description": "Load one skill by name for the rest of this session and return its full instructions. Only names from agentstack_list_loadable are allowed. Loads are sticky within a session and logged with your reason.",
+            "description": "Load one skill by name and return its full instructions. Only names from agentstack_list_loadable are allowed. With an MCP lease or native session, loads are sticky and recorded with your reason.",
             "inputSchema": {
                 "type": "object",
                 "required": ["name", "reason"],
                 "properties": {
                     "name": { "type": "string", "description": "Skill name from agentstack_list_loadable" },
                     "reason": { "type": "string", "description": "Why this task needs it (recorded for replay)" }
+                }
+            }
+        },
+        {
+            "name": "agentstack_lease_open",
+            "description": "Open a zero-file MCP profile lease for this connection. It fences live MCP servers and loadable skills to the profile, records on-demand skill loads in memory, and writes no native harness config, skill folders, or sessions.json entry.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["profile"],
+                "properties": {
+                    "profile": { "type": "string", "description": "Existing manifest profile to authorize for this MCP connection" }
+                }
+            }
+        },
+        {
+            "name": "agentstack_lease_status",
+            "description": "Show the process-local MCP profile lease and the skills loaded through it. Read-only.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "agentstack_lease_close",
+            "description": "Close the process-local MCP profile lease. No filesystem restore is needed because the lease wrote no native files.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "agentstack_lease_freeze",
+            "description": "Freeze the leased profile's servers and the skills actually loaded through this MCP connection into a new manifest profile. Commit-safe; does not apply it. A human reviews the manifest edit, then runs `agentstack lock`.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "New profile name (default <profile>-frozen)" }
                 }
             }
         },
@@ -806,11 +1051,134 @@ fn tool_defs() -> Value {
 /// this is auto-project mode AND the project is Untrusted/Changed (eager mode
 /// and trusted projects pass `None`) — the strict gate for anything that
 /// serves bundle content or writes beyond the manifest.
+fn lease_open(
+    args: &Value,
+    dir: Option<&Path>,
+    trust_note: Option<&str>,
+    store: &LeaseStore,
+) -> Result<String> {
+    if let Some(note) = trust_note {
+        anyhow::bail!("agentstack_lease_open is disabled for this project: {note}");
+    }
+    let profile = args
+        .get("profile")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("`profile` is required")?;
+    let ctx = crate::commands::load(dir)?;
+    if crate::session::active(&ctx.dir).is_some() {
+        anyhow::bail!(
+            "a native-file session is already active here — end it before opening a zero-file MCP lease"
+        );
+    }
+    ctx.loaded
+        .manifest
+        .profiles
+        .get(profile)
+        .with_context(|| format!("no profile '{profile}' in manifest"))?;
+
+    *store.lock().unwrap_or_else(|e| e.into_inner()) = Some(McpLease {
+        profile: profile.to_string(),
+        started_unix: now_secs(),
+        loads: Vec::new(),
+    });
+    Ok(serde_json::to_string_pretty(&json!({
+        "opened": profile,
+        "delivery": "mcp",
+        "lifetime": "this MCP process",
+        "native_files_written": false,
+        "note": "Server discovery/calls and skill loading are now fenced to this profile. Closing the MCP connection drops the lease automatically."
+    }))?)
+}
+
+fn lease_status(store: &LeaseStore) -> Result<String> {
+    let Some(lease) = lease_snapshot(store) else {
+        return Ok(serde_json::to_string_pretty(&json!({
+            "active": false,
+            "note": "No MCP profile lease. Skill loading is development-open unless a native session supplies a profile fence."
+        }))?);
+    };
+    let loads: Vec<Value> = lease
+        .loads
+        .iter()
+        .map(|entry| json!({ "name": entry.name, "reason": entry.reason, "ts": entry.ts }))
+        .collect();
+    Ok(serde_json::to_string_pretty(&json!({
+        "active": true,
+        "profile": lease.profile,
+        "started_unix": lease.started_unix,
+        "loads": loads,
+        "native_files_written": false,
+    }))?)
+}
+
+fn lease_close(store: &LeaseStore) -> Result<String> {
+    let closed = store
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+        .context("no active MCP profile lease")?;
+    Ok(serde_json::to_string_pretty(&json!({
+        "closed": closed.profile,
+        "loaded_skills": closed.loads.iter().map(|entry| entry.name.clone()).collect::<Vec<_>>(),
+        "native_restore_needed": false,
+    }))?)
+}
+
+fn lease_freeze(args: &Value, dir: Option<&Path>, store: &LeaseStore) -> Result<String> {
+    let lease = lease_snapshot(store).context("no active MCP profile lease to freeze")?;
+    let ctx = crate::commands::load(dir)?;
+    let profile = ctx
+        .loaded
+        .manifest
+        .profiles
+        .get(&lease.profile)
+        .with_context(|| format!("profile '{}' is gone from the manifest", lease.profile))?;
+    // The embedded manual is control-plane help, not a resolvable project or
+    // library skill. Never write it into a replay profile.
+    let observed: Vec<String> = lease
+        .loads
+        .iter()
+        .filter(|entry| entry.name != BUILTIN_MANUAL)
+        .map(|entry| entry.name.clone())
+        .collect();
+    let skills: Vec<String> = if observed.is_empty() {
+        profile.skills.clone()
+    } else {
+        observed
+    };
+    let name = args
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{}-frozen", lease.profile));
+    let created = crate::dashboard::actions::add_profile(
+        dir,
+        &json!({ "name": name, "servers": profile.servers, "skills": skills }),
+    )?;
+    Ok(format!(
+        "Froze MCP lease '{}' into profile '{created}'. The manifest changed; nothing was applied. Review it, then run `agentstack lock` to refresh agentstack.lock.",
+        lease.profile
+    ))
+}
+
+#[cfg(test)]
 fn run_tool(
     name: &str,
     args: &Value,
     dir: Option<&Path>,
     trust_note: Option<&str>,
+) -> Result<String> {
+    run_tool_with_lease(name, args, dir, trust_note, &new_lease_store())
+}
+
+fn run_tool_with_lease(
+    name: &str,
+    args: &Value,
+    dir: Option<&Path>,
+    trust_note: Option<&str>,
+    lease: &LeaseStore,
 ) -> Result<String> {
     match name {
         "agentstack_search" => Ok(search_text(
@@ -823,8 +1191,12 @@ fn run_tool(
         "agentstack_doctor" => doctor_summary(dir),
         "agentstack_add_from" => add_from(args, dir),
         "agentstack_add_server" => add_server(args, dir),
-        "agentstack_list_loadable" => list_loadable(dir, trust_note),
-        "agentstack_load" => load_capability(args, dir, trust_note),
+        "agentstack_list_loadable" => list_loadable_with_lease(dir, trust_note, lease),
+        "agentstack_load" => load_capability_with_lease(args, dir, trust_note, lease),
+        "agentstack_lease_open" => lease_open(args, dir, trust_note, lease),
+        "agentstack_lease_status" => lease_status(lease),
+        "agentstack_lease_close" => lease_close(lease),
+        "agentstack_lease_freeze" => lease_freeze(args, dir, lease),
         "agentstack_explain" => {
             let name = args
                 .get("name")
@@ -856,6 +1228,11 @@ fn run_tool(
             // commit-safe text edits, nothing executes and nothing resolves.
             if let Some(note) = trust_note {
                 anyhow::bail!("agentstack_session_start is disabled for this project: {note}");
+            }
+            if lease_snapshot(lease).is_some() {
+                anyhow::bail!(
+                    "an MCP profile lease is active — close it before starting a native-file session"
+                );
             }
             let profile = args
                 .get("profile")
@@ -1225,7 +1602,7 @@ fn add_server(args: &Value, dir: Option<&Path>) -> Result<String> {
 fn loadable_skill_names(
     manifest: &crate::manifest::Manifest,
     library: &crate::library::Library,
-    session: Option<&crate::session::Session>,
+    profile: Option<&str>,
 ) -> Vec<String> {
     let all = || {
         let mut names: Vec<String> = manifest.skills.keys().cloned().collect();
@@ -1236,7 +1613,7 @@ fn loadable_skill_names(
         }
         names
     };
-    match session.and_then(|s| manifest.profiles.get(&s.profile)) {
+    match profile.and_then(|p| manifest.profiles.get(p)) {
         Some(p) if p.loads_all_skills() => all(),
         // Profile names resolve inline-first, then library, at load time.
         Some(p) => p.skills.clone(),
@@ -1341,7 +1718,16 @@ fn builtin_manual_entry(md: &str, loaded: bool) -> Value {
     })
 }
 
+#[cfg(test)]
 fn list_loadable(dir: Option<&Path>, trust_note: Option<&str>) -> Result<String> {
+    list_loadable_with_lease(dir, trust_note, &new_lease_store())
+}
+
+fn list_loadable_with_lease(
+    dir: Option<&Path>,
+    trust_note: Option<&str>,
+    lease_store: &LeaseStore,
+) -> Result<String> {
     // Untrusted project in auto mode: names only. Skill descriptions are
     // bundle content (SKILL.md frontmatter) and "untrusted means inert"
     // covers every byte of it — the names give the human enough to review.
@@ -1398,14 +1784,23 @@ fn list_loadable(dir: Option<&Path>, trust_note: Option<&str>) -> Result<String>
     };
     let m = &ctx.loaded.manifest;
     let libctx = ctx.library_ctx();
+    let lease = lease_snapshot(lease_store);
     let session = crate::session::active(&ctx.dir);
-    let loaded: std::collections::HashSet<String> = session
+    let profile = lease
         .as_ref()
-        .map(|s| s.loads.iter().map(|l| l.name.clone()).collect())
-        .unwrap_or_default();
+        .map(|l| l.profile.as_str())
+        .or_else(|| session.as_ref().map(|s| s.profile.as_str()));
+    let loaded: std::collections::HashSet<String> = if let Some(l) = &lease {
+        l.loads.iter().map(|entry| entry.name.clone()).collect()
+    } else {
+        session
+            .as_ref()
+            .map(|s| s.loads.iter().map(|entry| entry.name.clone()).collect())
+            .unwrap_or_default()
+    };
 
     let mut entries = Vec::new();
-    for name in loadable_skill_names(m, &libctx.library, session.as_ref()) {
+    for name in loadable_skill_names(m, &libctx.library, profile) {
         // PathOnly: this catalog only reads SKILL.md descriptions — digesting
         // every skill body here would turn a cheap list into a full-library
         // read+hash pass.
@@ -1449,17 +1844,44 @@ fn list_loadable(dir: Option<&Path>, trust_note: Option<&str>) -> Result<String>
     }
     Ok(serde_json::to_string_pretty(&json!({
         "loadable": entries,
-        "fenced": session.is_some(),
+        "fenced": profile.is_some(),
+        "lease": lease.as_ref().map(|l| l.profile.clone()),
         "session": session.as_ref().map(|s| s.profile.clone()),
-        "note": if session.is_some() {
-            "Fenced to this session's profile. Load only what the task needs."
+        "note": if lease.is_some() {
+            "Fenced to this zero-file MCP lease. Loads are recorded in memory for this connection."
+        } else if session.is_some() {
+            "Fenced to this native session's profile. Load only what the task needs."
         } else {
-            "No active session — manifest + central-library skills are loadable (dev-open). Start a session to fence + log loads."
+            "No active lease or native session — manifest + central-library skills are loadable (dev-open). Open an MCP lease to fence + record loads without writing native files."
         },
     }))?)
 }
 
+fn record_lease_load(store: &LeaseStore, name: &str, reason: &str) -> Result<bool> {
+    let mut slot = store.lock().unwrap_or_else(|e| e.into_inner());
+    let lease = slot.as_mut().context("no active MCP profile lease")?;
+    if lease.loads.iter().any(|entry| entry.name == name) {
+        return Ok(false);
+    }
+    lease.loads.push(McpLeaseLoad {
+        name: name.to_string(),
+        reason: reason.to_string(),
+        ts: now_secs(),
+    });
+    Ok(true)
+}
+
+#[cfg(test)]
 fn load_capability(args: &Value, dir: Option<&Path>, trust_note: Option<&str>) -> Result<String> {
+    load_capability_with_lease(args, dir, trust_note, &new_lease_store())
+}
+
+fn load_capability_with_lease(
+    args: &Value,
+    dir: Option<&Path>,
+    trust_note: Option<&str>,
+    lease_store: &LeaseStore,
+) -> Result<String> {
     let name = args
         .get("name")
         .and_then(Value::as_str)
@@ -1472,6 +1894,7 @@ fn load_capability(args: &Value, dir: Option<&Path>, trust_note: Option<&str>) -
         .context("`reason` is required — say why this task needs the skill")?;
 
     let ctx = crate::commands::load(dir);
+    let lease = lease_snapshot(lease_store);
 
     // The built-in manual: served from the embedded copy whenever the project's
     // own `using-agentstack` isn't loadable + resolvable — including with no
@@ -1484,7 +1907,11 @@ fn load_capability(args: &Value, dir: Option<&Path>, trust_note: Option<&str>) -
             && ctx.as_ref().ok().is_some_and(|ctx| {
                 let libctx = ctx.library_ctx();
                 let session = crate::session::active(&ctx.dir);
-                loadable_skill_names(&ctx.loaded.manifest, &libctx.library, session.as_ref())
+                let profile = lease
+                    .as_ref()
+                    .map(|l| l.profile.as_str())
+                    .or_else(|| session.as_ref().map(|s| s.profile.as_str()));
+                loadable_skill_names(&ctx.loaded.manifest, &libctx.library, profile)
                     .iter()
                     .any(|n| n == BUILTIN_MANUAL)
                     && crate::resolve::resolve_skill(
@@ -1499,12 +1926,19 @@ fn load_capability(args: &Value, dir: Option<&Path>, trust_note: Option<&str>) -
                     .is_ok()
             });
         if !project_copy {
-            // Loads are still session-logged when a session is active.
-            let (sticky, newly) = match &ctx {
-                Ok(c) if crate::session::active(&c.dir).is_some() => {
-                    (true, crate::session::record_load(&c.dir, name, reason)?)
+            // A lease is process-local and takes precedence over the legacy
+            // native session trail. Both make loads sticky and idempotent.
+            let (sticky, newly, leased) = if lease.is_some() {
+                (true, record_lease_load(lease_store, name, reason)?, true)
+            } else {
+                match &ctx {
+                    Ok(c) if crate::session::active(&c.dir).is_some() => (
+                        true,
+                        crate::session::record_load(&c.dir, name, reason)?,
+                        false,
+                    ),
+                    _ => (false, false, false),
                 }
-                _ => (false, false),
             };
             return Ok(serde_json::to_string_pretty(&json!({
                 "loaded": name,
@@ -1512,7 +1946,8 @@ fn load_capability(args: &Value, dir: Option<&Path>, trust_note: Option<&str>) -
                 "instructions": builtin_manual_md()?,
                 "sticky": sticky,
                 "newly_loaded": newly,
-                "fenced": false,
+                "fenced": leased,
+                "lease": lease.as_ref().map(|l| l.profile.clone()),
             }))?);
         }
     }
@@ -1529,15 +1964,19 @@ fn load_capability(args: &Value, dir: Option<&Path>, trust_note: Option<&str>) -
     let libctx = ctx.library_ctx();
 
     let session = crate::session::active(&ctx.dir);
-    // Fence: inside a session, only the profile's skills are loadable.
-    if let Some(s) = &session {
-        if !loadable_skill_names(m, &libctx.library, Some(s))
+    let profile = lease
+        .as_ref()
+        .map(|l| l.profile.as_str())
+        .or_else(|| session.as_ref().map(|s| s.profile.as_str()));
+    // Fence: an MCP lease takes precedence; the native session remains the
+    // backward-compatible fallback.
+    if let Some(profile) = profile {
+        if !loadable_skill_names(m, &libctx.library, Some(profile))
             .iter()
             .any(|n| n == name)
         {
             anyhow::bail!(
-                "'{name}' is not loadable in session '{}' — add it to the profile to allow it",
-                s.profile
+                "'{name}' is not loadable in profile '{profile}' — add it to the profile to allow it"
             );
         }
     }
@@ -1588,7 +2027,9 @@ fn load_capability(args: &Value, dir: Option<&Path>, trust_note: Option<&str>) -
     let (_, body) = read_skill_md(&resolved.path);
     let instructions = body.with_context(|| format!("skill '{name}' has no SKILL.md"))?;
 
-    let newly = if session.is_some() {
+    let newly = if lease.is_some() {
+        record_lease_load(lease_store, name, reason)?
+    } else if session.is_some() {
         crate::session::record_load(&ctx.dir, name, reason)?
     } else {
         false
@@ -1601,9 +2042,10 @@ fn load_capability(args: &Value, dir: Option<&Path>, trust_note: Option<&str>) -
             crate::resolve::SkillOrigin::Library => "library",
         },
         "instructions": instructions,
-        "sticky": session.is_some(),
+        "sticky": lease.is_some() || session.is_some(),
         "newly_loaded": newly,
-        "fenced": session.is_some(),
+        "fenced": profile.is_some(),
+        "lease": lease.as_ref().map(|l| l.profile.clone()),
     });
     if let Some(w) = warning {
         out["warning"] = json!(w);
@@ -1719,6 +2161,10 @@ mod tests {
         assert!(names.contains(&"agentstack_add_server"));
         assert!(names.contains(&"agentstack_list_loadable"));
         assert!(names.contains(&"agentstack_load"));
+        assert!(names.contains(&"agentstack_lease_open"));
+        assert!(names.contains(&"agentstack_lease_status"));
+        assert!(names.contains(&"agentstack_lease_close"));
+        assert!(names.contains(&"agentstack_lease_freeze"));
         for t in [
             "agentstack_diff",
             "agentstack_add_skill",
@@ -1995,7 +2441,7 @@ mod tests {
 
         let proj = assert_fs::TempDir::new().unwrap();
         proj.child(".agentstack/agentstack.toml")
-            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n[profiles.p]\nservers = [\"x\"]\n")
             .unwrap();
 
         // Untrusted: the project resolves (control-plane tools see it) but the
@@ -2018,6 +2464,20 @@ mod tests {
             "trusted → gateway proxies the manifest"
         );
         assert!(auto.trust_note().is_none(), "trusted → no note");
+
+        // A manifest edit during the same MCP process invalidates trust. A
+        // later lease transition must re-check and tear the gateway down,
+        // never rebuild from the newly-untrusted bytes.
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://changed/mcp\"\n[profiles.p]\nservers = [\"x\"]\n")
+            .unwrap();
+        auto.rebuild_for_lease(Some("p"));
+        assert!(auto.gateway().is_empty(), "changed trust → empty gateway");
+        assert!(
+            auto.trust_note()
+                .is_some_and(|note| note.contains("changed since")),
+            "changed trust must be surfaced after a lease transition"
+        );
         auto.shutdown();
 
         std::env::remove_var("AGENTSTACK_HOME");
@@ -2199,6 +2659,160 @@ mod tests {
         });
         lock.save(proj.path()).unwrap();
         (home, proj)
+    }
+
+    #[test]
+    fn mcp_lease_fences_loads_records_in_memory_and_writes_no_native_artifacts() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str(
+                "version = 1\n\
+                 [skills.helper]\npath = \"./skills/helper\"\n\
+                 [skills.other]\npath = \"./skills/other\"\n\
+                 [profiles.backend]\nskills = [\"helper\"]\nservers = []\n",
+            )
+            .unwrap();
+        for name in ["helper", "other"] {
+            proj.child(format!(".agentstack/skills/{name}/SKILL.md"))
+                .write_str(&format!("---\ndescription: {name} skill\n---\n# {name}\n"))
+                .unwrap();
+        }
+        let manifest_dir = proj.child(".agentstack");
+        let mut lock = crate::lock::Lock::load(manifest_dir.path()).unwrap();
+        for name in ["helper", "other"] {
+            lock.upsert(crate::lock::LockedSkill {
+                name: name.into(),
+                source: "path".into(),
+                path: Some(format!("./skills/{name}")),
+                git: None,
+                rev: None,
+                checksum: agentstack_core::digest::dir_digest(
+                    manifest_dir.child(format!("skills/{name}")).path(),
+                )
+                .unwrap(),
+            });
+        }
+        lock.save(manifest_dir.path()).unwrap();
+
+        let lease = new_lease_store();
+        let opened = lease_open(
+            &json!({ "profile": "backend" }),
+            Some(proj.path()),
+            None,
+            &lease,
+        )
+        .unwrap();
+        assert!(opened.contains("native_files_written\": false"));
+        assert!(!home.child("sessions.json").path().exists());
+        assert!(!proj.child(".mcp.json").path().exists());
+        assert!(!proj.child(".claude/skills").path().exists());
+        let overlap = run_tool_with_lease(
+            "agentstack_session_start",
+            &json!({ "profile": "backend" }),
+            Some(proj.path()),
+            None,
+            &lease,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(overlap.contains("MCP profile lease is active"));
+
+        let catalog = list_loadable_with_lease(Some(proj.path()), None, &lease).unwrap();
+        let catalog: Value = serde_json::from_str(&catalog).unwrap();
+        let names: Vec<&str> = catalog["loadable"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"helper"));
+        assert!(names.contains(&BUILTIN_MANUAL));
+        assert!(!names.contains(&"other"));
+        assert_eq!(catalog["lease"], "backend");
+
+        let denied = load_capability_with_lease(
+            &json!({ "name": "other", "reason": "should be fenced" }),
+            Some(proj.path()),
+            None,
+            &lease,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(denied.contains("not loadable in profile 'backend'"));
+
+        let loaded = load_capability_with_lease(
+            &json!({ "name": "helper", "reason": "review backend code" }),
+            Some(proj.path()),
+            None,
+            &lease,
+        )
+        .unwrap();
+        let loaded: Value = serde_json::from_str(&loaded).unwrap();
+        assert_eq!(loaded["newly_loaded"], true);
+        assert_eq!(loaded["sticky"], true);
+        let loaded_again = load_capability_with_lease(
+            &json!({ "name": "helper", "reason": "duplicate" }),
+            Some(proj.path()),
+            None,
+            &lease,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&loaded_again).unwrap()["newly_loaded"],
+            false
+        );
+        let status: Value = serde_json::from_str(&lease_status(&lease).unwrap()).unwrap();
+        assert_eq!(status["profile"], "backend");
+        assert_eq!(status["loads"].as_array().unwrap().len(), 1);
+        assert_eq!(status["loads"][0]["reason"], "review backend code");
+
+        let frozen_message = lease_freeze(
+            &json!({ "name": "backend-observed" }),
+            Some(proj.path()),
+            &lease,
+        )
+        .unwrap();
+        assert!(frozen_message.contains("`agentstack lock`"));
+        let reloaded = crate::commands::load(Some(proj.path())).unwrap();
+        let frozen = &reloaded.loaded.manifest.profiles["backend-observed"];
+        assert_eq!(frozen.servers, Vec::<String>::new());
+        assert_eq!(frozen.skills, vec!["helper"]);
+
+        lease_close(&lease).unwrap();
+        let status: Value = serde_json::from_str(&lease_status(&lease).unwrap()).unwrap();
+        assert_eq!(status["active"], false);
+        assert!(!home.child("sessions.json").path().exists());
+        assert!(!proj.child(".mcp.json").path().exists());
+        assert!(!proj.child(".claude/skills").path().exists());
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn untrusted_project_cannot_open_mcp_lease() {
+        use assert_fs::prelude::*;
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[profiles.backend]\n")
+            .unwrap();
+        let lease = new_lease_store();
+        let err = lease_open(
+            &json!({ "profile": "backend" }),
+            Some(proj.path()),
+            Some("project is not trusted"),
+            &lease,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("not trusted"));
+        assert!(lease_snapshot(&lease).is_none());
     }
 
     #[test]

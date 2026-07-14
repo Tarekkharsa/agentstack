@@ -37,10 +37,16 @@ the gateway. Nothing touches disk without `--write`.
    `agentstack session start <p> --scope project` and `agentstack session end`.
    A missing `.mcp.json` in such a project is **intentional — do not create one**.
 3. **Zero-files / MCP** — the agent pulls skills itself through the `agentstack`
-   MCP server: `agentstack_list_loadable` to browse names + descriptions, then
-   `agentstack_load(name, reason)` for the full instructions. Loads are fenced
-   to the session's profile and logged. MCP servers flow the same way: the
-   gateway proxies them with **no rendered files at all** — compact mode
+   MCP server. Open a process-local fence with
+   `agentstack_lease_open(profile)`, use `agentstack_list_loadable` to browse
+   names + descriptions, then `agentstack_load(name, reason)` for the full
+   instructions. Loads are fenced to the leased profile and recorded in memory;
+   inspect the trail with `agentstack_lease_status`. To preserve the observed
+   set, `agentstack_lease_freeze(name)` proposes a manifest profile; tell the
+   human to review it and run `agentstack lock`. `agentstack_lease_close` or
+   MCP-process exit drops the state without a file restore. MCP servers flow
+   through the same profile fence with **no rendered
+   files at all** — compact mode
    collapses them behind `tools_search` (search → inspect → call the
    `<server>__<tool>` name); transparent mode (`--transparent`) advertises
    them directly in `tools/list`.
