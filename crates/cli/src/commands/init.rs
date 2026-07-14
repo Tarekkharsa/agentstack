@@ -330,11 +330,10 @@ version = 1
 # Fresh manifest — no agent CLIs were detected to import from.
 # Declare MCP servers here; secrets stay ${REF} placeholders (never values):
 #
-# [servers.github]
+# [servers.filesystem]
 # type = \"stdio\"
 # command = \"npx\"
-# args = [\"-y\", \"@modelcontextprotocol/server-github\"]
-# env = { GITHUB_TOKEN = \"${GH_PAT}\" }
+# args = [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"./\"]
 #
 # Next steps:
 #   agentstack search <query>          find servers/skills in the catalog

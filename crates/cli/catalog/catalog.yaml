@@ -5,10 +5,9 @@
   kind: server
   description: GitHub — issues, pull requests, repositories
   tags: [git, github, vcs, code]
-  transport: stdio
-  command: npx
-  args: ["-y", "@modelcontextprotocol/server-github"]
-  env: [GITHUB_TOKEN]
+  transport: http
+  url: https://api.githubcopilot.com/mcp/
+  headers: [Authorization]
 
 - name: gitlab
   kind: server

@@ -247,8 +247,10 @@ mod tests {
         assert!(http
             .add_command()
             .contains("--url https://mcp.linear.app/mcp"));
-        let stdio = search("github").into_iter().next().unwrap();
-        assert!(stdio.add_command().contains("--type stdio"));
-        assert!(stdio.add_command().contains("GITHUB_TOKEN"));
+        let github = search("github").into_iter().next().unwrap();
+        assert!(github
+            .add_command()
+            .contains("--url https://api.githubcopilot.com/mcp/"));
+        assert!(github.add_command().contains("GITHUB_TOKEN"));
     }
 }
