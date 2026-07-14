@@ -5,8 +5,8 @@
 //! name the client *asked for*, with no TLS interception. The ClientHello
 //! arrives from inside an untrusted container, so this parser is fully
 //! bounds-checked: every field length is validated against what remains, and
-//! any truncation, overrun, or unexpected tag yields `None` rather than a
-//! panic.
+//! any truncation, overrun, or unexpected tag yields `SniVerdict::Unverifiable`
+//! (fail closed) rather than a panic — never a silent `Absent`.
 //!
 //! Wire layout walked here (TLS 1.2/1.3 ClientHello):
 //! record[type=0x16, version, len] → handshake[type=0x01, len24] →
@@ -57,23 +57,60 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Extract the first host_name SNI from a TLS ClientHello record. `None` when
-/// the bytes are not a ClientHello, are truncated, or carry no SNI.
-pub fn extract_sni(record: &[u8]) -> Option<String> {
+/// The result of inspecting a first TLS flight for its SNI. The proxy allowlists
+/// by the name the client *asked for*, so it must tell a hello that PROVABLY
+/// carries no SNI apart from one it simply could not parse: a truncated or
+/// record-fragmented ClientHello that "has no SNI" is exactly how a client hides
+/// a mismatched SNI past the check (send record 1 with a short, SNI-less prefix;
+/// smuggle the real SNI in record 2). The two cases must diverge — allow vs.
+/// fail closed.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SniVerdict {
+    /// A complete, well-formed ClientHello carrying this host_name SNI.
+    Present(String),
+    /// A complete, well-formed ClientHello that provably carries NO server_name
+    /// extension (the handshake body was fully present and walked to its end).
+    Absent,
+    /// The bytes are not a parseable, self-contained ClientHello: not a
+    /// handshake record, not a ClientHello, or a handshake that runs past the
+    /// bytes available (truncated, or fragmented across TLS records — this
+    /// parser only sees the first record). The caller MUST fail closed.
+    Unverifiable,
+}
+
+/// Inspect a TLS ClientHello record for its first host_name SNI. Returns a
+/// three-way [`SniVerdict`]: an unparseable or fragmented hello is
+/// `Unverifiable` (fail closed), NOT silently `Absent` — a hello whose handshake
+/// spans beyond this single record must never be waved through as "no SNI".
+pub fn extract_sni(record: &[u8]) -> SniVerdict {
+    match parse_sni(record) {
+        Some(verdict) => verdict,
+        // Any bounds check that failed (`?`) means a length claimed more bytes
+        // than were present: truncated or record-fragmented. Fail closed.
+        None => SniVerdict::Unverifiable,
+    }
+}
+
+/// Walk the ClientHello. `None` from any `?` = a truncated/fragmented structure
+/// (→ `Unverifiable`). A clean walk to the end with no server_name = `Absent`.
+fn parse_sni(record: &[u8]) -> Option<SniVerdict> {
     let mut r = Reader::new(record);
 
     // Record layer: must be a Handshake record (0x16).
     if r.u8()? != 0x16 {
-        return None;
+        return Some(SniVerdict::Unverifiable);
     }
     let _record_version = r.u16()?;
     let record_len = r.u16()?;
+    // `take(record_len)` fails if the handshake body extends beyond THIS record
+    // (fragmented across records) — the crux of the fix: that is Unverifiable,
+    // not Absent.
     let handshake = r.take(record_len)?;
 
     // Handshake: must be a ClientHello (0x01).
     let mut h = Reader::new(handshake);
     if h.u8()? != 0x01 {
-        return None;
+        return Some(SniVerdict::Unverifiable);
     }
     let body_len = h.u24()?;
     let body = h.take(body_len)?;
@@ -88,8 +125,13 @@ pub fn extract_sni(record: &[u8]) -> Option<String> {
     let comp_len = c.u8()? as usize;
     c.take(comp_len)?; // compression_methods
 
-    // Extensions (absent in ancient ClientHellos → no SNI).
-    let ext_total = c.u16()?;
+    // Extensions block absent entirely (ancient ClientHello, body ends here) →
+    // provably no SNI. A PRESENT-but-truncated extensions length is a `?` fail
+    // above/below → Unverifiable.
+    let ext_total = match c.u16() {
+        Some(n) => n,
+        None => return Some(SniVerdict::Absent),
+    };
     let extensions = c.take(ext_total)?;
 
     let mut e = Reader::new(extensions);
@@ -98,10 +140,16 @@ pub fn extract_sni(record: &[u8]) -> Option<String> {
         let ext_len = e.u16()?;
         let ext_data = e.take(ext_len)?;
         if ext_type == 0x0000 {
-            return parse_server_name(ext_data);
+            // A server_name extension that won't parse is malformed, not
+            // "absent" — fail closed rather than allow.
+            return Some(match parse_server_name(ext_data) {
+                Some(name) => SniVerdict::Present(name),
+                None => SniVerdict::Unverifiable,
+            });
         }
     }
-    None
+    // Walked every extension cleanly; none was server_name.
+    Some(SniVerdict::Absent)
 }
 
 /// Parse a server_name extension body, returning the first host_name.
@@ -179,30 +227,68 @@ mod tests {
     #[test]
     fn extracts_the_sni_hostname() {
         let hello = client_hello_with_sni("api.search.example");
-        assert_eq!(extract_sni(&hello).as_deref(), Some("api.search.example"));
+        assert_eq!(
+            extract_sni(&hello),
+            SniVerdict::Present("api.search.example".into())
+        );
     }
 
     #[test]
-    fn truncation_anywhere_yields_none_never_panics() {
+    fn truncation_anywhere_is_unverifiable_never_panics_never_absent() {
         let hello = client_hello_with_sni("example.com");
-        // Every prefix of a valid ClientHello must parse to None (or the full
-        // value only at full length), never panic.
+        // Every strict prefix of a valid ClientHello is truncated, so it must be
+        // Unverifiable (fail closed) — NEVER Absent (which the caller allows) and
+        // never a panic. This is the anti-fronting guarantee: a partial hello
+        // must not read as "no SNI".
         for cut in 0..hello.len() {
-            let _ = extract_sni(&hello[..cut]);
+            assert_eq!(
+                extract_sni(&hello[..cut]),
+                SniVerdict::Unverifiable,
+                "prefix len {cut} must be Unverifiable, not Absent/Present"
+            );
         }
-        assert_eq!(extract_sni(&hello).as_deref(), Some("example.com"));
+        assert_eq!(
+            extract_sni(&hello),
+            SniVerdict::Present("example.com".into())
+        );
     }
 
     #[test]
-    fn non_clienthello_and_junk_yield_none() {
-        assert_eq!(extract_sni(&[]), None);
-        assert_eq!(extract_sni(&[0x17, 0x03, 0x03, 0x00, 0x00]), None); // not handshake
-        assert_eq!(extract_sni(&[0xff; 64]), None);
+    fn record_fragmented_clienthello_is_unverifiable_not_absent() {
+        // A ClientHello whose handshake body_len claims MORE than the first TLS
+        // record carries — the SNI would live in a second record this parser
+        // never sees. It must be Unverifiable (fail closed), not Absent. This is
+        // the exact domain-fronting-via-fragmentation bypass.
+        let full = client_hello_with_sni("evil.example");
+        // `full` is one record: [0x16, ver(2), rec_len(2), handshake...]. Re-frame
+        // it so the record header advertises only the first half of the
+        // handshake, leaving the rest (with the SNI) "in a later record".
+        let handshake = &full[5..];
+        let short_rec_len = (handshake.len() / 2) as u16;
+        let mut rec = vec![0x16, 0x03, 0x01];
+        rec.extend_from_slice(&short_rec_len.to_be_bytes());
+        rec.extend_from_slice(handshake); // more bytes than short_rec_len covers
+                                          // The record layer take(short_rec_len) yields a truncated handshake whose
+                                          // declared body_len overruns it → Unverifiable.
+        assert_eq!(extract_sni(&rec), SniVerdict::Unverifiable);
     }
 
     #[test]
-    fn clienthello_without_sni_yields_none() {
-        // A ClientHello with an empty extensions block.
+    fn non_clienthello_and_junk_are_unverifiable() {
+        assert_eq!(extract_sni(&[]), SniVerdict::Unverifiable);
+        // A complete non-handshake record (0x17) is not a ClientHello — the
+        // proxy must fail closed, not treat it as SNI-less.
+        assert_eq!(
+            extract_sni(&[0x17, 0x03, 0x03, 0x00, 0x00]),
+            SniVerdict::Unverifiable
+        );
+        assert_eq!(extract_sni(&[0xff; 64]), SniVerdict::Unverifiable);
+    }
+
+    #[test]
+    fn complete_clienthello_without_sni_is_absent() {
+        // A COMPLETE ClientHello with an empty extensions block provably carries
+        // no SNI — the one case the caller may legitimately allow.
         let mut body = Vec::new();
         body.extend_from_slice(&[0x03, 0x03]);
         body.extend_from_slice(&[0u8; 32]);
@@ -211,7 +297,7 @@ mod tests {
         body.extend_from_slice(&[0x13, 0x01]);
         body.push(0x01);
         body.push(0x00);
-        body.extend_from_slice(&0u16.to_be_bytes()); // no extensions
+        body.extend_from_slice(&0u16.to_be_bytes()); // extensions block, length 0
         let mut hs = vec![0x01];
         let bl = body.len();
         hs.extend_from_slice(&[(bl >> 16) as u8, (bl >> 8) as u8, bl as u8]);
@@ -219,6 +305,6 @@ mod tests {
         let mut rec = vec![0x16, 0x03, 0x01];
         rec.extend_from_slice(&(hs.len() as u16).to_be_bytes());
         rec.extend_from_slice(&hs);
-        assert_eq!(extract_sni(&rec), None);
+        assert_eq!(extract_sni(&rec), SniVerdict::Absent);
     }
 }

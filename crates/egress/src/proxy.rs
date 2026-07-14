@@ -29,7 +29,7 @@ use tokio::time::timeout;
 
 use crate::decide::{guard_block_event, EgressGuard};
 use crate::netguard::is_forbidden_target;
-use crate::sni::extract_sni;
+use crate::sni::{extract_sni, SniVerdict};
 
 /// Where decision events go. The runtime wraps `RunLog::append`; tests collect
 /// them. Called from async tasks, so it is `Send + Sync`.
@@ -244,19 +244,35 @@ impl ServerProxy {
                 }
                 bytes
             }
-            // A complete ClientHello: assert SNI == CONNECT host (absent SNI is
-            // fine — the client isn't claiming a different host).
+            // A first TLS record: assert SNI == CONNECT host. A provably absent
+            // SNI is fine (the client isn't claiming a different host); an
+            // UNVERIFIABLE hello (truncated or fragmented across records, so the
+            // SNI could be hidden past this parser) fails closed — that is the
+            // domain-fronting-via-fragmentation bypass.
             FirstFlight::Tls(bytes) => {
-                if let Some(sni) = extract_sni(&bytes) {
-                    let sni = crate::connect::normalize_host(&sni);
-                    if sni != target.host {
+                match extract_sni(&bytes) {
+                    SniVerdict::Present(sni) => {
+                        let sni = crate::connect::normalize_host(&sni);
+                        if sni != target.host {
+                            (self.on_event)(guard_block_event(
+                                &self.server,
+                                &target.host,
+                                format!(
+                                    "TLS SNI '{sni}' does not match CONNECT host '{}'",
+                                    target.host
+                                ),
+                            ));
+                            return Ok(()); // tunnel established; drop it
+                        }
+                    }
+                    SniVerdict::Absent => {} // provably no SNI — nothing to front
+                    SniVerdict::Unverifiable => {
                         (self.on_event)(guard_block_event(
                             &self.server,
                             &target.host,
-                            format!(
-                                "TLS SNI '{sni}' does not match CONNECT host '{}'",
-                                target.host
-                            ),
+                            "unverifiable TLS ClientHello (truncated or record-fragmented) \
+                             — cannot check SNI, failing closed"
+                                .to_string(),
                         ));
                         return Ok(()); // tunnel established; drop it
                     }

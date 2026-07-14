@@ -43,4 +43,4 @@ pub use execution_relay::{
 };
 pub use proxy::{EventSink, ServerProxy};
 pub use relay::start_relay;
-pub use sni::extract_sni;
+pub use sni::{extract_sni, SniVerdict};
