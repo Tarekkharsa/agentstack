@@ -18,7 +18,7 @@
 
 use std::fs;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
@@ -108,10 +108,18 @@ fn check(protocol: Option<&str>) -> Result<()> {
     let Some((event, cwd)) = proto.parse_event(&payload) else {
         finish(proto, &Decision::Allow, None);
     };
-    let workspace = cwd
+    let cwd = cwd
         .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("/"));
+    // Anchor the workspace at the project root, not the transient `cwd`. An
+    // agent that has `cd`'d into a subdirectory still writes to files higher
+    // up the same project (a repo-root `README.md`, say); scoping to `cwd`
+    // alone would wrongly report those as "outside the workspace". This also
+    // fixes the project-policy load just below — the `[policy]` deny globs
+    // live in the root `.agentstack/` manifest, which a subdirectory `cwd`
+    // would miss.
+    let workspace = anchor_workspace(&cwd);
 
     // The project layer may ADD deny globs (union — it can never loosen the
     // machine's). A broken/hostile project manifest is simply skipped: the
@@ -133,6 +141,34 @@ fn check(protocol: Option<&str>) -> Result<()> {
     };
     let decision = check_event(&ctx, &event);
     finish(proto, &decision, Some((&event, &ctx)))
+}
+
+/// Anchor the guard's workspace at the project root: the nearest ancestor of
+/// `cwd` that holds a `.git` or `.agentstack` entry. Falls back to `cwd`
+/// itself when no marker is found, preserving the previous behavior for a
+/// loose directory that is its own workspace.
+///
+/// The filesystem probe is the only I/O here; the outward walk is factored
+/// into [`nearest_ancestor`] so it stays unit-testable without touching disk.
+fn anchor_workspace(cwd: &Path) -> PathBuf {
+    nearest_ancestor(cwd, |dir| {
+        dir.join(".git").exists() || dir.join(".agentstack").exists()
+    })
+}
+
+/// Walk `start` and its ancestors outward, returning the first for which
+/// `is_root` holds; if none do, return `start` unchanged. `is_root` is a
+/// closure (not a hard-coded filesystem check) so tests can drive it with an
+/// in-memory predicate.
+fn nearest_ancestor(start: &Path, is_root: impl Fn(&Path) -> bool) -> PathBuf {
+    let mut dir = Some(start);
+    while let Some(d) = dir {
+        if is_root(d) {
+            return d.to_path_buf();
+        }
+        dir = d.parent();
+    }
+    start.to_path_buf()
 }
 
 fn read_payload(reader: impl Read) -> std::io::Result<String> {
@@ -810,6 +846,34 @@ fn set_guard_enabled(enabled: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nearest_ancestor_walks_up_to_the_first_matching_root() {
+        // Pure predicate, no disk: from a deep subdir the walk must return the
+        // project root, not the starting directory.
+        let start = Path::new("/work/repo/src/deep");
+        let root = Path::new("/work/repo");
+        assert_eq!(nearest_ancestor(start, |d| d == root), root);
+    }
+
+    #[test]
+    fn nearest_ancestor_falls_back_to_start_when_nothing_matches() {
+        let start = Path::new("/loose/dir");
+        assert_eq!(nearest_ancestor(start, |_| false), start);
+    }
+
+    #[test]
+    fn anchor_workspace_finds_the_repo_root_from_a_subdirectory() {
+        // The regression this fixes: an agent that `cd`'d into a subdirectory
+        // must still count the repo root (marked by `.git`) as its workspace,
+        // so a write to a repo-root file is not "outside the workspace".
+        let root = tempdir().join(format!("anchor-{}", std::process::id()));
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let sub = root.join("docs");
+        std::fs::create_dir_all(&sub).unwrap();
+        assert_eq!(anchor_workspace(&sub), root);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn oversized_hook_payload_is_rejected_before_json_parsing() {
