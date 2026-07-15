@@ -64,9 +64,23 @@ pub struct AdapterDescriptor {
     /// from the file.
     #[serde(skip)]
     pub source: AdapterSource,
+    /// SHA-256 (hex) of the EXACT descriptor YAML bytes, retained by the registry
+    /// at load. Crate-private and read-only via
+    /// [`AdapterDescriptor::definition_digest`], so a caller can neither forge it
+    /// nor mutate the descriptor and its digest independently. Empty for a
+    /// descriptor not loaded through the registry.
+    #[serde(skip)]
+    pub(crate) definition_digest: String,
 }
 
 impl AdapterDescriptor {
+    /// The exact-bytes definition digest the registry retained, or `None` for a
+    /// descriptor not loaded through the registry (which therefore cannot form a
+    /// grant's bound adapter identity).
+    pub fn definition_digest(&self) -> Option<&str> {
+        (!self.definition_digest.is_empty()).then_some(self.definition_digest.as_str())
+    }
+
     /// The config path + format for a given scope. `None` for `Project` when the
     /// CLI has no project config concept.
     pub fn config_for(

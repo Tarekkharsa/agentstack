@@ -35,8 +35,11 @@ impl Registry {
             let text = file
                 .contents_utf8()
                 .context("embedded adapter is not valid UTF-8")?;
-            let desc: AdapterDescriptor = serde_yaml::from_str(text)
+            let mut desc: AdapterDescriptor = serde_yaml::from_str(text)
                 .with_context(|| format!("parsing embedded adapter {}", file.path().display()))?;
+            // Retain the digest over the EXACT descriptor bytes so a grant can
+            // bind the adapter it launched (parsing otherwise discards them).
+            desc.definition_digest = agentstack_core::digest::sha256_hex(text.as_bytes());
             builtin_ids.insert(desc.id.clone());
             adapters.insert(desc.id.clone(), desc);
         }
@@ -70,6 +73,7 @@ impl Registry {
                         continue;
                     }
                 };
+                desc.definition_digest = agentstack_core::digest::sha256_hex(text.as_bytes());
                 desc.source = AdapterSource::User(path.clone());
                 adapters.insert(desc.id.clone(), desc);
             }
@@ -183,6 +187,60 @@ mod tests {
         assert!(matches!(cc.source, AdapterSource::BuiltIn));
 
         std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// The registry retains a definition digest over the EXACT embedded bytes:
+    /// the built-in digest equals `sha256(file.contents())`, and two adapters
+    /// differ.
+    #[test]
+    fn definition_digest_is_retained_from_exact_bytes() {
+        let reg = Registry::load().unwrap();
+        let cc = reg.get("claude-code").unwrap();
+
+        let file = EMBEDDED.get_file("claude-code.yaml").unwrap();
+        let expected = agentstack_core::digest::sha256_hex(file.contents());
+        assert_eq!(cc.definition_digest(), Some(expected.as_str()));
+
+        let codex = reg.get("codex").unwrap();
+        assert_ne!(
+            cc.definition_digest(),
+            codex.definition_digest(),
+            "different adapters, different digests"
+        );
+    }
+
+    /// A user override's digest is over its own file bytes, not the built-in's.
+    #[test]
+    fn user_override_digest_reflects_user_bytes() {
+        let _g = agentstack_core::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let adir = home.path().join("adapters");
+        fs::create_dir_all(&adir).unwrap();
+        let bytes = "id: cursor\ndisplay: Cursor Custom\n";
+        fs::write(adir.join("cursor.yaml"), bytes).unwrap();
+
+        let reg = Registry::load().unwrap();
+        let cur = reg.get("cursor").unwrap();
+        assert!(matches!(cur.source, AdapterSource::User(_)));
+        let expected = agentstack_core::digest::sha256_hex(bytes.as_bytes());
+        assert_eq!(
+            cur.definition_digest(),
+            Some(expected.as_str()),
+            "digest is over the exact user file bytes"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// A descriptor parsed directly (not through the registry) has no bound
+    /// digest, so it cannot form a grant's adapter identity.
+    #[test]
+    fn directly_parsed_descriptor_has_no_definition_digest() {
+        let parsed: AdapterDescriptor = serde_yaml::from_str("id: x\ndisplay: X\n").unwrap();
+        assert_eq!(parsed.definition_digest(), None);
     }
 
     /// Project-scope paths must anchor at the PROJECT ROOT even when the caller
