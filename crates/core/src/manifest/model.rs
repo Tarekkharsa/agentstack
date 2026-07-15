@@ -752,9 +752,13 @@ impl Profile {
     }
 }
 
-impl Manifest {
-    /// Every `${REF}` secret name referenced by any server, de-duplicated and
-    /// sorted. Used by `secret list` and `doctor`.
+impl Server {
+    /// Every `${REF}` secret name THIS server references — across url, command,
+    /// args, cwd, headers, env, and nested adapter `extra` string fields —
+    /// de-duplicated in first-seen order. Pure syntax: no value resolution.
+    /// Shared by [`Manifest::referenced_secrets`], `doctor`, and grant secret
+    /// validation so every consumer covers the identical field set (including
+    /// `extra`, which an earlier per-server copy in `doctor` omitted).
     pub fn referenced_secrets(&self) -> Vec<String> {
         let mut refs: Vec<String> = Vec::new();
         let mut push = |s: &str| {
@@ -764,33 +768,55 @@ impl Manifest {
                 }
             }
         };
-        for server in self.servers.values() {
-            if let Some(u) = &server.url {
-                push(u);
-            }
-            if let Some(c) = &server.command {
-                push(c);
-            }
-            for a in &server.args {
-                push(a);
-            }
-            if let Some(cwd) = &server.cwd {
-                push(cwd);
-            }
-            for v in server.headers.values() {
-                push(v);
-            }
-            for v in server.env.values() {
-                push(v);
-            }
-            for fields in server.extra.values() {
-                for v in fields.values() {
-                    for s in json_strings(v) {
-                        push(s);
-                    }
+        if let Some(u) = &self.url {
+            push(u);
+        }
+        if let Some(c) = &self.command {
+            push(c);
+        }
+        for a in &self.args {
+            push(a);
+        }
+        if let Some(cwd) = &self.cwd {
+            push(cwd);
+        }
+        for v in self.headers.values() {
+            push(v);
+        }
+        for v in self.env.values() {
+            push(v);
+        }
+        for fields in self.extra.values() {
+            for v in fields.values() {
+                for s in json_strings(v) {
+                    push(s);
                 }
             }
         }
+        refs
+    }
+}
+
+impl Manifest {
+    /// Every `${REF}` secret name referenced by any server (see
+    /// [`Server::referenced_secrets`]) or hook, de-duplicated and sorted. Used
+    /// by `secret list` and `doctor`.
+    pub fn referenced_secrets(&self) -> Vec<String> {
+        let mut refs: Vec<String> = Vec::new();
+        for server in self.servers.values() {
+            for r in server.referenced_secrets() {
+                if !refs.contains(&r) {
+                    refs.push(r);
+                }
+            }
+        }
+        let mut push = |s: &str| {
+            for r in crate::refs::refs_in(s) {
+                if !refs.contains(&r) {
+                    refs.push(r);
+                }
+            }
+        };
         for hook in self.hooks.values() {
             push(&hook.command);
             for a in &hook.args {
@@ -1158,6 +1184,30 @@ mod tests {
         )
         .unwrap();
         assert_eq!(m.referenced_secrets(), vec!["EXTRA_TOKEN".to_string()]);
+    }
+
+    #[test]
+    fn server_referenced_secrets_covers_extra_and_own_fields() {
+        // The shared per-server extractor sees command/args AND nested adapter
+        // `extra` string fields — the field an earlier doctor-local copy omitted.
+        let server: Server = toml::from_str(
+            r#"
+            type = "stdio"
+            command = "run ${CMD_TOKEN}"
+            args = ["--flag", "${ARG_TOKEN}"]
+
+            [extra.codex]
+            note = "${EXTRA_TOKEN}"
+            "#,
+        )
+        .unwrap();
+        let refs = server.referenced_secrets();
+        assert!(refs.contains(&"CMD_TOKEN".to_string()), "{refs:?}");
+        assert!(refs.contains(&"ARG_TOKEN".to_string()), "{refs:?}");
+        assert!(
+            refs.contains(&"EXTRA_TOKEN".to_string()),
+            "a ref nested in `extra` must be seen: {refs:?}"
+        );
     }
 
     #[test]

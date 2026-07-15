@@ -1291,42 +1291,6 @@ fn check_named_policy_keys(
     }
 }
 
-/// The `${REF}` names one server's OWN fields reference (url/command/args/
-/// cwd/headers/env) — scoped to a single server, unlike
-/// [`Manifest::referenced_secrets`] which flattens across every server. Used
-/// to check each ref against the EFFECTIVE (machine ∩ project)
-/// `[policy.secrets]` for that specific server, so a ref another server may
-/// use freely still gets flagged here if THIS server is denied it.
-fn server_secret_refs(server: &Server) -> Vec<String> {
-    let mut refs: Vec<String> = Vec::new();
-    let mut push = |s: &str| {
-        for r in agentstack_core::refs::refs_in(s) {
-            if !refs.contains(&r) {
-                refs.push(r);
-            }
-        }
-    };
-    if let Some(u) = &server.url {
-        push(u);
-    }
-    if let Some(c) = &server.command {
-        push(c);
-    }
-    for a in &server.args {
-        push(a);
-    }
-    if let Some(cwd) = &server.cwd {
-        push(cwd);
-    }
-    for v in server.headers.values() {
-        push(v);
-    }
-    for v in server.env.values() {
-        push(v);
-    }
-    refs
-}
-
 /// Cross-check every manifest server against the EFFECTIVE (machine ∩
 /// project) ruleset — the same artifact `apply` and the gateway consult —
 /// and flag anything that will fail closed at apply/gateway time: a `${REF}`
@@ -1348,7 +1312,7 @@ fn check_effective_policy(manifest: &Manifest, report: &mut Report) {
         }
     };
     for (name, server) in &manifest.servers {
-        for r in server_secret_refs(server) {
+        for r in server.referenced_secrets() {
             if let Err(rule) = ruleset.secret_decision(name, &r) {
                 report.line(
                     Level::Error,
