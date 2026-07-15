@@ -302,7 +302,7 @@ AgentStack should present two honest assurance tiers:
 
 | Tier | Requirements | Guarantees and limits | Product role |
 |---|---|---|---|
-| Protected activation | Standard binary; no Docker | Explicit project trust, locked-input and drift checks, policy compilation under the machine ceiling, and cooperative host-guard hooks where supported by the client. This is meaningful protection, but it is not kernel isolation. | Default quickstart, developer adoption, and the 15-minute activation metric |
+| Protected activation | Standard binary; no Docker | Explicit project trust, locked-input and drift checks, policy compilation under the machine ceiling, and cooperative host-guard hooks where supported by the client. This is meaningful protection, but it is not kernel isolation. | **Opt-in** Protected quickstart for Phase 0A (a candidate default at the Phase 0A exit gate); developer adoption and the 15-minute activation metric |
 | Maximum assurance | Official release binary, or a source build with the `sandbox` feature, plus a running Docker daemon | Container sandboxing and, with `--lockdown`, stronger network confinement through the egress path. Platform-specific guarantees must remain documented and tested. | Security-sensitive teams, CI, and environments willing to accept the dependency |
 
 The no-Docker tier is the activation wedge. Sandbox and lockdown remain important differentiation, but are an explicit opt-in maximum-assurance mode rather than a prerequisite for seeing the product's value.
