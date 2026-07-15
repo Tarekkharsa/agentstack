@@ -1,5 +1,5 @@
 //! `agentstack sign` / `agentstack verify` — detached ed25519 signatures over
-//! the project lockfile (ROADMAP Phase 4, the distribution primitive).
+//! the project lockfile (the strategy's distribution primitive).
 //!
 //! `sign` derives a key from a fresh random seed, signs `agentstack.lock`,
 //! writes the detached signature to `agentstack.lock.sig`, and prints the

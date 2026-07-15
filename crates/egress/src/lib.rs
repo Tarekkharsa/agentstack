@@ -1,6 +1,6 @@
 //! The egress proxy's **enforcement core** — the pure, fully-tested decision
-//! logic a forward proxy needs, with no sockets and no async (ROADMAP Phase 2
-//! item 2, the hardest step in the system).
+//! logic a forward proxy needs, with no sockets and no async. This was the
+//! hardest step in the initial enforcement implementation.
 //!
 //! What lives here, verifiable without a network or Docker:
 //! - [`connect`]: parse the target host:port out of an HTTP `CONNECT` request.

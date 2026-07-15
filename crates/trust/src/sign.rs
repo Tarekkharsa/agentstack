@@ -8,7 +8,7 @@
 //!
 //! This module is the primitive only: sign, verify, and hex-encoded key and
 //! signature types. Key distribution and a bundle registry are deliberately
-//! out of scope until there are real users (ROADMAP Phase 4 gate).
+//! out of scope until the real-user distribution gate in `STRATEGY.md`.
 //!
 //! No RNG dependency: a signing key is derived from a 32-byte seed the caller
 //! supplies (e.g. `core::util::random_bytes`), so this crate stays on its

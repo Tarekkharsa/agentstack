@@ -7,6 +7,8 @@
 
 **[Website](https://tarekkharsa.github.io/agentstack/)** ·
 [Examples](https://tarekkharsa.github.io/agentstack/examples.html) ·
+[Strategy](STRATEGY.md) ·
+[Current work](TODO.md) ·
 [Feature reference](docs/reference.md) ·
 [Enforcement matrix](docs/ENFORCEMENT.md) ·
 [Central library](https://tarekkharsa.github.io/agentstack/library.html) ·

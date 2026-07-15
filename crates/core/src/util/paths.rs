@@ -56,7 +56,8 @@ pub fn skills_home() -> PathBuf {
 
 /// `~/.agentstack/lib` — the central capability library. Projects reference its
 /// contents by name instead of copying capability files (see
-/// `plan/central-store.md`). Phase 1 populates `lib/skills/` and `library.toml`.
+/// `docs/reference.md#the-central-library`). Library commands populate
+/// `lib/skills/` and `library.toml`.
 pub fn lib_home() -> PathBuf {
     agentstack_home().join("lib")
 }

@@ -2,7 +2,7 @@
 //!
 //! The library is the single managed home a project references capabilities from
 //! by name, instead of copying capability files into each repo (see
-//! `plan/central-store.md`). This module is the inert foundation: it models the
+//! `docs/reference.md#the-central-library`). This module is the inert foundation: it models the
 //! index and loads/saves it. It performs **no resolution** — mapping a project's
 //! `skills = ["name"]` reference to a library entry is the resolver's job, added
 //! on top of this in a later step.

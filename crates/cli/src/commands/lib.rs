@@ -1,6 +1,6 @@
 //! `agentstack lib` — manage the central capability library
 //! (`~/.agentstack/lib/`) that projects reference by name instead of copying
-//! files (see `plan/central-store.md`).
+//! files (see `docs/reference.md#the-central-library`).
 //!
 //! This module owns the **library write contract**: [`add_skill`] is the single
 //! insertion path — how an item enters `library.toml`, how its files land under

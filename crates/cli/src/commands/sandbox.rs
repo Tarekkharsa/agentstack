@@ -1,5 +1,5 @@
 //! `agentstack run --sandbox` — launch the harness inside a container whose
-//! egress is enforced by the AgentStack proxy (Phase 2, ROADMAP items 1-3).
+//! egress is enforced by the AgentStack proxy.
 //!
 //! One seam assembles a run and one seam executes it: [`ExecutionPlan::build`]
 //! turns a loaded bundle into an immutable, verified plan (trust checked,

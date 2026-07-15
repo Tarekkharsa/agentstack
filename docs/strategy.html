@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentStack strategy</title>
+<meta name="description" content="The current decision-gated strategy for AgentStack: protected local activation, exact Workspace Grants, Cloudflare as the first hosted adapter, governed workflows, and the team control plane.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="canonical" href="https://tarekkharsa.github.io/agentstack/strategy.html">
+<style>
+  :root{--paper:#fbfaf7;--surface:#fff;--ink:#1b1f24;--muted:#5b6570;--faint:#737b84;--accent:#b4540a;--line:#e7e2d9;--soft:#f3f0ea;--good:#267a50;--warn:#a66a13;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--wrap:64rem}
+  @media(prefers-color-scheme:dark){:root{--paper:#14171b;--surface:#1a1e23;--ink:#e9e7e2;--muted:#aab1b8;--faint:#858d96;--accent:#f0975a;--line:#2b3036;--soft:#1e2329;--good:#58c08a;--warn:#e1ad54}}
+  *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 var(--sans);-webkit-font-smoothing:antialiased}a{color:var(--accent);text-decoration:none}a:hover,a:focus-visible{text-decoration:underline;text-underline-offset:3px}:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.skip{position:absolute;left:-9999px}.skip:focus{left:1rem;top:1rem;background:var(--accent);color:var(--paper);padding:.5rem .8rem;z-index:9}.site{position:sticky;top:0;background:color-mix(in srgb,var(--paper) 88%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);z-index:4}.bar{max-width:var(--wrap);margin:auto;padding:.8rem 1.35rem;display:flex;align-items:center;gap:1rem}.wordmark{color:var(--ink);font:700 1rem var(--mono)}nav{margin-left:auto;display:flex;gap:1rem;flex-wrap:wrap}nav a{color:var(--muted);font:.78rem var(--mono)}nav a[aria-current]{color:var(--accent)}main{max-width:var(--wrap);margin:auto;padding:0 1.35rem 6rem}.hero{padding:6rem 0 3.5rem;border-bottom:1px solid var(--line)}.eyebrow{color:var(--accent);font:600 .72rem var(--mono);letter-spacing:.14em;text-transform:uppercase}h1{max-width:58rem;margin:.7rem 0 1rem;font:700 clamp(2.2rem,6vw,4.5rem)/1.03 var(--mono);letter-spacing:-.055em}h2{margin:0 0 .8rem;font:700 clamp(1.4rem,3vw,2rem)/1.2 var(--mono)}h3{margin:0 0 .35rem;font:700 1rem var(--mono)}p{margin:.2rem 0 1rem}.lede{max-width:52rem;color:var(--muted);font-size:1.15rem}.status{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1.5rem}.pill{border:1px solid var(--line);border-radius:999px;padding:.28rem .62rem;color:var(--muted);font:.72rem var(--mono)}.pill.done{color:var(--good)}.pill.current{color:var(--warn)}section{margin-top:4.5rem;scroll-margin-top:5rem}.intro{max-width:52rem;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-top:1.4rem}.card{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:1.1rem}.card p,.card li{color:var(--muted);font-size:.94rem}.card p{margin:.4rem 0 0}.card ul{margin:.55rem 0 0;padding-left:1.2rem}.id{display:block;color:var(--accent);font:600 .7rem var(--mono);letter-spacing:.1em;margin-bottom:.45rem}.phase{display:grid;grid-template-columns:10rem 1fr;gap:1.5rem;padding:1.4rem 0;border-top:1px solid var(--line)}.phase:last-child{border-bottom:1px solid var(--line)}.phase-name{color:var(--accent);font:700 .78rem var(--mono);text-transform:uppercase;letter-spacing:.08em}.phase p,.phase li{color:var(--muted);font-size:.94rem}.phase ul{margin:.45rem 0;padding-left:1.2rem}.links{display:flex;gap:1rem;flex-wrap:wrap;margin-top:.65rem;font:.76rem var(--mono)}.callout{margin-top:1.5rem;border-left:3px solid var(--warn);background:linear-gradient(90deg,color-mix(in srgb,var(--warn) 10%,transparent),transparent 75%);padding:1rem 1.1rem}.callout p{color:var(--muted);margin:0}.flow{display:flex;align-items:stretch;gap:.5rem;margin-top:1.5rem;overflow-x:auto;padding-bottom:.5rem}.step{min-width:9.5rem;flex:1;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:.85rem}.step b{font:.78rem var(--mono);color:var(--accent)}.step p{font-size:.82rem;color:var(--muted);margin:.35rem 0 0}.arrow{align-self:center;color:var(--faint)}footer{border-top:1px solid var(--line);padding:1.5rem;color:var(--muted);font-size:.84rem}footer .bar{padding:0}@media(max-width:760px){body{font-size:16px}.grid{grid-template-columns:1fr}.phase{grid-template-columns:1fr;gap:.35rem}.hero{padding-top:4rem}.site nav a:nth-child(-n+2){display:none}.flow{flex-direction:column}.arrow{transform:rotate(90deg)}}
+</style>
+<style>
+  .table-wrap{overflow-x:auto;margin-top:1.4rem;border:1px solid var(--line);border-radius:12px;background:var(--surface)}table{width:100%;border-collapse:collapse;min-width:48rem}th,td{padding:.85rem 1rem;text-align:left;vertical-align:top;border-bottom:1px solid var(--line);font-size:.88rem}th{color:var(--ink);font:700 .72rem var(--mono);letter-spacing:.05em;background:var(--soft)}td{color:var(--muted)}tr:last-child td{border-bottom:0}.gate{margin-top:1.2rem;padding:1rem 1.1rem;border:1px solid var(--line);border-radius:12px;background:var(--soft)}.gate h3{color:var(--good)}.gate ul{margin:.5rem 0 0;padding-left:1.2rem}.gate li{color:var(--muted);font-size:.92rem}.compact{columns:2;column-gap:2rem}.compact li{break-inside:avoid;margin-bottom:.3rem}.label{display:inline-block;margin-right:.35rem;color:var(--accent);font:700 .7rem var(--mono)}code{font-family:var(--mono);font-size:.88em;background:var(--soft);border-radius:4px;padding:.08em .28em}@media(max-width:760px){.compact{columns:1}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site"><div class="bar"><a class="wordmark" href="./">agentstack</a><nav aria-label="Project links"><a href="how-it-works.html">how it works</a><a href="primitives.html">primitives</a><a href="examples.html">examples</a><a href="strategy.html" aria-current="page">strategy</a><a href="start.html">get started →</a></nav></div></header>
+<main id="main">
+  <header class="hero">
+    <p class="eyebrow">Strategy · detailed public plan · 15 July 2026</p>
+    <h1>Give every agent only what it needs—and prove what it did.</h1>
+    <p class="lede">AgentStack is becoming the vendor-neutral trust, policy, and workflow control plane for agent-enabled repositories. Portability creates adoption. Enforced grants and evidence create differentiation. Team coordination creates revenue.</p>
+    <div class="status"><span class="pill done">D4 lockdown · merged</span><span class="pill done">machine policy hardening · merged</span><span class="pill current">current · Phase 0A + 0B</span><span class="pill">later work · gated</span></div>
+  </header>
+
+  <section id="sources">
+    <p class="eyebrow">One source for each question</p>
+    <h2>No competing plans.</h2>
+    <div class="grid">
+      <article class="card"><span class="id">WHY + GATES</span><h3>Canonical strategy</h3><p><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">STRATEGY.md</a> owns product direction, phase details, exit gates, commercial posture, and decision history.</p></article>
+      <article class="card"><span class="id">WHAT NEXT</span><h3>Active checklist</h3><p><a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md">TODO.md</a> is the only ordered day-to-day work queue. Start with its first unchecked current-phase item.</p></article>
+      <article class="card"><span class="id">HOW IT FITS</span><h3>Architecture</h3><p><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md">ARCHITECTURE.md</a> defines component boundaries and dependency direction.</p></article>
+      <article class="card"><span class="id">WHAT IS ENFORCED</span><h3>Enforcement matrix</h3><p><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">ENFORCEMENT.md</a> is authoritative for runtime guarantees and their limits.</p></article>
+    </div>
+  </section>
+
+  <section id="sequence">
+    <p class="eyebrow">Fixed implementation order</p>
+    <h2>Prove one boundary before adding the next.</h2>
+    <div class="flow" aria-label="Strategic implementation sequence">
+      <div class="step"><b>0 · ACTIVATE</b><p>Canonical locked local run and evidence.</p></div><div class="arrow">→</div>
+      <div class="step"><b>1 · SCOPE</b><p>Exact local Workspace Grants.</p></div><div class="arrow">→</div>
+      <div class="step"><b>2A · HOST</b><p>One-shot Cloudflare adapter.</p></div><div class="arrow">→</div>
+      <div class="step"><b>2B · REPEAT</b><p>Saved governed workflows.</p></div><div class="arrow">→</div>
+      <div class="step"><b>3 · COORDINATE</b><p>Shared team control plane.</p></div><div class="arrow">→</div>
+      <div class="step"><b>4 · ASSURE</b><p>Enterprise needs proven by buyers.</p></div>
+    </div>
+    <div class="callout"><p><strong>Guardrail:</strong> Cloudflare is the first hosted adapter, not the public contract. Workflow files request capabilities; machine and organization policy remain the ceiling. Neither hosted execution nor saved workflows enters the current critical path.</p></div>
+  </section>
+
+  <section id="security-decisions">
+    <p class="eyebrow">Security decision ledger</p>
+    <h2>Five decisions keep the product claim honest.</h2>
+    <p class="intro">Each open boundary is a separate supervised implementation and review unit. It must carry its own executable witness; it is not bundled with unrelated documentation or catalog work.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Decision</th><th>Status</th><th>Contract</th><th>Required proof</th></tr></thead>
+      <tbody>
+        <tr><td><strong>D1 · resilient machine floor</strong></td><td><span class="pill done">done</span></td><td>Cache a validated, secret-free machine policy input—not a project ruleset. A corrupt edit uses the exact last-known-good input; first-run corruption or an invalid snapshot blocks activation. This is configuration resilience, not host-tamper protection.</td><td>Valid refresh, unchanged digest, degraded snapshot, blocked first run, corrupt/future snapshot, and a gateway-deny regression.</td></tr>
+        <tr><td><strong>D2 · one resolved grant</strong></td><td><span class="pill current">Phase 0A</span></td><td>Extend the existing <code>ExecutionPlan</code> / <code>Gateway::from_plan</code> seam through native render and profile leases. One grant carries resolved identities, verified pins, trust, effective policy, secret grant and lifetime, confinement posture, and evidence identity.</td><td>Every delivery path consumes the same grant. No path reconstructs or widens authority independently.</td></tr>
+        <tr><td><strong>D3 · executable integrity</strong></td><td><span class="pill current">Phase 0A gate</span></td><td>Declare and pin integrity inputs for stdio scripts and local executables, show them at trust review, and warn when executable code is intentionally unpinned. If excluded initially, say so explicitly.</td><td>A one-byte executable edit fails verification and re-gates review; intentionally unpinned code is visibly labelled.</td></tr>
+        <tr><td><strong>D4 · one MCP route</strong></td><td><span class="pill done">done</span></td><td>In lockdown, the same frozen pin-verified server set drives gateway dispatch and the direct-egress fence. Declared HTTP MCP endpoints cannot be reached around the gateway; unsafe fallback fails closed.</td><td>A Docker witness blocks direct access while the same call succeeds and is recorded through the relay, plus precedence, transport, classification, and version tests.</td></tr>
+        <tr><td><strong>D5 · name matches posture</strong></td><td><span class="pill">Phase 1</span></td><td>After compatibility evidence, decide whether ordinary <code>--sandbox</code> means topologically confined networking by default and give any weaker bridge/proxy mode an explicitly weaker name.</td><td>Tests and docs prove the default name cannot overstate the actual topology.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="phase-0a">
+    <p class="eyebrow">Current engineering lane</p>
+    <h2>Phase 0A — prove the canonical protected run.</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Assurance tier</th><th>Requirements</th><th>Honest guarantee</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Protected activation</strong></td><td>Standard release; no Docker</td><td>Explicit trust, locked-input and drift checks, machine-policy ceiling, cooperative host guards where supported, and evidence. Meaningful protection, but not kernel isolation.</td><td>Default quickstart and the 15-minute activation measure.</td></tr>
+        <tr><td><strong>Maximum assurance</strong></td><td>Official sandbox-capable release plus Docker</td><td>Container isolation and, with <code>--lockdown</code>, topologically confined network egress. Platform-specific limits remain documented and tested.</td><td>Security-sensitive teams, CI, and stronger demonstrations.</td></tr>
+      </tbody>
+    </table></div>
+    <div class="phase"><div class="phase-name">Contract</div><div><h3>Specify before composing boundaries</h3><p>Define <code>agentstack run &lt;harness&gt; --locked</code>, the no-Docker protected tier, the Docker maximum-assurance tier, trust timing, lock guarantees, secret handling, evidence, and cleanup.</p></div></div>
+    <div class="phase"><div class="phase-name">Build</div><div><h3>One path from trust to report</h3><p>Resolve only locked inputs, compile repository policy under the machine ceiling, launch through the canonical gateway, record material decisions, and fail before activation when trust or reproducibility cannot be proven.</p></div></div>
+    <div class="phase"><div class="phase-name">Prove</div><div><h3>Four demos and unassisted activation</h3><p>Prove a safe run, policy denial, changed or missing locked input, and a separate maximum-assurance Docker run. Add witnesses that authoritative verification hashes current bytes, every D2 delivery path uses one grant, and a one-byte D3 edit re-gates trust.</p><div class="links"><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md#phase-0a--prove-the-canonical-no-docker-activation-path">phase details →</a><a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md#phase-0a--prove-the-canonical-protected-run">checklist →</a></div></div></div>
+    <div class="gate"><h3>Exit gate</h3><ul><li>Three no-Docker demos pass with the standard release; sandbox and lockdown pass in their documented Docker environment.</li><li>Five people complete the safe flow without maintainer help, with median activation below 15 minutes.</li><li>Landing page, README, examples, CLI status, and enforcement claims agree with the demonstrated tier.</li></ul></div>
+  </section>
+
+  <section id="phase-0b">
+    <p class="eyebrow">Current market lane · parallel</p>
+    <h2>Phase 0B — validate the problem and distribution.</h2>
+    <p class="intro">Conduct 20 problem interviews, reach five people asking to try AgentStack, test the folder-access and repeated-workflow problems, publish the clone-as-consent story and demos, and find a repeatable path to unassisted activation.</p>
+    <div class="grid">
+      <article class="card"><span class="id">INTERVIEWS</span><h3>Observe current behavior</h3><p>Ask what people inspect after cloning, who approves MCP servers, skills, hooks, and secrets, where configuration drifts, which folders a real task may read or edit, and which task repeats enough to save.</p></article>
+      <article class="card"><span class="id">DISTRIBUTION</span><h3>Lead with repository consent</h3><p>Publish malicious-repository, compromised-MCP-server, and changed-pinned-byte demos; document the GitHub Action; target agent-heavy developers, platform teams, AppSec, and maintainers before a broad launch.</p></article>
+    </div>
+    <div class="gate"><h3>Exit gate</h3><ul><li>Twenty qualified interviews are complete and five end with “can I try it?”</li><li>At least one repeatable acquisition channel produces an unassisted activation.</li></ul></div>
+    <div class="links"><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md#phase-0b--validate-the-problem-and-build-distribution">phase details →</a><a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md#phase-0b--validate-the-problem-and-distribution">checklist →</a></div>
+  </section>
+
+  <section id="phase-1">
+    <p class="eyebrow">After both Phase 0 gates</p>
+    <h2>Phase 1 — productize the wedge and exact Workspace Grants.</h2>
+    <div class="grid">
+      <article class="card"><span class="id">DIRECTORY BOUNDARY</span><h3>Read, write, deny</h3><p>Start with safely mountable directory roots, keep the repository root read-only, reject traversal and symlink escapes, and never describe a full read-only repository mount as scoped read access.</p></article>
+      <article class="card"><span class="id">ROLE BOUNDARY</span><h3>Different authority for each job</h3><p>Bind grants to profiles and future roles: researcher, implementer, reviewer, and deployer receive only the folders, tools, secrets, egress, commands, and budgets they need.</p></article>
+      <article class="card"><span class="id">PORTABLE PLAN</span><h3>Freeze semantics once</h3><p>Version one backend-neutral execution plan. A local or hosted adapter may narrow it but cannot reinterpret or widen it.</p></article>
+      <article class="card"><span class="id">EXIT EVIDENCE</span><h3>Real use, not only tests</h3><p>Ten activated repositories, five weekly users, three CI users, one dependent team, and an external run proving out-of-grant writes fail.</p></article>
+      <article class="card"><span class="id">D5 POSTURE</span><h3>Name the network boundary honestly</h3><p>Use compatibility evidence to decide whether ordinary sandboxing becomes topologically confined by default or the weaker bridge/proxy path receives a clearly weaker name.</p></article>
+      <article class="card"><span class="id">EVIDENCE HEURISTIC</span><h3>Flag suspicious sequences, never claim DLP</h3><p>After recorder completion, report a secret access followed shortly by egress inconsistent with that secret’s constrained server. It is metadata correlation only: report, do not block or inspect payloads.</p></article>
+    </div>
+    <div class="gate"><h3>Exit gate</h3><ul><li>Ten independent repositories activate; five external users return weekly for four consecutive weeks.</li><li>Three repositories use the GitHub Action and one external team relies on AgentStack for real work.</li><li>An external run proves writes outside its grant fail; the frozen plan passes local backend conformance tests.</li></ul></div>
+    <div class="links"><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md#phase-1--productize-the-wedge">phase details →</a><a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md#phase-1--productize-the-wedge-and-exact-workspace-grants">checklist →</a></div>
+  </section>
+
+  <section id="phase-2">
+    <p class="eyebrow">After Phase 1 evidence</p>
+    <h2>Phase 2 — paid partners, then Cloudflare, then workflows.</h2>
+    <div class="phase"><div class="phase-name">First</div><div><h3>Find the repeated paid problem</h3><p>Run limited design partnerships around a governed rollout, policy baseline, or evidence outcome. Avoid unlimited bespoke engineering.</p></div></div>
+    <div class="phase"><div class="phase-name">Second</div><div><h3>Cloudflare one-shot runner</h3><p>A Worker owns authentication, policy, approval, and credential brokering; one isolated Sandbox handles one repository, harness, task, and frozen grant, then returns a validated patch and receipt. The sandbox receives approved read material and short-lived execution credentials—not a long-lived GitHub or model credential. Trusted code validates every returned path, traversal, symlink, and write before any approved branch or pull request. Start bring-your-own; no multi-tenant dashboard yet.</p></div></div>
+    <div class="phase"><div class="phase-name">Third</div><div><h3>Saved governed workflows</h3><p>Only after local/cloud parity and a real repeated task. Import a native format first where practical, normalize a restricted JS/TS API to the frozen plan, grant each role separate authority, digest-pin source and normalized plans, and re-gate changes. Retries require idempotency; irreversible effects require policy or approval. Add Cloudflare Workflows only when proven waits, schedules, retries, recovery, or approval events need durability.</p></div></div>
+    <div class="gate"><h3>Exit gate</h3><ul><li>Two paying partners share the same coordination problem.</li><li>One partner completes a Cloudflare run whose receipt matches the local grant contract.</li><li>One saved, role-scoped workflow repeats without permission widening.</li><li>Buyer, daily user, and security stakeholder agree on the value.</li></ul></div>
+    <div class="links"><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md#phase-2--paid-design-partnerships">phase details →</a><a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md#phase-2--paid-design-partners-cloudflare-runner-saved-workflows">checklist →</a></div>
+  </section>
+
+  <section id="phase-3">
+    <p class="eyebrow">After repeatable pilot evidence</p>
+    <h2>Phase 3 — team control plane.</h2>
+    <p class="intro">Monetize coordination: signed organization policy and Workspace Grants, shared workflows, identity and approvals, fleet and drift status, searchable evidence, provider integrations, and optional metered Cloudflare execution. Local enforcement must continue without the cloud.</p>
+    <div class="gate"><h3>Exit gate</h3><ul><li>Three organizations use shared policy or evidence coordination weekly.</li><li>One organization expands beyond its pilot team.</li><li>Support load and infrastructure cost fit a repeatable model.</li></ul></div>
+    <div class="links"><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md#phase-3--team-control-plane">phase details →</a><a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md#phase-3--team-control-plane">checklist →</a></div>
+  </section>
+
+  <section id="phase-4">
+    <p class="eyebrow">Only against proven procurement needs</p>
+    <h2>Phase 4 — enterprise assurance.</h2>
+    <p class="intro">Add SSO and directory sync, delegated administration, private networking and deployment choices, retention and SIEM export, formal policy changes and exceptions, requested compliance mappings, and support commitments. Completion means repeatable enterprise sales around one product—not unrelated consulting.</p>
+    <div class="gate"><h3>Completion gate</h3><ul><li>Enterprise sales repeat around the same product and buyer problem.</li><li>Revenue no longer depends on unrelated custom consulting.</li><li>The open local enforcement and portable contract remain useful without the hosted control plane.</li></ul></div>
+    <div class="links"><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md#phase-4--enterprise-assurance">phase details →</a><a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md#phase-4--enterprise-assurance">checklist →</a></div>
+  </section>
+
+  <section id="executor">
+    <p class="eyebrow">Cross-cutting security lane</p>
+    <h2><code>tools_execute</code> stays experimental until the evidence is complete.</h2>
+    <p class="intro">This hardening work can proceed without replacing the active Phase 0 lanes. The feature already has bounded source, input, tools, runtime, output, and recording; experimental status remains an honest product boundary.</p>
+    <div class="grid">
+      <article class="card"><span class="id">VALIDATE</span><h3>Trace and attack the boundary</h3><p>Build a current invariant-to-witness index, commission an independent source-to-sink review, fuzz relay framing and normalization, and cover relay-token reuse, disconnect cleanup, child teardown, DNS/UDP/proxy bypass, hostile log-shaped data, and post-plan mutation.</p></article>
+      <article class="card"><span class="id">OPERATE</span><h3>Prove cleanup and supply chain</h3><p>Soak timeouts, output limits, hangs, relay failure, cancellation, and concurrency without resource leaks. Publish runtime provenance, executor SBOM, independent image scan, digest-update policy, and attestation.</p></article>
+    </div>
+    <div class="gate"><h3>Promotion gate</h3><ul><li>No open critical or high findings.</li><li>Cleanup behavior is demonstrated under failure and sustained use.</li><li>Supply-chain evidence is published.</li><li>The enforcement matrix matches every fail-closed behavior and residual limit.</li></ul></div>
+    <div class="links"><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md#experimental-tools_execute">enforcement matrix →</a><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/tools-execute-threat-model.md">threat model →</a><a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md#cross-cutting-experimental-executor-stabilization">checklist →</a></div>
+  </section>
+
+  <section id="ecosystem">
+    <p class="eyebrow">Ecosystem architecture</p>
+    <h2>One coherent workspace now; independent products only when earned.</h2>
+    <p class="intro">The TanStack analogy describes the brand architecture, not a repo-count target. Present Core, Trust, Policy, Runtime, Workflow, Recorder, Cloud, and CLI as recognizable product layers while retaining the nine-crate monorepo.</p>
+    <div class="grid">
+      <article class="card"><span class="id">ORGANIZATION TRIGGER</span><h3>Transfer when ownership has value</h3><p>Reserve the organization name. Transfer the main repository when a second public repository is genuinely needed, a partner needs organization ownership, an external maintainer needs durable permissions, or neutral ownership materially improves trust.</p></article>
+      <article class="card"><span class="id">SPLIT TEST</span><h3>Five tests before a new repository</h3><p>The component must work without the full CLI, have its own users/docs/versioning/release cadence, expose a stable API, reduce more coordination than it adds, and have a real adopter asking to use or contribute independently.</p></article>
+    </div>
+  </section>
+
+  <section id="business">
+    <p class="eyebrow">Revenue boundary</p>
+    <h2>Keep local enforcement open. Charge for coordination.</h2>
+    <div class="grid">
+      <article class="card"><span class="id">OPEN SOURCE</span><h3>Portable local foundation</h3><p>Manifest, lock, adapters, trust, policy, Workspace Grants, local execution, signatures, reports, and CI verification stay inspectable and adoptable.</p></article>
+      <article class="card"><span class="id">DESIGN PARTNERS</span><h3>First revenue</h3><p>Sell a bounded rollout or evidence outcome and use repeated manual work to discover the team product.</p></article>
+      <article class="card"><span class="id">TEAM</span><h3>Coordination layer</h3><p>Shared policy and workflows, identity, approvals, evidence, managed updates, exceptions, and optional hosted execution.</p></article>
+      <article class="card"><span class="id">ENTERPRISE</span><h3>Assurance and operations</h3><p>Private deployment, residency, SSO, governance integrations, retention, compliance evidence, onboarding, and support.</p></article>
+    </div>
+    <div class="callout"><p><strong>Commercial rule:</strong> the first paid offer is a bounded governed rollout, policy baseline, migration, or evidence outcome with a defined success measure. Exact pricing remains a private hypothesis tested in sales conversations. Repeated manual work becomes product input; one customer’s bespoke procurement list does not become the roadmap.</p></div>
+  </section>
+
+  <section id="metrics">
+    <p class="eyebrow">Metrics and stop signals</p>
+    <h2>Measure behavior, not roadmap volume.</h2>
+    <div class="grid">
+      <article class="card"><span class="id">ACTIVATION</span><h3>Can people reach value?</h3><p>Quickstart completion, median time to protected run, failure stage, and external repositories with committed manifests and lockfiles.</p></article>
+      <article class="card"><span class="id">RETENTION</span><h3>Does it become routine?</h3><p>Weekly external users and repositories, repeat runs, enforced scoped writes, saved workflow reruns, local/cloud plan parity, CI checks, and multi-client use.</p></article>
+      <article class="card"><span class="id">TRUST VALUE</span><h3>Did the boundary matter?</h3><p>Violations blocked before activation, drift detected in CI, time to explain allow/deny decisions, and evidence exported to code or security review.</p></article>
+      <article class="card"><span class="id">COMMERCIAL PULL</span><h3>Will an organization pay?</h3><p>Trial requests, teams offering a real repository and policy baseline, qualified paid pilots, and repeated demand for shared policy, identity, inventory, workflows, or evidence.</p></article>
+    </div>
+    <div class="callout"><p><strong>Change the wedge</strong> if adequate distribution shows that repository configuration is not a meaningful trust problem, routine use has too much friction, native standards solve portability plus machine ceilings, or interest is only generic MCP discovery. Strong portability with weak trust suggests a narrower configuration product; strong security-team pull with weak developer pull suggests a CI and platform-governance lead.</p></div>
+  </section>
+
+  <section id="guardrails">
+    <p class="eyebrow">Risks, limits, and documentation governance</p>
+    <h2>Do not let a compelling future weaken today’s contract.</h2>
+    <ul class="compact">
+      <li><span class="label">CLAIMS</span>Distinguish cooperative host controls from kernel-enforced sandbox and lockdown guarantees.</li>
+      <li><span class="label">CLOUD</span>Cloudflare is an adapter behind the portable frozen plan; begin with bring-your-own cloud and model credentials.</li>
+      <li><span class="label">WORKFLOWS</span>JS/TS workflow files request authority but never grant it, run arbitrary code on the host, or bypass digest re-gating.</li>
+      <li><span class="label">CREDENTIALS</span>Keep GitHub, model, and long-lived credentials in trusted broker code, not the task sandbox.</li>
+      <li><span class="label">FOCUS</span>Defer marketplace, broad fleet platform, compliance suite, additional backends, and new client adapters until real demand earns them.</li>
+      <li><span class="label">POSITION</span>Own enforcement-backed action evidence, not generic observability, traces, token analytics, evaluations, DLP, or payload inspection.</li>
+      <li><span class="label">MARGINS</span>Enforce time, token, and cost budgets before reselling hosted execution.</li>
+      <li><span class="label">PILOTS</span>Time-box design partnerships and productize only repeated coordination needs.</li>
+      <li><span class="label">DOC STATUS</span>Label material Stable, Experimental, Design, Historical, or Archived; label examples as tested, Docker reproductions, validated manifests, or illustrative.</li>
+      <li><span class="label">SYNC</span>Generate this public view from authoritative Markdown or enforce a synchronization test for phases, status, examples, versions, adapter count, and claims.</li>
+    </ul>
+  </section>
+</main>
+<footer><div class="bar"><span>This is the detailed public view of the canonical <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">strategy</a>. Execute from the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md">active checklist</a>.</span><nav aria-label="Footer links"><a href="./">home</a><a href="examples.html">examples</a><a href="https://github.com/Tarekkharsa/agentstack">source</a></nav></div></footer>
+</body>
+</html>

@@ -1,7 +1,7 @@
 # Spike: gateway HTTP transport for sandboxed harnesses (2026-07-11)
 
-Session 0 of the gateway-unification milestone (ROADMAP "Adopted from the
-2026-07-11 strategy reviews", item 1). Three go/no-go questions, all answered
+Session 0 of the historical gateway-unification milestone. Three go/no-go
+questions, all answered
 **on the maintainer's machine** (macOS, Docker Desktop 25.0.3, sandbox image =
 `docker/sandbox.Dockerfile` → claude-code 2.1.207). Verdict: **GO.**
 

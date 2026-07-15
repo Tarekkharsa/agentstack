@@ -1,6 +1,6 @@
 //! Name resolution — the single seam that maps a `skills = ["name"]` or
 //! `servers = ["name"]` reference to a concrete definition (see
-//! `plan/central-store.md`).
+//! `docs/reference.md#the-central-library`).
 //!
 //! Resolution order (first hit wins), for both skills and servers:
 //!

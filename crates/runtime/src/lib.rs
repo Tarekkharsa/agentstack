@@ -1,5 +1,5 @@
 //! The sandbox runtime — container lifecycle for `agentstack run --sandbox`
-//! (Phase 2, ROADMAP item 2.1).
+//! used by AgentStack's maximum-assurance execution path.
 //!
 //! The design is a clean seam: a synchronous [`Sandbox`] trait abstracts the
 //! container backend, and the [`orchestrate::run`] driver takes a bundle

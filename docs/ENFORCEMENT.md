@@ -72,12 +72,12 @@ Modes are columns; policy dimensions are rows. Legend:
 
 | Dimension | `host` | `gateway` | `--sandbox` | `--lockdown` |
 |---|---|---|---|---|
-| **Tools** | unsupported | **enforced** | **enforced**† | **enforced**† |
+| **Tools** | unsupported | **enforced** | **enforced**† | **enforced** |
 | **Egress** | coarse | coarse | **enforced**\* | **enforced** |
-| **Secrets** | **enforced** | **enforced** | **enforced**‡ | **enforced**‡ |
+| **Secrets** | **enforced** | **enforced** | **enforced**‡ | **enforced** |
 | **Filesystem — write** | cooperative¶ | cooperative¶ | coarse | coarse |
 | **Filesystem — read** | cooperative¶ | cooperative¶ | coarse | coarse |
-| **Audit / recording** | unsupported | **enforced** | **enforced**§ | **enforced**§ |
+| **Audit / recording** | unsupported | **enforced** | **enforced**§ | **enforced** |
 
 \* **for proxied traffic only.** Plain `--sandbox` points `HTTPS_PROXY` at the
 proxy but the container keeps an ordinary bridge network — a process that
@@ -86,30 +86,26 @@ ignores the proxy env can still dial out directly. The run is labelled
 `--lockdown` (no direct route, topological confinement) earns `ENFORCED`.
 See the egress section below.
 
-† **for MCP traffic routed through the gateway.** `run --sandbox[/--lockdown]`
-of a *trusted* bundle now renders one gateway HTTP entry into the harness's
-config (host-side gateway; the sidecar relay bridges it under lockdown) and
-shadows any direct project config, so tool calls hit `Gateway::try_call` and
-`[policy.tools]` is enforced there. The ceiling matches egress's: an agent that
-reaches an upstream host *directly* — any host on `--sandbox`'s open route, or
-an egress-*allowed* host under `--lockdown` — bypasses the gateway. Denying the
-container direct egress to upstream hosts (leaving the relay the only path to
-them) is the remaining step for an unconditional cell; until then this is
-"enforced for what transits the gateway," not "impossible to evade." A run is
-*not* routed at all — cell degrades to `unsupported` — in three cases, each
-surfaced on stderr at run time: an *untrusted* bundle (empty gateway — no tool
-policy, but also no secrets and no server spawn), a bundle with no proxied
-servers, or a harness whose adapter *can't host an HTTP MCP entry* (stdio-only
-config). The same three non-routed cases apply to the ‡ (secrets) and §
-(audit) cells below.
+† **plain sandbox, for MCP traffic routed through the gateway.** A trusted run
+renders one host-gateway entry into the harness config, so calls hit
+`Gateway::try_call`. Plain `--sandbox` still has an open direct route: an agent
+that independently reaches an egress-allowed upstream can bypass that gateway.
+An untrusted bundle, a bundle with no proxied servers, or an incompatible
+adapter can also be unrouted; those cases are surfaced at runtime. Under
+`--lockdown`, D4 closes this qualification: the same frozen, pin-verified server
+set drives gateway dispatch and the `gateway_only_hosts` egress fence; direct
+connections to every declared HTTP MCP host are denied even when ordinary
+egress policy allows them. If the gateway entry and native-config shadows
+cannot be installed, lockdown refuses to start. Undeclared service aliases are
+outside this exact declared-endpoint claim.
 
-‡ **for gateway-routed runs.** The host-side gateway resolves `${REF}` secrets
+‡ **plain sandbox, for gateway-routed runs.** The host-side gateway resolves `${REF}` secrets
 in its own memory and hands the container only the endpoint URL + a per-run
 bearer token — resolved secret *values* never enter the container. A prior
 `agentstack apply` that baked secrets into a project config is shadowed out.
 (A run that isn't gateway-routed falls back to the coarse rendered-config path.)
 
-§ **tool calls + secret refs now recorded.** A gateway-routed run's own
+§ **plain sandbox, for gateway-routed runs.** A gateway-routed run's own
 `events.jsonl` gains a `ToolCall` per call (digest-only args) and a
 `SecretAccess` per resolved ref (name only), alongside the lifecycle + egress
 events it already held. Trust-store mutations and cost/tokens remain unrecorded.
@@ -136,26 +132,33 @@ Docker container behind the egress proxy.
   dispatch, and `namespaced_tools()` filters denied tools out of discovery too, so
   a denied tool is invisible *and* refused if called anyway. This is the single
   enforcement point. (`Gateway::try_call`, `crates/cli/src/gateway.rs`)
-- **sandbox / lockdown — enforced for gateway-routed traffic.** A trusted run
+- **sandbox — enforced for gateway-routed traffic.** A trusted run
   builds a host-side gateway (`Gateway::from_plan` — hard trust gate: untrusted
   → empty → unrouted) and a token-gated HTTP MCP endpoint, then renders one
   gateway entry into the harness's user-scope config and shadows any direct
   project config. The container's MCP calls therefore reach `Gateway::try_call`,
   where `[policy.tools]` is enforced exactly as in gateway mode (denied at
   discovery *and* at call), and each call is recorded in the run's own
-  `events.jsonl`. Under `--sandbox` the container reaches the gateway directly
-  (`host.docker.internal`); under `--lockdown` — no host route — it reaches the
-  egress sidecar's fixed-destination **relay** (`crates/egress/src/relay.rs`),
-  which splices to the host gateway. The relay is a dumb byte pipe: it parses
-  nothing, runs no policy, and does no SSRF check (its destination is host-fixed,
-  not client-chosen), so the real egress proxy's anti-SSRF guard is untouched;
-  auth stays end-to-end at the gateway. The proxy still never parses MCP
-  JSON-RPC — enforcement is at the gateway, not the proxy. **Ceiling:** an agent
-  that opens its own connection to an upstream host the egress policy allows
-  bypasses the gateway; making the relay the *only* route to upstream hosts
-  (deny their direct egress) is the remaining step. (`Gateway::from_plan`,
+  `events.jsonl`. The container reaches the gateway directly through
+  `host.docker.internal`. **Ceiling:** the ordinary bridge remains open; an
+  agent that opens its own connection to an upstream host the egress policy
+  allows bypasses the gateway. (`Gateway::from_plan`,
   `crates/cli/src/gateway_http.rs`, `crates/cli/src/commands/sandbox.rs`
-  `wire_sandbox_gateway`, `crates/runtime/src/lockdown.rs`)
+  `wire_sandbox_gateway`)
+- **lockdown — enforced.** The container reaches the host gateway only through
+  the egress sidecar's fixed-destination relay. The same frozen, pin-verified
+  server set is handed to `Gateway::from_frozen` for dispatch and compiled into
+  `gateway_only_hosts` for egress classification. That rule wins over an
+  ordinary allow, so a direct connection to every normalized declared HTTP MCP
+  host (all ports) is blocked while the relay remains the sole MCP route. stdio
+  upstreams stay host-side. Literal-IP and non-TLS CONNECT targets are refused;
+  partial, drifted, or unclassifiable server resolution fails the run; and an
+  adapter whose gateway entry or native shadows cannot be installed is refused
+  rather than given a rendered-config fallback. The relay is a fixed byte pipe;
+  tool policy remains at the gateway. Precise ceiling: AgentStack fences the
+  declared normalized endpoints, not every undeclared DNS alias the same service
+  might operate. (`crates/cli/src/commands/sandbox.rs`,
+  `crates/runtime/src/lockdown.rs`, `crates/egress/src/decide.rs`)
 
 ### Egress
 
@@ -198,7 +201,7 @@ Docker container behind the egress proxy.
   every `${REF}` through `secret_decision`; a ref outside `[policy.secrets]` fails
   to resolve, and the call is refused outright if any refs remain unresolved for
   that server. Same mechanism as host mode. (`crates/cli/src/gateway.rs`)
-- **sandbox / lockdown — enforced, for a gateway-routed run.** A trusted run
+- **sandbox — enforced, for a gateway-routed run.** A trusted run
   routes MCP through the host-side gateway (`Gateway::from_plan`), which resolves
   `${REF}`s fail-closed in its own memory via the same per-server `ScopedResolver`
   as gateway mode. Resolved secret *values* stay on the host — the container
@@ -210,6 +213,12 @@ Docker container behind the egress proxy.
   harness with no servers, or one that can't host an HTTP MCP entry — has no
   host-side resolution and, if a stale rendered config sits in the workspace, the
   container sees whatever was baked there. That path is coarse, as before.
+  (`crates/cli/src/gateway.rs`, `crates/cli/src/commands/sandbox.rs`)
+- **lockdown — enforced.** Secret resolution stays host-side as above, while
+  D4 removes the fallback: a trusted run must install the token-bearing gateway
+  entry and shadows, and an empty/untrusted run must install empty shadows. If
+  either cannot be done, lockdown refuses to start. Resolved values therefore
+  do not enter the container through AgentStack's MCP configuration path.
   (`crates/cli/src/gateway.rs`, `crates/cli/src/commands/sandbox.rs`)
 
 ### Filesystem — write
@@ -270,7 +279,7 @@ Docker container behind the egress proxy.
   error text is reduced to a fixed class so a malicious upstream can't write
   arbitrary bytes into the log. This is the most complete audit dimension.
   (`crates/cli/src/gateway.rs`, `crates/recorder/src/lib.rs`)
-- **sandbox / lockdown — enforced (for a gateway-routed run).** `RunLog::create`
+- **sandbox — enforced (for a gateway-routed run).** `RunLog::create`
   is mandatory and fails closed ("nothing trusted runs unobserved"). The run log
   captures container lifecycle (`SandboxStarted` / `SandboxExited`) and every
   egress decision — and, now that a trusted run's MCP traffic routes through the
@@ -283,6 +292,12 @@ Docker container behind the egress proxy.
   (below) and cost/tokens. A run that isn't gateway-routed (untrusted bundle, or
   no servers) records only lifecycle + egress. (`crates/cli/src/gateway.rs`
   `log_call`, `crates/cli/src/commands/sandbox.rs`)
+- **lockdown — enforced.** Run-log creation remains mandatory, and D4 makes the
+  gateway the only route to declared MCP endpoints. Every possible declared
+  MCP call therefore produces the same tool/secret evidence described above;
+  an untrusted or serverless run has no MCP calls and records lifecycle plus
+  egress. Trust-store mutations and cost/tokens remain the documented recorder
+  gaps. (`crates/cli/src/gateway.rs`, `crates/cli/src/commands/sandbox.rs`)
 
 ### Not yet wired: trust-store mutation logging
 
@@ -316,7 +331,8 @@ feature and has no host fallback.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the layer model this matrix concretizes,
   especially Layer 3 (policy dimensions) and Layer 4 (runtime modes).
-- [`ROADMAP.md`](ROADMAP.md) — what remains (the run-log fill-out for the coarse
-  audit cells; distribution/signing).
+- [`../TODO.md`](../TODO.md) — the ordered remaining work, including recorder
+  completion and later gated distribution.
+- [`../STRATEGY.md`](../STRATEGY.md) — the product phases and exit gates.
 - [`HISTORY.md`](HISTORY.md) — dated corrections and the closed security-review
   ledger.

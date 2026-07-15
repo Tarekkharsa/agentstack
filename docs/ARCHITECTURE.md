@@ -17,7 +17,8 @@ manifest and lock resolver, 13 CLI adapters, a central capability library,
 content-bound trust, machine-first policy, a single-dispatch MCP gateway,
 Docker sandbox and lockdown runtimes, egress enforcement, per-run recording,
 and an experimental frozen-plan executor. This document describes the current
-boundaries. [`ROADMAP.md`](ROADMAP.md) names what remains future work.
+boundaries. [`../STRATEGY.md`](../STRATEGY.md) defines the gated direction, and
+[`../TODO.md`](../TODO.md) names the current work.
 
 ## The flow
 
@@ -114,6 +115,12 @@ Invariant: changing any byte in the manifest/local/lock consent surface changes
 the trust digest. Changing lock-pinned skill, instruction, or library-server
 content fails lock verification until the project is deliberately re-locked
 and re-trusted.
+
+**Verification never uses the stat-fingerprint digest cache.** Trust granting,
+lock verification, and governed execution hash the current bytes directly.
+The mtime/size cache is permitted only on non-authoritative store and UI paths;
+moving it onto any verification path would turn a same-stat content change into
+a trust bypass and requires an explicit security review plus regression proof.
 
 **Principle — content identity and local consent are separate.** The consent
 digest is content-shaped, but the trust decision is deliberately stored under
@@ -293,6 +300,18 @@ per decision (allow/block, host, server, tool). Two confinement strengths ship:
   its version is newer than the binary understands. Both modes are
   Docker-verified end to end through the real binary (`sandbox_egress`,
   `sandbox_cli_e2e`, `sandbox_fs`, `sandbox_lockdown`, `sidecar_image`).
+
+  D4 also makes the gateway the sole MCP authority under lockdown. The run
+  resolves and pin-verifies one frozen server set, gives that exact set to the
+  gateway, and compiles every normalized declared HTTP host into the ruleset's
+  `gateway_only_hosts`. That fence wins over ordinary egress allows; direct
+  connections to declared MCP hosts are blocked on every port while stdio
+  servers stay host-side. Literal-IP and non-TLS tunnels are refused. Partial,
+  drifted, or unclassifiable resolution fails the run, and an adapter whose
+  gateway config or native shadows cannot be installed is refused rather than
+  given a direct rendered-config fallback. The precise ceiling is the declared
+  normalized endpoints: AgentStack does not discover every undeclared DNS alias
+  the same upstream service may operate.
 
 The egress proxy is the hardest engineering in the system — harder than the
 async learning curve. Known-hard sub-problems, stated up front:

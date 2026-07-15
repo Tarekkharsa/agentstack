@@ -6,20 +6,27 @@ AgentStack packages, runs, and governs AI agents — skills, tools, and MCP serv
 
 Core principle: **nothing runs until it's trusted, and nothing trusted runs unobserved.**
 
-Read `docs/ARCHITECTURE.md` before designing anything. Read `docs/ROADMAP.md` before starting new work — build only the current phase.
+Read `docs/ARCHITECTURE.md` before designing anything. Read `STRATEGY.md` for
+the phase gates, then `TODO.md` for the first current-phase task. Do not start
+later-phase work merely because it appears in the strategy.
 
 ## Where this starts (not greenfield)
 
-This repo is the shipped `agentstack` binary — a working single-crate Rust codebase (v0.8.x). Much of the architecture already exists in v0 form:
+This repo is the shipped `agentstack` binary — a working nine-crate Rust
+workspace (v0.10.x). The security architecture is implemented, not greenfield:
 
-- Manifest + lockfile with SHA-256 digests (`src/manifest/`, `src/lock.rs`)
-- A v0 trust gate: `agentstack trust .` pins the manifest + lockfile digest; edits re-gate
-- Machine-first tool policy (`[policy.tools]`) that no repo can loosen
-- An append-only call audit log (`~/.agentstack/audit/calls.jsonl`)
+- Manifest + lockfile with SHA-256 digests (`crates/core`)
+- Content-bound trust: `agentstack trust .` pins consent identity; edits re-gate
+- Machine-first tool, egress, secret, and filesystem policy that no repo can loosen
+- Global call audit plus per-run evidence (`crates/recorder`)
 - Fail-closed secret resolution: OS keychain (`keyring`) and varlock, `${REF}` placeholders only
-- 13 data-driven YAML adapters (`adapters/`)
+- 13 data-driven YAML adapters (`crates/adapters`)
+- Docker sandbox and lockdown, hardened egress, and the experimental governed executor
 
-The roadmap is a **restructure and hardening** of this code, not a rewrite: extract it into the workspace crates below, put the security invariants under property tests, then add sandbox enforcement. Existing modules embody tested knowledge — move them, then harden them. Never re-implement from scratch what already works.
+The active work productizes and extends this foundation; it is not a rewrite.
+Existing modules embody tested security knowledge. Extend their current seams
+and never re-implement working trust, policy, gateway, runtime, or recording
+paths from scratch.
 
 There are **no external users yet** — the maintainer is the only user. Breaking changes to config formats, file paths, and the CLI surface are free and encouraged when they improve the design. No migration shims, no deprecation cycles, no compatibility layers.
 
@@ -79,7 +86,7 @@ In particular: `trust` and `policy` depend on `core` only, and nothing depends o
 ## Workflow rules
 
 - **Plan before code.** For any task beyond a trivial fix, present a short plan (files touched, types added, tests) and wait for approval before implementing.
-- **Small increments.** One crate, one capability per session where possible. Never scaffold multiple phases ahead of the roadmap.
+- **Small increments.** One crate, one capability per session where possible. Never scaffold phases beyond the current gate in `TODO.md`.
 - **Extract, don't rewrite.** When roadmap work overlaps shipped code (`lock.rs`, `secret/`, the adapter engine), move and adapt the existing code. A from-scratch replacement of working code needs explicit approval.
 - **Tests are the spec.** Every public function in `trust` and `policy` ships with tests in the same PR. The proptest invariants in those crates must never be deleted or weakened.
 - **Run before done:** `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` must pass before declaring any task complete.

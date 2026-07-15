@@ -2,11 +2,47 @@
 
 Dated corrections and closed-out ledgers. Nothing here is current spec — it is
 the record of *how* the current spec was reached, kept out of `ARCHITECTURE.md`
-and `ROADMAP.md` so those read as the present tense. When a claim here conflicts
-with `ARCHITECTURE.md`, `ENFORCEMENT.md`, or the code, those win; this file is
-memory, not authority.
+and the current planning sources so those read as the present tense. When a
+claim here conflicts with `ARCHITECTURE.md`, `ENFORCEMENT.md`, `STRATEGY.md`,
+`TODO.md`, or the code, those win; this file is memory, not authority.
 
 ## Dated corrections
+
+### 2026-07-14 — D4 made the gateway the sole lockdown MCP authority
+
+The lockdown run now resolves and pin-verifies one profile-fenced server set
+and gives those same frozen definitions to both gateway dispatch and egress
+classification. Every normalized declared HTTP MCP host enters
+`gateway_only_hosts` in ruleset v3; that direct-deny wins over an ordinary
+egress allow on every port. stdio upstreams remain host-side. Literal-IP and
+non-TLS tunnels are refused, and partial, drifted, or unclassifiable resolution
+fails the run.
+
+There is no rendered-config fallback under lockdown. A trusted run must install
+the token-bearing gateway entry and shadow native project/user configuration; an
+empty or untrusted run must install empty shadows. If the adapter cannot carry
+the gateway token or its config cannot be mapped and shadowed, the run refuses
+to start. Docker tests prove a direct connection to a declared upstream fails
+while the same call succeeds and is recorded through the relay. The precise
+claim covers declared normalized endpoints, not every undeclared DNS alias the
+same service may operate.
+
+### 2026-07-14 — D1 made machine-policy corruption fail closed
+
+Machine policy now has four honest operating states: absent/unconfigured;
+current with a valid snapshot; degraded while enforcing the exact
+last-known-good input after a broken edit; and blocked when both source and
+snapshot are unusable. The snapshot stores a versioned, secret-free validated
+machine `Policy` input plus source digest—not a project-specific effective
+ruleset—and is refreshed atomically only when the digest changes. Gateway,
+render, guard, explain, and sandbox planning all use the same result-returning
+CLI provider, so substituting an empty policy on parse failure is no longer
+representable.
+
+This is resilience against accidental configuration rot, not tamper-proofing:
+the snapshot is user-writable like the source manifest. Tests cover absent,
+valid, unchanged-digest, degraded, first-run blocked, corrupt snapshot, future
+version, and a gateway deny surviving source corruption.
 
 ### 2026-07-13 — governed ephemeral execution landed experimentally
 
@@ -38,7 +74,7 @@ the render pipeline (`render/apply.rs`) already resolves before it renders — t
 boundary followed the data all along. This is why the `adapters` crate depends on
 `core` only.
 
-**Standing rule it produced** (now stated timelessly in ROADMAP Phase 0):
+**Standing rule it produced** (now stated timelessly in `CLAUDE.md`):
 coupling claims made from combined grep sweeps are hypotheses. Before design work
 is scheduled on an asserted "X depends on Y," verify it per-file against the
 source.
@@ -51,11 +87,21 @@ edge was withdrawn from CLAUDE.md and ARCHITECTURE.md to match reality (security
 review L5, doc half). Re-granting it is a deliberate architecture change, not a
 Cargo.toml edit.
 
+### 2026-07-11 — enforcement-backed action evidence, not generic observability
+
+An earlier positioning option proposed universal agent observability. It was
+rejected because reliable cross-client observation requires essentially the
+same interception boundary as enforcement while making a weaker promise.
+AgentStack therefore owns portable evidence for actions it actually governs:
+trust decisions, policy outcomes, capability use, lifecycle, and execution
+receipts. It does not position itself as a tracing, token analytics, evaluation,
+or payload-inspection platform. Future sequence-anomaly signals remain labelled
+metadata heuristics, not DLP or content inspection.
+
 ## Security-review ledger (2026-07-11)
 
 The two-reviewer audit (`docs/security-review-2026-07-11.html`), tracked to
-closure. ROADMAP keeps a one-line summary and the still-open items; the closed
-detail lives here.
+closure. The current open items live in `TODO.md`; the closed detail lives here.
 
 ### Closed — Highs (H1–H5)
 
@@ -119,6 +165,8 @@ returns one immutable plan. Commands `execute` it (one fail-closed run log + one
 proxy token, created once, no per-mode duplication) or `display` it (`--plan`, a
 Docker-free dry run naming trust state, mode, and the exact command). Three
 independent reviewers (Codex + two workflow checkers) confirmed the run is
-behavior-preserved. Extending the same boundary to the host-mode run and the
-gateway remains future work (tracked in ROADMAP).
+behavior-preserved. D4 subsequently made the frozen server definitions shared
+authority for gateway dispatch and lockdown egress classification. Extending
+the full resolved grant through the locked host run, native render, and profile
+leases remains D2 work tracked in `TODO.md`.
 </content>
