@@ -10,7 +10,7 @@
 //! reviewed and re-trusted. Trust stays bound to content because nothing is
 //! used that doesn't match the lock the human trusted.
 
-use crate::resolve::{InstructionLockStatus, ServerLockStatus, SkillLockStatus};
+use crate::resolve::{FrozenServer, InstructionLockStatus, ServerLockStatus, SkillLockStatus};
 
 /// The verdict for one capability vs its lock pin.
 ///
@@ -128,21 +128,96 @@ pub fn ensure_instructions_compilable(
     bail_blocked(&format!("compile instructions for {what}"), blocked)
 }
 
+/// Strict locked-run input verification (Phase 0A `run <harness> --locked`).
+/// **Not wired to any runtime path yet.**
+///
+/// Unlike [`ensure_activatable`] — which lets an `Unpinned` item through so the
+/// first activation can record its pin — every lock-pinnable input must be
+/// pinned and matching; every frozen server must resolve and pass its required
+/// integrity check. A missing pin, drift, or broken ref all block, and every
+/// offender is named together, kind-qualified (`skill 'x'`, `instruction 'x'`,
+/// `server 'x'`) so colliding names across capability kinds stay distinct.
+///
+/// The frozen server set is **borrowed**: this verifier proves the exact set
+/// acceptable without mutating or re-resolving it, so the grant builder can then
+/// move that same set into the `AuthorityGrant`. Inline servers carry no
+/// separate [`ServerLockStatus`] here — their declarations are bound by the
+/// trust digest — so a frozen `Err` only ever represents an unresolved or
+/// library-pin-unverifiable server (see [`crate::resolve::verify_library_pin`]).
+pub fn ensure_locked_inputs(
+    what: &str,
+    skills: &[(String, SkillLockStatus)],
+    instructions: &[(String, InstructionLockStatus)],
+    frozen_servers: &[FrozenServer],
+) -> anyhow::Result<()> {
+    let mut blocked: Vec<(String, String)> = Vec::new();
+    for (name, status) in skills {
+        if let Some(why) = locked_offender(skill_verdict(status)) {
+            blocked.push((format!("skill '{name}'"), why));
+        }
+    }
+    for (name, status) in instructions {
+        if let Some(why) = locked_offender(instruction_verdict(status)) {
+            blocked.push((format!("instruction '{name}'"), why));
+        }
+    }
+    for (name, resolved) in frozen_servers {
+        if let Err(reason) = resolved {
+            blocked.push((format!("server '{name}'"), reason.clone()));
+        }
+    }
+    bail_locked(&format!("run {what} with --locked"), blocked)
+}
+
+/// Strict offender extraction for locked runs: reuses the activation verdict but
+/// treats a missing pin (`Unpinned`) as an offender too — a locked run allows no
+/// first-pin, so every input must already be pinned and matching.
+fn locked_offender(verdict: Verdict) -> Option<String> {
+    match verdict {
+        Verdict::Ok => None,
+        Verdict::Unpinned => {
+            Some("not pinned in agentstack.lock — pin it with `agentstack lock`".to_string())
+        }
+        Verdict::Block(why) => Some(why),
+    }
+}
+
+/// Format the aligned offender list shared by every fail-closed bail: one
+/// `  name  why` line per offender, names padded to a common width.
+fn offender_lines(blocked: &[(String, String)]) -> String {
+    let width = blocked.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+    blocked
+        .iter()
+        .map(|(name, why)| format!("  {name:width$}  {why}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Shared fail-closed bail: name every offender, point at `agentstack lock`
 /// (whose byte change is what re-gates trust).
 fn bail_blocked(action: &str, blocked: Vec<(String, String)>) -> anyhow::Result<()> {
     if blocked.is_empty() {
         return Ok(());
     }
-    let width = blocked.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
-    let lines: Vec<String> = blocked
-        .iter()
-        .map(|(name, why)| format!("  {name:width$}  {why}"))
-        .collect();
     anyhow::bail!(
         "refusing to {action}: {} pinned item(s) changed since agentstack.lock was written —\n{}\nReview the changes, then run `agentstack lock` to accept them (re-locking re-gates the project for auto mode).",
         blocked.len(),
-        lines.join("\n")
+        offender_lines(&blocked)
+    )
+}
+
+/// Fail-closed bail for strict locked verification: reuses the shared offender
+/// formatter, but with a lead-in that fits every locked failure mode — a missing
+/// pin, drift, an unresolved server, or a failed integrity check — not only
+/// "changed" content.
+fn bail_locked(action: &str, blocked: Vec<(String, String)>) -> anyhow::Result<()> {
+    if blocked.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "refusing to {action}: {} input(s) failed locked integrity verification —\n{}\nLock-pinnable inputs must be pinned and matching, and every frozen server must resolve and pass its required integrity check; review them, then run `agentstack lock`.",
+        blocked.len(),
+        offender_lines(&blocked)
     )
 }
 
@@ -161,6 +236,25 @@ mod tests {
             locked: "aaaaaaaaaaaaaaaa".into(),
             current: "bbbbbbbbbbbbbbbb".into(),
         }
+    }
+
+    fn ok_server(name: &str) -> FrozenServer {
+        let server: agentstack_core::manifest::Server =
+            toml::from_str("type = \"stdio\"\ncommand = \"node\"\n").unwrap();
+        (
+            name.to_string(),
+            Ok(crate::resolve::ResolvedServer {
+                name: name.to_string(),
+                origin: crate::resolve::ServerOrigin::Inline,
+                server,
+                checksum: String::new(),
+                provenance: None,
+            }),
+        )
+    }
+
+    fn failed_server(name: &str, reason: &str) -> FrozenServer {
+        (name.to_string(), Err(reason.to_string()))
     }
 
     #[test]
@@ -309,5 +403,73 @@ mod tests {
         assert!(err.contains("kibana"), "{err}");
         assert!(!err.contains("good"), "unchanged items stay out: {err}");
         assert!(err.contains("`agentstack lock`"), "{err}");
+    }
+
+    #[test]
+    fn ensure_locked_inputs_blocks_missing_pins_of_all_three_kinds() {
+        // Two real MissingLockEntry statuses (skill, instruction) plus a frozen
+        // library server whose pin could not be verified — all three block, each
+        // kind-qualified in the report.
+        let skills = vec![("s".to_string(), SkillLockStatus::MissingLockEntry)];
+        let instructions = vec![("i".to_string(), InstructionLockStatus::MissingLockEntry)];
+        let servers = vec![failed_server(
+            "srv",
+            "library server is not pinned in agentstack.lock — pin it with `agentstack lock`",
+        )];
+        let err = ensure_locked_inputs("claude-code", &skills, &instructions, &servers)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("3 input(s)"), "{err}");
+        assert!(err.contains("skill 's'"), "{err}");
+        assert!(err.contains("instruction 'i'"), "{err}");
+        assert!(err.contains("server 'srv'"), "{err}");
+        assert!(err.contains("`agentstack lock`"), "{err}");
+    }
+
+    #[test]
+    fn locked_strictness_does_not_leak_into_existing_activation() {
+        // The existing gates keep first-pin semantics: a missing pin passes,
+        // including ServerLockStatus::MissingLockEntry.
+        let skills = vec![("s".to_string(), SkillLockStatus::MissingLockEntry)];
+        let servers = vec![("srv".to_string(), ServerLockStatus::MissingLockEntry)];
+        assert!(ensure_activatable("'p'", &skills, &servers).is_ok());
+
+        let instructions = vec![("i".to_string(), InstructionLockStatus::MissingLockEntry)];
+        assert!(ensure_instructions_compilable("claude-code", &instructions).is_ok());
+    }
+
+    #[test]
+    fn ensure_locked_inputs_reports_multiple_frozen_server_failures_together() {
+        let servers = vec![
+            failed_server(
+                "a",
+                "library definition drifted from agentstack.lock (locked x, current y)",
+            ),
+            failed_server("b", "library server is not pinned in agentstack.lock"),
+        ];
+        let err = ensure_locked_inputs("x", &[], &[], &servers)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("2 input(s)"), "{err}");
+        assert!(err.contains("server 'a'"), "{err}");
+        assert!(err.contains("server 'b'"), "{err}");
+    }
+
+    #[test]
+    fn ensure_locked_inputs_passes_clean_sets_and_leaves_them_usable() {
+        // Empty everything is trivially acceptable.
+        assert!(ensure_locked_inputs("x", &[], &[], &[]).is_ok());
+
+        // A valid non-empty set: matching skill + instruction + an Ok frozen
+        // server all pass.
+        let skills = vec![("s".to_string(), SkillLockStatus::Matches)];
+        let instructions = vec![("i".to_string(), InstructionLockStatus::Matches)];
+        let servers = vec![ok_server("srv")];
+        assert!(ensure_locked_inputs("x", &skills, &instructions, &servers).is_ok());
+
+        // Borrowed, not consumed: the exact frozen set is still usable after.
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].0, "srv");
+        assert!(servers[0].1.is_ok());
     }
 }
