@@ -83,6 +83,8 @@ dependencies = [
  "assert_fs",
  "clap",
  "dirs",
+ "getrandom 0.2.17",
+ "hmac",
  "include_dir",
  "indexmap",
  "insta",
