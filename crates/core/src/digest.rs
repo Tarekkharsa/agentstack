@@ -7,9 +7,9 @@
 //! are security-relevant: any byte, path, or file-set change must change the
 //! digest (property-tested below).
 //!
-//! The stat-fingerprint *cache* over `dir_digest` deliberately stays in the
-//! cli crate — caching is a performance policy, not part of the digest's
-//! definition, and core stays free of `~/.agentstack` knowledge.
+//! There is no stat-fingerprint cache: `dir_digest` reads current bytes on
+//! every call, and verification never consults a memoized digest (see
+//! `docs/ARCHITECTURE.md`). Core stays free of `~/.agentstack` knowledge.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -51,8 +51,7 @@ pub fn dir_digest(root: &Path) -> Result<String> {
 }
 
 /// Collect every file under `dir` as a path relative to `root`, recursing into
-/// subdirectories; `.git` is excluded. Shared by [`dir_digest`] and the cli's
-/// stat-fingerprint cache so both walk the identical file set.
+/// subdirectories; `.git` is excluded.
 pub fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     collect_files_at_depth(root, dir, out, 0)
 }

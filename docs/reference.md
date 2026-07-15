@@ -380,12 +380,10 @@ skills a profile references by name (resolved from the central library, no
 inline `[skills.*]` entry) keep their lock pins through the reconcile pass —
 pin or refresh those with `agentstack lock`.
 
-Repeat digests are served from a stat-fingerprint cache
-(`~/.agentstack/digest-cache.json`: file count + total size + max mtime + a
-hash of the sorted relative paths with each file's size and mtime). Any
-mismatch falls back to the full read+hash, so `doctor`/`use` over a large
-library cost stat calls, not a re-hash of every byte. Delete the file to
-force full re-hashing.
+Skill and library content digests always hash current bytes; there is no digest
+cache on the verification path. (Older versions kept a stat-fingerprint cache and
+may leave a harmless orphaned `~/.agentstack/digest-cache.json`; it is unused and
+safe to delete.)
 
 ### Selective skills via profiles
 

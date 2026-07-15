@@ -3,20 +3,17 @@
 //! path sources pass through. A content digest gives the lockfile its integrity
 //! field.
 
-use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
-use sha2::{Digest, Sha256};
 
 use crate::manifest::{Skill, SkillSource};
 use crate::util::paths;
 
 pub struct Store {
     root: PathBuf,
-    digest_cache: RefCell<DigestCache>,
 }
 
 /// The resolved local location of a skill's content.
@@ -35,15 +32,11 @@ impl Store {
     pub fn default_store() -> Self {
         Store {
             root: paths::agentstack_home().join("store"),
-            digest_cache: RefCell::new(DigestCache::load()),
         }
     }
 
     pub fn with_root(root: PathBuf) -> Self {
-        Store {
-            root,
-            digest_cache: RefCell::new(DigestCache::load()),
-        }
+        Store { root }
     }
 
     pub fn root(&self) -> &Path {
@@ -63,7 +56,7 @@ impl Store {
             SkillSource::Path(p) => {
                 let path = resolve_path(manifest_dir, &p);
                 let checksum = if path.exists() {
-                    dir_digest_cached_with(&path, &mut self.digest_cache.borrow_mut())?
+                    dir_digest(&path)?
                 } else {
                     String::new()
                 };
@@ -92,8 +85,7 @@ impl Store {
                         );
                     }
                 }
-                let checksum =
-                    dir_digest_cached_with(&content, &mut self.digest_cache.borrow_mut())?;
+                let checksum = dir_digest(&content)?;
                 Ok(Resolved {
                     path: content,
                     rev: Some(resolved_rev),
@@ -115,7 +107,7 @@ impl Store {
             SkillSource::Path(p) => {
                 let path = resolve_path(manifest_dir, &p);
                 let checksum = if path.exists() {
-                    dir_digest_cached_with(&path, &mut self.digest_cache.borrow_mut())?
+                    dir_digest(&path)?
                 } else {
                     String::new()
                 };
@@ -135,10 +127,7 @@ impl Store {
                 let content = git_content_dir(&clone, subpath.as_deref())?;
                 Ok(Some(Resolved {
                     rev: git_head(&clone).ok(),
-                    checksum: dir_digest_cached_with(
-                        &content,
-                        &mut self.digest_cache.borrow_mut(),
-                    )?,
+                    checksum: dir_digest(&content)?,
                     path: content,
                     fetched: false,
                     source_kind: "git",
@@ -184,15 +173,6 @@ impl Store {
 
     fn git_dir(&self, url: &str) -> PathBuf {
         self.root.join("git").join(sanitize(url))
-    }
-}
-
-impl Drop for Store {
-    fn drop(&mut self) {
-        let cache = self.digest_cache.get_mut();
-        if cache.dirty {
-            cache.save();
-        }
     }
 }
 
@@ -324,148 +304,6 @@ fn sanitize(url: &str) -> String {
         .collect()
 }
 
-// ---------- persistent digest cache ----------
-//
-// `dir_digest` reads and hashes every byte under a directory — fine for one
-// skill, painful when doctor/use/install digest a multi-hundred-MB library on
-// every run. The cache maps a canonical dir to the digest it had under a stat
-// fingerprint (file count + total size + max mtime + a hash of the sorted
-// relative paths, each with its file's size and mtime). Any mismatch falls
-// back to the full read+hash; a matching
-// fingerprint turns a multi-second pass into stat calls.
-
-/// Where digest cache entries live: `~/.agentstack/digest-cache.json`.
-fn digest_cache_path() -> PathBuf {
-    paths::agentstack_home().join("digest-cache.json")
-}
-
-/// Fingerprints younger than this are never cached: within mtime granularity a
-/// same-size edit right after a digest would be invisible to the fingerprint
-/// (the same racy-clean window git's index handles).
-const DIGEST_CACHE_SETTLE_NS: u64 = 2_000_000_000;
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-struct DirFingerprint {
-    files: u64,
-    bytes: u64,
-    max_mtime_ns: u64,
-    /// SHA-256 over the sorted relative paths, each folded with its file's
-    /// (size, mtime) — catches renames *and* per-file stat changes the
-    /// directory aggregates miss (e.g. two files swapping sizes, or an
-    /// mtime-preserving replacement whose mtime stays below the max).
-    paths_sha: String,
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct DigestCacheEntry {
-    #[serde(flatten)]
-    fingerprint: DirFingerprint,
-    sha256: String,
-}
-
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-struct DigestCache {
-    #[serde(default)]
-    entries: std::collections::BTreeMap<String, DigestCacheEntry>,
-    #[serde(skip)]
-    dirty: bool,
-}
-
-impl DigestCache {
-    fn load() -> DigestCache {
-        fs::read_to_string(digest_cache_path())
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
-    }
-
-    /// Best-effort persist — a failed cache write must never fail the caller.
-    fn save(&self) {
-        if let Ok(text) = serde_json::to_string_pretty(self) {
-            let _ = crate::util::atomic::write(&digest_cache_path(), &text);
-        }
-    }
-}
-
-/// Stat-only fingerprint of a directory (`.git` excluded, like `dir_digest`).
-fn dir_fingerprint(root: &Path) -> Result<DirFingerprint> {
-    let mut files: Vec<PathBuf> = Vec::new();
-    collect_files(root, root, &mut files)?;
-    files.sort();
-    let mut bytes = 0u64;
-    let mut max_mtime_ns = 0u64;
-    let mut hasher = Sha256::new();
-    for rel in &files {
-        let meta = fs::metadata(root.join(rel))
-            .with_context(|| format!("stat {}", root.join(rel).display()))?;
-        let mtime_ns = meta
-            .modified()
-            .ok()
-            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        // Per-file stats go into the hash, not just the aggregates: two files
-        // swapping sizes (or a replacement carrying an old mtime below the
-        // max) leave count/total/max unchanged but must break the fingerprint.
-        hasher.update(rel.to_string_lossy().as_bytes());
-        hasher.update([0]);
-        hasher.update(meta.len().to_le_bytes());
-        hasher.update(mtime_ns.to_le_bytes());
-        bytes = bytes.saturating_add(meta.len());
-        max_mtime_ns = max_mtime_ns.max(mtime_ns);
-    }
-    Ok(DirFingerprint {
-        files: files.len() as u64,
-        bytes,
-        max_mtime_ns,
-        paths_sha: format!("{:x}", hasher.finalize()),
-    })
-}
-
-/// [`dir_digest`] behind the persistent stat-fingerprint cache: a matching
-/// fingerprint returns the cached digest without reading file contents; any
-/// mismatch (or a fingerprint too fresh to be trustworthy) recomputes the full
-/// digest and updates the cache.
-pub fn dir_digest_cached(root: &Path) -> Result<String> {
-    let mut cache = DigestCache::load();
-    let sha256 = dir_digest_cached_with(root, &mut cache)?;
-    if cache.dirty {
-        cache.save();
-    }
-    Ok(sha256)
-}
-
-fn dir_digest_cached_with(root: &Path, cache: &mut DigestCache) -> Result<String> {
-    let canon = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let key = canon.display().to_string();
-    let fingerprint = dir_fingerprint(&canon)?;
-
-    if let Some(entry) = cache.entries.get(&key) {
-        if entry.fingerprint == fingerprint {
-            return Ok(entry.sha256.clone());
-        }
-    }
-
-    let sha256 = dir_digest(&canon)?;
-    let now_ns = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    if now_ns.saturating_sub(fingerprint.max_mtime_ns) > DIGEST_CACHE_SETTLE_NS {
-        cache.entries.insert(
-            key,
-            DigestCacheEntry {
-                fingerprint,
-                sha256: sha256.clone(),
-            },
-        );
-        cache.dirty = true;
-    }
-    // TODO(perf): fingerprinting and content hashing still walk separately on
-    // misses; combining them risks changing the digest algorithm owned by core.
-    Ok(sha256)
-}
-
 /// Total size in bytes of a directory's files (`.git` excluded, like
 /// [`dir_digest`]). Best-effort: unreadable entries count as zero.
 pub fn dir_size(root: &Path) -> u64 {
@@ -481,7 +319,8 @@ pub fn dir_size(root: &Path) -> u64 {
 }
 
 // The digest itself (paths + bytes → sha256) lives in core with the lockfile
-// types it feeds; only the stat-fingerprint cache above is cli policy.
+// types it feeds. Authoritative skill checksums call it directly — no
+// stat-fingerprint cache sits on the verification path (see ARCHITECTURE.md).
 // TODO(phase-1): shim — migrate callers to agentstack_core::digest and drop.
 pub use agentstack_core::digest::{collect_files, dir_digest};
 
@@ -502,7 +341,9 @@ mod tests {
         assert!(!r.checksum.is_empty());
     }
 
-    /// Serialize AGENTSTACK_HOME mutation (the digest cache lives under it).
+    /// Sandbox `AGENTSTACK_HOME` under `TEST_ENV_LOCK` so this regression is
+    /// safe when run against the previously cached implementation or if a cache
+    /// is reintroduced.
     fn with_home<T>(f: impl FnOnce(&assert_fs::TempDir) -> T) -> T {
         let _guard = crate::util::TEST_ENV_LOCK
             .lock()
@@ -512,99 +353,6 @@ mod tests {
         let out = f(&home);
         std::env::remove_var("AGENTSTACK_HOME");
         out
-    }
-
-    /// Backdate every file's mtime past the settle window so the fingerprint
-    /// is cache-eligible (fresh mtimes are deliberately never cached).
-    fn backdate_all(dir: &Path) {
-        let past = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
-        for entry in fs::read_dir(dir).unwrap() {
-            let entry = entry.unwrap();
-            if entry.file_type().unwrap().is_dir() {
-                backdate_all(&entry.path());
-            } else {
-                let f = fs::OpenOptions::new()
-                    .append(true)
-                    .open(entry.path())
-                    .unwrap();
-                f.set_modified(past).unwrap();
-            }
-        }
-    }
-
-    fn cache_key(dir: &Path) -> String {
-        fs::canonicalize(dir).unwrap().display().to_string()
-    }
-
-    #[test]
-    fn cached_digest_matches_full_digest_and_persists() {
-        with_home(|home| {
-            let tmp = assert_fs::TempDir::new().unwrap();
-            tmp.child("a.txt").write_str("hello").unwrap();
-            tmp.child("sub/b.txt").write_str("world").unwrap();
-            backdate_all(tmp.path());
-
-            let cached = dir_digest_cached(tmp.path()).unwrap();
-            assert_eq!(cached, dir_digest(tmp.path()).unwrap());
-
-            let text =
-                fs::read_to_string(home.path().join("digest-cache.json")).expect("cache written");
-            assert!(text.contains(&cache_key(tmp.path())), "entry keyed by dir");
-        });
-    }
-
-    #[test]
-    fn matching_fingerprint_short_circuits_the_hash() {
-        with_home(|home| {
-            let tmp = assert_fs::TempDir::new().unwrap();
-            tmp.child("a.txt").write_str("hello").unwrap();
-            backdate_all(tmp.path());
-            dir_digest_cached(tmp.path()).unwrap();
-
-            // Poison the cached sha; an unchanged fingerprint must return it —
-            // proof the content was not re-read.
-            let cache_path = home.path().join("digest-cache.json");
-            let mut v: serde_json::Value =
-                serde_json::from_str(&fs::read_to_string(&cache_path).unwrap()).unwrap();
-            v["entries"][cache_key(tmp.path())]["sha256"] = "deadbeef".into();
-            fs::write(&cache_path, serde_json::to_string(&v).unwrap()).unwrap();
-
-            assert_eq!(dir_digest_cached(tmp.path()).unwrap(), "deadbeef");
-        });
-    }
-
-    #[test]
-    fn changed_content_and_renames_fall_back_to_full_hash() {
-        with_home(|home| {
-            let tmp = assert_fs::TempDir::new().unwrap();
-            tmp.child("a.txt").write_str("hello").unwrap();
-            backdate_all(tmp.path());
-            dir_digest_cached(tmp.path()).unwrap();
-            let cache_path = home.path().join("digest-cache.json");
-            let poison = |key: &str| {
-                let mut v: serde_json::Value =
-                    serde_json::from_str(&fs::read_to_string(&cache_path).unwrap()).unwrap();
-                v["entries"][key]["sha256"] = "deadbeef".into();
-                fs::write(&cache_path, serde_json::to_string(&v).unwrap()).unwrap();
-            };
-
-            // A size-changing edit breaks the fingerprint → real digest again.
-            poison(&cache_key(tmp.path()));
-            tmp.child("a.txt").write_str("changed!").unwrap();
-            backdate_all(tmp.path());
-            let after_edit = dir_digest_cached(tmp.path()).unwrap();
-            assert_ne!(after_edit, "deadbeef");
-            assert_eq!(after_edit, dir_digest(tmp.path()).unwrap());
-
-            // A rename keeps count/size/mtime but must still invalidate (the
-            // digest covers relative paths).
-            poison(&cache_key(tmp.path()));
-            fs::rename(tmp.path().join("a.txt"), tmp.path().join("z.txt")).unwrap();
-            backdate_all(tmp.path());
-            let after_rename = dir_digest_cached(tmp.path()).unwrap();
-            assert_ne!(after_rename, "deadbeef");
-            assert_eq!(after_rename, dir_digest(tmp.path()).unwrap());
-        });
     }
 
     /// Pin a file's mtime to an exact time so two directory states can be
@@ -618,92 +366,90 @@ mod tests {
             .unwrap();
     }
 
+    /// Regression — contract §3 step 4 / ruling 3 and ARCHITECTURE.md:119.
+    /// Drives the real authoritative verification seam (`skill_lock_status` —
+    /// the chain trust-grant, `use --write`, and the MCP loader all share): a
+    /// same-size, mtime-restored in-place edit — the "same-stat" change a
+    /// reintroduced stat-fingerprint cache would miss — is still caught as lock
+    /// drift. AGENTSTACK_HOME is sandboxed under TEST_ENV_LOCK so running this
+    /// against the old (cached) code cannot touch the developer's real cache.
     #[test]
-    fn size_swap_with_identical_aggregates_changes_fingerprint() {
-        with_home(|home| {
-            // Two files swap sizes between states: file count, TOTAL bytes and
-            // max mtime are all identical — only the per-path stats differ. An
-            // aggregate-only fingerprint collides here and serves a stale
-            // digest.
-            let t = std::time::SystemTime::now() - std::time::Duration::from_secs(30);
-            let tmp = assert_fs::TempDir::new().unwrap();
-            tmp.child("a.txt").write_str("aa").unwrap();
-            tmp.child("b.txt").write_str("bbbb").unwrap();
-            set_mtime(&tmp.path().join("a.txt"), t);
-            set_mtime(&tmp.path().join("b.txt"), t);
-            let before = dir_fingerprint(tmp.path()).unwrap();
-            dir_digest_cached(tmp.path()).unwrap();
-
-            // Poison the cached sha to detect whether it gets served.
-            let cache_path = home.path().join("digest-cache.json");
-            let mut v: serde_json::Value =
-                serde_json::from_str(&fs::read_to_string(&cache_path).unwrap()).unwrap();
-            v["entries"][cache_key(tmp.path())]["sha256"] = "deadbeef".into();
-            fs::write(&cache_path, serde_json::to_string(&v).unwrap()).unwrap();
-
-            tmp.child("a.txt").write_str("bbbb").unwrap();
-            tmp.child("b.txt").write_str("aa").unwrap();
-            set_mtime(&tmp.path().join("a.txt"), t);
-            set_mtime(&tmp.path().join("b.txt"), t);
-
-            let after = dir_fingerprint(tmp.path()).unwrap();
-            assert_eq!(before.files, after.files);
-            assert_eq!(before.bytes, after.bytes);
-            assert_eq!(before.max_mtime_ns, after.max_mtime_ns);
-            assert_ne!(before, after, "per-path sizes must break the fingerprint");
-
-            let digest = dir_digest_cached(tmp.path()).unwrap();
-            assert_ne!(
-                digest, "deadbeef",
-                "stale digest served for swapped content"
-            );
-            assert_eq!(digest, dir_digest(tmp.path()).unwrap());
-        });
-    }
-
-    #[test]
-    fn mtime_preserving_replacement_below_max_changes_fingerprint() {
+    fn same_stat_skill_edit_is_detected_by_skill_lock_status() {
         with_home(|_home| {
-            // Simulate `cp -p` / `rsync -t` dropping in a same-size file that
-            // carries an old mtime still below the directory's max: aggregates
-            // are unchanged, but the per-path mtime moved.
-            let now = std::time::SystemTime::now();
-            let t_old = now - std::time::Duration::from_secs(60);
-            let t_max = now - std::time::Duration::from_secs(10);
-            let t_carried = now - std::time::Duration::from_secs(40);
             let tmp = assert_fs::TempDir::new().unwrap();
-            tmp.child("a.txt").write_str("hello").unwrap();
-            tmp.child("b.txt").write_str("world").unwrap();
-            set_mtime(&tmp.path().join("a.txt"), t_old);
-            set_mtime(&tmp.path().join("b.txt"), t_max);
-            let before = dir_fingerprint(tmp.path()).unwrap();
+            let skill_md = tmp.child("skills/x/SKILL.md");
+            skill_md.write_str("# x\ncontent-AAAA\n").unwrap(); // 17 bytes
+            let skill_dir = tmp.path().join("skills/x");
 
-            // Same-size content replacement whose mtime stays under the max.
-            tmp.child("a.txt").write_str("HELLO").unwrap();
-            set_mtime(&tmp.path().join("a.txt"), t_carried);
+            // Pin an old mtime so a hypothetical settle-window cache would deem
+            // the dir cache-eligible; the fix must not depend on mtime at all.
+            let t = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+            set_mtime(skill_md.path(), t);
 
-            let after = dir_fingerprint(tmp.path()).unwrap();
-            assert_eq!(before.files, after.files);
-            assert_eq!(before.bytes, after.bytes);
-            assert_eq!(before.max_mtime_ns, after.max_mtime_ns);
-            assert_ne!(before, after, "per-path mtime must break the fingerprint");
-        });
-    }
+            // Ground-truth pin from the raw, cache-free digest.
+            let pin = dir_digest(&skill_dir).unwrap();
+            let lock = crate::lock::Lock {
+                version: crate::lock::SUPPORTED_LOCK_VERSION,
+                skills: vec![crate::lock::LockedSkill {
+                    name: "x".into(),
+                    source: "path".into(),
+                    path: Some("./skills/x".into()),
+                    git: None,
+                    rev: None,
+                    checksum: pin,
+                }],
+                servers: Vec::new(),
+                instructions: Vec::new(),
+            };
 
-    #[test]
-    fn fresh_mtimes_are_not_cached() {
-        with_home(|home| {
-            // Files written just now sit inside mtime granularity — caching them
-            // could hide a same-size edit made a moment later.
-            let tmp = assert_fs::TempDir::new().unwrap();
-            tmp.child("a.txt").write_str("hello").unwrap();
-            let d = dir_digest_cached(tmp.path()).unwrap();
-            assert_eq!(d, dir_digest(tmp.path()).unwrap());
-            let text = fs::read_to_string(home.path().join("digest-cache.json"))
-                .unwrap_or_else(|_| "{}".into());
+            let manifest: crate::manifest::Manifest =
+                toml::from_str("version = 1\n[skills.x]\npath = \"./skills/x\"\n").unwrap();
+            let library = crate::library::Library::default();
+            let lib_home = tmp.child("lib").path().to_path_buf();
+            let store = Store::with_root(tmp.child("store").path().to_path_buf());
+
+            // Same `store` instance across both calls, so any in-memory cache on
+            // the seam is primed by the first call and would be hit by the second.
+            let status_of = || {
+                crate::resolve::skill_lock_status(
+                    "x",
+                    &manifest,
+                    tmp.path(),
+                    &library,
+                    &lib_home,
+                    &store,
+                    &lock,
+                    crate::resolve::ResolveMode::NoFetch,
+                )
+                .status
+            };
+
+            // First pass: clean, and primes any cache that sits on the seam.
+            assert_eq!(
+                status_of(),
+                crate::resolve::SkillLockStatus::Matches,
+                "freshly pinned content verifies"
+            );
+
+            // Same-size, same-mtime in-place edit — only the bytes differ.
+            skill_md.write_str("# x\ncontent-BBBB\n").unwrap(); // also 17 bytes
+            set_mtime(skill_md.path(), t);
+
+            // Second pass: drift despite an identical stat fingerprint.
+            let status = status_of();
             assert!(
-                !text.contains(&cache_key(tmp.path())),
-                "settle window keeps fresh dirs out of the cache"
+                matches!(
+                    status,
+                    crate::resolve::SkillLockStatus::ChecksumDrift { .. }
+                ),
+                "same-stat content change must be lock drift, got {status:?}"
+            );
+            assert!(
+                matches!(
+                    crate::verify::skill_verdict(&status),
+                    crate::verify::Verdict::Block(_)
+                ),
+                "drift must fail closed (Block)"
             );
         });
     }

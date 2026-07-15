@@ -116,11 +116,14 @@ the trust digest. Changing lock-pinned skill, instruction, or library-server
 content fails lock verification until the project is deliberately re-locked
 and re-trusted.
 
-**Verification never uses the stat-fingerprint digest cache.** Trust granting,
-lock verification, and governed execution hash the current bytes directly.
-The mtime/size cache is permitted only on non-authoritative store and UI paths;
-moving it onto any verification path would turn a same-stat content change into
-a trust bypass and requires an explicit security review plus regression proof.
+**Verification always hashes current bytes; there is no stat-fingerprint digest
+cache.** Trust granting, lock verification, and governed execution — and skill
+content digesting specifically — read and hash the current bytes on every call.
+The mtime/size memoization that once accelerated skill-directory digests was
+removed: its only consumers were authoritative paths, where a same-stat content
+change (same size, restored mtime) could serve a stale digest and become a trust
+bypass. Reintroducing any stat-keyed digest cache on a verification path requires
+an explicit security review plus regression proof.
 
 **Principle — content identity and local consent are separate.** The consent
 digest is content-shaped, but the trust decision is deliberately stored under

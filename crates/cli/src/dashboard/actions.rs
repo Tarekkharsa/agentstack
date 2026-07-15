@@ -153,7 +153,7 @@ pub fn toggle_skill(
     let statuses: Vec<_> = active
         .iter()
         .map(|(name, path)| {
-            let status = match crate::store::dir_digest_cached(path) {
+            let status = match crate::store::dir_digest(path) {
                 Ok(checksum) => crate::resolve::classify_skill(name, &checksum, None, &lock),
                 Err(e) => crate::resolve::SkillLockStatus::ResolveFailed {
                     error: format!("{e:#}"),
