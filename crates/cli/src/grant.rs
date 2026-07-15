@@ -19,13 +19,25 @@
 //! it is opaque, redacted, non-serializable, and exposed only to the outer grant
 //! digest — never recorded or displayed on its own.
 
+// STAGED: 3b-i lands the grant types + the sealed `GrantBuilder` unwired. 3b-ii
+// (the canonical digest + evidence, which reads every field) and increment 4
+// (the run flow, which calls the builder) consume this surface. Remove this
+// allow once the grant is wired into the run path.
+#![allow(dead_code)]
+
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
+use agentstack_core::scope::Scope;
+use agentstack_policy::CompiledRuleset;
+
+use crate::adapter::{AdapterDescriptor, AdapterSource, Registry};
 use crate::util::paths;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -324,9 +336,649 @@ pub fn commit_argv(key: &CommitmentKey, argv: &[String]) -> ArgvCommitment {
     ArgvCommitment(tag)
 }
 
+// ===== 3b-i: operational AuthorityGrant types, sealed construction =====
+//
+// STAGED + UNWIRED: nothing constructs or consumes a grant yet. This is not the
+// complete contract grant — repository-controlled executable inputs (D3) are
+// deferred to their own increment, which lands `executables` + full server-tied
+// validation together (never half-modeled). The canonical V1 digest/KAT (3b-ii)
+// must not freeze until D3 has added its digest field.
+
+/// Validated SHA-256 hex (exactly 64 lowercase hex chars). Parsing accepts an
+/// optional `sha256:` prefix; consumers emit one canonical form.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct Sha256Hex(String);
+impl Sha256Hex {
+    fn parse(s: &str) -> Result<Self> {
+        let h = s.strip_prefix("sha256:").unwrap_or(s);
+        if h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()) {
+            Ok(Sha256Hex(h.to_ascii_lowercase()))
+        } else {
+            bail!("not a sha256 hex digest: {s:?}");
+        }
+    }
+    fn hex(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The AuthorityGrant's own canonical digest.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GrantDigest(Sha256Hex);
+impl GrantDigest {
+    pub fn parse(s: &str) -> Result<Self> {
+        Ok(GrantDigest(Sha256Hex::parse(s)?))
+    }
+    pub fn hex(&self) -> &str {
+        self.0.hex()
+    }
+}
+impl std::fmt::Display for GrantDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "sha256:{}", self.0.hex())
+    }
+}
+impl std::fmt::Debug for GrantDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self}")
+    }
+}
+
+/// A trust consent digest bound into a grant.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConsentDigest(Sha256Hex);
+impl ConsentDigest {
+    pub fn parse(s: &str) -> Result<Self> {
+        Ok(ConsentDigest(Sha256Hex::parse(s)?))
+    }
+    pub fn hex(&self) -> &str {
+        self.0.hex()
+    }
+}
+impl std::fmt::Display for ConsentDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "sha256:{}", self.0.hex())
+    }
+}
+impl std::fmt::Debug for ConsentDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self}")
+    }
+}
+
+/// A content checksum: input, adapter definition, image, or policy source.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ContentDigest(Sha256Hex);
+impl ContentDigest {
+    pub fn parse(s: &str) -> Result<Self> {
+        Ok(ContentDigest(Sha256Hex::parse(s)?))
+    }
+    pub fn hex(&self) -> &str {
+        self.0.hex()
+    }
+}
+impl std::fmt::Display for ContentDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "sha256:{}", self.0.hex())
+    }
+}
+impl std::fmt::Debug for ContentDigest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self}")
+    }
+}
+
+/// An absolute, filesystem-canonical, UTF-8 path. Construction is read-only
+/// (`--plan`-safe): rejects non-UTF-8 and non-existent paths.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct GrantPath(String);
+impl GrantPath {
+    pub fn new(p: &Path) -> Result<GrantPath> {
+        if p.to_str().is_none() {
+            bail!("path is not valid UTF-8: {}", p.display());
+        }
+        let canon =
+            std::fs::canonicalize(p).with_context(|| format!("canonicalizing {}", p.display()))?;
+        let s = canon.to_str().ok_or_else(|| {
+            anyhow::anyhow!("canonical path is not valid UTF-8: {}", canon.display())
+        })?;
+        Ok(GrantPath(s.to_string()))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    /// Whether this canonical path lies inside `root` (canonical).
+    pub fn is_within(&self, root: &GrantPath) -> bool {
+        Path::new(&self.0).starts_with(&root.0)
+    }
+}
+
+/// Grant schema, tied to the digest domain: `V1` ↔ `agentstack-authority-grant-v1`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GrantSchema {
+    V1,
+}
+impl GrantSchema {
+    pub fn slug(self) -> &'static str {
+        match self {
+            GrantSchema::V1 => "v1",
+        }
+    }
+}
+
+/// Confinement posture (grant-local; slugs match `commands::sandbox::Posture`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GrantPosture {
+    Host,
+    Sandbox,
+    Lockdown,
+}
+impl GrantPosture {
+    pub fn slug(self) -> &'static str {
+        match self {
+            GrantPosture::Host => "host",
+            GrantPosture::Sandbox => "sandbox",
+            GrantPosture::Lockdown => "lockdown",
+        }
+    }
+    pub fn from_slug(s: &str) -> Option<GrantPosture> {
+        match s.trim() {
+            "host" => Some(GrantPosture::Host),
+            "sandbox" => Some(GrantPosture::Sandbox),
+            "lockdown" => Some(GrantPosture::Lockdown),
+            _ => None,
+        }
+    }
+}
+
+/// Egress enforcement, independent of posture.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EgressMode {
+    Unconfined,
+    ProxyAdvisory,
+    NoNetwork,
+    LockdownConfined,
+}
+impl EgressMode {
+    pub fn slug(self) -> &'static str {
+        match self {
+            EgressMode::Unconfined => "unconfined",
+            EgressMode::ProxyAdvisory => "proxy-advisory",
+            EgressMode::NoNetwork => "no-network",
+            EgressMode::LockdownConfined => "lockdown-confined",
+        }
+    }
+}
+
+/// Generated-artifact lifecycle.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ArtifactMode {
+    Static,
+    CleanAtRest,
+    ZeroFiles,
+}
+impl ArtifactMode {
+    pub fn slug(self) -> &'static str {
+        match self {
+            ArtifactMode::Static => "static",
+            ArtifactMode::CleanAtRest => "clean-at-rest",
+            ArtifactMode::ZeroFiles => "zero-files",
+        }
+    }
+}
+
+/// Workspace read/write/deny roots — Phase-1 reserved.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum WorkspaceGrant {
+    Unbound,
+}
+impl WorkspaceGrant {
+    pub fn slug(&self) -> &'static str {
+        match self {
+            WorkspaceGrant::Unbound => "unbound",
+        }
+    }
+}
+
+/// Where a resolved capability came from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum InputOrigin {
+    Inline,
+    Library,
+}
+
+/// A resolved skill's source (valid-state: Git always carries a revision).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum SkillSource {
+    Path,
+    Git { revision: String },
+}
+
+/// An instruction fragment's integrity binding.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum InstructionBinding {
+    MachineOwned(ContentDigest),
+    ProjectPinned(ContentDigest),
+}
+
+/// A server's binding — one discriminated union, so origin and integrity can't
+/// contradict. Inline servers are trust-digest-bound but still carry their
+/// per-definition checksum; library servers are lock-pinned.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum GrantedServerBinding {
+    Inline {
+        definition: ContentDigest,
+    },
+    Library {
+        definition: ContentDigest,
+        provenance: Option<String>,
+    },
+}
+
+/// Runtime image identity: `Host` (no image) vs a container image that may be
+/// present-but-unbound.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum RuntimeImage {
+    Host,
+    Container {
+        reference: String,
+        binding: ImageBinding,
+    },
+}
+impl RuntimeImage {
+    pub fn slug(&self) -> &'static str {
+        match self {
+            RuntimeImage::Host => "host",
+            RuntimeImage::Container { .. } => "container",
+        }
+    }
+}
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum ImageBinding {
+    Unbound,
+    Pinned(ContentDigest),
+}
+
+/// The harness binary's integrity boundary. Phase 0A: the harness/interpreter is
+/// an external `$PATH` binary, always unpinned. D3 pins repository-controlled
+/// server commands and script args — NOT the harness binary — so no
+/// `RepositoryPinned` variant is added here without revising the contract.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum HarnessIntegrity {
+    ExternalUnpinned,
+}
+
+/// Adapter source identity; a user override carries its canonical path.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum AdapterSourceIdentity {
+    BuiltIn,
+    User(GrantPath),
+}
+
+/// The `--profile`/`--scope`/`--keep` effect as one valid-state shape.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum ProfileEffect {
+    None,
+    Temporary { name: String, scope: Scope },
+    Kept { name: String, scope: Scope },
+}
+
+/// Secret authorization scope — concrete server, never unscoped.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum SecretScope {
+    Server(String),
+}
+
+/// Secret lifetime binding. Phase 0A constructs only `Unbound`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum SecretLifetimeBinding {
+    Unbound,
+    RunScoped,
+}
+
+/// A secret grant, canonically ordered by the full `(reference, scope, lifetime)`.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct SecretGrant {
+    reference: String,
+    scope: SecretScope,
+    lifetime: SecretLifetimeBinding,
+}
+impl SecretGrant {
+    pub(crate) fn new(
+        reference: &str,
+        scope: SecretScope,
+        lifetime: SecretLifetimeBinding,
+    ) -> Result<SecretGrant> {
+        if !agentstack_core::refs::is_ref_name(reference) {
+            bail!("invalid secret reference name {reference:?}");
+        }
+        let SecretScope::Server(server) = &scope;
+        if server.trim().is_empty() {
+            bail!("secret {reference:?} must be scoped to a non-empty server");
+        }
+        Ok(SecretGrant {
+            reference: reference.to_string(),
+            scope,
+            lifetime,
+        })
+    }
+}
+
+/// A policy input's identity — explicitly absent, never an empty string.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum PolicySource {
+    Absent,
+    Digest(ContentDigest),
+}
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct PolicyProvenance {
+    machine: PolicySource,
+    project: PolicySource,
+}
+
+/// The effective policy: the actual compiled ruleset plus its input provenance.
+#[derive(Clone, Debug)]
+pub struct PolicyGrant {
+    ruleset: CompiledRuleset,
+    provenance: PolicyProvenance,
+}
+
+/// Bound adapter identity: the cloned operational descriptor plus its
+/// registry-produced definition digest. Constructed ONLY from the registry, so a
+/// caller cannot supply a mutated descriptor with a stale digest.
+#[derive(Clone, Debug)]
+pub struct GrantedAdapter {
+    descriptor: AdapterDescriptor,
+    source: AdapterSourceIdentity,
+    definition_digest: ContentDigest,
+}
+impl GrantedAdapter {
+    pub(crate) fn from_registry(registry: &Registry, id: &str) -> Result<GrantedAdapter> {
+        let desc = registry
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("unknown adapter {id:?}"))?;
+        let digest = desc.definition_digest().ok_or_else(|| {
+            anyhow::anyhow!("adapter {id:?} has no registry definition digest — cannot bind it")
+        })?;
+        let definition_digest = ContentDigest::parse(digest)?;
+        let source = match &desc.source {
+            AdapterSource::BuiltIn => AdapterSourceIdentity::BuiltIn,
+            AdapterSource::User(p) => AdapterSourceIdentity::User(GrantPath::new(p)?),
+        };
+        Ok(GrantedAdapter {
+            descriptor: desc.clone(),
+            source,
+            definition_digest,
+        })
+    }
+    pub fn id(&self) -> &str {
+        &self.descriptor.id
+    }
+}
+
+/// The harness binary and its (Phase-0A always-external) integrity boundary.
+#[derive(Clone, Debug)]
+pub struct HarnessExecutable {
+    path: GrantPath,
+    integrity: HarnessIntegrity,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProjectIdentity {
+    root: GrantPath,
+    consent: ConsentDigest,
+}
+
+/// The exact, sensitive invocation. `argv` is stored once, verbatim.
+pub struct Invocation {
+    adapter: GrantedAdapter,
+    executable: HarnessExecutable,
+    argv: Vec<String>, // SENSITIVE, exact — the sole argv identity
+    cwd: GrantPath,
+    profile: ProfileEffect,
+}
+
+#[derive(Clone, Debug)]
+pub struct GrantedSkill {
+    // NOTE: `origin` (inline vs library) and `source` (path vs git) are
+    // orthogonal for skills — an inline entry may be `git=`, a library skill may
+    // be path or git — so they are two independent fields, unlike a server's
+    // single coupled binding.
+    path: GrantPath,
+    origin: InputOrigin,
+    source: SkillSource,
+    checksum: ContentDigest,
+    provenance: Option<String>,
+}
+#[derive(Clone, Debug)]
+pub struct GrantedInstruction {
+    path: GrantPath,
+    binding: InstructionBinding,
+    targets: BTreeSet<String>,
+}
+#[derive(Clone, Debug)]
+pub struct GrantedServer {
+    server: agentstack_core::manifest::Server,
+    binding: GrantedServerBinding,
+}
+
+/// The one operational grant. Sealed: constructed only via `GrantBuilder`
+/// (crate-internal). Sensitive: no `Serialize`; `Debug` is a minimal, infallible
+/// redaction (identities + counts, never argv or a fallible digest).
+pub struct AuthorityGrant {
+    schema: GrantSchema,
+    project: ProjectIdentity,
+    invocation: Invocation,
+    skills: BTreeMap<String, GrantedSkill>,
+    instructions: BTreeMap<String, GrantedInstruction>,
+    servers: BTreeMap<String, GrantedServer>,
+    policy: PolicyGrant,
+    secrets: BTreeSet<SecretGrant>,
+    runtime: RuntimeImage,
+    posture: GrantPosture,
+    egress: EgressMode,
+    workspace: WorkspaceGrant,
+    artifacts: ArtifactMode,
+}
+
+impl std::fmt::Debug for AuthorityGrant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthorityGrant")
+            .field("schema", &self.schema.slug())
+            .field("project_root", &self.project.root.as_str())
+            .field("harness", &self.invocation.adapter.id())
+            .field("argv_args", &self.invocation.argv.len())
+            .field("skills", &self.skills.len())
+            .field("instructions", &self.instructions.len())
+            .field("servers", &self.servers.len())
+            .field("secrets", &self.secrets.len())
+            .field("posture", &self.posture.slug())
+            .field("egress", &self.egress.slug())
+            .field("runtime", &self.runtime.slug())
+            .field("artifacts", &self.artifacts.slug())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Assembles an `AuthorityGrant`. Crate-internal: external callers cannot
+/// fabricate authority. Per-add duplicates are rejected non-destructively;
+/// `build()` validates cross-field invariants.
+pub struct GrantBuilder {
+    project: ProjectIdentity,
+    invocation: Invocation,
+    policy: PolicyGrant,
+    runtime: RuntimeImage,
+    posture: GrantPosture,
+    egress: EgressMode,
+    artifacts: ArtifactMode,
+    skills: BTreeMap<String, GrantedSkill>,
+    instructions: BTreeMap<String, GrantedInstruction>,
+    servers: BTreeMap<String, GrantedServer>,
+    secrets: BTreeSet<SecretGrant>,
+}
+
+impl GrantBuilder {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        project: ProjectIdentity,
+        invocation: Invocation,
+        policy: PolicyGrant,
+        runtime: RuntimeImage,
+        posture: GrantPosture,
+        egress: EgressMode,
+        artifacts: ArtifactMode,
+    ) -> GrantBuilder {
+        GrantBuilder {
+            project,
+            invocation,
+            policy,
+            runtime,
+            posture,
+            egress,
+            artifacts,
+            skills: BTreeMap::new(),
+            instructions: BTreeMap::new(),
+            servers: BTreeMap::new(),
+            secrets: BTreeSet::new(),
+        }
+    }
+
+    pub(crate) fn add_skill(&mut self, name: &str, skill: GrantedSkill) -> Result<&mut Self> {
+        insert_unique(&mut self.skills, name, skill, "skill")?;
+        Ok(self)
+    }
+    pub(crate) fn add_instruction(
+        &mut self,
+        name: &str,
+        ins: GrantedInstruction,
+    ) -> Result<&mut Self> {
+        insert_unique(&mut self.instructions, name, ins, "instruction")?;
+        Ok(self)
+    }
+    pub(crate) fn add_server(&mut self, name: &str, server: GrantedServer) -> Result<&mut Self> {
+        insert_unique(&mut self.servers, name, server, "server")?;
+        Ok(self)
+    }
+    pub(crate) fn add_secret(&mut self, secret: SecretGrant) -> Result<&mut Self> {
+        // Reject a second authorization for the same (reference, scope) REGARDLESS
+        // of lifetime, so a future RunScoped binding cannot silently coexist with
+        // an Unbound one for the same secret on the same server.
+        if self
+            .secrets
+            .iter()
+            .any(|s| s.reference == secret.reference && s.scope == secret.scope)
+        {
+            bail!(
+                "duplicate secret authorization for {:?} on that server",
+                secret.reference
+            );
+        }
+        self.secrets.insert(secret);
+        Ok(self)
+    }
+
+    pub(crate) fn build(self) -> Result<AuthorityGrant> {
+        // Supported posture / runtime / egress combinations only.
+        match (self.posture, &self.runtime, self.egress) {
+            (GrantPosture::Host, RuntimeImage::Host, EgressMode::Unconfined) => {}
+            (GrantPosture::Sandbox, RuntimeImage::Container { .. }, EgressMode::ProxyAdvisory)
+            | (GrantPosture::Sandbox, RuntimeImage::Container { .. }, EgressMode::NoNetwork) => {}
+            (
+                GrantPosture::Lockdown,
+                RuntimeImage::Container { .. },
+                EgressMode::LockdownConfined,
+            ) => {}
+            (p, r, e) => bail!(
+                "unsupported posture/runtime/egress combination: {}/{}/{}",
+                p.slug(),
+                r.slug(),
+                e.slug()
+            ),
+        }
+        // Container reference must be non-empty when a container image is used.
+        if let RuntimeImage::Container { reference, .. } = &self.runtime {
+            if reference.trim().is_empty() {
+                bail!("container runtime image reference must be non-empty");
+            }
+        }
+        // Profile name must be non-empty when a profile is applied.
+        match &self.invocation.profile {
+            ProfileEffect::Temporary { name, .. } | ProfileEffect::Kept { name, .. }
+                if name.trim().is_empty() =>
+            {
+                bail!("profile name must be non-empty")
+            }
+            _ => {}
+        }
+        // Git-sourced skills must carry a non-empty revision.
+        for (name, skill) in &self.skills {
+            if let SkillSource::Git { revision } = &skill.source {
+                if revision.trim().is_empty() {
+                    bail!("skill {name:?}: git source must carry a non-empty revision");
+                }
+            }
+        }
+        // Secret authority must name a frozen server that actually declares the ref.
+        for s in &self.secrets {
+            if s.lifetime != SecretLifetimeBinding::Unbound {
+                bail!(
+                    "secret {:?}: lifetime enforcement is not available yet (must be Unbound)",
+                    s.reference
+                );
+            }
+            let SecretScope::Server(server) = &s.scope;
+            let granted = self.servers.get(server).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "secret {:?} is scoped to server {server:?} which is not in the grant",
+                    s.reference
+                )
+            })?;
+            if !granted.server.referenced_secrets().contains(&s.reference) {
+                bail!(
+                    "secret {:?} is not referenced by its scoped server {server:?}",
+                    s.reference
+                );
+            }
+        }
+        Ok(AuthorityGrant {
+            schema: GrantSchema::V1,
+            project: self.project,
+            invocation: self.invocation,
+            skills: self.skills,
+            instructions: self.instructions,
+            servers: self.servers,
+            policy: self.policy,
+            secrets: self.secrets,
+            runtime: self.runtime,
+            posture: self.posture,
+            egress: self.egress,
+            workspace: WorkspaceGrant::Unbound,
+            artifacts: self.artifacts,
+        })
+    }
+}
+
+/// Non-destructive unique insert: a duplicate leaves the existing entry intact.
+fn insert_unique<V>(map: &mut BTreeMap<String, V>, name: &str, value: V, kind: &str) -> Result<()> {
+    if name.trim().is_empty() {
+        bail!("{kind} name must be non-empty");
+    }
+    if name != name.trim() {
+        bail!("{kind} name {name:?} must not have surrounding whitespace");
+    }
+    match map.entry(name.to_string()) {
+        Entry::Occupied(_) => bail!("duplicate {kind} {name:?} in grant"),
+        Entry::Vacant(v) => {
+            v.insert(value);
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_fs::prelude::*;
 
     fn with_home<T>(f: impl FnOnce() -> T) -> T {
         let _guard = crate::util::TEST_ENV_LOCK
@@ -575,5 +1227,364 @@ mod tests {
                 leftovers.iter().map(|e| e.file_name()).collect::<Vec<_>>()
             );
         });
+    }
+
+    // ---- 3b-i witnesses ----
+
+    fn h64(c: char) -> String {
+        std::iter::repeat(c).take(64).collect()
+    }
+
+    fn granted_server(toml_src: &str, binding: GrantedServerBinding) -> GrantedServer {
+        GrantedServer {
+            server: toml::from_str(toml_src).unwrap(),
+            binding,
+        }
+    }
+
+    /// A minimal valid host-posture builder over an existing project root.
+    fn host_builder(root: &GrantPath) -> GrantBuilder {
+        let reg = Registry::load().unwrap();
+        let adapter = GrantedAdapter::from_registry(&reg, "claude-code").unwrap();
+        let invocation = Invocation {
+            adapter,
+            executable: HarnessExecutable {
+                path: root.clone(),
+                integrity: HarnessIntegrity::ExternalUnpinned,
+            },
+            argv: vec!["--token".into(), "s3cr3t".into()],
+            cwd: root.clone(),
+            profile: ProfileEffect::None,
+        };
+        let policy = PolicyGrant {
+            ruleset: agentstack_policy::compile(
+                &agentstack_core::manifest::Policy::default(),
+                &agentstack_core::manifest::Policy::default(),
+                &[],
+            ),
+            provenance: PolicyProvenance {
+                machine: PolicySource::Absent,
+                project: PolicySource::Absent,
+            },
+        };
+        let project = ProjectIdentity {
+            root: root.clone(),
+            consent: ConsentDigest::parse(&h64('c')).unwrap(),
+        };
+        GrantBuilder::new(
+            project,
+            invocation,
+            policy,
+            RuntimeImage::Host,
+            GrantPosture::Host,
+            EgressMode::Unconfined,
+            ArtifactMode::Static,
+        )
+    }
+
+    #[test]
+    fn digest_newtypes_parse_normalize_and_reject() {
+        assert_eq!(ContentDigest::parse(&h64('a')).unwrap().hex(), h64('a'));
+        assert_eq!(
+            ContentDigest::parse(&format!("sha256:{}", h64('a')))
+                .unwrap()
+                .hex(),
+            h64('a')
+        );
+        assert_eq!(ContentDigest::parse(&h64('A')).unwrap().hex(), h64('a'));
+        assert_eq!(
+            ContentDigest::parse(&h64('a')).unwrap().to_string(),
+            format!("sha256:{}", h64('a'))
+        );
+        assert!(ContentDigest::parse("abc").is_err());
+        assert!(ContentDigest::parse(&h64('g')).is_err());
+    }
+
+    #[test]
+    fn grant_path_rejects_nonexistent_and_reports_containment() {
+        assert!(GrantPath::new(Path::new("does/not/exist/xyz-agentstack")).is_err());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        assert!(Path::new(root.as_str()).is_absolute());
+        let sub = tmp.child("sub");
+        sub.create_dir_all().unwrap();
+        let gsub = GrantPath::new(sub.path()).unwrap();
+        assert!(gsub.is_within(&root));
+        assert!(!root.is_within(&gsub));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn grant_path_rejects_non_utf8() {
+        use std::os::unix::ffi::OsStrExt;
+        let p = std::ffi::OsStr::from_bytes(&[0x66, 0xff, 0x66]);
+        assert!(GrantPath::new(Path::new(p)).is_err());
+    }
+
+    #[test]
+    fn slug_round_trips_and_posture_parity() {
+        assert_eq!(
+            GrantPosture::from_slug("lockdown"),
+            Some(GrantPosture::Lockdown)
+        );
+        assert_eq!(GrantPosture::from_slug("nope"), None);
+        use crate::commands::sandbox::Posture;
+        assert_eq!(GrantPosture::Host.slug(), Posture::Host.slug());
+        assert_eq!(GrantPosture::Sandbox.slug(), Posture::Sandbox.slug());
+        assert_eq!(GrantPosture::Lockdown.slug(), Posture::Lockdown.slug());
+    }
+
+    #[test]
+    fn adapter_bound_only_from_registry() {
+        let reg = Registry::load().unwrap();
+        assert_eq!(
+            GrantedAdapter::from_registry(&reg, "claude-code")
+                .unwrap()
+                .id(),
+            "claude-code"
+        );
+        assert!(GrantedAdapter::from_registry(&reg, "no-such-adapter").is_err());
+    }
+
+    #[test]
+    fn secret_grant_validates_and_orders_by_full_tuple() {
+        assert!(SecretGrant::new(
+            "BAD-NAME",
+            SecretScope::Server("s".into()),
+            SecretLifetimeBinding::Unbound
+        )
+        .is_err());
+        assert!(SecretGrant::new(
+            "TOK",
+            SecretScope::Server(String::new()),
+            SecretLifetimeBinding::Unbound
+        )
+        .is_err());
+        let a = SecretGrant::new(
+            "TOK",
+            SecretScope::Server("a".into()),
+            SecretLifetimeBinding::Unbound,
+        )
+        .unwrap();
+        let b = SecretGrant::new(
+            "TOK",
+            SecretScope::Server("b".into()),
+            SecretLifetimeBinding::Unbound,
+        )
+        .unwrap();
+        assert!(a < b, "ordered by the full tuple, not the reference alone");
+    }
+
+    #[test]
+    fn insert_unique_is_non_destructive() {
+        let mut m: BTreeMap<String, u32> = BTreeMap::new();
+        insert_unique(&mut m, "a", 1, "skill").unwrap();
+        assert!(insert_unique(&mut m, "a", 2, "skill").is_err());
+        assert_eq!(m["a"], 1, "first value survives the duplicate attempt");
+        assert!(insert_unique(&mut m, "  ", 3, "skill").is_err());
+    }
+
+    #[test]
+    fn builder_builds_valid_host_grant_with_argv_free_debug() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let grant = host_builder(&root).build().unwrap();
+        let dbg = format!("{grant:?}");
+        assert!(dbg.contains("argv_args: 2"), "{dbg}");
+        assert!(!dbg.contains("s3cr3t"), "no argv bytes in Debug: {dbg}");
+    }
+
+    #[test]
+    fn builder_rejects_duplicate_skill_non_destructively() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let mut b = host_builder(&root);
+        let first = GrantedSkill {
+            path: root.clone(),
+            origin: InputOrigin::Inline,
+            source: SkillSource::Path,
+            checksum: ContentDigest::parse(&h64('a')).unwrap(),
+            provenance: None,
+        };
+        let second = GrantedSkill {
+            checksum: ContentDigest::parse(&h64('b')).unwrap(),
+            ..first.clone()
+        };
+        b.add_skill("s", first).unwrap();
+        assert!(b.add_skill("s", second).is_err());
+        let grant = b.build().unwrap();
+        assert_eq!(grant.skills["s"].checksum.hex(), h64('a'));
+    }
+
+    #[test]
+    fn builder_rejects_unsupported_posture_combo() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let mut b = host_builder(&root);
+        b.egress = EgressMode::NoNetwork; // host + no-network is not supported
+        assert!(b.build().is_err());
+    }
+
+    #[test]
+    fn builder_rejects_empty_git_revision() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let mut b = host_builder(&root);
+        b.add_skill(
+            "s",
+            GrantedSkill {
+                path: root.clone(),
+                origin: InputOrigin::Library,
+                source: SkillSource::Git {
+                    revision: "   ".into(),
+                },
+                checksum: ContentDigest::parse(&h64('a')).unwrap(),
+                provenance: None,
+            },
+        )
+        .unwrap();
+        assert!(b.build().is_err());
+    }
+
+    #[test]
+    fn builder_rejects_secret_scoped_to_absent_server() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let mut b = host_builder(&root);
+        b.add_secret(
+            SecretGrant::new(
+                "TOK",
+                SecretScope::Server("ghost".into()),
+                SecretLifetimeBinding::Unbound,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(b.build().is_err(), "secret names a server not in the grant");
+    }
+
+    #[test]
+    fn builder_rejects_secret_ref_not_declared_by_server() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let mut b = host_builder(&root);
+        b.add_server(
+            "s",
+            granted_server(
+                "type = \"stdio\"\ncommand = \"run ${OTHER}\"\n",
+                GrantedServerBinding::Inline {
+                    definition: ContentDigest::parse(&h64('a')).unwrap(),
+                },
+            ),
+        )
+        .unwrap();
+        b.add_secret(
+            SecretGrant::new(
+                "TOK",
+                SecretScope::Server("s".into()),
+                SecretLifetimeBinding::Unbound,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            b.build().is_err(),
+            "ref not referenced by its scoped server"
+        );
+    }
+
+    #[test]
+    fn builder_accepts_secret_declared_by_scoped_server() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let mut b = host_builder(&root);
+        b.add_server(
+            "s",
+            granted_server(
+                "type = \"stdio\"\ncommand = \"run ${TOK}\"\n",
+                GrantedServerBinding::Inline {
+                    definition: ContentDigest::parse(&h64('a')).unwrap(),
+                },
+            ),
+        )
+        .unwrap();
+        b.add_secret(
+            SecretGrant::new(
+                "TOK",
+                SecretScope::Server("s".into()),
+                SecretLifetimeBinding::Unbound,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(b.build().is_ok());
+    }
+
+    #[test]
+    fn add_secret_rejects_same_reference_and_scope_regardless_of_lifetime() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let mut b = host_builder(&root);
+        b.add_secret(
+            SecretGrant::new(
+                "TOK",
+                SecretScope::Server("s".into()),
+                SecretLifetimeBinding::Unbound,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        // Same (reference, scope), different lifetime — must be rejected so two
+        // contradictory authorizations can never coexist.
+        assert!(b
+            .add_secret(
+                SecretGrant::new(
+                    "TOK",
+                    SecretScope::Server("s".into()),
+                    SecretLifetimeBinding::RunScoped,
+                )
+                .unwrap()
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn builder_accepts_sandbox_container_combo() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let mut b = host_builder(&root);
+        b.runtime = RuntimeImage::Container {
+            reference: "example.com/img@sha256:abc".into(),
+            binding: ImageBinding::Unbound,
+        };
+        b.posture = GrantPosture::Sandbox;
+        b.egress = EgressMode::ProxyAdvisory;
+        assert!(b.build().is_ok());
+    }
+
+    #[test]
+    fn builder_rejects_empty_container_reference() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let mut b = host_builder(&root);
+        b.runtime = RuntimeImage::Container {
+            reference: "   ".into(),
+            binding: ImageBinding::Unbound,
+        };
+        b.posture = GrantPosture::Sandbox;
+        b.egress = EgressMode::NoNetwork;
+        assert!(b.build().is_err());
+    }
+
+    #[test]
+    fn builder_rejects_empty_profile_name() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let mut b = host_builder(&root);
+        b.invocation.profile = ProfileEffect::Temporary {
+            name: "  ".into(),
+            scope: Scope::Project,
+        };
+        assert!(b.build().is_err());
     }
 }
