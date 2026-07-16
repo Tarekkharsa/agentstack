@@ -680,6 +680,7 @@ appears on the run banner, in `agentstack run --sandbox --plan`, and in
 | Posture                                 | Mode                          | What it means |
 |-----------------------------------------|-------------------------------|---------------|
 | `HOST / ADVISORY`                       | `agentstack run` (host)       | No container. The gateway still brokers MCP tool calls, but nothing confines the process's own egress or filesystem — policy is advisory. The banner says so, once. |
+| `HOST / PROTECTED`                       | `run --locked`                | No container either — but content trust, strict lock verification, and policy admission are enforced *before* launch and every decision is recorded, a fail-closed pre-launch gate. Not kernel isolation: the harness still runs as you, on the host, and the evidence is a cooperative local audit trail. |
 | `SANDBOX / PROXIED · DIRECT ROUTE OPEN` | `run --sandbox`               | Container with a host-side egress proxy; proxied HTTPS egress is checked against compiled policy, but the container's bridge network still has a direct route a proxy-ignoring process could use — only `--lockdown` removes it. |
 | `LOCKDOWN / ENFORCED · NO DIRECT ROUTE` | `run --lockdown`              | Container on an internal-only network whose sole peer is the egress sidecar — enforced *and* topologically confined (no host route, no direct internet). |
 
@@ -687,8 +688,9 @@ appears on the run banner, in `agentstack run --sandbox --plan`, and in
 honest claim even there is *unapproved egress is blocked*, not that
 exfiltration is impossible. Host mode makes no runtime claim at all — it
 only labels itself advisory so the two are never confused. A sandbox run records
-its posture beside the flight-recorder log, so `agentstack report` can label it
-after the fact (`report --json` carries the `posture` slug).
+its posture beside the flight-recorder log, and a `--locked` run carries it in
+its `attempt_started` event, so `agentstack report` can label either after the
+fact (`report --json` carries the `posture` slug).
 
 `agentstack doctor` also prints a one-word **machine-policy posture** — `open`
 (no machine policy, or empty/unreadable and failing open), `restrictive` (a

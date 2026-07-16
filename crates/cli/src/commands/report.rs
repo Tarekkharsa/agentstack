@@ -103,6 +103,27 @@ fn secret_refs(events: &[RunEvent]) -> Vec<(String, String)> {
     out
 }
 
+/// Human label for the posture slug a locked-run attempt records. Mirrors the
+/// banner `agentstack run --locked` prints (`HOST / PROTECTED`); a slug from a
+/// future version falls back to its uppercased form rather than being dropped.
+fn attempt_posture_label(slug: &str) -> String {
+    match slug {
+        "host-protected" => "HOST / PROTECTED".to_string(),
+        other => other.to_uppercase(),
+    }
+}
+
+/// The posture slug recorded on a locked-run attempt, if any. Locked runs carry
+/// their posture in the `AttemptStarted` event rather than the sidecar `posture`
+/// file a sandbox writes, so `report` derives the slug from the event when that
+/// file is absent.
+fn attempt_posture_slug(events: &[RunEvent]) -> Option<String> {
+    events.iter().find_map(|e| match e {
+        RunEvent::AttemptStarted { posture, .. } => Some(posture.clone()),
+        _ => None,
+    })
+}
+
 /// A one-line wall-time summary, or `None` when there's nothing to report. The
 /// sandbox lifetime needs both a `SandboxStarted` and a `SandboxExited` to be
 /// known; the in-tool total is the sum of the run's tool-call durations.
@@ -169,6 +190,69 @@ pub fn report_text(run_id: &str) -> String {
                 "  {:<9} {}   workspace {}\n",
                 "Sandbox", image, workspace
             ));
+        }
+    }
+
+    // Locked host-run lifecycle (`agentstack run --locked`): the pre-launch gate
+    // decisions, the frozen authority grant, and the terminal outcome. These
+    // event kinds predate the sandbox sections and had no renderer; they show in
+    // their own block in the same visual style (✓/✗ marks, indented detail).
+    if let Some(RunEvent::AttemptStarted {
+        harness, posture, ..
+    }) = events
+        .iter()
+        .find(|e| matches!(e, RunEvent::AttemptStarted { .. }))
+    {
+        o.push_str(&format!(
+            "  {}  {} · {}\n",
+            "Locked run".bold(),
+            harness,
+            attempt_posture_label(posture)
+        ));
+        for e in &events {
+            match e {
+                RunEvent::GateDecision {
+                    gate,
+                    passed,
+                    detail,
+                    ..
+                } => {
+                    let mark = if *passed {
+                        "✓".green().to_string()
+                    } else {
+                        "✗".red().to_string()
+                    };
+                    let why = detail
+                        .as_deref()
+                        .map(|d| format!("  ({d})"))
+                        .unwrap_or_default();
+                    o.push_str(&format!("    {mark} {gate}{why}\n"));
+                }
+                RunEvent::GrantFrozen { grant_digest, .. } => {
+                    o.push_str(&format!(
+                        "    {} grant frozen: {}\n",
+                        "✓".green(),
+                        grant_digest
+                    ));
+                }
+                RunEvent::LockedOutcome {
+                    outcome,
+                    exit_code,
+                    duration_ms,
+                    ..
+                } => {
+                    let mark = match outcome.as_str() {
+                        "completed" => "✓".green().to_string(),
+                        "refused" | "launch-failed" => "✗".red().to_string(),
+                        _ => "⚠".yellow().to_string(),
+                    };
+                    let code = exit_code
+                        .map(|c| format!(" · exit {c}"))
+                        .unwrap_or_default();
+                    o.push_str(&format!("    {mark} {outcome}{code} · {duration_ms}ms\n"));
+                }
+                _ => {}
+            }
         }
     }
 
@@ -381,11 +465,16 @@ pub fn report_json(run_id: &str) -> Result<String> {
             ))
         })
         .collect();
+    // Additive field: the recorded enforcement posture slug, or null for a run
+    // that predates posture recording. A sandbox run writes it to a sidecar
+    // `posture` file; a locked run carries it in its `AttemptStarted` event, so
+    // fall back to the event when the file is absent.
+    let posture = crate::commands::sandbox::read_recorded_posture(run_id)
+        .map(|p| p.slug().to_string())
+        .or_else(|| attempt_posture_slug(&events));
     Ok(serde_json::to_string_pretty(&serde_json::json!({
         "run": run_id,
-        // Additive field: the recorded enforcement posture slug, or null for a
-        // run that predates posture recording.
-        "posture": crate::commands::sandbox::read_recorded_posture(run_id).map(|p| p.slug()),
+        "posture": posture,
         "events": events,
         "calls": calls,
     }))?)
@@ -707,6 +796,70 @@ mod tests {
             assert_eq!(v["run"], "r-json");
             assert_eq!(v["events"][0]["event"], "sandbox_exited");
             assert_eq!(v["events"][0]["code"], 2);
+        });
+    }
+
+    /// Issue #22: a completed `--locked` run renders its lifecycle in the human
+    /// report (attempt line with the posture label, each gate, the frozen grant,
+    /// the terminal outcome) and carries the posture slug at the JSON top level —
+    /// derived from the `AttemptStarted` event, since a locked run writes no
+    /// sidecar `posture` file.
+    #[test]
+    fn renders_locked_run_lifecycle_and_carries_posture() {
+        with_home(|| {
+            let log = RunLog::create("r-locked").unwrap();
+            log.append(&RunEvent::AttemptStarted {
+                ts: 1,
+                harness: "claude-code".into(),
+                posture: "host-protected".into(),
+            });
+            log.append(&RunEvent::GateDecision {
+                ts: 2,
+                gate: "trust".into(),
+                passed: true,
+                detail: None,
+            });
+            log.append(&RunEvent::GateDecision {
+                ts: 3,
+                gate: "locked-verify".into(),
+                passed: true,
+                detail: None,
+            });
+            log.append(&RunEvent::GrantFrozen {
+                ts: 4,
+                grant_digest: "sha256:abc".into(),
+            });
+            log.append(&RunEvent::LockedOutcome {
+                ts: 5,
+                outcome: "completed".into(),
+                exit_code: Some(0),
+                duration_ms: 42,
+                grant_digest: Some("sha256:abc".into()),
+                usage: "unavailable".into(),
+            });
+
+            let text = report_text("r-locked");
+            assert!(
+                text.contains("Locked run") && text.contains("claude-code"),
+                "{text}"
+            );
+            assert!(text.contains("HOST / PROTECTED"), "{text}");
+            // Both pre-launch gates render, with their names.
+            assert!(
+                text.contains("trust") && text.contains("locked-verify"),
+                "{text}"
+            );
+            assert!(text.contains("grant frozen: sha256:abc"), "{text}");
+            assert!(
+                text.contains("completed") && text.contains("exit 0") && text.contains("42ms"),
+                "{text}"
+            );
+
+            // JSON top-level posture is derived from the AttemptStarted event
+            // (no sidecar `posture` file exists for a locked run).
+            let v: serde_json::Value =
+                serde_json::from_str(&report_json("r-locked").unwrap()).unwrap();
+            assert_eq!(v["posture"], "host-protected");
         });
     }
 }

@@ -186,6 +186,54 @@ pub fn load_commitment_key() -> Result<CommitmentKey> {
     Ok(CommitmentKey(key))
 }
 
+/// How `--plan` should treat the machine commitment key.
+///
+/// A live `--locked` run *provisions* the key on first use
+/// ([`provision_commitment_key`]); `--plan` mutates nothing, so it cannot. But a
+/// key that has simply never been provisioned — the whole `grant/` directory is
+/// absent — is a benign first-run condition, NOT a blocker: the live run will
+/// create it, so the plan reports that and proceeds without the invocation-
+/// binding digest. A key that is *present but unusable* (corrupt, insecure, a
+/// symlink) is a real blocker and stays an error.
+///
+/// (This is like a TypeScript discriminated union: three variants, matched
+/// exhaustively at the call site.)
+pub enum PlanKeyState {
+    /// Provisioned and valid — carries the loaded key so `--plan` can compute
+    /// the same binding digest a live run would.
+    Ready(CommitmentKey),
+    /// Never provisioned (no `grant/` yet). The first live run creates it; the
+    /// plan says so and omits the binding digest.
+    WillProvision,
+    /// Present but unusable — a real blocker, carrying the loader's diagnosis.
+    Blocked(anyhow::Error),
+}
+
+/// Classify the commitment key for `--plan`, distinguishing the benign
+/// never-provisioned case from a present-but-broken key (see [`PlanKeyState`]).
+///
+/// The discriminator is deliberately the `grant/` *directory*: if nothing exists
+/// at that path, the key was never provisioned and a live run would create it.
+/// Anything present there — a real directory (with or without a key), or a
+/// symlink standing in for one — is handed to [`load_commitment_key`], whose
+/// fail-closed checks turn any defect into a blocker. This mirrors live's own
+/// `provision_commitment_key` (which creates a missing directory but refuses a
+/// symlinked or insecure one), so `--plan` and the live run agree.
+pub fn plan_commitment_key() -> PlanKeyState {
+    if let Some(dir) = commit_key_path().parent() {
+        // `symlink_metadata` errors only when nothing exists at `dir` (it does
+        // not follow a final symlink), so an `Err` here means the directory is
+        // genuinely absent — never provisioned.
+        if std::fs::symlink_metadata(dir).is_err() {
+            return PlanKeyState::WillProvision;
+        }
+    }
+    match load_commitment_key() {
+        Ok(key) => PlanKeyState::Ready(key),
+        Err(e) => PlanKeyState::Blocked(e),
+    }
+}
+
 /// Provision the machine-local commitment key: 32 CSPRNG bytes written with
 /// checked, verified `0600` permissions. **Explicitly mutating** — never called
 /// by grant construction or `--plan`.

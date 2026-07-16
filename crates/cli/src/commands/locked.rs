@@ -983,11 +983,22 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         Err(e) => blockers.push(("policy-admission".into(), format!("{e:#}"))),
     }
 
-    // §4: --plan never provisions; a missing commitment key is a blocker and
-    // no invocation-binding digest exists without it.
-    let key = match crate::grant::load_commitment_key() {
-        Ok(k) => Some(k),
-        Err(e) => {
+    // §4: --plan never provisions. A commitment key that was simply never
+    // provisioned (a fresh home with no `grant/` yet) is NOT a blocker — the
+    // first LIVE run creates it, so the plan must not contradict live for the
+    // cautious first-time user. It reports the key will be created and proceeds
+    // without the invocation-binding digest. A present-but-broken key
+    // (corrupt/insecure/symlink) still blocks.
+    let key = match crate::grant::plan_commitment_key() {
+        crate::grant::PlanKeyState::Ready(k) => Some(k),
+        crate::grant::PlanKeyState::WillProvision => {
+            println!(
+                "  {} commitment key: will be created on first live run",
+                "ℹ".cyan()
+            );
+            None
+        }
+        crate::grant::PlanKeyState::Blocked(e) => {
             blockers.push((
                 "argv-commitment".into(),
                 format!("no invocation-binding digest without the machine commitment key: {e:#}"),
@@ -1030,8 +1041,16 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             .expect("no blockers implies inputs resolved");
         let bin_path = bin_path.expect("no blockers implies harness resolved");
         let grant = freeze_grant(ctx, base, args, inputs, ruleset, &machine, &bin_path)?;
-        let digest = grant.digest(&key.expect("no blockers implies key loaded"))?;
-        println!("    digest: {digest}");
+        match key {
+            // The key is present: show the exact binding digest a live run
+            // would freeze (the "plan matches run" property).
+            Some(key) => println!("    digest: {}", grant.digest(&key)?),
+            // The key will be provisioned on first live run; the invocation-
+            // binding digest can only be computed once it exists.
+            None => {
+                println!("    digest: (bound on first live run, once the commitment key exists)")
+            }
+        }
         println!("{} live launch would proceed", "✓".green());
         return Ok(());
     }
@@ -1456,6 +1475,62 @@ mod tests {
             assert!(
                 !home.path().join("runs").exists(),
                 "--plan must not create recorder state"
+            );
+        });
+    }
+
+    /// Issue #21: on a FRESH home (no `grant/` yet), `--locked --plan` for a
+    /// trusted, pinned project must NOT contradict the live run. The live run
+    /// provisions the commitment key on first use, so the plan treats a
+    /// never-provisioned key as informational — not an `argv-commitment`
+    /// blocker — and still reports the run would proceed, WITHOUT provisioning
+    /// anything itself. A key that is present but broken STILL blocks.
+    #[test]
+    fn plan_treats_never_provisioned_commitment_key_as_informational() {
+        locked_fixture(|home, proj| {
+            pinned_and_trusted(proj);
+            // Fresh home: the commitment key was never provisioned.
+            assert!(
+                !home.path().join("grant").exists(),
+                "fixture must start without a commitment key"
+            );
+
+            // Plan succeeds — a never-provisioned key is not a blocker for the
+            // cautious first-time user, so live and plan agree.
+            run_locked(Some(proj.path()), &run_args(true)).unwrap();
+
+            // Non-mutating: plan neither provisioned the key (no `grant/`) nor
+            // opened a recorder (no `runs/`). Only the live run creates the key.
+            assert!(
+                !home.path().join("grant").exists(),
+                "--plan must not provision the commitment key"
+            );
+            assert!(
+                !home.path().join("runs").exists(),
+                "--plan must not create recorder state"
+            );
+
+            // But a PRESENT-but-broken key still blocks: a zero-byte key file
+            // is malformed (exactly 32 bytes are required), so plan must refuse
+            // and name the `argv-commitment` gate.
+            let grant = home.child("grant");
+            grant.create_dir_all().unwrap();
+            grant.child("commit-key").write_str("").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(grant.path(), std::fs::Permissions::from_mode(0o700))
+                    .unwrap();
+                std::fs::set_permissions(
+                    grant.child("commit-key").path(),
+                    std::fs::Permissions::from_mode(0o600),
+                )
+                .unwrap();
+            }
+            let err = run_locked(Some(proj.path()), &run_args(true)).unwrap_err();
+            assert!(
+                format!("{err:#}").contains("[argv-commitment]"),
+                "a present-but-broken key must still block: {err:#}"
             );
         });
     }
