@@ -150,6 +150,13 @@ pub fn activate(
             &skill_statuses,
             &server_statuses,
         )?;
+        // D3 pre-render gate: an unverifiable local executable (symlink,
+        // traversal, non-regular file, broken declared root) must block HERE,
+        // before any native config is materialized — record_lock rejects it
+        // too, but that runs after targets were already written.
+        for r in resolved_servers {
+            crate::executable::derive_executable_pins(&ctx.dir, &r.name, &r.server)?;
+        }
     }
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
@@ -516,6 +523,13 @@ pub(crate) fn record_lock(
             .to_string(),
             checksum: r.checksum.clone(),
         });
+        // D3: pin the server's repository-local executable surface alongside
+        // its definition — auto-detected command/args files plus declared
+        // integrity roots. An unverifiable local candidate fails the whole
+        // lock write (nothing is saved below on error).
+        for pin in crate::executable::derive_executable_pins(dir, &r.name, &r.server)? {
+            lock.upsert_executable(pin);
+        }
     }
     // Re-activating an unchanged profile is the common case — don't churn the
     // lockfile's mtime (and anything watching it) for a byte-identical pin.

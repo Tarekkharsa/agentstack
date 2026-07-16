@@ -23,6 +23,7 @@ pub mod commands;
 pub mod consolidate;
 pub mod dashboard;
 pub mod discover;
+pub(crate) mod executable;
 pub mod execution;
 pub mod footprint;
 pub mod gateway;

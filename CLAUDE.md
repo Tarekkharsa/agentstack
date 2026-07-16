@@ -88,7 +88,7 @@ In particular: `trust` and `policy` depend on `core` only, and nothing depends o
 - **Plan before code.** For any task beyond a trivial fix, present a short plan (files touched, types added, tests) and wait for approval before implementing.
 - **Small increments.** One crate, one capability per session where possible. Never scaffold phases beyond the current gate in `TODO.md`.
 - **Extract, don't rewrite.** When roadmap work overlaps shipped code (`lock.rs`, `secret/`, the adapter engine), move and adapt the existing code. A from-scratch replacement of working code needs explicit approval.
-- **Tests are the spec.** Every public function in `trust` and `policy` ships with tests in the same PR. The proptest invariants in those crates must never be deleted or weakened.
+- **Don't write a lot of tests.** There is no need for exhaustive test suites — one focused test per new behavior is enough, and mechanical or plumbing code often needs none. Exception: security claims still need their witness. The proptest invariants in `trust` and `policy` must never be deleted or weakened, and a change to trust granting, policy intersection, digest computation, or secret resolution still ships with a test proving the claim.
 - **Run before done:** `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` must pass before declaring any task complete.
 - **Security-sensitive diffs get flagged.** If a change touches trust granting, policy intersection, secret resolution, or digest computation, say so explicitly at the top of your summary so the maintainer reviews it line by line.
 

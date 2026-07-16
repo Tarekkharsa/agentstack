@@ -261,6 +261,69 @@ mod tests {
     }
 
     #[test]
+    fn lock_pins_local_executables_and_declared_roots() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let library = Library::default();
+
+        proj.child("scripts/entry.py")
+            .write_str("import x")
+            .unwrap();
+        proj.child("tools/lib.py").write_str("v1").unwrap();
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [servers.agent]
+            type = "stdio"
+            command = "python"
+            args = ["./scripts/entry.py"]
+            integrity_roots = ["tools"]
+            [profiles.dev]
+            servers = ["agent"]
+            "#,
+        )
+        .unwrap();
+
+        let (skills, servers) = resolve_profiles(
+            &manifest,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            &["dev".to_string()],
+        )
+        .unwrap();
+        record_lock(proj.path(), &skills, &servers, &manifest, &library).unwrap();
+
+        let lock = Lock::load(proj.path()).unwrap();
+        use agentstack_core::lock::ExecutableKind;
+        let file = lock
+            .get_executable("scripts/entry.py", ExecutableKind::File)
+            .expect("entry script pinned");
+        assert_eq!(file.checksum.len(), 64);
+        let root = lock
+            .get_executable("tools", ExecutableKind::Root)
+            .expect("declared root pinned");
+        assert_eq!(root.checksum.len(), 64);
+
+        // The one-byte re-gate chain: an edit inside the declared root makes
+        // a re-lock rewrite the pin (new checksum → new lock bytes → the
+        // trust digest flips via the existing chain).
+        proj.child("tools/lib.py").write_str("v2").unwrap();
+        record_lock(proj.path(), &skills, &servers, &manifest, &library).unwrap();
+        let relocked = Lock::load(proj.path()).unwrap();
+        assert_ne!(
+            relocked
+                .get_executable("tools", ExecutableKind::Root)
+                .unwrap()
+                .checksum,
+            root.checksum
+        );
+    }
+
+    #[test]
     fn single_profile_selection_locks_only_its_refs() {
         let proj = assert_fs::TempDir::new().unwrap();
         let lib_home = assert_fs::TempDir::new().unwrap();
