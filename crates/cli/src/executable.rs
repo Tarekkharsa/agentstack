@@ -30,7 +30,7 @@ use anyhow::{Context, Result};
 ///
 /// (TS mental model: a discriminated union consumed with exhaustive `match`.)
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum LocalExecutable {
+pub enum LocalExecutable {
     /// Not repository-local content: a `$PATH` binary, an absolute path, a
     /// flag, a `${REF}`, or a path with nothing on disk behind it.
     NotLocal,
@@ -45,7 +45,7 @@ pub(crate) enum LocalExecutable {
 
 /// Classify one candidate string against `anchor` (the directory the server
 /// is spawned from — the project root, or its contained `cwd`).
-pub(crate) fn classify_local_executable(
+pub fn classify_local_executable(
     project_dir: &Path,
     anchor: &Path,
     candidate: &str,
@@ -115,7 +115,7 @@ pub(crate) fn classify_local_executable(
 /// auto-detected file pins for its stdio `command`/`args`, plus a root pin per
 /// declared integrity root. An unverifiable local candidate or an undigestable
 /// declared root is a hard error naming the server.
-pub(crate) fn derive_executable_pins(
+pub fn derive_executable_pins(
     project_dir: &Path,
     name: &str,
     server: &Server,
@@ -177,6 +177,70 @@ fn server_anchor(project_dir: &Path, server: &Server) -> Result<Option<PathBuf>>
             Ok(Some(anchor))
         }
     }
+}
+
+/// How one server's currently-derived executable surface compares to its
+/// `agentstack.lock` pins. Mirrors the other `*LockStatus` families in
+/// `crate::resolve` so the verify gates treat all input kinds identically.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutableLockStatus {
+    /// The current content digest matches the locked pin.
+    Matches,
+    /// The input is derivable but has no lock entry yet.
+    MissingLockEntry,
+    /// The current content digest differs from the locked pin.
+    ChecksumDrift { locked: String, current: String },
+    /// The surface could not be derived at all — a symlink, traversal,
+    /// non-regular file, or broken declared root. Never proceed.
+    ResolveFailed { error: String },
+}
+
+/// Compare every server's derived executable surface to the lock, one labeled
+/// status per input (`executable 'path' (server 'name')` / `integrity root
+/// 'path' (server 'name')`). Verification re-derives through the SAME
+/// classifier that produced the pins, so the two can never disagree on what
+/// should be pinned; a server whose surface fails to derive yields one
+/// `ResolveFailed` entry naming it.
+pub fn executable_lock_statuses(
+    project_dir: &Path,
+    servers: &[(String, Server)],
+    lock: &agentstack_core::lock::Lock,
+) -> Vec<(String, ExecutableLockStatus)> {
+    let mut out = Vec::new();
+    for (name, server) in servers {
+        match derive_executable_pins(project_dir, name, server) {
+            Err(e) => out.push((
+                format!("server '{name}' local executables"),
+                ExecutableLockStatus::ResolveFailed {
+                    error: format!("{e:#}"),
+                },
+            )),
+            Ok(pins) => {
+                for pin in pins {
+                    let label = match pin.kind {
+                        ExecutableKind::File => {
+                            format!("executable '{}' (server '{name}')", pin.path)
+                        }
+                        ExecutableKind::Root => {
+                            format!("integrity root '{}' (server '{name}')", pin.path)
+                        }
+                    };
+                    let status = match lock.get_executable(&pin.path, pin.kind) {
+                        None => ExecutableLockStatus::MissingLockEntry,
+                        Some(entry) if entry.checksum != pin.checksum => {
+                            ExecutableLockStatus::ChecksumDrift {
+                                locked: entry.checksum.clone(),
+                                current: pin.checksum.clone(),
+                            }
+                        }
+                        Some(_) => ExecutableLockStatus::Matches,
+                    };
+                    out.push((label, status));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Normalize a declared path to its lock key: `Normal` components joined with
@@ -377,6 +441,59 @@ mod tests {
                 .unwrap()
                 .is_empty());
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_statuses_cover_match_drift_missing_and_underivable() {
+        use agentstack_core::lock::Lock;
+
+        let tmp = assert_fs::TempDir::new().unwrap();
+        tmp.child("scripts/entry.py").write_str("v1").unwrap();
+        let pinned =
+            stdio("type = \"stdio\"\ncommand = \"python\"\nargs = [\"scripts/entry.py\"]\n");
+
+        // Pin, then verify: Matches.
+        let mut lock = Lock::default();
+        for pin in derive_executable_pins(tmp.path(), "a", &pinned).unwrap() {
+            lock.upsert_executable(pin);
+        }
+        let servers = vec![("a".to_string(), pinned)];
+        let statuses = executable_lock_statuses(tmp.path(), &servers, &lock);
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].1, ExecutableLockStatus::Matches);
+
+        // One-byte edit → ChecksumDrift (the D3 re-gate witness at the
+        // verification layer).
+        tmp.child("scripts/entry.py").write_str("v2").unwrap();
+        let statuses = executable_lock_statuses(tmp.path(), &servers, &lock);
+        assert!(
+            matches!(statuses[0].1, ExecutableLockStatus::ChecksumDrift { .. }),
+            "{statuses:?}"
+        );
+        assert!(statuses[0].0.contains("executable 'scripts/entry.py'"));
+
+        // No lock entry → MissingLockEntry.
+        let statuses = executable_lock_statuses(tmp.path(), &servers, &Lock::default());
+        assert_eq!(statuses[0].1, ExecutableLockStatus::MissingLockEntry);
+
+        // An underivable surface (symlinked command) → one ResolveFailed
+        // entry naming the server.
+        std::os::unix::fs::symlink(
+            tmp.child("scripts/entry.py").path(),
+            tmp.child("link.py").path(),
+        )
+        .unwrap();
+        let hostile = vec![(
+            "h".to_string(),
+            stdio("type = \"stdio\"\ncommand = \"./link.py\"\n"),
+        )];
+        let statuses = executable_lock_statuses(tmp.path(), &hostile, &Lock::default());
+        assert_eq!(statuses.len(), 1);
+        assert!(
+            matches!(&statuses[0].1, ExecutableLockStatus::ResolveFailed { error } if error.contains("symlink")),
+            "{statuses:?}"
+        );
     }
 
     #[test]

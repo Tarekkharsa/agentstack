@@ -10,6 +10,7 @@
 //! reviewed and re-trusted. Trust stays bound to content because nothing is
 //! used that doesn't match the lock the human trusted.
 
+use crate::executable::ExecutableLockStatus;
 use crate::resolve::{FrozenServer, InstructionLockStatus, ServerLockStatus, SkillLockStatus};
 
 /// The verdict for one capability vs its lock pin.
@@ -88,6 +89,22 @@ pub fn instruction_verdict(status: &InstructionLockStatus) -> Verdict {
     }
 }
 
+/// Verdict for a D3 executable input's lock status (contract §8). Same
+/// fail-closed rule as the other kinds; an underivable surface (symlink,
+/// traversal, broken root) blocks outright.
+pub fn executable_verdict(status: &ExecutableLockStatus) -> Verdict {
+    match status {
+        ExecutableLockStatus::Matches => Verdict::Ok,
+        ExecutableLockStatus::MissingLockEntry => Verdict::Unpinned,
+        ExecutableLockStatus::ChecksumDrift { locked, current } => Verdict::Block(format!(
+            "local executable content drifted from agentstack.lock (locked {}, current {})",
+            short(locked),
+            short(current)
+        )),
+        ExecutableLockStatus::ResolveFailed { error } => Verdict::Block(error.clone()),
+    }
+}
+
 /// The activation gate (`use --write`, session start, dashboard): block when
 /// anything in the resolved set drifted or broke, naming every offender.
 /// `Unpinned` passes — first activation records the pin, which itself flips
@@ -149,6 +166,7 @@ pub fn ensure_locked_inputs(
     skills: &[(String, SkillLockStatus)],
     instructions: &[(String, InstructionLockStatus)],
     frozen_servers: &[FrozenServer],
+    executables: &[(String, ExecutableLockStatus)],
 ) -> anyhow::Result<()> {
     let mut blocked: Vec<(String, String)> = Vec::new();
     for (name, status) in skills {
@@ -164,6 +182,14 @@ pub fn ensure_locked_inputs(
     for (name, resolved) in frozen_servers {
         if let Err(reason) = resolved {
             blocked.push((format!("server '{name}'"), reason.clone()));
+        }
+    }
+    // D3 (contract §8): executable labels arrive pre-qualified from
+    // `executable_lock_statuses` ("executable 'x' (server 's')") — the kind
+    // and owning server are part of the label, not re-derived here.
+    for (label, status) in executables {
+        if let Some(why) = locked_offender(executable_verdict(status)) {
+            blocked.push((label.clone(), why));
         }
     }
     bail_locked(&format!("run {what} with --locked"), blocked)
@@ -416,13 +442,50 @@ mod tests {
             "srv",
             "library server is not pinned in agentstack.lock — pin it with `agentstack lock`",
         )];
-        let err = ensure_locked_inputs("claude-code", &skills, &instructions, &servers)
+        let err = ensure_locked_inputs("claude-code", &skills, &instructions, &servers, &[])
             .unwrap_err()
             .to_string();
         assert!(err.contains("3 input(s)"), "{err}");
         assert!(err.contains("skill 's'"), "{err}");
         assert!(err.contains("instruction 'i'"), "{err}");
         assert!(err.contains("server 'srv'"), "{err}");
+        assert!(err.contains("`agentstack lock`"), "{err}");
+    }
+
+    #[test]
+    fn ensure_locked_inputs_blocks_drifted_and_missing_executables() {
+        // Executables follow the same strict rule as every other kind: a
+        // missing pin AND drift both block, labels arrive pre-qualified.
+        let executables = vec![
+            (
+                "executable 'scripts/run.sh' (server 'agent')".to_string(),
+                ExecutableLockStatus::ChecksumDrift {
+                    locked: "aaaaaaaaaaaaaaaa".into(),
+                    current: "bbbbbbbbbbbbbbbb".into(),
+                },
+            ),
+            (
+                "integrity root 'tools' (server 'agent')".to_string(),
+                ExecutableLockStatus::MissingLockEntry,
+            ),
+            (
+                "executable 'ok.sh' (server 'agent')".to_string(),
+                ExecutableLockStatus::Matches,
+            ),
+        ];
+        let err = ensure_locked_inputs("claude-code", &[], &[], &[], &executables)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("2 input(s)"), "{err}");
+        assert!(
+            err.contains("executable 'scripts/run.sh' (server 'agent')"),
+            "{err}"
+        );
+        assert!(
+            err.contains("integrity root 'tools' (server 'agent')"),
+            "{err}"
+        );
+        assert!(!err.contains("ok.sh"), "matching pins stay out: {err}");
         assert!(err.contains("`agentstack lock`"), "{err}");
     }
 
@@ -447,7 +510,7 @@ mod tests {
             ),
             failed_server("b", "library server is not pinned in agentstack.lock"),
         ];
-        let err = ensure_locked_inputs("x", &[], &[], &servers)
+        let err = ensure_locked_inputs("x", &[], &[], &servers, &[])
             .unwrap_err()
             .to_string();
         assert!(err.contains("2 input(s)"), "{err}");
@@ -458,14 +521,14 @@ mod tests {
     #[test]
     fn ensure_locked_inputs_passes_clean_sets_and_leaves_them_usable() {
         // Empty everything is trivially acceptable.
-        assert!(ensure_locked_inputs("x", &[], &[], &[]).is_ok());
+        assert!(ensure_locked_inputs("x", &[], &[], &[], &[]).is_ok());
 
         // A valid non-empty set: matching skill + instruction + an Ok frozen
         // server all pass.
         let skills = vec![("s".to_string(), SkillLockStatus::Matches)];
         let instructions = vec![("i".to_string(), InstructionLockStatus::Matches)];
         let servers = vec![ok_server("srv")];
-        assert!(ensure_locked_inputs("x", &skills, &instructions, &servers).is_ok());
+        assert!(ensure_locked_inputs("x", &skills, &instructions, &servers, &[]).is_ok());
 
         // Borrowed, not consumed: the exact frozen set is still usable after.
         assert_eq!(servers.len(), 1);
