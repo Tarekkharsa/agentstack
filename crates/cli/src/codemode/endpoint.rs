@@ -287,24 +287,34 @@ mod tests {
             .unwrap();
             held.push(s);
         }
-        // Loopback accepts are fast but not synchronous with our writes: give
-        // the accept loop a beat to count every held request before probing.
-        std::thread::sleep(std::time::Duration::from_millis(300));
-
-        let mut extra = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-        extra
-            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-            .unwrap();
-        extra
-            .write_all(b"POST /call HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n")
-            .unwrap();
-        let mut buf = [0u8; 256];
-        let n = extra.read(&mut buf).unwrap();
-        let head = String::from_utf8_lossy(&buf[..n]);
-        assert!(
-            head.starts_with("HTTP/1.1 503"),
-            "over-cap request should be shed, got: {head}"
-        );
+        // Loopback accepts are fast but not synchronous with our writes, and
+        // how quickly the accept loop counts the held requests varies by
+        // machine (a fixed sleep flaked on CI). The held slots never release
+        // — each handler is parked in the body read — so probe until the cap
+        // is observed: every non-503 probe (a 401, since it carries no token)
+        // frees its slot on reply, and once all held requests are counted a
+        // probe MUST see 503. A deadline keeps a regression from hanging.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let mut extra = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            extra
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            extra
+                .write_all(b"POST /call HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
+            let mut buf = [0u8; 256];
+            let n = extra.read(&mut buf).unwrap();
+            let head = String::from_utf8_lossy(&buf[..n]);
+            if head.starts_with("HTTP/1.1 503") {
+                break; // shed at the cap — the behavior under test
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "over-cap request was never shed with 503; last response: {head}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
         drop(held);
     }
 }
