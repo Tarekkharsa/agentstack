@@ -540,11 +540,15 @@ impl ScopedMcpConfig {
             // is chained, never swallowed (the run-dir copy still exists).
             if let Some(orig) = &original {
                 if let Err(roll) = crate::util::atomic::write(&path, orig) {
-                    let _ = std::fs::remove_file(&sentinel);
+                    // Double failure: the config's on-disk state is unknown.
+                    // KEEP the sentinel — the state needs attention, and a
+                    // subsequent locked run must not park the corrupted state
+                    // as its "original" (same rule as restore()'s failure).
                     return Err(e.context(format!(
                         "ALSO: restoring the original failed ({roll:#}) — your config is \
-                         preserved at {}",
-                        parked_copy.as_deref().unwrap_or(Path::new("?")).display()
+                         preserved at {}; the scope guard {} stays until this is resolved",
+                        parked_copy.as_deref().unwrap_or(Path::new("?")).display(),
+                        sentinel.display()
                     )));
                 }
             }
