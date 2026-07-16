@@ -450,7 +450,9 @@ that leave the manifest. Add/list from the dashboard Hooks pane.
 
 ### Search across providers
 
-`search` queries the embedded catalog **and the official MCP Registry**
+`search` queries **your central library first** (skill names and their
+SKILL.md frontmatter descriptions, plus library server names — labelled
+`[library]`), then the embedded catalog **and the official MCP Registry**
 (`registry.modelcontextprotocol.io`). `agentstack add from <id>` resolves a
 registry/catalog server, lifts its secrets to `${REF}`s, and (on `apply`)
 renders it to **all your CLIs at once**. agentstack is the cross-CLI *client*
@@ -838,6 +840,8 @@ These are MCP tool calls, not CLI shell commands. While the lease is active:
 - the live gateway exposes only servers from the selected profile;
 - `agentstack_list_loadable` and `agentstack_load` expose only that profile's
   skills (plus the embedded `using-agentstack` manual);
+  `agentstack_list_loadable` takes an optional `query` (case-insensitive
+  substring over name + description) that filters **within** the fence;
 - the first load of each skill is recorded with its reason, while repeated
   loads return the body without duplicating the trail;
 - trust, lock/digest verification, machine policy, project policy, and call

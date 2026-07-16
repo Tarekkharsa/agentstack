@@ -39,7 +39,8 @@ the gateway. Nothing touches disk without `--write`.
 3. **Zero-files / MCP** — the agent pulls skills itself through the `agentstack`
    MCP server. Open a process-local fence with
    `agentstack_lease_open(profile)`, use `agentstack_list_loadable` to browse
-   names + descriptions, then `agentstack_load(name, reason)` for the full
+   names + descriptions (optional `query` filters by substring over both),
+   then `agentstack_load(name, reason)` for the full
    instructions. Loads are fenced to the leased profile and recorded in memory;
    inspect the trail with `agentstack_lease_status`. To preserve the observed
    set, `agentstack_lease_freeze(name)` proposes a manifest profile; tell the
@@ -87,7 +88,7 @@ agentstack                       # orientation: CLIs detected, manifest state, n
 agentstack bootstrap             # preflight: skills, secrets, diff, next action
 agentstack use <profile> --scope project           # dry-run (always safe)
 agentstack use <profile> --scope project --write   # activate
-agentstack search <query>        # catalog + official MCP Registry
+agentstack search <query>        # your central library + catalog + official MCP Registry
 agentstack add from <id>         # add a found server to the manifest (not applied)
 agentstack lib list              # what the central library holds
 agentstack lib sync              # commit/pull/push the library across machines (secret gate enforced)

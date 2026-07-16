@@ -96,15 +96,30 @@ unwired machinery.
   events (contract §9); consumes the staged `grant.rs`/`verify.rs` surface.
   - **Landed (needs line-by-line review):** everything through GrantFrozen +
     launch + recorded outcome, the checked-append recorder events, `--plan`
-    (aggregates all blockers, mutates nothing, digest equals the live run's),
-    and loud named-limitation errors for `--locked --profile` / `--sandbox`.
-    Verified live: drift refusal, trust re-gate, admission (unclassifiable
-    host), clean run with real harness.
+    (aggregates all blockers, mutates nothing, digest equals the live run's
+    once the commitment key exists; a never-provisioned key is informational
+    — "will be created on first live run" — while a present-but-broken key
+    still blocks), and loud named-limitation errors for `--locked --profile`
+    / `--sandbox`. Verified live: drift refusal, trust re-gate, admission
+    (unclassifiable host), clean run with real harness.
   - **Also landed (2026-07-16, rulings: config-scope now / honest global
     label):** launch-scoped PROJECT MCP config (gateway-only during the run,
     parked original restored byte-identical, overlapping runs refuse instead
     of stacking parks, crash leaves the more restrictive state) and
     `RunEnvelope` as the sealed §6.2 evidence identity.
+  - **Also landed (2026-07-16, pre-dogfooding round):** five asserted
+    use-case example projects (`examples/projects/` + `FINDINGS.md` — the
+    skill-indexing report, the CLI-differences matrix, the locked-run device
+    test), and the twelve issues that round filed, all fixed the same day
+    (#11–#22): guard honors the project `[policy.filesystem]` deny from the
+    preferred `.agentstack/` layout; `run` (plain and `--locked`) spawns the
+    harness at the project root; `--plan`/live commitment-key parity;
+    `report` renders the locked lifecycle and carries the posture slug in
+    `--json`; silent drops to instruction-/skills-less adapters warn on every
+    surface and instruction `targets` validate like servers'; `agentstack
+    search` covers the central library (name + frontmatter description);
+    `agentstack_list_loadable` takes a `query`; `lib list` shows
+    descriptions.
   - **Remaining before this checks off (supervised session, per ruling):**
     the run-grant artifact handoff so the `agentstack mcp` bridge process
     consumes the frozen ruleset + server set verbatim (today it re-gates
