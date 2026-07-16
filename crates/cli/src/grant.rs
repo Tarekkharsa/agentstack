@@ -19,10 +19,13 @@
 //! it is opaque, redacted, non-serializable, and exposed only to the outer grant
 //! digest — never recorded or displayed on its own.
 
-// STAGED: 3b-i lands the grant types + the sealed `GrantBuilder` unwired. 3b-ii
-// (the canonical digest + evidence, which reads every field) and increment 4
-// (the run flow, which calls the builder) consume this surface. Remove this
-// allow once the grant is wired into the run path.
+// STAGED: 3b-i landed the grant types + the sealed `GrantBuilder`; 3b-ii landed
+// the canonical V1 digest (KAT-frozen, reads every field). Still unwired. The
+// run-flow increment consumes this surface and also lands `RunEnvelope`
+// (contract §6.2: run id + recorder identity + grant digest) — deferred there
+// because a run id and recorder identity only exist on a live run, and
+// `--plan` must never invent them. Remove this allow once the grant is wired
+// into the run path.
 #![allow(dead_code)]
 
 use std::collections::btree_map::Entry;
@@ -453,6 +456,16 @@ impl GrantPath {
     }
 }
 
+#[cfg(test)]
+impl GrantPath {
+    /// Test-only: a fixed path string, skipping canonicalization — the
+    /// known-answer test needs machine-independent bytes. Never a runtime
+    /// constructor.
+    fn test_fixed(s: &str) -> GrantPath {
+        GrantPath(s.to_string())
+    }
+}
+
 /// Grant schema, tied to the digest domain: `V1` ↔ `agentstack-authority-grant-v1`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GrantSchema {
@@ -816,6 +829,246 @@ impl std::fmt::Debug for AuthorityGrant {
             .field("runtime", &self.runtime.slug())
             .field("artifacts", &self.artifacts.slug())
             .finish_non_exhaustive()
+    }
+}
+
+// ===== 3b-ii: the canonical V1 grant digest =====
+
+/// Domain separator for the canonical grant digest (`GrantSchema::V1`).
+const GRANT_DIGEST_DOMAIN: &[u8] = b"agentstack-authority-grant-v1\0";
+
+/// Length-framed canonical encoder for the grant digest. Every field is a
+/// `(tag, value)` pair, both frames prefixed with a `u64` little-endian
+/// length, in a fixed emission order — self-delimiting and injective, the
+/// same discipline as the trust/lock/dir digests. Collections emit an
+/// explicit count before their entries so adjacent collections can never
+/// blur across a boundary.
+struct GrantEncoder {
+    hasher: Sha256,
+}
+impl GrantEncoder {
+    fn new() -> GrantEncoder {
+        let mut hasher = <Sha256 as sha2::Digest>::new();
+        sha2::Digest::update(&mut hasher, GRANT_DIGEST_DOMAIN);
+        GrantEncoder { hasher }
+    }
+    fn bytes(&mut self, tag: &str, value: &[u8]) {
+        sha2::Digest::update(&mut self.hasher, (tag.len() as u64).to_le_bytes());
+        sha2::Digest::update(&mut self.hasher, tag.as_bytes());
+        sha2::Digest::update(&mut self.hasher, (value.len() as u64).to_le_bytes());
+        sha2::Digest::update(&mut self.hasher, value);
+    }
+    fn text(&mut self, tag: &str, value: &str) {
+        self.bytes(tag, value.as_bytes());
+    }
+    /// `None` and `Some("")` must differ: a presence byte prefixes the value.
+    fn opt_text(&mut self, tag: &str, value: Option<&str>) {
+        match value {
+            None => self.bytes(tag, &[0u8]),
+            Some(v) => {
+                let mut framed = Vec::with_capacity(1 + v.len());
+                framed.push(1u8);
+                framed.extend_from_slice(v.as_bytes());
+                self.bytes(tag, &framed);
+            }
+        }
+    }
+    fn count(&mut self, tag: &str, n: usize) {
+        self.bytes(tag, &(n as u64).to_le_bytes());
+    }
+    fn finish(self) -> GrantDigest {
+        GrantDigest(Sha256Hex(format!(
+            "{:x}",
+            sha2::Digest::finalize(self.hasher)
+        )))
+    }
+}
+
+impl AuthorityGrant {
+    /// The canonical digest over **exactly this grant's fields** (contract
+    /// §6.1): deterministic ordering (`BTreeMap`/`BTreeSet` iteration),
+    /// length-framed, domain-separated per schema version. The exact
+    /// invocation is bound through the **mandatory keyed argv commitment**
+    /// (§4) — raw argv bytes never enter the digest, and there is no unkeyed
+    /// fallback: no key, no digest, no launch. Contains no run id, no
+    /// recorder identity, and no digest-of-itself (`RunEnvelope` is where the
+    /// digest lives, §6.2).
+    ///
+    /// The V1 encoding is FROZEN by the known-answer test below — any change
+    /// to emission order, tags, or framing must bump the schema/domain, never
+    /// silently re-shape V1.
+    pub(crate) fn digest(&self, key: &CommitmentKey) -> Result<GrantDigest> {
+        let mut e = GrantEncoder::new();
+        e.text("schema", self.schema.slug());
+
+        e.text("project.root", self.project.root.as_str());
+        e.text("project.consent", self.project.consent.hex());
+
+        let inv = &self.invocation;
+        e.text("adapter.id", inv.adapter.id());
+        match &inv.adapter.source {
+            AdapterSourceIdentity::BuiltIn => e.text("adapter.source", "builtin"),
+            AdapterSourceIdentity::User(p) => {
+                e.text("adapter.source", "user");
+                e.text("adapter.source.path", p.as_str());
+            }
+        }
+        e.text("adapter.definition", inv.adapter.definition_digest.hex());
+        e.text("harness.path", inv.executable.path.as_str());
+        match inv.executable.integrity {
+            HarnessIntegrity::ExternalUnpinned => e.text("harness.integrity", "external-unpinned"),
+        }
+        e.bytes("argv.commitment", &commit_argv(key, &inv.argv).0);
+        e.text("cwd", inv.cwd.as_str());
+        match &inv.profile {
+            ProfileEffect::None => e.text("profile", "none"),
+            ProfileEffect::Temporary { name, scope } => {
+                e.text("profile", "temporary");
+                e.text("profile.name", name);
+                e.text("profile.scope", scope.as_str());
+            }
+            ProfileEffect::Kept { name, scope } => {
+                e.text("profile", "kept");
+                e.text("profile.name", name);
+                e.text("profile.scope", scope.as_str());
+            }
+        }
+
+        e.count("skills", self.skills.len());
+        for (name, s) in &self.skills {
+            e.text("skill.name", name);
+            e.text("skill.path", s.path.as_str());
+            e.text(
+                "skill.origin",
+                match s.origin {
+                    InputOrigin::Inline => "inline",
+                    InputOrigin::Library => "library",
+                },
+            );
+            match &s.source {
+                SkillSource::Path => e.text("skill.source", "path"),
+                SkillSource::Git { revision } => {
+                    e.text("skill.source", "git");
+                    e.text("skill.revision", revision);
+                }
+            }
+            e.text("skill.checksum", s.checksum.hex());
+            e.opt_text("skill.provenance", s.provenance.as_deref());
+        }
+
+        e.count("instructions", self.instructions.len());
+        for (name, i) in &self.instructions {
+            e.text("instruction.name", name);
+            e.text("instruction.path", i.path.as_str());
+            match &i.binding {
+                InstructionBinding::MachineOwned(d) => {
+                    e.text("instruction.binding", "machine-owned");
+                    e.text("instruction.checksum", d.hex());
+                }
+                InstructionBinding::ProjectPinned(d) => {
+                    e.text("instruction.binding", "project-pinned");
+                    e.text("instruction.checksum", d.hex());
+                }
+            }
+            e.count("instruction.targets", i.targets.len());
+            for t in &i.targets {
+                e.text("instruction.target", t);
+            }
+        }
+
+        // A server's declaration bytes are covered by its definition digest
+        // (the checksum over the serialized `Server` table, which includes
+        // `integrity_roots`), so the definition digest IS the content
+        // identity here — the struct is not re-encoded field by field.
+        e.count("servers", self.servers.len());
+        for (name, s) in &self.servers {
+            e.text("server.name", name);
+            match &s.binding {
+                GrantedServerBinding::Inline { definition } => {
+                    e.text("server.binding", "inline");
+                    e.text("server.definition", definition.hex());
+                }
+                GrantedServerBinding::Library {
+                    definition,
+                    provenance,
+                } => {
+                    e.text("server.binding", "library");
+                    e.text("server.definition", definition.hex());
+                    e.opt_text("server.provenance", provenance.as_deref());
+                }
+            }
+        }
+
+        e.count("executables", self.executables.len());
+        for ((path, kind), exe) in &self.executables {
+            e.text("executable.path", path);
+            e.text(
+                "executable.kind",
+                match kind {
+                    ExecutableKind::File => "file",
+                    ExecutableKind::Root => "root",
+                },
+            );
+            e.text("executable.checksum", exe.checksum.hex());
+            e.count("executable.servers", exe.servers.len());
+            for server in &exe.servers {
+                e.text("executable.server", server);
+            }
+        }
+
+        // The compiled ruleset is the policy wire contract: ordered
+        // (`BTreeMap`/`BTreeSet`) and Serialize, so its JSON bytes are the
+        // canonical policy encoding — framed whole, not re-modeled here.
+        e.bytes(
+            "policy.ruleset",
+            &serde_json::to_vec(&self.policy.ruleset).context("encoding compiled ruleset")?,
+        );
+        for (tag, source) in [
+            ("policy.machine", &self.policy.provenance.machine),
+            ("policy.project", &self.policy.provenance.project),
+        ] {
+            match source {
+                PolicySource::Absent => e.text(tag, "absent"),
+                PolicySource::Digest(d) => {
+                    e.text(tag, "digest");
+                    e.text(&format!("{tag}.checksum"), d.hex());
+                }
+            }
+        }
+
+        e.count("secrets", self.secrets.len());
+        for s in &self.secrets {
+            e.text("secret.reference", &s.reference);
+            let SecretScope::Server(server) = &s.scope;
+            e.text("secret.scope.server", server);
+            e.text(
+                "secret.lifetime",
+                match s.lifetime {
+                    SecretLifetimeBinding::Unbound => "unbound",
+                    SecretLifetimeBinding::RunScoped => "run-scoped",
+                },
+            );
+        }
+
+        match &self.runtime {
+            RuntimeImage::Host => e.text("runtime", "host"),
+            RuntimeImage::Container { reference, binding } => {
+                e.text("runtime", "container");
+                e.text("runtime.image", reference);
+                match binding {
+                    ImageBinding::Unbound => e.text("runtime.image.binding", "unbound"),
+                    ImageBinding::Pinned(d) => {
+                        e.text("runtime.image.binding", "pinned");
+                        e.text("runtime.image.checksum", d.hex());
+                    }
+                }
+            }
+        }
+        e.text("posture", self.posture.slug());
+        e.text("egress", self.egress.slug());
+        e.text("workspace", self.workspace.slug());
+        e.text("artifacts", self.artifacts.slug());
+        Ok(e.finish())
     }
 }
 
@@ -1477,6 +1730,162 @@ mod tests {
         let dbg = format!("{grant:?}");
         assert!(dbg.contains("argv_args: 2"), "{dbg}");
         assert!(!dbg.contains("s3cr3t"), "no argv bytes in Debug: {dbg}");
+    }
+
+    /// A fully-populated grant over FIXED identities — every collection
+    /// non-empty, fixed paths/digests — so the digest is machine-independent
+    /// and can be frozen as a known answer.
+    fn kat_grant(argv: &[&str], exec_checksum: char) -> AuthorityGrant {
+        let root = GrantPath::test_fixed("/kat/project");
+        let reg = Registry::load().unwrap();
+        let adapter = GrantedAdapter {
+            descriptor: reg.get("claude-code").unwrap().clone(),
+            source: AdapterSourceIdentity::BuiltIn,
+            definition_digest: ContentDigest::parse(&h64('1')).unwrap(),
+        };
+        let invocation = Invocation {
+            adapter,
+            executable: HarnessExecutable {
+                path: GrantPath::test_fixed("/usr/local/bin/claude"),
+                integrity: HarnessIntegrity::ExternalUnpinned,
+            },
+            argv: argv.iter().map(|s| s.to_string()).collect(),
+            cwd: root.clone(),
+            profile: ProfileEffect::Temporary {
+                name: "dev".into(),
+                scope: Scope::Project,
+            },
+        };
+        let policy = PolicyGrant {
+            ruleset: agentstack_policy::compile(
+                &agentstack_core::manifest::Policy::default(),
+                &agentstack_core::manifest::Policy::default(),
+                &["agent"],
+            ),
+            provenance: PolicyProvenance {
+                machine: PolicySource::Digest(ContentDigest::parse(&h64('2')).unwrap()),
+                project: PolicySource::Absent,
+            },
+        };
+        let mut b = GrantBuilder::new(
+            ProjectIdentity {
+                root,
+                consent: ConsentDigest::parse(&h64('c')).unwrap(),
+            },
+            invocation,
+            policy,
+            RuntimeImage::Host,
+            GrantPosture::Host,
+            EgressMode::Unconfined,
+            ArtifactMode::ZeroFiles,
+        );
+        b.add_skill(
+            "review",
+            GrantedSkill {
+                path: GrantPath::test_fixed("/kat/lib/skills/review"),
+                origin: InputOrigin::Library,
+                source: SkillSource::Git {
+                    revision: "abc123".into(),
+                },
+                checksum: ContentDigest::parse(&h64('3')).unwrap(),
+                provenance: Some("consolidated".into()),
+            },
+        )
+        .unwrap();
+        b.add_instruction(
+            "house",
+            GrantedInstruction {
+                path: GrantPath::test_fixed("/kat/project/instructions/house.md"),
+                binding: InstructionBinding::ProjectPinned(
+                    ContentDigest::parse(&h64('4')).unwrap(),
+                ),
+                targets: BTreeSet::from(["claude-code".to_string(), "codex".to_string()]),
+            },
+        )
+        .unwrap();
+        b.add_server(
+            "agent",
+            granted_server(
+                "type = \"stdio\"\ncommand = \"python\"\nargs = [\"./tools/agent.py\"]\nintegrity_roots = [\"tools\"]\n\n[env]\nTOKEN = \"${KAT_TOKEN}\"\n",
+                GrantedServerBinding::Inline {
+                    definition: ContentDigest::parse(&h64('5')).unwrap(),
+                },
+            ),
+        )
+        .unwrap();
+        b.add_executable(
+            "tools",
+            ExecutableKind::Root,
+            ContentDigest::parse(&h64(exec_checksum)).unwrap(),
+            "agent",
+        )
+        .unwrap();
+        b.add_executable(
+            "tools/agent.py",
+            ExecutableKind::File,
+            ContentDigest::parse(&h64('7')).unwrap(),
+            "agent",
+        )
+        .unwrap();
+        b.add_secret(
+            SecretGrant::new(
+                "KAT_TOKEN",
+                SecretScope::Server("agent".into()),
+                SecretLifetimeBinding::Unbound,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        b.build().unwrap()
+    }
+
+    /// Freezes the V1 canonical encoding: emission order, tags, framing, the
+    /// argv-commitment binding, and the framed compiled-ruleset JSON. If this
+    /// test fails, the V1 wire shape changed — bump the schema and domain
+    /// separator instead of silently re-shaping V1. (A compiled-ruleset
+    /// version bump legitimately lands here too: the grant digest depends on
+    /// the policy wire contract.)
+    ///
+    /// NEVER delete or weaken this test.
+    #[test]
+    fn grant_digest_v1_known_answer() {
+        let key = CommitmentKey([0x42u8; 32]);
+        let digest = kat_grant(&["--model", "opus"], '6').digest(&key).unwrap();
+        assert_eq!(
+            digest.to_string(),
+            "sha256:ab60d5abc05fc7cb65605b4b6a8e873247ef236c9ee1fb7625eb76e9faffa09a"
+        );
+    }
+
+    #[test]
+    fn grant_digest_binds_argv_key_and_executables() {
+        let key = CommitmentKey([0x42u8; 32]);
+        let base = kat_grant(&["--model", "opus"], '6').digest(&key).unwrap();
+
+        // Plan-matches-run: the identical grant under the identical machine
+        // key digests identically.
+        assert_eq!(
+            base,
+            kat_grant(&["--model", "opus"], '6').digest(&key).unwrap()
+        );
+        // The exact invocation is bound — through the keyed commitment, so
+        // changing argv flips the digest without raw argv entering it.
+        assert_ne!(
+            base,
+            kat_grant(&["--model", "sonnet"], '6').digest(&key).unwrap()
+        );
+        // No unkeyed identity: a different machine key is a different digest.
+        assert_ne!(
+            base,
+            kat_grant(&["--model", "opus"], '6')
+                .digest(&CommitmentKey([0x43u8; 32]))
+                .unwrap()
+        );
+        // D3 executable content is digest-relevant.
+        assert_ne!(
+            base,
+            kat_grant(&["--model", "opus"], '9').digest(&key).unwrap()
+        );
     }
 
     #[test]
