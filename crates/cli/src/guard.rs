@@ -14,8 +14,11 @@
 //! kernel-enforced story is `run --sandbox` / `--lockdown`. Never describe
 //! this dimension as "enforced".
 //!
-//! The engine is pure (no I/O): [`GuardContext`] carries everything a
-//! decision needs, so the whole surface is unit-testable. Protocol
+//! The engine is pure (no I/O) with one exception: [`GuardContext`] carries
+//! everything a decision needs, so the whole surface is unit-testable — but
+//! `deny_glob_check` symlink-resolves paths to catch equivalent spellings
+//! (macOS `/var` vs `/private/var`), I/O that can only ADD deny spellings
+//! and degrades to the lexical check on fake test paths. Protocol
 //! translation (each CLI's payload/response dialect) lives in
 //! [`Protocol`]; the shell-command analysis is a conservative tokenizer,
 //! not a full parser — bounded, allocation-light, and honest about its
@@ -90,8 +93,27 @@ pub fn check_event(ctx: &GuardContext, event: &GuardEvent) -> Decision {
 fn deny_glob_check(ctx: &GuardContext, path: &str) -> Decision {
     let abs = normalize(path, &ctx.workspace, &ctx.home);
     let mut spellings: Vec<String> = vec![abs.to_string_lossy().into_owned()];
-    if let Ok(rel) = abs.strip_prefix(&ctx.workspace) {
-        spellings.push(rel.to_string_lossy().into_owned());
+    // The workspace-relative spelling, tried across the as-reported AND
+    // symlink-resolved forms of both sides. A payload can name the same file
+    // under two equivalent spellings (macOS: `cwd` as `/var/...`, `file_path`
+    // as `/private/var/...`); a lexical-only strip fails then, and losing the
+    // relative spelling silently fails OPEN for path-prefixed deny globs
+    // like `vault/**` (#23). Resolving only ADDS spellings, so it cannot
+    // weaken the blocklist.
+    let workspaces = [
+        Some(ctx.workspace.clone()),
+        std::fs::canonicalize(&ctx.workspace).ok(),
+    ];
+    let targets = [Some(abs.clone()), resolve_existing_prefix(&abs)];
+    for ws in workspaces.iter().flatten() {
+        for target in targets.iter().flatten() {
+            if let Ok(rel) = target.strip_prefix(ws) {
+                let rel = rel.to_string_lossy().into_owned();
+                if !spellings.contains(&rel) {
+                    spellings.push(rel);
+                }
+            }
+        }
     }
     if let Some(name) = abs.file_name() {
         spellings.push(name.to_string_lossy().into_owned());
@@ -163,6 +185,24 @@ fn normalize(path: &str, base: &Path, home: &Path) -> PathBuf {
         }
     }
     out
+}
+
+/// Symlink-resolve as much of `path` as exists on disk, re-attaching any
+/// non-existent tail unchanged. `fs::canonicalize` alone errors on paths
+/// that don't exist yet, which would lose the resolved spelling exactly
+/// when a write target is being judged. Used only to add spellings to the
+/// deny blocklist — never to decide an allow.
+fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
+    match std::fs::canonicalize(path) {
+        Ok(real) => Some(real),
+        // Recursion is bounded by the component count; `/` always
+        // canonicalizes, so the walk terminates before `parent()` runs out.
+        Err(_) => {
+            let parent = path.parent()?;
+            let name = path.file_name()?;
+            Some(resolve_existing_prefix(parent)?.join(name))
+        }
+    }
 }
 
 /// Component-wise prefix check (string prefixes would let `/tmp2` pass as
@@ -867,6 +907,59 @@ mod tests {
                     path: "src/main.rs".into()
                 }
             ),
+            Decision::Allow
+        );
+    }
+
+    /// #23 — a payload can name the same file under two equivalent
+    /// spellings (macOS: `cwd` as `/var/...`, `file_path` as
+    /// `/private/var/...`). A path-prefixed deny glob must hold no matter
+    /// which spelling each field arrived in.
+    #[cfg(unix)]
+    #[test]
+    fn deny_globs_match_across_equivalent_path_spellings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real-proj");
+        std::fs::create_dir_all(real.join("vault")).unwrap();
+        std::fs::write(real.join("vault/token.txt"), "secret").unwrap();
+        let link = tmp.path().join("link-proj");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let machine = Policy {
+            filesystem: FsPolicy {
+                read: vec![],
+                write: vec![],
+                deny: vec!["vault/**".into()],
+            },
+            ..Policy::default()
+        };
+        let mk = |workspace: &Path| GuardContext {
+            workspace: workspace.to_path_buf(),
+            home: PathBuf::from("/Users/me"),
+            tmp: vec![],
+            allow_roots: vec![],
+            ruleset: agentstack_policy::compile(&machine, &Policy::default(), &[]),
+        };
+        let read = |p: PathBuf| GuardEvent::FileRead {
+            path: p.to_string_lossy().into_owned(),
+        };
+        // Workspace in one spelling, target in the other — both directions —
+        // plus the consistent-spelling case that already worked.
+        assert!(denied(check_event(
+            &mk(&link),
+            &read(real.join("vault/token.txt"))
+        )));
+        assert!(denied(check_event(
+            &mk(&real),
+            &read(link.join("vault/token.txt"))
+        )));
+        assert!(denied(check_event(
+            &mk(&real),
+            &read(real.join("vault/token.txt"))
+        )));
+        // Files outside the deny glob still pass.
+        assert_eq!(
+            check_event(&mk(&real), &read(real.join("src/main.rs"))),
             Decision::Allow
         );
     }
