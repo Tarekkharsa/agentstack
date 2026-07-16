@@ -168,8 +168,12 @@ pub fn launch(
     // agent makes through `agentstack mcp` land in the audit log attributed
     // to this run.
     let id = gen_id();
+    // Spawn at the PROJECT root, not the manifest dir — under the preferred
+    // layout `dir` is `.agentstack/`, and a harness session opened there sees
+    // no source code. (With the legacy root manifest the two coincide.)
+    let workdir = crate::manifest::project_root_of(&dir);
     let status = match launch_attached(
-        &bin, extra_args, &dir, &id, harness, &display, profile, scope,
+        &bin, extra_args, &workdir, &id, harness, &display, profile, scope,
     ) {
         Ok(s) => s,
         Err(e) => {

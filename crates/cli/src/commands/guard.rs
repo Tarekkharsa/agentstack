@@ -127,9 +127,7 @@ fn check(protocol: Option<&str>) -> Result<()> {
     // The project layer may ADD deny globs (union — it can never loosen the
     // machine's). A broken/hostile project manifest is simply skipped: the
     // machine layer still applies in full.
-    let project_policy = manifest::load_from_dir(&workspace)
-        .map(|l| l.manifest.policy)
-        .unwrap_or_default();
+    let project_policy = project_policy_at(&workspace);
 
     let ctx = GuardContext {
         workspace,
@@ -157,6 +155,20 @@ fn anchor_workspace(cwd: &Path) -> PathBuf {
     nearest_ancestor(cwd, |dir| {
         dir.join(".git").exists() || dir.join(".agentstack").exists()
     })
+}
+
+/// The project policy layer for a guard decision: whatever manifest the
+/// workspace carries — the preferred `.agentstack/agentstack.toml` layout or
+/// the legacy root `agentstack.toml`. `load_from_dir` expects the MANIFEST
+/// dir, not the project root, so the workspace must be resolved through
+/// `resolve_manifest_dir` first; passing the workspace directly silently
+/// ignored every `[policy.filesystem]` deny declared in the preferred layout.
+/// A broken/hostile/absent manifest contributes nothing: the machine layer
+/// still applies in full (union semantics — a project can only ADD denies).
+fn project_policy_at(workspace: &Path) -> manifest::Policy {
+    manifest::load_from_dir(&manifest::resolve_manifest_dir(workspace))
+        .map(|l| l.manifest.policy)
+        .unwrap_or_default()
 }
 
 /// Walk `start` and its ancestors outward, returning the first for which
@@ -243,9 +255,7 @@ fn test(command: &str) -> Result<()> {
     };
     let machine_policy = crate::machine_policy::load()?;
     let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
-    let project_policy = manifest::load_from_dir(&workspace)
-        .map(|l| l.manifest.policy)
-        .unwrap_or_default();
+    let project_policy = project_policy_at(&workspace);
     let ctx = GuardContext {
         workspace,
         home: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
@@ -903,6 +913,38 @@ mod tests {
         std::fs::create_dir_all(&sub).unwrap();
         assert_eq!(anchor_workspace(&sub), root);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn project_policy_loads_from_the_preferred_agentstack_layout() {
+        // The regression this pins: a [policy.filesystem] deny declared in
+        // the PREFERRED `.agentstack/agentstack.toml` was silently ignored —
+        // the workspace root (not the manifest dir) was handed straight to
+        // the loader, so only legacy-root manifests were ever enforced.
+        let root = tempdir().join(format!("guardpol-{}", std::process::id()));
+        std::fs::create_dir_all(root.join(".agentstack")).unwrap();
+        std::fs::write(
+            root.join(".agentstack/agentstack.toml"),
+            "version = 1\n[policy.filesystem]\ndeny = [\"vault/**\"]\n",
+        )
+        .unwrap();
+        assert_eq!(project_policy_at(&root).filesystem.deny, vec!["vault/**"]);
+
+        // The legacy root layout keeps working (manifest dir IS the workspace).
+        let legacy = tempdir().join(format!("guardpol-legacy-{}", std::process::id()));
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(
+            legacy.join("agentstack.toml"),
+            "version = 1\n[policy.filesystem]\ndeny = [\"secrets/**\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            project_policy_at(&legacy).filesystem.deny,
+            vec!["secrets/**"]
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&legacy);
     }
 
     #[test]

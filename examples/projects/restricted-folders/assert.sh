@@ -37,11 +37,12 @@
 # unattended in CI. Self-contained: isolated temp HOME/AGENTSTACK_HOME, nothing
 # touches your real config.
 #
-#   IMPORTANT (F1): today `guard check` reads `[policy.filesystem] deny` from
-#   the MACHINE manifest only; a project-layer deny at `.agentstack/agentstack.toml`
-#   is silently IGNORED. This script therefore mirrors the repo's three folder
-#   globs into the machine manifest so the guard actually enforces them, and the
-#   final section demonstrates F1 with an isolated probe (SKIP, not a fake pass).
+#   History (F1 / issue #11): `guard check` once read the project layer only
+#   from the legacy root `agentstack.toml`, silently ignoring a deny at the
+#   preferred `.agentstack/agentstack.toml`. That is fixed; the final section
+#   asserts the project-layer deny is honored from the preferred location (and
+#   keeps a legacy-root control). The machine manifest still mirrors the three
+#   folder globs — that layer is the user's own floor and belongs there anyway.
 #
 # Requires: `agentstack` on PATH (or AGENTSTACK_BIN=..., or a built
 # target/release/agentstack in this repo) and python3.
@@ -301,13 +302,12 @@ for line in sys.stdin:
     print("   ", {k: d.get(k) for k in ("server", "tool", "outcome")})' | head -4
 fi
 
-# ── 9) DEFECT PROBE (F1): is a PROJECT-layer deny honored? ────────────────────
-# Isolated sub-sandbox: machine deny is EMPTY; a lone project deny at
-# `.agentstack/agentstack.toml` should (per CLAUDE.md + guard-demo README) ADD a
-# restriction. We assert nothing false — if the project layer is honored we PASS;
-# if it is ignored we SKIP loudly and prove the deny rule itself works from the
-# legacy-root manifest, isolating the bug to path resolution.
-say "Probe: does a project-layer [policy.filesystem] deny take effect? (F1)"
+# ── 9) PROJECT-LAYER deny (F1 regression check, issue #11) ────────────────────
+# Isolated sub-sandbox: machine deny is EMPTY; a lone project deny at the
+# preferred `.agentstack/agentstack.toml` must (per CLAUDE.md + guard-demo
+# README) ADD a restriction — the union a repo may only ever tighten. Then the
+# same deny from the legacy root manifest, so both layouts stay covered.
+say "Project-layer [policy.filesystem] deny takes effect from both layouts (F1)"
 PBX="$(mktemp -d)"
 PWS="$PBX/project"
 mkdir -p "$PBX/home" "$PBX/fakehome" "$PWS/.agentstack" "$PWS/.git" "$PWS/vault"
@@ -322,32 +322,26 @@ PY
 }
 # (a) deny declared in the PREFERRED project location: .agentstack/agentstack.toml
 printf 'version = 1\n[policy.filesystem]\ndeny = ["vault/*"]\n' > "$PWS/.agentstack/agentstack.toml"
-PROJECT_LAYER="$(probe_read)"
-if [ "$PROJECT_LAYER" = BLOCKED ]; then
+if [ "$(probe_read)" = BLOCKED ]; then
   ok "project-layer deny at .agentstack/agentstack.toml is honored (union works)"
 else
-  skip "F1: project-layer deny at .agentstack/agentstack.toml is IGNORED by guard check"
-  printf '       \033[2m(guard reads <repo>/agentstack.toml via load_from_dir; it never\n'
-  printf '        consults the .agentstack/ subdir — the documented preferred location.\n'
-  printf '        Effect: a repo cannot add restrictions the way CLAUDE.md/guard-demo\n'
-  printf '        README promise; only the machine layer enforces. This is why this\n'
-  printf '        demo mirrors the folder globs into the machine manifest.)\033[0m\n'
-  # Control: the SAME deny at the legacy-root manifest DOES enforce — proving the
-  # rule works and isolating the bug to `.agentstack/` path resolution.
-  rm -f "$PWS/.agentstack/agentstack.toml"
-  printf 'version = 1\n' > "$PWS/.agentstack/agentstack.toml"
-  printf 'version = 1\n[policy.filesystem]\ndeny = ["vault/*"]\n' > "$PWS/agentstack.toml"
-  if [ "$(probe_read)" = BLOCKED ]; then
-    ok "control: the same deny at <repo>/agentstack.toml (legacy root) IS enforced"
-  else
-    bad "control: even the legacy-root project deny was ignored — deny engine broken?"
-  fi
+  bad "F1 regressed: project-layer deny at .agentstack/agentstack.toml is IGNORED (issue #11)"
+fi
+# (b) the same deny from the LEGACY root manifest keeps enforcing. (The
+# .agentstack/ manifest must go: when both layouts exist the preferred one
+# wins, same as every other command's manifest resolution.)
+rm -f "$PWS/.agentstack/agentstack.toml"
+printf 'version = 1\n[policy.filesystem]\ndeny = ["vault/*"]\n' > "$PWS/agentstack.toml"
+if [ "$(probe_read)" = BLOCKED ]; then
+  ok "the same deny at <repo>/agentstack.toml (legacy root) is enforced too"
+else
+  bad "legacy-root project deny was ignored"
 fi
 rm -rf "$PBX"
 
 # ── summary ──────────────────────────────────────────────────────────────────
 say "Off-limits folders refused, allowed code untouched, every denial audited."
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed' "$PASS" "$FAIL"
-[ "$SKIP" -gt 0 ] && printf ', %d skipped (see F1)' "$SKIP"
+[ "$SKIP" -gt 0 ] && printf ', %d skipped' "$SKIP"
 printf '\n'
 [ "$FAIL" -eq 0 ] || exit 1

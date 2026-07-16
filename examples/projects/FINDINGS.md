@@ -13,14 +13,21 @@ through the real gateway, denials are audited, both skill delivery paths serve
 identical bytes, and `run --locked` gates/swaps/restores exactly as designed.
 The 12 issues filed (#11–#22) are one security-relevant gap, a family of
 "silent drop" diagnostics, two discovery gaps, and four paper cuts — none
-undermines the security model's core, but #11 and #20 deserve early attention
-during the week.
+undermines the security model's core.
+
+> **Update (same day):** [#11](https://github.com/Tarekkharsa/agentstack/issues/11)
+> and [#20](https://github.com/Tarekkharsa/agentstack/issues/20) — the two
+> dogfooding blockers — are fixed on this branch (guard now resolves the
+> project manifest through `resolve_manifest_dir`, and both run paths spawn
+> the harness at the project root), each pinned by a regression test; the
+> restricted-folders probe now asserts the project-layer deny instead of
+> skipping.
 
 ## Issues filed
 
 | # | Title | Severity | Found by |
 |---|-------|----------|----------|
-| [#11](https://github.com/Tarekkharsa/agentstack/issues/11) | guard ignores project-layer `[policy.filesystem]` deny at the preferred `.agentstack/` location | **security** | restricted-folders |
+| [#11](https://github.com/Tarekkharsa/agentstack/issues/11) | guard ignores project-layer `[policy.filesystem]` deny at the preferred `.agentstack/` location | **security** — *fixed on this branch* | restricted-folders |
 | [#12](https://github.com/Tarekkharsa/agentstack/issues/12) | instructions/skills targeting an incapable adapter are silently dropped on every surface | correctness of the mental model | multi-cli-webapp, per-cli-instructions, D3 |
 | [#13](https://github.com/Tarekkharsa/agentstack/issues/13) | `explain <instruction>` claims `*` compiles into *each* target's instruction file | honesty of output | multi-cli-webapp |
 | [#14](https://github.com/Tarekkharsa/agentstack/issues/14) | unknown adapter id in `[instructions.*] targets` isn't validated (servers/plugins are) | validation gap | per-cli-instructions |
@@ -29,7 +36,7 @@ during the week.
 | [#17](https://github.com/Tarekkharsa/agentstack/issues/17) | `agentstack search` can't see the central library at all | discovery gap | D2 |
 | [#18](https://github.com/Tarekkharsa/agentstack/issues/18) | `agentstack_list_loadable` has no query param and silently ignores one | discovery gap / context cost | D2 |
 | [#19](https://github.com/Tarekkharsa/agentstack/issues/19) | `lib list` omits skill descriptions | paper cut | D2 |
-| [#20](https://github.com/Tarekkharsa/agentstack/issues/20) | `agentstack run` (plain and `--locked`) spawns the harness in `.agentstack/`, not the project root | **real-usage bug** | device test |
+| [#20](https://github.com/Tarekkharsa/agentstack/issues/20) | `agentstack run` (plain and `--locked`) spawns the harness in `.agentstack/`, not the project root | **real-usage bug** — *fixed on this branch* | device test |
 | [#21](https://github.com/Tarekkharsa/agentstack/issues/21) | `run --locked --plan` refuses on a fresh home where the live run succeeds (commitment key) | first-run UX | device test |
 | [#22](https://github.com/Tarekkharsa/agentstack/issues/22) | `report` renders nothing for locked runs; `--json` posture is null; posture table predates HOST/PROTECTED | evidence visibility | device test |
 

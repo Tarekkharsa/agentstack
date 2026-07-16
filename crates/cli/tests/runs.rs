@@ -120,6 +120,52 @@ fn run_cleans_up_its_record_on_normal_exit() {
     );
 }
 
+/// The harness starts at the PROJECT root, not the manifest dir. Under the
+/// preferred `.agentstack/` layout the two differ, and a session opened
+/// inside `.agentstack/` sees no source code — the legacy root layout (used
+/// by the other tests here) masks the distinction.
+#[test]
+fn run_launches_the_harness_at_the_project_root() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let (tmp, proj) = setup("version = 1\n[meta]\nname = \"t\"\n");
+    // Re-home the manifest into the preferred layout.
+    fs::create_dir_all(proj.join(".agentstack")).unwrap();
+    fs::rename(
+        proj.join("agentstack.toml"),
+        proj.join(".agentstack/agentstack.toml"),
+    )
+    .unwrap();
+    // A shim "harness" that just records the directory it was launched from.
+    fs::write(
+        tmp.path().join("home/.agentstack/adapters/shtest.yaml"),
+        "id: shtest\ndisplay: Sh Test\ndetect:\n  bin: sh\n",
+    )
+    .unwrap();
+
+    agentstack::runs::launch(
+        Some(&proj),
+        "shtest",
+        None,
+        Scope::Project,
+        &["-c".to_string(), "pwd > launched-from.txt".to_string()],
+        false,
+    )
+    .unwrap();
+
+    assert!(
+        !proj.join(".agentstack/launched-from.txt").exists(),
+        "harness must not launch inside the manifest dir"
+    );
+    let recorded = fs::read_to_string(proj.join("launched-from.txt")).unwrap();
+    // Canonicalized: the kernel reports /private/var/… where the tempdir
+    // spells /var/… on macOS.
+    assert_eq!(
+        PathBuf::from(recorded.trim()).canonicalize().unwrap(),
+        proj.canonicalize().unwrap(),
+        "harness cwd must be the project root"
+    );
+}
+
 /// A run launched with a profile applies it before the harness starts and
 /// reverts it when the run ends (here: when killed).
 #[test]

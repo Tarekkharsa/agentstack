@@ -843,10 +843,13 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
 
     // Spawn on the host under the SAME run id the evidence carries, with the
     // run id exported for gateway audit attribution.
+    // Spawn at the PROJECT root, not the manifest dir — under the preferred
+    // layout ctx.dir is `.agentstack/`, and a harness opened there sees no
+    // source code (and sits one mistake away from the rendered configs).
     let status = crate::runs::launch_attached(
         &bin_path.to_string_lossy(),
         &args.args,
-        &ctx.dir,
+        base,
         &run_id,
         &args.harness,
         &display,
@@ -1349,6 +1352,65 @@ mod tests {
             assert!(
                 leftovers.is_empty(),
                 "no scope artifacts left: {leftovers:?}"
+            );
+        });
+    }
+
+    /// The harness must launch at the PROJECT root even when the manifest
+    /// lives in the preferred `.agentstack/` layout — a session opened inside
+    /// `.agentstack/` sees no source code and sits next to rendered configs.
+    /// (The other tests use the legacy root layout, where the two coincide.)
+    #[cfg(unix)]
+    #[test]
+    fn harness_launches_at_the_project_root_for_the_preferred_layout() {
+        locked_fixture(|home, proj| {
+            // Preferred layout: manifest (+ lock) under .agentstack/, the
+            // pinned tool at the project root where `./tool.sh` resolves.
+            proj.child("tool.sh")
+                .write_str("#!/bin/sh\necho v1\n")
+                .unwrap();
+            proj.child(".agentstack/agentstack.toml")
+                .write_str(
+                    "version = 1\n\n[servers.agent]\ntype = \"stdio\"\ncommand = \"./tool.sh\"\n",
+                )
+                .unwrap();
+            let manifest: crate::manifest::Manifest = toml::from_str(
+                &std::fs::read_to_string(proj.child(".agentstack/agentstack.toml").path()).unwrap(),
+            )
+            .unwrap();
+            let mut lock = agentstack_core::lock::Lock::default();
+            for pin in crate::executable::derive_executable_pins(
+                proj.path(),
+                "agent",
+                manifest.servers.get("agent").unwrap(),
+            )
+            .unwrap()
+            {
+                lock.upsert_executable(pin);
+            }
+            lock.save(proj.child(".agentstack").path()).unwrap();
+            trust::trust(proj.path()).unwrap();
+
+            // The fake harness records the directory it was launched from.
+            let fake = home.path().join("fakebin/claude");
+            std::fs::write(&fake, "#!/bin/sh\npwd > launched-from.txt\nexit 0\n").unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            run_locked(Some(proj.path()), &run_args(false)).unwrap();
+
+            // Written at the project root, not inside .agentstack/ …
+            assert!(
+                !proj.child(".agentstack/launched-from.txt").path().exists(),
+                "harness must not launch inside the manifest dir"
+            );
+            let recorded = std::fs::read_to_string(proj.child("launched-from.txt").path()).unwrap();
+            // … and the recorded cwd IS the project root (canonicalized: the
+            // kernel reports /private/var/… where TempDir says /var/…).
+            assert_eq!(
+                PathBuf::from(recorded.trim()).canonicalize().unwrap(),
+                proj.path().canonicalize().unwrap(),
+                "harness cwd must be the project root"
             );
         });
     }
