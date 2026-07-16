@@ -420,9 +420,19 @@ fn freeze_grant(
 /// standalone honest warning instead.
 struct ScopedMcpConfig {
     path: PathBuf,
-    /// The parked original (`<config>.agentstack-locked-<run>.bak`), when one
-    /// existed. Same-directory rename, so park/restore are atomic.
-    parked: Option<PathBuf>,
+    /// The kernel-enforced mutual-exclusion sentinel beside the config
+    /// (`<config>.agentstack-locked.lock`), created with `create_new` so two
+    /// racing locked runs can never both pass the guard. Contains only the
+    /// run id — SECRET-FREE by construction, so a crash leftover in the repo
+    /// can never leak anything.
+    sentinel: PathBuf,
+    /// The original config bytes (`None` when no config pre-existed). The
+    /// secret-bearing original is parked OUTSIDE the repo, in the run's
+    /// private 0700 recorder dir — a crash can never leave secrets sitting in
+    /// the project one `git add -A` away from publication.
+    original: Option<String>,
+    /// The on-disk crash-recovery copy of `original`, in the run dir.
+    parked_copy: Option<PathBuf>,
     /// The gateway-only body THIS run wrote — restore refuses to delete
     /// anything else (a swapped file means another process intervened).
     body: String,
@@ -430,12 +440,13 @@ struct ScopedMcpConfig {
 }
 
 impl ScopedMcpConfig {
-    /// Park + write, or `Ok(None)` when this harness has no project-scope MCP
-    /// config to scope (stated honestly by the caller).
+    /// Guard + park + write, or `Ok(None)` when this harness has no
+    /// project-scope MCP config to scope (stated honestly by the caller).
     fn apply(
         desc: &crate::adapter::AdapterDescriptor,
         project_dir: &Path,
         run_id: &str,
+        run_dir: &Path,
     ) -> Result<Option<ScopedMcpConfig>> {
         use crate::adapter::descriptor::Format;
         let (Some((path, format)), Some(mcp)) = (
@@ -466,93 +477,146 @@ impl ScopedMcpConfig {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "mcp-config".to_string());
-        // Concurrency guard: a parked backup beside this config means another
-        // locked run is scoping it right now (or a previous one crashed).
-        // Stacking parks would let the first run's restore silently WIDEN the
-        // second run mid-flight, and the second run's restore destroy the
-        // true original — refuse instead, naming the leftover.
-        if let Some(existing) = std::fs::read_dir(path.parent().unwrap_or(Path::new(".")))
-            .ok()
-            .and_then(|d| {
-                d.filter_map(|e| e.ok()).map(|e| e.file_name()).find(|n| {
-                    let n = n.to_string_lossy();
-                    n.starts_with(&format!("{file_name}.agentstack-locked-")) && n.ends_with(".bak")
-                })
-            })
+        // Concurrency guard, ATOMIC (`create_new`): a scan-then-rename guard
+        // races — two runs passing the scan together would stack parks, so
+        // the first run's restore silently WIDENS the second mid-flight. The
+        // kernel arbitrates this one: exactly one creator wins, the loser
+        // refuses naming the holder (or a crash leftover, with instructions).
+        let sentinel = path.with_file_name(format!("{file_name}.agentstack-locked.lock"));
         {
-            anyhow::bail!(
-                "another locked run appears to be scoping {} (or a previous one crashed): \
-                 parked backup {existing:?} exists — wait for that run to finish, or restore \
-                 the backup manually, then retry",
-                path.display()
-            );
+            use std::io::Write;
+            let mut opts = std::fs::OpenOptions::new();
+            opts.write(true).create_new(true);
+            match opts.open(&sentinel) {
+                Ok(mut f) => {
+                    let _ = f.write_all(run_id.as_bytes());
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let holder = std::fs::read_to_string(&sentinel).unwrap_or_default();
+                    anyhow::bail!(
+                        "another locked run ({}) is scoping {} — wait for it to finish; if it \
+                         crashed, its original config is under ~/.agentstack/runs/<that run>/ \
+                         and removing {} re-enables locked runs here",
+                        if holder.trim().is_empty() {
+                            "unknown"
+                        } else {
+                            holder.trim()
+                        },
+                        path.display(),
+                        sentinel.display()
+                    );
+                }
+                Err(e) => {
+                    return Err(e)
+                        .context(format!("creating the scope guard {}", sentinel.display()))
+                }
+            }
         }
-        let parked = if path.exists() {
-            let bak = path.with_file_name(format!("{file_name}.agentstack-locked-{run_id}.bak"));
-            std::fs::rename(&path, &bak).with_context(|| format!("parking {}", path.display()))?;
-            Some(bak)
-        } else {
-            None
+
+        // Park the (possibly secret-bearing) original OUTSIDE the repo.
+        let original = match std::fs::read_to_string(&path) {
+            Ok(text) => Some(text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                let _ = std::fs::remove_file(&sentinel);
+                return Err(e).context(format!("reading {}", path.display()));
+            }
+        };
+        let parked_copy = match &original {
+            Some(text) => {
+                let copy = run_dir.join(format!("parked-{file_name}"));
+                if let Err(e) = std::fs::write(&copy, text) {
+                    let _ = std::fs::remove_file(&sentinel);
+                    return Err(e).context("parking the original config in the run dir");
+                }
+                Some(copy)
+            }
+            None => None,
         };
         if let Err(e) =
             crate::util::atomic::write(&path, &body).context("writing the gateway-only config")
         {
-            // Fail closed but leave nothing half-scoped: put the original
-            // back; a rollback failure is chained, never swallowed.
-            if let Some(bak) = &parked {
-                if let Err(roll) = std::fs::rename(bak, &path) {
+            // Fail closed but leave nothing half-scoped; a rollback failure
+            // is chained, never swallowed (the run-dir copy still exists).
+            if let Some(orig) = &original {
+                if let Err(roll) = crate::util::atomic::write(&path, orig) {
+                    let _ = std::fs::remove_file(&sentinel);
                     return Err(e.context(format!(
-                        "ALSO: restoring the parked original failed ({roll}) — your config \
-                         is at {}",
-                        bak.display()
+                        "ALSO: restoring the original failed ({roll:#}) — your config is \
+                         preserved at {}",
+                        parked_copy.as_deref().unwrap_or(Path::new("?")).display()
                     )));
                 }
             }
+            let _ = std::fs::remove_file(&sentinel);
             return Err(e);
         }
         Ok(Some(ScopedMcpConfig {
             path,
-            parked,
+            sentinel,
+            original,
+            parked_copy,
             body,
             restored: false,
         }))
     }
 
-    /// Remove the gateway-only config and restore the parked original. Called
-    /// explicitly on every exit path; `Drop` is the best-effort backstop. A
-    /// crash before restore leaves the MORE restrictive state (gateway-only)
-    /// plus the `.bak` beside it — fail-safe direction, never wider. Every
-    /// failure mode is LOUD: this swaps the user's live config, so a restore
+    /// Put the original back and release the guard. Called explicitly on
+    /// every exit path; `Drop` is the best-effort backstop. A crash before
+    /// restore leaves the MORE restrictive state (gateway-only + sentinel +
+    /// the original safe in the run dir) — fail-safe direction, never wider,
+    /// never a secret in the repo. Every failure mode is LOUD: a restore
     /// that couldn't complete must never look like one that did.
     fn restore(&mut self) {
         if self.restored {
             return;
         }
         self.restored = true;
-        // Only delete what this run wrote: a different current content means
-        // another process swapped the file — leave it and the backup intact.
+        // Only replace what this run wrote: different current content means
+        // another process swapped the file — leave it intact.
         match std::fs::read_to_string(&self.path) {
             Ok(current) if current == self.body => {
-                let _ = std::fs::remove_file(&self.path);
+                let outcome = match &self.original {
+                    Some(orig) => crate::util::atomic::write(&self.path, orig),
+                    None => std::fs::remove_file(&self.path).map_err(Into::into),
+                };
+                if let Err(e) = outcome {
+                    eprintln!(
+                        "  ⚠ could not restore {} ({e:#}) — your original is preserved at {}",
+                        self.path.display(),
+                        self.parked_copy
+                            .as_deref()
+                            .unwrap_or(Path::new("(it did not exist)"))
+                            .display()
+                    );
+                    return; // keep the sentinel: the state needs attention
+                }
+                // Restored successfully: the crash-recovery copy (possibly
+                // secret-bearing) has served its purpose — don't leave
+                // plaintext secrets lingering in the run dir.
+                if let Some(copy) = &self.parked_copy {
+                    let _ = std::fs::remove_file(copy);
+                }
             }
             _ => {
                 eprintln!(
                     "  ⚠ {} changed during the run (not this run's gateway-only content) — \
-                     leaving it in place; your original remains at {:?}",
+                     leaving it in place; your original is preserved at {}",
                     self.path.display(),
-                    self.parked.as_deref().unwrap_or(Path::new("(none)"))
+                    self.parked_copy
+                        .as_deref()
+                        .unwrap_or(Path::new("(it did not exist)"))
+                        .display()
                 );
-                return;
+                // The swapper owns the file now; release the guard below.
             }
         }
-        if let Some(bak) = &self.parked {
-            if let Err(e) = std::fs::rename(bak, &self.path) {
-                eprintln!(
-                    "  ⚠ could not restore {} from {} ({e}) — restore it manually",
-                    self.path.display(),
-                    bak.display()
-                );
-            }
+        if let Err(e) = std::fs::remove_file(&self.sentinel) {
+            eprintln!(
+                "  ⚠ could not remove the scope guard {} ({e}) — remove it manually to \
+                 re-enable locked runs here",
+                self.sentinel.display()
+            );
         }
     }
 }
@@ -742,7 +806,17 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     // §3 step 7 (host tier, per ruling): launch-scope the PROJECT MCP config
     // to the synthetic gateway entry for the run's lifetime; restore after.
     // Global scope stays honestly labeled (see print_posture_and_limits).
-    let mut scoped = match ScopedMcpConfig::apply(desc, &ctx.dir, &run_id) {
+    let run_dir = ev
+        .log
+        .path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| {
+            crate::util::paths::agentstack_home()
+                .join("runs")
+                .join(&run_id)
+        });
+    let mut scoped = match ScopedMcpConfig::apply(desc, &ctx.dir, &run_id, &run_dir) {
         Ok(Some(s)) => {
             println!(
                 "  {} project MCP config launch-scoped to the gateway ({})",
@@ -1256,14 +1330,21 @@ mod tests {
 
             let after = std::fs::read_to_string(proj.child(".mcp.json").path()).unwrap();
             assert_eq!(after, ambient, "original restored byte-identical");
+            // No sentinel or park artifact remains in the PROJECT — the
+            // secret-bearing original is parked in the run dir, never in the
+            // repo (a crash must not leave secrets one `git add` away).
             let leftovers: Vec<_> = std::fs::read_dir(proj.path())
                 .unwrap()
                 .filter_map(|e| e.ok())
-                .filter(|e| e.file_name().to_string_lossy().contains(".bak"))
+                .filter(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .contains("agentstack-locked")
+                })
                 .collect();
             assert!(
                 leftovers.is_empty(),
-                "no parked backups left: {leftovers:?}"
+                "no scope artifacts left: {leftovers:?}"
             );
         });
     }
@@ -1277,14 +1358,14 @@ mod tests {
     fn overlapping_locked_run_refuses_instead_of_stacking_parks() {
         locked_fixture(|_home, proj| {
             pinned_and_trusted(proj);
-            proj.child(".mcp.json.agentstack-locked-r-other.bak")
-                .write_str("{}")
+            // The atomic sentinel another in-flight run would hold.
+            proj.child(".mcp.json.agentstack-locked.lock")
+                .write_str("r-other")
                 .unwrap();
 
             let err = run_locked(Some(proj.path()), &run_args(false)).unwrap_err();
             let msg = format!("{err:#}");
-            assert!(msg.contains("another locked run"), "{msg}");
-            assert!(msg.contains("agentstack-locked-r-other.bak"), "{msg}");
+            assert!(msg.contains("another locked run (r-other)"), "{msg}");
         });
     }
 
