@@ -579,6 +579,8 @@ fn render_gateway_config(
             .into_iter()
             .collect(),
         env: Default::default(),
+        // A synthetic in-memory entry: nothing on disk to integrity-pin.
+        integrity_roots: Vec::new(),
         extra: Default::default(),
     };
     let rendered = render_server(desc, &gw_server, &MapResolver::default());
