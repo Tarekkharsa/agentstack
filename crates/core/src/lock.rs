@@ -379,7 +379,10 @@ mod tests {
             checksum: "beef".into(),
         });
         assert_eq!(lock.servers[0].name, "figma", "sorted by name");
-        assert_eq!(lock.get_server("kibana").unwrap().source, ServerSource::Library);
+        assert_eq!(
+            lock.get_server("kibana").unwrap().source,
+            ServerSource::Library
+        );
 
         let text = toml::to_string_pretty(&lock).unwrap();
         assert!(text.contains("[[server]]"));
