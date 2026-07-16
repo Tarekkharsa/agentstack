@@ -654,6 +654,54 @@ impl RuntimeImage {
         }
     }
 }
+
+// Idiomatic trait surface over the posture/mode enums: `Display` (so they
+// format with `{}` and interoperate with anything generic over `Display`) and,
+// where a string is parsed back, `FromStr` (so callers use `.parse()` and the
+// type works with clap/serde-with). Each `Display` delegates to the existing
+// zero-alloc `slug()` accessor — kept as the `&'static str` fast path — so no
+// call site pays an allocation it didn't before. Written out explicitly (no
+// macro) per the house style.
+impl std::fmt::Display for GrantSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.slug())
+    }
+}
+impl std::fmt::Display for GrantPosture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.slug())
+    }
+}
+impl std::fmt::Display for EgressMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.slug())
+    }
+}
+impl std::fmt::Display for ArtifactMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.slug())
+    }
+}
+impl std::fmt::Display for WorkspaceGrant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.slug())
+    }
+}
+impl std::fmt::Display for RuntimeImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.slug())
+    }
+}
+
+/// `FromStr` returns a real error type, so `?` propagates it — unlike a
+/// `FromStr<Err = Infallible>`, which would force callers into an `unwrap`.
+impl std::str::FromStr for GrantPosture {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self> {
+        GrantPosture::from_slug(s)
+            .ok_or_else(|| anyhow::anyhow!("unknown confinement posture '{}'", s.trim()))
+    }
+}
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ImageBinding {
     Unbound,
