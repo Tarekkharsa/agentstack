@@ -115,24 +115,11 @@ pub fn start(gateway: Arc<Gateway>, bind: &str) -> Option<GatewayHttp> {
     Some(GatewayHttp { port, token })
 }
 
-/// Constant-time byte-equality — no early return on the first mismatched byte,
-/// so comparing the bearer token can't leak a per-byte timing signal. (The
-/// token length is fixed and public, so length may short-circuit.)
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
-}
-
 /// Handle one HTTP request: token first, then method, then MCP dispatch.
 fn serve_one(mut req: tiny_http::Request, gateway: &Gateway, token: &str, session_id: &str) {
     let authed = req.headers().iter().any(|h| {
-        h.field.equiv("X-Agentstack-Token") && ct_eq(h.value.as_str().as_bytes(), token.as_bytes())
+        h.field.equiv("X-Agentstack-Token")
+            && crate::util::ct_eq(h.value.as_str().as_bytes(), token.as_bytes())
     });
     if !authed {
         let resp = Response::from_string(json!({ "error": "unauthorized" }).to_string())

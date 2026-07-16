@@ -114,10 +114,13 @@ fn serve_loop(server: Server, gateway: Arc<Gateway>, token: String) {
         let token = token.clone();
         std::thread::spawn(move || {
             let _guard = guard; // released (decrementing) on thread exit
-            let authed = req
-                .headers()
-                .iter()
-                .any(|h| h.field.equiv("X-Agentstack-Token") && h.value.as_str() == token);
+            let authed = req.headers().iter().any(|h| {
+                // Constant-time comparison — same reasoning as the gateway HTTP
+                // endpoint (see crate::util::ct_eq): a plain `==` short-circuits
+                // on the first mismatched byte and leaks a timing signal.
+                h.field.equiv("X-Agentstack-Token")
+                    && crate::util::ct_eq(h.value.as_str().as_bytes(), token.as_bytes())
+            });
             // Token first: an unauthenticated caller is answered 401 before
             // the endpoint reads (let alone buffers) a single body byte.
             if !authed {

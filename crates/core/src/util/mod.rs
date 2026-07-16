@@ -59,6 +59,21 @@ pub fn random_bytes() -> Vec<u8> {
     h.finalize().to_vec()
 }
 
+/// Constant-time byte-equality — no early return on the first mismatched byte,
+/// so comparing a bearer token (gateway HTTP, code-mode endpoint) can't leak a
+/// per-byte timing signal. (The token length is fixed and public, so length
+/// may short-circuit.)
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// Best-effort permission tightening for files/dirs holding local secrets
 /// (0600 files, 0700 dirs on unix; no-op elsewhere). Applied after creation
 /// too, so pre-existing artifacts from before a hardening change get fixed.
