@@ -288,6 +288,46 @@ CLOSED_LOOP = (
     ],
 )
 
+GUARD = (
+    "rm -rf blocked · git reset blocked · .env denied · on the record",
+    [
+        cmd("agentstack guard install", "     # a pre-tool-use hook in 9 CLIs"),
+        out(("ok", "  ✓"), ("c", " wired: Claude Code · Codex · Gemini · Cursor · Windsurf · +4"), d=0.8),
+        gap(),
+        out(("c", "  agent → "), ("i", "rm -rf /opt/acme/data")),
+        out(("no", "    ✗ blocked"), ("c", "   destructive, outside the workspace"), d=0.8),
+        # NOTE: '~' is reserved by render() as a quote placeholder — avoid it
+        # in row text (the real demo uses HEAD~3; condensed here without it).
+        out(("c", "  agent → "), ("i", "git reset --hard")),
+        out(("no", "    ✗ blocked"), ("c", "   discards uncommitted work"), d=0.8),
+        out(("c", "  agent → "), ("i", "cat .env")),
+        out(("no", "    ✗ blocked"), ("c", "   [policy.filesystem] deny glob"), d=0.8),
+        out(("c", "  agent → "), ("i", "ls -la")),
+        out(("ok", "    ✓ allowed"), d=0.9),
+        gap(),
+        cmd("agentstack audit --calls"),
+        out(("c", "  3 denials recorded (host-guard) — tool + outcome, never file contents")),
+    ],
+)
+
+ONE_MANIFEST = (
+    "one manifest → .mcp.json · config.toml · mcp.json",
+    [
+        cmd("cat .agentstack/agentstack.toml", "   # one committed source of truth"),
+        out(("c", "  [servers.github]")),
+        out(("c", '  command = "npx"  args = ["-y", "@modelcontextprotocol/server-github"]')),
+        out(("c", '  env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_TOKEN}" }'), d=0.8),
+        gap(),
+        cmd("agentstack apply --write"),
+        out(("c", "  Claude Code   + .mcp.json                "), ("ok", "✓ wrote 1 server")),
+        out(("c", "  Codex CLI     + .codex/config.toml       "), ("ok", "✓ wrote 1 server")),
+        out(("c", "  Cursor        + .cursor/mcp.json         "), ("ok", "✓ wrote 1 server")),
+        out(("c", "  instructions  → CLAUDE.md + AGENTS.md    "), ("ok", "✓ compiled"), d=0.9),
+        gap(),
+        out(("ok", "  ✓"), ("c", " same server, three native shapes — the manifest never holds the token")),
+    ],
+)
+
 if __name__ == "__main__":
     docs = Path(__file__).resolve().parent.parent / "docs"
     for name, (title, rows) in {
@@ -295,5 +335,7 @@ if __name__ == "__main__":
         "trust-gate": TRUST_GATE,
         "lockdown": LOCKDOWN,
         "closed-loop": CLOSED_LOOP,
+        "guard": GUARD,
+        "one-manifest": ONE_MANIFEST,
     }.items():
         render(title, rows, docs / f"{name}.svg")

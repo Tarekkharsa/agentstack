@@ -92,18 +92,51 @@
     border-bottom: 1px solid transparent; transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
   header.site.scrolled { border-bottom-color: var(--line); box-shadow: var(--shadow-sm); }
-  .bar { max-width: var(--wrap); margin: 0 auto; padding: 0.8rem 1.35rem; display: flex; align-items: center; gap: 1.1rem; }
+  .bar { max-width: 74rem; margin: 0 auto; padding: 0.7rem 1.35rem; display: flex; align-items: center; gap: 1.1rem; }
   .wordmark { font-family: var(--mono); font-weight: 700; font-size: 1.02rem; color: var(--ink); display: inline-flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em; }
   .wordmark:hover { text-decoration: none; }
+  .wordmark .wm2, .brand .wm2 { color: var(--accent); }
   .wordmark .mark { height: 26px; width: auto; flex: none; display: block; filter: drop-shadow(0 1px 1.5px rgba(20,24,28,0.18)); }
-  nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.15rem; flex-wrap: wrap; }
+  nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.05rem; flex-wrap: nowrap; white-space: nowrap; }
+  @media (max-width: 1060px) { nav.top a.nav-x { display: none; } }
+  @media (max-width: 700px) { nav.top a:not(.ghost) { display: none; } }
   nav.top a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
   nav.top a:hover { color: var(--accent); text-decoration: none; }
   nav.top a[aria-current="page"] { color: var(--accent); }
   nav.top .ghost { padding: 0.34rem 0.7rem; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); }
   nav.top .ghost:hover { border-color: var(--accent-line); background: var(--accent-soft); }
 
-  main { max-width: var(--wrap); margin: 0 auto; padding: 0 1.35rem 6rem; }
+  /* Canonical docs sidebar — identical on docs.html, examples.html, and
+     start.html. Edit in ALL THREE places together (each page is self-contained). */
+  .docwrap {
+    max-width: 78rem; margin: 0 auto; padding: 0 1.35rem;
+    display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 2.75rem;
+    align-items: start;
+  }
+  aside.side { position: sticky; top: 4.2rem; max-height: calc(100vh - 5rem); overflow-y: auto; padding: 1.6rem 0 2rem; font-size: 0.85rem; }
+  aside.side .crumb { display: inline-block; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); margin-bottom: 0.9rem; }
+  aside.side .grp { margin-bottom: 1.15rem; }
+  aside.side .grp > b { display: block; font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.35rem; }
+  aside.side .grp > code { display: block; font-family: var(--mono); font-size: 0.66rem; color: var(--accent); background: none; border: none; padding: 0; margin: -0.25rem 0 0.35rem; }
+  aside.side ul { list-style: none; margin: 0; padding: 0; }
+  aside.side li a {
+    display: flex; gap: 0.5rem; align-items: baseline; padding: 0.14rem 0.5rem;
+    border-left: 2px solid transparent; border-radius: 0 5px 5px 0;
+    font-family: var(--mono); font-size: 0.76rem; color: var(--muted);
+  }
+  aside.side li a:hover { color: var(--accent); text-decoration: none; }
+  aside.side li a .n { color: var(--accent); font-size: 0.68rem; min-width: 1.2rem; text-align: right; }
+  aside.side li a.on { color: var(--ink); border-left-color: var(--accent); background: var(--accent-soft); }
+  aside.side li a.on-page { color: var(--ink); font-weight: 600; }
+  aside.side ul.sub { margin: 0.15rem 0 0.4rem; }
+  aside.side ul.sub li a { font-size: 0.72rem; padding-left: 1.15rem; }
+  aside.side ul.sub li.subhead {
+    font-family: var(--mono); font-size: 0.6rem; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+    margin: 0.5rem 0 0.15rem; padding-left: 1.15rem; opacity: 0.85;
+  }
+  @media (max-width: 960px) { .docwrap { display: block; } aside.side { display: none; } }
+  main { max-width: var(--wrap); min-width: 0; margin: 0; padding: 0 0 6rem; }
   section { margin-top: 4.5rem; scroll-margin-top: 5rem; }
 
   .eyebrow { font-family: var(--mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); margin: 0 0 0.7rem; display: inline-flex; align-items: center; gap: 0.55rem; }
@@ -155,6 +188,13 @@
   .toc-groups a:hover { color: var(--accent); }
 
   .grp { margin-top: 4rem; padding-top: 0.4rem; border-top: 1px solid var(--line-soft); }
+  .cathead { margin-top: 5.5rem; }
+  .cathead .catname { font-family: var(--mono); font-size: 0.9rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin: 0; display: inline-flex; align-items: center; gap: 0.55rem; }
+  .cathead .catname::before { content: ""; width: 1.6rem; height: 1px; background: var(--accent-line); }
+  .cathead .cmdline { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); margin: 0.4rem 0 0; }
+  .cathead .cmdline b { color: var(--accent); font-weight: 600; }
+  .cathead + .grp { border-top: none; margin-top: 1.6rem; }
+  .toc-groups .g .gl { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); display: block; margin: 0.55rem 0 0.2rem; }
   h3.ex { display: flex; align-items: baseline; gap: 0.65rem; margin-top: 2.4rem; scroll-margin-top: 5rem; }
   h3.ex:first-of-type { margin-top: 1.6rem; }
   h3.ex .num { color: var(--accent); font-variant-numeric: tabular-nums; }
@@ -233,18 +273,136 @@
 
 <header class="site" id="site-header">
   <div class="bar">
-    <a class="wordmark" href="./"><svg class="mark" viewBox="24 18 72 85" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="navTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F5A968"/><stop offset="1" stop-color="#E7864A"/></linearGradient></defs><path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/><path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/><path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/><path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/><path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/><path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/><path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#navTop)"/><path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/><path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/><path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/></svg>agentstack</a>
+    <a class="wordmark" href="./"><img class="mark" src="logo-mark.svg" alt=""><span>agent<span class="wm2">Stack</span></span></a>
     <nav class="top" aria-label="Project links">
-      <a href="index.html#enforced">what's&nbsp;enforced</a>
-      <a href="start.html">get&nbsp;started</a>
-      <a href="how-it-works.html">how&nbsp;it&nbsp;works</a>
-      <a class="refline" href="primitives.html">primitives</a>
+      <a href="docs.html">docs</a>
       <a href="examples.html" aria-current="page">examples</a>
-      <a class="refline" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">reference</a>
-      <a class="ghost" href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
+      <a href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
+      <a class="ghost" href="start.html">Get&nbsp;started&nbsp;→</a>
     </nav>
   </div>
 </header>
+
+<div class="docwrap">
+
+<!-- sidebar:begin (generated — edit agentstack-test/make-docs-sidebar.py) -->
+<aside class="side" aria-label="Documentation">
+  <div class="grp">
+    <b>Start</b>
+    <ul>
+      <li><a href="start.html">Get started</a>
+      </li>
+      <li><a href="index.html#install">Install</a>
+      </li>
+      <li><a class="on-page" href="examples.html">Examples</a>
+        <ul class="sub">
+          <li class="subhead">Configure</li>
+          <li><a href="#e1"><span class="n">1</span>The smallest manifest</a></li>
+          <li><a href="#e2"><span class="n">2</span>Fan out to several CLIs</a></li>
+          <li><a href="#e3"><span class="n">3</span>Secrets out of the file</a></li>
+          <li><a href="#e4"><span class="n">4</span>HTTP server with auth</a></li>
+          <li><a href="#e5"><span class="n">5</span>Native passthrough</a></li>
+          <li><a href="#e6"><span class="n">6</span>Add skills</a></li>
+          <li><a href="#e7"><span class="n">7</span>Task-specific profiles</a></li>
+          <li><a href="#e8"><span class="n">8</span>Instruction files</a></li>
+          <li><a href="#e9"><span class="n">9</span>The everyday loop</a></li>
+          <li><a href="#e14"><span class="n">14</span>The central library</a></li>
+          <li><a href="#e15"><span class="n">15</span>Sync across machines</a></li>
+          <li><a href="#e16"><span class="n">16</span>Versioned vendor packs</a></li>
+          <li><a href="#e17"><span class="n">17</span>Adopt a native plugin</a></li>
+          <li><a href="#e24"><span class="n">24</span>Add a CLI in one file</a></li>
+          <li><a href="#e25"><span class="n">25</span>The personal layer</a></li>
+          <li class="subhead">Protect</li>
+          <li><a href="#e10"><span class="n">10</span>The MCP tool firewall</a></li>
+          <li><a href="#e11"><span class="n">11</span>The machine layer</a></li>
+          <li><a href="#e12"><span class="n">12</span>Governance</a></li>
+          <li><a href="#e13"><span class="n">13</span>The trust gate</a></li>
+          <li><a href="#e19"><span class="n">19</span>Policy dimensions</a></li>
+          <li><a href="#e23"><span class="n">23</span>The CI trust gate</a></li>
+          <li class="subhead">Run confined</li>
+          <li><a href="#e18"><span class="n">18</span>Sandboxed runs</a></li>
+          <li><a href="#e22"><span class="n">22</span>Governed TypeScript</a></li>
+          <li class="subhead">Observe</li>
+          <li><a href="#e20"><span class="n">20</span>Audit, analyze, report</a></li>
+          <li><a href="#e21"><span class="n">21</span>What your tools cost</a></li>
+        </ul>
+      </li>
+      <li><a href="primitives.html">Which primitive?</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Configure</b>
+    <code>$ agentstack apply</code>
+    <ul>
+      <li><a href="how-it-works.html">How it works</a>
+      </li>
+      <li><a href="index.html#manifest">The manifest</a>
+      </li>
+      <li><a href="library.html">Central library</a>
+      </li>
+      <li><a href="index.html#modes">Rendered-file modes</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">Dashboard</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Protect</b>
+    <code>$ agentstack trust · guard</code>
+    <ul>
+      <li><a href="index.html#trust">The trust gate</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Policy presets</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Run confined</b>
+    <code>$ agentstack run --lockdown</code>
+    <ul>
+      <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a>
+      </li>
+      <li><a href="index.html#enforced">What's enforced</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">Enforcement matrix</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Observe</b>
+    <code>$ agentstack report</code>
+    <ul>
+      <li><a href="#e20">Reports &amp; call audit</a>
+      </li>
+      <li><a href="#e21">Wire-cost analysis</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Reference</b>
+    <ul>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Every command</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md">Agent manual (skill)</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Project</b>
+    <ul>
+      <li><a href="security-review-2026-07-11.html">Security review</a>
+      </li>
+      <li><a href="strategy.html">Strategy</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/HISTORY.md">History</a>
+      </li>
+    </ul>
+  </div>
+</aside>
+<!-- sidebar:end -->
 
 <main id="main">
 
@@ -275,53 +433,58 @@
     <div class="toc" aria-label="Contents">
       <h2>Contents</h2>
       <div class="toc-groups">
-        <div class="g"><span>Basics</span>
+        <div class="g"><span>Configure</span>
+          <span class="gl">Basics</span>
           <ol>
-            <li><a href="#e1">The smallest manifest</a></li>
-            <li><a href="#e2">Fan out to several CLIs</a></li>
-            <li><a href="#e3">Keep secrets out of the file</a></li>
-            <li><a href="#e4">An HTTP server with auth</a></li>
-            <li><a href="#e5">Per-CLI native passthrough</a></li>
+            <li value="1"><a href="#e1">The smallest manifest</a></li>
+            <li value="2"><a href="#e2">Fan out to several CLIs</a></li>
+            <li value="3"><a href="#e3">Keep secrets out of the file</a></li>
+            <li value="4"><a href="#e4">An HTTP server with auth</a></li>
+            <li value="5"><a href="#e5">Per-CLI native passthrough</a></li>
+          </ol>
+          <span class="gl">Structure</span>
+          <ol>
+            <li value="6"><a href="#e6">Add skills</a></li>
+            <li value="7"><a href="#e7">Task-specific profiles</a></li>
+            <li value="8"><a href="#e8">Instruction files</a></li>
+            <li value="9"><a href="#e9">The everyday loop</a></li>
+          </ol>
+          <span class="gl">Scale</span>
+          <ol>
+            <li value="14"><a href="#e14">The central library</a></li>
+            <li value="15"><a href="#e15">Sync across machines</a></li>
+            <li value="16"><a href="#e16">Versioned vendor packs</a></li>
+            <li value="17"><a href="#e17">Adopt a native plugin</a></li>
+          </ol>
+          <span class="gl">Extend</span>
+          <ol>
+            <li value="24"><a href="#e24">Add a CLI in one file</a></li>
+            <li value="25"><a href="#e25">Personal layer &amp; owned servers</a></li>
           </ol>
         </div>
-        <div class="g"><span>Structure</span>
-          <ol start="6">
-            <li><a href="#e6">Add skills</a></li>
-            <li><a href="#e7">Task-specific profiles</a></li>
-            <li><a href="#e8">Instruction files</a></li>
-            <li><a href="#e9">The everyday loop</a></li>
+        <div class="g"><span>Protect</span>
+          <span class="gl">Security</span>
+          <ol>
+            <li value="10"><a href="#e10">The MCP tool firewall</a></li>
+            <li value="11"><a href="#e11">The machine layer</a></li>
+            <li value="12"><a href="#e12">Governance</a></li>
+            <li value="13"><a href="#e13">Zero files: the trust gate</a></li>
+            <li value="19"><a href="#e19">The other policy dimensions</a></li>
+            <li value="23"><a href="#e23">The CI trust gate</a></li>
           </ol>
         </div>
-        <div class="g"><span>Security</span>
-          <ol start="10">
-            <li><a href="#e10">The MCP tool firewall</a></li>
-            <li><a href="#e11">The machine layer</a></li>
-            <li><a href="#e12">Governance</a></li>
-            <li><a href="#e13">Zero files: the trust gate</a></li>
+        <div class="g"><span>Run confined</span>
+          <span class="gl">Runtime</span>
+          <ol>
+            <li value="18"><a href="#e18">Sandboxed runs + egress</a></li>
+            <li value="22"><a href="#e22">Governed TypeScript</a></li>
           </ol>
         </div>
-        <div class="g"><span>Scale</span>
-          <ol start="14">
-            <li><a href="#e14">The central library</a></li>
-            <li><a href="#e15">Sync across machines</a></li>
-            <li><a href="#e16">Versioned vendor packs</a></li>
-            <li><a href="#e17">Adopt a native plugin</a></li>
-          </ol>
-        </div>
-        <div class="g"><span>Runtime</span>
-          <ol start="18">
-            <li><a href="#e18">Sandboxed runs + egress</a></li>
-            <li><a href="#e19">Other policy dimensions</a></li>
-            <li><a href="#e20">Audit, analyze, report</a></li>
-            <li><a href="#e21">See what your tools cost</a></li>
-            <li><a href="#e22">Governed TypeScript</a></li>
-          </ol>
-        </div>
-        <div class="g"><span>Operate</span>
-          <ol start="23">
-            <li><a href="#e23">The CI trust gate</a></li>
-            <li><a href="#e24">Add a CLI in one file</a></li>
-            <li><a href="#e25">Personal layer &amp; owned servers</a></li>
+        <div class="g"><span>Observe</span>
+          <span class="gl">Observe</span>
+          <ol>
+            <li value="20"><a href="#e20">Audit, analyze, report</a></li>
+            <li value="21"><a href="#e21">See what your tools cost</a></li>
           </ol>
         </div>
       </div>
@@ -352,6 +515,12 @@
     </div>
     <p class="small muted" style="margin-top:1rem">Full decision table: <a href="primitives.html">AgentStack primitives and recommendations</a>.</p>
   </section>
+
+  <!-- ============ CATEGORY 1 · CONFIGURE ============ -->
+  <div class="cathead">
+    <p class="catname">Configure</p>
+    <p class="cmdline"><b>$</b> agentstack apply</p>
+  </div>
 
   <!-- ============ BASICS ============ -->
   <section class="grp" id="basics">
@@ -532,6 +701,63 @@ agentstack doctor       <span class="cm"># verify wiring; every warning names it
     </div>
   </section>
 
+  <!-- ============ SCALE ============ -->
+  <section class="grp" id="scale">
+    <p class="eyebrow">Scale</p>
+    <h2>Reuse capabilities everywhere</h2>
+
+    <h3 class="ex" id="e14"><span class="num">14</span> The central library</h3>
+    <p class="intent">Install a capability <strong>once</strong> into your machine-wide library (<code>~/.agentstack/lib</code>), then reference it <strong>by name</strong> from any project — nothing copied, and every add is content-scanned before it lands.</p>
+    <p class="muted small">See <a href="library.html#quickstart">the central library quick start</a> for the full <code>lib add</code> flow.</p>
+
+    <h3 class="ex" id="e15"><span class="num">15</span> Sync the library across machines</h3>
+    <p class="intent">Version the library as a git repo with <code>agentstack lib sync</code> — a fail-closed gate scans every server field <strong>and the outgoing commits</strong> for secrets before pushing.</p>
+    <p class="muted small">A literal secret, or a definition it can't parse, blocks the sync rather than slipping through. See <a href="library.html#commands">the library command reference</a>.</p>
+
+    <h3 class="ex" id="e16"><span class="num">16</span> Versioned vendor packs</h3>
+    <p class="intent">Install a pinned bundle of MCP servers, skills, and house rules in one shot — policy-gated and content-scanned first, with the lockfile recording exactly what you got.</p>
+    <p class="muted small">Upgrading is just the next tag. See <a href="library.html#sandbox">the runnable closed-loop demo</a> of a pack installed, applied, firewalled, and upgraded.</p>
+
+    <h3 class="ex" id="e17"><span class="num">17</span> Adopt a native plugin</h3>
+    <p class="intent">Lift a plugin you installed in one CLI into the manifest so it travels everywhere — skills copied to the library with provenance, servers carried as <code>${REF}</code>s.</p>
+    <p class="muted small">The harness you adopted <em>from</em> stays satisfied by its native install — <code>status</code>/<code>doctor</code> report it up to date rather than double-installing. See <a href="library.html#views">how agentstack owns provider views</a>.</p>
+  </section>
+
+  <!-- ============ EXTEND ============ -->
+  <section class="grp" id="operate">
+    <p class="eyebrow">Extend</p>
+    <h2>Extend it</h2>
+
+    <h3 class="ex" id="e24"><span class="num">24</span> Extend it — add a CLI in one file</h3>
+    <p class="intent">Support a new CLI with a single YAML descriptor — no rebuild.</p>
+    <div class="copywrap">
+      <pre><code>cp crates/adapters/descriptors/codex.yaml my-adapter.yaml
+<span class="cm"># edit it, then:</span>
+agentstack adapters validate my-adapter.yaml
+cp my-adapter.yaml ~/.agentstack/adapters/      <span class="cm"># picked up on next run</span>
+agentstack adapters list                        <span class="cm"># marks which adapters are yours</span></code></pre>
+      <button class="copybtn" data-copy="agentstack adapters validate my-adapter.yaml">copy</button>
+    </div>
+    <p class="muted small">A broken drop-in is skipped with a warning, never fatal.</p>
+
+    <h3 class="ex" id="e25"><span class="num">25</span> The personal layer &amp; app-owned servers</h3>
+    <p class="intent">Machine-wide instructions that merge beneath every project without landing in any repo; and letting an app's own config be the source of truth.</p>
+    <div class="copywrap">
+      <pre><code>agentstack init --global                        <span class="cm"># a home for your machine-wide rules</span></code></pre>
+      <button class="copybtn" data-copy="agentstack init --global">copy</button>
+    </div>
+    <pre><code>[servers.codex-native]
+owner = "codex"                                 <span class="cm"># codex owns this entry; apply follows it</span></code></pre>
+    <p class="muted small">When the app rewrites its own entry (a self-update), <code>apply</code> refreshes the manifest and fans the fresh values out to every other CLI instead of reverting the app.</p>
+    <p class="muted small">Machine policy is resilient to accidental bad edits: a validated policy continues from a secret-free last-known-good snapshot and reports <strong>DEGRADED</strong>; first-run corruption reports <strong>BLOCKED</strong> and protected activation refuses to continue. Run <code>agentstack doctor</code> for the exact state and repair details.</p>
+  </section>
+
+  <!-- ============ CATEGORY 2 · PROTECT ============ -->
+  <div class="cathead">
+    <p class="catname">Protect</p>
+    <p class="cmdline"><b>$</b> agentstack trust . &nbsp;·&nbsp; <b>$</b> agentstack guard install</p>
+  </div>
+
   <!-- ============ SECURITY ============ -->
   <section class="grp" id="security">
     <p class="eyebrow">Security</p>
@@ -645,34 +871,50 @@ agentstack_lease_close({})</code></pre>
       <b>Keep what the task actually used</b>
       <p>Call <code>agentstack_lease_freeze({ "name": "backend-observed" })</code> to propose a normal manifest profile from the observed skill set. Review that edit, then run <code>agentstack lock</code>; freeze never applies or renders the profile. Try the <a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/mcp-profile-lease">runnable end-to-end fixture</a>.</p>
     </div>
+
+    <h3 class="ex" id="e19"><span class="num">19</span> The other policy dimensions</h3>
+    <p class="intent">The same two-layer intersection and <code>"*"</code> grammar apply beyond tools and egress.</p>
+    <pre><code>[policy.secrets]
+github = ["GH_*"]                       <span class="cm"># server named github may resolve only GH_* refs</span>
+
+[policy.filesystem]                     <span class="cm"># bundle-global path globs</span>
+read  = ["./src/**", "./docs/**"]
+write = ["./out/**", "!**/.env"]        <span class="cm"># never write a .env, even under an allowed root</span></code></pre>
+    <p class="muted small">Enforcement depends on execution mode: host/gateway filesystem guards are cooperative harness hooks; sandbox/lockdown use coarse workspace mounts. See <a href="index.html#enforced">the enforcement matrix</a> before making a security claim.</p>
+
+    <h3 class="ex" id="e23"><span class="num">23</span> The CI trust gate</h3>
+    <p class="intent">Two commands make a pipeline fail on drift or unsafe content — or use the pinned Action.</p>
+    <div class="viz" data-viz>
+      <p class="viz-cap"><span class="d"></span>fail the build on drift</p>
+      <div class="pipe">
+        <div class="stage" style="--d:.05s"><div class="ic">⇩</div><div class="lbl">install --locked</div><div class="sub">fail on source drift</div></div>
+        <div class="conn" style="--d:.4s"></div>
+        <div class="stage hot" style="--d:.55s"><div class="ic">✔</div><div class="lbl">doctor --ci</div><div class="sub">policy · unsafe content</div></div>
+        <div class="conn" style="--d:.9s"></div>
+        <div class="stage" style="--d:1.05s"><div class="ic">⇥</div><div class="lbl">build</div><div class="oc"><span class="y">✓ green</span> / <span class="n">✗ blocked</span></div></div>
+      </div>
+    </div>
+    <div class="copywrap">
+      <pre><code>agentstack install --locked                   <span class="cm"># fail if sources drifted from the pinned lock</span>
+agentstack doctor --ci                         <span class="cm"># fail on errors, drift, policy, unsafe content</span></code></pre>
+      <button class="copybtn" data-copy="agentstack install --locked">copy</button>
+    </div>
+    <pre><code>steps:
+  - uses: actions/checkout@v4
+  - uses: Tarekkharsa/agentstack@v0.10.1        <span class="cm"># pin a release tag, not @main</span></code></pre>
+
   </section>
 
-  <!-- ============ SCALE ============ -->
-  <section class="grp" id="scale">
-    <p class="eyebrow">Scale</p>
-    <h2>Reuse capabilities everywhere</h2>
-
-    <h3 class="ex" id="e14"><span class="num">14</span> The central library</h3>
-    <p class="intent">Install a capability <strong>once</strong> into your machine-wide library (<code>~/.agentstack/lib</code>), then reference it <strong>by name</strong> from any project — nothing copied, and every add is content-scanned before it lands.</p>
-    <p class="muted small">See <a href="library.html#quickstart">the central library quick start</a> for the full <code>lib add</code> flow.</p>
-
-    <h3 class="ex" id="e15"><span class="num">15</span> Sync the library across machines</h3>
-    <p class="intent">Version the library as a git repo with <code>agentstack lib sync</code> — a fail-closed gate scans every server field <strong>and the outgoing commits</strong> for secrets before pushing.</p>
-    <p class="muted small">A literal secret, or a definition it can't parse, blocks the sync rather than slipping through. See <a href="library.html#commands">the library command reference</a>.</p>
-
-    <h3 class="ex" id="e16"><span class="num">16</span> Versioned vendor packs</h3>
-    <p class="intent">Install a pinned bundle of MCP servers, skills, and house rules in one shot — policy-gated and content-scanned first, with the lockfile recording exactly what you got.</p>
-    <p class="muted small">Upgrading is just the next tag. See <a href="library.html#sandbox">the runnable closed-loop demo</a> of a pack installed, applied, firewalled, and upgraded.</p>
-
-    <h3 class="ex" id="e17"><span class="num">17</span> Adopt a native plugin</h3>
-    <p class="intent">Lift a plugin you installed in one CLI into the manifest so it travels everywhere — skills copied to the library with provenance, servers carried as <code>${REF}</code>s.</p>
-    <p class="muted small">The harness you adopted <em>from</em> stays satisfied by its native install — <code>status</code>/<code>doctor</code> report it up to date rather than double-installing. See <a href="library.html#views">how agentstack owns provider views</a>.</p>
-  </section>
+  <!-- ============ CATEGORY 3 · RUN CONFINED ============ -->
+  <div class="cathead">
+    <p class="catname">Run confined</p>
+    <p class="cmdline"><b>$</b> agentstack run --sandbox [--lockdown]</p>
+  </div>
 
   <!-- ============ RUNTIME ============ -->
   <section class="grp" id="runtime">
     <p class="eyebrow">Runtime</p>
-    <h2>Confine, observe, and measure a run</h2>
+    <h2>Confine the run</h2>
 
     <h3 class="ex" id="e18"><span class="num">18</span> Sandboxed runs with egress policy <span class="evidence">runnable · Docker</span></h3>
     <p class="intent">Run the agent in a container with <strong>no host route and no internet</strong> — its only way out is the egress-proxy sidecar, which enforces your machine <code>[policy.egress]</code>.</p>
@@ -698,36 +940,6 @@ agentstack report &lt;run-id&gt;              <span class="cm"># the run's fligh
     </div>
     <p class="result">Result</p>
     <p class="muted small">Ignoring the proxy reaches nothing — confinement is topological. It filters by host, requires a TLS connection's SNI to match the dialed host (no domain fronting), and refuses names resolving to loopback/private/link-local/metadata addresses (no SSRF). Needs Docker + <code>--features sandbox</code>.</p>
-
-    <h3 class="ex" id="e19"><span class="num">19</span> The other policy dimensions</h3>
-    <p class="intent">The same two-layer intersection and <code>"*"</code> grammar apply beyond tools and egress.</p>
-    <pre><code>[policy.secrets]
-github = ["GH_*"]                       <span class="cm"># server named github may resolve only GH_* refs</span>
-
-[policy.filesystem]                     <span class="cm"># bundle-global path globs</span>
-read  = ["./src/**", "./docs/**"]
-write = ["./out/**", "!**/.env"]        <span class="cm"># never write a .env, even under an allowed root</span></code></pre>
-    <p class="muted small">Enforcement depends on execution mode: host/gateway filesystem guards are cooperative harness hooks; sandbox/lockdown use coarse workspace mounts. See <a href="index.html#enforced">the enforcement matrix</a> before making a security claim.</p>
-
-    <h3 class="ex" id="e20"><span class="num">20</span> See what happened — audit, analyze, report</h3>
-    <p class="intent">Every brokered call is recorded (digests and outcomes, never argument values or secrets). Turn that into insight.</p>
-    <div class="copywrap">
-      <pre><code>agentstack audit --calls --since 7            <span class="cm"># recent brokered calls: tool · outcome · latency</span>
-agentstack report &lt;run-id&gt;                    <span class="cm"># per-run tree, incl. sandbox egress decisions</span>
-agentstack analyze                            <span class="cm"># what you actually call; flags installed-but-unused</span>
-agentstack analyze --transcripts              <span class="cm"># + cross-harness reach from local session logs</span></code></pre>
-      <button class="copybtn" data-copy="agentstack report &lt;run-id&gt;">copy</button>
-    </div>
-
-    <h3 class="ex" id="e21"><span class="num">21</span> See what your tools cost</h3>
-    <p class="intent">Every tool/server/skill you load is re-billed as input tokens <strong>every turn</strong>. Measure it with the passive wire proxy — observe only, cache stays warm.</p>
-    <div class="copywrap">
-      <pre><code>export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-agentstack proxy start                        <span class="cm"># in one shell, then use your agent normally</span>
-agentstack proxy report                       <span class="cm"># ranks tokens/turn vs. how often each was called</span></code></pre>
-      <button class="copybtn" data-copy="agentstack proxy start">copy</button>
-    </div>
-    <p class="muted small">A server that's expensive but never used is flagged <code>drop / lazy</code> — data-driven pruning that closes the loop with the profiles you manage.</p>
 
     <h3 class="ex" id="e22"><span class="num">22</span> Experimental: governed TypeScript</h3>
     <p class="intent"><code>tools_execute</code> lets one bounded TypeScript program call a small, exact set of MCP tools through the gateway — as a non-root process in a read-only, resource-limited Docker container with no workspace, credentials, package install, or direct network. <strong>Off by default</strong>; only the machine owner enables it.</p>
@@ -756,54 +968,37 @@ max_output_bytes = 131072</code></pre>
     <p class="muted small">Every allowed call is re-checked by the gateway and attributed in <code>agentstack report</code>. Docker-only; never a host-execution fallback.</p>
   </section>
 
-  <!-- ============ OPERATE ============ -->
-  <section class="grp" id="operate">
-    <p class="eyebrow">Operate</p>
-    <h2>CI, extension, and the personal layer</h2>
+  <!-- ============ CATEGORY 4 · OBSERVE ============ -->
+  <div class="cathead">
+    <p class="catname">Observe</p>
+    <p class="cmdline"><b>$</b> agentstack report &nbsp;·&nbsp; <b>$</b> agentstack audit --calls</p>
+  </div>
 
-    <h3 class="ex" id="e23"><span class="num">23</span> The CI trust gate</h3>
-    <p class="intent">Two commands make a pipeline fail on drift or unsafe content — or use the pinned Action.</p>
-    <div class="viz" data-viz>
-      <p class="viz-cap"><span class="d"></span>fail the build on drift</p>
-      <div class="pipe">
-        <div class="stage" style="--d:.05s"><div class="ic">⇩</div><div class="lbl">install --locked</div><div class="sub">fail on source drift</div></div>
-        <div class="conn" style="--d:.4s"></div>
-        <div class="stage hot" style="--d:.55s"><div class="ic">✔</div><div class="lbl">doctor --ci</div><div class="sub">policy · unsafe content</div></div>
-        <div class="conn" style="--d:.9s"></div>
-        <div class="stage" style="--d:1.05s"><div class="ic">⇥</div><div class="lbl">build</div><div class="oc"><span class="y">✓ green</span> / <span class="n">✗ blocked</span></div></div>
-      </div>
-    </div>
-    <div class="copywrap">
-      <pre><code>agentstack install --locked                   <span class="cm"># fail if sources drifted from the pinned lock</span>
-agentstack doctor --ci                         <span class="cm"># fail on errors, drift, policy, unsafe content</span></code></pre>
-      <button class="copybtn" data-copy="agentstack install --locked">copy</button>
-    </div>
-    <pre><code>steps:
-  - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@v0.10.1        <span class="cm"># pin a release tag, not @main</span></code></pre>
+  <!-- ============ OBSERVE ============ -->
+  <section class="grp" id="observe">
+    <p class="eyebrow">Observe</p>
+    <h2>See what happened</h2>
 
-    <h3 class="ex" id="e24"><span class="num">24</span> Extend it — add a CLI in one file</h3>
-    <p class="intent">Support a new CLI with a single YAML descriptor — no rebuild.</p>
+    <h3 class="ex" id="e20"><span class="num">20</span> See what happened — audit, analyze, report</h3>
+    <p class="intent">Every brokered call is recorded (digests and outcomes, never argument values or secrets). Turn that into insight.</p>
     <div class="copywrap">
-      <pre><code>cp crates/adapters/descriptors/codex.yaml my-adapter.yaml
-<span class="cm"># edit it, then:</span>
-agentstack adapters validate my-adapter.yaml
-cp my-adapter.yaml ~/.agentstack/adapters/      <span class="cm"># picked up on next run</span>
-agentstack adapters list                        <span class="cm"># marks which adapters are yours</span></code></pre>
-      <button class="copybtn" data-copy="agentstack adapters validate my-adapter.yaml">copy</button>
+      <pre><code>agentstack audit --calls --since 7            <span class="cm"># recent brokered calls: tool · outcome · latency</span>
+agentstack report &lt;run-id&gt;                    <span class="cm"># per-run tree, incl. sandbox egress decisions</span>
+agentstack analyze                            <span class="cm"># what you actually call; flags installed-but-unused</span>
+agentstack analyze --transcripts              <span class="cm"># + cross-harness reach from local session logs</span></code></pre>
+      <button class="copybtn" data-copy="agentstack report &lt;run-id&gt;">copy</button>
     </div>
-    <p class="muted small">A broken drop-in is skipped with a warning, never fatal.</p>
 
-    <h3 class="ex" id="e25"><span class="num">25</span> The personal layer &amp; app-owned servers</h3>
-    <p class="intent">Machine-wide instructions that merge beneath every project without landing in any repo; and letting an app's own config be the source of truth.</p>
+    <h3 class="ex" id="e21"><span class="num">21</span> See what your tools cost</h3>
+    <p class="intent">Every tool/server/skill you load is re-billed as input tokens <strong>every turn</strong>. Measure it with the passive wire proxy — observe only, cache stays warm.</p>
     <div class="copywrap">
-      <pre><code>agentstack init --global                        <span class="cm"># a home for your machine-wide rules</span></code></pre>
-      <button class="copybtn" data-copy="agentstack init --global">copy</button>
+      <pre><code>export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+agentstack proxy start                        <span class="cm"># in one shell, then use your agent normally</span>
+agentstack proxy report                       <span class="cm"># ranks tokens/turn vs. how often each was called</span></code></pre>
+      <button class="copybtn" data-copy="agentstack proxy start">copy</button>
     </div>
-    <pre><code>[servers.codex-native]
-owner = "codex"                                 <span class="cm"># codex owns this entry; apply follows it</span></code></pre>
-    <p class="muted small">When the app rewrites its own entry (a self-update), <code>apply</code> refreshes the manifest and fans the fresh values out to every other CLI instead of reverting the app.</p>
-    <p class="muted small">Machine policy is resilient to accidental bad edits: a validated policy continues from a secret-free last-known-good snapshot and reports <strong>DEGRADED</strong>; first-run corruption reports <strong>BLOCKED</strong> and protected activation refuses to continue. Run <code>agentstack doctor</code> for the exact state and repair details.</p>
+    <p class="muted small">A server that's expensive but never used is flagged <code>drop / lazy</code> — data-driven pruning that closes the loop with the profiles you manage.</p>
+
   </section>
 
   <section id="next">
@@ -834,6 +1029,57 @@ owner = "codex"                                 <span class="cm"># codex owns th
   </section>
 
 </main>
+
+</div>
+
+<script>
+  // Sidebar scroll-spy — canonical, identical on examples.html and start.html.
+  // Active = the LAST target whose top sits above the reading line (just under
+  // the sticky header, where a clicked target rests per scroll-margin-top).
+  // This is robust for tall targets, where intersection-based spies light up a
+  // neighbor. Progressive enhancement only — without JS the rail is plain links.
+  (function () {
+    const links = [];
+    document.querySelectorAll("aside.side li a[href^='#']").forEach((a) => {
+      const el = document.getElementById(a.getAttribute("href").slice(1));
+      if (el) links.push([el, a]);
+    });
+    if (!links.length) return;
+    let current = null;
+    const setActive = (link) => {
+      if (!link || link === current) return;
+      if (current) current.classList.remove("on");
+      current = link;
+      link.classList.add("on");
+      // Keep the active link visible by scrolling ONLY the rail —
+      // scrollIntoView would also scroll the window and hijack the
+      // in-flight anchor navigation.
+      const rail = link.closest("aside");
+      const r = link.getBoundingClientRect(), rr = rail.getBoundingClientRect();
+      if (r.top < rr.top + 40 || r.bottom > rr.bottom - 40) {
+        rail.scrollTop += r.top - rr.top - rr.height / 2 + r.height / 2;
+      }
+    };
+    const LINE = 88; // px from viewport top: header (~64) + breathing room
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      let pick = links[0][1];
+      for (const [el, a] of links) {
+        if (el.getBoundingClientRect().top <= LINE) pick = a;
+        else break;
+      }
+      setActive(pick);
+    };
+    const onScroll = () => {
+      if (!ticking) { ticking = true; requestAnimationFrame(update); }
+    };
+    addEventListener("scroll", onScroll, { passive: true });
+    // A clicked rail link answers immediately; the scroll handler then agrees.
+    links.forEach(([, a]) => a.addEventListener("click", () => setActive(a)));
+    update();
+  })();
+</script>
 
 <footer>
   <div class="bar">

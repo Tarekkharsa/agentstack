@@ -94,7 +94,7 @@
   /* ---------- sticky nav ---------- */
   header {
     position: sticky; top: 0; z-index: 50;
-    background: color-mix(in srgb, var(--paper) 78%, transparent);
+    background: color-mix(in srgb, var(--paper) 96%, transparent);
     -webkit-backdrop-filter: saturate(1.4) blur(12px);
     backdrop-filter: saturate(1.4) blur(12px);
     border-bottom: 1px solid transparent;
@@ -102,7 +102,9 @@
   }
   header.scrolled { border-bottom-color: var(--line); box-shadow: var(--shadow-sm); }
   .bar {
-    max-width: var(--wrap); margin: 0 auto; padding: 0.8rem 1.35rem;
+    /* Wider than the prose column so the nav fits on ONE row; the content
+       below keeps var(--wrap) for reading comfort. */
+    max-width: 74rem; margin: 0 auto; padding: 0.7rem 1.35rem;
     display: flex; align-items: center; gap: 1.1rem;
   }
   .wordmark {
@@ -110,22 +112,27 @@
     display: inline-flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em;
   }
   .wordmark:hover { text-decoration: none; }
+  .wordmark .wm2, .brand .wm2 { color: var(--accent); }
   .wordmark .mark {
     height: 26px; width: auto; flex: none; display: block;
     filter: drop-shadow(0 1px 1.5px rgba(20,24,28,0.18));
   }
-  nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.15rem; flex-wrap: wrap; }
+  nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.05rem; flex-wrap: nowrap; white-space: nowrap; }
   nav.top a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+  /* Never wrap to a second row: drop secondary links first, then all links,
+     keeping the wordmark + Get started at every width. */
+  @media (max-width: 1060px) { nav.top a.nav-x { display: none; } }
+  @media (max-width: 700px)  { nav.top a.refline { display: none; } }
   nav.top a:hover { color: var(--accent); text-decoration: none; }
   nav.top .ghost {
-    padding: 0.34rem 0.7rem; border: 1px solid var(--line); border-radius: 7px;
-    color: var(--ink);
+    padding: 0.34rem 0.7rem; border: 1px solid var(--accent-line); border-radius: 7px;
+    color: var(--ink); background: var(--accent-soft);
   }
-  nav.top .ghost:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+  nav.top .ghost:hover { border-color: var(--accent); }
 
   /* ---------- layout ---------- */
-  main { max-width: var(--wrap); margin: 0 auto; padding: 0 1.35rem 6rem; }
-  section { margin-top: 5rem; scroll-margin-top: 5rem; }
+  main { max-width: var(--wrap); margin: 0 auto; padding: 0 1.35rem 4.5rem; }
+  section { margin-top: 4rem; scroll-margin-top: 5rem; }
 
   .eyebrow {
     font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
@@ -309,18 +316,17 @@
   .posture-legend .lab .slug { color: var(--accent); }
   .posture-legend small { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
 
-  /* ---------- hero journey strip — the page's spine ---------- */
-  .journey { margin: 1.9rem 0 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; }
-  .journey a {
-    display: block; padding: 0.8rem 0.9rem; border: 1px solid var(--line);
-    border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-sm);
-    text-decoration: none; transition: transform 0.14s ease, border-color 0.16s ease, box-shadow 0.16s ease;
-  }
-  .journey a:hover { transform: translateY(-2px); border-color: var(--accent-line); box-shadow: var(--shadow-md); }
-  .journey .jn { font-family: var(--mono); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em; color: var(--accent); }
-  .journey b { display: block; margin-top: 0.2rem; font-family: var(--mono); font-size: 0.85rem; color: var(--ink); letter-spacing: -0.01em; }
-  .journey small { display: block; margin-top: 0.3rem; color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
-  @media (max-width: 760px) { .journey { grid-template-columns: 1fr 1fr; } }
+  /* ---------- docs map: the documentation, grouped by intent ---------- */
+  .docmap { margin: 1rem 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.7rem; }
+  .docmap .dmcmd { display: block; font-family: var(--mono); font-size: 0.66rem; color: var(--accent); background: none; border: none; padding: 0; margin: -0.35rem 0 0.5rem; }
+  .docmap .fcard h3 { font-size: 0.78rem; letter-spacing: 0.13em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.6rem; }
+  .docmap ul { list-style: none; margin: 0; padding: 0; }
+  .docmap li { margin: 0.35rem 0; }
+  .docmap li a { font-family: var(--mono); font-size: 0.82rem; color: var(--ink); }
+  .docmap li a:hover { color: var(--accent); text-decoration: none; }
+  .docmap li small { display: block; color: var(--muted); font-size: 0.76rem; line-height: 1.4; }
+  @media (max-width: 860px) { .docmap { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 520px) { .docmap { grid-template-columns: 1fr; } }
 
   .matrix-wrap { margin: 1.6rem 0 0; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
   table.matrix { border-collapse: collapse; width: 100%; min-width: 34rem; background: var(--surface); font-size: 0.88rem; }
@@ -375,13 +381,43 @@
 
   /* ---------- "see it work" strip: four compact example cards ---------- */
   #see-it { margin-top: 2.6rem; }
-  .seeit { margin: 1rem 0 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; }
-  .seeit .fcard { padding: 0.95rem 1rem; }
-  .seeit .fcard h3 { font-size: 0.9rem; margin-bottom: 0.35rem; }
-  .seeit .fcard p { font-size: 0.84rem; line-height: 1.5; }
-  .seeit .fcard .tag { margin-top: 0.7rem; font-size: 0.66rem; }
-  @media (max-width: 760px) { .seeit { grid-template-columns: 1fr 1fr; } }
-  @media (max-width: 460px) { .seeit { grid-template-columns: 1fr; } }
+  /* ---------- "See it work" visual showcase ---------- */
+  /* One numbered sequence on the page's shared left edge: short copy, then
+     the demo at full column width. No breakout, no alternation — the section
+     aligns with every other section and each terminal gets real width. */
+  .show { display: grid; gap: 2.7rem; margin-top: 1.3rem; }
+  .show-copy .lvl {
+    display: inline-flex; align-items: center; gap: 0.55rem;
+    font-family: var(--mono); font-size: 0.68rem; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
+    margin-bottom: 0.5rem;
+  }
+  .show-copy .lvl::after { content: ""; width: 2.2rem; height: 1px; background: var(--accent-line); }
+  /* The command that anchors each chapter (nub-style): quiet chip, accent prompt. */
+  .show-copy code.cmd {
+    display: inline-block; font-family: var(--mono); font-size: 0.72rem; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 6px; padding: 0.16rem 0.55rem;
+    margin-left: 0.75rem; white-space: nowrap; vertical-align: 2px;
+  }
+  .show-copy code.cmd::first-letter { color: var(--accent); }
+  @media (max-width: 640px) { .show-copy code.cmd { display: none; } }
+  .show-copy h3 { margin: 0 0 0.4rem; font-family: var(--mono); font-size: 1.08rem; letter-spacing: -0.01em; }
+  .show-copy p { margin: 0; max-width: 46rem; color: var(--muted); font-size: 0.95rem; line-height: 1.62; }
+  .show-copy a.tag {
+    display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.6rem;
+    font-family: var(--mono); font-size: 0.7rem; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent);
+  }
+  .show-copy a.tag::after { content: "→"; transition: transform 0.14s ease; }
+  .show-copy a.tag:hover { text-decoration: none; }
+  .show-copy a.tag:hover::after { transform: translateX(3px); }
+  .show-visual { margin-top: 1rem; }
+  img.show-visual {
+    width: 100%; height: auto; display: block;
+    border: 1px solid var(--line); border-radius: 12px;
+  }
+  .show-visual .term { margin: 0; }
+  .show-visual .term pre { overflow-x: auto; }
 
   /* ---------- footer ---------- */
   footer { border-top: 1px solid var(--line); margin-top: 6rem; background: var(--line-soft); }
@@ -417,14 +453,11 @@
 
 <header id="site-header">
   <div class="bar">
-    <a class="wordmark" href="./"><svg class="mark" viewBox="24 18 72 85" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="navTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F5A968"/><stop offset="1" stop-color="#E7864A"/></linearGradient></defs><path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/><path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/><path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/><path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/><path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/><path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/><path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#navTop)"/><path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/><path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/><path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/></svg>agentstack</a>
+    <a class="wordmark" href="./"><img class="mark" src="logo-mark.svg" alt=""><span>agent<span class="wm2">Stack</span></span></a>
     <nav class="top" aria-label="Project links">
-      <a href="#enforced">what's&nbsp;enforced</a>
-      <a class="refline" href="how-it-works.html">how&nbsp;it&nbsp;works</a>
-      <a class="refline" href="primitives.html">primitives</a>
-      <a class="refline" href="examples.html">examples</a>
-      <a class="refline" href="library.html">library&nbsp;guide</a>
-      <a class="refline" href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
+      <a href="docs.html">docs</a>
+      <a href="examples.html">examples</a>
+      <a href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
       <a class="ghost" href="start.html">Get&nbsp;started&nbsp;→</a>
     </nav>
   </div>
@@ -432,23 +465,108 @@
 
 <main id="main">
 
-  <section id="hero" style="margin-top:2.25rem">
-    <p class="eyebrow" style="margin-bottom:0.5rem">Configure · package · govern · run · observe · 13 agent CLIs</p>
+  <section id="hero" style="margin-top:2.75rem">
     <h1 style="margin:0.7rem 0 0.8rem">Build, govern, and run<br>your agent stack.<span class="cursor" aria-hidden="true"></span></h1>
     <p class="lede">
-      Define servers, skills, instructions, and secrets once. AgentStack compiles
-      that source of truth into native config across 13 agent CLIs, enforces
-      machine-owned policy, runs agents under optional lockdown, and records the
-      evidence to audit the stack.
+      One manifest for all 13 agent CLIs — servers, skills, instructions, and
+      secrets, defined once. Nothing runs until you trust it, and nothing
+      trusted runs unobserved.
     </p>
     <div class="cta" style="margin-top:1.1rem">
       <a class="btn primary" href="start.html">Get started · 10 min →</a>
       <a class="btn secondary" href="#install">Install</a>
     </div>
 
-    <div class="term" data-replay style="margin-top:1.2rem">
-      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → trust → firewalled → logged</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
-      <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack connect --all --write</span><span class="c">     # once: the gateway, in every CLI</span></span>
+    <div class="term" style="margin-top:1.5rem">
+      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>the whole stack, governed</b></div>
+      <pre><code><span class="row"><span class="p">$</span> <span class="t">agentstack apply</span><span class="c">            # one manifest → 13 CLIs, in sync</span></span>
+<span class="row"><span class="p">$</span> <span class="t">agentstack guard install</span><span class="c">    # blocks rm -rf / .env accidents in 9 CLIs</span></span>
+<span class="row"><span class="p">$</span> <span class="t">agentstack trust .</span><span class="c">          # cloned repos stay inert until you consent</span></span>
+<span class="row"><span class="p">$</span> <span class="t">agentstack run --lockdown</span><span class="c">   # no route out but the egress firewall</span></span>
+<span class="row"><span class="p">$</span> <span class="t">agentstack report</span><span class="c">           # every brokered call, on the record</span></span></code></pre>
+    </div>
+
+  </section>
+
+  <section id="see-it">
+    <p class="eyebrow">See it work</p>
+    <h2>Start with the problem you have today.</h2>
+    <div class="show" aria-label="Four user situations, each answered and shown live">
+
+      <div class="show-row">
+        <div class="show-copy">
+          <span class="lvl">01 · You juggle several CLIs</span><code class="cmd">$ agentstack apply</code>
+          <h3>One manifest keeps them all in sync</h3>
+          <p>Claude Code at work, Cursor for edits, Codex in CI — and every MCP
+            server configured three different ways. Define it once;
+            <code>agentstack apply</code> renders each CLI's native config,
+            with secrets left as per-machine references.</p>
+          <a class="tag" href="#manifest">The manifest, in detail</a>
+        </div>
+        <div class="show-visual">
+          <div class="term" style="margin:0">
+            <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>one manifest → .mcp.json · config.toml · mcp.json</b></div>
+            <pre><code><span class="row"><span class="p">$</span> <span class="t">cat .agentstack/agentstack.toml</span><span class="c">   # one committed source of truth</span></span>
+<span class="row"><span class="c">  [servers.github]</span></span>
+<span class="row"><span class="c">  command = "npx"  args = ["-y", "@modelcontextprotocol/server-github"]</span></span>
+<span class="row"><span class="c">  env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_TOKEN}" }</span></span>
+<span class="row"> </span>
+<span class="row"><span class="p">$</span> <span class="t">agentstack apply --write</span></span>
+<span class="row"><span class="c">  Claude Code   + .mcp.json                </span><span class="ok">✓ wrote 1 server</span></span>
+<span class="row"><span class="c">  Codex CLI     + .codex/config.toml       </span><span class="ok">✓ wrote 1 server</span></span>
+<span class="row"><span class="c">  Cursor        + .cursor/mcp.json         </span><span class="ok">✓ wrote 1 server</span></span>
+<span class="row"><span class="c">  instructions  → CLAUDE.md + AGENTS.md    </span><span class="ok">✓ compiled</span></span>
+<span class="row"> </span>
+<span class="row"><span class="ok">  ✓</span><span class="c"> same server, three native shapes — the manifest never holds the token</span></span></code></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="show-row">
+        <div class="show-copy">
+          <span class="lvl">02 · Your agent makes mistakes</span><code class="cmd">$ agentstack guard install</code>
+          <h3>Guardrails catch them before they land</h3>
+          <p>A well-meaning agent still runs <code>rm -rf</code> in the wrong
+            directory or reads <code>.env</code> into context. A cooperative
+            hook across 9 CLIs blocks those before they touch your machine —
+            and every denial lands in the audit log.</p>
+          <a class="tag" href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Run it yourself</a>
+        </div>
+        <div class="show-visual">
+          <div class="term" style="margin:0">
+            <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>rm -rf blocked · git reset blocked · .env denied · on the record</b></div>
+            <pre><code><span class="row"><span class="p">$</span> <span class="t">agentstack guard install</span><span class="c">     # a pre-tool-use hook in 9 CLIs</span></span>
+<span class="row"><span class="ok">  ✓</span><span class="c"> wired: Claude Code · Codex · Gemini · Cursor · Windsurf · +4</span></span>
+<span class="row"> </span>
+<span class="row"><span class="c">  agent → </span>rm -rf /opt/acme/data</span>
+<span class="row"><span class="no">    ✗ blocked</span><span class="c">   destructive, outside the workspace</span></span>
+<span class="row"><span class="c">  agent → </span>git reset --hard</span>
+<span class="row"><span class="no">    ✗ blocked</span><span class="c">   discards uncommitted work</span></span>
+<span class="row"><span class="c">  agent → </span>cat .env</span>
+<span class="row"><span class="no">    ✗ blocked</span><span class="c">   [policy.filesystem] deny glob</span></span>
+<span class="row"><span class="c">  agent → </span>ls -la</span>
+<span class="row"><span class="ok">    ✓ allowed</span></span>
+<span class="row"> </span>
+<span class="row"><span class="p">$</span> <span class="t">agentstack audit --calls</span></span>
+<span class="row"><span class="c">  3 denials recorded (host-guard) — tool + outcome, never file contents</span></span></code></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="show-row">
+        <div class="show-copy">
+          <span class="lvl">03 · You clone repos you didn't write</span><code class="cmd">$ agentstack trust .</code>
+          <h3>They stay inert until you consent</h3>
+          <p>The repo you just cloned declares MCP servers you've never read.
+            Nothing spawns and no secret resolves until you review what it
+            declares and trust it — and any later edit to the pinned surface
+            re-gates it.</p>
+          <a class="tag" href="#trust">How consent works</a>
+        </div>
+        <div class="show-visual">
+          <div class="term" data-replay style="margin:0">
+            <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → trust → firewalled → logged</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
+            <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack connect --all --write</span><span class="c">     # once: the gateway, in every CLI</span></span>
 <span class="row cmd"><span class="p">$</span> <span class="t">git clone some-repo &amp;&amp; cd some-repo</span><span class="c">  # declares servers you've never seen</span></span>
 <span class="row" data-d="450"><span class="c">  agent session starts…</span></span>
 <span class="row" data-d="800"><span class="no">  ✗ untrusted — no servers spawned, no secrets resolved</span></span>
@@ -461,54 +579,38 @@
 <span class="row" data-d="800"><span class="c">  agent → demo.delete_all  </span><span class="no">✗ denied</span><span class="c">  rule "!delete_*" — YOUR machine policy</span></span>
 <span class="row" data-d="500"> </span>
 <span class="row"><span class="c">  # both brokered outcomes are in the audit log</span></span></code></pre>
-    </div>
-    <div class="journey" aria-label="What agentstack does, in order">
-      <a href="#start">
-        <span class="jn">01 · DEFINE</span>
-        <b>One source of truth</b>
-        <small>Capabilities, configuration, instructions, and profiles in one manifest.</small>
-      </a>
-      <a href="#more">
-        <span class="jn">02 · PACKAGE</span>
-        <b>Carry the whole stack</b>
-        <small>Pin skills and servers; share libraries, packs, and native plugins.</small>
-      </a>
-      <a href="#trust">
-        <span class="jn">03 · GOVERN</span>
-        <b>Review before authority</b>
-        <small>Scan, trust, sign, and intersect repo requests with machine policy.</small>
-      </a>
-      <a href="#sandbox">
-        <span class="jn">04 · RUN &amp; LEARN</span>
-        <b>Contain, record, improve</b>
-        <small>Reversible sessions, optional lockdown, reports, and optimization.</small>
-      </a>
-    </div>
-  </section>
+          </div>
+        </div>
+      </div>
 
-  <section id="see-it">
-    <p class="eyebrow">See it work</p>
-    <div class="seeit" aria-label="Runnable examples of the security model">
-      <div class="fcard">
-        <h3><a href="examples.html#e13">The trust gate</a></h3>
-        <p>A cloned repo is inert — no server spawned, no secret resolved — until you review and consent.</p>
-        <a class="tag" href="examples.html#e13">Example 13</a>
+      <div class="show-row">
+        <div class="show-copy">
+          <span class="lvl">04 · Some work must not leak</span><code class="cmd">$ agentstack run --lockdown</code>
+          <h3>Lockdown: no route out but the proxy</h3>
+          <p>For runs that touch sensitive code or data:
+            <code>--lockdown</code> puts the agent in a container whose only
+            network peer is the egress firewall. Ignoring the proxy reaches
+            nothing; a denied host is refused — and recorded.</p>
+          <a class="tag" href="#sandbox">The enforcement story</a>
+        </div>
+        <div class="show-visual">
+          <div class="term" style="margin:0">
+            <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>no route out · denied host blocked · on the record</b></div>
+            <pre><code><span class="row"><span class="p">$</span> <span class="t">agentstack run --lockdown shtest -- -c 'unset HTTPS_PROXY; curl example.com'</span></span>
+<span class="row"><span class="c">  posture: </span><span class="am">LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span></span>
+<span class="row"><span class="c">  🔒 no host route, no internet — the only peer is the egress sidecar</span></span>
+<span class="row"><span class="no">  BLOCKED</span><span class="c">        # ignoring the proxy reaches nothing</span></span>
+<span class="row"> </span>
+<span class="row"><span class="p">$</span> <span class="t">agentstack run --lockdown shtest -- -c 'curl https://blocked.invalid/steal'</span></span>
+<span class="row"><span class="no">  ✗ refused at the sidecar</span><span class="c"> — and recorded</span></span>
+<span class="row"> </span>
+<span class="row"><span class="p">$</span> <span class="t">agentstack report r-0859dcee73</span></span>
+<span class="row"><span class="c">  Posture   </span><span class="am">LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span></span>
+<span class="row"><span class="no">    ✗ shtest → blocked.invalid</span><span class="c">   denied by rule "!blocked.invalid" (machine policy)</span></span></code></pre>
+          </div>
+        </div>
       </div>
-      <div class="fcard">
-        <h3><a href="examples.html#e10">The MCP tool firewall</a></h3>
-        <p>Denied tools are invisible in discovery and refused if called anyway.</p>
-        <a class="tag" href="examples.html#e10">Example 10</a>
-      </div>
-      <div class="fcard">
-        <h3><a href="examples.html#e18">Sandboxed runs</a></h3>
-        <p>No host route, no internet — the only way out is the egress proxy.</p>
-        <a class="tag" href="examples.html#e18">Example 18</a>
-      </div>
-      <div class="fcard">
-        <h3><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guardrails</a></h3>
-        <p>Cooperative hooks block <code>rm -rf</code> and <code>.env</code> reads across 9 CLIs.</p>
-        <a class="tag" href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">guard-demo</a>
-      </div>
+
     </div>
   </section>
 
@@ -1033,6 +1135,80 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
       The closed loop in under a minute, condensed from a real run:
       <a href="https://github.com/Tarekkharsa/agentstack/blob/main/agentstack-test/demo-closed-loop.sh"><code>agentstack-test/demo-closed-loop.sh</code></a>.
     </p>
+  </section>
+
+  <section id="docs" class="reveal">
+    <p class="eyebrow">All the documentation, by intent</p>
+    <h2>Where to go next.</h2>
+    <p class="small muted" style="margin:0.4rem 0 0">
+      The full, categorized directory lives at <a href="docs.html">docs</a> —
+      every guide, reference, and demo, organized by what you want to do.
+    </p>
+    <!-- docmap:begin (generated — edit agentstack-test/make-docs-sidebar.py) -->
+    <div class="docmap" aria-label="Documentation grouped by what you want to do">
+          <div class="fcard">
+            <h3>Start</h3>
+            <ul>
+              <li><a href="start.html">Get started</a><small>guided setup, ~10 minutes</small></li>
+              <li><a href="index.html#install">Install</a><small>one static binary</small></li>
+              <li><a href="examples.html">Examples</a><small>25 runnable walkthroughs</small></li>
+              <li><a href="primitives.html">Which primitive?</a><small>which boundary answers what</small></li>
+            </ul>
+          </div>
+          <div class="fcard">
+            <h3>Configure</h3>
+            <code class="dmcmd">$ agentstack apply</code>
+            <ul>
+              <li><a href="how-it-works.html">How it works</a><small>activation, leases, policy layers</small></li>
+              <li><a href="index.html#manifest">The manifest</a><small>servers, skills, ${REF} secrets</small></li>
+              <li><a href="library.html">Central library</a><small>one library, every project</small></li>
+              <li><a href="index.html#modes">Rendered-file modes</a><small>static, clean-at-rest, or zero files</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">Dashboard</a><small>the same loop, in a web UI</small></li>
+            </ul>
+          </div>
+          <div class="fcard">
+            <h3>Protect</h3>
+            <code class="dmcmd">$ agentstack trust · guard</code>
+            <ul>
+              <li><a href="index.html#trust">The trust gate</a><small>cloned repos stay inert</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a><small>rm -rf blocked, runnable</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Policy presets</a><small>developer, CI, locked-down</small></li>
+            </ul>
+          </div>
+          <div class="fcard">
+            <h3>Run confined</h3>
+            <code class="dmcmd">$ agentstack run --lockdown</code>
+            <ul>
+              <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a><small>container + egress firewall</small></li>
+              <li><a href="index.html#enforced">What's enforced</a><small>the honest per-mode matrix</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">Enforcement matrix</a><small>checked against the source</small></li>
+            </ul>
+          </div>
+          <div class="fcard">
+            <h3>Observe</h3>
+            <code class="dmcmd">$ agentstack report</code>
+            <ul>
+              <li><a href="examples.html#e20">Reports &amp; call audit</a><small>per-run evidence, by example</small></li>
+              <li><a href="examples.html#e21">Wire-cost analysis</a><small>what your tools cost</small></li>
+            </ul>
+          </div>
+          <div class="fcard">
+            <h3>Reference</h3>
+            <ul>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Every command</a><small>every command, CI-tested</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md">Agent manual (skill)</a><small>ships inside the binary</small></li>
+            </ul>
+          </div>
+          <div class="fcard">
+            <h3>Project</h3>
+            <ul>
+              <li><a href="security-review-2026-07-11.html">Security review</a><small>findings and closures</small></li>
+              <li><a href="strategy.html">Strategy</a><small>phases, gates, decisions</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/HISTORY.md">History</a><small>dated corrections</small></li>
+            </ul>
+          </div>
+        </div>
+    <!-- docmap:end -->
   </section>
 
 </main>

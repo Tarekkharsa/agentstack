@@ -1,38 +1,21 @@
-<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="agentstack — a local control plane for your AI agents' MCP tools">
-  <title>agentstack</title>
-  <desc>agentstack social card: the layer-stack mark, wordmark, and tagline.</desc>
-  <defs>
-    <linearGradient id="ogTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#F5A968"/>
-      <stop offset="1" stop-color="#E7864A"/>
-    </linearGradient>
-  </defs>
-
-  <rect x="0" y="0" width="1200" height="630" fill="#FBFAF7"/>
-  <rect x="0" y="0" width="1200" height="8" fill="#B4540A"/>
-
-  <!-- mark -->
-  <g transform="translate(70,150) scale(3.1)">
-    <path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/>
-    <path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/>
-    <path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/>
-    <path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/>
-    <path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/>
-    <path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/>
-    <path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#ogTop)"/>
-    <path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/>
-    <path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/>
-    <path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/>
-    <path d="M60 35.9 L64.5 38 L60 40.1 L55.5 38 Z" fill="#E7864A"/>
-  </g>
-
-  <text x="430" y="300" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="86" font-weight="700" letter-spacing="-3">
-    <tspan fill="#1B1F24">agent</tspan><tspan fill="#B4540A">stack</tspan>
-  </text>
-
-  <text x="432" y="366" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="32" fill="#5B6570">The local control plane for your AI agent CLIs</text>
-
-  <text x="432" y="418" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="21" font-weight="600" letter-spacing="1.5" fill="#B4540A">TRUST-GATE · FIREWALL · AUDIT EVERY TOOL CALL</text>
-
-  <text x="432" y="470" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="21" fill="#8A929B">tarekkharsa.github.io/agentstack</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="agentStack — the local control plane for your AI agent CLIs">
+<style>
+  .wm { font: 700 86px ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: -3px; }
+  .tag { font: 31px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #9AA3AC; }
+  .caps { font: 700 19.5px ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.05em; fill: #F0975A; }
+  .url { font: 21px ui-monospace, Menlo, Consolas, monospace; fill: #737C85; }
+</style>
+<rect width="1200" height="630" fill="#14171B"/>
+<rect width="1200" height="10" fill="#F0975A"/>
+<defs><linearGradient id="ogM" x1="18" y1="34" x2="84" y2="100" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F0975A"/><stop offset="1" stop-color="#C96F2F"/></linearGradient></defs>
+<g transform="translate(84,185) scale(2.25)">
+  <rect x="44" y="8" width="66" height="66" rx="17" fill="none" stroke="#E9E7E2" stroke-width="6" opacity="0.28"/>
+  <rect x="31" y="21" width="66" height="66" rx="17" fill="none" stroke="#E9E7E2" stroke-width="6" opacity="0.5"/>
+  <rect x="18" y="34" width="66" height="66" rx="17" fill="url(#ogM)"/>
+  <path d="M51 57 L61 67 L51 77 L41 67 Z" fill="#FDF6EE"/>
+</g>
+<text class="wm" x="412" y="268"><tspan fill="#F3F0EA">agent</tspan><tspan fill="#F0975A">Stack</tspan></text>
+<text class="tag" x="412" y="336">The local control plane for your AI agent CLIs</text>
+<text class="caps" x="412" y="394">TRUST-GATE · FIREWALL · AUDIT EVERY TOOL CALL</text>
+<text class="url" x="412" y="446">tarekkharsa.github.io/agentstack</text>
 </svg>

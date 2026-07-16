@@ -28,6 +28,7 @@
   .bar{border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--paper) 88%,transparent);backdrop-filter:blur(12px);position:sticky;top:0;z-index:5}
   .bar-inner{max-width:960px;margin:auto;padding:.78rem 1.4rem;display:flex;align-items:center;gap:1rem}
   .brand{font:700 1rem var(--mono);color:var(--ink);text-decoration:none;display:flex;align-items:center;gap:.55rem}
+  .wordmark .wm2, .brand .wm2 { color: var(--accent); }
   .brand img{width:27px;height:27px}.bar nav{margin-left:auto;display:flex;gap:1rem}.bar nav a{font:.78rem var(--mono);color:var(--muted);text-decoration:none}
   main{max-width:960px;margin:auto;padding:0 1.4rem 6rem}
   .hero{padding:6rem 0 4.2rem;border-bottom:1px solid var(--line);position:relative;overflow:hidden}
@@ -60,7 +61,7 @@
 </head>
 <body>
 <header class="bar"><div class="bar-inner">
-  <a class="brand" href="index.html"><img src="logo-mark.svg" alt="">agentstack</a>
+  <a class="brand" href="index.html"><img src="logo-mark.svg" alt=""><span>agent<span class="wm2">Stack</span></span></a>
   <nav aria-label="Page"><a href="#idea">The idea</a><a href="#fit">Project fit</a><a href="#recommendation">Recommendation</a></nav>
 </div></header>
 <main>

@@ -1,29 +1,8 @@
-<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="agentstack">
-  <title>agentstack</title>
-  <desc>An isometric stack of three layers with a control-plane port on top.</desc>
-  <defs>
-    <linearGradient id="asTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#F5A968"/>
-      <stop offset="1" stop-color="#E7864A"/>
-    </linearGradient>
-  </defs>
-
-  <!-- bottom plate (topY 58) -->
-  <path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/>
-  <path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/>
-  <path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/>
-
-  <!-- middle plate (topY 40) -->
-  <path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/>
-  <path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/>
-  <path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/>
-
-  <!-- top plate (topY 22) -->
-  <path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#asTop)"/>
-  <path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/>
-  <path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/>
-
-  <!-- control-plane port on the top face -->
-  <path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/>
-  <path d="M60 35.9 L64.5 38 L60 40.1 L55.5 38 Z" fill="#E7864A"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="agentStack">
+<style>.s{stroke:#23282E}@media(prefers-color-scheme:dark){.s{stroke:#E9E7E2}}</style>
+<defs><linearGradient id="g" x1="18" y1="34" x2="84" y2="100" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F0975A"/><stop offset="1" stop-color="#C96F2F"/></linearGradient></defs>
+<rect class="s" x="44" y="8" width="66" height="66" rx="17" fill="none" stroke-width="7" opacity="0.25"/>
+<rect class="s" x="31" y="21" width="66" height="66" rx="17" fill="none" stroke-width="7" opacity="0.5"/>
+<rect x="18" y="34" width="66" height="66" rx="17" fill="url(#g)"/>
+<path d="M51 57 L61 67 L51 77 L41 67 Z" fill="#FDF6EE"/>
 </svg>

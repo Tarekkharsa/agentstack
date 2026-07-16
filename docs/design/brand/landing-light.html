@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #FBFAF7; }
+    a { color: #B4540A; text-decoration: none; }
+    a:hover { text-decoration: underline; text-underline-offset: 3px; }
+    @keyframes blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+  </style>
+</helmet>
+
+<div data-screen-label="Landing — 3b Compile II" style="min-height: 100vh; background: #FBFAF7; color: #1B1F24; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased;">
+
+  <div style="background: #1B1F24; color: #D7DEE4; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; padding: 7px 22px; display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden;">
+    <span style="background: #F0975A; color: #1A1206; font-weight: 700; padding: 1px 7px; border-radius: 5px;">3b</span>
+    <span>Brand test — Compile II</span>
+    <a href="Landing 3a Prompt.dc.html" style="margin-left: auto; color: #D7DEE4;">compare with 3a Prompt →</a>
+    <a href="Landing 3b Compile Dark.dc.html" style="color: #F0975A;">dark mode →</a>
+  </div>
+
+  <header style="position: sticky; top: 0; z-index: 50; background: rgba(251,250,247,0.96); backdrop-filter: saturate(1.4) blur(12px); border-bottom: 1px solid #E7E2D9;">
+    <div style="max-width: 74rem; margin: 0 auto; padding: 11px 22px; display: flex; align-items: center; gap: 18px;">
+      <a href="#" style="display: inline-flex; align-items: center; gap: 9px; font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; font-size: 16.3px; color: #1B1F24; letter-spacing: -0.01em;" style-hover="text-decoration: none;">
+        <svg width="26" height="26" viewBox="0 0 120 120" style="display: block; filter: drop-shadow(0 1px 1.5px rgba(20,24,28,0.18));"><defs><linearGradient id="nv3b" x1="18" y1="34" x2="84" y2="100" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F0975A"></stop><stop offset="1" stop-color="#C96F2F"></stop></linearGradient></defs><rect x="44" y="8" width="66" height="66" rx="17" fill="none" stroke="#23282E" stroke-width="7" opacity="0.25"></rect><rect x="31" y="21" width="66" height="66" rx="17" fill="none" stroke="#23282E" stroke-width="7" opacity="0.5"></rect><rect x="18" y="34" width="66" height="66" rx="17" fill="url(#nv3b)"></rect><path d="M51 57 L61 67 L51 77 L41 67 Z" fill="#FDF6EE"></path></svg>
+        <span><span style="color: #1B1F24;">agent</span><span style="color: #B4540A;">Stack</span></span>
+      </a>
+      <nav style="margin-left: auto; display: flex; align-items: center; gap: 17px; white-space: nowrap;">
+        <a href="#" style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.8px; color: #5B6570;" style-hover="color: #B4540A; text-decoration: none;">docs</a>
+        <a href="#" style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.8px; color: #5B6570;" style-hover="color: #B4540A; text-decoration: none;">examples</a>
+        <a href="#" style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.8px; color: #5B6570;" style-hover="color: #B4540A; text-decoration: none;">GitHub ↗</a>
+        <a href="#" style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.8px; color: #1B1F24; padding: 5.5px 11px; border: 1px solid rgba(180,84,10,0.28); border-radius: 7px; background: rgba(180,84,10,0.10);" style-hover="border-color: #B4540A; text-decoration: none;">Get started →</a>
+      </nav>
+    </div>
+  </header>
+
+  <main style="max-width: 54rem; margin: 0 auto; padding: 0 22px 72px;">
+
+    <section style="margin-top: 44px;">
+      <h1 style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 48px; line-height: 1.12; letter-spacing: -0.03em; font-weight: 700; margin: 11px 0 13px;">Build, govern, and run<br>your agent stack.<span style="display: inline-block; width: 0.58ch; height: 1.05em; vertical-align: -0.14em; background: #B4540A; margin-left: 0.08em; border-radius: 1px; animation: blink 1.15s steps(2, start) infinite;"></span></h1>
+      <p style="font-size: 18.5px; line-height: 1.6; color: #5B6570; max-width: 42rem; margin: 0 0 16px;">
+        One manifest for all 13 agent CLIs — servers, skills, instructions, and
+        secrets, defined once. <strong style="color: #1B1F24; font-weight: 600;">Nothing runs until you trust it, and nothing
+        trusted runs unobserved.</strong>
+      </p>
+      <div style="display: flex; gap: 11px; flex-wrap: wrap; margin-top: 18px;">
+        <a href="#" style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.6px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; padding: 10px 17px; border-radius: 9px; background: #B4540A; color: #FFFFFF; box-shadow: 0 4px 14px rgba(20,24,28,0.07), 0 1px 3px rgba(20,24,28,0.05);" style-hover="transform: translateY(-1px); text-decoration: none;">Get started · 10 min →</a>
+        <a href="#install" style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.6px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; padding: 10px 17px; border-radius: 9px; background: #FFFFFF; color: #1B1F24; border: 1px solid #E7E2D9; box-shadow: 0 1px 2px rgba(20,24,28,0.05);" style-hover="border-color: rgba(180,84,10,0.28); background: rgba(180,84,10,0.10); text-decoration: none;">Install</a>
+      </div>
+
+      <div style="background: #14181C; color: #D7DEE4; border-radius: 14px; margin-top: 24px; box-shadow: 0 24px 60px -18px rgba(16,22,30,0.28), 0 8px 22px -12px rgba(16,22,30,0.20); border: 1px solid rgba(255,255,255,0.06); overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-bottom: 1px solid rgba(255,255,255,0.07); background: rgba(255,255,255,0.015);">
+          <i style="width: 11px; height: 11px; border-radius: 50%; background: #E5786B;"></i>
+          <i style="width: 11px; height: 11px; border-radius: 50%; background: #E0B04A;"></i>
+          <i style="width: 11px; height: 11px; border-radius: 50%; background: #7CC08B;"></i>
+          <b style="margin-left: auto; font: 600 11.2px ui-monospace, Menlo, monospace; color: #97A1AD; letter-spacing: 0.06em;">the whole stack, governed</b>
+        </div>
+        <pre style="margin: 0; padding: 18px 21px 22px; font: 13.8px/1.62 ui-monospace, Menlo, Consolas, monospace; overflow-x: auto;"><div><span style="color: #F0975A; font-weight: 600;">$</span> agentstack apply<span style="color: #97A1AD;">            # one manifest → 13 CLIs, in sync</span></div><div><span style="color: #F0975A; font-weight: 600;">$</span> agentstack guard install<span style="color: #97A1AD;">    # blocks rm -rf / .env accidents in 9 CLIs</span></div><div><span style="color: #F0975A; font-weight: 600;">$</span> agentstack trust .<span style="color: #97A1AD;">          # cloned repos stay inert until you consent</span></div><div><span style="color: #F0975A; font-weight: 600;">$</span> agentstack run --lockdown<span style="color: #97A1AD;">   # no route out but the egress firewall</span></div><div><span style="color: #F0975A; font-weight: 600;">$</span> agentstack report<span style="color: #97A1AD;">           # every brokered call, on the record</span></div></pre>
+      </div>
+    </section>
+
+    <section style="margin-top: 64px;">
+      <p style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #B4540A; margin: 0 0 11px; display: inline-flex; align-items: center; gap: 9px;"><span style="width: 26px; height: 1px; background: rgba(180,84,10,0.28); display: inline-block;"></span>See it work</p>
+      <h2 style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 20.5px; letter-spacing: -0.015em; font-weight: 700; margin: 0 0 14px;">Start with the problem you have today.</h2>
+      <div style="margin-top: 21px;">
+        <div style="display: inline-flex; align-items: center; gap: 9px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10.9px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #B4540A; margin-bottom: 8px;">01 · You juggle several CLIs<span style="width: 35px; height: 1px; background: rgba(180,84,10,0.28); display: inline-block;"></span></div>
+        <h3 style="margin: 0 0 6px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 17.3px; letter-spacing: -0.01em;">One manifest keeps them all in sync</h3>
+        <p style="margin: 0; max-width: 46rem; color: #5B6570; font-size: 15.2px; line-height: 1.62;">Claude Code at work, Cursor for edits, Codex in CI — and every MCP
+          server configured three different ways. Define it once;
+          <code style="font-family: ui-monospace, Menlo, monospace; font-size: 0.86em; background: #F3F0EA; padding: 2px 6px; border-radius: 5px; border: 1px solid #EFEBE3;">agentstack apply</code> renders each CLI's native config,
+          with secrets left as per-machine references.</p>
+        <div style="background: #14181C; color: #D7DEE4; border-radius: 14px; margin-top: 16px; box-shadow: 0 24px 60px -18px rgba(16,22,30,0.28), 0 8px 22px -12px rgba(16,22,30,0.20); border: 1px solid rgba(255,255,255,0.06); overflow: hidden;">
+          <div style="display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-bottom: 1px solid rgba(255,255,255,0.07); background: rgba(255,255,255,0.015);">
+            <i style="width: 11px; height: 11px; border-radius: 50%; background: #E5786B;"></i>
+            <i style="width: 11px; height: 11px; border-radius: 50%; background: #E0B04A;"></i>
+            <i style="width: 11px; height: 11px; border-radius: 50%; background: #7CC08B;"></i>
+            <b style="margin-left: auto; font: 600 11.2px ui-monospace, Menlo, monospace; color: #97A1AD; letter-spacing: 0.06em;">one manifest → .mcp.json · config.toml · mcp.json</b>
+          </div>
+          <pre style="margin: 0; padding: 18px 21px 22px; font: 13.8px/1.62 ui-monospace, Menlo, Consolas, monospace; overflow-x: auto;"><div><span style="color: #F0975A; font-weight: 600;">$</span> cat .agentstack/agentstack.toml<span style="color: #97A1AD;">   # one committed source of truth</span></div><div><span style="color: #97A1AD;">  [servers.github]</span></div><div><span style="color: #97A1AD;">  command = "npx"  args = ["-y", "@modelcontextprotocol/server-github"]</span></div><div><span style="color: #97A1AD;">  env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_TOKEN}" }</span></div><div> </div><div><span style="color: #F0975A; font-weight: 600;">$</span> agentstack apply --write</div><div><span style="color: #97A1AD;">  Claude Code   + .mcp.json                </span><span style="color: #7CC08B;">✓ wrote 1 server</span></div><div><span style="color: #97A1AD;">  Codex CLI     + .codex/config.toml       </span><span style="color: #7CC08B;">✓ wrote 1 server</span></div><div><span style="color: #97A1AD;">  Cursor        + .cursor/mcp.json         </span><span style="color: #7CC08B;">✓ wrote 1 server</span></div><div><span style="color: #97A1AD;">  instructions  → CLAUDE.md + AGENTS.md    </span><span style="color: #7CC08B;">✓ compiled</span></div><div> </div><div><span style="color: #7CC08B;">  ✓</span><span style="color: #97A1AD;"> same server, three native shapes — the manifest never holds the token</span></div></pre>
+        </div>
+      </div>
+    </section>
+
+    <section style="margin-top: 64px;">
+      <p style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #B4540A; margin: 0 0 11px; display: inline-flex; align-items: center; gap: 9px;"><span style="width: 26px; height: 1px; background: rgba(180,84,10,0.28); display: inline-block;"></span>Why this exists</p>
+      <h2 style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 20.5px; letter-spacing: -0.015em; font-weight: 700; margin: 0 0 14px;">Your agents run whatever your repos tell them to.</h2>
+      <p style="color: #5B6570; margin: 0 0 16px;">
+        Every skill, MCP server, and agent config you adopt is
+        <strong style="color: #1B1F24;">unreviewed code plus instructions</strong>,
+        wired into a process that holds your credentials, your shell, and the
+        network.
+      </p>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px;">
+        <div style="border: 1px solid #E7E2D9; border-radius: 14px; background: #FFFFFF; padding: 19px 20px; box-shadow: 0 1px 2px rgba(20,24,28,0.05);">
+          <h3 style="margin: 0 0 8px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15.7px; font-weight: 700;">One clone away</h3>
+          <p style="margin: 0; color: #5B6570; font-size: 14.4px; line-height: 1.55;">A repo can declare MCP servers, and the moment an agent session starts, they want to run. <span style="color: #B4540A;">→</span> Here, a clone is <strong>inert</strong> until you approve its consent surface.</p>
+        </div>
+        <div style="border: 1px solid #E7E2D9; border-radius: 14px; background: #FFFFFF; padding: 19px 20px; box-shadow: 0 1px 2px rgba(20,24,28,0.05);">
+          <h3 style="margin: 0 0 8px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15.7px; font-weight: 700;">One prompt away</h3>
+          <p style="margin: 0; color: #5B6570; font-size: 14.4px; line-height: 1.55;">An injected instruction can steer a well-behaved agent into using a legitimate tool against you. <span style="color: #B4540A;">→</span> Here, your <strong>machine policy</strong> fences tools, secrets, and egress.</p>
+        </div>
+        <div style="border: 1px solid #E7E2D9; border-radius: 14px; background: #FFFFFF; padding: 19px 20px; box-shadow: 0 1px 2px rgba(20,24,28,0.05);">
+          <h3 style="margin: 0 0 8px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15.7px; font-weight: 700;">Invisible afterwards</h3>
+          <p style="margin: 0; color: #5B6570; font-size: 14.4px; line-height: 1.55;">Most setups can't answer the first question a reviewer asks: <em>what did the agent actually call?</em> <span style="color: #B4540A;">→</span> Here, every brokered call and denial lands in the call audit.</p>
+        </div>
+        <div style="border: 1px solid #E7E2D9; border-radius: 14px; background: #FFFFFF; padding: 19px 20px; box-shadow: 0 1px 2px rgba(20,24,28,0.05);">
+          <h3 style="margin: 0 0 8px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15.7px; font-weight: 700;">Honestly scoped</h3>
+          <p style="margin: 0; color: #5B6570; font-size: 14.4px; line-height: 1.55;">No tool can make agent use risk-free: hosts you allow stay allowed. <span style="color: #B4540A;">→</span> That's why every mode carries an honest posture label.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="install" style="margin-top: 64px;">
+      <p style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #B4540A; margin: 0 0 11px; display: inline-flex; align-items: center; gap: 9px;"><span style="width: 26px; height: 1px; background: rgba(180,84,10,0.28); display: inline-block;"></span>Install</p>
+      <pre style="background: #F3F0EA; border: 1px solid #E7E2D9; border-radius: 9px; padding: 16px 18px; overflow-x: auto; margin: 0 0 16px; font: 13.4px/1.6 ui-monospace, Menlo, Consolas, monospace;">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</pre>
+      <p style="font-size: 13.8px; color: #5B6570; margin: 0;">One static binary, no runtime dependencies.</p>
+    </section>
+
+  </main>
+
+  <footer style="border-top: 1px solid #E7E2D9; margin-top: 40px; background: #EFEBE3;">
+    <div style="max-width: 74rem; margin: 0 auto; padding: 26px 22px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; font-size: 13.6px; color: #5B6570;">
+      <span style="display: inline-flex; align-items: center; gap: 8px;">
+        <svg width="20" height="20" viewBox="0 0 120 120" style="display: block;"><rect x="44" y="8" width="66" height="66" rx="17" fill="none" stroke="#1B1F24" stroke-width="7" opacity="0.25"></rect><rect x="31" y="21" width="66" height="66" rx="17" fill="none" stroke="#1B1F24" stroke-width="7" opacity="0.5"></rect><rect x="18" y="34" width="66" height="66" rx="17" fill="#C96F2F"></rect><path d="M51 57 L61 67 L51 77 L41 67 Z" fill="#FDF6EE"></path></svg>
+        <span style="font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: #1B1F24;">agent<span style="color: #B4540A;">Stack</span></span> · MIT / Apache-2.0
+      </span>
+      <nav style="margin-left: auto; display: flex; gap: 17px; flex-wrap: wrap;">
+        <a href="#" style="font-family: ui-monospace, Menlo, monospace; font-size: 12.8px; color: #5B6570;" style-hover="color: #B4540A;">docs</a>
+        <a href="#" style="font-family: ui-monospace, Menlo, monospace; font-size: 12.8px; color: #5B6570;" style-hover="color: #B4540A;">reference</a>
+        <a href="#" style="font-family: ui-monospace, Menlo, monospace; font-size: 12.8px; color: #5B6570;" style-hover="color: #B4540A;">GitHub ↗</a>
+      </nav>
+    </div>
+  </footer>
+</div>
+</x-dc>
+</body>
+</html>

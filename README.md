@@ -6,6 +6,7 @@
 > run, audit, and optimize the result.
 
 **[Website](https://tarekkharsa.github.io/agentstack/)** ·
+[Docs](https://tarekkharsa.github.io/agentstack/docs.html) ·
 [Examples](https://tarekkharsa.github.io/agentstack/examples.html) ·
 [Strategy](STRATEGY.md) ·
 [Current work](TODO.md) ·
@@ -198,7 +199,7 @@ determined attacker — a harness that ignores its own hook protocol bypasses it
 Kernel-enforced confinement is `run --sandbox` / `--lockdown`. Runnable
 walkthrough: [`examples/guard-demo/`](examples/guard-demo/).
 
-![agentstack guard blocking rm -rf, git reset --hard, and cat .env](docs/demos/guard.gif)
+![agentstack guard blocking rm -rf, git reset --hard, and cat .env](docs/guard.svg)
 
 ## One manifest, 13 CLIs
 

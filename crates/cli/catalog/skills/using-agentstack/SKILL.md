@@ -95,6 +95,8 @@ agentstack explain <name>        # provenance, secrets, footprint of a capabilit
 agentstack doctor --ci           # the full trust gate (validation, lock, policy, content scan)
 agentstack audit --json          # re-scan skills/instructions for hidden-unicode/injection
 agentstack audit --calls         # summarize the gateway call log (who called what, outcomes)
+agentstack guard status          # which CLIs have the destructive-command hook wired
+agentstack guard test <command>  # judge a shell command against guard policy (nonzero on deny)
 agentstack analyze               # usage analysis: unused servers, context cost, recommendations
 agentstack secret set NAME       # store a secret in the OS keychain
 agentstack restore <target>      # undo a write from its pre-write backup
@@ -114,6 +116,10 @@ agentstack restore <target>      # undo a write from its pre-write backup
   `--allow-secrets`** unless the user explicitly says so.
 - A blocked write ("unresolved secret") is a feature, not an error to work
   around: surface which `${REF}` is missing.
+- A command the **host guard** blocks (`✗ blocked` from the pre-tool-use hook)
+  is protecting the user from an accident — explain the denial, don't retry
+  variants or route around it. `agentstack guard test <command>` reproduces
+  the decision outside an agent session.
 - To give a project a new skill that exists in the library: add its name to the
   profile's `skills = [...]` list — no file copying.
 - A native config key one CLI needs but the manifest schema doesn't model

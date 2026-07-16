@@ -100,7 +100,7 @@
   }
   header.site.scrolled { border-bottom-color: var(--line); box-shadow: var(--shadow-sm); }
   .bar {
-    max-width: var(--wrap); margin: 0 auto; padding: 0.8rem 1.35rem;
+    max-width: 74rem; margin: 0 auto; padding: 0.7rem 1.35rem;
     display: flex; align-items: center; gap: 1.1rem;
   }
   .wordmark {
@@ -108,11 +108,14 @@
     display: inline-flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em;
   }
   .wordmark:hover { text-decoration: none; }
+  .wordmark .wm2, .brand .wm2 { color: var(--accent); }
   .wordmark .mark {
     height: 26px; width: auto; flex: none; display: block;
     filter: drop-shadow(0 1px 1.5px rgba(20,24,28,0.18));
   }
-  nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.15rem; flex-wrap: wrap; }
+  nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.05rem; flex-wrap: nowrap; white-space: nowrap; }
+  @media (max-width: 1060px) { nav.top a.nav-x { display: none; } }
+  @media (max-width: 700px) { nav.top a:not(.ghost) { display: none; } }
   nav.top a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
   nav.top a:hover { color: var(--accent); text-decoration: none; }
   nav.top a[aria-current="page"] { color: var(--accent); }
@@ -123,7 +126,37 @@
   nav.top .ghost:hover { border-color: var(--accent-line); background: var(--accent-soft); }
 
   /* ---------- layout ---------- */
-  main { max-width: var(--wrap); margin: 0 auto; padding: 0 1.35rem 6rem; }
+  /* Canonical docs sidebar — identical on docs.html, examples.html, and
+     start.html. Edit in ALL THREE places together (each page is self-contained). */
+  .docwrap {
+    max-width: 78rem; margin: 0 auto; padding: 0 1.35rem;
+    display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 2.75rem;
+    align-items: start;
+  }
+  aside.side { position: sticky; top: 4.2rem; max-height: calc(100vh - 5rem); overflow-y: auto; padding: 1.6rem 0 2rem; font-size: 0.85rem; }
+  aside.side .crumb { display: inline-block; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); margin-bottom: 0.9rem; }
+  aside.side .grp { margin-bottom: 1.15rem; }
+  aside.side .grp > b { display: block; font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.35rem; }
+  aside.side .grp > code { display: block; font-family: var(--mono); font-size: 0.66rem; color: var(--accent); background: none; border: none; padding: 0; margin: -0.25rem 0 0.35rem; }
+  aside.side ul { list-style: none; margin: 0; padding: 0; }
+  aside.side li a {
+    display: flex; gap: 0.5rem; align-items: baseline; padding: 0.14rem 0.5rem;
+    border-left: 2px solid transparent; border-radius: 0 5px 5px 0;
+    font-family: var(--mono); font-size: 0.76rem; color: var(--muted);
+  }
+  aside.side li a:hover { color: var(--accent); text-decoration: none; }
+  aside.side li a .n { color: var(--accent); font-size: 0.68rem; min-width: 1.2rem; text-align: right; }
+  aside.side li a.on { color: var(--ink); border-left-color: var(--accent); background: var(--accent-soft); }
+  aside.side li a.on-page { color: var(--ink); font-weight: 600; }
+  aside.side ul.sub { margin: 0.15rem 0 0.4rem; }
+  aside.side ul.sub li a { font-size: 0.72rem; padding-left: 1.15rem; }
+  aside.side ul.sub li.subhead {
+    font-family: var(--mono); font-size: 0.6rem; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+    margin: 0.5rem 0 0.15rem; padding-left: 1.15rem; opacity: 0.85;
+  }
+  @media (max-width: 960px) { .docwrap { display: block; } aside.side { display: none; } }
+  main { max-width: var(--wrap); min-width: 0; margin: 0; padding: 0 0 6rem; }
   section { margin-top: 4.5rem; scroll-margin-top: 5rem; }
 
   .eyebrow {
@@ -132,6 +165,8 @@
     margin: 0 0 0.7rem; display: inline-flex; align-items: center; gap: 0.55rem;
   }
   .eyebrow::before { content: ""; width: 1.6rem; height: 1px; background: var(--accent-line); }
+  .crumb { display: inline-block; font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 1rem; }
+  .crumb:hover { color: var(--accent); text-decoration: none; }
   h1 {
     font-family: var(--mono);
     font-size: clamp(1.8rem, 5.2vw, 2.7rem);
@@ -217,7 +252,7 @@
   ol.walk > li {
     counter-increment: step; position: relative;
     padding: 0 0 2.5rem 3.4rem; border-left: 1px solid var(--line);
-    margin-left: 1.1rem;
+    margin-left: 1.1rem; scroll-margin-top: 5rem;
   }
   ol.walk > li:last-child { border-left-color: transparent; padding-bottom: 0.5rem; }
   ol.walk > li::before {
@@ -229,6 +264,12 @@
     box-shadow: var(--shadow-sm);
   }
   ol.walk > li > h2 { margin-top: -0.1rem; font-size: 1.14rem; }
+  /* Track headers + per-track step prefixes (A1…, B1…) matching the rail. */
+  .track { margin: 3.6rem 0 0; padding-top: 2.1rem; border-top: 1px solid var(--line-soft); }
+  .track h2 { margin: 0.3rem 0 0.15rem; font-size: 1.4rem; letter-spacing: -0.01em; }
+  .track p.muted { margin: 0.2rem 0 0; font-size: 0.95rem; }
+  ol.walk.ta > li::before { content: "A" counter(step); font-size: 0.82rem; }
+  ol.walk.tb > li::before { content: "B" counter(step); font-size: 0.82rem; }
   ol.walk .expect {
     font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em;
     text-transform: uppercase; color: var(--faint); margin: 1.1rem 0 0.1rem;
@@ -271,48 +312,152 @@
 
 <header class="site" id="site-header">
   <div class="bar">
-    <a class="wordmark" href="./"><svg class="mark" viewBox="24 18 72 85" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="navTop" x1="28" y1="22" x2="92" y2="54" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F5A968"/><stop offset="1" stop-color="#E7864A"/></linearGradient></defs><path d="M60 58 L92 74 L60 90 L28 74 Z" fill="#9E5A1E"/><path d="M28 74 L60 90 L60 99 L28 83 Z" fill="#7E4512"/><path d="M92 74 L60 90 L60 99 L92 83 Z" fill="#64340C"/><path d="M60 40 L92 56 L60 72 L28 56 Z" fill="#CB7433"/><path d="M28 56 L60 72 L60 81 L28 65 Z" fill="#A85618"/><path d="M92 56 L60 72 L60 81 L92 65 Z" fill="#8A4512"/><path d="M60 22 L92 38 L60 54 L28 38 Z" fill="url(#navTop)"/><path d="M28 38 L60 54 L60 63 L28 47 Z" fill="#C56A2E"/><path d="M92 38 L60 54 L60 63 L92 47 Z" fill="#A85618"/><path d="M60 33.5 L69 38 L60 42.5 L51 38 Z" fill="#FDF6EE"/></svg>agentstack</a>
+    <a class="wordmark" href="./"><img class="mark" src="logo-mark.svg" alt=""><span>agent<span class="wm2">Stack</span></span></a>
     <nav class="top" aria-label="Project links">
-      <a href="index.html#enforced">what's enforced</a>
-      <a href="start.html" aria-current="page">get&nbsp;started</a>
-      <a class="refline" href="how-it-works.html">how&nbsp;it&nbsp;works</a>
-      <a class="refline" href="primitives.html">primitives</a>
-      <a class="refline" href="examples.html">examples</a>
-      <a class="refline" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">reference</a>
-      <a class="ghost" href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
+      <a href="docs.html">docs</a>
+      <a href="examples.html">examples</a>
+      <a href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
+      <a class="ghost" href="start.html">Get&nbsp;started&nbsp;→</a>
     </nav>
   </div>
 </header>
 
+<div class="docwrap">
+
+<!-- sidebar:begin (generated — edit agentstack-test/make-docs-sidebar.py) -->
+<aside class="side" aria-label="Documentation">
+  <div class="grp">
+    <b>Start</b>
+    <ul>
+      <li><a class="on-page" href="start.html">Get started</a>
+        <ul class="sub">
+          <li><a href="#s-install"><span class="n">1</span>Install the binary</a></li>
+          <li class="subhead">Track A — unify your setup</li>
+          <li><a href="#s-import"><span class="n">A1</span>Import what's there</a></li>
+          <li><a href="#s-render"><span class="n">A2</span>Render into every CLI</a></li>
+          <li><a href="#s-guard"><span class="n">A3</span>Wire the guardrails</a></li>
+          <li><a href="#s-verify"><span class="n">A4</span>Verify the loop</a></li>
+          <li class="subhead">Track B — govern a repo</li>
+          <li><a href="#s-connect"><span class="n">B1</span>Register the gateway</a></li>
+          <li><a href="#s-clone"><span class="n">B2</span>Clone — it stays inert</a></li>
+          <li><a href="#s-trust"><span class="n">B3</span>Review, then trust</a></li>
+          <li><a href="#s-secret"><span class="n">B4</span>Secrets in the keychain</a></li>
+          <li><a href="#s-run"><span class="n">B5</span>Run it confined</a></li>
+          <li><a href="#s-report"><span class="n">B6</span>Read the flight recorder</a></li>
+        </ul>
+      </li>
+      <li><a href="index.html#install">Install</a>
+      </li>
+      <li><a href="examples.html">Examples</a>
+      </li>
+      <li><a href="primitives.html">Which primitive?</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Configure</b>
+    <code>$ agentstack apply</code>
+    <ul>
+      <li><a href="how-it-works.html">How it works</a>
+      </li>
+      <li><a href="index.html#manifest">The manifest</a>
+      </li>
+      <li><a href="library.html">Central library</a>
+      </li>
+      <li><a href="index.html#modes">Rendered-file modes</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/dashboard.md">Dashboard</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Protect</b>
+    <code>$ agentstack trust · guard</code>
+    <ul>
+      <li><a href="index.html#trust">The trust gate</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Policy presets</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Run confined</b>
+    <code>$ agentstack run --lockdown</code>
+    <ul>
+      <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a>
+      </li>
+      <li><a href="index.html#enforced">What's enforced</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">Enforcement matrix</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Observe</b>
+    <code>$ agentstack report</code>
+    <ul>
+      <li><a href="examples.html#e20">Reports &amp; call audit</a>
+      </li>
+      <li><a href="examples.html#e21">Wire-cost analysis</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Reference</b>
+    <ul>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Every command</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md">Agent manual (skill)</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>Project</b>
+    <ul>
+      <li><a href="security-review-2026-07-11.html">Security review</a>
+      </li>
+      <li><a href="strategy.html">Strategy</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/HISTORY.md">History</a>
+      </li>
+    </ul>
+  </div>
+</aside>
+<!-- sidebar:end -->
+
 <main id="main">
 
-  <section id="intro" style="margin-top:3.25rem">
+  <section id="intro" style="margin-top:1.9rem">
+    <a class="crumb" href="docs.html">← all docs</a>
     <p class="eyebrow">Get started · two paths · ~10 minutes</p>
-    <h1>Unify the stack you have—or test its strongest boundary.</h1>
+    <h1 style="margin:0.7rem 0 0.85rem">Unify the stack you have—or test its strongest boundary.</h1>
     <p class="lede">
-      For everyday setup, let <code>agentstack setup</code> import what your
-      CLIs already use, preview one portable manifest, and compile it back into
-      their native formats. The detailed walkthrough below follows the security
-      path: open an unfamiliar repo, keep it inert until review, run it
-      <strong>confined</strong>, then read the evidence. <strong>Only the
-      confined run needs Docker.</strong>
+      Install once, then pick the track that matches you today.
+      <strong>Track&nbsp;A</strong> — you juggle several CLIs: import what's
+      already on your machine and render one manifest into all of them, guarded.
+      <strong>Track&nbsp;B</strong> — you clone repos you didn't write: keep
+      them inert until review, run them <strong>confined</strong>, read the
+      evidence. The tracks are independent; most people end up doing both.
     </p>
     <div class="callout">
-      <b>Fast path: consolidate your existing setup</b>
-      <p><code>agentstack setup</code> runs the guided
-        <code>init → bootstrap → apply → doctor</code> loop. It imports existing
-        CLI configuration, lifts inline secrets into references, previews every
-        write, and leaves you with one source of truth for all detected CLIs.</p>
+      <b>Which track first?</b>
+      <p>If agentstack is new to your machine, <strong>Track A</strong> pays off
+        immediately — one source of truth for every CLI plus guardrails, in
+        about five minutes, no Docker. Come back for <strong>Track B</strong>
+        the first time an unfamiliar repo declares MCP servers you've never
+        read.</p>
     </div>
     <div class="callout">
       <b>What needs Docker, and what doesn't</b>
       <p>The trust gate, the tool firewall, secret resolution, and the call
         audit log all run natively — no container, no Docker. Only the
-        <code>--sandbox</code> / <code>--lockdown</code> runs in step 6 spawn a
-        container, so those are the only steps that need Docker installed and
-        running. If you don't have Docker, stop after step 5: you'll still have
-        a trust-gated, firewalled, audited setup for brokered MCP capabilities;
-        the host agent process itself is not confined.</p>
+        <code>--sandbox</code> / <code>--lockdown</code> run at the end of
+        Track&nbsp;B spawns a container, so that is the only step that needs
+        Docker installed and running. Without Docker, stop before it: you'll
+        still have a trust-gated, firewalled, audited setup for brokered MCP
+        capabilities; the host agent process itself is not confined.</p>
     </div>
   </section>
 
@@ -344,6 +489,129 @@
 <span class="c">agentstack 0.10.x</span></code></pre>
       </div>
     </li>
+  </ol>
+
+  <div class="track" id="track-a">
+    <p class="eyebrow">Track A · you juggle several CLIs</p>
+    <h2>Unify the stack you already have</h2>
+    <p class="muted">~5 minutes · no Docker · ends with every CLI in sync, and guarded.</p>
+  </div>
+
+  <ol class="walk ta">
+
+    <li id="s-import">
+      <h2>Import what's already there</h2>
+      <p class="muted">
+        <code>agentstack setup</code> runs the guided
+        <code>init → bootstrap → apply → doctor</code> loop interactively. It
+        detects your installed CLIs, imports their existing configuration into
+        one portable manifest, lifts inline secrets into references, and
+        previews every write before making it. Prefer the pieces individually?
+        The same flow is <code>agentstack init</code> then
+        <code>agentstack bootstrap</code>.
+      </p>
+      <div class="copywrap">
+        <pre><code>agentstack setup</code></pre>
+        <button class="copybtn" data-copy="agentstack setup">copy</button>
+      </div>
+      <p class="expect">You should see</p>
+      <div class="term">
+        <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>init → bootstrap</b></div>
+        <pre><code><span class="p">$</span> agentstack init
+<span class="c">  🔍 Detected 6 CLIs: Claude Code · Codex · Copilot · Gemini · OpenCode · Pi</span>
+<span class="c">  📥 Imported 1 MCP server from existing configs</span>
+<span class="ok">  ✅ Wrote .agentstack/agentstack.toml</span>
+<span class="p">$</span> agentstack bootstrap
+<span class="ok">  ✓</span><span class="c"> manifest validates · 6 adapters installed · no missing secrets</span></code></pre>
+      </div>
+    </li>
+
+    <li id="s-render">
+      <h2>Render it into every CLI</h2>
+      <p class="muted">
+        <code>apply</code> previews each CLI's changes in its own native format
+        and writes them on confirmation. The manifest keeps secrets as
+        <code>${REF}</code> placeholders that resolve per machine — it stays
+        safe to commit and share. (Skills activate through profiles, not
+        <code>apply</code>: <code>agentstack use &lt;profile&gt; --write</code>
+        materializes them; <code>apply</code> will remind you.)
+      </p>
+      <div class="copywrap">
+        <pre><code>agentstack apply --write</code></pre>
+        <button class="copybtn" data-copy="agentstack apply --write">copy</button>
+      </div>
+      <p class="expect">You should see</p>
+      <div class="term">
+        <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>one manifest → every native format</b></div>
+        <pre><code><span class="p">$</span> agentstack apply --write
+<span class="c">  Claude Code   + .mcp.json                </span><span class="ok">✓ wrote 1 server</span>
+<span class="c">  Codex CLI     + .codex/config.toml       </span><span class="ok">✓ wrote 1 server</span>
+<span class="c">  Cursor        + .cursor/mcp.json         </span><span class="ok">✓ wrote 1 server</span>
+<span class="c">  instructions  → CLAUDE.md + AGENTS.md    </span><span class="ok">✓ compiled</span></code></pre>
+      </div>
+    </li>
+
+    <li id="s-guard">
+      <h2>Wire the guardrails</h2>
+      <p class="muted">
+        One command hooks a <strong>cooperative</strong> pre-tool-use check into
+        every detected hook-capable CLI: destructive commands
+        (<code>rm -rf</code> outside the workspace, <code>git reset --hard</code>)
+        and reads of <code>[policy.filesystem]</code> deny-globs like
+        <code>.env</code> are blocked before they land, and every denial is
+        recorded in the audit log. It catches an agent's <em>accidents</em>, not
+        a determined attacker — kernel-enforced confinement is Track&nbsp;B's
+        confined run.
+      </p>
+      <div class="copywrap">
+        <pre><code>agentstack guard install</code></pre>
+        <button class="copybtn" data-copy="agentstack guard install">copy</button>
+      </div>
+      <p class="expect">You should see</p>
+      <div class="term">
+        <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>accidents, caught</b></div>
+        <pre><code><span class="p">$</span> agentstack guard install
+<span class="ok">  ✓</span><span class="c"> wired: Claude Code · Codex · Gemini · Cursor · Windsurf · +4</span>
+<span class="c">  agent → </span>rm -rf /opt/acme/data
+<span class="no">    ✗ blocked</span><span class="c">   destructive, outside the workspace</span>
+<span class="c">  agent → </span>cat .env
+<span class="no">    ✗ blocked</span><span class="c">   [policy.filesystem] deny glob</span></code></pre>
+      </div>
+      <p class="small muted">
+        Want to see a denial without involving an agent? <code>agentstack guard
+        test rm -rf /</code> judges any command against the current guard policy
+        and exits nonzero on deny. <code>agentstack guard status</code> shows
+        which CLIs are wired.
+      </p>
+    </li>
+
+    <li id="s-verify">
+      <h2>Verify, and keep the habit</h2>
+      <p class="muted">
+        <code>agentstack doctor</code> checks that everything is wired up and
+        names the exact fix for anything that isn't. And from any directory,
+        bare <code>agentstack</code> tells you the one next step for where
+        you're standing. That's the whole everyday loop — edit the manifest,
+        <code>apply</code>, and every CLI follows.
+      </p>
+      <div class="copywrap">
+        <pre><code>agentstack doctor</code></pre>
+        <button class="copybtn" data-copy="agentstack doctor">copy</button>
+      </div>
+      <p class="small muted">
+        The first time a repo you didn't write declares its own MCP servers,
+        continue below — that's what Track&nbsp;B is for.
+      </p>
+    </li>
+  </ol>
+
+  <div class="track" id="track-b">
+    <p class="eyebrow">Track B · you clone repos you didn't write</p>
+    <h2>Govern an unfamiliar repo</h2>
+    <p class="muted">~10 minutes · Docker only for the confined run at the end.</p>
+  </div>
+
+  <ol class="walk tb">
 
     <li id="s-connect">
       <h2>Register the gateway, once</h2>
@@ -571,6 +839,57 @@ agentstack report &lt;run-id&gt; --json # machine-readable, carries the posture 
   </section>
 
 </main>
+
+</div>
+
+<script>
+  // Sidebar scroll-spy — canonical, identical on examples.html and start.html.
+  // Active = the LAST target whose top sits above the reading line (just under
+  // the sticky header, where a clicked target rests per scroll-margin-top).
+  // This is robust for tall targets, where intersection-based spies light up a
+  // neighbor. Progressive enhancement only — without JS the rail is plain links.
+  (function () {
+    const links = [];
+    document.querySelectorAll("aside.side li a[href^='#']").forEach((a) => {
+      const el = document.getElementById(a.getAttribute("href").slice(1));
+      if (el) links.push([el, a]);
+    });
+    if (!links.length) return;
+    let current = null;
+    const setActive = (link) => {
+      if (!link || link === current) return;
+      if (current) current.classList.remove("on");
+      current = link;
+      link.classList.add("on");
+      // Keep the active link visible by scrolling ONLY the rail —
+      // scrollIntoView would also scroll the window and hijack the
+      // in-flight anchor navigation.
+      const rail = link.closest("aside");
+      const r = link.getBoundingClientRect(), rr = rail.getBoundingClientRect();
+      if (r.top < rr.top + 40 || r.bottom > rr.bottom - 40) {
+        rail.scrollTop += r.top - rr.top - rr.height / 2 + r.height / 2;
+      }
+    };
+    const LINE = 88; // px from viewport top: header (~64) + breathing room
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      let pick = links[0][1];
+      for (const [el, a] of links) {
+        if (el.getBoundingClientRect().top <= LINE) pick = a;
+        else break;
+      }
+      setActive(pick);
+    };
+    const onScroll = () => {
+      if (!ticking) { ticking = true; requestAnimationFrame(update); }
+    };
+    addEventListener("scroll", onScroll, { passive: true });
+    // A clicked rail link answers immediately; the scroll handler then agrees.
+    links.forEach(([, a]) => a.addEventListener("click", () => setActive(a)));
+    update();
+  })();
+</script>
 
 <footer>
   <div class="bar">
