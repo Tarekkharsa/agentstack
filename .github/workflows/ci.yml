@@ -43,6 +43,30 @@ jobs:
         run: |
           cargo build --release
           bash examples/malicious-repo-demo/run-demo.sh
+      # The rest of the asserted example suite — every demo and example
+      # project is CI-grade (isolated HOME, PASS/FAIL checks, nonzero exit on
+      # failure), so run them all here rather than trusting a manual sweep.
+      # The Python MCP clients (lease demo, gateway probe, skills workout) are
+      # stdlib-only; the runner's python3 suffices. Reuses the release binary
+      # built by the step above.
+      - name: Example suite (asserting)
+        env:
+          AGENTSTACK_BIN: ${{ github.workspace }}/target/release/agentstack
+        run: |
+          for script in \
+            examples/guard-demo/run-demo.sh \
+            examples/one-manifest-demo/run-demo.sh \
+            examples/mcp-profile-lease/run-demo.sh \
+            examples/projects/multi-cli-webapp/assert.sh \
+            examples/projects/per-cli-instructions/assert.sh \
+            examples/projects/policy-intersection/assert.sh \
+            examples/projects/restricted-folders/assert.sh \
+            examples/projects/skills-workout/assert.sh
+          do
+            echo "::group::$script"
+            bash "$script"
+            echo "::endgroup::"
+          done
 
   # The flagship security feature — the sandbox + egress proxy + lockdown — only
   # exists behind the `sandbox`/`docker` features and is proven against a real
