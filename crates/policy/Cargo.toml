@@ -1,6 +1,6 @@
 [package]
 name = "agentstack-policy"
-version = "0.10.1"
+version = "0.10.2"
 edition = "2021"
 rust-version = "1.80"
 description = "agentstack policy engine: machine ∩ bundle composition, the seed of the intersection engine"
