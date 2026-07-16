@@ -30,6 +30,7 @@ pub mod gateway;
 pub mod gateway_http;
 pub mod grant;
 pub mod guard;
+pub mod harness;
 pub mod history;
 pub mod library;
 pub mod machine_policy;

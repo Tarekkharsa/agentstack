@@ -15,6 +15,7 @@ use crate::cli::{
     PluginsAdoptArgs, PluginsArgs, PluginsCommand, PluginsCreateArgs, PluginsNativeArgs,
     PluginsStatusArgs, PluginsSyncArgs,
 };
+use crate::harness::Harness;
 use crate::library::{Library, LibrarySkill};
 use crate::manifest::{validate_with_context, Hook, PluginRecipe, Server, ServerType, ValidateCtx};
 use crate::plugin_recipes::{self, SyncOptions};
@@ -745,8 +746,8 @@ fn native_remove_plan(recipe: &plugin_recipes::RecipeStatus, target: &str) -> Na
 
 fn native_marketplace_command(target: &str, package_path: &Path) -> Option<Vec<String>> {
     let repo_dir = package_path.parent()?.parent()?.parent()?;
-    match target {
-        "codex" => Some(vec![
+    match Harness::from_id(target) {
+        Harness::Codex => Some(vec![
             "codex".into(),
             "plugin".into(),
             "marketplace".into(),
@@ -754,7 +755,7 @@ fn native_marketplace_command(target: &str, package_path: &Path) -> Option<Vec<S
             repo_dir.display().to_string(),
             "--json".into(),
         ]),
-        "claude-code" => Some(vec![
+        Harness::ClaudeCode => Some(vec![
             "claude".into(),
             "plugin".into(),
             "marketplace".into(),
@@ -763,20 +764,20 @@ fn native_marketplace_command(target: &str, package_path: &Path) -> Option<Vec<S
             "local".into(),
             repo_dir.display().to_string(),
         ]),
-        _ => None,
+        Harness::Other(_) => None,
     }
 }
 
 fn native_install_command(target: &str, name: &str) -> Option<Vec<String>> {
-    match target {
-        "codex" => Some(vec![
+    match Harness::from_id(target) {
+        Harness::Codex => Some(vec![
             "codex".into(),
             "plugin".into(),
             "add".into(),
             format!("{name}@agentstack"),
             "--json".into(),
         ]),
-        "claude-code" => Some(vec![
+        Harness::ClaudeCode => Some(vec![
             "claude".into(),
             "plugin".into(),
             "install".into(),
@@ -784,20 +785,20 @@ fn native_install_command(target: &str, name: &str) -> Option<Vec<String>> {
             "--scope".into(),
             "local".into(),
         ]),
-        _ => None,
+        Harness::Other(_) => None,
     }
 }
 
 fn native_remove_command(target: &str, name: &str) -> Option<Vec<String>> {
-    match target {
-        "codex" => Some(vec![
+    match Harness::from_id(target) {
+        Harness::Codex => Some(vec![
             "codex".into(),
             "plugin".into(),
             "remove".into(),
             format!("{name}@agentstack"),
             "--json".into(),
         ]),
-        "claude-code" => Some(vec![
+        Harness::ClaudeCode => Some(vec![
             "claude".into(),
             "plugin".into(),
             "uninstall".into(),
@@ -805,7 +806,7 @@ fn native_remove_command(target: &str, name: &str) -> Option<Vec<String>> {
             "--scope".into(),
             "local".into(),
         ]),
-        _ => None,
+        Harness::Other(_) => None,
     }
 }
 

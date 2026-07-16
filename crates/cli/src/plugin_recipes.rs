@@ -11,6 +11,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Map, Value};
 
 use crate::adapter::Registry;
+use crate::harness::Harness;
 use crate::manifest::{Hook, Manifest, PluginRecipe, Server};
 use crate::secret::{refs_in, MapResolver};
 use crate::store::{local_source_dir, Store};
@@ -232,10 +233,10 @@ pub fn sync(
             .filter(|g| g.targets.iter().any(|t| t == target))
             .collect();
         let path = marketplace_path(dir, target);
-        let proposed = match target.as_str() {
-            "codex" => merge_codex_marketplace(&path, &relevant)?,
-            "claude-code" => merge_claude_marketplace(&path, &relevant)?,
-            _ => continue,
+        let proposed = match Harness::from_id(target) {
+            Harness::Codex => merge_codex_marketplace(&path, &relevant)?,
+            Harness::ClaudeCode => merge_claude_marketplace(&path, &relevant)?,
+            Harness::Other(_) => continue,
         };
         if marketplace_changed(&path, &proposed)? {
             if opts.write {
@@ -455,10 +456,10 @@ fn marketplace_statuses(
     let mut out = Vec::new();
     for target in targets {
         let path = marketplace_path(dir, target);
-        let expected_entry = match target.as_str() {
-            "codex" => codex_marketplace_entry(&generated),
-            "claude-code" => claude_marketplace_entry(&generated),
-            _ => continue,
+        let expected_entry = match Harness::from_id(target) {
+            Harness::Codex => codex_marketplace_entry(&generated),
+            Harness::ClaudeCode => claude_marketplace_entry(&generated),
+            Harness::Other(_) => continue,
         };
         let actual_entry = marketplace_recipe_entry(&path, name);
         let present = actual_entry.is_some();
@@ -693,54 +694,54 @@ fn native_satisfaction_action(native: &NativeSatisfaction) -> String {
 }
 
 fn native_marketplace_action(target: &str, name: &str, repo_dir: &Path) -> String {
-    match target {
-        "codex" => format!(
+    match Harness::from_id(target) {
+        Harness::Codex => format!(
             "Make the repo marketplace visible to Codex: codex plugin marketplace add {} --json; then install with codex plugin add {name}@agentstack --json or browse /plugins.",
             repo_dir.display()
         ),
-        "claude-code" => format!(
+        Harness::ClaudeCode => format!(
             "Make the repo marketplace visible to Claude Code: claude plugin marketplace add --scope local {}; then install with claude plugin install {name}@agentstack --scope local or browse /plugin.",
             repo_dir.display()
         ),
-        _ => "Open the native plugin marketplace UI/CLI for this target and add this repository marketplace."
+        Harness::Other(_) => "Open the native plugin marketplace UI/CLI for this target and add this repository marketplace."
             .to_string(),
     }
 }
 
 fn native_install_action(target: &str, name: &str) -> String {
-    match target {
-        "codex" => format!(
+    match Harness::from_id(target) {
+        Harness::Codex => format!(
             "Install from the native Codex marketplace: codex plugin add {name}@agentstack --json or browse /plugins."
         ),
-        "claude-code" => format!(
+        Harness::ClaudeCode => format!(
             "Install from the native Claude Code marketplace: claude plugin install {name}@agentstack --scope local or browse /plugin."
         ),
-        _ => "Install from this target's native plugin marketplace.".to_string(),
+        Harness::Other(_) => "Install from this target's native plugin marketplace.".to_string(),
     }
 }
 
 fn native_enable_action(target: &str) -> String {
-    match target {
-        "codex" => "Plugin is installed but disabled; open Codex /plugins and enable or inspect it."
+    match Harness::from_id(target) {
+        Harness::Codex => "Plugin is installed but disabled; open Codex /plugins and enable or inspect it."
             .to_string(),
-        "claude-code" => {
+        Harness::ClaudeCode => {
             "Plugin is installed but reported disabled; open Claude Code /plugin and enable or inspect it."
                 .to_string()
         }
-        _ => "Plugin is installed but disabled; open the native plugin UI/CLI and enable or inspect it."
+        Harness::Other(_) => "Plugin is installed but disabled; open the native plugin UI/CLI and enable or inspect it."
             .to_string(),
     }
 }
 
 fn native_check_action(target: &str) -> String {
-    match target {
-        "codex" => "Plugin is installed; Codex discovery did not report enabled state, so check /plugins."
+    match Harness::from_id(target) {
+        Harness::Codex => "Plugin is installed; Codex discovery did not report enabled state, so check /plugins."
             .to_string(),
-        "claude-code" => {
+        Harness::ClaudeCode => {
             "Plugin is installed; Claude Code discovery does not expose enabled state, so check /plugin."
                 .to_string()
         }
-        _ => "Plugin is installed; this target did not expose enabled state, so check the native UI/CLI."
+        Harness::Other(_) => "Plugin is installed; this target did not expose enabled state, so check the native UI/CLI."
             .to_string(),
     }
 }
@@ -1137,10 +1138,10 @@ fn package_dir(dir: &Path, name: &str) -> PathBuf {
 }
 
 fn marketplace_path(dir: &Path, target: &str) -> PathBuf {
-    match target {
-        "codex" => dir.join(".agents/plugins/marketplace.json"),
-        "claude-code" => dir.join(".claude-plugin/marketplace.json"),
-        _ => dir.join(format!(".agentstack/unsupported-{target}.json")),
+    match Harness::from_id(target) {
+        Harness::Codex => dir.join(".agents/plugins/marketplace.json"),
+        Harness::ClaudeCode => dir.join(".claude-plugin/marketplace.json"),
+        Harness::Other(id) => dir.join(format!(".agentstack/unsupported-{id}.json")),
     }
 }
 
