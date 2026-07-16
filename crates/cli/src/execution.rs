@@ -329,14 +329,26 @@ mod hosted {
         );
         setup!(write_file(&files.ruleset, &ruleset_json), "setup-error");
         setup!(make_app_readonly(&files.app), "setup-error");
+        // The sink runs on the lockdown log-follower's tokio task, so parse +
+        // append happen on a spool thread, not an async worker. Declared
+        // before `lockdown` so it drops (and flushes) after the follower's
+        // sender handle.
         let sink_log = agentstack_recorder::RunLog::create(log_id);
-        let sink: agentstack_runtime::LockdownSink = Arc::new(move |line| {
-            if let (Some(run_log), Ok(event)) = (
-                sink_log.as_ref(),
-                serde_json::from_str::<agentstack_recorder::RunEvent>(line),
-            ) {
-                run_log.append(&event);
-            }
+        let spool = setup!(
+            agentstack_egress::WriterSpool::spawn("executor-events", move |line: String| {
+                if let (Some(run_log), Ok(event)) = (
+                    sink_log.as_ref(),
+                    serde_json::from_str::<agentstack_recorder::RunEvent>(&line),
+                ) {
+                    run_log.append(&event);
+                }
+            })
+            .map_err(|error| runtime_unavailable("starting the event writer", error)),
+            "runtime-unavailable"
+        );
+        let events = spool.sender();
+        let sink: agentstack_runtime::LockdownSink = Arc::new(move |line: &str| {
+            events.send(line.to_string());
         });
         let relay_dest = format!("host.docker.internal:{}", relay.addr().port());
         // The executor never receives this token. Even if guest code imports

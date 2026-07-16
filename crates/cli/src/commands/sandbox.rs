@@ -1132,12 +1132,22 @@ fn execute_proxy(
     // Stand up the egress proxy for this run from the compiled policy, bound on
     // 0.0.0.0 so the container reaches it via host.docker.internal. Attributed
     // to the harness as the sandbox's single egress identity.
+    // The sink runs on the proxy's tokio workers (BlockingBridge has exactly
+    // one), so the file append happens on a spool thread — a slow disk must
+    // not stall every in-flight tunnel. Declared before `bridge` so it drops
+    // (and flushes) after the proxies release their sender handles.
     let sink_log = Arc::clone(&log);
-    let sink: agentstack_egress::EventSink = Arc::new(move |ev| {
-        if let Some(l) = sink_log.as_ref() {
-            l.append(&ev);
-        }
-    });
+    let spool = agentstack_egress::WriterSpool::spawn(
+        "egress-events",
+        move |ev: agentstack_recorder::RunEvent| {
+            if let Some(l) = sink_log.as_ref() {
+                l.append(&ev);
+            }
+        },
+    )
+    .context("starting the egress event writer")?;
+    let events = spool.sender();
+    let sink: agentstack_egress::EventSink = Arc::new(move |ev| events.send(ev));
     // Anti-SSRF address check is on by default; the demo dials the host gateway
     // (host.docker.internal), so it opts out via env — never set in real use.
     let proxy_config = agentstack_egress::proxy::ProxyConfig {
@@ -1214,14 +1224,22 @@ fn execute_lockdown(
     // The sidecar reports each egress decision as a JSON line; parse it into a
     // RunEvent and append to the same flight recorder the sandbox lifecycle
     // writes. Runtime forwards the raw line so serde stays out of that crate.
+    // The sink runs on the log-follower's tokio task (a 2-worker runtime), so
+    // parse + append happen on a spool thread, not an async worker. Declared
+    // before `lock` so it drops (and flushes) after the follower's sender.
     let sink_log = Arc::clone(&log);
-    let sink: agentstack_runtime::LockdownSink = Arc::new(move |line: &str| {
+    let spool = agentstack_egress::WriterSpool::spawn("lockdown-events", move |line: String| {
         if let (Some(l), Ok(ev)) = (
             sink_log.as_ref(),
-            serde_json::from_str::<agentstack_recorder::RunEvent>(line),
+            serde_json::from_str::<agentstack_recorder::RunEvent>(&line),
         ) {
             l.append(&ev);
         }
+    })
+    .context("starting the lockdown event writer")?;
+    let events = spool.sender();
+    let sink: agentstack_runtime::LockdownSink = Arc::new(move |line: &str| {
+        events.send(line.to_string());
     });
 
     let backend = agentstack_runtime::docker::DockerSandbox::connect()

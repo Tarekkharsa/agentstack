@@ -33,6 +33,7 @@ pub mod netguard;
 pub mod proxy;
 pub mod relay;
 pub mod sni;
+pub mod spool;
 
 pub use blocking::BlockingBridge;
 pub use bridge::{EgressBridge, ProxyEndpoint};
@@ -44,3 +45,4 @@ pub use execution_relay::{
 pub use proxy::{EventSink, ServerProxy};
 pub use relay::start_relay;
 pub use sni::{extract_sni, SniVerdict};
+pub use spool::{SpoolSender, WriterSpool};

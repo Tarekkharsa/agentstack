@@ -63,13 +63,23 @@ fn run() -> Result<(), String> {
 
     // Every decision goes to stdout as one self-describing JSON line, flushed
     // immediately — the host is tailing container logs, not reading a file.
-    let sink: EventSink = Arc::new(|ev| {
-        if let Ok(line) = serde_json::to_string(&ev) {
-            let mut out = std::io::stdout().lock();
-            let _ = writeln!(out, "{line}");
-            let _ = out.flush();
-        }
-    });
+    // The write happens on the spool's dedicated thread, never a proxy worker:
+    // this runtime has two workers, and stdout here is a pipe the host reads,
+    // so a stalled reader must not freeze every in-flight tunnel. Declared
+    // before `rt` so the sidecar's lifetime keeps it alive.
+    let spool = agentstack_egress::WriterSpool::spawn(
+        "sidecar-stdout",
+        |ev: agentstack_recorder::RunEvent| {
+            if let Ok(line) = serde_json::to_string(&ev) {
+                let mut out = std::io::stdout().lock();
+                let _ = writeln!(out, "{line}");
+                let _ = out.flush();
+            }
+        },
+    )
+    .map_err(|e| format!("starting the event writer thread: {e}"))?;
+    let events = spool.sender();
+    let sink: EventSink = Arc::new(move |ev| events.send(ev));
 
     // Anti-SSRF is on by default: resolved targets must be global unicast.
     // The Docker demo dials the host gateway (host.docker.internal), so it opts
