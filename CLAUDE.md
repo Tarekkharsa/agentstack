@@ -89,14 +89,19 @@ In particular: `trust` and `policy` depend on `core` only, and nothing depends o
 - **Small increments.** One crate, one capability per session where possible. Never scaffold phases beyond the current gate in `TODO.md`.
 - **Extract, don't rewrite.** When roadmap work overlaps shipped code (`lock.rs`, `secret/`, the adapter engine), move and adapt the existing code. A from-scratch replacement of working code needs explicit approval.
 - **Don't write a lot of tests.** There is no need for exhaustive test suites — one focused test per new behavior is enough, and mechanical or plumbing code often needs none. Exception: security claims still need their witness. The proptest invariants in `trust` and `policy` must never be deleted or weakened, and a change to trust granting, policy intersection, digest computation, or secret resolution still ships with a test proving the claim.
-- **Run before done:** `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` must pass before declaring any task complete.
+- **Run before done:** `cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings` must pass before declaring any task complete. For tests, run only what relates to the change — the touched crate and the specific tests covering the changed behavior (e.g. `cargo nextest run -p <crate>` or `cargo nextest run <filter>`), not the full workspace suite. The full suite is for pre-commit/CI, not every iteration.
 - **Security-sensitive diffs get flagged.** If a change touches trust granting, policy intersection, secret resolution, or digest computation, say so explicitly at the top of your summary so the maintainer reviews it line by line.
 
 ## Commands
 
 ```
 cargo build --workspace
-cargo test --workspace
+cargo nextest run --workspace   # preferred: parallel test binaries, ~3x faster than cargo test
+cargo test --workspace          # fallback if nextest is unavailable
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt
 ```
+
+The Docker sidecar tests (`crates/egress/tests/sidecar_image.rs`) are `#[ignore]`d
+and excluded from the default run; the CI sandbox job runs them with
+`--include-ignored`.

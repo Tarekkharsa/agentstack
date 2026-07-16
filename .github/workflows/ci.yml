@@ -57,7 +57,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Sidecar image + policy enforcement (Docker)
-        run: cargo test -p agentstack-egress --test sidecar_image -- --nocapture
+        # The sidecar tests are #[ignore]d to keep the default workspace run
+        # fast; this dedicated job is where they actually execute.
+        run: cargo test -p agentstack-egress --test sidecar_image -- --include-ignored --nocapture
       - name: Sandbox egress + lockdown end-to-end (Docker)
         run: |
           cargo test -p agentstack --features sandbox \

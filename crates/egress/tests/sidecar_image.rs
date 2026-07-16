@@ -9,8 +9,9 @@
 //! startup (fail closed).
 //!
 //! SKIPS (never fails) without a Docker daemon. The first run compiles the
-//! workspace inside rust:alpine (~minutes); Docker caches it after. Run:
-//!   cargo test -p agentstack-egress --test sidecar_image -- --nocapture
+//! workspace inside rust:alpine (~minutes); Docker caches it after. The tests
+//! are `#[ignore]`d so the default workspace run stays fast; run them with:
+//!   cargo test -p agentstack-egress --test sidecar_image -- --include-ignored --nocapture
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -114,7 +115,12 @@ fn send_and_read(stream: &mut TcpStream, payload: &[u8]) -> String {
     String::from_utf8_lossy(&buf[..n]).to_string()
 }
 
+// Docker-bound and slow (~18s warm, minutes cold): excluded from the default
+// `cargo test --workspace` run. The dedicated CI sandbox job runs it with
+// `--include-ignored`; locally:
+//   cargo test -p agentstack-egress --test sidecar_image -- --include-ignored
 #[test]
+#[ignore = "Docker sidecar build/run; covered by the CI sandbox job (--include-ignored)"]
 fn sidecar_container_enforces_policy_and_reports_on_stdout() {
     if !image_ready() {
         return;
@@ -248,6 +254,7 @@ fn sidecar_container_enforces_policy_and_reports_on_stdout() {
 }
 
 #[test]
+#[ignore = "Docker sidecar build/run; covered by the CI sandbox job (--include-ignored)"]
 fn sidecar_refuses_a_future_ruleset_version_at_startup() {
     if !image_ready() {
         return;
