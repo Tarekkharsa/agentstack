@@ -680,7 +680,11 @@ mod tests {
             server: server.into(),
             tool: tool.into(),
             args_digest: "x".into(),
-            outcome: outcome.into(),
+            outcome: match outcome {
+                "denied" => agentstack_recorder::CallOutcome::Denied,
+                "error" => agentstack_recorder::CallOutcome::Error,
+                _ => agentstack_recorder::CallOutcome::Ok,
+            },
             detail: if outcome == "denied" {
                 Some("!*".into())
             } else {

@@ -39,6 +39,29 @@ const TAIL_CHUNK_BYTES: usize = 64 * 1024;
 /// by that run's agent can be attributed to the run.
 pub const RUN_ID_ENV: &str = "AGENTSTACK_RUN_ID";
 
+/// The outcome of one proxied tool call — a closed 3-value set. Serializes to
+/// the same `"ok"` / `"error"` / `"denied"` the log has always used, so the
+/// persisted wire form is byte-identical (a stale reader parses it unchanged).
+/// Typed so the report/analyze consumers match variants instead of magic
+/// strings, and a typo like `"Denied"` can't slip through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallOutcome {
+    Ok,
+    Error,
+    Denied,
+}
+
+impl CallOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CallOutcome::Ok => "ok",
+            CallOutcome::Error => "error",
+            CallOutcome::Denied => "denied",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallRecord {
     pub ts: u64,
@@ -51,8 +74,7 @@ pub struct CallRecord {
     pub tool: String,
     /// First 12 hex chars of SHA-256 over the serialized arguments.
     pub args_digest: String,
-    /// `ok` / `error` / `denied`.
-    pub outcome: String,
+    pub outcome: CallOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     pub ms: u64,
@@ -322,7 +344,7 @@ pub enum RunEvent {
         execution_id: Option<String>,
         server: String,
         tool: String,
-        outcome: String,
+        outcome: CallOutcome,
         /// Keyed SHA-256 digest prefix over the arguments (see
         /// [`digest_args`]) — the same value `calls.jsonl` stores, never the
         /// argument values themselves.
@@ -531,7 +553,7 @@ mod tests {
             server: "server".into(),
             tool: format!("tool-{ts}-{}", "x".repeat(256)),
             args_digest: format!("{ts:012x}"),
-            outcome: "ok".into(),
+            outcome: CallOutcome::Ok,
             detail: None,
             ms: ts,
         }
@@ -621,7 +643,7 @@ mod tests {
                 server: "s".into(),
                 tool: "t".into(),
                 args_digest: "0".into(),
-                outcome: "ok".into(),
+                outcome: CallOutcome::Ok,
                 detail: None,
                 ms: 0,
             });
@@ -691,7 +713,7 @@ mod tests {
                     execution_id: None,
                     server: "figma".into(),
                     tool: "get_file".into(),
-                    outcome: "ok".into(),
+                    outcome: CallOutcome::Ok,
                     args_digest: "0123456789ab".into(),
                     detail: None,
                     ms: 42,
@@ -701,7 +723,7 @@ mod tests {
                     execution_id: Some("exec-1".into()),
                     server: "figma".into(),
                     tool: "delete_file".into(),
-                    outcome: "denied".into(),
+                    outcome: CallOutcome::Denied,
                     args_digest: "beefbeefbeef".into(),
                     detail: Some("machine policy denies delete_*".into()),
                     ms: 0,
@@ -726,6 +748,22 @@ mod tests {
             // The digest is on the wire but no argument value ever is.
             assert!(raw.contains("0123456789ab"));
         });
+    }
+
+    #[test]
+    fn call_outcome_wire_form_is_the_legacy_lowercase_string() {
+        // The typed CallOutcome must serialize to exactly the strings the log
+        // has always used, so a record written today is byte-identical to one
+        // from before the enum existed, and old logs parse unchanged.
+        for (variant, text) in [
+            (CallOutcome::Ok, "\"ok\""),
+            (CallOutcome::Error, "\"error\""),
+            (CallOutcome::Denied, "\"denied\""),
+        ] {
+            assert_eq!(serde_json::to_string(&variant).unwrap(), text);
+            assert_eq!(serde_json::from_str::<CallOutcome>(text).unwrap(), variant);
+            assert_eq!(variant.as_str(), text.trim_matches('"'));
+        }
     }
 
     #[test]

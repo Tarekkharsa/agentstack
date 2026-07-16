@@ -464,7 +464,7 @@ pub struct Gateway {
 }
 
 struct CallAudit<'a> {
-    outcome: &'a str,
+    outcome: crate::calllog::CallOutcome,
     detail: Option<&'a str>,
     started: Instant,
     run_id: Option<&'a str>,
@@ -998,7 +998,7 @@ impl Gateway {
                 tool,
                 args,
                 CallAudit {
-                    outcome: "denied",
+                    outcome: crate::calllog::CallOutcome::Denied,
                     detail: Some(&rule),
                     started,
                     run_id,
@@ -1017,7 +1017,7 @@ impl Gateway {
                 tool,
                 args,
                 CallAudit {
-                    outcome: "ok",
+                    outcome: crate::calllog::CallOutcome::Ok,
                     detail: None,
                     started,
                     run_id,
@@ -1032,7 +1032,7 @@ impl Gateway {
                 tool,
                 args,
                 CallAudit {
-                    outcome: "error",
+                    outcome: crate::calllog::CallOutcome::Error,
                     detail: Some(error_class(e)),
                     started,
                     run_id,
@@ -1080,7 +1080,7 @@ impl Gateway {
             server: server.to_string(),
             tool: tool.to_string(),
             args_digest: args_digest.clone(),
-            outcome: audit.outcome.to_string(),
+            outcome: audit.outcome,
             detail: detail.clone(),
             ms,
         });
@@ -1097,7 +1097,7 @@ impl Gateway {
                 execution_id: audit.execution_id.map(str::to_owned),
                 server: server.to_string(),
                 tool: tool.to_string(),
-                outcome: audit.outcome.to_string(),
+                outcome: audit.outcome,
                 args_digest,
                 detail,
                 ms,
@@ -1450,7 +1450,7 @@ mod tests {
             "get_file",
             &json!({ "id": 1 }),
             CallAudit {
-                outcome: "ok",
+                outcome: crate::calllog::CallOutcome::Ok,
                 detail: None,
                 started: Instant::now(),
                 run_id: Some("r-gw"),
@@ -1472,7 +1472,8 @@ mod tests {
             events.iter().any(|e| matches!(
                 e,
                 crate::calllog::RunEvent::ToolCall { server, tool, outcome, .. }
-                    if server == "figma" && tool == "get_file" && outcome == "ok"
+                    if server == "figma" && tool == "get_file"
+                        && *outcome == crate::calllog::CallOutcome::Ok
             )),
             "run log must carry the mirrored tool call: {events:?}"
         );
@@ -1487,7 +1488,7 @@ mod tests {
             "get_file",
             &json!({ "id": 2 }),
             CallAudit {
-                outcome: "ok",
+                outcome: crate::calllog::CallOutcome::Ok,
                 detail: None,
                 started: Instant::now(),
                 run_id: None,

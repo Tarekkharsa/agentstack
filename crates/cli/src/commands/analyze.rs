@@ -63,7 +63,7 @@ fn calls_summary(calls: &[CallRecord]) -> Value {
         }
         let entry = per_server.entry(c.server.clone()).or_insert((0, 0));
         entry.0 += 1;
-        if c.outcome != "ok" {
+        if c.outcome != agentstack_recorder::CallOutcome::Ok {
             entry.1 += 1;
         }
         *per_tool.entry(c.tool.clone()).or_insert(0) += 1;
@@ -302,7 +302,11 @@ mod tests {
             server: server.into(),
             tool: tool.into(),
             args_digest: "0".into(),
-            outcome: outcome.into(),
+            outcome: match outcome {
+                "denied" => agentstack_recorder::CallOutcome::Denied,
+                "error" => agentstack_recorder::CallOutcome::Error,
+                _ => agentstack_recorder::CallOutcome::Ok,
+            },
             detail: None,
             ms: 1,
         }

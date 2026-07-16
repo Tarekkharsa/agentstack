@@ -551,7 +551,7 @@ fn policy_firewall_hides_denied_tools_and_refuses_calls() {
     let entries = agentstack::calllog::read_all();
     let e = entries.last().expect("one record");
     assert_eq!((e.server.as_str(), e.tool.as_str()), ("fix", "echo"));
-    assert_eq!(e.outcome, "denied");
+    assert_eq!(e.outcome, agentstack::calllog::CallOutcome::Denied);
     assert!(e.detail.as_deref().unwrap_or("").contains("!echo"));
     assert_eq!(e.args_digest.len(), 12);
 }
@@ -581,7 +581,7 @@ fn audit_log_records_ok_calls_with_digest_only() {
     assert!(!raw.contains("sentinel-ok-abc"), "log leaked args: {raw}");
     let entries = agentstack::calllog::read_all();
     let e = entries.last().expect("one record");
-    assert_eq!(e.outcome, "ok");
+    assert_eq!(e.outcome, agentstack::calllog::CallOutcome::Ok);
     assert_eq!((e.server.as_str(), e.tool.as_str()), ("fix", "echo"));
     assert_eq!(e.args_digest.len(), 12);
     assert!(e.project.as_deref().unwrap_or("").contains("proj"));

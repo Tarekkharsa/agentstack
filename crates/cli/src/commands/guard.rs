@@ -221,7 +221,7 @@ fn finish(
             server: "host-guard".to_string(),
             tool: subject.chars().take(200).collect(),
             args_digest: crate::calllog::digest_args(&json!(subject)),
-            outcome: "denied".to_string(),
+            outcome: crate::calllog::CallOutcome::Denied,
             detail: Some(reason.clone()),
             ms: 0,
         });
