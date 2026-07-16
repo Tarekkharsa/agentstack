@@ -39,7 +39,9 @@ in an isolated temp `HOME` — nothing touches your real config.
    | Cursor      | `.cursor/mcp.json`   | infers the transport, omits the `type` tag     |
 
    The instruction fragment compiles into `CLAUDE.md` (Claude Code) and
-   `AGENTS.md` (Codex, which Cursor also reads), inside a managed marker block.
+   `AGENTS.md` (Codex), inside a managed marker block. Cursor has no instruction
+   file agentstack manages — agentstack renders Cursor's MCP config, but not its
+   instructions.
 
 3. **Preview before write.** `agentstack apply` with no `--write` is a read-only
    plan — it shows the per-CLI diff and masks the secret as `${GITHUB_TOKEN}`,

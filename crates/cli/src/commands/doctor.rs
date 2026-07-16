@@ -598,6 +598,21 @@ fn run_checks(
                 );
             }
         }
+        // A fragment that EXPLICITLY names a CLI with no instruction file (not
+        // via `"*"`) reaches it nowhere — an authoring mistake worth a warning,
+        // shared with the `instructions` command's per-fragment notice.
+        for (frag, target) in crate::render::instructions::explicit_incapable_instruction_targets(
+            manifest,
+            &ctx.registry,
+        ) {
+            instr_issues += 1;
+            report.line(
+                Level::Warn,
+                format!(
+                    "instruction '{frag}' targets '{target}', which has no instructions file ↳ remove the target or use a supported CLI"
+                ),
+            );
+        }
         if instr_issues == 0 {
             report.line(Level::Ok, "all instruction files match the manifest");
         }
@@ -663,12 +678,39 @@ fn run_checks(
     }
 
     report.section("Skills");
-    if manifest.skills.is_empty() {
+    // The same name set a trust review covers — inline `[skills.*]` PLUS every
+    // profile-referenced name (which may resolve from the central library), not
+    // just inline entries. Counting inline-only made this section say "no skills
+    // defined" while the Reproducibility section below listed a pinned
+    // library skill the profile pulls in.
+    let skill_names = super::trust::review_skill_names(manifest);
+    if skill_names.is_empty() {
         report.line(Level::Ok, "no skills defined");
     }
     let store = crate::store::Store::default_store();
-    for (name, skill) in &manifest.skills {
-        match crate::store::local_source_dir(&store, skill, &ctx.dir) {
+    let skills_library = crate::library::Library::load_default().unwrap_or_default();
+    let skills_lib_home = paths::lib_home();
+    for name in &skill_names {
+        // Inline definitions resolve straight to their local dir; a
+        // profile-only name resolves through the central library (offline —
+        // NoFetch, so a git body that isn't cached reports as not installed
+        // rather than triggering a fetch).
+        let dir = if let Some(skill) = manifest.skills.get(name) {
+            crate::store::local_source_dir(&store, skill, &ctx.dir)
+        } else {
+            crate::resolve::resolve_skill(
+                manifest,
+                &ctx.dir,
+                &skills_library,
+                &skills_lib_home,
+                &store,
+                name,
+                crate::resolve::ResolveMode::NoFetch,
+            )
+            .ok()
+            .map(|r| r.path)
+        };
+        match dir {
             None => report.line(
                 Level::Warn,
                 format!("{name:<20} not installed ↳ agentstack install"),

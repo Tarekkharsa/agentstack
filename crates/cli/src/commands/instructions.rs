@@ -46,6 +46,23 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
+
+    // The unknown-target validation `apply`/`doctor` already run, scoped to
+    // the instruction issues this command owns: a typo'd adapter id means the
+    // fragment can never be delivered anywhere. Surface it on the dedicated
+    // command too, and gate --write on it exactly like `apply` does.
+    let known: Vec<&str> = ctx.registry.ids().collect();
+    let bad_targets: Vec<_> = crate::manifest::validate_with_targets(manifest, known)
+        .into_iter()
+        .filter(|i| i.kind == crate::manifest::IssueKind::UnknownInstructionTarget)
+        .collect();
+    for issue in &bad_targets {
+        println!("{} {}", "✗".red(), issue.message);
+    }
+    if args.write && !bad_targets.is_empty() {
+        anyhow::bail!("manifest has validation errors — not writing. Fix them first.");
+    }
+
     println!("Scope: {scope}");
     if let Some(up) = &ctx.loaded.user_path {
         println!(
@@ -115,6 +132,33 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
         } else {
             println!("  {} up to date", "✓".green());
         }
+    }
+
+    // Silent-drop guard: 6 of the 13 adapters have an instruction file. A
+    // resolved target without one, that fragments nonetheless apply to, would
+    // silently receive nothing — say so once, aggregated.
+    let unreachable = crate::render::instructions::unreachable_instruction_targets(
+        manifest,
+        &ctx.registry,
+        &target_ids,
+    );
+    if !unreachable.is_empty() {
+        println!(
+            "\n{} no instructions file for {} — fragments cannot reach these CLIs",
+            "⚠".yellow(),
+            unreachable.join(", ")
+        );
+    }
+    // A fragment that EXPLICITLY names an incapable CLI (not via `"*"`) is a
+    // per-fragment authoring mistake — name it and point at the fix.
+    for (frag, target) in
+        crate::render::instructions::explicit_incapable_instruction_targets(manifest, &ctx.registry)
+    {
+        println!(
+            "{} instruction '{frag}' targets '{target}', which has no instructions file",
+            "⚠".yellow()
+        );
+        println!("  {} remove the target or use a supported CLI", "↳".cyan());
     }
 
     println!();

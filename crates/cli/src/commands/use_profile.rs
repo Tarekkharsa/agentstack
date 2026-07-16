@@ -352,6 +352,15 @@ pub fn activate(
             } else {
                 println!("  {} skills up to date", "✓".green());
             }
+        } else if !active_skills.is_empty() && desc.skills.is_none() {
+            // This CLI has no skills directory agentstack manages, so the
+            // profile's skills silently reach it nowhere — say so in its block
+            // rather than leaving the count unaccounted for.
+            println!(
+                "  {} (skills not supported by this CLI — {} skill(s) not materialized)",
+                "·".dimmed(),
+                active_skills.len()
+            );
         }
 
         // Managed .gitignore block: emit an entry only for an artifact this

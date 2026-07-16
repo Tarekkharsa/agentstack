@@ -192,19 +192,23 @@ $doctor_out
 $explain_instr
 $explain_skill"
 
-# A genuine warning would pair "cursor" with drop/skip/unsupported/no-instructions.
-if printf '%s' "$combined" | grep -iqE 'cursor.*(no instruction|no skill|unsupported|not supported|skipp|dropp|can.?t receive|will not)'; then
+# A genuine warning pairs "cursor" with drop/skip/unsupported/no-instructions —
+# in either order (explain says "not supported by: … Cursor"; apply prints the
+# note inside Cursor's own block). Once a silent gap (issue #12), now asserted.
+drop_phrases='no instruction|no skill|unsupported|not supported|skipp|dropp|can.?t receive|will not'
+if printf '%s' "$combined" | grep -iqE "cursor.*($drop_phrases)|($drop_phrases).*cursor" \
+   || printf '%s' "$apply_out" | grep -iqE "$drop_phrases"; then
   ok "AgentStack warns that Cursor cannot receive the instruction/skill"
 else
-  skip "AgentStack does NOT warn that Cursor's instruction+skill are dropped (defect: silent gap)"
-  printf '  \033[33m→ apply --target cursor shows only the server, no dropped-content note:\033[0m\n'
+  bad "regressed (issue #12): no surface warns that Cursor's instruction+skill are dropped"
+  printf '  \033[33m→ apply --target cursor output:\033[0m\n'
   printf '%s\n' "$apply_out" | sed 's/^/      /'
-  printf '  \033[33m→ explain house-rules claims all targets get a compiled CLAUDE.md/AGENTS.md:\033[0m\n'
+  printf '  \033[33m→ explain house-rules Targets line:\033[0m\n'
   printf '%s\n' "$explain_instr" | grep -i 'target' | sed 's/^/      /'
 fi
 
 # ── summary ──────────────────────────────────────────────────────────────────
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed' "$PASS" "$FAIL"
-[ "$SKIP" -gt 0 ] && printf ', %d skipped (documented defect)' "$SKIP"
+[ "$SKIP" -gt 0 ] && printf ', %d skipped' "$SKIP"
 printf '\n'
 [ "$FAIL" -eq 0 ] || exit 1

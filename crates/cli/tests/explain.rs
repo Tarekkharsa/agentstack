@@ -84,6 +84,40 @@ fn explain_skill_reports_resolution_and_lock() {
 }
 
 #[test]
+fn explain_instruction_names_receiving_and_unsupported_targets() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(proj.join("house.md"), "House rule.\n").unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[instructions.house]\npath = \"./house.md\"\n",
+    )
+    .unwrap();
+
+    let out = explain_text("house", Some(&proj)).unwrap();
+    // The CLIs that actually receive it, with their instruction file…
+    assert!(
+        out.contains("Claude Code (CLAUDE.md)") && out.contains("Codex CLI (AGENTS.md)"),
+        "names receiving targets with their file: {out}"
+    );
+    // …and the ones that match `"*"` but have no instruction file.
+    assert!(
+        out.contains("not supported by:") && out.contains("Cursor"),
+        "names unsupported targets: {out}"
+    );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
+#[test]
 fn explain_library_only_skill() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();

@@ -131,6 +131,46 @@ fn apply_write_blocks_on_a_missing_fragment_source() {
 }
 
 #[test]
+fn doctor_warns_when_a_fragment_targets_a_cli_without_instructions() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+
+    // A fragment explicitly targets Cursor, which has no instruction file
+    // agentstack manages — so it reaches Cursor nowhere.
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(proj.join("house.md"), "House rule.\n").unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [instructions.house]\npath = \"./house.md\"\ntargets = [\"cursor\"]\n",
+    )
+    .unwrap();
+
+    let report = doctor::collect(Some(&proj)).unwrap();
+    let instr = report["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["title"] == "Instructions")
+        .expect("Instructions section");
+    let warned = instr["lines"].as_array().unwrap().iter().any(|l| {
+        l["level"] == "warn"
+            && l["msg"].as_str().unwrap().contains("house")
+            && l["msg"].as_str().unwrap().contains("no instructions file")
+    });
+    assert!(
+        warned,
+        "a fragment targeting an instructions-less CLI should warn: {report}"
+    );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
+#[test]
 fn apply_without_instructions_leaves_a_foreign_region_alone() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();

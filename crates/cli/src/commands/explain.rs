@@ -68,11 +68,47 @@ fn explain_instruction(name: &str, ctx: &crate::commands::Context) -> String {
     if !resolved.exists() {
         out.push_str("  ✗ source file missing\n");
     }
-    out.push_str(&format!(
-        "Targets: {} — compiled into each one's CLAUDE.md / AGENTS.md managed region by `agentstack instructions --write` (or `apply`).\n",
+    // Only some CLIs have an instruction file agentstack manages (6 of the 13
+    // adapters). Split the fragment's effective target set into the CLIs that
+    // actually receive it — with the file its managed region lives in — and the
+    // ones that match but silently can't, so the line never overstates reach.
+    let mut receiving: Vec<String> = Vec::new();
+    let mut excluded: Vec<String> = Vec::new();
+    for desc in ctx.registry.iter() {
+        if !instr.applies_to(&desc.id) {
+            continue;
+        }
+        match desc.instructions.as_ref() {
+            Some(spec) => receiving.push(format!("{} ({})", desc.display, instr_file_name(spec))),
+            None => excluded.push(desc.display.clone()),
+        }
+    }
+    let recv = if receiving.is_empty() {
+        "(no supported CLI receives this fragment)".to_string()
+    } else {
+        receiving.join(", ")
+    };
+    let mut line = format!(
+        "Targets: {} → {recv} — managed region written by `agentstack instructions --write` (or `apply`)",
         instr.targets.join(", ")
-    ));
+    );
+    if !excluded.is_empty() {
+        line.push_str(&format!("; not supported by: {}", excluded.join(", ")));
+    }
+    out.push_str(&line);
+    out.push('\n');
     out
+}
+
+/// The instruction file's name for an adapter (e.g. `CLAUDE.md`, `AGENTS.md`) —
+/// the project file when one exists, else the global file. Just the base name,
+/// for a glanceable "which file does this land in" signal.
+fn instr_file_name(spec: &crate::adapter::descriptor::InstructionsSpec) -> String {
+    let raw = spec.project.as_deref().unwrap_or(&spec.global);
+    Path::new(raw)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| raw.to_string())
 }
 
 fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {

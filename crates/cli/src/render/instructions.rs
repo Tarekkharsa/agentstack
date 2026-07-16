@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::adapter::AdapterDescriptor;
+use crate::adapter::{AdapterDescriptor, Registry};
 use crate::manifest::Manifest;
 use crate::scope::Scope;
 use crate::util::diff;
@@ -82,6 +82,55 @@ pub fn plan_instructions(
     })
 }
 
+/// Resolved targets that CANNOT receive instructions (no adapter instruction
+/// file) yet have at least one fragment applying to them — so the fragment
+/// silently reaches nowhere on those CLIs. Returned in `target_ids` order, by
+/// id. Drives the aggregate warning `instructions` prints so a skills-less/
+/// instructions-less target isn't a silent drop. Only 6 of 13 adapters have an
+/// instruction file (see `desc.instructions`).
+pub fn unreachable_instruction_targets(
+    manifest: &Manifest,
+    registry: &Registry,
+    target_ids: &[String],
+) -> Vec<String> {
+    target_ids
+        .iter()
+        .filter(|id| {
+            registry
+                .get(id)
+                .is_some_and(|desc| desc.instructions.is_none())
+                && manifest.instructions.values().any(|i| i.applies_to(id))
+        })
+        .cloned()
+        .collect()
+}
+
+/// `(fragment name, target id)` pairs where a fragment EXPLICITLY names (not via
+/// `"*"`) a registered adapter that has no instruction file — the author asked
+/// for a CLI that cannot receive it. Shared by the `instructions` command and
+/// `doctor` so both flag the same fragments. Deterministic (manifest fragment
+/// order, then declared target order).
+pub fn explicit_incapable_instruction_targets(
+    manifest: &Manifest,
+    registry: &Registry,
+) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (name, instr) in &manifest.instructions {
+        for target in &instr.targets {
+            if target == "*" {
+                continue;
+            }
+            if registry
+                .get(target)
+                .is_some_and(|desc| desc.instructions.is_none())
+            {
+                out.push((name.clone(), target.clone()));
+            }
+        }
+    }
+    out
+}
+
 /// Whether the instruction file at `path` currently carries agentstack's
 /// managed region. This on-disk marker is the persistent record that we
 /// compiled (and therefore gitignore) this file: `use`, which never compiles
@@ -102,5 +151,50 @@ pub fn fragment_source(dir: &Path, path: &str) -> PathBuf {
         p
     } else {
         dir.join(p)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(s: &str) -> Manifest {
+        toml::from_str(s).unwrap()
+    }
+
+    // Cursor and Gemini CLI are registered but have no instruction file; Claude
+    // Code and Codex do. The shipped registry backs both assertions.
+    #[test]
+    fn flags_unreachable_and_explicit_incapable_instruction_targets() {
+        let registry = Registry::load().unwrap();
+        let m = parse(
+            r#"
+            version = 1
+            [instructions.shared]
+            path = "./a.md"
+            [instructions.cursoronly]
+            path = "./b.md"
+            targets = ["cursor"]
+            "#,
+        );
+
+        // Aggregate: a `"*"` fragment applies to cursor + gemini, neither of
+        // which can receive it. A capable target (claude-code) never appears.
+        let targets: Vec<String> = ["claude-code", "codex", "cursor", "gemini"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let unreachable = unreachable_instruction_targets(&m, &registry, &targets);
+        assert!(unreachable.contains(&"cursor".to_string()));
+        assert!(unreachable.contains(&"gemini".to_string()));
+        assert!(!unreachable.contains(&"claude-code".to_string()));
+
+        // Per-fragment: only the fragment EXPLICITLY naming an incapable CLI is
+        // reported — the `"*"` fragment is not (it targets no one by name).
+        let explicit = explicit_incapable_instruction_targets(&m, &registry);
+        assert_eq!(
+            explicit,
+            vec![("cursoronly".to_string(), "cursor".to_string())]
+        );
     }
 }

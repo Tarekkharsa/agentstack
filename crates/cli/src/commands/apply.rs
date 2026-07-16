@@ -528,6 +528,21 @@ fn render(
                         );
                     }
                 }
+            } else if desc.instructions.is_none() {
+                // This CLI has no instruction file agentstack manages. If
+                // fragments would otherwise compile here, note the silent drop
+                // in its block rather than omitting it entirely.
+                let n = manifest
+                    .instructions
+                    .values()
+                    .filter(|i| i.compiles_at(id, scope))
+                    .count();
+                if n > 0 {
+                    println!(
+                        "  {} (instructions not supported by this CLI — {n} fragment(s) not compiled)",
+                        "·".dimmed()
+                    );
+                }
             }
         }
 

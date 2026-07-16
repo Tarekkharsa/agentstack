@@ -142,7 +142,7 @@ else
   bad "the instruction fragment did not reach CLAUDE.md"
 fi
 if grep -q "formatter and linter" AGENTS.md; then
-  ok "the instruction fragment compiled into AGENTS.md (Codex + Cursor)"
+  ok "the instruction fragment compiled into AGENTS.md (Codex)"
 else
   bad "the instruction fragment did not reach AGENTS.md"
 fi

@@ -55,6 +55,10 @@ pub enum IssueKind {
     /// refresh-from-disk would silently never happen and the stale manifest
     /// values would fan out (the exact downgrade `owner` exists to prevent).
     UnknownServerOwner,
+    /// An `[instructions.X] targets` entry names an adapter id that isn't
+    /// registered — the fragment would silently compile into no harness the
+    /// author expected (the instruction analogue of `UnknownServerTarget`).
+    UnknownInstructionTarget,
     InvalidPluginName,
 }
 
@@ -76,6 +80,7 @@ impl IssueKind {
                 | IssueKind::UnknownServerTarget
                 | IssueKind::UnknownExtraTarget
                 | IssueKind::UnknownServerOwner
+                | IssueKind::UnknownInstructionTarget
                 | IssueKind::InvalidPluginName
         )
     }
@@ -242,6 +247,27 @@ fn run<'a>(
                     IssueKind::UnknownSkillRef,
                     format!("profile '{pname}' references unknown skill '{kref}'"),
                 )),
+            }
+        }
+    }
+
+    // Instruction fragment targets: a typo'd adapter id in `[instructions.X]
+    // targets` would silently compile the fragment into no harness — the same
+    // check `[servers]`/plugin recipes get. Machine-layer fragments merge in
+    // (from_user_layer): their ids come from the same registry, so validate
+    // them too, but say so in the wording — a bad id there is the machine
+    // manifest's, not this project's. (`"*"` and no target set stay valid.)
+    if !targets.is_empty() {
+        for (name, instr) in &manifest.instructions {
+            for target in &instr.targets {
+                if target != "*" && !targets.contains(target) {
+                    let msg = if instr.from_user_layer {
+                        format!("machine-layer instruction '{name}' references unknown target '{target}'")
+                    } else {
+                        format!("instruction '{name}' references unknown target '{target}'")
+                    };
+                    issues.push(Issue::new(IssueKind::UnknownInstructionTarget, msg));
+                }
             }
         }
     }
@@ -465,6 +491,43 @@ mod tests {
             .any(|i| i.kind == IssueKind::UnknownServerTarget
                 && i.message.contains("typo")
                 && i.message.contains("codx")));
+        // Without a target set, the check is skipped (registry-independent).
+        assert!(validate(&m).is_empty());
+    }
+
+    #[test]
+    fn flags_unknown_instruction_target_but_allows_wildcard_and_default() {
+        let m = parse(
+            r#"
+            version = 1
+            [instructions.typo]
+            path = "./instructions/typo.md"
+            targets = ["claude-kode"]
+            [instructions.scoped]
+            path = "./instructions/scoped.md"
+            targets = ["codex"]
+            [instructions.wildcard]
+            path = "./instructions/wildcard.md"
+            targets = ["*"]
+            [instructions.defaulted]
+            path = "./instructions/defaulted.md"
+            "#,
+        );
+        // With a known target set, only the typo'd id is flagged — the wildcard,
+        // a registered id, and the implicit `["*"]` default are all fine.
+        let issues = validate_with_targets(&m, ["codex", "claude-code"]);
+        assert_eq!(
+            issues
+                .iter()
+                .filter(|i| i.kind == IssueKind::UnknownInstructionTarget)
+                .count(),
+            1
+        );
+        assert!(issues
+            .iter()
+            .any(|i| i.kind == IssueKind::UnknownInstructionTarget
+                && i.message.contains("typo")
+                && i.message.contains("claude-kode")));
         // Without a target set, the check is skipped (registry-independent).
         assert!(validate(&m).is_empty());
     }
