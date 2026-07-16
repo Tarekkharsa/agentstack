@@ -21,6 +21,11 @@ use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
 const DIR_DIGEST_DOMAIN: &[u8] = b"agentstack-dir-digest-v2\0";
+/// Domain separator for D3 integrity-root digests. Distinct from
+/// [`DIR_DIGEST_DOMAIN`] so a skill-directory digest can never stand in for an
+/// integrity-root digest over the same tree (the two routines make different
+/// promises about symlinks and `.git`).
+const INTEGRITY_ROOT_DOMAIN: &[u8] = b"agentstack-integrity-root-v1\0";
 const MAX_DIRECTORY_DEPTH: usize = 64;
 
 /// SHA-256 hex digest of a byte string.
@@ -85,6 +90,183 @@ fn collect_files_at_depth(
             collect_files_at_depth(root, &path, out, depth + 1)?;
         } else if let Ok(rel) = path.strip_prefix(root) {
             out.push(rel.to_path_buf());
+        }
+    }
+    Ok(())
+}
+
+/// Resolve a manifest-declared repository-relative path to a real location
+/// inside `project_root`, defensively (contract §8 canonical-path rule):
+///
+/// - absolute paths, `..` traversal, and Windows drive prefixes are hard errors;
+/// - a symlink **anywhere** on the path — intermediate directory or final
+///   component — is a hard error (D3 ruling: reject, never resolve), because a
+///   link target can change without changing any pinned byte;
+/// - the path must exist (can't pin what can't be read);
+/// - the project root itself is rejected: a root-wide pin would include
+///   `agentstack.lock`, so every re-lock would immediately re-drift it.
+///
+/// A leading `./` is accepted — manifests conventionally write
+/// `command = "./scripts/foo.sh"`.
+pub fn resolve_contained(project_root: &Path, declared: &str) -> Result<PathBuf> {
+    if declared.is_empty() {
+        anyhow::bail!("integrity path is empty");
+    }
+    let rel = Path::new(declared);
+    if rel.is_absolute() {
+        anyhow::bail!(
+            "integrity path '{declared}' is absolute — only repository-relative paths can be pinned"
+        );
+    }
+    let mut resolved = project_root.to_path_buf();
+    for component in rel.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(part) => {
+                resolved.push(part);
+                let meta = fs::symlink_metadata(&resolved)
+                    .with_context(|| format!("reading {}", resolved.display()))?;
+                if meta.file_type().is_symlink() {
+                    anyhow::bail!(
+                        "integrity path '{declared}' passes through a symlink at {} — \
+                         symlinks are never part of a pinned integrity surface",
+                        resolved.display()
+                    );
+                }
+            }
+            _ => anyhow::bail!(
+                "integrity path '{declared}' contains a traversal or non-relative component — \
+                 only paths inside the project can be pinned"
+            ),
+        }
+    }
+    if resolved == project_root {
+        anyhow::bail!(
+            "integrity path '{declared}' resolves to the project root itself — \
+             declare a subdirectory or file"
+        );
+    }
+    Ok(resolved)
+}
+
+/// SHA-256 of one repository-relative file's current bytes — the D3 pin for a
+/// repo-relative stdio `command` or interpreter-script `args` entry. Same
+/// digest shape as instruction pins (raw file bytes), same defensive path
+/// rules as [`resolve_contained`]; a directory or other non-regular file is an
+/// error.
+pub fn contained_file_digest(project_root: &Path, declared: &str) -> Result<String> {
+    let path = resolve_contained(project_root, declared)?;
+    let meta =
+        fs::symlink_metadata(&path).with_context(|| format!("reading {}", path.display()))?;
+    if !meta.is_file() {
+        anyhow::bail!(
+            "integrity path '{declared}' is not a regular file — \
+             a command/args pin must name one executable file"
+        );
+    }
+    let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(sha256_hex(&bytes))
+}
+
+/// SHA-256 digest of a declared D3 integrity root (contract §8): a file or
+/// directory subtree whose **every byte** is pinned, cache-free.
+///
+/// This is deliberately NOT [`dir_digest`]:
+/// - a symlink anywhere inside the root is a **hard error**, never skipped —
+///   an interpreter would happily follow a link the skip-symlinks digest never
+///   covered (contract §8, round-3 correction 2; D3 ruling: reject all);
+/// - `.git` is NOT excluded — a payload hidden under a nested `.git/` inside a
+///   declared root would otherwise be present-but-unpinned, breaking the
+///   "one-byte change anywhere in a declared root re-gates" guarantee;
+/// - its own domain separator, so the two digest families never collide.
+///
+/// Layout: domain, then for each file sorted by relative path, the
+/// length-framed normalized path bytes and length-framed content bytes. A root
+/// that is a single file frames the empty relative path (a directory entry can
+/// never have an empty name, so file roots and directory roots cannot
+/// collide).
+pub fn integrity_root_digest(project_root: &Path, declared: &str) -> Result<String> {
+    let root = resolve_contained(project_root, declared)?;
+    let meta =
+        fs::symlink_metadata(&root).with_context(|| format!("reading {}", root.display()))?;
+
+    let mut files: Vec<PathBuf> = Vec::new();
+    if meta.is_dir() {
+        collect_files_rejecting_symlinks(&root, &root, &mut files, 0)?;
+    } else if meta.is_file() {
+        files.push(PathBuf::new());
+    } else {
+        anyhow::bail!("integrity root '{declared}' is neither a regular file nor a directory");
+    }
+    files.sort();
+
+    let mut hasher = Sha256::new();
+    hasher.update(INTEGRITY_ROOT_DOMAIN);
+    for rel in &files {
+        let path_bytes = normalized_relative_path_bytes(rel);
+        hasher.update((path_bytes.len() as u64).to_le_bytes());
+        hasher.update(&path_bytes);
+        // A file root frames the empty relative path; joining "" would append
+        // a trailing separator, so the root path itself is read directly.
+        let path = if rel.as_os_str().is_empty() {
+            root.clone()
+        } else {
+            root.join(rel)
+        };
+        let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(bytes);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// [`collect_files_at_depth`]'s strict sibling for integrity roots: same
+/// depth-bounded recursive walk, but a symlink is a hard error instead of a
+/// skip, and `.git` is included (see [`integrity_root_digest`]).
+fn collect_files_rejecting_symlinks(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<PathBuf>,
+    depth: usize,
+) -> Result<()> {
+    if depth > MAX_DIRECTORY_DEPTH {
+        anyhow::bail!(
+            "directory nesting exceeds the maximum depth of {MAX_DIRECTORY_DEPTH} under {}",
+            root.display()
+        );
+    }
+    for entry in fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            anyhow::bail!(
+                "integrity root {} contains a symlink at {} — \
+                 symlinks are never part of a pinned integrity surface",
+                root.display(),
+                path.display()
+            );
+        }
+        if file_type.is_dir() {
+            collect_files_rejecting_symlinks(root, &path, out, depth + 1)?;
+        } else if file_type.is_file() {
+            // A file outside `root` is impossible here (every path descends
+            // from it), but a silent drop would mean present-but-unpinned
+            // bytes, so the impossible case still fails closed.
+            let rel = path.strip_prefix(root).map_err(|_| {
+                anyhow::anyhow!("integrity walk escaped its root at {}", path.display())
+            })?;
+            out.push(rel.to_path_buf());
+        } else {
+            // FIFOs, sockets, and device nodes: reading one can block forever
+            // (a FIFO with no writer), turning the trust gate into a hang —
+            // and none of them are pinnable content anyway.
+            anyhow::bail!(
+                "integrity root {} contains a non-regular file at {} — \
+                 only regular files and directories can be pinned",
+                root.display(),
+                path.display()
+            );
         }
     }
     Ok(())
@@ -215,6 +397,194 @@ mod tests {
         assert!(dir_digest(tmp.path()).is_err());
     }
 
+    mod integrity_roots {
+        use super::*;
+
+        #[test]
+        fn resolve_contained_rejects_hostile_paths() {
+            let tmp = assert_fs::TempDir::new().unwrap();
+            tmp.child("tools/agent.py").write_str("print()").unwrap();
+
+            // Accepted: plain relative and ./-prefixed forms of a real path.
+            assert!(resolve_contained(tmp.path(), "tools/agent.py").is_ok());
+            assert!(resolve_contained(tmp.path(), "./tools/agent.py").is_ok());
+
+            for (declared, why) in [
+                ("", "empty"),
+                ("/etc/passwd", "absolute"),
+                ("../outside.sh", "traversal"),
+                ("tools/../../outside.sh", "traversal"),
+                (".", "project root itself"),
+                ("./", "project root itself"),
+                ("tools/missing.py", "missing"),
+            ] {
+                assert!(
+                    resolve_contained(tmp.path(), declared).is_err(),
+                    "{declared:?} must be rejected ({why})"
+                );
+            }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn resolve_contained_rejects_symlinks_at_every_position() {
+            let tmp = assert_fs::TempDir::new().unwrap();
+            tmp.child("real/agent.py").write_str("print()").unwrap();
+            tmp.child("outside.sh").write_str("echo").unwrap();
+
+            // Final component is a symlink — even to a contained target.
+            std::os::unix::fs::symlink(
+                tmp.child("real/agent.py").path(),
+                tmp.child("link.py").path(),
+            )
+            .unwrap();
+            let err = resolve_contained(tmp.path(), "link.py").unwrap_err();
+            assert!(err.to_string().contains("symlink"), "{err}");
+
+            // Intermediate directory is a symlink.
+            std::os::unix::fs::symlink(tmp.child("real").path(), tmp.child("alias").path())
+                .unwrap();
+            assert!(resolve_contained(tmp.path(), "alias/agent.py").is_err());
+
+            // Symlink escaping the project root.
+            std::os::unix::fs::symlink(
+                tmp.child("outside.sh").path(),
+                tmp.child("real/esc").path(),
+            )
+            .unwrap();
+            assert!(resolve_contained(tmp.path(), "real/esc").is_err());
+        }
+
+        #[test]
+        fn contained_file_digest_pins_current_bytes() {
+            let tmp = assert_fs::TempDir::new().unwrap();
+            tmp.child("scripts/run.sh").write_str("echo one").unwrap();
+
+            let d1 = contained_file_digest(tmp.path(), "scripts/run.sh").unwrap();
+            assert_eq!(
+                d1,
+                sha256_hex(b"echo one"),
+                "raw file bytes, like instruction pins"
+            );
+
+            // The one-byte re-gate witness for a pinned entry file.
+            tmp.child("scripts/run.sh").write_str("echo two").unwrap();
+            assert_ne!(
+                d1,
+                contained_file_digest(tmp.path(), "scripts/run.sh").unwrap()
+            );
+
+            // A directory is not a file pin.
+            assert!(contained_file_digest(tmp.path(), "scripts").is_err());
+        }
+
+        #[test]
+        fn integrity_root_digest_stable_and_sensitive_anywhere_in_the_root() {
+            let tmp = assert_fs::TempDir::new().unwrap();
+            tmp.child("tools/agent.py")
+                .write_str("import payload")
+                .unwrap();
+            tmp.child("tools/deep/payload.py").write_str("v1").unwrap();
+
+            let d1 = integrity_root_digest(tmp.path(), "tools").unwrap();
+            assert_eq!(d1, integrity_root_digest(tmp.path(), "tools").unwrap());
+            assert_eq!(d1, integrity_root_digest(tmp.path(), "./tools").unwrap());
+            assert_eq!(d1.len(), 64);
+
+            // One byte in a transitive import — not the entry file — re-gates.
+            tmp.child("tools/deep/payload.py").write_str("v2").unwrap();
+            let d2 = integrity_root_digest(tmp.path(), "tools").unwrap();
+            assert_ne!(d1, d2);
+
+            // Adding a new file anywhere re-gates too.
+            tmp.child("tools/new.py").write_str("x").unwrap();
+            assert_ne!(d2, integrity_root_digest(tmp.path(), "tools").unwrap());
+        }
+
+        #[test]
+        fn integrity_root_digest_supports_single_file_roots() {
+            let tmp = assert_fs::TempDir::new().unwrap();
+            tmp.child("run.sh").write_str("echo").unwrap();
+            tmp.child("dir/run.sh").write_str("echo").unwrap();
+
+            let file_root = integrity_root_digest(tmp.path(), "run.sh").unwrap();
+            let dir_root = integrity_root_digest(tmp.path(), "dir").unwrap();
+            // Same bytes, but a file root and a one-file directory root must
+            // not collide (empty vs named framed path).
+            assert_ne!(file_root, dir_root);
+        }
+
+        #[test]
+        fn integrity_root_digest_diverges_from_dir_digest_on_git_dirs() {
+            let tmp = assert_fs::TempDir::new().unwrap();
+            tmp.child("tools/agent.py").write_str("x").unwrap();
+
+            let before = integrity_root_digest(tmp.path(), "tools").unwrap();
+            // dir_digest ignores .git; the integrity root must NOT — bytes
+            // under a nested .git are still reachable by an interpreter.
+            tmp.child("tools/.git/hooks/payload.sh")
+                .write_str("evil")
+                .unwrap();
+            assert_ne!(before, integrity_root_digest(tmp.path(), "tools").unwrap());
+
+            // And its domain separation: same tree, different digest family.
+            assert_ne!(
+                integrity_root_digest(tmp.path(), "tools").unwrap(),
+                dir_digest(&tmp.path().join("tools")).unwrap()
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn integrity_root_digest_rejects_symlinks_dir_digest_skips() {
+            let tmp = assert_fs::TempDir::new().unwrap();
+            tmp.child("tools/agent.py").write_str("x").unwrap();
+            tmp.child("tools/inner.py").write_str("y").unwrap();
+
+            // A symlink to a CONTAINED sibling: dir_digest silently skips it;
+            // the integrity root rejects it (ruling: reject all).
+            std::os::unix::fs::symlink(
+                tmp.child("tools/inner.py").path(),
+                tmp.child("tools/link.py").path(),
+            )
+            .unwrap();
+            assert!(dir_digest(&tmp.path().join("tools")).is_ok());
+            let err = integrity_root_digest(tmp.path(), "tools").unwrap_err();
+            assert!(err.to_string().contains("symlink"), "{err}");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn integrity_root_digest_rejects_non_regular_files() {
+            // A FIFO with no writer would block fs::read forever — the gate
+            // must fail closed on any non-regular file, never hang. A unix
+            // socket is the same file-type class, creatable with std alone.
+            let tmp = assert_fs::TempDir::new().unwrap();
+            tmp.child("tools/agent.py").write_str("x").unwrap();
+            let _listener =
+                std::os::unix::net::UnixListener::bind(tmp.path().join("tools/sock")).unwrap();
+
+            let err = integrity_root_digest(tmp.path(), "tools").unwrap_err();
+            assert!(err.to_string().contains("non-regular file"), "{err}");
+
+            // The same special file declared directly is rejected too.
+            assert!(contained_file_digest(tmp.path(), "tools/sock").is_err());
+        }
+
+        #[test]
+        fn integrity_root_digest_rejects_excessive_depth() {
+            let tmp = assert_fs::TempDir::new().unwrap();
+            let mut dir = tmp.path().join("root");
+            for _ in 0..=MAX_DIRECTORY_DEPTH {
+                dir.push("nested");
+            }
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("file.txt"), b"deep").unwrap();
+
+            assert!(integrity_root_digest(tmp.path(), "root").is_err());
+        }
+    }
+
     /// The content-pinning invariant, one layer below the trust-store proptest
     /// (`any_single_byte_flip_in_any_pinned_file_regates` in the trust crate):
     /// for a skill directory, ANY change — a single flipped byte in any file,
@@ -265,6 +635,37 @@ mod tests {
                 fs::write(tmp.path().join(rel), &flipped).unwrap();
 
                 prop_assert_ne!(before, dir_digest(tmp.path()).unwrap());
+            }
+
+            /// The same invariant for D3 integrity roots (contract §8): a
+            /// single flipped byte ANYWHERE in a declared root — entry file or
+            /// transitive import — must change `integrity_root_digest`,
+            /// because strict locked verification (and, through the lock
+            /// bytes, the trust digest) is only as strong as this digest.
+            ///
+            /// NEVER delete or weaken this test.
+            #[test]
+            fn any_single_byte_flip_changes_the_integrity_root_digest(
+                files in file_tree(),
+                file_pick: prop::sample::Index,
+                byte_pick: prop::sample::Index,
+            ) {
+                let tmp = tempfile::tempdir().unwrap();
+                let root = tmp.path().join("declared-root");
+                fs::create_dir(&root).unwrap();
+                write_tree(&root, &files);
+                let before = integrity_root_digest(tmp.path(), "declared-root").unwrap();
+
+                let (rel, bytes) = &files[file_pick.index(files.len())];
+                let mut flipped = bytes.clone();
+                let i = byte_pick.index(flipped.len());
+                flipped[i] ^= 0xff;
+                fs::write(root.join(rel), &flipped).unwrap();
+
+                prop_assert_ne!(
+                    before,
+                    integrity_root_digest(tmp.path(), "declared-root").unwrap()
+                );
             }
 
             #[test]
