@@ -286,7 +286,7 @@ fn check_bash(ctx: &GuardContext, command: &str) -> Decision {
                 return d;
             }
         }
-        let (program, rest, via_xargs) = strip_wrappers(&tokens);
+        let (program, rest, via_xargs) = strip_wrappers(tokens);
         let Some(program) = program else { continue };
         let d = match program.as_str() {
             "rm" => check_rm(ctx, &rest, via_xargs),
@@ -391,7 +391,10 @@ fn tokenize(segment: &str) -> Vec<String> {
 
 /// Skip env assignments and wrapper programs; returns the effective program
 /// (basename), its args, and whether it runs under `xargs` (targets unknown).
-fn strip_wrappers(tokens: &[String]) -> (Option<String>, Vec<String>, bool) {
+// Takes `tokens` by value so the tail can be MOVED out (`split_off`) instead of
+// cloned — this runs on every `;`/`&&`/`|`-separated segment of every guarded
+// bash command, the hottest path in the guard.
+fn strip_wrappers(mut tokens: Vec<String>) -> (Option<String>, Vec<String>, bool) {
     let mut i = 0;
     let mut via_xargs = false;
     while i < tokens.len() {
@@ -416,7 +419,10 @@ fn strip_wrappers(tokens: &[String]) -> (Option<String>, Vec<String>, bool) {
                 i += 1;
             }
         } else {
-            return (Some(base), tokens[i + 1..].to_vec(), via_xargs);
+            // Move the tail out rather than cloning it — `tokens` is owned and
+            // dropped right after this return.
+            let rest = tokens.split_off(i + 1);
+            return (Some(base), rest, via_xargs);
         }
     }
     (None, Vec::new(), via_xargs)
