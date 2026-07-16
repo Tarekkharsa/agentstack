@@ -9,13 +9,39 @@
 //! generated client in its own sandbox and that client POSTs here. This endpoint
 //! only brokers the real upstream MCP call.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
 use tiny_http::{Header, Response, Server};
 
 use crate::gateway::Gateway;
+
+/// Decrements the in-flight counter when a served request finishes, even on a
+/// panic in the handler — so a panic can't permanently consume a slot.
+/// (Same pattern as `crate::gateway_http`.)
+struct InflightGuard(Arc<AtomicUsize>);
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Release);
+    }
+}
+
+/// Cap on concurrently-served requests. Each authed request gets its own OS
+/// thread (see `serve_loop`); without a cap a runaway client could exhaust
+/// host threads. The socket is loopback-only and the token gates every call,
+/// so — like `gateway_http`'s identical cap — this is defense-in-depth
+/// against a buggy or compromised *local* process, not a remote surface.
+/// Excess requests get a fast `503` instead of a thread.
+const MAX_INFLIGHT: usize = 64;
+
+/// Hard cap on an authed request body (CLAUDE.md rule 7 — bound sizes on
+/// hostile input). Matches `MAX_FRAME_BYTES` in
+/// `crates/egress/src/execution_relay.rs`: code-mode call payloads are small
+/// JSON, and 1 MiB is a generous ceiling that still refuses an OOM attempt.
+const MAX_BODY_BYTES: u64 = 1024 * 1024;
 
 /// A running runtime endpoint. Dropping/`shutdown`-ing removes the machine-local
 /// `endpoint.json` so a stale port+token isn't left pointing at a dead socket.
@@ -59,39 +85,71 @@ pub fn start(dir: Option<&Path>, gateway: Arc<Gateway>) -> Option<RuntimeHandle>
     crate::util::restrict(&endpoint_path, false);
 
     let token_for_thread = token;
-    std::thread::spawn(move || {
-        // Accept loop only: each request is served on its own thread. The
-        // gateway is Sync with per-upstream locking, so parallel code-mode
-        // calls to different servers proceed concurrently — one slow upstream
-        // no longer blocks the endpoint (or the stdio serve loop). Local,
-        // agent-driven traffic: thread-per-request is plenty.
-        for mut req in server.incoming_requests() {
-            let gateway = Arc::clone(&gateway);
-            let token = token_for_thread.clone();
-            std::thread::spawn(move || {
-                let authed = req
-                    .headers()
-                    .iter()
-                    .any(|h| h.field.equiv("X-Agentstack-Token") && h.value.as_str() == token);
-                let mut body = String::new();
-                let _ = req.as_reader().read_to_string(&mut body);
-                let (status, payload) = if !authed {
-                    (
-                        401,
-                        json!({ "error": "unauthorized — endpoint token mismatch" }).to_string(),
-                    )
-                } else {
-                    handle_runtime_call(&gateway, &body)
-                };
-                let resp = Response::from_string(payload)
-                    .with_status_code(status)
-                    .with_header(json_ctype());
-                let _ = req.respond(resp);
-            });
-        }
-    });
+    std::thread::spawn(move || serve_loop(server, gateway, token_for_thread));
 
     Some(RuntimeHandle { endpoint_path, url })
+}
+
+/// Accept loop only: each authed request is served on its own thread. The
+/// gateway is Sync with per-upstream locking, so parallel code-mode calls to
+/// different servers proceed concurrently — one slow upstream no longer
+/// blocks the endpoint (or the stdio serve loop). Local, agent-driven
+/// traffic: thread-per-request is plenty, and `MAX_INFLIGHT` bounds it.
+fn serve_loop(server: Server, gateway: Arc<Gateway>, token: String) {
+    let inflight = Arc::new(AtomicUsize::new(0));
+    for mut req in server.incoming_requests() {
+        // Bounded concurrency: shed load with a fast 503 rather than spawning
+        // an unbounded number of threads. `fetch_add` then compare works as a
+        // reservation because only this accept thread ever increments.
+        if inflight.fetch_add(1, Ordering::AcqRel) >= MAX_INFLIGHT {
+            inflight.fetch_sub(1, Ordering::Release);
+            let resp = Response::from_string(json!({ "error": "server busy" }).to_string())
+                .with_status_code(503)
+                .with_header(json_ctype());
+            let _ = req.respond(resp);
+            continue;
+        }
+        let guard = InflightGuard(Arc::clone(&inflight));
+        let gateway = Arc::clone(&gateway);
+        let token = token.clone();
+        std::thread::spawn(move || {
+            let _guard = guard; // released (decrementing) on thread exit
+            let authed = req
+                .headers()
+                .iter()
+                .any(|h| h.field.equiv("X-Agentstack-Token") && h.value.as_str() == token);
+            // Token first: an unauthenticated caller is answered 401 before
+            // the endpoint reads (let alone buffers) a single body byte.
+            if !authed {
+                let resp = Response::from_string(
+                    json!({ "error": "unauthorized — endpoint token mismatch" }).to_string(),
+                )
+                .with_status_code(401)
+                .with_header(json_ctype());
+                let _ = req.respond(resp);
+                return;
+            }
+            let mut body = String::new();
+            // `take` caps the read: a body that streams past the cap is
+            // truncated here rather than buffered whole, then rejected below.
+            let _ = req
+                .as_reader()
+                .take(MAX_BODY_BYTES + 1)
+                .read_to_string(&mut body);
+            let (status, payload) = if body.len() as u64 > MAX_BODY_BYTES {
+                (
+                    413,
+                    json!({ "error": "request body too large" }).to_string(),
+                )
+            } else {
+                handle_runtime_call(&gateway, &body)
+            };
+            let resp = Response::from_string(payload)
+                .with_status_code(status)
+                .with_header(json_ctype());
+            let _ = req.respond(resp);
+        });
+    }
 }
 
 /// Forward one `{ name, arguments }` call through the gateway and shape the HTTP
@@ -151,6 +209,7 @@ fn gen_token() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn unknown_tool_is_404() {
@@ -177,5 +236,75 @@ mod tests {
         let t = gen_token();
         assert_eq!(t.len(), 64);
         assert!(t.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    /// Serve an empty gateway on an ephemeral loopback port with a known
+    /// token, for socket-level tests (`start` itself refuses an empty
+    /// gateway and mints its own token).
+    fn spawn_test_endpoint() -> u16 {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        std::thread::spawn(move || serve_loop(server, Arc::new(Gateway::empty()), "tok".into()));
+        port
+    }
+
+    /// The token is checked BEFORE the body is read: a tokenless request
+    /// declaring a huge Content-Length and sending no body still gets its
+    /// 401 promptly. If the endpoint buffered the body pre-auth (the old
+    /// behavior), this read would hang until the timeout.
+    #[test]
+    fn unauthenticated_request_gets_401_without_a_body_read() {
+        let port = spawn_test_endpoint();
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        s.write_all(b"POST /call HTTP/1.1\r\nHost: x\r\nContent-Length: 10737418240\r\n\r\n")
+            .unwrap();
+        let mut buf = [0u8; 256];
+        let n = s
+            .read(&mut buf)
+            .expect("401 should arrive without the body");
+        let head = String::from_utf8_lossy(&buf[..n]);
+        assert!(head.starts_with("HTTP/1.1 401"), "got: {head}");
+    }
+
+    /// With every slot pinned by an authed request whose body never arrives
+    /// (each handler thread parks in the bounded body read), the next request
+    /// is shed with a fast 503 by the accept loop — it never gets a thread.
+    /// Mirrors the egress proxy's `connection_over_the_cap_is_dropped`.
+    #[test]
+    fn request_over_the_inflight_cap_is_shed_with_503() {
+        let port = spawn_test_endpoint();
+        let mut held = Vec::with_capacity(MAX_INFLIGHT);
+        for _ in 0..MAX_INFLIGHT {
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            // Content-Length must exceed 1024: below that, tiny_http buffers
+            // the whole body BEFORE yielding the request, so it would never
+            // reach the serve loop and pin a slot.
+            s.write_all(
+                b"POST /call HTTP/1.1\r\nHost: x\r\nX-Agentstack-Token: tok\r\nContent-Length: 2048\r\n\r\n",
+            )
+            .unwrap();
+            held.push(s);
+        }
+        // Loopback accepts are fast but not synchronous with our writes: give
+        // the accept loop a beat to count every held request before probing.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let mut extra = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        extra
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        extra
+            .write_all(b"POST /call HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n")
+            .unwrap();
+        let mut buf = [0u8; 256];
+        let n = extra.read(&mut buf).unwrap();
+        let head = String::from_utf8_lossy(&buf[..n]);
+        assert!(
+            head.starts_with("HTTP/1.1 503"),
+            "over-cap request should be shed, got: {head}"
+        );
+        drop(held);
     }
 }
