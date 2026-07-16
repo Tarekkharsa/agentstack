@@ -1,7 +1,7 @@
 # AgentStack execution checklist
 
 > **Status:** active work queue<br/>
-> **Updated:** 2026-07-15<br/>
+> **Updated:** 2026-07-16<br/>
 > **Current phase:** Phase 0A and Phase 0B in parallel<br/>
 > **Strategy source:** [`STRATEGY.md`](STRATEGY.md)
 
@@ -39,24 +39,31 @@ gate is satisfied. `STRATEGY.md` explains why and defines the gates;
 
 ### Contract
 
-- [ ] Write the reviewed behavioral contract for
+All contract items are satisfied by the approved
+[`docs/design/locked-run-contract.md`](docs/design/locked-run-contract.md)
+(revision 4, approved 2026-07-15).
+
+- [x] Write the reviewed behavioral contract for
   `agentstack run <harness> --locked` using the current working directory as
   the project.
-- [ ] Define how `--locked` composes with `--profile`, `--plan`, the required
-  harness positional, and trailing harness arguments.
-- [ ] Define the exact no-Docker guarantee: explicit trust, locked-input and
+- [x] Define how `--locked` composes with `--profile`, `--plan`, the required
+  harness positional, and trailing harness arguments. (Contract §2.)
+- [x] Define the exact no-Docker guarantee: explicit trust, locked-input and
   drift checks, machine-policy ceiling, cooperative host guard, evidence, and
-  honest non-isolation limits.
-- [ ] Define the maximum-assurance guarantee separately for `--sandbox` and
-  `--lockdown`.
-- [ ] Freeze the minimum backend-neutral fields needed later by Workspace
+  honest non-isolation limits. (Contract §3, §3.1.)
+- [x] Define the maximum-assurance guarantee separately for `--sandbox` and
+  `--lockdown`. (Contract §5.)
+- [x] Freeze the minimum backend-neutral fields needed later by Workspace
   Grants and hosted adapters without implementing those later phases now.
-- [ ] D2: specify how the existing `ExecutionPlan` / `Gateway::from_plan` seam
-  extends across native render and profile leases without a parallel authority
-  abstraction.
-- [ ] D3: decide which stdio scripts and local executables are declared
+  (Contract §6: `AuthorityGrant` / `RunEnvelope`.)
+- [x] D2: specify how the existing `ExecutionPlan` / `Gateway::from_frozen`
+  seam extends across native render and profile leases without a parallel
+  authority abstraction. (Contract §7; `from_plan` never existed in code —
+  contract §0.)
+- [x] D3: decide which stdio scripts and local executables are declared
   integrity inputs for `--locked`; if the first release excludes them, write
-  the limitation into the contract and trust preview.
+  the limitation into the contract and trust preview. (Contract §8: Option A
+  with declared integrity roots — implementation pending below.)
 
 ### Implementation
 
@@ -92,8 +99,9 @@ gate is satisfied. `STRATEGY.md` explains why and defines the gates;
   independently reconstruct or widen authority.
 - [ ] Prove a one-byte D3 executable edit fails lock verification and re-gates
   review; prove intentionally unpinned code is labelled honestly.
-- [ ] Add a regression witness that authoritative trust/lock verification hashes
+- [x] Add a regression witness that authoritative trust/lock verification hashes
   current bytes and never uses the stat-fingerprint digest cache.
+  (Landed with the skill-cache bypass fix; contract §3 step 4, ruling 3.)
 - [ ] Add documentation status labels for Stable, Experimental, Design,
   Historical, and Archived material.
 - [ ] Generate the public strategy page from authoritative Markdown or add a
