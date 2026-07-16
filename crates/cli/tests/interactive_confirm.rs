@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Plan D safety contract: in non-interactive shells, `apply` without `--write`
 //! must never write and never block. Only `--write` — the
 //! scripting escape hatch — applies in a non-interactive shell. Under `cargo`

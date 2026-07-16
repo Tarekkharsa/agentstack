@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! `agentstack setup` is the interactive newcomer wizard. In a non-interactive
 //! shell (CI, pipes — which is what `cargo test` is) it must preview and stop
 //! at the confirm having written nothing to any live CLI config. With no

@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! `agentstack lib sync` versions the central library (`~/.agentstack/lib`) as a
 //! git repo and moves it across machines — without ever committing the content
 //! store cache (a sibling dir) or a resolved secret.

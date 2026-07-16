@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Gateway stdio proxying end-to-end: a manifest-declared stdio server is
 //! spawned lazily, speaks real JSON-RPC over its pipes, gets its `${REF}`s
 //! resolved into the child env, and is tree-killed when the gateway drops.

@@ -1,11 +1,11 @@
 [package]
 name = "agentstack-core"
 version = "0.10.3"
-edition = "2021"
-rust-version = "1.80"
+edition.workspace = true
+rust-version.workspace = true
 description = "agentstack bundle format: manifest + lockfile parsing, content digests"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/Tarekkharsa/agentstack"
+license.workspace = true
+repository.workspace = true
 publish = false
 
 [dependencies]
@@ -26,3 +26,6 @@ owo-colors = "4"
 assert_fs = "1"
 proptest = "1"
 tempfile = "3"
+
+[lints]
+workspace = true

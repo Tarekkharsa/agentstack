@@ -117,7 +117,9 @@ fn splice_top_level(text: &str, key: &str, body: Option<&Value>) -> Result<Strin
     match (find_top_level_value_span(text, key), body) {
         // Replace an existing key's value in place.
         (Some((start, _)), Some(body)) => {
-            let end = find_top_level_value_span(text, key).unwrap().1;
+            let end = find_top_level_value_span(text, key)
+                .expect("the span was matched in this same arm")
+                .1;
             let base_indent = line_indent(text, start);
             let pretty = serde_json::to_string_pretty(body)?;
             let reindented = reindent(&pretty, &base_indent);

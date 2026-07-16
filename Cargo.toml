@@ -2,6 +2,28 @@
 resolver = "2"
 members = ["crates/core", "crates/trust", "crates/policy", "crates/adapters", "crates/recorder", "crates/runtime", "crates/egress", "crates/executor", "crates/cli"]
 
+# Fields shared by every crate. Members inherit with `edition.workspace = true`
+# etc., so a toolchain bump is one edit here, not nine.
+[workspace.package]
+edition = "2021"
+rust-version = "1.80"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Tarekkharsa/agentstack"
+
+# Workspace-wide lints, inherited by each member via `[lints] workspace = true`.
+# This is where the panic-discipline the codebase already keeps by convention
+# (18 production unwraps in ~55k lines, all provably safe) becomes MACHINE-
+# enforced: `unwrap_used` is a clippy restriction lint (allow-by-default), and
+# denying it means a bare `.unwrap()` in non-test code fails the build. Test
+# code is exempted in `clippy.toml` (`allow-unwrap-in-tests`), and `.expect(
+# "why this holds")` — the house style for a genuine invariant — is untouched.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+# A stray debugging panic must never ship in a security tool.
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
 # Profiles only take effect at the workspace root.
 [profile.release]
 strip = true

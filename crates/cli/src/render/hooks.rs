@@ -70,7 +70,11 @@ pub fn plan_hooks(
     let Some((path, format)) = desc.hooks_for(scope, project_dir) else {
         return Ok(None);
     };
-    let spec = desc.hooks.as_ref().unwrap();
+    // `hooks_for` returned Some, which it only does when `desc.hooks` is Some.
+    let spec = desc
+        .hooks
+        .as_ref()
+        .expect("hooks_for returned Some, so desc.hooks is Some");
     let mut selected: Vec<(&String, &Hook)> = manifest
         .hooks
         .iter()
@@ -161,7 +165,7 @@ pub(crate) fn build_claude_hooks(
             .entry(h.event.clone())
             .or_insert_with(|| Value::Array(Vec::new()))
             .as_array_mut()
-            .unwrap()
+            .expect("the entry was just inserted as Value::Array")
             .push(Value::Object(entry));
     }
     Value::Object(events)

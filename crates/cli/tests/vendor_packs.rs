@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! End-to-end tests for the vendor-packs rail (PLAN §9 — Linear pack MVP).
 //!
 //! These drive the real `add`/`remove` command flow against a temp manifest dir

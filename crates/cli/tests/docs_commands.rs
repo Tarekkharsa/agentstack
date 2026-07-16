@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Docs-vs-CLI sync gate: every top-level subcommand (hidden ones included —
 //! `trust`, `connect`, `mcp` are hidden but documented) must appear in
 //! docs/reference.md's "All commands" inventory. The command surface grows

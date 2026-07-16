@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Owned servers (`[servers.X] owner = "codex"`): the owning harness app
 //! rewrites its own config entry (observed: the Codex desktop app refreshes
 //! node_repl env values on every self-update). The manifest must follow the

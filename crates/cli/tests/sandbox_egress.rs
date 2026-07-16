@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! The Phase 2 sandbox-egress demo, as a Docker-gated integration test — the
 //! real thing end to end: a container tries to exfiltrate to a host, and the
 //! AgentStack egress proxy allows or blocks it per the compiled policy, on a

@@ -1,11 +1,11 @@
 [package]
 name = "agentstack-adapters"
 version = "0.10.3"
-edition = "2021"
-rust-version = "1.80"
+edition.workspace = true
+rust-version.workspace = true
 description = "agentstack adapters: data-driven bundle -> per-CLI config compilers (13 CLIs)"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/Tarekkharsa/agentstack"
+license.workspace = true
+repository.workspace = true
 publish = false
 
 [dependencies]
@@ -20,3 +20,6 @@ include_dir = "0.7"
 
 [dev-dependencies]
 assert_fs = "1"
+
+[lints]
+workspace = true

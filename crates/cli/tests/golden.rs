@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Golden snapshot tests: a fixed fixture manifest rendered to each adapter's
 //! native config. These lock in the exact JSON/TOML we produce, including the
 //! per-format quirks (Claude `type:"http"`, Codex header rename + subtable).

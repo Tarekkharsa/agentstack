@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Phase 1b: `apply` (and the shared render path used by `diff`/`session`)
 //! resolves profile server refs from the central library, renders them into a
 //! provider config, and resolves `${REF}` per-machine at render time. Inline

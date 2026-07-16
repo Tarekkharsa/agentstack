@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Hooks compile into Claude Code's settings.json `hooks` key, render the exact
 //! nested schema, preserve other keys, resolve secrets, and prune when removed.
 //! Own test file so the HOME override runs isolated.

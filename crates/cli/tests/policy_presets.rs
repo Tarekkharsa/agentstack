@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Every shipped machine-policy preset in `examples/policies/` must parse with
 //! the REAL loader — the same `machine_policy_health()` the gateway consults —
 //! not a hand-rolled parse. A preset that documents a syntax the loader rejects

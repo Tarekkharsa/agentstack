@@ -302,15 +302,18 @@ fn tool_error(text: &str) -> Value {
 }
 
 fn json_ctype() -> Header {
-    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
+    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+        .expect("literal ASCII header name and value are always valid")
 }
 
 fn session_header(session_id: &str) -> Header {
-    Header::from_bytes(&b"Mcp-Session-Id"[..], session_id.as_bytes()).unwrap()
+    Header::from_bytes(&b"Mcp-Session-Id"[..], session_id.as_bytes())
+        .expect("literal header name; session_id is server-generated hex")
 }
 
 fn allow_post() -> Header {
-    Header::from_bytes(&b"Allow"[..], &b"POST"[..]).unwrap()
+    Header::from_bytes(&b"Allow"[..], &b"POST"[..])
+        .expect("literal ASCII header name and value are always valid")
 }
 
 /// Per-run credential from the OS entropy pool — same construction as the

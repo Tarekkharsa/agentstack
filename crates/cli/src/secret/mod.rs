@@ -66,7 +66,12 @@ impl Resolver for Chain {
     }
 
     fn lookup(&self, name: &str) -> Lookup {
-        if let Some(hit) = self.cache.lock().unwrap().get(name) {
+        if let Some(hit) = self
+            .cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(name)
+        {
             return hit.clone();
         }
         // A failed link doesn't stop the walk — a later store may still have
@@ -101,7 +106,7 @@ impl Resolver for Chain {
         }
         self.cache
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(name.to_string(), out.clone());
         out
     }

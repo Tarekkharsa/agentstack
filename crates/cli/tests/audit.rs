@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Supply-chain scanning end-to-end: a fixture skill carrying a zero-width
 //! character (High) and an injection phrase (Warn) must block `install` unless
 //! `--allow-flagged`, show up in `audit --json` with the right severities, and

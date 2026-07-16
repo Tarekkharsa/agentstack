@@ -1,11 +1,11 @@
 [package]
 name = "agentstack-egress"
 version = "0.10.3"
-edition = "2021"
-rust-version = "1.80"
+edition.workspace = true
+rust-version.workspace = true
 description = "agentstack egress proxy enforcement: CONNECT/SNI parsing + per-host policy decisions (Phase 2)"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/Tarekkharsa/agentstack"
+license.workspace = true
+repository.workspace = true
 publish = false
 
 # The egress enforcement crate: the pure decision core (CONNECT/SNI parsing +
@@ -32,3 +32,6 @@ serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
+
+[lints]
+workspace = true

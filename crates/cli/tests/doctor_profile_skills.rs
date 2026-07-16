@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! `doctor`'s Skills section must consider the same name set a trust review
 //! covers — inline `[skills.*]` PLUS profile-referenced (library) names — not
 //! just inline entries. Regression for the "no skills defined" contradiction:

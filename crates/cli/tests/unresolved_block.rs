@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Finding 1 (project review): an unresolved `${REF}` must never reach a live
 //! config write. `apply --write` blocks the target by default and only writes
 //! when `--allow-unresolved` is passed.

@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Instructions in the mainstream lifecycle: `apply --write` compiles
 //! `[instructions.*]` into each CLI's instruction file, a manifest WITHOUT
 //! instructions never touches a region another layer owns, and `doctor`

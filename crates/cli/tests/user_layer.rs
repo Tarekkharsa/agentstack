@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! The user layer: the machine-level manifest's `[instructions]` merge in
 //! beneath every project load — instructions ONLY (never servers/skills),
 //! compiled at global scope only, and the project wins a name conflict.

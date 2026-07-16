@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! `session end` must restore the filesystem exactly: it removes the skills
 //! dir it emptied only when the session itself created that dir — a dir the
 //! user pre-created (even empty) survives. Serialized because these mutate

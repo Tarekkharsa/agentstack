@@ -192,7 +192,8 @@ pub fn handle_runtime_call(gateway: &Gateway, body: &str) -> (u16, String) {
 }
 
 fn json_ctype() -> Header {
-    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
+    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+        .expect("literal ASCII header name and value are always valid")
 }
 
 /// A per-session bearer token for the loopback endpoint. The socket is

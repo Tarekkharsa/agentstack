@@ -1,3 +1,9 @@
+// This whole file is test code: its unwraps live in free helper fns (not
+// `#[test]`-annotated), so `allow-unwrap-in-tests` in clippy.toml doesn't
+// reach them. A panic here IS the test failure, so opt the file out of the
+// workspace `unwrap_used`/`expect_used` deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! The egress-proxy **sidecar image**, exercised for real — Docker-gated.
 //!
 //! Builds `docker/egress-proxy.Dockerfile` from the repo root, runs the

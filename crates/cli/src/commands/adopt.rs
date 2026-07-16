@@ -92,7 +92,11 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // Insert into the existing manifest text, preserving comments.
     let entries: Vec<(String, Value)> = collected
         .iter()
-        .map(|(n, s)| (n.clone(), serde_json::to_value(s).unwrap()))
+        .map(|(n, s)| {
+            let value = serde_json::to_value(s)
+                .expect("an internal derive(Serialize) struct always serializes");
+            (n.clone(), value)
+        })
         .collect();
     let manifest_text = fs::read_to_string(&ctx.loaded.manifest_path)
         .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;

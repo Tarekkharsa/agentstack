@@ -1,11 +1,11 @@
 [package]
 name = "agentstack-runtime"
 version = "0.10.3"
-edition = "2021"
-rust-version = "1.80"
+edition.workspace = true
+rust-version.workspace = true
 description = "agentstack sandbox runtime: container lifecycle (Phase 2)"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/Tarekkharsa/agentstack"
+license.workspace = true
+repository.workspace = true
 publish = false
 
 # The Docker backend (bollard + the tokio it drives) is OPT-IN, not default.
@@ -37,3 +37,6 @@ futures-util = { version = "0.3", optional = true, default-features = false }
 
 [dev-dependencies]
 assert_fs = "1"
+
+[lints]
+workspace = true

@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Consolidation gathers real skill directories into the central library and
 //! symlinks the originals back. It indexes each skill in `library.toml` (so it is
 //! referenced by name), keeps content reachable through the links, backs up moved

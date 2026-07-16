@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Versioned packs from any git host, end-to-end against a local `file://`
 //! repo: install at a tag, reproduce via the lock, upgrade to a newer tag,
 //! policy-gate before fetch, and content-scan the clone.

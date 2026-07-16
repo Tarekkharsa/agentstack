@@ -436,8 +436,12 @@ pub fn add_server_def(
     let dest = lib_home.join("servers").join(format!("{name}.toml"));
 
     if write {
-        std::fs::create_dir_all(dest.parent().unwrap())
-            .with_context(|| format!("creating {}", dest.parent().unwrap().display()))?;
+        // `dest` is always `lib_home/servers/<name>.toml`, so it has a parent.
+        let dest_dir = dest
+            .parent()
+            .expect("lib server path always has a parent directory");
+        std::fs::create_dir_all(dest_dir)
+            .with_context(|| format!("creating {}", dest_dir.display()))?;
         std::fs::write(&dest, &normalized)
             .with_context(|| format!("writing {}", dest.display()))?;
         library.upsert_server(LibraryServer {
@@ -647,8 +651,10 @@ fn key_is_secretish(key: &str) -> bool {
 /// won't parse (F3) and when scanning outgoing commits (F6).
 fn secretish_keys_in_line(line: &str) -> Vec<String> {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re =
-        RE.get_or_init(|| regex::Regex::new(r#"([A-Za-z0-9_.-]+)\s*[=:]\s*"([^"]*)""#).unwrap());
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r#"([A-Za-z0-9_.-]+)\s*[=:]\s*"([^"]*)""#)
+            .expect("the literal secret-scan regex is valid")
+    });
     re.captures_iter(line)
         .filter_map(|c| {
             let key = c.get(1)?.as_str();

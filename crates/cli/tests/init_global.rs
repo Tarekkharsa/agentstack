@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! `agentstack init --global` seeds the machine-level manifest — the personal
 //! instructions layer at `~/.agentstack/` (honoring `AGENTSTACK_HOME`).
 

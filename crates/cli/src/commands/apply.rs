@@ -601,7 +601,11 @@ fn render(
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let json_entries: Vec<(String, serde_json::Value)> = entries
             .iter()
-            .map(|(n, s)| (n.clone(), serde_json::to_value(s).unwrap()))
+            .map(|(n, s)| {
+                let value = serde_json::to_value(s)
+                    .expect("an internal derive(Serialize) struct always serializes");
+                (n.clone(), value)
+            })
             .collect();
         let new_text = crate::render::merge_toml::merge(&text, "servers", &json_entries, true)?;
         if new_text == text {

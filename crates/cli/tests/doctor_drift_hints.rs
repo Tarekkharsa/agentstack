@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Drift-safety finding: doctor's drift section used to hint a bare
 //! `agentstack apply --write` even when the pending change would DELETE
 //! entries from a live config (hand-added or foreign-manifest servers), and

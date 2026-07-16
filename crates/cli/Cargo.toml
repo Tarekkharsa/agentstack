@@ -1,11 +1,11 @@
 [package]
 name = "agentstack"
 version = "0.10.3"
-edition = "2021"
-rust-version = "1.80"
+edition.workspace = true
+rust-version.workspace = true
 description = "One portable manifest, every agent CLI. Manage MCP servers + skills across Claude Code, Codex, and more."
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/Tarekkharsa/agentstack"
+license.workspace = true
+repository.workspace = true
 homepage = "https://github.com/Tarekkharsa/agentstack"
 readme = "../../README.md"
 keywords = ["mcp", "cli", "claude", "codex", "agents"]
@@ -67,3 +67,6 @@ assert_fs = "1"
 tempfile = "3"
 # For the Docker-gated sandbox-egress integration test (feature `sandbox`).
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
+
+[lints]
+workspace = true

@@ -47,7 +47,7 @@ pub fn merge_with_removals(
     }
     let section = doc
         .get_mut(location)
-        .unwrap()
+        .expect("location was just ensured present above")
         .as_table_mut()
         .with_context(|| format!("`{location}` in config is not a table"))?;
     section.set_implicit(true);

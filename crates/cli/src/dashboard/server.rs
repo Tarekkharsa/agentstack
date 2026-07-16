@@ -546,7 +546,8 @@ fn json(body: &str) -> Resp {
 }
 
 fn ctype(value: &str) -> Header {
-    Header::from_bytes(&b"Content-Type"[..], value.as_bytes()).unwrap()
+    Header::from_bytes(&b"Content-Type"[..], value.as_bytes())
+        .expect("Content-Type is a valid header name; callers pass a literal value")
 }
 
 fn split_url(url: &str) -> (&str, &str) {

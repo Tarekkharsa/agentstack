@@ -1,0 +1,6 @@
+# Test code may `.unwrap()`/`.expect()` freely — a panic in a test IS the
+# failure signal, so the `unwrap_used` deny in `[workspace.lints]` (Cargo.toml)
+# applies to production code only. Non-test code states its invariants with
+# `.expect("why this holds")` instead.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

@@ -549,14 +549,19 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
     let bridge_harnesses: Vec<Value> = ctx
         .registry
         .iter()
-        .filter(|d| d.mcp.is_some() && d.config.is_some() && d.detected())
-        .map(|d| {
-            let (cfg, mcp) = (d.config.as_ref().unwrap(), d.mcp.as_ref().unwrap());
+        .filter(|d| d.detected())
+        // let-else binds both options together, so the presence check and the
+        // use are one expression — no filter-then-unwrap coupling to keep in
+        // sync (an entry missing either field is simply skipped).
+        .filter_map(|d| {
+            let (Some(cfg), Some(mcp)) = (d.config.as_ref(), d.mcp.as_ref()) else {
+                return None;
+            };
             let path = crate::util::paths::expand_tilde(&cfg.path);
             let existing = std::fs::read_to_string(&path).unwrap_or_default();
             let connected =
                 crate::commands::connect::has_bridge_entry(&existing, &mcp.location, cfg.format);
-            json!({ "id": d.id, "display": d.display, "connected": connected })
+            Some(json!({ "id": d.id, "display": d.display, "connected": connected }))
         })
         .collect();
     let project_base = crate::manifest::project_root_of(&ctx.dir);

@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Wire-proxy relay + telemetry, end to end and hermetic (127.0.0.1 only).
 //!
 //! Stands up a stub upstream (a second tiny_http in-test), starts `proxy::serve`

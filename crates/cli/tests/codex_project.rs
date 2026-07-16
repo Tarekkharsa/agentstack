@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Codex project scope: `<repo>/.codex/config.toml` (which Codex loads only
 //! for trusted projects — its gate, not ours) receives MCP servers, hooks,
 //! and settings COEXISTING in the one TOML file, non-destructively; and the

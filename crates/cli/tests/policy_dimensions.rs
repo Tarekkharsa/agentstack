@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Policy dimensions, end to end: per-server secret access is enforced
 //! fail-closed at BOTH substitution sites (rendered configs and the gateway),
 //! the write-time egress check refuses a disallowed declared host, machine

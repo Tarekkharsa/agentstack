@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Root-cause drift-safety finding: global-scope state keys are bare adapter
 //! ids, so servers applied from manifest A became prune targets whenever
 //! manifest B applied globally — `apply --write` from B silently deleted A's

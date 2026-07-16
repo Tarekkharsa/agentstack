@@ -1,11 +1,11 @@
 [package]
 name = "agentstack-trust"
 version = "0.10.3"
-edition = "2021"
-rust-version = "1.80"
+edition.workspace = true
+rust-version.workspace = true
 description = "agentstack trust store: digest pinning, re-gating, review states"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/Tarekkharsa/agentstack"
+license.workspace = true
+repository.workspace = true
 publish = false
 
 # rule 6: this crate is reviewed line by line, so its dependency list is the
@@ -28,3 +28,6 @@ thiserror = "1"
 [dev-dependencies]
 assert_fs = "1"
 proptest = "1"
+
+[lints]
+workspace = true

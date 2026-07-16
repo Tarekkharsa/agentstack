@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Code mode (PLAN code-mode Phase 2) end-to-end: the generated client is built
 //! from the *live* proxied surface, and a runtime call round-trips through the
 //! gateway to a real (mock) upstream MCP server. Also proves `codemode --write`

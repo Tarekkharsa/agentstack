@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Tracked runs, end to end: launch a benign `sleep` as a run, see it listed,
 //! kill it, and confirm a profile applied for the run is reverted when it ends.
 //! Uses a throwaway adapter pointing at `sleep` so no real harness/TUI is needed.

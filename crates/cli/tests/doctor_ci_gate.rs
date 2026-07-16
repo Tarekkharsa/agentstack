@@ -1,3 +1,8 @@
+// Integration test: unwraps/expects in free helper fns aren't seen as
+// "in tests" by clippy's allow-unwrap-in-tests (only #[test] fns are),
+// so opt the whole test file out of the workspace unwrap_used deny.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Project-review finding: `doctor --ci` is documented as a trust gate, but it
 //! used to downgrade *every* manifest-validation issue to a warning and only
 //! exit nonzero on `report.errors > 0` — so a structural error (e.g. a profile
