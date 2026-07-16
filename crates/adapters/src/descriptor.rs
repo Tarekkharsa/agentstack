@@ -30,6 +30,7 @@ pub enum AdapterSource {
 
 /// One CLI's full descriptor, deserialized from `adapters/<id>.yaml`.
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdapterDescriptor {
     pub id: String,
     pub display: String,
@@ -177,6 +178,7 @@ impl AdapterDescriptor {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Detect {
     /// Binary that, if on PATH, indicates the CLI is installed.
     #[serde(default)]
@@ -194,6 +196,7 @@ pub enum Format {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigSpec {
     /// Path to the CLI config file (may start with `~`).
     pub path: String,
@@ -201,6 +204,7 @@ pub struct ConfigSpec {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct McpSpec {
     /// Dotted/plain key under which servers live (e.g. `mcpServers`,
     /// `mcp_servers`).
@@ -226,6 +230,7 @@ pub struct McpSpec {
 /// Target field names for each canonical field. `None` means the CLI does not
 /// support that field and it is dropped.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Fields {
     #[serde(default)]
     pub url: Option<String>,
@@ -245,6 +250,7 @@ pub struct Fields {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Transport {
     /// The key that holds the transport tag (e.g. `type`).
     pub key: String,
@@ -265,6 +271,7 @@ pub enum SecretMode {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SkillsSpec {
     /// Global skills directory (e.g. `~/.claude/skills`).
     pub dir: String,
@@ -290,6 +297,7 @@ pub enum SkillStrategy {
 
 /// Instruction-file locations for a CLI (markdown, managed-region merge).
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InstructionsSpec {
     /// Global instruction file (e.g. `~/.claude/CLAUDE.md`).
     pub global: String,
@@ -313,6 +321,7 @@ impl InstructionsSpec {
 /// Native extension/add-on directory for a CLI (code modules placed in a dir,
 /// e.g. Pi extensions). Each entry is a file or a directory.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExtensionsSpec {
     /// Global extensions directory (e.g. `~/.pi/agent/extensions`).
     pub dir: String,
@@ -324,6 +333,7 @@ pub struct ExtensionsSpec {
 /// Native settings-file locations for a CLI (permissions, feature flags, etc.).
 /// Distinct from the MCP config file; merged non-destructively at the top level.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SettingsSpec {
     /// File format (json for Claude `settings.json`, toml for Codex `config.toml`).
     pub format: Format,
@@ -342,6 +352,7 @@ pub struct SettingsSpec {
 /// One known setting in a CLI's settings file. `key` is a dotted path
 /// (`permissions.defaultMode`) into the settings object.
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SettingField {
     pub key: String,
     #[serde(default)]
@@ -373,6 +384,7 @@ pub enum SettingKind {
 /// Lifecycle-hook destination for a CLI. Claude Code keeps hooks under the
 /// `hooks` key of its settings.json; other harnesses may differ.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HooksSpec {
     pub format: Format,
     /// Global hooks file (e.g. `~/.claude/settings.json`).
@@ -397,6 +409,7 @@ pub enum HookShape {
 
 /// Project-scope config location for a CLI that supports project files.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectSpec {
     /// Project config path relative to the repo (e.g. `.mcp.json`).
     pub config: String,
