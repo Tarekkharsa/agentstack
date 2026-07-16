@@ -143,6 +143,11 @@ impl Drop for StdioChild {
     }
 }
 
+/// Bound on the stdio reader's message queue — deep enough to absorb a burst
+/// of notifications between requests, small enough that a runaway server can't
+/// grow host memory. JSON-RPC frames, so this is a modest buffer.
+const STDIO_QUEUE_CAP: usize = 256;
+
 impl StdioTransport {
     fn spawn(&self) -> Result<StdioChild> {
         let mut cmd = std::process::Command::new(&self.command);
@@ -162,7 +167,13 @@ impl StdioTransport {
             .with_context(|| format!("spawning '{}' in {}", self.command, self.cwd.display()))?;
         let stdin = Some(proc.stdin.take().expect("piped stdin"));
         let stdout = proc.stdout.take().expect("piped stdout");
-        let (tx, rx) = std::sync::mpsc::channel();
+        // Bounded so a chatty server (a flood of notifications between the
+        // requests that drain them) can't grow this queue without limit. A
+        // full channel parks the reader thread on `send`, which lets the
+        // child's stdout pipe fill and applies backpressure to the child —
+        // no deadlock, since `request` drains one message at a time while it
+        // waits, freeing slots for the reply it's looking for.
+        let (tx, rx) = std::sync::mpsc::sync_channel(STDIO_QUEUE_CAP);
         std::thread::spawn(move || {
             use std::io::BufRead;
             for line in std::io::BufReader::new(stdout).lines() {
@@ -1134,7 +1145,8 @@ impl Gateway {
         let tools = self.namespaced_tools();
         let q = query.trim().to_lowercase();
         let tokens: Vec<&str> = q.split_whitespace().collect();
-        let mut scored: Vec<(i32, Hit)> = Vec::new();
+        // Bounded by the tool count — one alloc up front instead of growing.
+        let mut scored: Vec<(i32, Hit)> = Vec::with_capacity(tools.len());
         for t in tools.iter() {
             let name = t.get("name").and_then(Value::as_str).unwrap_or("");
             let desc = t.get("description").and_then(Value::as_str).unwrap_or("");
