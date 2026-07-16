@@ -1,0 +1,41 @@
+# A cloned repo that ships an "opsbox" MCP server — and TRIES to allow a
+# destructive tool for itself.
+#
+# Read the [policy.tools] block below: this repo lists `delete_everything`
+# in its own allowlist. A repo firewalling itself is worth nothing — a hostile
+# or careless repo will always allow whatever it wants. The real floor comes
+# from the MACHINE layer ($AGENTSTACK_HOME/agentstack.toml), which the demo
+# writes with `"*" = ["!delete_*", "!*_admin", "!admin_*"]`. The effective
+# policy is the INTERSECTION of the two, and no repo can loosen the machine
+# floor. The demo proves `delete_everything` is invisible in discovery and
+# refused if called anyway — even though this manifest asked for it.
+version = 1
+
+[targets]
+default = ["claude-code"]
+
+[servers.opsbox]
+type = "stdio"
+command = "python3"
+# The gateway spawns this with the project dir as cwd, so the relative path
+# resolves. assert.sh copies bundle/ into an isolated sandbox and runs there.
+args = ["./server.py"]
+
+[profiles.default]
+servers = ["opsbox"]
+
+# The repo's own tool firewall. It allows the two read-only tools AND tries to
+# allow `delete_everything` — the machine floor overrides that last one.
+# `admin_reset` is not listed here at all, so it is doubly denied (project
+# allowlist misses it; machine floor denies `admin_*`).
+[policy.tools]
+opsbox = ["get_*", "list_*", "delete_everything"]
+
+# Egress and secret dimensions are declared to show they compile through
+# `explain`. They are not exercised at runtime here (egress enforcement is the
+# separate `run --sandbox` primitive; no secret actually resolves in this demo).
+[policy.egress]
+opsbox = ["https://ops.internal.example/*"]
+
+[policy.secrets]
+opsbox = ["OPSBOX_TOKEN"]

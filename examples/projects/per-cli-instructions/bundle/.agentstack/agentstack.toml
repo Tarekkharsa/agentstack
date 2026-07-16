@@ -1,0 +1,36 @@
+# Per-CLI instruction targeting — one manifest, three audiences.
+#
+# A single committed manifest carries three instruction fragments. Each fragment
+# says WHO it is for via `targets`, and `agentstack instructions` compiles each
+# one only into the harnesses it names — inside a managed marker block, leaving
+# any hand-written prose in the file untouched.
+#
+#   shared       -> every targeted harness   (CLAUDE.md AND AGENTS.md)
+#   claude_only  -> Claude Code only          (CLAUDE.md, never AGENTS.md)
+#   codex_only   -> Codex only                (AGENTS.md, never CLAUDE.md)
+#
+# Relative paths anchor at THIS file's directory (.agentstack/), so
+# "./instructions/shared.md" means .agentstack/instructions/shared.md.
+version = 1
+
+# Both harnesses are in scope. Claude Code writes CLAUDE.md; Codex writes
+# AGENTS.md. (Cursor, notably, has no instructions file at all — see the
+# cursor probe in assert.sh.)
+[targets]
+default = ["claude-code", "codex"]
+
+# Targets defaults to ["*"] — this fragment reaches every targeted harness.
+[instructions.shared]
+path = "./instructions/shared.md"
+
+# Claude-Code-only guidance. Its marker text must land in CLAUDE.md and must
+# NOT appear in AGENTS.md.
+[instructions.claude_only]
+path = "./instructions/claude_only.md"
+targets = ["claude-code"]
+
+# Codex-only guidance. Its marker text must land in AGENTS.md and must NOT
+# appear in CLAUDE.md.
+[instructions.codex_only]
+path = "./instructions/codex_only.md"
+targets = ["codex"]

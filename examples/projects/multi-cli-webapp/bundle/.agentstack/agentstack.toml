@@ -1,0 +1,36 @@
+# One agent setup for a team that ships across three CLIs.
+#
+# The storefront-api team uses Claude Code, Codex, and Cursor. Rather than
+# hand-maintain .mcp.json + .codex/config.toml + .cursor/mcp.json (and a
+# CLAUDE.md and an AGENTS.md) and let them drift, they author this ONE file
+# and let `agentstack` compile it into each CLI's native format.
+version = 1
+
+# Fan-out targets. Everything below renders into these three CLIs by default.
+[targets]
+default = ["claude-code", "codex", "cursor"]
+
+# One MCP server — the team's internal API, spoken over HTTP. Each adapter
+# emits it in its own native shape: Claude Code tags `type = "http"`, Codex
+# uses an [mcp_servers.<name>.http_headers] sub-table, Cursor infers the
+# transport and omits the tag. The bearer token is a `${REF}` placeholder,
+# resolved per-machine at render time (env → varlock → keychain → .env) and
+# never written into this manifest or the lockfile.
+[servers.storefront-api]
+type = "http"
+url = "https://api.storefront.example/mcp"
+headers = { Authorization = "Bearer ${WEBAPP_API_TOKEN}" }
+
+# One portable instruction fragment — the team's house rules. Its targets
+# default to "*", i.e. every CLI in [targets].default. It compiles into the
+# managed region of CLAUDE.md (Claude Code) and AGENTS.md (Codex). Watch what
+# happens to Cursor: it is a declared target with no instructions support.
+[instructions.house-rules]
+path = "./instructions/house-rules.md"
+
+# The profile activated in a working repo. The `api-conventions` skill is NOT
+# defined inline here — it is referenced BY NAME and resolved from the central
+# library (`agentstack lib`). assert.sh seeds that library first.
+[profiles.team]
+servers = ["storefront-api"]
+skills = ["api-conventions"]

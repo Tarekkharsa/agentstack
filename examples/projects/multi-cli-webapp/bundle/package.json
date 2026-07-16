@@ -1,0 +1,21 @@
+{
+  "name": "storefront-api",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Tiny storefront web app — the sample repo three CLIs share one agent setup over.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "lint": "eslint src",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "fastify": "^4.28.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}
