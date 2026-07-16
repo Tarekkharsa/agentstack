@@ -15,13 +15,15 @@ The 12 issues filed (#11–#22) are one security-relevant gap, a family of
 "silent drop" diagnostics, two discovery gaps, and four paper cuts — none
 undermines the security model's core.
 
-> **Update (same day):** [#11](https://github.com/Tarekkharsa/agentstack/issues/11)
-> and [#20](https://github.com/Tarekkharsa/agentstack/issues/20) — the two
-> dogfooding blockers — are fixed on this branch (guard now resolves the
-> project manifest through `resolve_manifest_dir`, and both run paths spawn
-> the harness at the project root), each pinned by a regression test; the
-> restricted-folders probe now asserts the project-layer deny instead of
-> skipping.
+> **Update (same day):** all 12 issues are fixed on this branch, each pinned
+> by a regression test, and every example probe that documented a defect now
+> asserts the fixed behavior instead of skipping. Highlights: guard resolves
+> the project manifest through `resolve_manifest_dir` (#11); both run paths
+> spawn at the project root (#20); silent drops warn on every surface and
+> instruction targets validate like servers' (#12–#14); `agentstack search`
+> covers the central library and `list_loadable` takes a query (#17, #18);
+> `--plan` agrees with live on fresh homes and `report` renders locked runs
+> (#21, #22).
 
 ## Issues filed
 
