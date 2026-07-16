@@ -288,7 +288,7 @@ impl Policy {
     /// manifest calls it.
     pub fn tool_allowed(&self, server: &str, tool: &str) -> Result<(), RuleDenial> {
         map_allowed(&self.tools, Dimension::Tools, server, |pat| {
-            glob_match(pat, tool)
+            glob_to_match(pat, tool)
         })
     }
 
@@ -307,7 +307,7 @@ impl Policy {
     /// `[policy.secrets]` — same keyed grammar and `"*"` rename-proofing.
     pub fn secret_allowed(&self, server: &str, reference: &str) -> Result<(), RuleDenial> {
         map_allowed(&self.secrets, Dimension::Secrets, server, |pat| {
-            glob_match(pat, reference)
+            glob_to_match(pat, reference)
         })
     }
 }
@@ -320,14 +320,40 @@ impl Policy {
 /// Grammar: plain globs allow, `!`-prefixed globs deny; a key with at least
 /// one allow pattern is an allowlist; an absent key constrains nothing
 /// (uniform allow-by-default — least privilege is an explicit `"*" = ["!*"]`).
+/// Adapter for the glob dimensions, whose grammar has no malformed form —
+/// any string is a valid glob, so the outcome is only ever Match/NoMatch.
+pub fn glob_to_match(pattern: &str, subject: &str) -> PatternMatch {
+    if glob_match(pattern, subject) {
+        PatternMatch::Match
+    } else {
+        PatternMatch::NoMatch
+    }
+}
+
+/// The fail-closed denial for a pattern the grammar can't interpret. A
+/// malformed pattern denies the WHOLE decision — even when it sits in an
+/// allowlist another entry of which matches — because a half-working rule
+/// set is exactly when quiet misinterpretation is most dangerous; the
+/// message names the pattern so the fix is one edit away.
+fn malformed_denial(dimension: Dimension, key: &str, pattern: &str) -> RuleDenial {
+    RuleDenial {
+        dimension,
+        message: format!(
+            "malformed {dimension} pattern for {key}: \"{pattern}\" — failing closed; \
+             fix the pattern in the manifest"
+        ),
+    }
+}
+
 fn map_allowed(
     map: &IndexMap<String, Vec<String>>,
     dimension: Dimension,
     server: &str,
     // Given a pattern (with its leading `!` already stripped for denies),
-    // whether it matches the subject the closure captured. Dimensions differ
-    // only here: tools/secrets glob-match a bare name; egress scopes by port.
-    matches: impl Fn(&str) -> bool,
+    // how it matches the subject the closure captured. Dimensions differ
+    // only here: tools/secrets glob-match a bare name; egress scopes by port
+    // (and is the one grammar that can report `Malformed`).
+    matches: impl Fn(&str) -> PatternMatch,
 ) -> Result<(), RuleDenial> {
     let keys: &[&str] = if server == "*" {
         &["*"]
@@ -340,30 +366,64 @@ fn map_allowed(
         };
         for r in rules {
             if let Some(deny) = r.strip_prefix('!') {
-                if matches(deny) {
-                    return Err(RuleDenial {
-                        dimension,
-                        message: format!("denied by {dimension} {key} = \"!{deny}\""),
-                    });
+                match matches(deny) {
+                    PatternMatch::Match => {
+                        return Err(RuleDenial {
+                            dimension,
+                            message: format!("denied by {dimension} {key} = \"!{deny}\""),
+                        });
+                    }
+                    // A deny the grammar can't read must never be inert.
+                    PatternMatch::Malformed => {
+                        return Err(malformed_denial(dimension, key, r));
+                    }
+                    PatternMatch::NoMatch => {}
                 }
             }
         }
         let allows: Vec<&String> = rules.iter().filter(|r| !r.starts_with('!')).collect();
-        if !allows.is_empty() && !allows.iter().any(|a| matches(a)) {
-            return Err(RuleDenial {
-                dimension,
-                message: format!(
-                    "not in the {dimension} allowlist for {key} ({})",
-                    allows
-                        .iter()
-                        .map(|s| s.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            });
+        if !allows.is_empty() {
+            let mut hit = false;
+            for a in &allows {
+                match matches(a) {
+                    PatternMatch::Match => hit = true,
+                    PatternMatch::Malformed => {
+                        return Err(malformed_denial(dimension, key, a));
+                    }
+                    PatternMatch::NoMatch => {}
+                }
+            }
+            if !hit {
+                return Err(RuleDenial {
+                    dimension,
+                    message: format!(
+                        "not in the {dimension} allowlist for {key} ({})",
+                        allows
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                });
+            }
         }
     }
     Ok(())
+}
+
+/// The outcome of matching one policy pattern against a subject. Three-state
+/// because "the pattern itself is broken" must be distinguishable from "the
+/// pattern didn't match": a malformed DENY that merely reads as no-match is
+/// an inert deny — a fail-open. Checks treat `Malformed` as an error (deny
+/// the whole decision, naming the pattern); manifest validation rejects the
+/// pattern at authoring time so runs never see one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatternMatch {
+    Match,
+    NoMatch,
+    /// The pattern cannot be interpreted (today: only egress `host:port`
+    /// grammar can be malformed — a bad bracket form or an invalid port).
+    Malformed,
 }
 
 /// Egress pattern match: the pattern is `host` (any port) or `host:port` (that
@@ -373,15 +433,27 @@ fn map_allowed(
 /// write-time, check) defers the port test to runtime and matches. Bracketed
 /// IPv6 (`[::1]:443`) is understood; a bare `::1` (multiple colons, unbracketed)
 /// is treated as a host with no port so its own colons aren't read as a port.
-pub fn egress_match(pattern: &str, host: &str, port: Option<u16>) -> bool {
-    let (pat_host, pat_port) = split_pattern_port(pattern);
+///
+/// A pattern the grammar can't interpret returns [`PatternMatch::Malformed`]
+/// so the caller fails CLOSED. (Before 2026-07-16 a malformed pattern was
+/// treated as a host glob over its own junk text and matched nothing — which
+/// made a malformed deny like `!evil.example:443junk` silently inert.)
+pub fn egress_match(pattern: &str, host: &str, port: Option<u16>) -> PatternMatch {
+    let Some((pat_host, pat_port)) = split_pattern_port(pattern) else {
+        return PatternMatch::Malformed;
+    };
     if !glob_match(pat_host, host) {
-        return false;
+        return PatternMatch::NoMatch;
     }
-    match (pat_port, port) {
+    let hit = match (pat_port, port) {
         (None, _) => true,            // pattern pins no port → any port
         (Some(_), None) => true,      // no query port → port enforced at runtime
         (Some(p), Some(q)) => p == q, // pinned port must match exactly
+    };
+    if hit {
+        PatternMatch::Match
+    } else {
+        PatternMatch::NoMatch
     }
 }
 
@@ -465,47 +537,56 @@ pub fn host_from_url(url: &str) -> Option<String> {
     }
 }
 
-/// Split an egress pattern into its host part and an optional pinned port.
+/// Whether an egress pattern (leading `!` allowed) is malformed — the
+/// authoring-time probe behind manifest validation, so a typo'd port is
+/// rejected at `apply`/`doctor` instead of surfacing as a fail-closed denial
+/// at run time. Same grammar as [`egress_match`], by construction.
+pub fn egress_pattern_is_malformed(pattern: &str) -> bool {
+    let body = pattern.strip_prefix('!').unwrap_or(pattern);
+    split_pattern_port(body).is_none()
+}
+
+/// Parse an egress pattern into its host part and an optional pinned port.
 /// `host:443` → (`host`, Some(443)); `host` or `host:*` → (`host`, None);
 /// `[::1]:443` → (`::1`, Some(443)); a bare `::1` → (`::1`, None).
-fn split_pattern_port(pattern: &str) -> (&str, Option<u16>) {
+///
+/// `None` means the pattern is MALFORMED — the grammar cannot interpret it:
+/// an unclosed `[`, a non-`:port` suffix after `]`, a single-colon suffix
+/// that isn't a valid nonzero port or `*` (hostnames cannot contain `:`, so
+/// `host:junk` can only be a typo'd port pin, never a legitimate host glob),
+/// or port `0`. Callers must fail closed on `None` — the pre-2026-07-16
+/// behavior of degrading a malformed pattern to a host glob over its own
+/// text made malformed denies silently inert.
+fn split_pattern_port(pattern: &str) -> Option<(&str, Option<u16>)> {
     if let Some(rest) = pattern.strip_prefix('[') {
         // Bracketed IPv6 literal: `[addr]` or `[addr]:port`.
-        if let Some((addr, after)) = rest.split_once(']') {
-            if after.is_empty() {
-                return (addr, None); // `[addr]` → any port
-            }
-            if let Some(port) = after
-                .strip_prefix(':')
-                .and_then(|p| p.parse::<u16>().ok())
-                .filter(|p| *p != 0)
-            {
-                return (addr, Some(port));
-            }
-            // A non-empty, non-`:port` suffix (`[::1]:443junk`, `[::1]:`,
-            // `[::1]garbage`) is malformed — do NOT silently widen to any-port.
-            // Return the whole pattern as the host so it matches no real host
-            // (a malformed allow grants nothing; a malformed deny is inert —
-            // manifest validation should have rejected it upstream).
-            return (pattern, None);
+        let (addr, after) = rest.split_once(']')?; // unclosed `[` → malformed
+        if after.is_empty() {
+            return Some((addr, None)); // `[addr]` → any port
         }
-        return (pattern, None);
+        let p = after.strip_prefix(':')?; // `[addr]garbage` → malformed
+        if p == "*" {
+            return Some((addr, None)); // explicit any-port
+        }
+        return match p.parse::<u16>() {
+            Ok(port) if port != 0 => Some((addr, Some(port))),
+            _ => None, // `[addr]:junk`, `[addr]:`, `[addr]:0` → malformed
+        };
     }
     // Only read a trailing `:port` when there's a SINGLE colon — otherwise a
     // bare IPv6 literal's own colons would be misread as a port.
     if let Some((h, p)) = pattern.rsplit_once(':') {
-        if !h.contains(':') && !p.is_empty() {
+        if !h.contains(':') {
             if p == "*" {
-                return (h, None); // explicit any-port
+                return Some((h, None)); // explicit any-port
             }
-            if let Ok(port) = p.parse::<u16>() {
-                if port != 0 {
-                    return (h, Some(port));
-                }
-            }
+            return match p.parse::<u16>() {
+                Ok(port) if port != 0 => Some((h, Some(port))),
+                _ => None, // `host:junk`, `host:`, `host:0` → malformed
+            };
         }
     }
-    (pattern, None)
+    Some((pattern, None))
 }
 
 /// Minimal glob: `*` matches any run of characters (including empty). No `?`.
@@ -939,71 +1020,89 @@ mod tests {
         assert!(err.message.contains("!delete_*"), "{err}");
     }
 
+    /// Bool view for the match-only assertions below; the three-state
+    /// verdict is asserted directly where malformed-ness is the point.
+    fn matches(pattern: &str, host: &str, port: Option<u16>) -> bool {
+        egress_match(pattern, host, port) == PatternMatch::Match
+    }
+
     #[test]
     fn egress_match_scopes_by_port() {
         // Bare host pattern matches any port.
-        assert!(egress_match(
-            "api.example.com",
-            "api.example.com",
-            Some(443)
-        ));
-        assert!(egress_match("api.example.com", "api.example.com", Some(22)));
+        assert!(matches("api.example.com", "api.example.com", Some(443)));
+        assert!(matches("api.example.com", "api.example.com", Some(22)));
         // host:port pins the exact port.
-        assert!(egress_match(
-            "api.example.com:443",
-            "api.example.com",
-            Some(443)
-        ));
-        assert!(!egress_match(
-            "api.example.com:443",
-            "api.example.com",
-            Some(22)
-        ));
+        assert!(matches("api.example.com:443", "api.example.com", Some(443)));
+        assert!(!matches("api.example.com:443", "api.example.com", Some(22)));
         // Host-only query (no port) defers the port test → matches.
-        assert!(egress_match("api.example.com:443", "api.example.com", None));
+        assert!(matches("api.example.com:443", "api.example.com", None));
         // Glob host still applies, with a pinned port.
-        assert!(egress_match(
-            "*.example.com:443",
-            "api.example.com",
-            Some(443)
-        ));
-        assert!(!egress_match(
-            "*.example.com:443",
-            "api.example.com",
-            Some(80)
-        ));
+        assert!(matches("*.example.com:443", "api.example.com", Some(443)));
+        assert!(!matches("*.example.com:443", "api.example.com", Some(80)));
         // Explicit any-port.
-        assert!(egress_match(
-            "api.example.com:*",
-            "api.example.com",
-            Some(9999)
-        ));
+        assert!(matches("api.example.com:*", "api.example.com", Some(9999)));
         // Host mismatch is a mismatch regardless of port.
-        assert!(!egress_match(
-            "api.example.com:443",
-            "evil.example",
-            Some(443)
-        ));
+        assert!(!matches("api.example.com:443", "evil.example", Some(443)));
+    }
+
+    /// The fail-closed witness for malformed patterns (CLAUDE.md rule 2's
+    /// spirit): a deny with a typo'd port (`!evil.example:443junk`) used to
+    /// degrade to a host glob over its own junk text — matching nothing, an
+    /// INERT deny that failed open. Now any decision that consults a
+    /// malformed pattern is refused outright, naming the pattern.
+    /// NEVER weaken this to "matches nothing".
+    #[test]
+    fn malformed_egress_pattern_fails_the_decision_closed() {
+        let mut p = Policy::default();
+        p.egress
+            .insert("api".into(), vec!["!evil.example:443junk".into()]);
+        // The old behavior ALLOWED this call (inert deny). Now it is refused,
+        // and the refusal says the pattern is malformed.
+        let err = p.egress_allowed("api", "evil.example").unwrap_err();
+        assert!(err.message.contains("malformed"), "{err}");
+        assert!(err.message.contains("!evil.example:443junk"), "{err}");
+        // A malformed ALLOW also refuses the decision (never half-works),
+        // even when another allow entry would match.
+        let mut p = Policy::default();
+        p.egress.insert(
+            "api".into(),
+            vec!["api.example.com".into(), "api.example.com:junk".into()],
+        );
+        let err = p.egress_allowed("api", "api.example.com").unwrap_err();
+        assert!(err.message.contains("malformed"), "{err}");
+        // Well-formed policies are untouched.
+        let mut p = Policy::default();
+        p.egress
+            .insert("api".into(), vec!["!evil.example:443".into()]);
+        assert!(p.egress_allowed("api", "api.example.com").is_ok());
+        assert!(p.egress_allowed("api", "evil.example").is_err());
     }
 
     #[test]
     fn egress_match_handles_ipv6_literals() {
         // A bare IPv6 literal's own colons are NOT read as a port.
-        assert!(egress_match("::1", "::1", Some(443)));
+        assert!(matches("::1", "::1", Some(443)));
         // Bracketed form pins a port.
-        assert!(egress_match("[::1]:443", "::1", Some(443)));
-        assert!(!egress_match("[::1]:443", "::1", Some(80)));
-        assert!(egress_match("[::1]", "::1", Some(80)));
-        // A MALFORMED bracketed suffix must NOT silently widen to any-port —
-        // it matches nothing (never all ports).
-        for bad in ["[::1]:443junk", "[::1]:", "[::1]garbage", "[::1]:0"] {
-            assert!(
-                !egress_match(bad, "::1", Some(443)),
-                "malformed pattern {bad} must not match"
-            );
-            assert!(
-                !egress_match(bad, "::1", Some(80)),
-                "malformed pattern {bad} must not match any port"
+        assert!(matches("[::1]:443", "::1", Some(443)));
+        assert!(!matches("[::1]:443", "::1", Some(80)));
+        assert!(matches("[::1]", "::1", Some(80)));
+        // A MALFORMED pattern is reported as such — not silently widened to
+        // any-port, and (since 2026-07-16) not degraded to an inert host glob
+        // either: the caller fails closed on the verdict.
+        for bad in [
+            "[::1]:443junk",
+            "[::1]:",
+            "[::1]garbage",
+            "[::1]:0",
+            "[::1",
+            "api.example.com:junk",
+            "api.example.com:",
+            "api.example.com:0",
+        ] {
+            assert_eq!(
+                egress_match(bad, "::1", Some(443)),
+                PatternMatch::Malformed,
+                "pattern {bad} must be reported malformed"
             );
         }
     }

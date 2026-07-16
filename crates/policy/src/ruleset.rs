@@ -28,7 +28,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use agentstack_core::manifest::{egress_match, glob_match, normalize_host, Dimension, RuleDenial};
+use agentstack_core::manifest::{
+    egress_match, glob_to_match, normalize_host, Dimension, PatternMatch, RuleDenial,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{Layer, PolicyDenial};
@@ -95,23 +97,44 @@ impl LayerRules {
 
     /// Deny-then-allow evaluation with a custom `matches(pattern)` (leading `!`
     /// already stripped for denies) that captures its own subject. Glob
-    /// dimensions pass a `glob_match` closure via [`Guard::check`]; egress
-    /// passes a port-aware one.
+    /// dimensions pass a `glob_to_match` closure via [`Guard::check`]; egress
+    /// passes a port-aware one — the one grammar that can report `Malformed`,
+    /// which fails the whole check CLOSED (a deny the grammar can't read must
+    /// never be inert, and a broken allowlist must not half-work).
     fn check_with(
         &self,
         dimension: Dimension,
-        matches: &impl Fn(&str) -> bool,
+        matches: &impl Fn(&str) -> PatternMatch,
     ) -> Result<(), RuleDenial> {
+        let malformed = |pattern: &str| RuleDenial {
+            dimension,
+            message: format!(
+                "malformed {dimension} pattern \"{pattern}\" in the compiled ruleset — \
+                 failing closed; fix the pattern in the manifest"
+            ),
+        };
         for d in &self.deny {
-            if matches(d) {
-                return Err(RuleDenial {
-                    dimension,
-                    message: format!("denied by {dimension} rule \"!{d}\""),
-                });
+            match matches(d) {
+                PatternMatch::Match => {
+                    return Err(RuleDenial {
+                        dimension,
+                        message: format!("denied by {dimension} rule \"!{d}\""),
+                    });
+                }
+                PatternMatch::Malformed => return Err(malformed(d)),
+                PatternMatch::NoMatch => {}
             }
         }
         for allows in &self.allow_all_of {
-            if !allows.iter().any(|a| matches(a)) {
+            let mut hit = false;
+            for a in allows {
+                match matches(a) {
+                    PatternMatch::Match => hit = true,
+                    PatternMatch::Malformed => return Err(malformed(a)),
+                    PatternMatch::NoMatch => {}
+                }
+            }
+            if !hit {
                 return Err(RuleDenial {
                     dimension,
                     message: format!("not in the {dimension} allowlist ({})", allows.join(", ")),
@@ -142,7 +165,7 @@ impl Guard {
     /// Machine layer first (its refusal carries `Layer::Machine`), then the
     /// bundle's — the same composition as `agentstack_policy::tool_decision`.
     pub fn check(&self, dimension: Dimension, subject: &str) -> Result<(), PolicyDenial> {
-        self.check_with(dimension, &|pat| glob_match(pat, subject))
+        self.check_with(dimension, &|pat| glob_to_match(pat, subject))
     }
 
     /// Machine-then-bundle check with a custom pattern matcher (egress uses it
@@ -151,7 +174,7 @@ impl Guard {
     pub fn check_with(
         &self,
         dimension: Dimension,
-        matches: &impl Fn(&str) -> bool,
+        matches: &impl Fn(&str) -> PatternMatch,
     ) -> Result<(), PolicyDenial> {
         self.machine
             .check_with(dimension, matches)
@@ -347,7 +370,14 @@ impl CompiledRuleset {
     /// checked first so the refusal names the layer.
     pub fn fs_deny_decision(&self, spellings: &[&str]) -> Result<(), PolicyDenial> {
         self.filesystem.deny.check_with(Dimension::FsDeny, &|pat| {
-            spellings.iter().any(|s| glob_match(pat, s))
+            if spellings
+                .iter()
+                .any(|s| agentstack_core::manifest::glob_match(pat, s))
+            {
+                PatternMatch::Match
+            } else {
+                PatternMatch::NoMatch
+            }
         })
     }
 

@@ -60,6 +60,10 @@ pub enum IssueKind {
     /// author expected (the instruction analogue of `UnknownServerTarget`).
     UnknownInstructionTarget,
     InvalidPluginName,
+    /// A `[policy.egress]` pattern the grammar cannot interpret (bad bracket
+    /// form or invalid `:port` suffix). At run time such a pattern fails the
+    /// decision CLOSED, so this is caught here first — at authoring time.
+    MalformedEgressPattern,
 }
 
 impl IssueKind {
@@ -82,6 +86,7 @@ impl IssueKind {
                 | IssueKind::UnknownServerOwner
                 | IssueKind::UnknownInstructionTarget
                 | IssueKind::InvalidPluginName
+                | IssueKind::MalformedEgressPattern
         )
     }
 }
@@ -128,6 +133,23 @@ fn run<'a>(
     let mut issues = Vec::new();
     let targets: std::collections::BTreeSet<String> =
         targets.into_iter().map(str::to_string).collect();
+
+    // [policy.egress] pattern grammar: a malformed pattern fails every
+    // decision that consults it closed at run time — reject it here so the
+    // fix happens at authoring time, with the exact pattern named.
+    for (server, patterns) in &manifest.policy.egress {
+        for pattern in patterns {
+            if agentstack_core::manifest::egress_pattern_is_malformed(pattern) {
+                issues.push(Issue::new(
+                    IssueKind::MalformedEgressPattern,
+                    format!(
+                        "[policy.egress] {server} pattern \"{pattern}\" is malformed \
+                         (expected `host`, `host:port`, `host:*`, or a bracketed IPv6 form)"
+                    ),
+                ));
+            }
+        }
+    }
 
     // Server transport consistency.
     for (name, server) in &manifest.servers {
@@ -387,6 +409,38 @@ mod tests {
             provenance: Some("consolidated".into()),
         });
         lib
+    }
+
+    /// A malformed `[policy.egress]` pattern is rejected at authoring time —
+    /// the same pattern would fail every runtime decision closed, so the
+    /// validator names it before a run ever hits the denial.
+    #[test]
+    fn flags_malformed_egress_patterns() {
+        let m = parse(
+            r#"
+            version = 1
+            [policy.egress]
+            api = ["api.example.com:443", "!evil.example:443junk"]
+            "#,
+        );
+        let issues = validate(&m);
+        let issue = issues
+            .iter()
+            .find(|i| i.kind == IssueKind::MalformedEgressPattern)
+            .expect("malformed pattern must be flagged");
+        assert!(issue.kind.is_error());
+        assert!(issue.message.contains("!evil.example:443junk"), "{issue:?}");
+        // Well-formed patterns raise nothing.
+        let m = parse(
+            r#"
+            version = 1
+            [policy.egress]
+            api = ["api.example.com:443", "!evil.example", "*.corp.example:*"]
+            "#,
+        );
+        assert!(validate(&m)
+            .iter()
+            .all(|i| i.kind != IssueKind::MalformedEgressPattern));
     }
 
     #[test]

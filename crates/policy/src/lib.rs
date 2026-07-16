@@ -363,6 +363,28 @@ mod tests {
         assert!(rs.egress_decision("api", "api.example.com", None).is_ok());
     }
 
+    /// The compiled-path twin of core's fail-closed witness: a malformed
+    /// egress deny in the machine policy used to be INERT after compilation
+    /// (the pattern degraded to a host glob over its own junk text and
+    /// matched nothing — fail open). Now the compiled decision refuses every
+    /// call that consults it, naming the pattern.
+    /// NEVER weaken this to "matches nothing".
+    #[test]
+    fn malformed_egress_pattern_fails_closed_through_compile() {
+        let mut machine = Policy::default();
+        machine
+            .egress
+            .insert("api".into(), vec!["!evil.example:443junk".into()]);
+        let rs = compile(&machine, &Policy::default(), &["api"]);
+        let err = rs
+            .egress_decision("api", "evil.example", Some(443))
+            .unwrap_err();
+        assert!(err.to_string().contains("malformed"), "{err}");
+        // The compiled deny entry is stored with its `!` stripped, so the
+        // message names the body — still enough to locate the manifest line.
+        assert!(err.to_string().contains("evil.example:443junk"), "{err}");
+    }
+
     /// Pinning a port can only NARROW: if the machine allows a host on any port
     /// and the bundle pins 443, the effective decision denies 22 (which the
     /// machine alone would have allowed). Rule 2 in the port dimension.
