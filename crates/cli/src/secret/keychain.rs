@@ -30,10 +30,10 @@ impl Resolver for KeychainResolver {
 /// "unresolved secret" for a secret that is in the keychain.
 fn read_with_retry(read: impl Fn() -> Result<Option<String>>) -> Lookup {
     if let Ok(outcome) = read() {
-        return outcome.map_or(Lookup::Missing, Lookup::Found);
+        return outcome.map_or(Lookup::Missing, |v| Lookup::Found(v.into()));
     }
     match read() {
-        Ok(Some(v)) => Lookup::Found(v),
+        Ok(Some(v)) => Lookup::Found(v.into()),
         Ok(None) => Lookup::Missing,
         Err(e) => Lookup::Failed(format!("keychain read failed: {e:#}")),
     }

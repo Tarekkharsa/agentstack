@@ -383,8 +383,13 @@ pub fn substitute_with(
                 if agentstack_core::refs::is_ref_name(name) {
                     match resolver.lookup(name) {
                         Lookup::Found(val) => {
-                            secrets.push((name.to_string(), val.clone()));
-                            out.push_str(&val);
+                            // The render output is the one place the value is
+                            // written in the clear (that's what `apply` puts in
+                            // the config); `secrets` records it so the display
+                            // layer can redact it from the human-facing diff.
+                            let exposed = val.expose();
+                            secrets.push((name.to_string(), exposed.to_string()));
+                            out.push_str(exposed);
                         }
                         Lookup::Missing => {
                             unresolved.push(name.to_string());
