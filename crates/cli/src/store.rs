@@ -400,6 +400,7 @@ mod tests {
                 }],
                 servers: Vec::new(),
                 instructions: Vec::new(),
+                executables: Vec::new(),
             };
 
             let manifest: crate::manifest::Manifest =

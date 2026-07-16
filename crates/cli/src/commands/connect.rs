@@ -248,6 +248,7 @@ fn bridge_server(command: &str, transparent: bool) -> Server {
         command: Some(command.to_string()),
         args,
         cwd: None,
+        integrity_roots: Vec::new(),
         targets: crate::manifest::model::all_targets(),
         owner: None,
         headers: Default::default(),

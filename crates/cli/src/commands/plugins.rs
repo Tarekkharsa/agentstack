@@ -1298,6 +1298,7 @@ fn server_from_native_value(value: &Value) -> Option<Server> {
         command,
         args,
         cwd,
+        integrity_roots: Vec::new(),
         targets: crate::manifest::model::all_targets(),
         owner: None,
         headers,

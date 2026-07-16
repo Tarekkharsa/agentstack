@@ -631,6 +631,18 @@ pub struct Server {
     /// wrapper there). Supports `${REF}`/path expansion like other fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// D3 integrity roots (locked-run contract §8): repository-relative files
+    /// or directory subtrees whose **content** this stdio server's interpreted
+    /// payload depends on (transitive imports, sourced files, required
+    /// modules). `agentstack lock` pins each declared root by a symlink-free
+    /// content digest, and a one-byte change anywhere inside a root re-gates
+    /// trust. Roots are declared, not inferred — pinning only the entry script
+    /// would leave `import`ed/`source`d files unbound. Paths must stay inside
+    /// the project (traversal, absolute paths, and symlinks are hard errors at
+    /// pin/verify time). Empty for http servers and for stdio servers whose
+    /// command is an external `$PATH` binary with no local payload.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub integrity_roots: Vec<String>,
     /// Adapter ids `apply` renders this server to; `["*"]` (the default) = all
     /// targets. An explicit empty list opts the server out of the direct
     /// `[servers]` fan-out entirely — how adopted plugin servers are stored:
@@ -1208,6 +1220,32 @@ mod tests {
             refs.contains(&"EXTRA_TOKEN".to_string()),
             "a ref nested in `extra` must be seen: {refs:?}"
         );
+    }
+
+    #[test]
+    fn server_integrity_roots_parse_roundtrip_and_stay_out_of_undeclared_definitions() {
+        // Declared roots parse and survive a serialize/parse roundtrip (the
+        // definition digest is over this serialization, so a declaration is
+        // digest-relevant — trust re-gates when roots change).
+        let server: Server = toml::from_str(
+            r#"
+            type = "stdio"
+            command = "python"
+            args = ["./tools/agent.py"]
+            integrity_roots = ["tools"]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(server.integrity_roots, vec!["tools".to_string()]);
+        let text = toml::to_string(&server).unwrap();
+        let reparsed: Server = toml::from_str(&text).unwrap();
+        assert_eq!(reparsed.integrity_roots, server.integrity_roots);
+
+        // A server with no declaration serializes without the field at all, so
+        // every pre-D3 server definition digest is byte-identical to before.
+        let plain: Server = toml::from_str("type = \"stdio\"\ncommand = \"node\"\n").unwrap();
+        assert!(plain.integrity_roots.is_empty());
+        assert!(!toml::to_string(&plain).unwrap().contains("integrity_roots"));
     }
 
     #[test]

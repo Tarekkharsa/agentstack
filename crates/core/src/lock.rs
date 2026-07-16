@@ -28,6 +28,14 @@ pub struct Lock {
     pub servers: Vec<LockedServer>,
     #[serde(default, rename = "instruction")]
     pub instructions: Vec<LockedInstruction>,
+    /// D3 executable pins (locked-run contract §8). Additive `#[serde(default)]`
+    /// fields at version 2, unlike the v1→v2 instruction-pin bump: a pre-D3 v2
+    /// binary that rewrites these pins away changes the lock bytes, which flips
+    /// the trust digest and forces re-review — and both the trust gate and
+    /// strict locked verification block unpinned repo-relative executables, so
+    /// silent unpinning cannot pass any gate downstream.
+    #[serde(default, rename = "executable")]
+    pub executables: Vec<LockedExecutable>,
 }
 
 impl Default for Lock {
@@ -37,6 +45,7 @@ impl Default for Lock {
             skills: Vec::new(),
             servers: Vec::new(),
             instructions: Vec::new(),
+            executables: Vec::new(),
         }
     }
 }
@@ -60,6 +69,34 @@ pub struct LockedServer {
 pub struct LockedInstruction {
     pub name: String,
     pub path: String,
+    pub checksum: String,
+}
+
+/// How a D3 executable pin's digest was computed — the two families are not
+/// interchangeable (see `agentstack_core::digest`).
+///
+/// (TS mental model: a string-literal union `"file" | "root"` with exhaustive
+/// `match` at every consumer.)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutableKind {
+    /// One repository-relative file (a stdio `command` or interpreter-script
+    /// `args` entry), pinned by `contained_file_digest` — raw file bytes.
+    File,
+    /// A declared integrity root (file or directory subtree), pinned by the
+    /// symlink-rejecting, domain-separated `integrity_root_digest`.
+    Root,
+}
+
+/// A pinned repository-local executable input (D3, contract §8): the
+/// repo-relative path as declared in the manifest, which digest family pinned
+/// it, and the content checksum. Identity is `(path, kind)` — the same path
+/// may legitimately carry both a file pin (as an `args` entry) and a root pin
+/// (as a declared root), and the two digests differ.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedExecutable {
+    pub path: String,
+    pub kind: ExecutableKind,
     pub checksum: String,
 }
 
@@ -163,6 +200,36 @@ impl Lock {
         self.servers.iter().find(|s| s.name == name)
     }
 
+    pub fn get_executable(&self, path: &str, kind: ExecutableKind) -> Option<&LockedExecutable> {
+        self.executables
+            .iter()
+            .find(|e| e.path == path && e.kind == kind)
+    }
+
+    /// Insert or replace an executable pin, keeping entries sorted by
+    /// `(path, kind)`.
+    pub fn upsert_executable(&mut self, entry: LockedExecutable) {
+        if let Some(existing) = self
+            .executables
+            .iter_mut()
+            .find(|e| e.path == entry.path && e.kind == entry.kind)
+        {
+            *existing = entry;
+        } else {
+            self.executables.push(entry);
+        }
+        self.executables
+            .sort_by(|a, b| (&a.path, a.kind).cmp(&(&b.path, b.kind)));
+    }
+
+    /// Drop executable pins no longer in `keep` — stale pins for paths a
+    /// re-lock no longer derives from the manifest are pruned, so the lock
+    /// never carries dead pins that mask a renamed payload.
+    pub fn retain_executables(&mut self, keep: &[(String, ExecutableKind)]) {
+        self.executables
+            .retain(|e| keep.iter().any(|(p, k)| *p == e.path && *k == e.kind));
+    }
+
     /// Insert or replace a server entry, keeping entries sorted by name.
     pub fn upsert_server(&mut self, entry: LockedServer) {
         if let Some(existing) = self.servers.iter_mut().find(|s| s.name == entry.name) {
@@ -260,6 +327,79 @@ mod tests {
         assert!(text.contains("[[server]]"));
         let parsed: Lock = toml::from_str(&text).unwrap();
         assert_eq!(parsed.servers, lock.servers);
+    }
+
+    #[test]
+    fn executable_upsert_sorts_roundtrips_and_retains() {
+        let mut lock = Lock::default();
+        lock.upsert_executable(LockedExecutable {
+            path: "tools".into(),
+            kind: ExecutableKind::Root,
+            checksum: "cafe".into(),
+        });
+        lock.upsert_executable(LockedExecutable {
+            path: "scripts/run.sh".into(),
+            kind: ExecutableKind::File,
+            checksum: "beef".into(),
+        });
+        assert_eq!(lock.executables[0].path, "scripts/run.sh", "sorted by path");
+
+        // Identity is (path, kind): the same path carries both pin kinds.
+        lock.upsert_executable(LockedExecutable {
+            path: "tools".into(),
+            kind: ExecutableKind::File,
+            checksum: "f00d".into(),
+        });
+        assert_eq!(lock.executables.len(), 3);
+        assert_eq!(
+            lock.get_executable("tools", ExecutableKind::File)
+                .unwrap()
+                .checksum,
+            "f00d"
+        );
+        assert_eq!(
+            lock.get_executable("tools", ExecutableKind::Root)
+                .unwrap()
+                .checksum,
+            "cafe"
+        );
+
+        // Upsert replaces in place, keyed by both path and kind.
+        lock.upsert_executable(LockedExecutable {
+            path: "tools".into(),
+            kind: ExecutableKind::Root,
+            checksum: "0000".into(),
+        });
+        assert_eq!(lock.executables.len(), 3);
+        assert_eq!(
+            lock.get_executable("tools", ExecutableKind::Root)
+                .unwrap()
+                .checksum,
+            "0000"
+        );
+
+        let text = toml::to_string_pretty(&lock).unwrap();
+        assert!(text.contains("[[executable]]"));
+        assert!(text.contains("kind = \"root\""));
+        assert!(text.contains("kind = \"file\""));
+        let parsed: Lock = toml::from_str(&text).unwrap();
+        assert_eq!(parsed.executables, lock.executables);
+
+        // Prune to the derived set.
+        lock.retain_executables(&[("tools".to_string(), ExecutableKind::Root)]);
+        assert_eq!(lock.executables.len(), 1);
+        assert!(lock.get_executable("tools", ExecutableKind::Root).is_some());
+    }
+
+    #[test]
+    fn pre_d3_lock_without_executables_parses_to_empty() {
+        // Ruling: additive #[serde(default)] fields, no version bump — an
+        // existing v2 lock with no [[executable]] entries must load with an
+        // empty pin set (the trust gate and strict verification decide what an
+        // absent pin means; parsing never invents one).
+        let parsed: Lock =
+            toml::from_str(&format!("version = {SUPPORTED_LOCK_VERSION}\n")).unwrap();
+        assert!(parsed.executables.is_empty());
     }
 
     #[test]

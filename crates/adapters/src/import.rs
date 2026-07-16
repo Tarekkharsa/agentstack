@@ -128,6 +128,9 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
                 command,
                 args,
                 cwd,
+                // Native configs have no integrity-root concept; declaring
+                // roots is a manifest-side trust decision, never imported.
+                integrity_roots: Vec::new(),
                 targets: agentstack_core::manifest::model::all_targets(),
                 owner: None,
                 headers,
