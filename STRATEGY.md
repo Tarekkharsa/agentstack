@@ -1,7 +1,7 @@
 # AgentStack strategy
 
 > **Status:** working strategy and decision framework, not a promise of shipped features<br/>
-> **Updated:** 2026-07-15<br/>
+> **Updated:** 2026-07-16<br/>
 > **Audience:** maintainers, contributors, design partners, and future collaborators<br/>
 > **Publication:** intentionally public. Open strategy supports trust and contribution; exact pricing, prospect details, and confidential commercial assumptions stay elsewhere.
 
@@ -261,6 +261,16 @@ Charge for coordination that is difficult to reproduce with local files alone:
 ## Execution strategy: two parallel lanes
 
 The engineering milestone and market learning should proceed together. Interviews do not require a finished product, but activation tests do.
+
+> **Scope decision (2026-07-16) — minimum version first.** The maintainer has
+> scoped current work to a minimum version: finish the locked-run keystone and
+> close the gaps in already-implemented machinery, then stop. Lane B
+> (validation and distribution) and everything past the minimum-version cut
+> are deferred — explicitly, not silently — until the cut ships and there is
+> time or a reason to seek external users. The success criterion for the cut
+> is "trustworthy for the maintainer's own daily repositories." The exact cut
+> line lives in [`TODO.md`](TODO.md); the phase gates below remain the bar for
+> calling any phase complete.
 
 ```mermaid
 flowchart LR
@@ -656,6 +666,7 @@ changes; update `TODO.md` as work starts and finishes.
 | Cloudflare is the first hosted backend, not the product identity | Its Worker, durable coordination, Sandbox, and Workflow primitives fit the first vertical slice, while AgentStack must remain portable | A second backend or private-deployment requirement earns an adapter |
 | Saved workflows follow one-shot local/cloud parity | Persistence and orchestration multiply security and cost risk; they should wrap a stable frozen plan | A repeated user task proves the need and both backends consume the same plan |
 | Strategy is public; commercial details are private | Transparency supports trust, but pricing and prospect data create no equivalent public benefit | Publication causes measurable strategic harm or the audience changes |
+| Minimum version first; Phase 0B and post-cut work deferred (2026-07-16) | Solo-maintainer time and token budget are the binding constraints; the configuration problem is solved and the staged trust machinery must become an enforced claim before anything new is worth building. Deferral is explicit so resuming is a decision, not drift | The minimum version ships, or a concrete external pull (user, design partner, deadline) justifies reopening a deferred lane |
 
 ## External reference points
 

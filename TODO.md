@@ -2,7 +2,9 @@
 
 > **Status:** active work queue<br/>
 > **Updated:** 2026-07-16<br/>
-> **Current phase:** Phase 0A and Phase 0B in parallel<br/>
+> **Current phase:** Phase 0A **minimum version** (maintainer scope decision
+> 2026-07-16; Phase 0B and everything after the minimum-version cut are
+> deferred)<br/>
 > **Strategy source:** [`STRATEGY.md`](STRATEGY.md)
 
 This is the only ordered day-to-day plan. Start with the first unchecked item
@@ -10,9 +12,18 @@ in the current phase. Do not begin a later phase until the current phase's exit
 gate is satisfied. `STRATEGY.md` explains why and defines the gates;
 `docs/ARCHITECTURE.md` and `docs/ENFORCEMENT.md` define the technical boundaries.
 
+**Minimum-version decision (2026-07-16):** the maintainer is scoping the
+project to a minimum version: solve the configuration problem (shipped) and
+finish the trust machinery already implemented, then stop. Success criterion
+for the cut is "trustworthy for the maintainer's own daily repositories" —
+external activation metrics and distribution are deferred with Phase 0B, not
+abandoned. Deferred items remain listed so resuming one is a deliberate scope
+decision, never an accident.
+
 ## How to work from this file
 
-1. Select the first unchecked item in Phase 0A or the parallel Phase 0B lane.
+1. Select the first unchecked item in the Phase 0A **minimum version** cut;
+   deferred sections are not work sources until the cut ships.
 2. Read the linked strategy section and relevant technical contract before coding.
 3. For trust, policy, secret, digest, or enforcement semantics, work in a short
    supervised session and require line-by-line review.
@@ -65,61 +76,89 @@ All contract items are satisfied by the approved
   the limitation into the contract and trust preview. (Contract §8: Option A
   with declared integrity roots — implementation pending below.)
 
-### Implementation
+### Minimum version — the current cut (2026-07-16)
 
-- [ ] Implement the canonical `run <harness> --locked` flow.
-- [ ] Require trust before any repository-controlled hook, tool, server, or
-  secret can activate.
-- [ ] Resolve locked inputs and fail before activation on missing pins, drift,
-  or unverifiable state.
-- [ ] Compile repository policy beneath the machine-policy ceiling.
-- [ ] Launch through the canonical gateway path and preserve the documented
-  assurance label for the selected mode.
-- [ ] Record material trust, policy, capability, lifecycle, and outcome
-  decisions without recording secret values.
-- [ ] Complete the remaining recorder events for trust-store mutations and
-  per-run token/cost evidence.
-- [ ] Extend the D2 frozen grant across render, gateway, and profile leases:
-  resolved identities, verified pins, trust, effective policy, secret grant and
-  lifetime, confinement posture, and evidence identity.
-- [x] Implement D3 lock digests and trust-review display for declared local
-  executable inputs; make `doctor` warn on executable-but-unpinned code.
-  (Symlink-rejecting root digests in core; auto-detected command/args pins +
-  declared roots recorded by `agentstack lock`/`use --write`; strict verifier
-  dimension; trust blocks unpinned executables; doctor errors on
-  drift/underivable and warns on unpinned. Wiring into `run --locked` is the
-  separate flow increment above.)
-- [ ] Resolve the unreleased `agentstack_lease_freeze` →
-  `agentstack_lease_capture` naming decision before external compatibility; if
-  accepted, rename directly with no alias or migration shim.
+One keystone increment plus three small closures, plus the marketing surface
+(vision decision, later on 2026-07-16: a visitor must see the value
+immediately — demos and docs quality are in the cut; outreach stays deferred).
+The keystone is the last engineering prerequisite for everything staged on
+`feat/d3-local-executable-integrity` (D3 pins, strict verifier, sealed
+`AuthorityGrant`, KAT-frozen digest) to become an enforced claim instead of
+unwired machinery.
 
-### Proof and activation
+- [ ] Implement the canonical `run <harness> --locked` flow as **one
+  supervised increment** (contract §3 sequence): recorder-open
+  (`AttemptStarted`) → enforced trust → strict lock verification including D3
+  executables (`ensure_locked_inputs`) → policy admission → freeze
+  `AuthorityGrant` (`GrantFrozen`) → fallible gateway (zero-server-valid) →
+  launch-scoped MCP config with cooperative host guards → recorded outcome.
+  Lands `RunEnvelope` (contract §6.2) and the material checked-append recorder
+  events (contract §9); consumes the staged `grant.rs`/`verify.rs` surface.
+  - The wiring must assert a `GrantedServer`'s definition digest was honestly
+    derived from its stored `Server` bytes (carried 3b-ii review note).
+- [ ] Call `Lock::retain_executables` in `record_lock` so a removed server or
+  integrity root prunes its `[[executable]]` pins (stale-pin gap; mirror
+  `retain_instruction_names`).
+- [ ] Witness: a one-byte D3 executable edit fails locked verification before
+  launch and re-gates review; intentionally unpinned code is labelled
+  honestly. (Falls out of the locked-flow tests — contract §10 item 3.)
+- [ ] README restructure: pain-led hero, 60-second start, three proof blocks
+  (guard, trust gate, one-manifest-everywhere), experimental features moved
+  out of the beginner path. Includes the honesty pass — every claim matches
+  the shipped tier; `--locked` is pre-launch gating, not isolation; D2
+  standalone-command unification is a labelled known limit.
+- [ ] Docs site reorganization: index leads with the most important examples
+  and their visuals; pages consolidated and status-labelled (shipped by
+  default, Experimental badged, design/internal docs out of user navigation);
+  stale claims fixed against the code.
+- [ ] Three recorded demo clips (asciinema + agg): guard blocks a destructive
+  command; trust gate inerts a malicious repo and re-gates on a one-byte
+  edit; one manifest renders across CLIs.
 
-- [ ] Demo: safe repository, standard binary, no Docker.
-- [ ] Demo: machine policy blocks a repository-requested capability, no Docker.
-- [ ] Demo: changed or missing locked input fails before activation, no Docker.
-- [ ] Demo: maximum-assurance sandbox and lockdown behavior with Docker.
-- [ ] Add claim-consistency tests for the enforcement matrix and recorded event list.
-- [ ] Prove every delivery path consumes the same D2 grant and cannot
-  independently reconstruct or widen authority.
-- [ ] Prove a one-byte D3 executable edit fails lock verification and re-gates
-  review; prove intentionally unpinned code is labelled honestly.
-- [x] Add a regression witness that authoritative trust/lock verification hashes
+Landed toward this cut:
+
+- [x] D3 end to end short of the locked flow: symlink-rejecting root digests
+  (core); auto-detected command/args pins + declared roots recorded by
+  `agentstack lock`/`use --write`; strict verifier dimension; trust review
+  blocks unpinned/drifted executables; doctor errors on drift/underivable and
+  warns on unpinned.
+- [x] Canonical V1 `AuthorityGrant` digest, KAT-frozen, keyed argv commitment
+  with no unkeyed fallback (contract §4, §6.1).
+- [x] Regression witness that authoritative trust/lock verification hashes
   current bytes and never uses the stat-fingerprint digest cache.
   (Landed with the skill-cache bypass fix; contract §3 step 4, ruling 3.)
-- [ ] Add documentation status labels for Stable, Experimental, Design,
-  Historical, and Archived material.
-- [ ] Generate the public strategy page from authoritative Markdown or add a
-  synchronization check that prevents phase/status drift.
-- [ ] Extend documentation claim tests to CLI examples, versions, adapter
-  counts, and feature status—not only matrix cells and event names.
-- [ ] Label every public example as a tested fixture, Docker reproduction,
-  validated manifest, or illustrative snippet.
-- [ ] Observe five strangers completing the protected run without maintainer help.
-- [ ] Reach a median time to first protected run below 15 minutes.
-- [ ] Update the README and website so every claim matches the demonstrated tier.
 
-### Phase 0A exit gate
+### Deferred beyond the minimum version
+
+Explicitly deferred, not silently dropped. Each keeps its contract reference;
+picking one up again is a deliberate scope decision.
+
+- [ ] D2 standalone-command unification: plain `apply` / `session` / MCP lease
+  invoked outside a locked run keep today's behavior. (Contract §7 requires
+  this before the full Phase 0A exit gate — that gate is deferred with it.
+  The README honesty pass above labels the limit.)
+- [ ] Extend the D2 frozen grant across render, gateway, and profile leases,
+  and prove every delivery path consumes the same grant and cannot widen
+  authority.
+- [ ] Remaining recorder events: trust-store mutations and per-run token/cost
+  evidence. (The locked flow records its material events; these two dimensions
+  stay honestly `unavailable`, which the contract permits.)
+- [ ] `agentstack_lease_freeze` → `agentstack_lease_capture` naming decision
+  (only matters before external compatibility, which is deferred).
+- [ ] Remaining demos beyond the three in-cut clips: the locked-run trio
+  (safe repo, policy violation, drift — their substance ships with the
+  wiring; recording waits for it) and the Docker maximum-assurance recording.
+- [ ] Documentation tooling (the automated kind): claim-consistency tests for
+  the enforcement matrix and event list, strategy-page sync, claim tests over
+  CLI examples. (The status-label *convention* moved into the in-cut docs
+  reorganization; only its test enforcement stays deferred.)
+- [ ] Activation measurement: five unassisted strangers, sub-15-minute median
+  — deferred with Phase 0B distribution.
+
+### Phase 0A exit gate (deferred with distribution)
+
+Unchanged as the bar for calling Phase 0A *complete*; the minimum version
+deliberately ships without it.
 
 - [ ] All three no-Docker demos and the separate Docker demo pass.
 - [ ] Five unassisted users complete the flow.
@@ -128,7 +167,13 @@ All contract items are satisfied by the approved
 
 ## Phase 0B — validate the problem and distribution
 
-**Runs in parallel with Phase 0A.**
+**Deferred (maintainer decision 2026-07-16).** The minimum version ships
+without outreach or validation work; this lane resumes when there is time or
+a reason to seek external users. Two of this lane's assets — the demo
+recordings and the README/homepage rewrite — moved into the minimum-version
+cut later the same day (users must see the value immediately); interviews,
+publishing, and outreach stay here. The items stay listed so resuming is
+deliberate.
 
 **Details:** [strategy phase 0B](STRATEGY.md#phase-0b--validate-the-problem-and-build-distribution)
 
