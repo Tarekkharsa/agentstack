@@ -502,7 +502,8 @@ fn lockdown_declared_upstream_blocked_directly_but_reachable_through_the_relay()
         events.iter().any(|e| matches!(
             e,
             RunEvent::ToolCall { server, tool, outcome, .. }
-                if server == "up" && tool == "echo" && outcome == "ok"
+                if server == "up" && tool == "echo"
+                    && *outcome == agentstack::calllog::CallOutcome::Ok
         )),
         "a successful ToolCall through the relay must be recorded: {events:?}"
     );

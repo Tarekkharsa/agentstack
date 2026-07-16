@@ -303,7 +303,8 @@ fn trusted_bundle_routes_denied_tool_and_records_it() {
         matches!(
             e,
             RunEvent::ToolCall { server, tool, outcome, .. }
-                if server == "figma" && tool == "post_comment" && outcome == "denied"
+                if server == "figma" && tool == "post_comment"
+                    && *outcome == agentstack::calllog::CallOutcome::Denied
         )
     });
     assert!(
@@ -380,7 +381,8 @@ fn lockdown_routes_denied_tool_through_the_sidecar_relay() {
         matches!(
             e,
             RunEvent::ToolCall { server, tool, outcome, .. }
-                if server == "figma" && tool == "post_comment" && outcome == "denied"
+                if server == "figma" && tool == "post_comment"
+                    && *outcome == agentstack::calllog::CallOutcome::Denied
         )
     });
     assert!(
