@@ -146,6 +146,7 @@ fn add_skill_inner(
         LibSource::Path(src) => {
             let src = absolutize(src)?;
             require_skill_md(&src)?;
+            warn_missing_description(name, &src, &mut warnings);
             // Supply-chain gate: scan the source before any of it becomes the
             // canonical library copy (plan §3).
             scan_gate(name, &src, allow_flagged, &mut warnings)?;
@@ -212,6 +213,7 @@ fn add_skill_inner(
                 .resolve(&skill, lib_home, rev)
                 .with_context(|| format!("resolving git source {url}"))?;
             require_skill_md(&resolved.path)?;
+            warn_missing_description(name, &resolved.path, &mut warnings);
             scan_gate(name, &resolved.path, allow_flagged, &mut warnings)?;
             // Truthful provenance: url @ resolved rev, with the subpath fragment
             // when the skill lives in a subdir (plan §6).
@@ -1651,6 +1653,19 @@ fn require_skill_md(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Search matching and an agent's decision to load both hinge entirely on the
+/// frontmatter `description:` — without one the skill only matches queries by
+/// name and shows as a bare name in every loadable index. Warn, don't block:
+/// the skill still works once someone knows its name.
+fn warn_missing_description(name: &str, dir: &Path, warnings: &mut Vec<String>) {
+    if !crate::library::skill_has_description(dir) {
+        warnings.push(format!(
+            "'{name}' has no frontmatter description — search can only match its name and \
+             agents see a bare name in the loadable index. Add `description:` to its SKILL.md."
+        ));
+    }
+}
+
 /// Supply-chain content gate for `lib add` (plan §3): scan the resolved skill
 /// dir before it becomes the canonical library copy. High findings (hidden
 /// Unicode) block the add — the same philosophy as unresolved secrets blocking
@@ -1783,6 +1798,49 @@ mod tests {
         );
         // The copy itself still lands and is indexed as usual.
         assert!(lib.child("skills/eph/SKILL.md").path().exists());
+    }
+
+    /// A skill without a frontmatter description is undiscoverable (search
+    /// and the loadable index both key on it) — the add warns; one WITH a
+    /// description doesn't.
+    #[test]
+    fn add_warns_when_skill_md_has_no_description() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        let src = src_skill(&work, "# body, no frontmatter\n");
+        let out = add_skill(
+            lib.path(),
+            "mute",
+            LibSource::Path(&src),
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(
+            out.warnings
+                .iter()
+                .any(|w| w.contains("no frontmatter description")),
+            "missing description flagged: {:?}",
+            out.warnings
+        );
+
+        let described = assert_fs::TempDir::new().unwrap();
+        let src = src_skill(&described, "---\ndescription: reviews SQL\n---\n# body\n");
+        let out = add_skill(
+            lib.path(),
+            "vocal",
+            LibSource::Path(&src),
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(
+            !out.warnings.iter().any(|w| w.contains("description")),
+            "described skill not flagged: {:?}",
+            out.warnings
+        );
     }
 
     #[test]

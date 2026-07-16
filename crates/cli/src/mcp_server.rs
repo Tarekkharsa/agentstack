@@ -83,16 +83,29 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
                 let dir = dir.clone();
                 let lease = std::sync::Arc::clone(&lease);
                 workers.spawn(move || {
-                    if let Some(resp) =
-                        handle_with_lease(&req, dir.as_deref(), &gw, None, transparent, &lease)
-                    {
+                    if let Some(resp) = handle_with_lease(
+                        &req,
+                        dir.as_deref(),
+                        &gw,
+                        None,
+                        transparent,
+                        &lease,
+                        true,
+                    ) {
                         respond(&out, &resp);
                     }
                 });
             } else {
                 let before = lease_profile(&lease);
-                let resp =
-                    handle_with_lease(&req, dir.as_deref(), &gateway, None, transparent, &lease);
+                let resp = handle_with_lease(
+                    &req,
+                    dir.as_deref(),
+                    &gateway,
+                    None,
+                    transparent,
+                    &lease,
+                    true,
+                );
                 let after = lease_profile(&lease);
                 if before != after {
                     if let Some(rt) = runtime.take() {
@@ -218,6 +231,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
                     note.as_deref(),
                     transparent,
                     &lease,
+                    false,
                 ) {
                     respond(&out, &resp);
                 }
@@ -231,6 +245,7 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
                 auto.trust_note().as_deref(),
                 transparent,
                 &lease,
+                false,
             );
             let after = lease_profile(&lease);
             if before != after {
@@ -691,6 +706,7 @@ fn handle(
         trust_note,
         transparent,
         &new_lease_store(),
+        true,
     )
 }
 
@@ -701,21 +717,29 @@ fn handle_with_lease(
     trust_note: Option<&str>,
     transparent: bool,
     lease: &LeaseStore,
+    // Eager mode knows its project at launch; auto mode only establishes it
+    // after the client answers roots/list — which is AFTER initialize, so the
+    // ambient skill index must not probe the cwd there (wrong-project risk,
+    // and the trust gate hasn't been computed yet).
+    project_known: bool,
 ) -> Option<Value> {
     let id = req.get("id").cloned();
     let method = req.get("method")?.as_str()?;
     match method {
-        "initialize" => Some(result(
-            id,
-            json!({
+        "initialize" => {
+            let mut body = json!({
                 // listChanged is declared unconditionally (harmless when never
                 // sent); transparent auto-mode uses it to announce the lazily
                 // built gateway's upstream tools.
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": { "tools": { "listChanged": true } },
                 "serverInfo": { "name": "agentstack", "version": env!("CARGO_PKG_VERSION") }
-            }),
-        )),
+            });
+            if let Some(text) = initialize_instructions(dir, trust_note, lease, project_known) {
+                body["instructions"] = Value::String(text);
+            }
+            Some(result(id, body))
+        }
         "notifications/initialized" | "notifications/cancelled" => None,
         "tools/list" => {
             // Compact mode (default): agentstack's own control-plane tools
@@ -1723,6 +1747,87 @@ fn list_loadable(dir: Option<&Path>, trust_note: Option<&str>) -> Result<String>
     list_loadable_with_lease(dir, trust_note, &new_lease_store(), None)
 }
 
+/// Entry cap and per-description cap for the initialize-embedded index. The
+/// library is typically a dozen skills; the caps only matter when a bundle
+/// tries to flood the ambient context (bundle content is hostile input).
+const INDEX_MAX_ENTRIES: usize = 50;
+const INDEX_MAX_DESC_CHARS: usize = 160;
+
+/// First line of `s`, capped at `max` characters.
+fn one_line(s: &str, max: usize) -> String {
+    let line = s.lines().next().unwrap_or("").trim();
+    let mut out: String = line.chars().take(max).collect();
+    if line.chars().count() > max {
+        out.push('…');
+    }
+    out
+}
+
+/// The `instructions` string for the MCP initialize result: an ambient index
+/// of the skills loadable right now (name + one-line description), so an
+/// agent sees the menu without a discovery round-trip and can call
+/// `agentstack_load` directly. Skills that aren't in context don't get used —
+/// this is the same reason host CLIs list native skills in the system prompt.
+///
+/// It reuses the `list_loadable` path wholesale, so the trust gate (untrusted
+/// project → names only, descriptions are inert bundle content), profile
+/// fencing, and the built-in manual behave identically — the index is exactly
+/// what a first `agentstack_list_loadable` call would have returned. Best
+/// effort: initialize must succeed even when the index can't be built.
+fn initialize_instructions(
+    dir: Option<&Path>,
+    trust_note: Option<&str>,
+    lease: &LeaseStore,
+    project_known: bool,
+) -> Option<String> {
+    let mut out = String::from(
+        "Skills load on demand: pick a name and call agentstack_load(name, reason). \
+         agentstack_list_loadable(query?) has the live list — the set can change when \
+         a lease or session opens.\n",
+    );
+    if !project_known {
+        // Auto mode initializes before the project is established (the
+        // roots/list answer arrives later); probing the cwd here could index
+        // the wrong project and would sidestep the trust gate.
+        out.push_str(
+            "No project established yet — call agentstack_list_loadable for the skill index.",
+        );
+        return Some(out);
+    }
+    let raw = list_loadable_with_lease(dir, trust_note, lease, None).ok()?;
+    let parsed: Value = serde_json::from_str(&raw).ok()?;
+    let entries = parsed.get("loadable")?.as_array()?;
+    out.push_str("Loadable now:\n");
+    for entry in entries.iter().take(INDEX_MAX_ENTRIES) {
+        let name = entry.get("name").and_then(Value::as_str).unwrap_or("");
+        if name.is_empty() {
+            continue;
+        }
+        let desc = entry
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let desc = one_line(desc, INDEX_MAX_DESC_CHARS);
+        if desc.is_empty() {
+            out.push_str(&format!("- {name}\n"));
+        } else {
+            out.push_str(&format!("- {name} — {desc}\n"));
+        }
+    }
+    if entries.len() > INDEX_MAX_ENTRIES {
+        out.push_str(&format!(
+            "…and {} more — call agentstack_list_loadable.\n",
+            entries.len() - INDEX_MAX_ENTRIES
+        ));
+    }
+    if let Some(note) = parsed.get("note").and_then(Value::as_str) {
+        if !note.is_empty() {
+            out.push_str(note);
+        }
+    }
+    Some(out)
+}
+
 /// Filter loadable `entries` by an optional case-insensitive `query`, matching a
 /// skill's name OR its description (an entry without a `description` field — the
 /// untrusted, names-only path — matches on name alone). An absent or blank query
@@ -2150,6 +2255,13 @@ mod tests {
     /// lose nothing.
     #[test]
     fn initialize_declares_list_changed_capability() {
+        // The env lock + temp home keep the new instructions index from
+        // reading the developer's real library during this test.
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
         let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" });
         let gw = shared(crate::gateway::Gateway::empty());
         let resp = handle(&req, None, &gw, None, false).unwrap();
@@ -2157,6 +2269,7 @@ mod tests {
             resp["result"]["capabilities"]["tools"]["listChanged"],
             json!(true)
         );
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     /// Only proxied `<server>__<tool>` calls go to worker threads; agentstack's
@@ -2179,11 +2292,65 @@ mod tests {
 
     #[test]
     fn initialize_returns_server_info() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
         let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" });
         let gw = shared(crate::gateway::Gateway::empty());
         let resp = handle(&req, None, &gw, None, false).unwrap();
         assert_eq!(resp["result"]["serverInfo"]["name"], "agentstack");
         assert_eq!(resp["id"], 1);
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// The initialize result carries an ambient index of loadable skills
+    /// (name + one-line description), mirroring `agentstack_list_loadable`
+    /// exactly: full entries when trusted, names only when the trust gate is
+    /// up, and no project probe at all in auto mode (project unknown until
+    /// the roots answer).
+    #[test]
+    fn initialize_embeds_trust_gated_skill_index() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (_home, proj) = pinned_inline_project();
+        let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" });
+        let gw = shared(crate::gateway::Gateway::empty());
+
+        // Trusted: names + descriptions, plus the built-in manual.
+        let resp = handle(&req, Some(proj.path()), &gw, None, false).unwrap();
+        let text = resp["result"]["instructions"].as_str().unwrap();
+        assert!(text.contains("- helper — helps"), "{text}");
+        assert!(text.contains(BUILTIN_MANUAL), "{text}");
+        assert!(text.contains("agentstack_load"), "{text}");
+
+        // Untrusted: the name is listed, the description (bundle content)
+        // is not — identical to the list_loadable trust gate.
+        let note = "This project is not trusted yet.";
+        let resp = handle(&req, Some(proj.path()), &gw, Some(note), false).unwrap();
+        let text = resp["result"]["instructions"].as_str().unwrap();
+        assert!(text.contains("- helper\n"), "{text}");
+        assert!(!text.contains("helps"), "{text}");
+
+        // Auto mode (project not yet established): no probe, just the
+        // pointer at the tool.
+        let resp = handle_with_lease(
+            &req,
+            Some(proj.path()),
+            &gw,
+            None,
+            false,
+            &new_lease_store(),
+            false,
+        )
+        .unwrap();
+        let text = resp["result"]["instructions"].as_str().unwrap();
+        assert!(text.contains("No project established yet"), "{text}");
+        assert!(!text.contains("helper"), "{text}");
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     #[test]

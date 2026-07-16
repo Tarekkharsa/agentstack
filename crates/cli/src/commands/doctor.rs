@@ -719,6 +719,15 @@ fn run_checks(
                 Level::Warn,
                 format!("{name:<20} no SKILL.md in {}", dir.display()),
             ),
+            // A described skill is a discoverable skill: search matching and
+            // the loadable index an agent sees both come from this one line.
+            Some(dir) if !crate::library::skill_has_description(&dir) => report.line(
+                Level::Warn,
+                format!(
+                    "{name:<20} SKILL.md has no frontmatter description \
+                     ↳ add `description:` so search and agents can find it"
+                ),
+            ),
             Some(_) => report.line(Level::Ok, format!("{name:<20} present · SKILL.md ok")),
         }
     }

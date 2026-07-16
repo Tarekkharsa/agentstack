@@ -811,6 +811,16 @@ through session fences, served from the copy embedded in the binary (a
 project's own `using-agentstack` skill overrides it). An agent that can reach
 the gateway can always learn how to drive it.
 
+The `initialize` handshake carries an ambient skill index: the server's
+`instructions` field lists every loadable skill (name + one-line description),
+so an agent sees the menu before its first tool call and can go straight to
+`agentstack_load`. The index is exactly what `agentstack_list_loadable` would
+return at connect time — the trust gate (untrusted projects list names only,
+descriptions are inert bundle content) and any active session fence apply
+identically. In `--auto-project` mode the project is only established after
+the client answers `roots/list`, which is after `initialize`, so there the
+instructions point at `agentstack_list_loadable` instead of probing the cwd.
+
 Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
 skills-over-MCP (`agentstack_list_loadable`/`agentstack_load`) create no
 per-project native artifacts. Native skill folders and instruction files (`CLAUDE.md`/`AGENTS.md`)

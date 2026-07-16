@@ -39,6 +39,17 @@ pub fn parse_frontmatter_description(md: &str) -> Option<String> {
     None
 }
 
+/// Whether a skill directory's `SKILL.md` carries a non-empty frontmatter
+/// `description:`. Search matching and an agent's decision to load both hinge
+/// entirely on the description — `lib add` and `doctor` warn when it's
+/// missing rather than let the skill go silently undiscoverable.
+pub fn skill_has_description(dir: &std::path::Path) -> bool {
+    std::fs::read_to_string(dir.join("SKILL.md"))
+        .ok()
+        .and_then(|text| parse_frontmatter_description(&text))
+        .is_some_and(|d| !d.trim().is_empty())
+}
+
 pub const LIBRARY_FILE: &str = "library.toml";
 /// Newest library-index schema version this build reads and writes. Anything
 /// above it was written by a future agentstack; [`Library::load`] refuses it
