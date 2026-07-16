@@ -82,8 +82,13 @@ All contract items are satisfied by the approved
 - [ ] Extend the D2 frozen grant across render, gateway, and profile leases:
   resolved identities, verified pins, trust, effective policy, secret grant and
   lifetime, confinement posture, and evidence identity.
-- [ ] Implement D3 lock digests and trust-review display for declared local
+- [x] Implement D3 lock digests and trust-review display for declared local
   executable inputs; make `doctor` warn on executable-but-unpinned code.
+  (Symlink-rejecting root digests in core; auto-detected command/args pins +
+  declared roots recorded by `agentstack lock`/`use --write`; strict verifier
+  dimension; trust blocks unpinned executables; doctor errors on
+  drift/underivable and warns on unpinned. Wiring into `run --locked` is the
+  separate flow increment above.)
 - [ ] Resolve the unreleased `agentstack_lease_freeze` →
   `agentstack_lease_capture` naming decision before external compatibility; if
   accepted, rename directly with no alias or migration shim.

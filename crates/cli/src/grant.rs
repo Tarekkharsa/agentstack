@@ -34,6 +34,7 @@ use anyhow::{bail, Context, Result};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
+use agentstack_core::lock::ExecutableKind;
 use agentstack_core::scope::Scope;
 use agentstack_policy::CompiledRuleset;
 
@@ -338,11 +339,10 @@ pub fn commit_argv(key: &CommitmentKey, argv: &[String]) -> ArgvCommitment {
 
 // ===== 3b-i: operational AuthorityGrant types, sealed construction =====
 //
-// STAGED + UNWIRED: nothing constructs or consumes a grant yet. This is not the
-// complete contract grant — repository-controlled executable inputs (D3) are
-// deferred to their own increment, which lands `executables` + full server-tied
-// validation together (never half-modeled). The canonical V1 digest/KAT (3b-ii)
-// must not freeze until D3 has added its digest field.
+// STAGED + UNWIRED: nothing constructs or consumes a grant yet. D3
+// repository-controlled executable inputs are modeled (`executables`, server-
+// tied and validated in `build()`), so the canonical V1 digest/KAT (3b-ii) may
+// now freeze over the complete field set.
 
 /// Validated SHA-256 hex (exactly 64 lowercase hex chars). Parsing accepts an
 /// optional `sha256:` prefix; consumers emit one canonical form.
@@ -762,6 +762,23 @@ pub struct GrantedServer {
     binding: GrantedServerBinding,
 }
 
+/// One verified repository-local executable input (D3, contract §8),
+/// server-tied: an auto-detected stdio command/args file or a declared
+/// integrity root, with the content digest strict verification proved.
+///
+/// `path` is the normalized project-relative lock key — deliberately NOT a
+/// [`GrantPath`]: `GrantPath::new` canonicalizes (follows symlinks), while
+/// these paths were containment-checked and symlink-rejected by the
+/// classifier, and the grant must carry the lock's identity byte-for-byte.
+#[derive(Clone, Debug)]
+pub struct GrantedExecutable {
+    path: String,
+    kind: ExecutableKind,
+    checksum: ContentDigest,
+    /// Every granted server whose surface this input belongs to (≥ 1).
+    servers: BTreeSet<String>,
+}
+
 /// The one operational grant. Sealed: constructed only via `GrantBuilder`
 /// (crate-internal). Sensitive: no `Serialize`; `Debug` is a minimal, infallible
 /// redaction (identities + counts, never argv or a fallible digest).
@@ -772,6 +789,7 @@ pub struct AuthorityGrant {
     skills: BTreeMap<String, GrantedSkill>,
     instructions: BTreeMap<String, GrantedInstruction>,
     servers: BTreeMap<String, GrantedServer>,
+    executables: BTreeMap<(String, ExecutableKind), GrantedExecutable>,
     policy: PolicyGrant,
     secrets: BTreeSet<SecretGrant>,
     runtime: RuntimeImage,
@@ -791,6 +809,7 @@ impl std::fmt::Debug for AuthorityGrant {
             .field("skills", &self.skills.len())
             .field("instructions", &self.instructions.len())
             .field("servers", &self.servers.len())
+            .field("executables", &self.executables.len())
             .field("secrets", &self.secrets.len())
             .field("posture", &self.posture.slug())
             .field("egress", &self.egress.slug())
@@ -814,6 +833,7 @@ pub struct GrantBuilder {
     skills: BTreeMap<String, GrantedSkill>,
     instructions: BTreeMap<String, GrantedInstruction>,
     servers: BTreeMap<String, GrantedServer>,
+    executables: BTreeMap<(String, ExecutableKind), GrantedExecutable>,
     secrets: BTreeSet<SecretGrant>,
 }
 
@@ -839,6 +859,7 @@ impl GrantBuilder {
             skills: BTreeMap::new(),
             instructions: BTreeMap::new(),
             servers: BTreeMap::new(),
+            executables: BTreeMap::new(),
             secrets: BTreeSet::new(),
         }
     }
@@ -859,6 +880,38 @@ impl GrantBuilder {
         insert_unique(&mut self.servers, name, server, "server")?;
         Ok(self)
     }
+    /// Record one verified D3 executable input for `server`. Two servers may
+    /// legitimately share a payload — the entry merges their ties — but a
+    /// checksum conflict for the same `(path, kind)` means two verifications
+    /// disagreed about the same bytes, which can never be merged.
+    pub(crate) fn add_executable(
+        &mut self,
+        path: &str,
+        kind: ExecutableKind,
+        checksum: ContentDigest,
+        server: &str,
+    ) -> Result<&mut Self> {
+        match self.executables.entry((path.to_string(), kind)) {
+            Entry::Vacant(slot) => {
+                slot.insert(GrantedExecutable {
+                    path: path.to_string(),
+                    kind,
+                    checksum,
+                    servers: BTreeSet::from([server.to_string()]),
+                });
+            }
+            Entry::Occupied(mut slot) => {
+                if slot.get().checksum != checksum {
+                    bail!(
+                        "executable {path:?}: conflicting content digests for the same pinned input"
+                    );
+                }
+                slot.get_mut().servers.insert(server.to_string());
+            }
+        }
+        Ok(self)
+    }
+
     pub(crate) fn add_secret(&mut self, secret: SecretGrant) -> Result<&mut Self> {
         // Reject a second authorization for the same (reference, scope) REGARDLESS
         // of lifetime, so a future RunScoped binding cannot silently coexist with
@@ -940,6 +993,37 @@ impl GrantBuilder {
                 );
             }
         }
+        // D3 server-tied validation, both directions (contract §8):
+        // an executable may only cite servers that are in the grant, and a
+        // granted server that DECLARES integrity roots must have a matching
+        // Root entry for each — a grant must not silently drop a declared
+        // root, or the digest would bless less than the manifest demands.
+        for ((path, _), exe) in &self.executables {
+            for server in &exe.servers {
+                if !self.servers.contains_key(server) {
+                    bail!(
+                        "executable {path:?} is tied to server {server:?} which is not in the grant"
+                    );
+                }
+            }
+        }
+        for (name, granted) in &self.servers {
+            for root in &granted.server.integrity_roots {
+                let key = (
+                    crate::executable::normalize_declared(root),
+                    ExecutableKind::Root,
+                );
+                let tied = self
+                    .executables
+                    .get(&key)
+                    .is_some_and(|exe| exe.servers.contains(name));
+                if !tied {
+                    bail!(
+                        "server {name:?} declares integrity root {root:?} but the grant carries no verified pin for it"
+                    );
+                }
+            }
+        }
         Ok(AuthorityGrant {
             schema: GrantSchema::V1,
             project: self.project,
@@ -947,6 +1031,7 @@ impl GrantBuilder {
             skills: self.skills,
             instructions: self.instructions,
             servers: self.servers,
+            executables: self.executables,
             policy: self.policy,
             secrets: self.secrets,
             runtime: self.runtime,
@@ -1392,6 +1477,85 @@ mod tests {
         let dbg = format!("{grant:?}");
         assert!(dbg.contains("argv_args: 2"), "{dbg}");
         assert!(!dbg.contains("s3cr3t"), "no argv bytes in Debug: {dbg}");
+    }
+
+    #[test]
+    fn builder_ties_executables_to_servers_both_directions() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+
+        // An executable tied to a server outside the grant fails build().
+        let mut b = host_builder(&root);
+        b.add_executable(
+            "scripts/run.sh",
+            ExecutableKind::File,
+            ContentDigest::parse(&h64('a')).unwrap(),
+            "ghost",
+        )
+        .unwrap();
+        let err = b.build().unwrap_err().to_string();
+        assert!(err.contains("ghost"), "{err}");
+
+        // A server declaring an integrity root with no verified pin in the
+        // grant fails build() — a grant must not bless less than the manifest
+        // demands. The declared "./tools" and the pin key "tools" normalize
+        // to the same entry.
+        let declares_root =
+            "type = \"stdio\"\ncommand = \"python\"\nintegrity_roots = [\"./tools\"]\n";
+        let mut b = host_builder(&root);
+        b.add_server(
+            "agent",
+            granted_server(
+                declares_root,
+                GrantedServerBinding::Inline {
+                    definition: ContentDigest::parse(&h64('d')).unwrap(),
+                },
+            ),
+        )
+        .unwrap();
+        let err = b.build().unwrap_err().to_string();
+        assert!(err.contains("integrity root"), "{err}");
+
+        // With the pin present and TWO distinct servers sharing it, build()
+        // passes and the entry merges both ties into one; a conflicting
+        // digest for the same (path, kind) can never merge.
+        let mut b = host_builder(&root);
+        for name in ["agent", "sidekick"] {
+            b.add_server(
+                name,
+                granted_server(
+                    declares_root,
+                    GrantedServerBinding::Inline {
+                        definition: ContentDigest::parse(&h64('d')).unwrap(),
+                    },
+                ),
+            )
+            .unwrap();
+            b.add_executable(
+                "tools",
+                ExecutableKind::Root,
+                ContentDigest::parse(&h64('e')).unwrap(),
+                name,
+            )
+            .unwrap();
+        }
+        assert!(b
+            .add_executable(
+                "tools",
+                ExecutableKind::Root,
+                ContentDigest::parse(&h64('f')).unwrap(),
+                "agent",
+            )
+            .is_err());
+        let grant = b.build().unwrap();
+        let exe = &grant.executables[&("tools".to_string(), ExecutableKind::Root)];
+        assert_eq!(
+            exe.servers.len(),
+            2,
+            "one merged entry ties both servers: {:?}",
+            exe.servers
+        );
+        assert!(format!("{grant:?}").contains("executables: 1"));
     }
 
     #[test]

@@ -245,7 +245,9 @@ pub fn executable_lock_statuses(
 
 /// Normalize a declared path to its lock key: `Normal` components joined with
 /// `/` (drops any `./` prefix so `"./tools"` and `"tools"` share one entry).
-fn normalize_declared(declared: &str) -> String {
+/// The ONE normalizer for D3 lock keys — lock generation, verification, and
+/// the grant's server-tie validation all key through it.
+pub(crate) fn normalize_declared(declared: &str) -> String {
     Path::new(declared)
         .components()
         .filter_map(|c| match c {
