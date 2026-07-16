@@ -942,6 +942,37 @@ impl std::fmt::Debug for AuthorityGrant {
     }
 }
 
+/// Evidence identity around one live run (contract §6.2): the run id, the
+/// recorder identity (the events path), and `digest(AuthorityGrant)` — the
+/// single place the grant digest lives. Wraps exactly one frozen grant;
+/// `--plan` produces an `AuthorityGrant` but never a `RunEnvelope` (a plan
+/// invents no run id and opens no recorder).
+#[derive(Clone, Debug)]
+pub struct RunEnvelope {
+    run_id: String,
+    recorder: String,
+    grant_digest: GrantDigest,
+}
+
+impl RunEnvelope {
+    pub(crate) fn new(run_id: String, recorder: String, grant_digest: GrantDigest) -> RunEnvelope {
+        RunEnvelope {
+            run_id,
+            recorder,
+            grant_digest,
+        }
+    }
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+    pub fn recorder(&self) -> &str {
+        &self.recorder
+    }
+    pub fn grant_digest(&self) -> &GrantDigest {
+        &self.grant_digest
+    }
+}
+
 // ===== 3b-ii: the canonical V1 grant digest =====
 
 /// Domain separator for the canonical grant digest (`GrantSchema::V1`).

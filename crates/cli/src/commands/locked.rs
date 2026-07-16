@@ -409,6 +409,160 @@ fn freeze_grant(
     b.build()
 }
 
+/// Launch-scoped PROJECT MCP config (contract §3 step 7, host tier): for the
+/// run's lifetime the harness's project-scope MCP config exposes ONLY the
+/// synthetic gateway entry (`agentstack mcp --auto-project`); any pre-existing
+/// project config is parked beside itself and restored on exit. The gateway
+/// process re-gates trust and pins over the same lock bytes the grant froze,
+/// so nothing reachable through it can widen authority. USER/GLOBAL-scope
+/// entries are NOT swapped (harness apps rewrite their own global configs
+/// mid-run — racing that risks clobbering user state); they are named in a
+/// standalone honest warning instead.
+struct ScopedMcpConfig {
+    path: PathBuf,
+    /// The parked original (`<config>.agentstack-locked-<run>.bak`), when one
+    /// existed. Same-directory rename, so park/restore are atomic.
+    parked: Option<PathBuf>,
+    /// The gateway-only body THIS run wrote — restore refuses to delete
+    /// anything else (a swapped file means another process intervened).
+    body: String,
+    restored: bool,
+}
+
+impl ScopedMcpConfig {
+    /// Park + write, or `Ok(None)` when this harness has no project-scope MCP
+    /// config to scope (stated honestly by the caller).
+    fn apply(
+        desc: &crate::adapter::AdapterDescriptor,
+        project_dir: &Path,
+        run_id: &str,
+    ) -> Result<Option<ScopedMcpConfig>> {
+        use crate::adapter::descriptor::Format;
+        let (Some((path, format)), Some(mcp)) = (
+            desc.config_for(agentstack_core::scope::Scope::Project, project_dir),
+            desc.mcp.as_ref(),
+        ) else {
+            return Ok(None);
+        };
+        let bridge = super::connect::bridge_server(&super::connect::bridge_command(None), false);
+        let rendered =
+            crate::adapter::render_server(desc, &bridge, &crate::secret::MapResolver::default());
+        if !rendered.representable {
+            return Ok(None);
+        }
+        let entries = vec![(super::connect::BRIDGE_ENTRY.to_string(), rendered.value)];
+        let body = match format {
+            Format::Json => crate::render::merge_json::merge("", &mcp.location, &entries)?,
+            Format::Toml => crate::render::merge_toml::merge_with_removals(
+                "",
+                &mcp.location,
+                &entries,
+                &[],
+                mcp.headers_as_subtable,
+            )?,
+        };
+
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "mcp-config".to_string());
+        // Concurrency guard: a parked backup beside this config means another
+        // locked run is scoping it right now (or a previous one crashed).
+        // Stacking parks would let the first run's restore silently WIDEN the
+        // second run mid-flight, and the second run's restore destroy the
+        // true original — refuse instead, naming the leftover.
+        if let Some(existing) = std::fs::read_dir(path.parent().unwrap_or(Path::new(".")))
+            .ok()
+            .and_then(|d| {
+                d.filter_map(|e| e.ok()).map(|e| e.file_name()).find(|n| {
+                    let n = n.to_string_lossy();
+                    n.starts_with(&format!("{file_name}.agentstack-locked-")) && n.ends_with(".bak")
+                })
+            })
+        {
+            anyhow::bail!(
+                "another locked run appears to be scoping {} (or a previous one crashed): \
+                 parked backup {existing:?} exists — wait for that run to finish, or restore \
+                 the backup manually, then retry",
+                path.display()
+            );
+        }
+        let parked = if path.exists() {
+            let bak = path.with_file_name(format!("{file_name}.agentstack-locked-{run_id}.bak"));
+            std::fs::rename(&path, &bak).with_context(|| format!("parking {}", path.display()))?;
+            Some(bak)
+        } else {
+            None
+        };
+        if let Err(e) =
+            crate::util::atomic::write(&path, &body).context("writing the gateway-only config")
+        {
+            // Fail closed but leave nothing half-scoped: put the original
+            // back; a rollback failure is chained, never swallowed.
+            if let Some(bak) = &parked {
+                if let Err(roll) = std::fs::rename(bak, &path) {
+                    return Err(e.context(format!(
+                        "ALSO: restoring the parked original failed ({roll}) — your config \
+                         is at {}",
+                        bak.display()
+                    )));
+                }
+            }
+            return Err(e);
+        }
+        Ok(Some(ScopedMcpConfig {
+            path,
+            parked,
+            body,
+            restored: false,
+        }))
+    }
+
+    /// Remove the gateway-only config and restore the parked original. Called
+    /// explicitly on every exit path; `Drop` is the best-effort backstop. A
+    /// crash before restore leaves the MORE restrictive state (gateway-only)
+    /// plus the `.bak` beside it — fail-safe direction, never wider. Every
+    /// failure mode is LOUD: this swaps the user's live config, so a restore
+    /// that couldn't complete must never look like one that did.
+    fn restore(&mut self) {
+        if self.restored {
+            return;
+        }
+        self.restored = true;
+        // Only delete what this run wrote: a different current content means
+        // another process swapped the file — leave it and the backup intact.
+        match std::fs::read_to_string(&self.path) {
+            Ok(current) if current == self.body => {
+                let _ = std::fs::remove_file(&self.path);
+            }
+            _ => {
+                eprintln!(
+                    "  ⚠ {} changed during the run (not this run's gateway-only content) — \
+                     leaving it in place; your original remains at {:?}",
+                    self.path.display(),
+                    self.parked.as_deref().unwrap_or(Path::new("(none)"))
+                );
+                return;
+            }
+        }
+        if let Some(bak) = &self.parked {
+            if let Err(e) = std::fs::rename(bak, &self.path) {
+                eprintln!(
+                    "  ⚠ could not restore {} from {} ({e}) — restore it manually",
+                    self.path.display(),
+                    bak.display()
+                );
+            }
+        }
+    }
+}
+
+impl Drop for ScopedMcpConfig {
+    fn drop(&mut self) {
+        self.restore();
+    }
+}
+
 /// Resolve the harness binary to the full path that would execute — the grant
 /// records the resolved identity, not the bare name (§6.1).
 fn resolve_bin_path(bin: &str) -> Result<PathBuf> {
@@ -429,13 +583,15 @@ fn print_posture_and_limits() {
          trail. Use --sandbox/--lockdown for runtime containment.",
         "ℹ".cyan()
     );
-    // Contract §3 step 7 is NOT yet delivered — its own loud line, not a
-    // buried clause: pre-existing native MCP entries stay reachable around
-    // the grant until the D2 unification lands launch-scoped config.
+    // Contract §3 step 7, the honest remainder — its own loud line, not a
+    // buried clause: USER/GLOBAL-scope native MCP entries are not swapped
+    // (harness apps rewrite their own global configs mid-run; racing that
+    // risks clobbering user state). Project scope IS launch-scoped below.
     eprintln!(
-        "  {} not yet launch-scoped: MCP servers already in this harness's native config \
-         remain reachable OUTSIDE the frozen grant for this run (launch-scoped MCP \
-         config lands with the D2 unification).",
+        "  {} user/global-scope native MCP entries are NOT shadowed for this run — only \
+         the project scope is launch-scoped to the gateway (run-grant handoff for the \
+         bridge lands in the follow-up D2 session). Host-guard hooks apply where the \
+         machine [guard] config installed them (cooperative).",
         "⚠".yellow()
     );
 }
@@ -578,9 +734,37 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     })?;
     println!("  {} authority grant frozen: {}", "✓".green(), digest);
 
-    // §3 step 7 (this increment's honest subset): spawn on the host under the
-    // SAME run id the evidence carries, with the run id exported for gateway
-    // audit attribution. Launch-scoped MCP shadowing lands with D2.
+    // §6.2: the evidence identity around this frozen grant — the one place
+    // the grant digest lives from here on.
+    let envelope =
+        crate::grant::RunEnvelope::new(run_id.clone(), ev.log.path().display().to_string(), digest);
+
+    // §3 step 7 (host tier, per ruling): launch-scope the PROJECT MCP config
+    // to the synthetic gateway entry for the run's lifetime; restore after.
+    // Global scope stays honestly labeled (see print_posture_and_limits).
+    let mut scoped = match ScopedMcpConfig::apply(desc, &ctx.dir, &run_id) {
+        Ok(Some(s)) => {
+            println!(
+                "  {} project MCP config launch-scoped to the gateway ({})",
+                "✓".green(),
+                s.path.display()
+            );
+            Some(s)
+        }
+        Ok(None) => {
+            println!(
+                "  {} {} has no project-scope MCP config to launch-scope (stated honestly; \
+                 the global bridge entry still gates declared servers)",
+                "ℹ".cyan(),
+                display
+            );
+            None
+        }
+        Err(e) => return Err(ev.refuse("launch-scope", e)),
+    };
+
+    // Spawn on the host under the SAME run id the evidence carries, with the
+    // run id exported for gateway audit attribution.
     let status = crate::runs::launch_attached(
         &bin_path.to_string_lossy(),
         &args.args,
@@ -591,6 +775,9 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         None,
         args.scope,
     );
+    if let Some(s) = scoped.as_mut() {
+        s.restore();
+    }
 
     // §3 step 8: terminal outcome — observed evidence or explicit
     // "unavailable", never fabricated.
@@ -601,7 +788,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 outcome: "completed".to_string(),
                 exit_code: st.code(),
                 duration_ms: ev.started.elapsed().as_millis() as u64,
-                grant_digest: Some(digest.to_string()),
+                grant_digest: Some(envelope.grant_digest().to_string()),
                 usage: "unavailable".to_string(),
             })
             .context("the harness ran, but its outcome could not be recorded")?;
@@ -616,7 +803,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 outcome: "launch-failed".to_string(),
                 exit_code: None,
                 duration_ms: ev.started.elapsed().as_millis() as u64,
-                grant_digest: Some(digest.to_string()),
+                grant_digest: Some(envelope.grant_digest().to_string()),
                 usage: "unavailable".to_string(),
             });
             match record {
@@ -1029,6 +1216,75 @@ mod tests {
             assert!(msg.contains("could not be fully recorded"), "{msg}");
 
             std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        });
+    }
+
+    /// Contract §3 step 7 (host tier): for the run's lifetime the project
+    /// MCP config exposes ONLY the synthetic gateway entry — observed from
+    /// INSIDE the run by the harness itself — and the pre-existing project
+    /// config comes back byte-identical afterward, with no leftovers.
+    #[cfg(unix)]
+    #[test]
+    fn project_mcp_config_is_gateway_only_during_the_run_and_restored_after() {
+        locked_fixture(|home, proj| {
+            pinned_and_trusted(proj);
+            // A pre-existing project MCP config with an ambient entry that
+            // must NOT be reachable during the locked run.
+            let ambient = r#"{"mcpServers":{"ambient":{"command":"evil"}}}"#;
+            proj.child(".mcp.json").write_str(ambient).unwrap();
+            // The fake harness snapshots what it actually sees.
+            let fake = home.path().join("fakebin/claude");
+            std::fs::write(
+                &fake,
+                "#!/bin/sh\ncat .mcp.json > mcp-during-run.json\nexit 0\n",
+            )
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            run_locked(Some(proj.path()), &run_args(false)).unwrap();
+
+            let during = std::fs::read_to_string(proj.child("mcp-during-run.json").path()).unwrap();
+            assert!(
+                during.contains("agentstack"),
+                "gateway entry present: {during}"
+            );
+            assert!(
+                !during.contains("ambient") && !during.contains("evil"),
+                "ambient project entry shadowed during the run: {during}"
+            );
+
+            let after = std::fs::read_to_string(proj.child(".mcp.json").path()).unwrap();
+            assert_eq!(after, ambient, "original restored byte-identical");
+            let leftovers: Vec<_> = std::fs::read_dir(proj.path())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().contains(".bak"))
+                .collect();
+            assert!(
+                leftovers.is_empty(),
+                "no parked backups left: {leftovers:?}"
+            );
+        });
+    }
+
+    /// Concurrency guard: a parked backup beside the project config (another
+    /// locked run in flight, or a crash leftover) refuses the run instead of
+    /// stacking parks — stacked parks would widen the sibling mid-run and
+    /// destroy the true original on out-of-order exits.
+    #[cfg(unix)]
+    #[test]
+    fn overlapping_locked_run_refuses_instead_of_stacking_parks() {
+        locked_fixture(|_home, proj| {
+            pinned_and_trusted(proj);
+            proj.child(".mcp.json.agentstack-locked-r-other.bak")
+                .write_str("{}")
+                .unwrap();
+
+            let err = run_locked(Some(proj.path()), &run_args(false)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("another locked run"), "{msg}");
+            assert!(msg.contains("agentstack-locked-r-other.bak"), "{msg}");
         });
     }
 

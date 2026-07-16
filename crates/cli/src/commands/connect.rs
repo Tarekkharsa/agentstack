@@ -237,7 +237,7 @@ fn select_targets<'r>(
 
 /// The bridge, expressed as a manifest server so the existing per-adapter
 /// renderer shapes it (transport tags, field names, command arrays).
-fn bridge_server(command: &str, transparent: bool) -> Server {
+pub(crate) fn bridge_server(command: &str, transparent: bool) -> Server {
     let mut args = vec!["mcp".to_string(), "--auto-project".to_string()];
     if transparent {
         args.push("--transparent".to_string());
@@ -262,7 +262,7 @@ fn bridge_server(command: &str, transparent: bool) -> Server {
 /// so configs survive rebuilds instead of pinning e.g. target/release), else
 /// this executable's real path. An absolute path matters either way — GUI
 /// harnesses spawn MCP servers without a login shell's $PATH.
-fn bridge_command(explicit: Option<&str>) -> String {
+pub(crate) fn bridge_command(explicit: Option<&str>) -> String {
     if let Some(c) = explicit {
         return c.to_string();
     }
