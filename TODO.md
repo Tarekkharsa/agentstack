@@ -100,10 +100,17 @@ unwired machinery.
     and loud named-limitation errors for `--locked --profile` / `--sandbox`.
     Verified live: drift refusal, trust re-gate, admission (unclassifiable
     host), clean run with real harness.
-  - **Remaining before this checks off:** fallible gateway consumption +
-    launch-scoped MCP config with host guards (printed today as a standalone
-    ⚠ known limit), and `RunEnvelope` as a named type (run id + recorder
-    identity + grant digest currently ride the events directly).
+  - **Also landed (2026-07-16, rulings: config-scope now / honest global
+    label):** launch-scoped PROJECT MCP config (gateway-only during the run,
+    parked original restored byte-identical, overlapping runs refuse instead
+    of stacking parks, crash leaves the more restrictive state) and
+    `RunEnvelope` as the sealed §6.2 evidence identity.
+  - **Remaining before this checks off (supervised session, per ruling):**
+    the run-grant artifact handoff so the `agentstack mcp` bridge process
+    consumes the frozen ruleset + server set verbatim (today it re-gates
+    trust + pins over the same lock bytes — equivalent authority by content
+    identity, not yet object handoff), user/global-scope shadowing (today a
+    standalone honest ⚠), and `--locked --profile` rendering from the grant.
   - The wiring must assert a `GrantedServer`'s definition digest was honestly
     derived from its stored `Server` bytes (carried 3b-ii review note).
     (Done: `GrantedServer::from_resolved` is the only wiring constructor.)
@@ -119,18 +126,22 @@ unwired machinery.
   honestly. (`one_byte_executable_edit_refuses_before_launch_and_is_recorded`
   + the digest/verifier/lock-cmd layer witnesses; unbound surface labelled in
   the trust preview and locked posture output.)
-- [ ] README restructure: pain-led hero, 60-second start, three proof blocks
+- [x] README restructure: pain-led hero, 60-second start, three proof blocks
   (guard, trust gate, one-manifest-everywhere), experimental features moved
   out of the beginner path. Includes the honesty pass — every claim matches
   the shipped tier; `--locked` is pre-launch gating, not isolation; D2
-  standalone-command unification is a labelled known limit.
-- [ ] Docs site reorganization: index leads with the most important examples
-  and their visuals; pages consolidated and status-labelled (shipped by
-  default, Experimental badged, design/internal docs out of user navigation);
-  stale claims fixed against the code.
-- [ ] Three recorded demo clips (asciinema + agg): guard blocks a destructive
-  command; trust gate inerts a malicious repo and re-gates on a one-byte
-  edit; one manifest renders across CLIs.
+  standalone-command unification is a labelled known limit. (Commit bf879ea;
+  new guard section with embedded demo gif.)
+- [x] Docs site reorganization: index leads with a simple→advanced "See it
+  work" ladder (manifest → guard → trust gate → lockdown); pages consolidated
+  and status-labelled; stale claims fixed against the code (commit bf879ea).
+  Design pass on top: one-row sticky header across all six pages with
+  responsive link-hiding, enforcement-matrix cells matched to ENFORCEMENT.md,
+  hero proof visible above the fold, tightened section rhythm.
+- [x] Three recorded demo clips (asciinema + agg, 100x30, DEMO_PAUSE=2.5):
+  guard blocks destructive commands (28s); trust gate (39s); one manifest →
+  3 CLIs (33s). docs/demos/*.gif + .cast, guard gif embedded in README.
+  (Commit bf879ea. Still deferred: the locked-run demo trio recordings.)
 
 Landed toward this cut:
 
