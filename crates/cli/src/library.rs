@@ -31,10 +31,43 @@ use crate::util::paths;
 pub fn parse_frontmatter_description(md: &str) -> Option<String> {
     let rest = md.trim_start().strip_prefix("---")?;
     let end = rest.find("\n---")?;
-    for line in rest[..end].lines() {
-        if let Some(v) = line.trim().strip_prefix("description:") {
-            return Some(v.trim().trim_matches('"').trim_matches('\'').to_string());
+    let mut lines = rest[..end].lines().peekable();
+    while let Some(line) = lines.next() {
+        // Only top-level keys: an indented `description:` belongs to some
+        // nested structure, not the skill.
+        if line.starts_with(char::is_whitespace) {
+            continue;
         }
+        let Some(v) = line.trim().strip_prefix("description:") else {
+            continue;
+        };
+        let v = v.trim();
+        // YAML block scalars (`|`, `>`, with optional chomp/indent
+        // indicators like `|-` or `>2`) and empty values put the actual
+        // text on the FOLLOWING indented lines. Third-party skills use
+        // full YAML frontmatter — returning the literal "|" here made
+        // perfectly described skills look undescribed.
+        let is_block = matches!(v.chars().next(), Some('|' | '>'))
+            && v[1..].chars().all(|c| matches!(c, '+' | '-' | '0'..='9'));
+        if is_block || v.is_empty() {
+            let mut parts: Vec<String> = Vec::new();
+            while let Some(next) = lines.peek() {
+                if !next.trim().is_empty() && !next.starts_with(char::is_whitespace) {
+                    break; // next top-level key
+                }
+                let text = lines.next().unwrap_or_default().trim().to_string();
+                if !text.is_empty() {
+                    parts.push(text);
+                }
+            }
+            if parts.is_empty() {
+                return None;
+            }
+            // Fold to one logical line — every consumer (search, lib list,
+            // the loadable index) wants a single description string.
+            return Some(parts.join(" "));
+        }
+        return Some(v.trim_matches('"').trim_matches('\'').to_string());
     }
     None
 }
@@ -127,6 +160,16 @@ impl LibrarySkill {
     /// rather than failing. Reading at call time is deliberate: the library is
     /// small (~a dozen skills) so `search` and `lib list` stay cheap.
     pub fn description(&self, lib_home: &Path) -> Option<String> {
+        let text = fs::read_to_string(self.body_dir(lib_home)?.join("SKILL.md")).ok()?;
+        parse_frontmatter_description(&text)
+    }
+
+    /// The on-disk directory holding this skill's body, if it's locally
+    /// readable right now: path sources resolve under `<lib_home>/skills/…`;
+    /// git sources only if already cached in the shared store (no network,
+    /// no fetch, no content digest). Lets callers distinguish "not installed"
+    /// from "installed but undescribed".
+    pub fn body_dir(&self, lib_home: &Path) -> Option<PathBuf> {
         // Reuse the resolver's view of a library skill (path relative to
         // `<lib_home>/skills/`, or a cached git clone) without digesting — the
         // same shape `resolve_skill` builds for `SkillOrigin::Library`.
@@ -136,13 +179,13 @@ impl LibrarySkill {
             rev: self.rev.clone(),
             subpath: self.subpath.clone(),
         };
-        let dir = Store::default_store()
-            .resolve_path_only(&skill, &lib_home.join("skills"))
-            .ok()
-            .flatten()?
-            .path;
-        let text = fs::read_to_string(dir.join("SKILL.md")).ok()?;
-        parse_frontmatter_description(&text)
+        Some(
+            Store::default_store()
+                .resolve_path_only(&skill, &lib_home.join("skills"))
+                .ok()
+                .flatten()?
+                .path,
+        )
     }
 }
 
@@ -292,6 +335,34 @@ mod tests {
             Some("Fill and merge PDFs.")
         );
         assert_eq!(parse_frontmatter_description("no frontmatter"), None);
+    }
+
+    /// Third-party skills use full YAML frontmatter: block scalars (`|`,
+    /// `>`, chomped variants) put the text on the following indented lines.
+    /// The parser folds them to one line; the old behavior returned the
+    /// literal "|", making described skills look undescribed everywhere.
+    #[test]
+    fn frontmatter_description_parses_block_scalars() {
+        let folded = "---\nname: t\ndescription: >\n  Teach a topic\n  interactively.\nargument-hint: \"x\"\n---\nbody";
+        assert_eq!(
+            parse_frontmatter_description(folded).as_deref(),
+            Some("Teach a topic interactively.")
+        );
+        let literal = "---\ndescription: |-\n  Builds agents.\n\n  Use when: asked.\n---\nbody";
+        assert_eq!(
+            parse_frontmatter_description(literal).as_deref(),
+            Some("Builds agents. Use when: asked.")
+        );
+        // An empty block is still no description; an indented `description:`
+        // inside nested structure is not the skill's.
+        assert_eq!(
+            parse_frontmatter_description("---\ndescription: |\nnext: k\n---\nbody"),
+            None
+        );
+        assert_eq!(
+            parse_frontmatter_description("---\nmeta:\n  description: nested\n---\nbody"),
+            None
+        );
     }
 
     #[test]

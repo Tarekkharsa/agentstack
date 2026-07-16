@@ -1808,10 +1808,18 @@ fn initialize_instructions(
             .and_then(Value::as_str)
             .unwrap_or("");
         let desc = one_line(desc, INDEX_MAX_DESC_CHARS);
-        if desc.is_empty() {
-            out.push_str(&format!("- {name}\n"));
-        } else {
+        if !desc.is_empty() {
             out.push_str(&format!("- {name} — {desc}\n"));
+        } else if trust_note.is_none() {
+            // Genuinely undescribed (on the untrusted path descriptions are
+            // gated, not missing). Say so — the agent is the only messenger
+            // that reliably reaches whoever owns the skill.
+            out.push_str(&format!(
+                "- {name} (its SKILL.md has no description — it loads fine by name; \
+                 suggest the user add one)\n"
+            ));
+        } else {
+            out.push_str(&format!("- {name}\n"));
         }
     }
     if entries.len() > INDEX_MAX_ENTRIES {

@@ -762,6 +762,41 @@ fn run_checks(
         }
     }
 
+    // The central library is machine-global, so check ALL of it here, not
+    // just the skills this project references: `lib add` warns at entry, but
+    // consolidated/pre-existing skills have no other surface that tells the
+    // user they're undiscoverable. A skill without a frontmatter description
+    // only matches search by name and shows as a bare name in every loadable
+    // index — warn with the fix, don't block (it still works by name).
+    let undescribed: Vec<&str> = skills_library
+        .skills
+        .iter()
+        .filter(|entry| {
+            // Only judge bodies that are locally readable — a git skill that
+            // isn't cached yet is "not installed", not "undescribed".
+            let readable = entry
+                .body_dir(&skills_lib_home)
+                .is_some_and(|dir| dir.join("SKILL.md").exists());
+            readable
+                && entry
+                    .description(&skills_lib_home)
+                    .map_or(true, |d| d.trim().is_empty())
+        })
+        .map(|entry| entry.name.as_str())
+        .collect();
+    if !undescribed.is_empty() {
+        report.section("Central library");
+        for name in undescribed {
+            report.line(
+                Level::Warn,
+                format!(
+                    "{name:<20} no frontmatter description \
+                     ↳ add `description:` to its SKILL.md so search and agents can find it"
+                ),
+            );
+        }
+    }
+
     // Supply-chain content scan (same detectors as `agentstack audit`): hidden
     // Unicode is an error so `--ci` gates it; injection heuristics only warn.
     // It reads every skill body, so the everyday run skips it — `--deep` opts
