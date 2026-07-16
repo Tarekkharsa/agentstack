@@ -234,9 +234,9 @@ impl Provider for CatalogProvider {
     fn search(&self, query: &str, _limit: usize) -> Vec<Candidate> {
         catalog::search(query)
             .into_iter()
-            .filter_map(|e| {
-                let kind = match e.kind.as_str() {
-                    "server" => CandidateKind::Server(server_install(
+            .map(|e| {
+                let kind = match e.kind {
+                    crate::catalog::CatalogKind::Server => CandidateKind::Server(server_install(
                         e.transport.as_deref(),
                         e.url.as_deref(),
                         e.command.as_deref(),
@@ -244,13 +244,13 @@ impl Provider for CatalogProvider {
                         &e.env,
                         &e.headers,
                     )),
-                    "skill" => CandidateKind::Skill(SkillRef {
+                    crate::catalog::CatalogKind::Skill => CandidateKind::Skill(SkillRef {
                         name: e.name.clone(),
                         path: e.path.clone(),
                         git: None,
                         rev: None,
                     }),
-                    "pack" => CandidateKind::Pack(PackSpec {
+                    crate::catalog::CatalogKind::Pack => CandidateKind::Pack(PackSpec {
                         server: e.server.as_ref().map(|s| {
                             server_install(
                                 s.transport.as_deref(),
@@ -285,15 +285,14 @@ impl Provider for CatalogProvider {
                             e.targets.clone()
                         },
                     }),
-                    _ => return None,
                 };
-                Some(Candidate {
+                Candidate {
                     id: e.name.clone(),
                     name: e.name.clone(),
                     description: e.description.clone(),
                     source: "catalog",
                     kind,
-                })
+                }
             })
             .collect()
     }

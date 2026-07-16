@@ -12,10 +12,25 @@ const CATALOG_YAML: &str = include_str!("../catalog/catalog.yaml");
 /// [`crate::adapter::registry`]). Packs extract members out of this at install.
 static CATALOG_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/catalog");
 
+/// What a catalog entry installs. The embedded catalog TOML uses the lowercase
+/// tags `server` / `skill` / `pack`; deserializing to a typed enum makes the
+/// provider dispatch exhaustive (teaching a fourth kind is a compile error at
+/// the match) instead of a fall-through string comparison. Deserialize-only —
+/// the catalog is compiled into the binary, so the wire form is fixed and
+/// trusted, and an unknown tag is a build-time catalog bug, surfaced by the
+/// `#[serde(deny_unknown…)]`-free default (a bad tag fails the entry's parse).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CatalogKind {
+    Server,
+    Skill,
+    Pack,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct CatalogEntry {
     pub name: String,
-    pub kind: String,
+    pub kind: CatalogKind,
     pub description: String,
     /// Human-friendly display name (e.g. `Linear`). Falls back to `name`.
     #[serde(default)]
@@ -214,7 +229,7 @@ mod tests {
     fn parses_pack_and_standalone_skill_entries() {
         let all = entries();
         let pack = all.iter().find(|e| e.name == "linear-pack").unwrap();
-        assert_eq!(pack.kind, "pack");
+        assert_eq!(pack.kind, CatalogKind::Pack);
         assert_eq!(pack.display.as_deref(), Some("Linear"));
         assert_eq!(pack.skills[0].name, "linear_breakdown");
         assert_eq!(pack.instructions[0].name, "linear_rules");
@@ -223,7 +238,7 @@ mod tests {
         assert_eq!(server.headers, vec!["Authorization".to_string()]);
 
         let skill = all.iter().find(|e| e.name == "pr-triage").unwrap();
-        assert_eq!(skill.kind, "skill");
+        assert_eq!(skill.kind, CatalogKind::Skill);
         assert_eq!(skill.path.as_deref(), Some("skills/pr-triage"));
     }
 
