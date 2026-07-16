@@ -546,8 +546,15 @@ fn json(body: &str) -> Resp {
 }
 
 fn ctype(value: &str) -> Header {
-    Header::from_bytes(&b"Content-Type"[..], value.as_bytes())
-        .expect("Content-Type is a valid header name; callers pass a literal value")
+    // Every caller passes a static literal, so this never fails today. Fall
+    // back to a valid literal rather than panic if a future caller ever hands
+    // a runtime value with bytes the header grammar rejects — a dashboard
+    // Content-Type is never worth crashing the server over. The inner
+    // construction is over a compile-time literal, so it is total.
+    Header::from_bytes(&b"Content-Type"[..], value.as_bytes()).unwrap_or_else(|()| {
+        Header::from_bytes(&b"Content-Type"[..], &b"application/octet-stream"[..])
+            .expect("octet-stream is a valid literal Content-Type")
+    })
 }
 
 fn split_url(url: &str) -> (&str, &str) {
