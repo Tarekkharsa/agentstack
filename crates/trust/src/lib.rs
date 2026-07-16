@@ -75,7 +75,10 @@ pub struct TrustEntry {
 }
 
 /// Where a project stands with the zero-files bridge.
-#[derive(Debug, Clone, PartialEq, Eq)]
+// `Copy`: all variants are data-free, so copying is a register move — callers
+// compare it by value (`self.trust == Some(TrustState::Trusted)`) without the
+// `.as_ref()`/`&` dance a non-Copy enum forces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustState {
     /// Trusted and the manifest is byte-identical to what was trusted.
     Trusted,

@@ -502,7 +502,7 @@ impl AutoProject {
         };
         self.dir = Some(base.clone());
         let state = crate::trust::check(&base);
-        self.trust = Some(state.clone());
+        self.trust = Some(state);
         match state {
             crate::trust::TrustState::Trusted => {}
             crate::trust::TrustState::Changed => eprintln!(
@@ -528,8 +528,8 @@ impl AutoProject {
             self.built = true;
             return;
         };
-        let allowed = self.explicit.is_some()
-            || self.trust.as_ref() == Some(&crate::trust::TrustState::Trusted);
+        let allowed =
+            self.explicit.is_some() || self.trust == Some(crate::trust::TrustState::Trusted);
         if allowed {
             self.activate(&base, None);
         } else {
@@ -546,7 +546,7 @@ impl AutoProject {
         }
         if let Some(base) = &self.dir {
             let state = crate::trust::check(base);
-            self.trust = Some(state.clone());
+            self.trust = Some(state);
             if state != crate::trust::TrustState::Trusted {
                 if let Some(rt) = self.runtime.take() {
                     rt.shutdown();
@@ -565,8 +565,8 @@ impl AutoProject {
         let Some(base) = self.dir.clone() else {
             return;
         };
-        let allowed = self.explicit.is_some()
-            || self.trust.as_ref() == Some(&crate::trust::TrustState::Trusted);
+        let allowed =
+            self.explicit.is_some() || self.trust == Some(crate::trust::TrustState::Trusted);
         if !allowed {
             if let Some(rt) = self.runtime.take() {
                 rt.shutdown();
