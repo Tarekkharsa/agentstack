@@ -23,6 +23,48 @@ Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro,
 and Pi. Secrets stay `${REFERENCES}` that resolve per machine, so the source of
 truth is safe to commit and share.
 
+Every capability you add is unreviewed code and instructions running with your
+credentials and your shell. AgentStack makes **nothing run until it's trusted,
+and nothing trusted run unobserved** — a clone stays inert until you pin its
+exact bytes, a machine policy no repo can loosen fences what runs, and every
+brokered call lands in an audit log.
+
+## Why
+
+Every skill, MCP server, and agent config you adopt is **unreviewed code plus
+instructions**, wired into a process that holds your credentials, your shell,
+and the network. Installing one is `npm install` with an agent attached —
+except with no lockfile, no review gate, and no record of what it did. The gaps
+that follow:
+
+1. **Anything a repo declares can run.** Clone it, start an agent session,
+   and its MCP servers want to spawn — commands you never read, with your
+   keychain in reach. Here a clone is *inert* until you trust its exact
+   bytes, and any edit re-gates it.
+2. **Nothing narrows or records what agents do.** Consent today is
+   all-or-nothing and unlogged; an injected prompt can turn a legitimate tool
+   against you. Here your *machine policy* — which no repo can loosen —
+   fences tools, secrets, and egress; every brokered call lands in an audit
+   log; `--lockdown` removes the agent's direct network route while approved
+   traffic can still pass through the enforcing proxy. (Honest scope: what
+   each mode enforces is spelled out in the
+   [enforcement matrix](docs/ENFORCEMENT.md).)
+3. **Every CLI spells the same setup differently** — six config syntaxes,
+   drifting copies, real tokens pasted into files that were never meant to be
+   shared. Here one reviewed manifest renders them all, secrets stay
+   references, and a lockfile makes it reproducible.
+4. **An agent can wreck your working tree by accident.** No prompt injection
+   needed — a wrong `rm -rf`, a `git reset --hard`, a `git clean -f`, with
+   nothing between the command and your filesystem. Here `agentstack guard`
+   wires a **cooperative** pre-tool-use hook into your CLIs that blocks
+   destructive commands and out-of-workspace writes before they run and
+   records each denial. It catches an agent's *accidents*; a harness that
+   ignores its own hook protocol bypasses it, so kernel-enforced confinement
+   stays `run --sandbox` / `--lockdown`.
+
+If you use a single agent with one hand-managed server, you may not need this
+yet. The moment capabilities come from repos you didn't write, you do.
+
 ## Install
 
 ```sh
@@ -55,8 +97,6 @@ agentstack bootstrap    # check CLIs, skills, secrets; see what's missing
 agentstack apply        # preview every CLI's changes, confirm to write
 ```
 
-![agentstack first run: init → bootstrap → apply](docs/firstrun.svg)
-
 > ▶ [Watch it live on the site](https://tarekkharsa.github.io/agentstack/#start) — same flow, replayed in your browser.
 
 Two things worth knowing before you go further:
@@ -82,62 +122,85 @@ That's the whole everyday loop. Two habits worth keeping:
 - `agentstack doctor` verifies everything is wired up and names the exact fix
   for anything that isn't.
 
-### Experimental: governed TypeScript execution
+## The trust gate — keep repo-declared capabilities inert until review
 
-Sandbox-enabled builds can expose `tools_execute`: one bounded TypeScript
-program can call a small, exact set of MCP tools through the existing gateway.
-The program runs as a non-root process in a read-only, resource-limited Docker
-container with no workspace, ambient credentials, package installation, or
-direct network route. Every allowed call is re-checked by the gateway and
-attributed in `agentstack report`.
+Register the AgentStack gateway, then clone a repo: its declared MCP servers
+remain inactive until you inspect their runtime surface and trust the current
+manifest/lock consent digest. Calls brokered after that are firewalled and
+audited.
 
-It is off by default and only the machine owner can enable it in
-`~/.agentstack/agentstack.toml`:
+![The trust gate: clone → inert → review → trust → firewalled → audited — and the library sync gate blocking a literal secret](docs/trust-gate.svg)
 
-```toml
-[experimental]
-tools_execute = true
+> ▶ [Watch it live on the site](https://tarekkharsa.github.io/agentstack/#trust) — and run it yourself: [`docs/trust-gate-demo.sh`](docs/trust-gate-demo.sh).
 
-# Optional machine-owned defaults; requests may only narrow them.
-[experimental.tools_execute_limits]
-timeout_ms = 30000
-max_calls = 40
-max_output_bytes = 131072
+Register the gateway once (`agentstack connect --all --write`) and every repo
+you open brings its own MCP servers with **no files copied in**. But a repo you haven't reviewed
+is **inert** — none of its servers are spawned or contacted, no secrets resolved:
+
+```bash
+git clone <some-repo> && cd <some-repo>
+agentstack mcp --auto-project    # an agent asks what it can use here → nothing (untrusted)
+
+agentstack trust .               # you SEE what it declares before authorizing:
+#   ▶ demo: runs `python3 ./server.py`
+#   ✓ trusted at sha256:…        (editing the manifest re-gates it)
 ```
 
-This is an experimental Docker-only surface, not a host-execution fallback.
-See the [exact request contract](docs/reference.md#experimental-tools_execute)
-and [enforcement matrix](docs/ENFORCEMENT.md#experimental-tools_execute).
+Trust pins the **manifest, local overlay, and lockfile**, not arbitrary code they point at —
+which also means running `agentstack lock` re-gates the project (new pins =
+new consent); expect to re-run `trust .` after locking. And:
+you're authorizing the command `python3 ./server.py`, and a later edit to
+`server.py` won't re-gate the project (an edit to the manifest or lock will).
+Central-library servers are pinned by definition digest in `agentstack.lock`
+and verified by the gateway before serving — a drifted definition is refused
+until you re-lock (which re-gates trust). Review referenced scripts as part
+of `trust .` — same discipline as reading a `.envrc` before `direnv allow`.
 
-## Why
+After that its servers are live through the gateway — and every brokered call is
+**firewalled** and **audited**. Two policy layers apply: the repo's `[policy]`
+and your own machine-level `[policy.tools]` in `~/.agentstack/agentstack.toml`,
+which is checked first and which no repo can loosen:
 
-Every skill, MCP server, and agent config you adopt is **unreviewed code plus
-instructions**, wired into a process that holds your credentials, your shell,
-and the network. Installing one is `npm install` with an agent attached —
-except with no lockfile, no review gate, and no record of what it did. Three
-gaps follow:
+```text
+agent → demo.echo         ✓ ok        # brokered through the gateway, logged
+agent → demo.secret_read  ✗ denied    # blocked by [policy.tools]
+every call → ~/.agentstack/audit/calls.jsonl   (tool · outcome · latency)
+```
 
-1. **Anything a repo declares can run.** Clone it, start an agent session,
-   and its MCP servers want to spawn — commands you never read, with your
-   keychain in reach. Here a clone is *inert* until you trust its exact
-   bytes, and any edit re-gates it.
-2. **Nothing narrows or records what agents do.** Consent today is
-   all-or-nothing and unlogged; an injected prompt can turn a legitimate tool
-   against you. Here your *machine policy* — which no repo can loosen —
-   fences tools, secrets, and egress; every brokered call lands in an audit
-   log; `--lockdown` removes the agent's direct network route while approved
-   traffic can still pass through the enforcing proxy. (Honest scope: what
-   each mode enforces is spelled out in the
-   [enforcement matrix](docs/ENFORCEMENT.md).)
-3. **Every CLI spells the same setup differently** — six config syntaxes,
-   drifting copies, real tokens pasted into files that were never meant to be
-   shared. Here one reviewed manifest renders them all, secrets stay
-   references, and a lockfile makes it reproducible.
+No generated config files in the repo, and no untrusted repo-declared server is
+auto-started by the gateway. This does not sandbox arbitrary repo code; use
+`run --sandbox --lockdown` when the agent process itself needs confinement.
+The whole thing is a runnable 60-second demo:
+[`docs/trust-gate-demo.sh`](docs/trust-gate-demo.sh).
 
-If you use a single agent with one hand-managed server, you may not need this
-yet. The moment capabilities come from repos you didn't write, you do.
+## Guardrails against accidental destruction
 
-## A manifest at a glance
+`agentstack guard install` wires a **cooperative** pre-tool-use hook into 9
+agent CLIs (Claude Code, Codex, Gemini, Cursor, Windsurf, Copilot CLI,
+Antigravity, OpenCode, and Pi; VS Code agent mode reads the Claude-format user
+hooks). Once installed, it stops the commands an agent runs by mistake before
+they touch your machine:
+
+```text
+agent → rm -rf ~/other-project   ✗ blocked   # destructive, outside the workspace
+agent → git reset --hard         ✗ blocked   # discards uncommitted work
+agent → cat .env                 ✗ blocked   # [policy.filesystem] deny-glob
+every denial → ~/.agentstack/audit/calls.jsonl   (host-guard entry)
+```
+
+It also blocks file-tool writes outside the workspace (plus your `[guard]`
+allow_roots and temp) and reads or writes to `[policy.filesystem]` deny-globs
+like `.env`. `agentstack guard status` shows which CLIs are wired — and
+`agentstack guard test rm -rf /` lets you watch a denial without an agent.
+
+This is a **cooperative** boundary: it catches an agent's *accidents*, not a
+determined attacker — a harness that ignores its own hook protocol bypasses it.
+Kernel-enforced confinement is `run --sandbox` / `--lockdown`. Runnable
+walkthrough: [`examples/guard-demo/`](examples/guard-demo/).
+
+![agentstack guard blocking rm -rf, git reset --hard, and cat .env](docs/demos/guard.gif)
+
+## One manifest, 13 CLIs
 
 ```toml
 version = 1
@@ -145,7 +208,7 @@ version = 1
 [servers.github]
 type = "http"
 url = "https://api.githubcopilot.com/mcp/"
-headers = { Authorization = "Bearer ${GH_PAT}" } # resolved per machine, never stored
+headers = { Authorization = "Bearer ${GH_PAT}" } # resolved per machine — the manifest never holds the value
 
 [servers.github.extra.codex]                 # native keys one CLI needs pass
 startup_timeout_sec = 20                     # through verbatim, per adapter
@@ -169,6 +232,12 @@ the **manifest's directory** — `.agentstack/` in the preferred layout — so
 (`cwd` is the exception: it anchors at the project root, matching what a
 harness gives a rendered config.)
 
+One `agentstack apply` compiles this single manifest into the native config of
+every CLI in `[targets]` — up to all 13 — each adapter's quirks handled for you
+and secrets left as `${REF}`s:
+
+![agentstack first run: init → bootstrap → apply](docs/firstrun.svg)
+
 ## Everyday commands
 
 | Command | What it does |
@@ -181,6 +250,7 @@ harness gives a rendered config.)
 | `agentstack secret set NAME` | Store a secret in the OS keychain |
 | `agentstack use <profile> --write` | Activate one profile's servers + skills |
 | `agentstack run <cli> --profile <p>` | Launch a harness with a profile for its lifetime |
+| `agentstack guard install` | Wire the destructive-command guard into your CLIs' hooks |
 | `agentstack lock` | Pin profile refs in the lockfile without rendering anything |
 | `agentstack dashboard` | The same lifecycle in a local web UI |
 
@@ -285,57 +355,6 @@ steps:
   - uses: actions/checkout@v4
   - uses: Tarekkharsa/agentstack@v0.10.1  # pin a release tag, not @main
 ```
-
-## The trust gate — keep repo-declared capabilities inert until review
-
-Register the AgentStack gateway, then clone a repo: its declared MCP servers
-remain inactive until you inspect their runtime surface and trust the current
-manifest/lock consent digest. Calls brokered after that are firewalled and
-audited.
-
-![The trust gate: clone → inert → review → trust → firewalled → audited — and the library sync gate blocking a literal secret](docs/trust-gate.svg)
-
-> ▶ [Watch it live on the site](https://tarekkharsa.github.io/agentstack/#trust) — and run it yourself: [`docs/trust-gate-demo.sh`](docs/trust-gate-demo.sh).
-
-Register the gateway once (`agentstack connect --all --write`) and every repo
-you open brings its own MCP servers with **no files copied in**. But a repo you haven't reviewed
-is **inert** — none of its servers are spawned or contacted, no secrets resolved:
-
-```bash
-git clone <some-repo> && cd <some-repo>
-agentstack mcp --auto-project    # an agent asks what it can use here → nothing (untrusted)
-
-agentstack trust .               # you SEE what it declares before authorizing:
-#   ▶ demo: runs `python3 ./server.py`
-#   ✓ trusted at sha256:…        (editing the manifest re-gates it)
-```
-
-Trust pins the **manifest, local overlay, and lockfile**, not arbitrary code they point at —
-which also means running `agentstack lock` re-gates the project (new pins =
-new consent); expect to re-run `trust .` after locking. And:
-you're authorizing the command `python3 ./server.py`, and a later edit to
-`server.py` won't re-gate the project (an edit to the manifest or lock will).
-Central-library servers are pinned by definition digest in `agentstack.lock`
-and verified by the gateway before serving — a drifted definition is refused
-until you re-lock (which re-gates trust). Review referenced scripts as part
-of `trust .` — same discipline as reading a `.envrc` before `direnv allow`.
-
-After that its servers are live through the gateway — and every brokered call is
-**firewalled** and **audited**. Two policy layers apply: the repo's `[policy]`
-and your own machine-level `[policy.tools]` in `~/.agentstack/agentstack.toml`,
-which is checked first and which no repo can loosen:
-
-```text
-agent → demo.echo         ✓ ok        # brokered through the gateway, logged
-agent → demo.secret_read  ✗ denied    # blocked by [policy.tools]
-every call → ~/.agentstack/audit/calls.jsonl   (tool · outcome · latency)
-```
-
-No generated config files in the repo, and no untrusted repo-declared server is
-auto-started by the gateway. This does not sandbox arbitrary repo code; use
-`run --sandbox --lockdown` when the agent process itself needs confinement.
-The whole thing is a runnable 60-second demo:
-[`docs/trust-gate-demo.sh`](docs/trust-gate-demo.sh).
 
 ## Where rendered files live — pick a mode
 
@@ -442,6 +461,33 @@ vendor's next tag:
 ![agentstack closed loop: install a versioned pack, spread it everywhere, firewall a tool, watch the audited refusal, upgrade](docs/closed-loop.svg)
 
 > ▶ Run it yourself: [`agentstack-test/demo-closed-loop.sh`](agentstack-test/demo-closed-loop.sh).
+
+### Experimental: governed TypeScript execution
+
+Sandbox-enabled builds can expose `tools_execute`: one bounded TypeScript
+program can call a small, exact set of MCP tools through the existing gateway.
+The program runs as a non-root process in a read-only, resource-limited Docker
+container with no workspace, ambient credentials, package installation, or
+direct network route. Every allowed call is re-checked by the gateway and
+attributed in `agentstack report`.
+
+It is off by default and only the machine owner can enable it in
+`~/.agentstack/agentstack.toml`:
+
+```toml
+[experimental]
+tools_execute = true
+
+# Optional machine-owned defaults; requests may only narrow them.
+[experimental.tools_execute_limits]
+timeout_ms = 30000
+max_calls = 40
+max_output_bytes = 131072
+```
+
+This is an experimental Docker-only surface, not a host-execution fallback.
+See the [exact request contract](docs/reference.md#experimental-tools_execute)
+and [enforcement matrix](docs/ENFORCEMENT.md#experimental-tools_execute).
 
 ## Develop
 

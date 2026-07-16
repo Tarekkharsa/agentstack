@@ -198,7 +198,7 @@
     <p class="eyebrow">Lease edge case</p>
     <h2>Trust can fail closed without erasing the proposal trail</h2>
     <div class="trust-note">
-      <p>If manifest or lock bytes change during an auto-project connection, AgentStack replaces the live gateway with an empty one. The in-memory lease may remain inspectable, and <code>agentstack_lease_freeze</code> may still propose a manifest profile because it serves no bundle content, resolves no secrets, spawns no server, and applies no files. Restoring an active gateway still requires review, locking where needed, and renewed trust.</p>
+      <p>If manifest or lock bytes change during an auto-project connection, AgentStack empties the live gateway — but the in-memory lease can still be inspected and frozen into a proposal, since it never served bundle content, resolved a secret, or touched a file. See the full lease lifecycle and cleanup contract in <a href="how-it-works.html#mcp-lease">how it works</a>.</p>
     </div>
   </section>
 

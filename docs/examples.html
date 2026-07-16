@@ -653,57 +653,20 @@ agentstack_lease_close({})</code></pre>
     <h2>Reuse capabilities everywhere</h2>
 
     <h3 class="ex" id="e14"><span class="num">14</span> The central library</h3>
-    <p class="intent">Install a capability <strong>once</strong> into your machine-wide library (<code>~/.agentstack/lib</code>), then reference it <strong>by name</strong> from any project.</p>
-    <div class="viz" data-viz>
-      <p class="viz-cap"><span class="d"></span>install once · reference by name</p>
-      <div class="pipe">
-        <div class="stage" style="--d:.05s"><div class="ic">+</div><div class="lbl">lib add</div><div class="sub">content-scanned first</div></div>
-        <div class="conn" style="--d:.4s"></div>
-        <div class="stage hot" style="--d:.55s"><div class="ic">◫</div><div class="lbl">~/.agentstack/lib</div><div class="sub">machine-wide</div></div>
-        <div class="conn" style="--d:.9s"></div>
-        <div class="stage good" style="--d:1.05s"><div class="ic">⇉</div><div class="lbl">by name</div><div class="oc">project A · B · C<br>no files copied</div></div>
-      </div>
-    </div>
-    <div class="copywrap">
-      <pre><code>agentstack search codex                          <span class="cm"># find shipped skills + registry servers</span>
-agentstack lib add sql-review --path ./skills/sql-review --write
-
-<span class="cm"># straight from a git repo, including monorepo subdirs:</span>
-agentstack lib add improve --git https://github.com/acme/skills \
-    --subpath skills/improve --write
-
-agentstack lib list                              <span class="cm"># what's installed, with provenance</span></code></pre>
-      <button class="copybtn" data-copy="agentstack lib list">copy</button>
-    </div>
-    <p class="muted small">Then in any profile: <code>skills = ["sql-review"]</code> resolves from the library. Every add is content-scanned (hidden-Unicode / prompt-injection) before it lands.</p>
+    <p class="intent">Install a capability <strong>once</strong> into your machine-wide library (<code>~/.agentstack/lib</code>), then reference it <strong>by name</strong> from any project — nothing copied, and every add is content-scanned before it lands.</p>
+    <p class="muted small">See <a href="library.html#quickstart">the central library quick start</a> for the full <code>lib add</code> flow.</p>
 
     <h3 class="ex" id="e15"><span class="num">15</span> Sync the library across machines</h3>
-    <p class="intent">Version the library as a git repo. A fail-closed gate scans every server field <strong>and the outgoing commits</strong> for secrets before pushing.</p>
-    <div class="copywrap">
-      <pre><code>agentstack lib sync --init --remote git@github.com:you/agent-lib.git
-agentstack lib sync                              <span class="cm"># commit local changes, pull, push</span></code></pre>
-      <button class="copybtn" data-copy="agentstack lib sync">copy</button>
-    </div>
-    <p class="result">Result</p>
-    <p class="muted small">A literal secret in a definition — or a definition it can't parse — <strong>blocks the sync</strong> rather than slipping through.</p>
+    <p class="intent">Version the library as a git repo with <code>agentstack lib sync</code> — a fail-closed gate scans every server field <strong>and the outgoing commits</strong> for secrets before pushing.</p>
+    <p class="muted small">A literal secret, or a definition it can't parse, blocks the sync rather than slipping through. See <a href="library.html#commands">the library command reference</a>.</p>
 
     <h3 class="ex" id="e16"><span class="num">16</span> Versioned vendor packs</h3>
-    <p class="intent">Install a pinned bundle of MCP + skills + house-rules in one shot, policy-gated and content-scanned first.</p>
-    <div class="copywrap">
-      <pre><code>agentstack add from git:github.com/acme/pack@v1.2.0</code></pre>
-      <button class="copybtn" data-copy="agentstack add from git:github.com/acme/pack@v1.2.0">copy</button>
-    </div>
-    <p class="muted small">Upgrading is just the next tag — the lockfile records exactly what you got.</p>
+    <p class="intent">Install a pinned bundle of MCP servers, skills, and house rules in one shot — policy-gated and content-scanned first, with the lockfile recording exactly what you got.</p>
+    <p class="muted small">Upgrading is just the next tag. See <a href="library.html#sandbox">the runnable closed-loop demo</a> of a pack installed, applied, firewalled, and upgraded.</p>
 
     <h3 class="ex" id="e17"><span class="num">17</span> Adopt a native plugin</h3>
     <p class="intent">Lift a plugin you installed in one CLI into the manifest so it travels everywhere — skills copied to the library with provenance, servers carried as <code>${REF}</code>s.</p>
-    <div class="copywrap">
-      <pre><code>agentstack plugins adopt cloudflare --harness codex --write
-agentstack plugins sync --write                  <span class="cm"># generate native packages + marketplaces</span>
-agentstack plugins install cloudflare --target claude-code --write</code></pre>
-      <button class="copybtn" data-copy="agentstack plugins adopt cloudflare --harness codex --write">copy</button>
-    </div>
-    <p class="muted small">The harness you adopted <em>from</em> stays satisfied by its native install — <code>status</code>/<code>doctor</code> report it up to date and flag drift, never double-installing.</p>
+    <p class="muted small">The harness you adopted <em>from</em> stays satisfied by its native install — <code>status</code>/<code>doctor</code> report it up to date rather than double-installing. See <a href="library.html#views">how agentstack owns provider views</a>.</p>
   </section>
 
   <!-- ============ RUNTIME ============ -->

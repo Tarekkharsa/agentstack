@@ -1,0 +1,34 @@
+# One manifest — the portable source of truth for a whole team's agent setup.
+#
+# This single file is what a human authors and commits. `agentstack apply`
+# compiles it into each CLI's *native* config format — you never hand-edit
+# .mcp.json, .codex/config.toml, or .cursor/mcp.json again, and you never let
+# three tools drift out of sync.
+#
+# Note what is NOT here: any secret value. The manifest holds only a `${REF}`
+# placeholder; the real token is resolved per-machine at render time.
+version = 1
+
+# Fan-out targets: the same declarations below render into all three CLIs.
+[targets]
+default = ["claude-code", "codex", "cursor"]
+
+# One MCP server, declared once. Each adapter emits it in its own native shape
+# (Claude tags `type = "stdio"`; Codex uses an [mcp_servers.<name>] table with
+# an env subtable; Cursor infers the transport and omits the tag).
+[servers.github]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+# The secret is a placeholder, never a literal. Resolved at apply time from the
+# environment (env → varlock → OS keychain → .env), fail-closed if unset.
+env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_TOKEN}" }
+
+# One portable instruction fragment. It compiles into each harness's native
+# instructions file (CLAUDE.md for Claude Code; AGENTS.md for Codex, which
+# Cursor also reads) inside a managed marker block.
+[instructions.guardrails]
+path = "team-guardrails.md"
+
+[profiles.default]
+servers = ["github"]

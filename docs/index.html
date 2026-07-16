@@ -373,6 +373,16 @@
   .fcard a.tag::after { content: "→"; transition: transform 0.14s ease; }
   .fcard:hover a.tag::after { transform: translateX(3px); }
 
+  /* ---------- "see it work" strip: four compact example cards ---------- */
+  #see-it { margin-top: 2.6rem; }
+  .seeit { margin: 1rem 0 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; }
+  .seeit .fcard { padding: 0.95rem 1rem; }
+  .seeit .fcard h3 { font-size: 0.9rem; margin-bottom: 0.35rem; }
+  .seeit .fcard p { font-size: 0.84rem; line-height: 1.5; }
+  .seeit .fcard .tag { margin-top: 0.7rem; font-size: 0.66rem; }
+  @media (max-width: 760px) { .seeit { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 460px) { .seeit { grid-template-columns: 1fr; } }
+
   /* ---------- footer ---------- */
   footer { border-top: 1px solid var(--line); margin-top: 6rem; background: var(--line-soft); }
   footer .bar { padding: 1.6rem 1.35rem; font-size: 0.85rem; color: var(--muted); flex-wrap: wrap; }
@@ -422,22 +432,21 @@
 
 <main id="main">
 
-  <section id="hero" style="margin-top:3.5rem">
-    <p class="eyebrow">Configure · package · govern · run · observe · 13 agent CLIs</p>
-    <h1>Build, govern, and run<br>your agent stack.<span class="cursor" aria-hidden="true"></span></h1>
+  <section id="hero" style="margin-top:2.25rem">
+    <p class="eyebrow" style="margin-bottom:0.5rem">Configure · package · govern · run · observe · 13 agent CLIs</p>
+    <h1 style="margin:0.7rem 0 0.8rem">Build, govern, and run<br>your agent stack.<span class="cursor" aria-hidden="true"></span></h1>
     <p class="lede">
-      Define servers, skills, instructions, settings, hooks, plugins, profiles,
-      and secrets once. AgentStack turns that source of truth into native config
-      across 13 agent CLIs, installs and pins capabilities, activates profiles
-      per task, enforces machine-owned policy, runs agents under optional
-      lockdown, and records the evidence you need to audit and optimize the stack.
+      Define servers, skills, instructions, and secrets once. AgentStack compiles
+      that source of truth into native config across 13 agent CLIs, enforces
+      machine-owned policy, runs agents under optional lockdown, and records the
+      evidence to audit the stack.
     </p>
-    <div class="cta">
+    <div class="cta" style="margin-top:1.1rem">
       <a class="btn primary" href="start.html">Get started · 10 min →</a>
       <a class="btn secondary" href="#install">Install</a>
     </div>
 
-    <div class="term" data-replay>
+    <div class="term" data-replay style="margin-top:1.2rem">
       <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → trust → firewalled → logged</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
       <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack connect --all --write</span><span class="c">     # once: the gateway, in every CLI</span></span>
 <span class="row cmd"><span class="p">$</span> <span class="t">git clone some-repo &amp;&amp; cd some-repo</span><span class="c">  # declares servers you've never seen</span></span>
@@ -474,6 +483,32 @@
         <b>Contain, record, improve</b>
         <small>Reversible sessions, optional lockdown, reports, and optimization.</small>
       </a>
+    </div>
+  </section>
+
+  <section id="see-it">
+    <p class="eyebrow">See it work</p>
+    <div class="seeit" aria-label="Runnable examples of the security model">
+      <div class="fcard">
+        <h3><a href="examples.html#e13">The trust gate</a></h3>
+        <p>A cloned repo is inert — no server spawned, no secret resolved — until you review and consent.</p>
+        <a class="tag" href="examples.html#e13">Example 13</a>
+      </div>
+      <div class="fcard">
+        <h3><a href="examples.html#e10">The MCP tool firewall</a></h3>
+        <p>Denied tools are invisible in discovery and refused if called anyway.</p>
+        <a class="tag" href="examples.html#e10">Example 10</a>
+      </div>
+      <div class="fcard">
+        <h3><a href="examples.html#e18">Sandboxed runs</a></h3>
+        <p>No host route, no internet — the only way out is the egress proxy.</p>
+        <a class="tag" href="examples.html#e18">Example 18</a>
+      </div>
+      <div class="fcard">
+        <h3><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guardrails</a></h3>
+        <p>Cooperative hooks block <code>rm -rf</code> and <code>.env</code> reads across 9 CLIs.</p>
+        <a class="tag" href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">guard-demo</a>
+      </div>
     </div>
   </section>
 
@@ -729,17 +764,17 @@
         </thead>
         <tbody>
           <tr><th scope="row">Tools</th>
-            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;†</span></td><td><span class="cell e">enforced&thinsp;†</span></td></tr>
+            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;†</span></td><td><span class="cell e">enforced</span></td></tr>
           <tr><th scope="row">Egress</th>
-            <td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">enforced&thinsp;*</span></td><td><span class="cell e">enforced</span></td></tr>
+            <td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td><td><span class="cell e">enforced&thinsp;*</span></td><td><span class="cell e">enforced</span></td></tr>
           <tr><th scope="row">Secrets</th>
-            <td><span class="cell e">enforced</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;‡</span></td><td><span class="cell e">enforced&thinsp;‡</span></td></tr>
+            <td><span class="cell e">enforced</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;‡</span></td><td><span class="cell e">enforced</span></td></tr>
           <tr><th scope="row">Filesystem — write</th>
             <td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
           <tr><th scope="row">Filesystem — read</th>
             <td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
           <tr><th scope="row">Audit / recording</th>
-            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;§</span></td><td><span class="cell e">enforced&thinsp;§</span></td></tr>
+            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;§</span></td><td><span class="cell e">enforced</span></td></tr>
         </tbody>
       </table>
     </div>

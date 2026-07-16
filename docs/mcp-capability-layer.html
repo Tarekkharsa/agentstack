@@ -51,6 +51,7 @@
   .flow{display:grid;grid-template-columns:1fr 38px 1fr 38px 1fr;align-items:stretch;margin-top:2rem}.flow .step{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:1.2rem}.flow .step b{font:700 .93rem var(--mono);display:block;margin-bottom:.45rem}.flow .step p{font-size:.85rem;color:var(--muted);margin:0}.flow .arr{display:grid;place-items:center;color:var(--accent);font:700 1.4rem var(--mono)}
   .priority{counter-reset:item;list-style:none;padding:0;margin:2rem 0 0}.priority li{counter-increment:item;position:relative;padding:1.15rem 1.2rem 1.15rem 4.1rem;margin-bottom:.75rem;background:var(--surface);border:1px solid var(--line);border-radius:12px}.priority li:before{content:counter(item);position:absolute;left:1.15rem;top:1.2rem;width:2rem;height:2rem;display:grid;place-items:center;border-radius:7px;background:var(--accent-soft);color:var(--accent);font:750 .82rem var(--mono)}.priority b{font-family:var(--mono)}.priority p{color:var(--muted);font-size:.92rem;margin:.35rem 0 0}
   .boundary{padding:1.4rem 1.55rem;border:1px dashed var(--accent);border-radius:var(--radius);background:var(--accent-soft)}.boundary b{font-family:var(--mono)}.boundary p{margin:.4rem 0 0;color:var(--muted)}
+  .status-banner{margin-top:1.8rem;padding:1rem 1.3rem;border:1px solid var(--accent);border-radius:var(--radius);background:var(--accent-soft);color:var(--muted);font-size:.92rem;line-height:1.6}.status-banner b{color:var(--accent);font-family:var(--mono)}
   footer{margin-top:5rem;padding-top:1.5rem;border-top:1px solid var(--line);font:.8rem var(--mono);color:var(--muted)}
   @keyframes arrive{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
   @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}h1{animation:none}.figure svg{transition:none}.figure:hover svg{transform:none}}
@@ -68,6 +69,14 @@
     <h1>Beyond MCP <span>connectors.</span></h1>
     <p class="lede">What changes when MCP becomes a <strong>capability layer</strong>—and why agentstack is unusually well positioned to make generated capabilities trusted, portable, constrained, and observable.</p>
     <p class="source">Inspired by Adam’s “I was wrong about MCPs.” <a href="https://x.com/_overment/status/2076440928726708612">Read the original article on X ↗</a></p>
+    <div class="status-banner"><b>POINT-IN-TIME DESIGN MEMO · JULY 2026</b><br>
+      This page captures a design discussion about the experimental,
+      machine-opt-in <code>tools_execute</code> surface as it stood in July
+      2026; it is not a feature guide and is not kept current. For the
+      current status, see the <a href="ENFORCEMENT.md#experimental-tools_execute">enforcement
+      matrix</a> and <a href="reference.md#experimental-tools_execute">reference
+      docs</a>.
+    </div>
   </header>
 
   <section aria-label="Verdict">

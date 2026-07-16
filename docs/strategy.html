@@ -22,10 +22,11 @@
 <header class="site"><div class="bar"><a class="wordmark" href="./">agentstack</a><nav aria-label="Project links"><a href="how-it-works.html">how it works</a><a href="primitives.html">primitives</a><a href="examples.html">examples</a><a href="strategy.html" aria-current="page">strategy</a><a href="start.html">get started →</a></nav></div></header>
 <main id="main">
   <header class="hero">
-    <p class="eyebrow">Strategy · detailed public plan · 15 July 2026</p>
+    <p class="eyebrow">Strategy · detailed public plan · 16 July 2026</p>
     <h1>Give every agent only what it needs—and prove what it did.</h1>
     <p class="lede">AgentStack is becoming the vendor-neutral trust, policy, and workflow control plane for agent-enabled repositories. Portability creates adoption. Enforced grants and evidence create differentiation. Team coordination creates revenue.</p>
-    <div class="status"><span class="pill done">D4 lockdown · merged</span><span class="pill done">machine policy hardening · merged</span><span class="pill current">current · Phase 0A + 0B</span><span class="pill">later work · gated</span></div>
+    <div class="status"><span class="pill done">D4 lockdown · merged</span><span class="pill done">machine policy hardening · merged</span><span class="pill current">current · Phase 0A minimum version</span><span class="pill">Phase 0B · deferred</span><span class="pill">later work · gated</span></div>
+    <div class="callout"><p><strong>Scope decision (2026-07-16):</strong> the maintainer has scoped current work to a minimum version — finish the locked-run keystone and close the gaps in already-implemented machinery, then stop. Phase 0B (validation and distribution) and everything past the minimum-version cut are deferred, explicitly and not silently, until the cut ships and there is time or a reason to seek external users. The success criterion for the cut is “trustworthy for the maintainer's own daily repositories.” The exact cut line lives in <a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md">TODO.md</a>; the phase gates below remain the bar for calling any phase complete.</p></div>
   </header>
 
   <section id="sources">
@@ -86,9 +87,10 @@
   </section>
 
   <section id="phase-0b">
-    <p class="eyebrow">Current market lane · parallel</p>
+    <p class="eyebrow">Deferred lane · maintainer decision 2026-07-16</p>
     <h2>Phase 0B — validate the problem and distribution.</h2>
-    <p class="intro">Conduct 20 problem interviews, reach five people asking to try AgentStack, test the folder-access and repeated-workflow problems, publish the clone-as-consent story and demos, and find a repeatable path to unassisted activation.</p>
+    <p class="intro">Deferred by maintainer scope decision (2026-07-16) until the minimum-version cut ships or a concrete external pull — a user, design partner, or deadline — justifies reopening it. When resumed: conduct 20 problem interviews, reach five people asking to try AgentStack, test the folder-access and repeated-workflow problems, publish the clone-as-consent story and demos, and find a repeatable path to unassisted activation.</p>
+    <div class="callout"><p><strong>Moved into the minimum-version cut:</strong> two of this lane's assets — the recorded demo clips and the README/homepage rewrite — moved into the Phase 0A minimum-version cut the same day, because a visitor must see the value immediately. Interviews, publishing, and outreach stay deferred here.</p></div>
     <div class="grid">
       <article class="card"><span class="id">INTERVIEWS</span><h3>Observe current behavior</h3><p>Ask what people inspect after cloning, who approves MCP servers, skills, hooks, and secrets, where configuration drifts, which folders a real task may read or edit, and which task repeats enough to save.</p></article>
       <article class="card"><span class="id">DISTRIBUTION</span><h3>Lead with repository consent</h3><p>Publish malicious-repository, compromised-MCP-server, and changed-pinned-byte demos; document the GitHub Action; target agent-heavy developers, platform teams, AppSec, and maintainers before a broad launch.</p></article>
