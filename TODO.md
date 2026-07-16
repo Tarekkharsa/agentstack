@@ -94,14 +94,31 @@ unwired machinery.
   launch-scoped MCP config with cooperative host guards → recorded outcome.
   Lands `RunEnvelope` (contract §6.2) and the material checked-append recorder
   events (contract §9); consumes the staged `grant.rs`/`verify.rs` surface.
+  - **Landed (needs line-by-line review):** everything through GrantFrozen +
+    launch + recorded outcome, the checked-append recorder events, `--plan`
+    (aggregates all blockers, mutates nothing, digest equals the live run's),
+    and loud named-limitation errors for `--locked --profile` / `--sandbox`.
+    Verified live: drift refusal, trust re-gate, admission (unclassifiable
+    host), clean run with real harness.
+  - **Remaining before this checks off:** fallible gateway consumption +
+    launch-scoped MCP config with host guards (printed today as a standalone
+    ⚠ known limit), and `RunEnvelope` as a named type (run id + recorder
+    identity + grant digest currently ride the events directly).
   - The wiring must assert a `GrantedServer`'s definition digest was honestly
     derived from its stored `Server` bytes (carried 3b-ii review note).
-- [ ] Call `Lock::retain_executables` in `record_lock` so a removed server or
-  integrity root prunes its `[[executable]]` pins (stale-pin gap; mirror
-  `retain_instruction_names`).
-- [ ] Witness: a one-byte D3 executable edit fails locked verification before
+    (Done: `GrantedServer::from_resolved` is the only wiring constructor.)
+- [x] Call `Lock::retain_executables` so a removed server or integrity root
+  prunes its `[[executable]]` pins (stale-pin gap; mirror
+  `retain_instruction_names`). (In the strict manifest-global
+  `record_executable_pins` — the profile-scoped `record_lock` first-pin path
+  sees only a subset of servers and must never prune; pruning also skips when
+  any server ref fails to resolve, so an incomplete picture can't drop live
+  pins.)
+- [x] Witness: a one-byte D3 executable edit fails locked verification before
   launch and re-gates review; intentionally unpinned code is labelled
-  honestly. (Falls out of the locked-flow tests — contract §10 item 3.)
+  honestly. (`one_byte_executable_edit_refuses_before_launch_and_is_recorded`
+  + the digest/verifier/lock-cmd layer witnesses; unbound surface labelled in
+  the trust preview and locked posture output.)
 - [ ] README restructure: pain-led hero, 60-second start, three proof blocks
   (guard, trust gate, one-manifest-everywhere), experimental features moved
   out of the beginner path. Includes the honesty pass — every claim matches

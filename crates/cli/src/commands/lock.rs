@@ -33,6 +33,17 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // undeclared names are pruned.
     let instructions = record_instruction_pins(&ctx.dir, manifest, true)?;
 
+    let library = Library::load_default()?;
+    let lib_home = crate::util::paths::lib_home();
+
+    // The D3 executable surface is manifest-global too: it derives from the
+    // EFFECTIVE runtime server set (inline `[servers.*]` fan-out included),
+    // not from profiles — a profile-less manifest still declares runnable
+    // local code, and the trust gate blocks unpinned executables, so `lock`
+    // must be able to pin them or a profile-less project could never be
+    // trusted at all.
+    let executables = record_executable_pins(&ctx.dir, manifest, &library, &lib_home)?;
+
     let profiles: Vec<String> = match &args.profile {
         Some(p) => {
             manifest
@@ -44,21 +55,19 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         None => manifest.profiles.keys().cloned().collect(),
     };
     if profiles.is_empty() {
-        if instructions > 0 {
+        if instructions > 0 || executables > 0 {
             println!(
-                "{} pinned {instructions} instruction(s) in {}",
+                "{} pinned {instructions} instruction(s) + {executables} executable pin(s) in {}",
                 "✓".green(),
                 Lock::path(&ctx.dir).display()
             );
-            println!("  manifest defines no profiles — no skills or servers to pin.");
+            println!("  manifest defines no profiles — no skills or profile servers to pin.");
         } else {
             println!("Manifest defines no profiles — nothing to lock.");
         }
         return Ok(());
     }
 
-    let library = Library::load_default()?;
-    let lib_home = crate::util::paths::lib_home();
     let store = crate::store::Store::default_store();
 
     let (skills, servers) =
@@ -66,12 +75,13 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     record_lock(&ctx.dir, &skills, &servers, manifest, &library)?;
 
     println!(
-        "{} pinned {} skill(s) + {} server(s) from {} profile(s) + {} instruction(s) in {}",
+        "{} pinned {} skill(s) + {} server(s) from {} profile(s) + {} instruction(s) + {} executable pin(s) in {}",
         "✓".green(),
         skills.len(),
         servers.len(),
         profiles.len(),
         instructions,
+        executables,
         Lock::path(&ctx.dir).display()
     );
     println!(
@@ -125,6 +135,53 @@ pub(crate) fn record_instruction_pins(
         lock.retain_instruction_names(&declared);
     }
     // Don't churn the lockfile (or the trust digest) for a byte-identical pin.
+    if lock != before {
+        lock.save(dir)?;
+    }
+    Ok(pinned)
+}
+
+/// Pin the D3 executable surface of the EFFECTIVE runtime server set (inline
+/// fan-out + every profile-referenced name; the same set the trust preview,
+/// doctor, and a locked run verify). Strict like the instruction pins: an
+/// unverifiable local candidate (symlink, traversal, broken declared root) is
+/// an error, and stale pins are PRUNED — a removed server or un-declared
+/// integrity root must not leave a dead pin masking the surface (mirror of
+/// `retain_instruction_names`; the profile-scoped `record_lock` first-pin path
+/// never prunes, since it only sees a subset of servers). Unresolvable server
+/// refs are skipped here — the profile resolution below (or the use path)
+/// reports those; their existing pins are retained, never pruned on a broken
+/// resolution. Returns how many pinned.
+pub(crate) fn record_executable_pins(
+    dir: &Path,
+    manifest: &Manifest,
+    library: &Library,
+    lib_home: &Path,
+) -> Result<usize> {
+    let mut lock = Lock::load(dir)?;
+    let before = lock.clone();
+    let mut pinned = 0usize;
+    let mut keep: Vec<(String, agentstack_core::lock::ExecutableKind)> = Vec::new();
+    let mut all_resolved = true;
+    for (name, resolved) in
+        crate::resolve::effective_runtime_servers(manifest, library, lib_home, None)
+    {
+        let Ok(r) = resolved else {
+            all_resolved = false;
+            continue;
+        };
+        for pin in crate::executable::derive_executable_pins(dir, &name, &r.server)? {
+            keep.push((pin.path.clone(), pin.kind));
+            lock.upsert_executable(pin);
+            pinned += 1;
+        }
+    }
+    // Prune only from a complete picture: if any server failed to resolve, its
+    // executable surface is unknown, and pruning would drop live pins.
+    if all_resolved {
+        lock.retain_executables(&keep);
+    }
+    // Don't churn the lockfile (or the trust digest) for byte-identical pins.
     if lock != before {
         lock.save(dir)?;
     }
@@ -321,6 +378,41 @@ mod tests {
                 .checksum,
             root.checksum
         );
+    }
+
+    #[test]
+    fn removing_a_server_or_root_prunes_its_executable_pins() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let library = Library::default();
+        proj.child("tool.sh").write_str("echo").unwrap();
+        proj.child("tools/lib.py").write_str("v1").unwrap();
+
+        let with_root: Manifest = toml::from_str(
+            "version = 1\n[servers.agent]\ntype = \"stdio\"\ncommand = \"./tool.sh\"\nintegrity_roots = [\"tools\"]\n",
+        )
+        .unwrap();
+        record_executable_pins(proj.path(), &with_root, &library, lib_home.path()).unwrap();
+        assert_eq!(Lock::load(proj.path()).unwrap().executables.len(), 2);
+
+        // Un-declaring the root prunes its pin; the command pin survives.
+        let without_root: Manifest = toml::from_str(
+            "version = 1\n[servers.agent]\ntype = \"stdio\"\ncommand = \"./tool.sh\"\n",
+        )
+        .unwrap();
+        record_executable_pins(proj.path(), &without_root, &library, lib_home.path()).unwrap();
+        let lock = Lock::load(proj.path()).unwrap();
+        assert_eq!(lock.executables.len(), 1);
+        use agentstack_core::lock::ExecutableKind;
+        assert!(lock
+            .get_executable("tool.sh", ExecutableKind::File)
+            .is_some());
+        assert!(lock.get_executable("tools", ExecutableKind::Root).is_none());
+
+        // Removing the server entirely prunes everything.
+        let empty: Manifest = toml::from_str("version = 1\n").unwrap();
+        record_executable_pins(proj.path(), &empty, &library, lib_home.path()).unwrap();
+        assert!(Lock::load(proj.path()).unwrap().executables.is_empty());
     }
 
     #[test]

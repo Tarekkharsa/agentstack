@@ -329,7 +329,7 @@ fn review_policy(p: &crate::manifest::Policy) {
 /// plus every profile-referenced name (which may resolve to the central
 /// library), deduped in first-seen order. The `"*"` wildcard expands to inline
 /// skills only — the same rule as activation — so it adds nothing new here.
-fn review_skill_names(m: &crate::manifest::Manifest) -> Vec<String> {
+pub(crate) fn review_skill_names(m: &crate::manifest::Manifest) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     let push = |n: &str, names: &mut Vec<String>| {
         if n != "*" && !names.iter().any(|x| x == n) {

@@ -206,10 +206,27 @@ pub fn executable_lock_statuses(
     servers: &[(String, Server)],
     lock: &agentstack_core::lock::Lock,
 ) -> Vec<(String, ExecutableLockStatus)> {
-    let mut out = Vec::new();
+    executable_lock_statuses_and_pins(project_dir, servers, lock).0
+}
+
+/// [`executable_lock_statuses`] plus the derived pins themselves, keyed by
+/// owning server. The locked run freezes EXACTLY these content identities into
+/// the grant — the same derivation the verify gate judged, never a second one
+/// between check and freeze.
+#[allow(clippy::type_complexity)]
+pub fn executable_lock_statuses_and_pins(
+    project_dir: &Path,
+    servers: &[(String, Server)],
+    lock: &agentstack_core::lock::Lock,
+) -> (
+    Vec<(String, ExecutableLockStatus)>,
+    Vec<(String, LockedExecutable)>,
+) {
+    let mut statuses = Vec::new();
+    let mut derived = Vec::new();
     for (name, server) in servers {
         match derive_executable_pins(project_dir, name, server) {
-            Err(e) => out.push((
+            Err(e) => statuses.push((
                 format!("server '{name}' local executables"),
                 ExecutableLockStatus::ResolveFailed {
                     error: format!("{e:#}"),
@@ -235,12 +252,13 @@ pub fn executable_lock_statuses(
                         }
                         Some(_) => ExecutableLockStatus::Matches,
                     };
-                    out.push((label, status));
+                    statuses.push((label, status));
+                    derived.push((name.clone(), pin));
                 }
             }
         }
     }
-    out
+    (statuses, derived)
 }
 
 /// Normalize a declared path to its lock key: `Normal` components joined with

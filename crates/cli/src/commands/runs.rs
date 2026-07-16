@@ -10,6 +10,12 @@ use owo_colors::OwoColorize;
 use crate::cli::{KillArgs, RunArgs, RunsArgs};
 
 pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
+    // --locked promotes the host run to the Protected tier (fail-closed gates
+    // before launch). It owns its combination rules — --locked --sandbox is a
+    // named not-yet limitation there, not a silent fall-through.
+    if args.locked {
+        return crate::commands::locked::run_locked(dir, args);
+    }
     // --lockdown is the stronger sandbox mode; it implies --sandbox.
     if args.sandbox || args.lockdown {
         return crate::commands::sandbox::run_sandboxed(dir, args);

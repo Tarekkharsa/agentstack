@@ -349,6 +349,43 @@ pub enum RunEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         code: Option<i32>,
     },
+    /// A locked host-run attempt opened — emitted BEFORE any gate (locked-run
+    /// contract §3 step 2), so a refusal is itself recorded evidence. Carries
+    /// invocation identity only: never argv (caller-supplied, possibly
+    /// secret-bearing; §4) and no grant digest (the grant is not frozen yet).
+    AttemptStarted {
+        ts: u64,
+        harness: String,
+        posture: String,
+    },
+    /// One pre-launch gate's decision (trust / locked-verify /
+    /// policy-admission). Emitted before the grant freeze, so it carries no
+    /// grant digest by construction (§9). `detail` is the observed state or
+    /// the refusal text — never secret values, never raw argv.
+    GateDecision {
+        ts: u64,
+        gate: String,
+        passed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    /// The `AuthorityGrant` froze (§3 step 6). Every material event from here
+    /// on can carry this digest.
+    GrantFrozen { ts: u64, grant_digest: String },
+    /// Terminal outcome of a locked run attempt: a pre-launch refusal (no
+    /// grant digest), a launch failure, or the harness exit. `usage` carries
+    /// observed token/cost evidence or the literal `"unavailable"` — never a
+    /// fabricated value or a zero standing in for unknown (§9).
+    LockedOutcome {
+        ts: u64,
+        outcome: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
+        duration_ms: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        grant_digest: Option<String>,
+        usage: String,
+    },
 }
 
 /// The append-only event log for one sandboxed run.
@@ -427,6 +464,31 @@ impl RunLog {
         if let Ok(mut f) = opts.open(&path) {
             let _ = f.write_all(line.as_bytes());
         }
+    }
+
+    /// Append one event with a **checked** write: any serialization, open, or
+    /// write failure is returned to the caller instead of swallowed.
+    ///
+    /// This is what the locked-run contract's material events (attempt, gate
+    /// decisions, `GrantFrozen`, terminal outcome) require: "successfully
+    /// appended" means the write returned without error — NOT crash-durable
+    /// `fsync` — and a run must refuse to proceed when a material event cannot
+    /// be recorded (§3 step 2, §9). Best-effort telemetry keeps [`append`].
+    pub fn append_checked(&self, ev: &RunEvent) -> std::io::Result<()> {
+        let mut line = serde_json::to_string(ev)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        // Same single-buffer O_APPEND discipline as `append` (torn-line
+        // avoidance under concurrent writers).
+        line.push('\n');
+        let path = self.path();
+        let mut opts = fs::OpenOptions::new();
+        opts.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        opts.open(&path)?.write_all(line.as_bytes())
     }
 
     /// Read a run's events, oldest first. Unparseable lines are skipped (a

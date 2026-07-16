@@ -168,49 +168,74 @@ pub fn launch(
     // agent makes through `agentstack mcp` land in the audit log attributed
     // to this run.
     let id = gen_id();
-    let mut child = match spawn_child(&bin, extra_args, &dir, &id) {
-        Ok(c) => c,
+    let status = match launch_attached(
+        &bin, extra_args, &dir, &id, harness, &display, profile, scope,
+    ) {
+        Ok(s) => s,
         Err(e) => {
             if started_session && !keep {
                 let _ = crate::session::end(manifest_dir);
             }
-            return Err(e).with_context(|| format!("launching {display}"));
+            return Err(e);
         }
     };
+    if started_session && !keep {
+        let _ = crate::session::end(manifest_dir);
+    }
+    // As before this was extracted: the harness's own exit code is its
+    // business — only a wait/spawn failure is an error here.
+    let _ = status;
+    Ok(())
+}
+
+/// Spawn `bin` attached to this terminal under an EXISTING run id, track it in
+/// the run registry, and block until it exits. The caller owns the id (the
+/// locked flow creates it before its gates so refusals are recorded under the
+/// same identity the child would have carried) and owns interpreting the exit
+/// status. No profile logic here — `launch` layers that on top.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_attached(
+    bin: &str,
+    extra_args: &[String],
+    dir: &Path,
+    id: &str,
+    harness: &str,
+    display: &str,
+    profile: Option<&str>,
+    scope: Scope,
+) -> Result<std::process::ExitStatus> {
+    let mut child =
+        spawn_child(bin, extra_args, dir, id).with_context(|| format!("launching {display}"))?;
     let pid = child.id() as i32;
     let rec = RunRecord {
-        id: id.clone(),
+        id: id.to_string(),
         pid,
         harness: harness.to_string(),
-        display,
-        command: bin,
+        display: display.to_string(),
+        command: bin.to_string(),
         args: extra_args.to_vec(),
         cwd: dir.to_string_lossy().into_owned(),
         profile: profile.map(String::from),
         scope: profile.map(|_| scope.as_str().to_string()),
         started_unix: now_secs(),
-        started_session,
+        started_session: false,
     };
     {
         let mut map = load_all();
-        map.insert(id.clone(), rec);
+        map.insert(id.to_string(), rec);
         let _ = save_all(&map);
     }
 
     // Block until the harness exits (or is killed — from here or the dashboard).
     let status = child.wait();
 
-    // Clean up regardless of how it exited: drop the record, revert the profile.
+    // Clean up regardless of how it exited: drop the record.
     {
         let mut map = load_all();
-        map.remove(&id);
+        map.remove(id);
         let _ = save_all(&map);
     }
-    if started_session && !keep {
-        let _ = crate::session::end(manifest_dir);
-    }
-    status?;
-    Ok(())
+    Ok(status?)
 }
 
 /// How long to wait for a graceful `SIGTERM` before escalating to `SIGKILL`.

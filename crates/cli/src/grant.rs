@@ -751,6 +751,56 @@ pub struct Invocation {
     profile: ProfileEffect,
 }
 
+impl ProjectIdentity {
+    pub(crate) fn new(root: GrantPath, consent: ConsentDigest) -> ProjectIdentity {
+        ProjectIdentity { root, consent }
+    }
+}
+
+impl HarnessExecutable {
+    /// Phase 0A: the harness binary is always an external `$PATH` binary and
+    /// never pinned (contract §3.1) — the only constructible integrity state.
+    pub(crate) fn external(path: GrantPath) -> HarnessExecutable {
+        HarnessExecutable {
+            path,
+            integrity: HarnessIntegrity::ExternalUnpinned,
+        }
+    }
+}
+
+impl Invocation {
+    pub(crate) fn new(
+        adapter: GrantedAdapter,
+        executable: HarnessExecutable,
+        argv: Vec<String>,
+        cwd: GrantPath,
+        profile: ProfileEffect,
+    ) -> Invocation {
+        Invocation {
+            adapter,
+            executable,
+            argv,
+            cwd,
+            profile,
+        }
+    }
+}
+
+impl PolicyProvenance {
+    pub(crate) fn new(machine: PolicySource, project: PolicySource) -> PolicyProvenance {
+        PolicyProvenance { machine, project }
+    }
+}
+
+impl PolicyGrant {
+    pub(crate) fn new(ruleset: CompiledRuleset, provenance: PolicyProvenance) -> PolicyGrant {
+        PolicyGrant {
+            ruleset,
+            provenance,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct GrantedSkill {
     // NOTE: `origin` (inline vs library) and `source` (path vs git) are
@@ -773,6 +823,66 @@ pub struct GrantedInstruction {
 pub struct GrantedServer {
     server: agentstack_core::manifest::Server,
     binding: GrantedServerBinding,
+}
+
+impl GrantedSkill {
+    pub(crate) fn new(
+        path: GrantPath,
+        origin: InputOrigin,
+        source: SkillSource,
+        checksum: ContentDigest,
+        provenance: Option<String>,
+    ) -> GrantedSkill {
+        GrantedSkill {
+            path,
+            origin,
+            source,
+            checksum,
+            provenance,
+        }
+    }
+}
+
+impl GrantedInstruction {
+    /// A project-declared fragment, pinned by the digest strict verification
+    /// proved. (Machine-owned fragments never enter a locked grant — they are
+    /// filtered before assembly, like everywhere else `from_user_layer` is.)
+    pub(crate) fn project_pinned(
+        path: GrantPath,
+        checksum: ContentDigest,
+        targets: BTreeSet<String>,
+    ) -> GrantedInstruction {
+        GrantedInstruction {
+            path,
+            binding: InstructionBinding::ProjectPinned(checksum),
+            targets,
+        }
+    }
+}
+
+impl GrantedServer {
+    /// Bind a server from the resolution machinery's OWN output: the binding
+    /// digest is `resolved.checksum` — computed by `resolve_server` from the
+    /// definition it resolved (inline: the serialized table; library: the
+    /// definition file bytes) — so a caller can never pair a mutated `Server`
+    /// with a stale digest. This is the honest-derivation constructor the
+    /// wiring must use; tests may build literals.
+    pub(crate) fn from_resolved(
+        resolved: &crate::resolve::ResolvedServer,
+    ) -> Result<GrantedServer> {
+        let definition = ContentDigest::parse(&resolved.checksum)?;
+        let binding = match resolved.origin {
+            crate::resolve::ServerOrigin::Inline => GrantedServerBinding::Inline { definition },
+            crate::resolve::ServerOrigin::Library => GrantedServerBinding::Library {
+                definition,
+                provenance: resolved.provenance.clone(),
+            },
+        };
+        Ok(GrantedServer {
+            server: resolved.server.clone(),
+            binding,
+        })
+    }
 }
 
 /// One verified repository-local executable input (D3, contract §8),

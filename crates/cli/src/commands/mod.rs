@@ -21,6 +21,7 @@ pub mod install;
 pub mod instructions;
 pub mod lib;
 pub mod lock;
+pub mod locked;
 pub mod optimize;
 pub mod overview;
 pub mod pack;

@@ -428,6 +428,15 @@ pub struct RunArgs {
     /// Harness/adapter id to launch, e.g. `claude-code` or `codex`.
     pub harness: String,
 
+    /// Promote this host run to the Protected tier (fail-closed): refuse to
+    /// launch unless the project is explicitly trusted, every input in the
+    /// declared integrity surface is pinned and matching, and the declared
+    /// capability requests fit under the machine policy ceiling — recording
+    /// what was decided, including refusals. No Docker required. Not kernel
+    /// isolation: see the printed limits.
+    #[arg(long)]
+    pub locked: bool,
+
     /// Apply this profile's servers + skills for the life of the run.
     #[arg(long, value_name = "NAME")]
     pub profile: Option<String>,
