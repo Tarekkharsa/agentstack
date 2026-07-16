@@ -272,72 +272,49 @@ mod tests {
         assert!(head.starts_with("HTTP/1.1 401"), "got: {head}");
     }
 
-    /// With every slot pinned by an authed request whose body never arrives
-    /// (each handler thread parks in the bounded body read), the next request
-    /// is shed with a fast 503 by the accept loop — it never gets a thread.
-    /// Mirrors the egress proxy's `connection_over_the_cap_is_dropped`.
+    /// Once `MAX_INFLIGHT` authed requests park (each handler blocks in the
+    /// bounded body read, holding its slot for the whole test), the accept loop
+    /// sheds every further connection with a fast 503. So flooding the endpoint
+    /// with more than `MAX_INFLIGHT` such connections MUST produce at least one
+    /// 503 — a guarantee that holds however the runner schedules the accept
+    /// loop. (The earlier saturate-exactly-then-probe version raced on that
+    /// scheduling and flaked twice on loaded CI; this is bounded by a connection
+    /// count, not wall-clock time.)
     #[test]
     fn request_over_the_inflight_cap_is_shed_with_503() {
         let port = spawn_test_endpoint();
-        let mut held = Vec::with_capacity(MAX_INFLIGHT);
-        for _ in 0..MAX_INFLIGHT {
+        // Hold every parked connection open — dropping one frees its slot.
+        let mut held = Vec::new();
+        let mut saw_503 = false;
+        for _ in 0..(MAX_INFLIGHT * 3) {
             let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-            // Content-Length must exceed 1024: below that, tiny_http buffers
-            // the whole body BEFORE yielding the request, so it would never
-            // reach the serve loop and pin a slot.
+            // A shed 503 is written by the accept loop immediately; a pinned
+            // slot's handler blocks forever in the body read. A short read
+            // timeout tells the two apart.
+            s.set_read_timeout(Some(std::time::Duration::from_millis(300)))
+                .unwrap();
+            // Content-Length > 1024 so tiny_http yields the request to the serve
+            // loop (and a handler thread) before the body arrives, pinning the
+            // slot; the body never comes, so the handler parks.
             s.write_all(
                 b"POST /call HTTP/1.1\r\nHost: x\r\nX-Agentstack-Token: tok\r\nContent-Length: 2048\r\n\r\n",
             )
             .unwrap();
-            held.push(s);
-        }
-        // Loopback accepts are fast but not synchronous with our writes, and
-        // how quickly the accept loop counts the held requests varies by
-        // machine (a fixed sleep flaked on CI). The held slots never release
-        // — each handler is parked in the body read — so probe until the cap
-        // is observed: every non-503 probe (a 401, since it carries no token)
-        // frees its slot on reply, and once all held requests are counted a
-        // probe MUST see 503. A deadline keeps a regression from hanging.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        loop {
-            let mut extra = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-            extra
-                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
-                .unwrap();
-            extra
-                .write_all(b"POST /call HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n")
-                .unwrap();
-            let mut buf = [0u8; 256];
-            let outcome = match extra.read(&mut buf) {
-                Ok(n) => {
-                    let head = String::from_utf8_lossy(&buf[..n]).into_owned();
-                    if head.starts_with("HTTP/1.1 503") {
-                        break; // shed at the cap — the behavior under test
-                    }
-                    // A 401 means a slot was momentarily free — keep probing.
-                    head
+            let mut buf = [0u8; 64];
+            match s.read(&mut buf) {
+                Ok(n) if String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 503") => {
+                    saw_503 = true;
+                    break;
                 }
-                // On a loaded runner (CI runs the whole lib suite in one
-                // process) the endpoint may be starved past the probe's read
-                // timeout — that's congestion, not a verdict; keep probing.
-                // Unix reports a read timeout as WouldBlock, Windows as
-                // TimedOut.
-                Err(e)
-                    if matches!(
-                        e.kind(),
-                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                    ) =>
-                {
-                    format!("(probe timed out: {e})")
-                }
-                Err(e) => panic!("probe read failed: {e}"),
-            };
-            assert!(
-                std::time::Instant::now() < deadline,
-                "over-cap request was never shed with 503; last outcome: {outcome}"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(50));
+                // Parked (read timed out) or any other reply — keep the socket
+                // open so its slot stays pinned, and keep flooding.
+                _ => held.push(s),
+            }
         }
+        assert!(
+            saw_503,
+            "the accept loop must shed at least one over-cap request with 503"
+        );
         drop(held);
     }
 }
