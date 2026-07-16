@@ -989,7 +989,10 @@ impl Gateway {
         let (server, tool) = name.split_once("__")?;
         let slot = self.upstreams.iter().find(|u| u.name == server)?;
         let started = Instant::now();
-        if let Err(rule) = self.tool_allowed(server, tool) {
+        if let Err(denial) = self.tool_allowed(server, tool) {
+            // Rendered once: the audit detail and the caller-facing error both
+            // carry the display form (which names the denying layer).
+            let rule = denial.to_string();
             self.log_call(
                 server,
                 tool,
@@ -1042,10 +1045,15 @@ impl Gateway {
 
     /// The effective firewall — one lookup in the compiled ruleset: a tool
     /// must pass the machine `[policy.tools]` AND the project's, machine
-    /// denies win and the error names the layer. Composition semantics and
+    /// denies win and the denial's `layer` names the layer (its `Display`
+    /// still renders that into user-facing errors). Composition semantics and
     /// their tests (⊆ machine, plus live-vs-compiled equivalence) live in
     /// `agentstack-policy`.
-    fn tool_allowed(&self, server: &str, tool: &str) -> Result<(), String> {
+    fn tool_allowed(
+        &self,
+        server: &str,
+        tool: &str,
+    ) -> Result<(), agentstack_policy::PolicyDenial> {
         self.ruleset.tool_decision(server, tool)
     }
 
@@ -1362,9 +1370,9 @@ mod tests {
             frozen: Vec::new(),
         };
         let err = gw.tool_allowed("figma", "post_comment").unwrap_err();
-        assert!(err.contains("machine policy"), "{err}");
+        assert_eq!(err.layer, agentstack_policy::Layer::Machine, "{err}");
         let err = gw.tool_allowed("figma", "delete_file").unwrap_err();
-        assert!(!err.contains("machine policy"), "{err}");
+        assert_eq!(err.layer, agentstack_policy::Layer::Bundle, "{err}");
         assert!(gw.tool_allowed("figma", "get_file").is_ok());
     }
 

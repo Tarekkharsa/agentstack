@@ -14,7 +14,7 @@ pub use load::{
     SUPPORTED_MANIFEST_VERSION,
 };
 pub use model::{
-    egress_match, glob_match, host_from_url, normalize_host, ExperimentalConfig,
+    egress_match, glob_match, host_from_url, normalize_host, Dimension, ExperimentalConfig,
     ExperimentalExecuteLimits, FsPolicy, GuardConfig, Hook, Instruction, Manifest, PluginRecipe,
-    Policy, Profile, Server, ServerType, Skill, SkillSource,
+    Policy, Profile, RuleDenial, Server, ServerType, Skill, SkillSource,
 };

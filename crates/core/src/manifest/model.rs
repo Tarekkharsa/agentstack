@@ -204,6 +204,63 @@ impl FsPolicy {
     }
 }
 
+/// Which policy dimension a rule belongs to. Typed so a refusal carries its
+/// dimension as data, not as a substring of its message — the `Display` form
+/// is the exact `[policy.…]` spelling users write in the manifest, so
+/// rendered errors read the same as before this type existed.
+///
+/// (For the TS-minded: this enum + `match` is a discriminated union with an
+/// exhaustive switch — adding a dimension is a compile error at every
+/// `match`, unlike a new magic string.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dimension {
+    Tools,
+    Egress,
+    Secrets,
+    FsRead,
+    FsWrite,
+    FsDeny,
+}
+
+impl Dimension {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Dimension::Tools => "[policy.tools]",
+            Dimension::Egress => "[policy.egress]",
+            Dimension::Secrets => "[policy.secrets]",
+            Dimension::FsRead => "[policy.filesystem] read",
+            Dimension::FsWrite => "[policy.filesystem] write",
+            Dimension::FsDeny => "[policy.filesystem] deny",
+        }
+    }
+}
+
+impl std::fmt::Display for Dimension {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// One policy refusal, layer-agnostic: which dimension refused and the
+/// rendered rule text. core checks a SINGLE policy value and cannot know
+/// whether it was the machine's or a bundle's — the composing engine in the
+/// `policy` crate wraps this with the layer (`PolicyDenial` there). The
+/// `message` already reads as a complete sentence (it embeds the dimension
+/// and the pattern), so `Display` is just the message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleDenial {
+    pub dimension: Dimension,
+    pub message: String,
+}
+
+impl std::fmt::Display for RuleDenial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RuleDenial {}
+
 impl Policy {
     pub fn is_empty(&self) -> bool {
         self.require.is_empty()
@@ -229,8 +286,8 @@ impl Policy {
     /// the repo controls and can rename — so `"*"` is how a machine-level rule
     /// is written rename-proof: it constrains every server, whatever a
     /// manifest calls it.
-    pub fn tool_allowed(&self, server: &str, tool: &str) -> Result<(), String> {
-        map_allowed(&self.tools, "[policy.tools]", server, |pat| {
+    pub fn tool_allowed(&self, server: &str, tool: &str) -> Result<(), RuleDenial> {
+        map_allowed(&self.tools, Dimension::Tools, server, |pat| {
             glob_match(pat, tool)
         })
     }
@@ -240,16 +297,16 @@ impl Policy {
     /// (no query port), so a `host:port` pattern is treated as matching here
     /// and the exact port is enforced at runtime (the proxy calls the compiled
     /// ruleset with the real port).
-    pub fn egress_allowed(&self, server: &str, host: &str) -> Result<(), String> {
-        map_allowed(&self.egress, "[policy.egress]", server, |pat| {
+    pub fn egress_allowed(&self, server: &str, host: &str) -> Result<(), RuleDenial> {
+        map_allowed(&self.egress, Dimension::Egress, server, |pat| {
             egress_match(pat, host, None)
         })
     }
 
     /// Whether `server` may resolve the secret named `reference` per
     /// `[policy.secrets]` — same keyed grammar and `"*"` rename-proofing.
-    pub fn secret_allowed(&self, server: &str, reference: &str) -> Result<(), String> {
-        map_allowed(&self.secrets, "[policy.secrets]", server, |pat| {
+    pub fn secret_allowed(&self, server: &str, reference: &str) -> Result<(), RuleDenial> {
+        map_allowed(&self.secrets, Dimension::Secrets, server, |pat| {
             glob_match(pat, reference)
         })
     }
@@ -265,13 +322,13 @@ impl Policy {
 /// (uniform allow-by-default — least privilege is an explicit `"*" = ["!*"]`).
 fn map_allowed(
     map: &IndexMap<String, Vec<String>>,
-    dimension: &str,
+    dimension: Dimension,
     server: &str,
     // Given a pattern (with its leading `!` already stripped for denies),
     // whether it matches the subject the closure captured. Dimensions differ
     // only here: tools/secrets glob-match a bare name; egress scopes by port.
     matches: impl Fn(&str) -> bool,
-) -> Result<(), String> {
+) -> Result<(), RuleDenial> {
     let keys: &[&str] = if server == "*" {
         &["*"]
     } else {
@@ -284,20 +341,26 @@ fn map_allowed(
         for r in rules {
             if let Some(deny) = r.strip_prefix('!') {
                 if matches(deny) {
-                    return Err(format!("denied by {dimension} {key} = \"!{deny}\""));
+                    return Err(RuleDenial {
+                        dimension,
+                        message: format!("denied by {dimension} {key} = \"!{deny}\""),
+                    });
                 }
             }
         }
         let allows: Vec<&String> = rules.iter().filter(|r| !r.starts_with('!')).collect();
         if !allows.is_empty() && !allows.iter().any(|a| matches(a)) {
-            return Err(format!(
-                "not in the {dimension} allowlist for {key} ({})",
-                allows
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
+            return Err(RuleDenial {
+                dimension,
+                message: format!(
+                    "not in the {dimension} allowlist for {key} ({})",
+                    allows
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            });
         }
     }
     Ok(())
@@ -872,7 +935,8 @@ mod tests {
         assert!(p.tool_allowed("other", "anything").is_ok());
         // The refusal names the rule.
         let err = p.tool_allowed("jira", "delete_issue").unwrap_err();
-        assert!(err.contains("!delete_*"), "{err}");
+        assert_eq!(err.dimension, Dimension::Tools);
+        assert!(err.message.contains("!delete_*"), "{err}");
     }
 
     #[test]

@@ -293,7 +293,11 @@ impl ExecutionPlan {
             // fails the run here (`?`) rather than leaving a direct route open.
             ruleset.gateway_only_hosts = crate::resolve::gateway_only_hosts(&frozen_servers)?;
         }
-        let fs_readonly_reason = ruleset.workspace_write_decision().err();
+        // Rendered here: the plan stores display text for the ro-mount notice.
+        let fs_readonly_reason = ruleset
+            .workspace_write_decision()
+            .err()
+            .map(|denial| denial.to_string());
         let run_id = crate::runs::gen_id();
         let spec = build_sandbox_spec(&ctx.dir, command, ruleset, &run_id);
 

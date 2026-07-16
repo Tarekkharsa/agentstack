@@ -20,22 +20,85 @@ pub mod ruleset;
 pub use compile::compile;
 pub use ruleset::{CompiledRuleset, RULESET_VERSION};
 
-use agentstack_core::manifest::Policy;
+// Re-exported so consumers matching on a denial's dimension don't need a
+// direct `agentstack_core` import for it.
+pub use agentstack_core::manifest::Dimension;
+
+use agentstack_core::manifest::{Policy, RuleDenial};
+
+/// Which authority refused a call. This used to be a SUBSTRING of the error
+/// message ("machine policy") that tests asserted with `.contains(…)` — now
+/// it is data the compiler tracks, and the rendered message is derived from
+/// it in `Display`, not the other way round. The audit trail's "machine
+/// denies win *and say so*" property is carried by this field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layer {
+    /// `~/.agentstack/agentstack.toml` — the user's own rules, checked first.
+    Machine,
+    /// The trusted bundle/project manifest.
+    Bundle,
+    /// No authored rule was consulted: the dimension itself is
+    /// deny-by-default (today only the sandbox workspace write mount).
+    DenyByDefault,
+}
+
+/// One effective-policy refusal: which layer refused, and the underlying
+/// rule denial (dimension + rendered rule text) from core. `Display`
+/// renders exactly the strings this crate produced before the type existed,
+/// so CLI errors, run events, and logs are byte-identical.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicyDenial {
+    pub layer: Layer,
+    pub denial: RuleDenial,
+}
+
+impl PolicyDenial {
+    fn machine(denial: RuleDenial) -> PolicyDenial {
+        PolicyDenial {
+            layer: Layer::Machine,
+            denial,
+        }
+    }
+
+    fn bundle(denial: RuleDenial) -> PolicyDenial {
+        PolicyDenial {
+            layer: Layer::Bundle,
+            denial,
+        }
+    }
+}
+
+impl std::fmt::Display for PolicyDenial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.layer {
+            Layer::Machine => write!(
+                f,
+                "{} (machine policy — ~/.agentstack/agentstack.toml)",
+                self.denial
+            ),
+            Layer::Bundle | Layer::DenyByDefault => self.denial.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for PolicyDenial {}
 
 /// The effective firewall decision for one tool call: it must pass the
 /// machine `[policy.tools]` AND the project's. Machine denies win by
 /// construction — nothing a repo declares is consulted before the user's
-/// own rules — and the error says which layer refused.
+/// own rules — and the denial's `layer` says which layer refused.
 pub fn tool_decision(
     machine: &Policy,
     project: &Policy,
     server: &str,
     tool: &str,
-) -> Result<(), String> {
+) -> Result<(), PolicyDenial> {
     machine
         .tool_allowed(server, tool)
-        .map_err(|rule| format!("{rule} (machine policy — ~/.agentstack/agentstack.toml)"))?;
-    project.tool_allowed(server, tool)
+        .map_err(PolicyDenial::machine)?;
+    project
+        .tool_allowed(server, tool)
+        .map_err(PolicyDenial::bundle)
 }
 
 /// The effective egress decision for one (server, host): machine
@@ -47,11 +110,13 @@ pub fn egress_decision(
     project: &Policy,
     server: &str,
     host: &str,
-) -> Result<(), String> {
+) -> Result<(), PolicyDenial> {
     machine
         .egress_allowed(server, host)
-        .map_err(|rule| format!("{rule} (machine policy — ~/.agentstack/agentstack.toml)"))?;
-    project.egress_allowed(server, host)
+        .map_err(PolicyDenial::machine)?;
+    project
+        .egress_allowed(server, host)
+        .map_err(PolicyDenial::bundle)
 }
 
 /// The effective secret-access decision for one (server, `${REF}` name):
@@ -62,11 +127,13 @@ pub fn secret_decision(
     project: &Policy,
     server: &str,
     reference: &str,
-) -> Result<(), String> {
+) -> Result<(), PolicyDenial> {
     machine
         .secret_allowed(server, reference)
-        .map_err(|rule| format!("{rule} (machine policy — ~/.agentstack/agentstack.toml)"))?;
-    project.secret_allowed(server, reference)
+        .map_err(PolicyDenial::machine)?;
+    project
+        .secret_allowed(server, reference)
+        .map_err(PolicyDenial::bundle)
 }
 
 #[cfg(test)]
@@ -95,10 +162,10 @@ mod tests {
         let project = tools(&[("figma", &["!delete_*"])]);
         // Machine deny wins and says so, even though the project allows it.
         let err = tool_decision(&machine, &project, "figma", "post_comment").unwrap_err();
-        assert!(err.contains("machine policy"), "{err}");
+        assert_eq!(err.layer, Layer::Machine, "{err}");
         // Project deny still applies on its own.
         let err = tool_decision(&machine, &project, "figma", "delete_file").unwrap_err();
-        assert!(!err.contains("machine policy"), "{err}");
+        assert_eq!(err.layer, Layer::Bundle, "{err}");
         // A tool neither layer names passes.
         assert!(tool_decision(&machine, &project, "figma", "get_file").is_ok());
         // Other servers are untouched by either layer.
@@ -115,10 +182,29 @@ mod tests {
         assert!(tool_decision(&machine, &project, "figma", "get_file").is_ok());
         // Inside the machine bound, outside the project's → project refuses.
         let err = tool_decision(&machine, &project, "figma", "get_node").unwrap_err();
-        assert!(!err.contains("machine policy"), "{err}");
+        assert_eq!(err.layer, Layer::Bundle, "{err}");
         // Outside the machine bound → machine refuses, whatever the project says.
         let err = tool_decision(&machine, &project, "figma", "delete_file").unwrap_err();
-        assert!(err.contains("machine policy"), "{err}");
+        assert_eq!(err.layer, Layer::Machine, "{err}");
+    }
+
+    /// The rendered denial is byte-identical to the pre-typed format: the
+    /// machine layer's suffix comes from `Display`, derived from `layer` —
+    /// audit logs and CLI errors must not drift when the type evolves.
+    #[test]
+    fn denial_display_renders_the_layer_suffix_exactly() {
+        let deny = tools(&[("figma", &["!post_*"])]);
+        let err = tool_decision(&deny, &Policy::default(), "figma", "post_comment").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "denied by [policy.tools] figma = \"!post_*\" \
+             (machine policy — ~/.agentstack/agentstack.toml)"
+        );
+        let err = tool_decision(&Policy::default(), &deny, "figma", "post_comment").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "denied by [policy.tools] figma = \"!post_*\""
+        );
     }
 
     /// The `"*"` wildcard key constrains every server — the rename-proof form
@@ -130,7 +216,7 @@ mod tests {
         // Whatever a repo names the server, delete_* is refused…
         for server in ["github", "gh", "totally-not-github"] {
             let err = tool_decision(&machine, &project, server, "delete_repo").unwrap_err();
-            assert!(err.contains("machine policy"), "{err}");
+            assert_eq!(err.layer, Layer::Machine, "{err}");
         }
         // …and everything else still passes.
         assert!(tool_decision(&machine, &project, "gh", "get_repo").is_ok());
@@ -250,9 +336,9 @@ mod tests {
         let project = Policy::default();
         for server in ["github", "gh", "totally-not-github"] {
             let err = egress_decision(&machine, &project, server, "169.254.169.254").unwrap_err();
-            assert!(err.contains("machine policy"), "{err}");
+            assert_eq!(err.layer, Layer::Machine, "{err}");
             let err = secret_decision(&machine, &project, server, "AWS_SECRET_KEY").unwrap_err();
-            assert!(err.contains("machine policy"), "{err}");
+            assert_eq!(err.layer, Layer::Machine, "{err}");
         }
         assert!(egress_decision(&machine, &project, "gh", "api.github.com").is_ok());
         assert!(secret_decision(&machine, &project, "gh", "GITHUB_TOKEN").is_ok());
@@ -481,7 +567,8 @@ mod tests {
         let err = compile(&none, &none, &[])
             .workspace_write_decision()
             .unwrap_err();
-        assert!(err.contains("deny-by-default"), "{err}");
+        assert_eq!(err.layer, Layer::DenyByDefault, "{err}");
+        assert!(err.to_string().contains("deny-by-default"), "{err}");
 
         // Each root-covering spelling grants rw, from either layer alone.
         for scope in ["./**", "./*", "*", ".", "./"] {
@@ -503,7 +590,7 @@ mod tests {
         let err = compile(&fs_write(&["src/**"]), &none, &[])
             .workspace_write_decision()
             .unwrap_err();
-        assert!(err.contains("[policy.filesystem]"), "{err}");
+        assert_eq!(err.denial.dimension, Dimension::FsWrite, "{err}");
     }
 
     /// Rule 2 on the fs dimension: a bundle cannot widen the workspace mount
@@ -516,7 +603,7 @@ mod tests {
         let err = compile(&machine, &bundle, &[])
             .workspace_write_decision()
             .unwrap_err();
-        assert!(err.contains("machine policy"), "{err}");
+        assert_eq!(err.layer, Layer::Machine, "{err}");
     }
 
     // ── Filesystem deny globs (`[policy.filesystem] deny`) ──────────────────
@@ -529,7 +616,7 @@ mod tests {
         // Basename spelling catches a nested .env even though the relative
         // path alone wouldn't match the pattern.
         let err = rs.fs_deny_decision(&["sub/dir/.env", ".env"]).unwrap_err();
-        assert!(err.contains("machine policy"), "{err}");
+        assert_eq!(err.layer, Layer::Machine, "{err}");
         // Variants covered by the glob.
         assert!(rs.fs_deny_decision(&[".env.local"]).is_err());
         // Non-matching paths pass; empty deny set allows everything.
@@ -545,10 +632,10 @@ mod tests {
         let rs = compile(&fs_deny(&[".env*"]), &fs_deny(&["*.pem"]), &[]);
         // Machine entry still denies, naming its layer.
         let err = rs.fs_deny_decision(&[".env"]).unwrap_err();
-        assert!(err.contains("machine policy"), "{err}");
+        assert_eq!(err.layer, Layer::Machine, "{err}");
         // Bundle entry denies too — its refusal does NOT claim machine.
         let err = rs.fs_deny_decision(&["server.pem"]).unwrap_err();
-        assert!(!err.contains("machine policy"), "{err}");
+        assert_eq!(err.layer, Layer::Bundle, "{err}");
     }
 
     proptest! {
@@ -615,17 +702,17 @@ mod tests {
             },
         };
         // Passes every bound.
-        assert!(guard.check("[policy.tools]", "get_file").is_ok());
+        assert!(guard.check(Dimension::Tools, "get_file").is_ok());
         // Machine deny wins and names the layer.
-        let err = guard.check("[policy.tools]", "post_file").unwrap_err();
-        assert!(err.contains("machine policy"), "{err}");
+        let err = guard.check(Dimension::Tools, "post_file").unwrap_err();
+        assert_eq!(err.layer, Layer::Machine, "{err}");
         // Inside the machine bound, outside the bundle bound → bundle refuses.
-        let err = guard.check("[policy.tools]", "get_node").unwrap_err();
-        assert!(!err.contains("machine policy"), "{err}");
+        let err = guard.check(Dimension::Tools, "get_node").unwrap_err();
+        assert_eq!(err.layer, Layer::Bundle, "{err}");
         // Outside the machine allowlist → machine refuses.
-        let err = guard.check("[policy.tools]", "delete_file").unwrap_err();
-        assert!(err.contains("machine policy"), "{err}");
+        let err = guard.check(Dimension::Tools, "delete_file").unwrap_err();
+        assert_eq!(err.layer, Layer::Machine, "{err}");
         // Empty guard: allow-by-default.
-        assert!(Guard::default().check("[policy.tools]", "anything").is_ok());
+        assert!(Guard::default().check(Dimension::Tools, "anything").is_ok());
     }
 }

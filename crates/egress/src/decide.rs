@@ -59,8 +59,12 @@ impl EgressGuard {
             ))
         } else {
             // The proxy has the real CONNECT port, so `host:port` egress
-            // patterns are enforced exactly here.
-            self.ruleset.egress_decision(server, host, Some(port))
+            // patterns are enforced exactly here. The typed denial is
+            // rendered here because the event's `rule` is wire-format text —
+            // `Display` keeps the layer attribution in the rendered string.
+            self.ruleset
+                .egress_decision(server, host, Some(port))
+                .map_err(|denial| denial.to_string())
         };
         let allowed = result.is_ok();
         let rule = result.err();

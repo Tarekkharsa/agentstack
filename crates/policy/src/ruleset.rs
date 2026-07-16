@@ -28,8 +28,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use agentstack_core::manifest::{egress_match, glob_match, normalize_host};
+use agentstack_core::manifest::{egress_match, glob_match, normalize_host, Dimension, RuleDenial};
 use serde::{Deserialize, Serialize};
+
+use crate::{Layer, PolicyDenial};
 
 /// Bump ONLY on an incompatible semantic change. Additive fields ride on
 /// serde defaults without a bump.
@@ -95,18 +97,25 @@ impl LayerRules {
     /// already stripped for denies) that captures its own subject. Glob
     /// dimensions pass a `glob_match` closure via [`Guard::check`]; egress
     /// passes a port-aware one.
-    fn check_with(&self, dimension: &str, matches: &impl Fn(&str) -> bool) -> Result<(), String> {
+    fn check_with(
+        &self,
+        dimension: Dimension,
+        matches: &impl Fn(&str) -> bool,
+    ) -> Result<(), RuleDenial> {
         for d in &self.deny {
             if matches(d) {
-                return Err(format!("denied by {dimension} rule \"!{d}\""));
+                return Err(RuleDenial {
+                    dimension,
+                    message: format!("denied by {dimension} rule \"!{d}\""),
+                });
             }
         }
         for allows in &self.allow_all_of {
             if !allows.iter().any(|a| matches(a)) {
-                return Err(format!(
-                    "not in the {dimension} allowlist ({})",
-                    allows.join(", ")
-                ));
+                return Err(RuleDenial {
+                    dimension,
+                    message: format!("not in the {dimension} allowlist ({})", allows.join(", ")),
+                });
             }
         }
         Ok(())
@@ -130,23 +139,32 @@ impl Guard {
         self.machine.is_empty() && self.bundle.is_empty()
     }
 
-    /// Machine layer first (its refusal names the layer), then the bundle's —
-    /// the same composition as `agentstack_policy::tool_decision`.
-    pub fn check(&self, dimension: &str, subject: &str) -> Result<(), String> {
+    /// Machine layer first (its refusal carries `Layer::Machine`), then the
+    /// bundle's — the same composition as `agentstack_policy::tool_decision`.
+    pub fn check(&self, dimension: Dimension, subject: &str) -> Result<(), PolicyDenial> {
         self.check_with(dimension, &|pat| glob_match(pat, subject))
     }
 
     /// Machine-then-bundle check with a custom pattern matcher (egress uses it
-    /// to scope by port). Machine refusals still name their layer.
+    /// to scope by port). A machine refusal carries `Layer::Machine`, so the
+    /// rendered error still names the layer — via `Display`, not string glue.
     pub fn check_with(
         &self,
-        dimension: &str,
+        dimension: Dimension,
         matches: &impl Fn(&str) -> bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), PolicyDenial> {
         self.machine
             .check_with(dimension, matches)
-            .map_err(|r| format!("{r} (machine policy — ~/.agentstack/agentstack.toml)"))?;
-        self.bundle.check_with(dimension, matches)
+            .map_err(|denial| PolicyDenial {
+                layer: Layer::Machine,
+                denial,
+            })?;
+        self.bundle
+            .check_with(dimension, matches)
+            .map_err(|denial| PolicyDenial {
+                layer: Layer::Bundle,
+                denial,
+            })
     }
 }
 
@@ -246,8 +264,8 @@ impl CompiledRuleset {
     /// The effective firewall decision for one tool call — identical
     /// semantics to `tool_decision(machine, bundle, server, tool)` (property-
     /// tested equivalence in lib.rs).
-    pub fn tool_decision(&self, server: &str, tool: &str) -> Result<(), String> {
-        self.rules_for(server).tools.check("[policy.tools]", tool)
+    pub fn tool_decision(&self, server: &str, tool: &str) -> Result<(), PolicyDenial> {
+        self.rules_for(server).tools.check(Dimension::Tools, tool)
     }
 
     /// Whether `server` may reach `host` (on `port`, if known) per the compiled
@@ -260,19 +278,19 @@ impl CompiledRuleset {
         server: &str,
         host: &str,
         port: Option<u16>,
-    ) -> Result<(), String> {
+    ) -> Result<(), PolicyDenial> {
         self.rules_for(server)
             .egress
-            .check_with("[policy.egress]", &|pat| egress_match(pat, host, port))
+            .check_with(Dimension::Egress, &|pat| egress_match(pat, host, port))
     }
 
     /// Whether `server` may resolve the secret named `reference` per the
     /// compiled `[policy.secrets]`. Enforced fail-closed at both substitution
     /// sites (gateway + adapter render).
-    pub fn secret_decision(&self, server: &str, reference: &str) -> Result<(), String> {
+    pub fn secret_decision(&self, server: &str, reference: &str) -> Result<(), PolicyDenial> {
         self.rules_for(server)
             .secrets
-            .check("[policy.secrets]", reference)
+            .check(Dimension::Secrets, reference)
     }
 
     /// Whether the sandbox may mount the run's workspace read-WRITE, per the
@@ -291,27 +309,34 @@ impl CompiledRuleset {
     /// `compile` gives fs scopes no deny grammar (no `!` patterns, unlike the
     /// keyed dimensions) — if that ever changes, "any spelling passes" must
     /// be revisited, since a deny could match one spelling and not the other.
-    pub fn workspace_write_decision(&self) -> Result<(), String> {
+    pub fn workspace_write_decision(&self) -> Result<(), PolicyDenial> {
         if self.filesystem.write.is_empty() {
-            return Err("no [policy.filesystem] write scope covers the workspace \
-                 (sandbox workspace writes are deny-by-default)"
-                .to_string());
+            // No authored rule was consulted here — this is the dimension's
+            // own deny-by-default refusing, so it carries that layer rather
+            // than pinning the refusal on the machine or the bundle.
+            return Err(PolicyDenial {
+                layer: Layer::DenyByDefault,
+                denial: RuleDenial {
+                    dimension: Dimension::FsWrite,
+                    message: "no [policy.filesystem] write scope covers the workspace \
+                         (sandbox workspace writes are deny-by-default)"
+                        .to_string(),
+                },
+            });
         }
-        let mut refusal = String::new();
+        let mut refusal: Option<PolicyDenial> = None;
         for subject in ["./", "."] {
-            match self
-                .filesystem
-                .write
-                .check("[policy.filesystem] write", subject)
-            {
+            match self.filesystem.write.check(Dimension::FsWrite, subject) {
                 Ok(()) => return Ok(()),
                 // Keep the first refusal: `./` is the canonical spelling, so
                 // its error is the one worth showing.
-                Err(e) if refusal.is_empty() => refusal = e,
+                Err(e) if refusal.is_none() => refusal = Some(e),
                 Err(_) => {}
             }
         }
-        Err(refusal)
+        // The loop always ran at least once over a non-empty guard, so a
+        // refusal was recorded on every non-returning path.
+        Err(refusal.expect("non-empty write guard yields a refusal per subject"))
     }
 
     /// Whether a path may be touched at all per `[policy.filesystem] deny`.
@@ -320,12 +345,10 @@ impl CompiledRuleset {
     /// matches ANY deny glob — more spellings can only make the check
     /// stricter, the safe direction for a blocklist. Machine denies are
     /// checked first so the refusal names the layer.
-    pub fn fs_deny_decision(&self, spellings: &[&str]) -> Result<(), String> {
-        self.filesystem
-            .deny
-            .check_with("[policy.filesystem] deny", &|pat| {
-                spellings.iter().any(|s| glob_match(pat, s))
-            })
+    pub fn fs_deny_decision(&self, spellings: &[&str]) -> Result<(), PolicyDenial> {
+        self.filesystem.deny.check_with(Dimension::FsDeny, &|pat| {
+            spellings.iter().any(|s| glob_match(pat, s))
+        })
     }
 
     /// Whether ANY egress rule constrains `server`. Write-time checks use
