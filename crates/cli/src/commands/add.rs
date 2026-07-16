@@ -519,7 +519,18 @@ fn add_pack(
         };
         if let Err(e) = result {
             // Roll back: restore the original manifest and drop created files.
-            crate::util::atomic::write(&ctx.loaded.manifest_path, &original).ok();
+            // The manifest restore is load-bearing — a silent failure would
+            // leave a possibly-corrupt manifest with no signal, so surface it
+            // (unlike the best-effort file cleanup below).
+            if let Err(restore_err) =
+                crate::util::atomic::write(&ctx.loaded.manifest_path, &original)
+            {
+                eprintln!(
+                    "warning: rollback could not restore {} ({restore_err:#}); \
+                     the manifest may be inconsistent — check it before re-running",
+                    ctx.loaded.manifest_path.display()
+                );
+            }
             for (path, is_dir) in created.iter().rev() {
                 if *is_dir {
                     let _ = fs::remove_dir_all(path);

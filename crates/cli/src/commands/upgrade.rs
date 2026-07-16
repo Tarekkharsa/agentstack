@@ -615,7 +615,16 @@ fn apply_upgrade(
         for (out, _) in &new_instr {
             let _ = fs::remove_file(out);
         }
-        atomic::write(&ctx.loaded.manifest_path, original).ok();
+        // Restoring the manifest is the load-bearing rollback step — unlike the
+        // best-effort file cleanup around it, a silent failure here leaves the
+        // user with a possibly-corrupt manifest and no signal, so surface it.
+        if let Err(restore_err) = atomic::write(&ctx.loaded.manifest_path, original) {
+            eprintln!(
+                "warning: rollback could not restore {} ({restore_err:#}); \
+                 the manifest may be inconsistent — check it before re-running",
+                ctx.loaded.manifest_path.display()
+            );
+        }
         for (orig, backup, is_dir) in &backups {
             if *is_dir {
                 let _ = fs::remove_dir_all(orig);
