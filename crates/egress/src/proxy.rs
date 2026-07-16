@@ -19,6 +19,7 @@
 
 use std::io;
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -49,6 +50,24 @@ const MAX_HELLO: usize = 16 * 1024 + 5;
 /// the ClientHello, resolving, dialing). Bounds slowloris-style clients that
 /// open a tunnel and then dribble bytes to pin a task indefinitely.
 const STEP_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Cap on concurrent tunnels per listener. This proxy's peer is the sandboxed
+/// (potentially compromised) container — the most hostile-facing listener in
+/// the crate, since `HTTPS_PROXY` points straight at it — so an unbounded
+/// accept loop would let it drive unbounded task/fd creation on the host.
+/// One MCP server never needs this many tunnels at once; excess connections
+/// are dropped (closed) rather than queued. Bounded with a plain
+/// `AtomicUsize` (not a tokio `Semaphore`), matching `relay.rs`.
+const MAX_CONNECTIONS: usize = 64;
+
+/// Decrements the connection counter when a tunnel ends, even on a panic — so
+/// a task panic can't permanently consume a slot.
+struct ConnGuard(Arc<AtomicUsize>);
+impl Drop for ConnGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Release);
+    }
+}
 
 /// Transport-level knobs for a proxy, separate from the policy the guard holds.
 #[derive(Debug, Clone, Default)]
@@ -106,12 +125,23 @@ impl ServerProxy {
     /// Accept forever, handling each connection on its own task. Returns only
     /// on an accept error (the listener closing).
     pub async fn serve(self: Arc<Self>, listener: TcpListener) -> io::Result<()> {
+        let inflight = Arc::new(AtomicUsize::new(0));
         loop {
             let (client, _) = listener.accept().await?;
+            // Bounded concurrency: at the cap, drop the connection instead of
+            // spawning another task (shed load rather than exhaust).
+            if inflight.fetch_add(1, Ordering::AcqRel) >= MAX_CONNECTIONS {
+                inflight.fetch_sub(1, Ordering::Release);
+                drop(client);
+                continue;
+            }
+            let guard = ConnGuard(Arc::clone(&inflight));
             let me = Arc::clone(&self);
             tokio::spawn(async move {
-                // A per-connection error is logged by the client's failed
-                // request, never fatal to the proxy.
+                // Frees the slot when this connection ends. A per-connection
+                // error is logged by the client's failed request, never fatal
+                // to the proxy.
+                let _guard = guard;
                 let _ = me.handle(client).await;
             });
         }
@@ -751,6 +781,37 @@ mod tests {
             )),
             "the 407 rejection was recorded: {evs:?}"
         );
+    }
+
+    /// With every slot saturated by idle clients (each pins a slot while the
+    /// proxy waits out its CONNECT head), the next connection must be dropped
+    /// — accepted and immediately closed, no task, no response — not queued.
+    /// This is the bound that stops a compromised container from driving
+    /// unbounded task/fd creation through its `HTTPS_PROXY` listener.
+    #[tokio::test]
+    async fn connection_over_the_cap_is_dropped() {
+        let (paddr, _events) = start_proxy(CompiledRuleset::default()).await;
+
+        // Fill the cap with connections that never send a byte; read_head
+        // holds each for STEP_TIMEOUT (far longer than this test runs), so all
+        // slots stay occupied. Loopback accepts are FIFO, so by the time the
+        // extra connection is accepted, all of these have been counted.
+        let mut held = Vec::with_capacity(MAX_CONNECTIONS);
+        for _ in 0..MAX_CONNECTIONS {
+            held.push(TcpStream::connect(paddr).await.unwrap());
+        }
+
+        // The over-cap connection: the accept loop closes it, so the client
+        // sees EOF (or a reset) promptly — not the 400 a served-but-garbage
+        // connection would get, and well before STEP_TIMEOUT.
+        let mut extra = TcpStream::connect(paddr).await.unwrap();
+        let mut b = [0u8; 16];
+        let n = timeout(Duration::from_secs(5), extra.read(&mut b))
+            .await
+            .expect("over-cap connection was queued instead of dropped")
+            .unwrap_or(0); // a connection-reset error proves the drop too
+        assert_eq!(n, 0, "over-cap connection is closed without a response");
+        drop(held);
     }
 
     #[test]
