@@ -5,6 +5,7 @@
 //! a bad apply is recoverable.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -12,7 +13,7 @@ use anyhow::{Context, Result};
 use crate::util::paths;
 
 /// Atomically write `contents` to `path`: back up the current file (best
-/// effort), write a sibling temp file, then `rename` it into place.
+/// effort), write a sibling temp file, fsync it, then `rename` it into place.
 pub fn write(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -23,11 +24,31 @@ pub fn write(path: &Path, contents: &str) -> Result<()> {
         let _ = backup(path); // best effort — never block a write on backup
     }
     let tmp = tmp_path(path);
-    fs::write(&tmp, contents).with_context(|| format!("writing {}", tmp.display()))?;
+    // Write, then fsync the temp file so its bytes are durably on disk BEFORE
+    // the rename. Without the fsync, a crash right after the rename can leave
+    // the renamed file EMPTY on common filesystems: the rename's directory
+    // metadata reaches disk before the file's data pages do. fsync-then-rename
+    // is the standard durable-replace recipe.
+    {
+        let mut f = fs::File::create(&tmp).with_context(|| format!("writing {}", tmp.display()))?;
+        f.write_all(contents.as_bytes())
+            .with_context(|| format!("writing {}", tmp.display()))?;
+        f.sync_all()
+            .with_context(|| format!("flushing {}", tmp.display()))?;
+    }
     fs::rename(&tmp, path).with_context(|| {
         let _ = fs::remove_file(&tmp);
         format!("replacing {}", path.display())
     })?;
+    // Best-effort: fsync the containing directory so the rename itself is
+    // durable across a crash. A failure here can't corrupt the file (it is
+    // already in place), so it never fails the write. Opening a directory as a
+    // File is a no-op on platforms that don't support it (the open errors and
+    // we skip it).
+    let dir = path.parent().filter(|p| !p.as_os_str().is_empty());
+    if let Ok(handle) = fs::File::open(dir.unwrap_or_else(|| Path::new("."))) {
+        let _ = handle.sync_all();
+    }
     Ok(())
 }
 
@@ -52,8 +73,14 @@ fn tmp_path(path: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
+/// Backup file name for a target path. Two different paths can map to the same
+/// readable form (`/a/b` and `/a-b` both → `-a-b`), so a short digest of the
+/// FULL original path is appended: same target → same name (a rolling backup),
+/// different target → different name (no silent clobber). The readable part is
+/// bounded so a deep path can't blow past filesystem name limits.
 fn sanitize(s: &str) -> String {
-    s.chars()
+    let cleaned: String = s
+        .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
                 c
@@ -61,7 +88,12 @@ fn sanitize(s: &str) -> String {
                 '-'
             }
         })
-        .collect()
+        .collect();
+    // `cleaned` is pure ASCII, so byte-slicing the tail (the distinctive end of
+    // a path) can't split a char. Keep the last 160 bytes at most.
+    let tail = &cleaned[cleaned.len().saturating_sub(160)..];
+    let digest = &crate::digest::sha256_hex(s.as_bytes())[..12];
+    format!("{tail}.{digest}")
 }
 
 #[cfg(test)]
@@ -79,6 +111,15 @@ mod tests {
         write(f.path(), "{\"a\":2}").unwrap();
         assert_eq!(fs::read_to_string(f.path()).unwrap(), "{\"a\":2}");
         assert!(!tmp.child("config.json.agentstack-tmp").path().exists());
+    }
+
+    #[test]
+    fn backup_names_dont_collide_across_distinct_paths() {
+        // The pre-2026-07 sanitizer mapped every non-word char to `-`, so these
+        // two distinct targets shared one backup file. The digest suffix keeps
+        // them apart; the same path still maps to a stable name.
+        assert_ne!(sanitize("/a/b"), sanitize("/a-b"));
+        assert_eq!(sanitize("/a/b"), sanitize("/a/b"));
     }
 
     #[test]
