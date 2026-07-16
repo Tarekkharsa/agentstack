@@ -729,13 +729,15 @@ fn remove_server_cli(args: &LibRemoveServerArgs) -> Result<()> {
 fn list() -> Result<()> {
     let lib_home = paths::lib_home();
     let library = Library::load(&lib_home)?;
-    print!("{}", render_list(&library));
+    print!("{}", render_list(&library, &lib_home));
     Ok(())
 }
 
 /// Render the library index as plain tables grouped by kind (shared with tests).
 /// Rows are sorted by name for stable output regardless of on-disk order.
-fn render_list(library: &Library) -> String {
+/// `lib_home` is the library root, used to read each skill's one-line
+/// `SKILL.md` description for display.
+fn render_list(library: &Library, lib_home: &Path) -> String {
     if library.skills.is_empty() && library.servers.is_empty() {
         return "No skills or servers installed in the central library.\n".to_string();
     }
@@ -750,9 +752,16 @@ fn render_list(library: &Library) -> String {
         o.push_str("  (none)\n");
     }
     for s in &skills {
+        // Best-effort one-line description; a skill with no readable SKILL.md
+        // renders a dimmed dash rather than breaking the row.
+        let desc = s
+            .description(lib_home)
+            .map(|d| truncate(&d, 60))
+            .unwrap_or_else(|| "-".to_string());
         o.push_str(&format!(
-            "  {:<20} {:<6} {:<16} {}\n",
+            "  {:<20} {} {:<6} {:<16} {}\n",
             s.name,
+            format!("{desc:<60}").dimmed(),
             s.source,
             locator(s),
             s.provenance.as_deref().unwrap_or("-")
@@ -1691,6 +1700,16 @@ fn short(sum: &str) -> &str {
     &sum[..sum.len().min(12)]
 }
 
+/// Truncate a display string to `n` characters, appending an ellipsis when it
+/// was cut. Counts `char`s (not bytes) so multibyte descriptions don't panic.
+fn truncate(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(n).collect::<String>())
+    }
+}
+
 /// Human-readable byte count (binary units, one decimal).
 fn human_bytes(bytes: u64) -> String {
     const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
@@ -1923,7 +1942,7 @@ mod tests {
 
     #[test]
     fn list_empty_says_none() {
-        let out = render_list(&Library::default());
+        let out = render_list(&Library::default(), Path::new("/no-such-lib-home"));
         assert!(out.contains("No skills or servers installed"));
     }
 
@@ -1931,11 +1950,42 @@ mod tests {
     fn list_path_row_shows_name_source_checksum_provenance() {
         let mut library = Library::default();
         library.upsert(path_entry("sql-review", "abcdef0123456789deadbeef"));
-        let out = render_list(&library);
+        let out = render_list(&library, Path::new("/no-such-lib-home"));
         assert!(out.contains("sql-review"));
         assert!(out.contains("path"));
         assert!(out.contains("abcdef012345"), "short checksum (12 chars)");
         assert!(out.contains("path:/src/sql-review"), "provenance");
+    }
+
+    #[test]
+    fn list_row_shows_skill_description() {
+        // Seed a real skill body so its SKILL.md description is read.
+        let lib = assert_fs::TempDir::new().unwrap();
+        let body = lib.path().join("skills/sql-review");
+        std::fs::create_dir_all(&body).unwrap();
+        std::fs::write(
+            body.join("SKILL.md"),
+            "---\nname: sql-review\ndescription: Review SQL migrations for safety.\n---\nbody\n",
+        )
+        .unwrap();
+
+        let mut library = Library::default();
+        library.upsert(LibrarySkill {
+            name: "sql-review".into(),
+            source: "path".into(),
+            path: Some("sql-review".into()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: Some("deadbeef".into()),
+            version: None,
+            provenance: Some("manual".into()),
+        });
+        let out = render_list(&library, lib.path());
+        assert!(
+            out.contains("Review SQL migrations for safety."),
+            "row shows the description: {out}"
+        );
     }
 
     #[test]
@@ -1952,7 +2002,7 @@ mod tests {
             version: None,
             provenance: Some("git:https://example.com/x.git".into()),
         });
-        let out = render_list(&library);
+        let out = render_list(&library, Path::new("/no-such-lib-home"));
         assert!(out.contains("git"));
         assert!(
             out.contains("rev 0123456789ab"),
@@ -1966,7 +2016,7 @@ mod tests {
         // Insert out of order; render must sort.
         library.skills.push(path_entry("zebra", "1111"));
         library.skills.push(path_entry("alpha", "2222"));
-        let out = render_list(&library);
+        let out = render_list(&library, Path::new("/no-such-lib-home"));
         let a = out.find("alpha").unwrap();
         let z = out.find("zebra").unwrap();
         assert!(a < z, "rows sorted by name");
@@ -2460,7 +2510,7 @@ mod tests {
             version: None,
             provenance: Some("file:/x/kibana.toml".into()),
         });
-        let out = render_list(&library);
+        let out = render_list(&library, Path::new("/no-such-lib-home"));
         assert!(out.contains("Servers"));
         assert!(out.contains("kibana"));
         assert!(out.contains("abcdef012345"), "short checksum shown");

@@ -18,7 +18,26 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::manifest::Skill;
+use crate::store::Store;
 use crate::util::paths;
+
+/// Parse the one-line `description:` value from a `SKILL.md` YAML frontmatter
+/// block — the leading `---` … `---` fence. Returns `None` when there's no
+/// frontmatter or no `description:` key. This is the single shared parser for
+/// every surface that shows skill descriptions: central-library search
+/// (`agentstack search`), `lib list`, and the MCP loadable catalog
+/// (`mcp_server`), which all call it rather than re-implementing it.
+pub fn parse_frontmatter_description(md: &str) -> Option<String> {
+    let rest = md.trim_start().strip_prefix("---")?;
+    let end = rest.find("\n---")?;
+    for line in rest[..end].lines() {
+        if let Some(v) = line.trim().strip_prefix("description:") {
+            return Some(v.trim().trim_matches('"').trim_matches('\'').to_string());
+        }
+    }
+    None
+}
 
 pub const LIBRARY_FILE: &str = "library.toml";
 /// Newest library-index schema version this build reads and writes. Anything
@@ -84,6 +103,36 @@ pub struct LibrarySkill {
     /// `"manual"`). Informational; surfaced by `explain`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<String>,
+}
+
+impl LibrarySkill {
+    /// Best-effort one-line description from this skill's `SKILL.md` frontmatter.
+    ///
+    /// `lib_home` is the central-library root: path sources read directly from
+    /// `<lib_home>/skills/…`; git sources read from the shared store **only if
+    /// already cached** (no network, no fetch, no content digest). Any miss — a
+    /// git source not yet installed, a missing/blank `SKILL.md`, or no
+    /// `description:` key — yields `None`, and callers render a placeholder
+    /// rather than failing. Reading at call time is deliberate: the library is
+    /// small (~a dozen skills) so `search` and `lib list` stay cheap.
+    pub fn description(&self, lib_home: &Path) -> Option<String> {
+        // Reuse the resolver's view of a library skill (path relative to
+        // `<lib_home>/skills/`, or a cached git clone) without digesting — the
+        // same shape `resolve_skill` builds for `SkillOrigin::Library`.
+        let skill = Skill {
+            path: self.path.clone(),
+            git: self.git.clone(),
+            rev: self.rev.clone(),
+            subpath: self.subpath.clone(),
+        };
+        let dir = Store::default_store()
+            .resolve_path_only(&skill, &lib_home.join("skills"))
+            .ok()
+            .flatten()?
+            .path;
+        let text = fs::read_to_string(dir.join("SKILL.md")).ok()?;
+        parse_frontmatter_description(&text)
+    }
 }
 
 /// One MCP server installed in the central library (Phase 1b). The reusable
@@ -222,6 +271,38 @@ mod tests {
             version: None,
             provenance: Some("consolidated".into()),
         }
+    }
+
+    #[test]
+    fn frontmatter_description_parses() {
+        let md = "---\nname: pdf\ndescription: Fill and merge PDFs.\n---\nbody";
+        assert_eq!(
+            parse_frontmatter_description(md).as_deref(),
+            Some("Fill and merge PDFs.")
+        );
+        assert_eq!(parse_frontmatter_description("no frontmatter"), None);
+    }
+
+    #[test]
+    fn skill_description_reads_path_body() {
+        let dir = assert_fs::TempDir::new().unwrap();
+        // A path skill body lives at `<lib_home>/skills/<path>/SKILL.md`.
+        let body = dir.path().join("skills/quokka-lint");
+        fs::create_dir_all(&body).unwrap();
+        fs::write(
+            body.join("SKILL.md"),
+            "---\nname: quokka-lint\ndescription: Lint quokka configs.\n---\nbody\n",
+        )
+        .unwrap();
+
+        let entry = skill("quokka-lint");
+        assert_eq!(
+            entry.description(dir.path()).as_deref(),
+            Some("Lint quokka configs.")
+        );
+
+        // A skill whose body is absent degrades to None (no panic).
+        assert_eq!(skill("ghost").description(dir.path()), None);
     }
 
     #[test]

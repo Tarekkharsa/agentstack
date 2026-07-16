@@ -879,7 +879,12 @@ fn tool_defs() -> Value {
         {
             "name": "agentstack_list_loadable",
             "description": "List the skills you're allowed to load right now, each with a one-line description (the cheap catalog — not the full instructions). An MCP lease takes precedence as the profile fence; a native session is the fallback. agentstack's own manual (using-agentstack) is always listed. Call this first, read the descriptions, then load only what the task needs.",
-            "inputSchema": { "type": "object", "properties": {} }
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Optional case-insensitive substring; filters the listing by skill name and description. Omit for the full list." }
+                }
+            }
         },
         {
             "name": "agentstack_load",
@@ -1191,7 +1196,12 @@ fn run_tool_with_lease(
         "agentstack_doctor" => doctor_summary(dir),
         "agentstack_add_from" => add_from(args, dir),
         "agentstack_add_server" => add_server(args, dir),
-        "agentstack_list_loadable" => list_loadable_with_lease(dir, trust_note, lease),
+        "agentstack_list_loadable" => list_loadable_with_lease(
+            dir,
+            trust_note,
+            lease,
+            args.get("query").and_then(Value::as_str),
+        ),
         "agentstack_load" => load_capability_with_lease(args, dir, trust_note, lease),
         "agentstack_lease_open" => lease_open(args, dir, trust_note, lease),
         "agentstack_lease_status" => lease_status(lease),
@@ -1627,19 +1637,8 @@ fn read_skill_md(source: &Path) -> (Option<String>, Option<String>) {
     let Ok(text) = std::fs::read_to_string(source.join("SKILL.md")) else {
         return (None, None);
     };
-    let desc = parse_frontmatter_description(&text);
+    let desc = crate::library::parse_frontmatter_description(&text);
     (desc, Some(text))
-}
-
-fn parse_frontmatter_description(md: &str) -> Option<String> {
-    let rest = md.trim_start().strip_prefix("---")?;
-    let end = rest.find("\n---")?;
-    for line in rest[..end].lines() {
-        if let Some(v) = line.trim().strip_prefix("description:") {
-            return Some(v.trim().trim_matches('"').trim_matches('\'').to_string());
-        }
-    }
-    None
 }
 
 fn scope_arg(args: &Value) -> crate::scope::Scope {
@@ -1712,7 +1711,7 @@ fn manifest_file_exists(dir: Option<&Path>) -> bool {
 fn builtin_manual_entry(md: &str, loaded: bool) -> Value {
     json!({
         "name": BUILTIN_MANUAL,
-        "description": parse_frontmatter_description(md).unwrap_or_default(),
+        "description": crate::library::parse_frontmatter_description(md).unwrap_or_default(),
         "kind": "skill",
         "origin": "builtin",
         "loaded": loaded,
@@ -1721,13 +1720,42 @@ fn builtin_manual_entry(md: &str, loaded: bool) -> Value {
 
 #[cfg(test)]
 fn list_loadable(dir: Option<&Path>, trust_note: Option<&str>) -> Result<String> {
-    list_loadable_with_lease(dir, trust_note, &new_lease_store())
+    list_loadable_with_lease(dir, trust_note, &new_lease_store(), None)
+}
+
+/// Filter loadable `entries` by an optional case-insensitive `query`, matching a
+/// skill's name OR its description (an entry without a `description` field — the
+/// untrusted, names-only path — matches on name alone). An absent or blank query
+/// returns everything, so the full-list behavior is unchanged.
+fn filter_loadable(entries: Vec<Value>, query: Option<&str>) -> Vec<Value> {
+    let Some(q) = query.map(str::trim).filter(|q| !q.is_empty()) else {
+        return entries;
+    };
+    let q = q.to_ascii_lowercase();
+    entries
+        .into_iter()
+        .filter(|e| {
+            let name = e.get("name").and_then(Value::as_str).unwrap_or("");
+            let desc = e.get("description").and_then(Value::as_str).unwrap_or("");
+            name.to_ascii_lowercase().contains(&q) || desc.to_ascii_lowercase().contains(&q)
+        })
+        .collect()
+}
+
+/// The `note` to show when a `query` was given: a graceful "no match" line when
+/// the filter emptied the list, otherwise the caller's default note.
+fn loadable_note(query: Option<&str>, entries: &[Value], default: impl Into<String>) -> String {
+    match query.map(str::trim).filter(|q| !q.is_empty()) {
+        Some(q) if entries.is_empty() => format!("No loadable skills match '{q}'."),
+        _ => default.into(),
+    }
 }
 
 fn list_loadable_with_lease(
     dir: Option<&Path>,
     trust_note: Option<&str>,
     lease_store: &LeaseStore,
+    query: Option<&str>,
 ) -> Result<String> {
     // Untrusted project in auto mode: names only. Skill descriptions are
     // bundle content (SKILL.md frontmatter) and "untrusted means inert"
@@ -1752,11 +1780,17 @@ fn list_loadable_with_lease(
                 entries.push(json!({ "name": name, "kind": "skill", "origin": origin }));
             }
         }
+        let entries = filter_loadable(entries, query);
+        let note = loadable_note(
+            query,
+            &entries,
+            format!("{note} Until then only names are listed and only the built-in manual loads."),
+        );
         return Ok(serde_json::to_string_pretty(&json!({
             "loadable": entries,
             "fenced": false,
             "session": Value::Null,
-            "note": format!("{note} Until then only names are listed and only the built-in manual loads."),
+            "note": note,
         }))?);
     }
     // No manifest anywhere (a control-plane-only session outside any project):
@@ -1767,7 +1801,7 @@ fn list_loadable_with_lease(
         Ok(ctx) => ctx,
         Err(err) => {
             let entries = vec![builtin_manual_entry(&builtin_manual_md()?, false)];
-            let note = if manifest_file_exists(dir) {
+            let default_note = if manifest_file_exists(dir) {
                 format!(
                     "Project manifest failed to load ({err:#}) — only agentstack's built-in manual is loadable until it is fixed."
                 )
@@ -1775,6 +1809,8 @@ fn list_loadable_with_lease(
                 "No project manifest found — only agentstack's built-in manual is loadable."
                     .to_string()
             };
+            let entries = filter_loadable(entries, query);
+            let note = loadable_note(query, &entries, default_note);
             return Ok(serde_json::to_string_pretty(&json!({
                 "loadable": entries,
                 "fenced": false,
@@ -1843,18 +1879,23 @@ fn list_loadable_with_lease(
             builtin_manual_entry(&builtin_manual_md()?, loaded.contains(BUILTIN_MANUAL)),
         );
     }
+    // The query filters WITHIN the fenced set: profile-lease fencing above has
+    // already decided which skills are listable; this only narrows the display.
+    let entries = filter_loadable(entries, query);
+    let default_note = if lease.is_some() {
+        "Fenced to this zero-file MCP lease. Loads are recorded in memory for this connection."
+    } else if session.is_some() {
+        "Fenced to this native session's profile. Load only what the task needs."
+    } else {
+        "No active lease or native session — manifest + central-library skills are loadable (dev-open). Open an MCP lease to fence + record loads without writing native files."
+    };
+    let note = loadable_note(query, &entries, default_note);
     Ok(serde_json::to_string_pretty(&json!({
         "loadable": entries,
         "fenced": profile.is_some(),
         "lease": lease.as_ref().map(|l| l.profile.clone()),
         "session": session.as_ref().map(|s| s.profile.clone()),
-        "note": if lease.is_some() {
-            "Fenced to this zero-file MCP lease. Loads are recorded in memory for this connection."
-        } else if session.is_some() {
-            "Fenced to this native session's profile. Load only what the task needs."
-        } else {
-            "No active lease or native session — manifest + central-library skills are loadable (dev-open). Open an MCP lease to fence + record loads without writing native files."
-        },
+        "note": note,
     }))?)
 }
 
@@ -2236,16 +2277,6 @@ mod tests {
             .contains("untrusted"));
 
         std::env::remove_var("AGENTSTACK_HOME");
-    }
-
-    #[test]
-    fn frontmatter_description_parses() {
-        let md = "---\nname: pdf\ndescription: Fill and merge PDFs.\n---\nbody";
-        assert_eq!(
-            parse_frontmatter_description(md).as_deref(),
-            Some("Fill and merge PDFs.")
-        );
-        assert_eq!(parse_frontmatter_description("no frontmatter"), None);
     }
 
     #[test]
@@ -2725,7 +2756,7 @@ mod tests {
         .to_string();
         assert!(overlap.contains("MCP profile lease is active"));
 
-        let catalog = list_loadable_with_lease(Some(proj.path()), None, &lease).unwrap();
+        let catalog = list_loadable_with_lease(Some(proj.path()), None, &lease, None).unwrap();
         let catalog: Value = serde_json::from_str(&catalog).unwrap();
         let names: Vec<&str> = catalog["loadable"]
             .as_array()

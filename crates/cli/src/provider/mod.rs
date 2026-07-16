@@ -299,6 +299,112 @@ impl Provider for CatalogProvider {
     }
 }
 
+/// The user's own central library (`~/.agentstack/lib`) as a provider. These are
+/// the capabilities the maintainer already curated, so a hit here is the most
+/// relevant result — `search_all` lists this provider first, and its clean name
+/// wins de-dup against catalog/registry hits of the same name.
+pub struct LibraryProvider {
+    library: crate::library::Library,
+    lib_home: std::path::PathBuf,
+}
+
+impl Default for LibraryProvider {
+    fn default() -> Self {
+        // A fresh machine has no library file; `load_default_or_warn` returns an
+        // empty library there, so search simply finds no library hits (no error).
+        LibraryProvider {
+            library: crate::library::Library::load_default_or_warn(),
+            lib_home: crate::util::paths::lib_home(),
+        }
+    }
+}
+
+impl Provider for LibraryProvider {
+    fn id(&self) -> &'static str {
+        "library"
+    }
+    fn search(&self, query: &str, _limit: usize) -> Vec<Candidate> {
+        let q = query.to_ascii_lowercase();
+        let mut out = Vec::new();
+        // Skills: match the reference name OR the `SKILL.md` frontmatter
+        // description. An empty query lists everything (like the catalog).
+        for entry in &self.library.skills {
+            let desc = entry.description(&self.lib_home);
+            let name_hit = entry.name.to_ascii_lowercase().contains(&q);
+            let desc_hit = desc
+                .as_deref()
+                .is_some_and(|d| d.to_ascii_lowercase().contains(&q));
+            if q.is_empty() || name_hit || desc_hit {
+                out.push(Candidate {
+                    id: entry.name.clone(),
+                    name: entry.name.clone(),
+                    description: desc.unwrap_or_default(),
+                    source: "library",
+                    kind: CandidateKind::Skill(SkillRef {
+                        name: entry.name.clone(),
+                        path: entry.path.clone(),
+                        git: entry.git.clone(),
+                        rev: entry.rev.clone(),
+                    }),
+                });
+            }
+        }
+        // Servers: match the reference name. The library index carries no
+        // description, so the install shape (loaded from `servers/<name>.toml`)
+        // is what we display; a definition that won't load is skipped.
+        for entry in &self.library.servers {
+            if q.is_empty() || entry.name.to_ascii_lowercase().contains(&q) {
+                if let Some(install) = self.load_server_install(&entry.name) {
+                    out.push(Candidate {
+                        id: entry.name.clone(),
+                        name: entry.name.clone(),
+                        description: String::new(),
+                        source: "library",
+                        kind: CandidateKind::Server(install),
+                    });
+                }
+            }
+        }
+        out
+    }
+}
+
+impl LibraryProvider {
+    /// Load a central-library server definition (`<lib_home>/servers/<name>.toml`)
+    /// and map it to an [`Install`] for display. Best-effort: an unreadable or
+    /// invalid definition yields `None`, so the server is omitted rather than
+    /// failing the whole search.
+    fn load_server_install(&self, name: &str) -> Option<Install> {
+        let path = self.lib_home.join("servers").join(format!("{name}.toml"));
+        let text = std::fs::read_to_string(path).ok()?;
+        let server: Server = toml::from_str(&text).ok()?;
+        Some(install_from_server(&server))
+    }
+}
+
+/// Map a stored [`Server`] definition back to an [`Install`] for discovery
+/// display. A header/env is treated as secret-bearing when its value carries a
+/// `${REF}` placeholder — the only way secrets are ever written to a definition.
+fn install_from_server(server: &Server) -> Install {
+    let secret_refs = |map: &IndexMap<String, String>| -> Vec<String> {
+        map.iter()
+            .filter(|(_, v)| v.contains("${"))
+            .map(|(k, _)| k.clone())
+            .collect()
+    };
+    match server.server_type {
+        ServerType::Http => Install::Http {
+            url: server.url.clone().unwrap_or_default(),
+            secret_headers: secret_refs(&server.headers),
+        },
+        ServerType::Stdio => Install::Stdio {
+            command: server.command.clone().unwrap_or_default(),
+            args: server.args.clone(),
+            secret_env: secret_refs(&server.env),
+        },
+    }
+}
+
 /// Build an [`Install`] from flat catalog server fields (shared by `kind:
 /// server` entries and the nested `server:` of a pack).
 fn server_install(
@@ -323,10 +429,14 @@ fn server_install(
     }
 }
 
-/// Search every enabled provider and return combined results (catalog first,
-/// then network providers). De-duplicated by clean name.
+/// Search every enabled provider and return combined results. The user's own
+/// central library ranks first (their curated capabilities are the most
+/// relevant), then the embedded catalog, then network providers.
+/// De-duplicated by clean name — a library hit shadows a same-named catalog or
+/// registry hit.
 pub fn search_all(query: &str, limit: usize) -> Vec<Candidate> {
     let providers: Vec<Box<dyn Provider>> = vec![
+        Box::new(LibraryProvider::default()),
         Box::new(CatalogProvider),
         Box::new(registry::RegistryProvider::default()),
     ];
@@ -412,6 +522,54 @@ mod tests {
         };
         let s = c.to_server();
         assert_eq!(s.headers["Authorization"], "Bearer ${KIBANA_TOKEN}");
+    }
+
+    #[test]
+    fn library_provider_matches_name_and_description() {
+        use crate::library::{Library, LibrarySkill};
+
+        // Seed a temp library: one path skill whose SKILL.md description carries
+        // a unique word, and whose body lives at `<lib_home>/skills/<path>/`.
+        let dir = assert_fs::TempDir::new().unwrap();
+        let body = dir.path().join("skills/quokka-lint");
+        std::fs::create_dir_all(&body).unwrap();
+        std::fs::write(
+            body.join("SKILL.md"),
+            "---\nname: quokka-lint\ndescription: Guards against zzquokkaword drift.\n---\nbody\n",
+        )
+        .unwrap();
+
+        let mut library = Library::default();
+        library.upsert(LibrarySkill {
+            name: "quokka-lint".into(),
+            source: "path".into(),
+            path: Some("quokka-lint".into()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: None,
+            version: None,
+            provenance: Some("manual".into()),
+        });
+        let provider = LibraryProvider {
+            library,
+            lib_home: dir.path().to_path_buf(),
+        };
+
+        // Found by exact name, labeled `[library]` (via `source`).
+        let by_name = provider.search("quokka-lint", 10);
+        assert_eq!(by_name.len(), 1);
+        assert_eq!(by_name[0].source, "library");
+        assert_eq!(by_name[0].name, "quokka-lint");
+
+        // Found by a unique word in its SKILL.md description.
+        let by_desc = provider.search("zzquokkaword", 10);
+        assert_eq!(by_desc.len(), 1);
+        assert_eq!(by_desc[0].name, "quokka-lint");
+        assert_eq!(by_desc[0].source, "library");
+
+        // No spurious hits.
+        assert!(provider.search("no-such-token", 10).is_empty());
     }
 
     #[test]

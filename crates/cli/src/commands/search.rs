@@ -14,7 +14,7 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let query = args.query.clone().unwrap_or_default();
     if query.trim().is_empty() {
         println!(
-            "Usage: agentstack search <query>  (searches the catalog + official MCP Registry)"
+            "Usage: agentstack search <query>  (searches your central library + the catalog + official MCP Registry)"
         );
         return Ok(());
     }
@@ -42,7 +42,7 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
         .unwrap_or_default();
 
     if results.is_empty() {
-        println!("No matches for '{query}' (catalog or registry).");
+        println!("No matches for '{query}' (library, catalog, or registry).");
         return Ok(());
     }
 
