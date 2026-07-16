@@ -392,7 +392,7 @@ mod tests {
                 version: crate::lock::SUPPORTED_LOCK_VERSION,
                 skills: vec![crate::lock::LockedSkill {
                     name: "x".into(),
-                    source: "path".into(),
+                    source: crate::lock::SkillLockSource::Path,
                     path: Some("./skills/x".into()),
                     git: None,
                     rev: None,

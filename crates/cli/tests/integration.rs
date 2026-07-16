@@ -485,7 +485,7 @@ fn store_resolves_path_skill_and_lock_roundtrips() {
     let mut lock = Lock::default();
     lock.upsert(LockedSkill {
         name: "x".into(),
-        source: "path".into(),
+        source: agentstack_core::lock::SkillLockSource::Path,
         path: Some("./skills/x".into()),
         git: None,
         rev: None,

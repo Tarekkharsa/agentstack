@@ -10,7 +10,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::UseArgs;
 use crate::library::Library;
-use crate::lock::{Lock, LockedServer, LockedSkill};
+use crate::lock::{Lock, LockedServer, LockedSkill, ServerSource, SkillLockSource};
 use crate::manifest::Manifest;
 use crate::render::skills;
 use crate::render::{resolve_targets, Selection};
@@ -526,10 +526,9 @@ pub(crate) fn record_lock(
         lock.upsert_server(LockedServer {
             name: r.name.clone(),
             source: match r.origin {
-                ServerOrigin::Inline => "inline",
-                ServerOrigin::Library => "library",
-            }
-            .to_string(),
+                ServerOrigin::Inline => ServerSource::Inline,
+                ServerOrigin::Library => ServerSource::Library,
+            },
             checksum: r.checksum.clone(),
         });
         // D3: pin the server's repository-local executable surface alongside
@@ -568,7 +567,12 @@ fn locked_from_resolved(
     };
     LockedSkill {
         name: resolved.name.clone(),
-        source: resolved.source_kind.to_string(),
+        // `source_kind` is an internal `&'static str` tag ("path"/"git");
+        // parse it to the typed lockfile source at this boundary.
+        source: match resolved.source_kind {
+            "git" => SkillLockSource::Git,
+            _ => SkillLockSource::Path,
+        },
         path,
         git,
         rev: resolved.rev.clone(),
@@ -834,7 +838,7 @@ mod tests {
         // The lock now pins the library skill's resolved digest.
         let lock = Lock::load(proj.path()).unwrap();
         let entry = lock.get("sql-review").expect("lock entry written");
-        assert_eq!(entry.source, "path");
+        assert_eq!(entry.source, SkillLockSource::Path);
         assert_eq!(entry.path.as_deref(), Some("sql-review"));
         assert_eq!(entry.checksum, resolved[0].checksum);
         assert_eq!(entry.checksum.len(), 64);
@@ -851,7 +855,7 @@ mod tests {
         let mut lock = Lock::default();
         lock.upsert(LockedSkill {
             name: "other".into(),
-            source: "path".into(),
+            source: SkillLockSource::Path,
             path: Some("other".into()),
             git: None,
             rev: None,
@@ -977,7 +981,7 @@ mod tests {
         let entry = lock
             .get_server("kibana")
             .expect("server lock entry written");
-        assert_eq!(entry.source, "library");
+        assert_eq!(entry.source, ServerSource::Library);
         assert_eq!(entry.checksum, "cafebabe");
         // The lock holds only name/source/checksum — never a secret value.
         let text = std::fs::read_to_string(Lock::path(proj.path())).unwrap();

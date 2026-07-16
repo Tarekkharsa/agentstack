@@ -1011,7 +1011,7 @@ mod tests {
         .unwrap();
         let lock = lock_with(LockedSkill {
             name: "sql-review".into(),
-            source: "path".into(),
+            source: crate::lock::SkillLockSource::Path,
             path: Some("sql-review".into()),
             git: None,
             rev: None,
@@ -1044,7 +1044,7 @@ mod tests {
         // Lock a stale digest, then change the library content underneath it.
         let lock = lock_with(LockedSkill {
             name: "sql-review".into(),
-            source: "path".into(),
+            source: crate::lock::SkillLockSource::Path,
             path: Some("sql-review".into()),
             git: None,
             rev: None,
@@ -1217,7 +1217,7 @@ mod tests {
         .unwrap();
         let lock = lock_with(LockedSkill {
             name: "gitskill".into(),
-            source: "git".into(),
+            source: crate::lock::SkillLockSource::Git,
             path: None,
             git: resolved.rev.clone().map(|_| "url".into()),
             rev: Some("0000000000000000000000000000000000000000".into()),
@@ -1566,7 +1566,7 @@ mod tests {
         let mut lock = Lock::default();
         lock.upsert_server(crate::lock::LockedServer {
             name: name.into(),
-            source: "library".into(),
+            source: crate::lock::ServerSource::Library,
             checksum: checksum.into(),
         });
         lock

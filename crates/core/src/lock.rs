@@ -50,14 +50,35 @@ impl Default for Lock {
     }
 }
 
+/// Where a pinned server's definition came from: declared inline in the
+/// manifest, or referenced by name from the central library. Serializes
+/// lowercase (`"inline"` / `"library"`), so the lockfile bytes — and thus the
+/// trust digest over them — are byte-identical to the pre-enum string form.
+/// (TS mental model: a `"inline" | "library"` union with an exhaustive match.)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerSource {
+    Inline,
+    Library,
+}
+
+/// Where a pinned skill's body came from: a local path or a git source.
+/// Serializes lowercase (`"path"` / `"git"`) — lockfile-byte-identical to the
+/// pre-enum string form (see [`ServerSource`]).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillLockSource {
+    Path,
+    Git,
+}
+
 /// A pinned MCP server: the SHA-256 of its **definition** (a `${REF}`-only
 /// server table — never resolved secret values, never a provider-specific render
-/// shape), so a fresh checkout resolves the same server. `source` is `"inline"`
-/// or `"library"`.
+/// shape), so a fresh checkout resolves the same server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockedServer {
     pub name: String,
-    pub source: String,
+    pub source: ServerSource,
     pub checksum: String,
 }
 
@@ -103,8 +124,7 @@ pub struct LockedExecutable {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockedSkill {
     pub name: String,
-    /// `path` or `git`.
-    pub source: String,
+    pub source: SkillLockSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -245,6 +265,44 @@ impl Lock {
 mod tests {
     use super::*;
 
+    /// The typed sources must serialize to exactly the lowercase strings the
+    /// lockfile has always used — the lockfile feeds the trust digest (rule 4),
+    /// so a byte change here would spuriously re-gate every project. NEVER
+    /// weaken: this pins the wire form, not just that it round-trips.
+    #[test]
+    fn locked_sources_serialize_to_the_legacy_strings() {
+        let mut lock = Lock::default();
+        lock.servers.push(LockedServer {
+            name: "s".into(),
+            source: ServerSource::Library,
+            checksum: "sha256:aa".into(),
+        });
+        lock.skills.push(LockedSkill {
+            name: "k".into(),
+            source: SkillLockSource::Git,
+            path: None,
+            git: Some("u".into()),
+            rev: None,
+            checksum: "sha256:bb".into(),
+        });
+        let toml = toml::to_string_pretty(&lock).unwrap();
+        assert!(toml.contains("source = \"library\""), "{toml}");
+        assert!(toml.contains("source = \"git\""), "{toml}");
+        // And each variant maps to its exact tag on the wire.
+        for (v, s) in [
+            (ServerSource::Inline, "\"inline\""),
+            (ServerSource::Library, "\"library\""),
+        ] {
+            assert_eq!(serde_json::to_string(&v).unwrap(), s);
+        }
+        for (v, s) in [
+            (SkillLockSource::Path, "\"path\""),
+            (SkillLockSource::Git, "\"git\""),
+        ] {
+            assert_eq!(serde_json::to_string(&v).unwrap(), s);
+        }
+    }
+
     #[test]
     fn load_checks_the_lock_schema_version() {
         let dir = assert_fs::TempDir::new().unwrap();
@@ -285,7 +343,7 @@ mod tests {
         let mut lock = Lock::default();
         lock.upsert(LockedSkill {
             name: "b".into(),
-            source: "path".into(),
+            source: SkillLockSource::Path,
             path: Some("./b".into()),
             git: None,
             rev: None,
@@ -293,7 +351,7 @@ mod tests {
         });
         lock.upsert(LockedSkill {
             name: "a".into(),
-            source: "git".into(),
+            source: SkillLockSource::Git,
             path: None,
             git: Some("https://x".into()),
             rev: Some("abc".into()),
@@ -312,16 +370,16 @@ mod tests {
         let mut lock = Lock::default();
         lock.upsert_server(LockedServer {
             name: "kibana".into(),
-            source: "library".into(),
+            source: ServerSource::Library,
             checksum: "cafe".into(),
         });
         lock.upsert_server(LockedServer {
             name: "figma".into(),
-            source: "inline".into(),
+            source: ServerSource::Inline,
             checksum: "beef".into(),
         });
         assert_eq!(lock.servers[0].name, "figma", "sorted by name");
-        assert_eq!(lock.get_server("kibana").unwrap().source, "library");
+        assert_eq!(lock.get_server("kibana").unwrap().source, ServerSource::Library);
 
         let text = toml::to_string_pretty(&lock).unwrap();
         assert!(text.contains("[[server]]"));

@@ -8,7 +8,7 @@ use anyhow::Result;
 use owo_colors::OwoColorize;
 
 use crate::cli::{InstallArgs, UpdateArgs};
-use crate::lock::{Lock, LockedSkill};
+use crate::lock::{Lock, LockedSkill, SkillLockSource};
 use crate::manifest::SkillSource;
 use crate::scan::Severity;
 use crate::store::Store;
@@ -188,12 +188,14 @@ pub(crate) fn locked_entry(
     resolved: &crate::store::Resolved,
 ) -> Result<LockedSkill> {
     let (source, path, git, rev) = match skill.source()? {
-        SkillSource::Path(p) => ("path", Some(p), None, None),
-        SkillSource::Git { url, .. } => ("git", None, Some(url), resolved.rev.clone()),
+        SkillSource::Path(p) => (SkillLockSource::Path, Some(p), None, None),
+        SkillSource::Git { url, .. } => {
+            (SkillLockSource::Git, None, Some(url), resolved.rev.clone())
+        }
     };
     Ok(LockedSkill {
         name: name.to_string(),
-        source: source.to_string(),
+        source,
         path,
         git,
         rev,

@@ -308,7 +308,7 @@ mod tests {
         let skill = lock.get("sql-review").expect("skill pinned");
         assert_eq!(skill.checksum.len(), 64);
         let server = lock.get_server("kibana").expect("server pinned");
-        assert_eq!(server.source, "library");
+        assert_eq!(server.source, agentstack_core::lock::ServerSource::Library);
         // Lock-only: nothing was rendered or materialized in the project.
         assert!(!proj.child(".mcp.json").path().exists());
         assert!(!proj.child(".claude").path().exists());

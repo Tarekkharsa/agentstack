@@ -2858,7 +2858,7 @@ mod tests {
         let mut lock = crate::lock::Lock::load(proj.path()).unwrap();
         lock.upsert(crate::lock::LockedSkill {
             name: "helper".into(),
-            source: "path".into(),
+            source: crate::lock::SkillLockSource::Path,
             path: Some("./skills/helper".into()),
             git: None,
             rev: None,
@@ -2896,7 +2896,7 @@ mod tests {
         for name in ["helper", "other"] {
             lock.upsert(crate::lock::LockedSkill {
                 name: name.into(),
-                source: "path".into(),
+                source: crate::lock::SkillLockSource::Path,
                 path: Some(format!("./skills/{name}")),
                 git: None,
                 rev: None,
