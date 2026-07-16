@@ -123,6 +123,40 @@ fn grant(base: &Path) -> Result<()> {
         println!("  secrets referenced: {}", refs.join(", "));
     }
 
+    // D3 (contract §8): the repository-local executable surface, pinned by
+    // current bytes. Ruling: an unpinned repo-relative executable BLOCKS
+    // trust — the lock is a prerequisite of trust, so an unpinned declared
+    // executable means the lock is incomplete, and trusting would bless
+    // ungoverned local code. What stays honestly unbound (the interpreter/
+    // harness binary itself, imports outside a declared root) is labeled.
+    let exec_servers: Vec<(String, crate::manifest::Server)> = servers
+        .iter()
+        .filter_map(|(n, r)| r.as_ref().ok().map(|r| (n.clone(), r.server.clone())))
+        .collect();
+    let exec_statuses = crate::executable::executable_lock_statuses(&dir, &exec_servers, &lock);
+    if !exec_statuses.is_empty() {
+        println!("  local executable content (pinned by current bytes):");
+        for (label, status) in &exec_statuses {
+            match crate::verify::executable_verdict(status) {
+                crate::verify::Verdict::Ok => println!("  · {label}   [pinned]"),
+                crate::verify::Verdict::Unpinned => {
+                    println!("  {} {label}   [{}]", "✗".red(), "unpinned".red());
+                    blockers.push((
+                        label.clone(),
+                        "local executable unpinned — run `agentstack lock`".to_string(),
+                    ));
+                }
+                crate::verify::Verdict::Block(why) => {
+                    println!("  {} {label}   [{}]", "✗".red(), why.red());
+                    blockers.push((label.clone(), why));
+                }
+            }
+        }
+        println!(
+            "  (unbound, by design: interpreter/harness binaries from $PATH, and imports outside a declared integrity root)"
+        );
+    }
+
     // Skills, reviewed like servers: name + origin + pin status. Their bodies
     // are exactly the bytes the trust digest does NOT cover, so the pin is
     // the only thing binding what the human reviews to what gets served.

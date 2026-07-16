@@ -745,6 +745,7 @@ fn run_checks(
     check_reproducibility(manifest, &ctx.dir, &store, report);
     check_server_reproducibility(manifest, &ctx.dir, report);
     check_instruction_reproducibility(manifest, &ctx.dir, report);
+    check_executable_integrity(manifest, &ctx.dir, report);
 
     report.section("Plugin recipes");
     let recipe_statuses = crate::plugin_recipes::statuses(manifest, &ctx.registry, &ctx.dir);
@@ -1130,6 +1131,44 @@ fn check_server_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Re
                     }
                 }
             }
+        }
+    }
+}
+
+/// D3 (contract §8): compare each declared server's repository-local
+/// executable surface — auto-detected stdio command/args files plus declared
+/// integrity roots — to its `agentstack.lock` pins. Drift and underivable
+/// surfaces (symlink, traversal, broken root) are errors so `doctor --ci`
+/// gates them; executable-but-unpinned local code is a warning here (the
+/// trust gate is what blocks it).
+fn check_executable_integrity(manifest: &Manifest, dir: &Path, report: &mut Report) {
+    use crate::executable::ExecutableLockStatus;
+    let lock = crate::lock::Lock::load(dir).unwrap_or_default();
+    let library = crate::library::Library::load_default().unwrap_or_default();
+    let lib_home = paths::lib_home();
+    // The effective runtime surface (inline + library, like the trust
+    // preview), not just profile refs: any declared server's local code can
+    // run once activated. Unresolvable servers are already reported by
+    // check_server_reproducibility.
+    let servers: Vec<(String, crate::manifest::Server)> =
+        crate::resolve::effective_runtime_servers(manifest, &library, &lib_home, None)
+            .into_iter()
+            .filter_map(|(n, r)| r.ok().map(|r| (n, r.server)))
+            .collect();
+    for (label, status) in crate::executable::executable_lock_statuses(dir, &servers, &lock) {
+        match status {
+            ExecutableLockStatus::ResolveFailed { error } => {
+                report.line(Level::Error, format!("{label} — {error}"));
+            }
+            ExecutableLockStatus::ChecksumDrift { .. } => report.line(
+                Level::Error,
+                format!("{label} content drifted from lock ↳ agentstack lock"),
+            ),
+            ExecutableLockStatus::MissingLockEntry => report.line(
+                Level::Warn,
+                format!("{label} executable local code not pinned ↳ agentstack lock"),
+            ),
+            ExecutableLockStatus::Matches => {}
         }
     }
 }
