@@ -9,6 +9,7 @@
 use std::collections::BTreeSet;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -86,7 +87,11 @@ pub fn relay_bind_address(os: &str, docker_bridge_gateway: Option<IpAddr>) -> Ip
 struct Shared {
     token: String,
     grant: BTreeSet<String>,
-    max_calls: u32,
+    // The per-run call ceiling. `NonZeroU32` carries "a zero ceiling is
+    // invalid" in the type, so the boundary check in `start` is a construction
+    // (`NonZeroU32::new`) rather than a `== 0` guard that a future refactor
+    // could drop.
+    max_calls: NonZeroU32,
     calls: AtomicU32,
     connections: AtomicUsize,
     call: ExecutionCall,
@@ -119,12 +124,15 @@ impl ExecutionRelay {
         max_calls: u32,
         call: ExecutionCall,
     ) -> io::Result<Self> {
-        if token.len() < 32 || grant.is_empty() || max_calls == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid execution relay authority",
-            ));
-        }
+        let max_calls = match NonZeroU32::new(max_calls) {
+            Some(n) if token.len() >= 32 && !grant.is_empty() => n,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "invalid execution relay authority",
+                ))
+            }
+        };
         let listener = TcpListener::bind(bind).await?;
         let addr = listener.local_addr()?;
         let shared = Arc::new(Shared {
@@ -201,7 +209,7 @@ async fn serve(stream: TcpStream, state: Arc<Shared>) -> io::Result<()> {
             continue;
         }
         let prior = state.calls.fetch_add(1, Ordering::AcqRel);
-        if prior >= state.max_calls {
+        if prior >= state.max_calls.get() {
             state.calls.fetch_sub(1, Ordering::Release);
             write_response(&mut write, json!({"id":id,"ok":false,"error":"call-limit"})).await?;
             continue;
