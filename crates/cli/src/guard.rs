@@ -54,6 +54,12 @@ pub struct GuardContext {
     pub tmp: Vec<PathBuf>,
     /// `[guard] allow_roots` — extra write roots beyond the workspace.
     pub allow_roots: Vec<PathBuf>,
+    /// `~/.agentstack` (or `$AGENTSTACK_HOME`) — the guard's own config and
+    /// state: the machine manifest whose `[guard]` table configures this very
+    /// check, the trust store, and the hook wrapper scripts. Shell writes
+    /// here are always denied, even inside `allow_roots` — otherwise
+    /// `allow_roots` could be edited to allowlist itself.
+    pub agentstack_home: PathBuf,
     /// Compiled policy; only `[policy.filesystem] deny` is consulted here.
     pub ruleset: CompiledRuleset,
 }
@@ -153,6 +159,39 @@ fn write_target_check(ctx: &GuardContext, path: &str) -> Decision {
     write_scope_check(ctx, path)
 }
 
+/// [`write_target_check`] for writes reached through the SHELL (in-place
+/// edits, redirects, rm/mv/cp/tee …), with one addition: targets inside
+/// `~/.agentstack` are always denied, `allow_roots` notwithstanding. That
+/// directory holds the machine manifest whose `[guard]` table configures
+/// this very check (a `sed -i` there could widen `allow_roots` or flip
+/// `enabled = false`), the trust store, and the hook wrapper scripts the
+/// CLIs execute. File-tool writes (Write/Edit) are exempt: those diffs are
+/// shown to the user by the harness, and legitimately edit manifests.
+fn shell_write_check(ctx: &GuardContext, path: &str) -> Decision {
+    let abs = normalize(path, &ctx.workspace, &ctx.home);
+    // Both sides in as-given AND symlink-resolved spellings — resolving can
+    // only ADD ways to hit the deny, never ways to escape it.
+    let targets = [Some(abs.clone()), resolve_existing_prefix(&abs)];
+    let homes = [
+        Some(ctx.agentstack_home.clone()),
+        resolve_existing_prefix(&ctx.agentstack_home),
+    ];
+    for t in targets.iter().flatten() {
+        for h in homes.iter().flatten() {
+            if within(t, h) {
+                return Decision::deny(format!(
+                    "{} is inside {} — the guard's own config and state; \
+                     [guard] allow_roots cannot allowlist it (edit it directly, \
+                     outside the agent)",
+                    abs.display(),
+                    ctx.agentstack_home.display()
+                ));
+            }
+        }
+    }
+    write_target_check(ctx, path)
+}
+
 /// Lexical normalization: make `path` absolute against `base`, expand `~`
 /// and `$HOME`, resolve `.`/`..` without touching the filesystem (the
 /// target may not exist yet, and a symlink-following canonicalize would
@@ -243,7 +282,7 @@ fn check_bash(ctx: &GuardContext, command: &str) -> Decision {
                 }
                 continue;
             }
-            if let d @ Decision::Deny { .. } = write_target_check(ctx, &target) {
+            if let d @ Decision::Deny { .. } = shell_write_check(ctx, &target) {
                 return d;
             }
         }
@@ -257,8 +296,18 @@ fn check_bash(ctx: &GuardContext, command: &str) -> Decision {
             "dd" => check_dd(&rest),
             "diskutil" => check_diskutil(&rest),
             "chmod" | "chown" => check_chmod_chown(ctx, program.as_str(), &rest),
-            "truncate" => check_write_targets(ctx, program.as_str(), &rest),
+            // tee's non-flag operands are all write targets; truncate's too.
+            "truncate" | "tee" => check_write_targets(ctx, program.as_str(), &rest),
+            "sed" | "perl" => check_in_place_edit(ctx, program.as_str(), &rest),
             "mv" | "cp" => check_mv_cp(ctx, program.as_str(), &rest),
+            // `install -d` creates every operand; otherwise it copies like cp.
+            "install" => {
+                if combined_flags(&rest).contains('d') {
+                    check_write_targets(ctx, program.as_str(), &rest)
+                } else {
+                    check_mv_cp(ctx, program.as_str(), &rest)
+                }
+            }
             p if p.starts_with("mkfs") => Decision::deny(format!(
                 "{p} formats a filesystem — never allowed via a hook"
             )),
@@ -440,7 +489,7 @@ fn check_rm(ctx: &GuardContext, args: &[String], via_xargs: bool) -> Decision {
             ));
         }
         // Deletion is a write: confined to the workspace + allow_roots + tmp.
-        if let d @ Decision::Deny { .. } = write_target_check(ctx, &t) {
+        if let d @ Decision::Deny { .. } = shell_write_check(ctx, &t) {
             return d;
         }
     }
@@ -501,7 +550,7 @@ fn check_find(ctx: &GuardContext, args: &[String]) -> Decision {
         return Decision::Allow; // implicit `.` — inside the workspace
     }
     for r in roots {
-        if let d @ Decision::Deny { .. } = write_target_check(ctx, r) {
+        if let d @ Decision::Deny { .. } = shell_write_check(ctx, r) {
             return d;
         }
         let abs = normalize(r, &ctx.workspace, &ctx.home);
@@ -543,7 +592,7 @@ fn check_chmod_chown(ctx: &GuardContext, program: &str, args: &[String]) -> Deci
         if abs == Path::new("/") || abs == ctx.home {
             return Decision::deny(format!("{program} -R on {}", abs.display()));
         }
-        if let d @ Decision::Deny { .. } = write_target_check(ctx, t) {
+        if let d @ Decision::Deny { .. } = shell_write_check(ctx, t) {
             return d;
         }
     }
@@ -552,7 +601,11 @@ fn check_chmod_chown(ctx: &GuardContext, program: &str, args: &[String]) -> Deci
 
 fn check_write_targets(ctx: &GuardContext, program: &str, args: &[String]) -> Decision {
     for t in targets_of(args) {
-        if let Decision::Deny { reason } = write_target_check(ctx, &t) {
+        // The sink devices a pipeline legitimately tees into.
+        if matches!(t.as_str(), "/dev/null" | "/dev/stdout" | "/dev/stderr") {
+            continue;
+        }
+        if let Decision::Deny { reason } = shell_write_check(ctx, &t) {
             return Decision::deny(format!("{program}: {reason}"));
         }
     }
@@ -566,7 +619,7 @@ fn check_mv_cp(ctx: &GuardContext, program: &str, args: &[String]) -> Decision {
     }
     // The destination is a write; for `mv`, sources are deletions too.
     let (sources, dest) = targets.split_at(targets.len() - 1);
-    if let Decision::Deny { reason } = write_target_check(ctx, &dest[0]) {
+    if let Decision::Deny { reason } = shell_write_check(ctx, &dest[0]) {
         return Decision::deny(format!("{program} destination: {reason}"));
     }
     for s in sources {
@@ -574,12 +627,118 @@ fn check_mv_cp(ctx: &GuardContext, program: &str, args: &[String]) -> Decision {
             return d;
         }
         if program == "mv" {
-            if let Decision::Deny { reason } = write_target_check(ctx, s) {
+            if let Decision::Deny { reason } = shell_write_check(ctx, s) {
                 return Decision::deny(format!("mv source (a deletion): {reason}"));
             }
         }
     }
     Decision::Allow
+}
+
+/// `sed -i` / `perl -i` rewrite their file operands in place — a write, not
+/// a read. Conservative by design (this is cooperative accident protection,
+/// per the `GuardConfig` doc): only operands statically identifiable as
+/// paths (absolute or `~`/`$HOME`-anchored) are judged, and the script
+/// operand is skipped, so an invocation we can't parse degrades to the
+/// pre-existing allow rather than a false block.
+fn check_in_place_edit(ctx: &GuardContext, program: &str, args: &[String]) -> Decision {
+    if !has_in_place_flag(program, args) {
+        return Decision::Allow;
+    }
+    // Flags whose separate VALUE is not a file operand. The script-carrying
+    // ones among them also mean "every remaining operand is a file".
+    let (value_flags, script_flags): (&[&str], &[&str]) = if program == "sed" {
+        (
+            &["-e", "-f", "--expression", "--file"],
+            &["-e", "-f", "--expression", "--file"],
+        )
+    } else {
+        (&["-e", "-E", "-I"], &["-e", "-E"])
+    };
+    let mut operands: Vec<&String> = Vec::new();
+    let mut script_via_flag = false;
+    let mut skip_value = false;
+    let mut after_dashdash = false;
+    for a in args {
+        if skip_value {
+            skip_value = false;
+        } else if after_dashdash {
+            operands.push(a);
+        } else if a == "--" {
+            after_dashdash = true;
+        } else if a.starts_with('-') && a.len() > 1 {
+            if value_flags.contains(&a.as_str()) {
+                skip_value = true;
+                script_via_flag |= script_flags.contains(&a.as_str());
+            }
+        } else {
+            operands.push(a);
+        }
+    }
+    let files = if script_via_flag {
+        operands.as_slice()
+    } else {
+        // Without `-e`/`-f` the first operand is the script (sed) or the
+        // program file (perl) — a read, not a write target.
+        operands.get(1..).unwrap_or_default()
+    };
+    for f in files {
+        if !is_explicit_path(f) {
+            continue;
+        }
+        if let Decision::Deny { reason } = shell_write_check(ctx, f) {
+            return Decision::deny(format!("{program} -i rewrites {f} in place: {reason}"));
+        }
+    }
+    Decision::Allow
+}
+
+/// Does this sed/perl invocation edit in place? Clusters are scanned
+/// left-to-right with each program's grammar: an `i` before any
+/// value-taking letter means in-place (`-i`, `-i.bak`, `-pi`, `-Ei`); a
+/// letter that consumes the rest of the token (or the next arg) stops the
+/// scan, so `perl -ne'if…'` and `-Mstrict` never false-positive.
+fn has_in_place_flag(program: &str, args: &[String]) -> bool {
+    // (letters that never take a value, letters whose value follows)
+    let (transparent, terminators) = if program == "sed" {
+        ("nErsuzgpal", "ef")
+    } else {
+        ("pnlawcstuUWX", "eE")
+    };
+    for a in args.iter().take_while(|a| a.as_str() != "--") {
+        if a == "--in-place" || a.starts_with("--in-place=") {
+            return true;
+        }
+        let Some(cluster) = a.strip_prefix('-') else {
+            continue;
+        };
+        if cluster.starts_with('-') {
+            continue;
+        }
+        for c in cluster.chars() {
+            if c == 'i' {
+                return true;
+            }
+            if terminators.contains(c) || !transparent.contains(c) {
+                break;
+            }
+        }
+    }
+    false
+}
+
+/// A token statically identifiable as a filesystem path: absolute or
+/// home-anchored. Relative operands stay un-judged here (they may be a
+/// script, a suffix, a flag value …) — the per-token deny-glob pass and the
+/// workspace anchor already cover the common relative spellings.
+fn is_explicit_path(arg: &str) -> bool {
+    arg.starts_with('/')
+        || arg == "~"
+        || arg.starts_with("~/")
+        || arg == "$HOME"
+        || arg == "${HOME}"
+        || arg.starts_with("$HOME/")
+        || arg.starts_with("${HOME}/")
 }
 
 // ── Protocols: each CLI's payload / response dialect ────────────────────────
@@ -861,6 +1020,7 @@ mod tests {
             home: PathBuf::from("/Users/me"),
             tmp: vec![PathBuf::from("/tmp"), PathBuf::from("/private/tmp")],
             allow_roots: vec![PathBuf::from("/Users/me/Documents/GitHub")],
+            agentstack_home: PathBuf::from("/Users/me/.agentstack"),
             ruleset: agentstack_policy::compile(&machine, &Policy::default(), &[]),
         }
     }
@@ -938,6 +1098,7 @@ mod tests {
             home: PathBuf::from("/Users/me"),
             tmp: vec![],
             allow_roots: vec![],
+            agentstack_home: PathBuf::from("/Users/me/.agentstack"),
             ruleset: agentstack_policy::compile(&machine, &Policy::default(), &[]),
         };
         let read = |p: PathBuf| GuardEvent::FileRead {
@@ -1128,6 +1289,105 @@ mod tests {
         // survives its own strings.
         assert_eq!(
             check_event(&c, &bash("echo 'rm -rf / is a bad idea'")),
+            Decision::Allow
+        );
+    }
+
+    // ── bash: write-capable commands (in-place edits, tee, install) ─────
+
+    #[test]
+    fn in_place_edits_are_writes_to_their_file_arguments() {
+        let c = ctx();
+        for cmd in [
+            "sed -i '' 's|a|b|' /Users/me/.zshrc", // the live-repro shape
+            "sed -i.bak -e 's/a/b/' /etc/hosts",
+            "sed --in-place 's/a/b/' /Users/me/.profile",
+            "perl -pi -e 's/a/b/' /Users/me/.zshrc",
+            "perl -i.orig fix.pl /Users/me/notes.txt", // script skipped, file judged
+        ] {
+            assert!(
+                denied(check_event(&c, &bash(cmd))),
+                "{cmd} should be denied"
+            );
+        }
+        for cmd in [
+            "sed -i '' 's|a|b|' src/config.toml", // relative → workspace (not static; fail-open)
+            "sed -i '' 's|a|b|' /work/proj/Cargo.toml",
+            "sed -i '' 's|a|b|' /Users/me/Documents/GitHub/x/README.md", // allow_root
+            "sed 's|a|b|' /Users/me/.zshrc",                             // no -i: a read
+            "sed -n '/error/p' /var/log/system.log",                     // a read
+            "sed -i '' '/debug/d' notes.txt", // address-form script is not a path
+            "perl -ne 'print if /x/' /var/log/foo.log", // 'i' in inline code ≠ -i
+            "perl -Mstrict -e 'print' /Users/me/data.txt", // 'i' in -M value ≠ -i
+        ] {
+            assert_eq!(check_event(&c, &bash(cmd)), Decision::Allow, "{cmd}");
+        }
+    }
+
+    #[test]
+    fn tee_and_install_targets_are_writes() {
+        let c = ctx();
+        for cmd in [
+            "cat data.txt | tee /Users/me/.zshrc",
+            "echo x | tee -a /etc/profile",
+            "install -m 755 tool.sh /usr/local/bin/tool",
+            "install -d /Users/me/newdir",
+        ] {
+            assert!(
+                denied(check_event(&c, &bash(cmd))),
+                "{cmd} should be denied"
+            );
+        }
+        for cmd in [
+            "make 2>&1 | tee build.log",
+            "cargo test | tee /tmp/out.txt",
+            "echo x | tee /dev/stderr",
+            "install tool.sh bin/tool",
+        ] {
+            assert_eq!(check_event(&c, &bash(cmd)), Decision::Allow, "{cmd}");
+        }
+    }
+
+    /// The guard's own config/state dir is never shell-writable, even when
+    /// `allow_roots` covers it — otherwise a shell write could widen
+    /// allow_roots (or flip `enabled = false`) and then write anywhere.
+    #[test]
+    fn guard_own_config_is_never_shell_writable() {
+        let mut c = ctx();
+        c.allow_roots = vec![PathBuf::from("/Users/me")]; // home allowlisted!
+        for cmd in [
+            "sed -i '' 's|true|false|' /Users/me/.agentstack/agentstack.toml",
+            "echo '[guard]' > /Users/me/.agentstack/agentstack.toml",
+            "echo 'allow_roots = [\"/\"]' >> ~/.agentstack/agentstack.toml",
+            "rm -rf /Users/me/.agentstack",
+            "cp evil.toml /Users/me/.agentstack/agentstack.toml",
+            "mv /Users/me/.agentstack/agentstack.toml /tmp/x",
+            "tee ~/.agentstack/guard/agentstack-guard-cursor.sh", // hook wrappers too
+        ] {
+            assert!(
+                denied(check_event(&c, &bash(cmd))),
+                "{cmd} should be denied"
+            );
+        }
+        // The special case is shell-only and write-only: reads pass, other
+        // home writes pass (allow_roots covers home here), and file-tool
+        // writes stay governed by the ordinary boundary — harnesses show
+        // those diffs to the user, and agents legitimately edit manifests.
+        assert_eq!(
+            check_event(&c, &bash("cat /Users/me/.agentstack/agentstack.toml")),
+            Decision::Allow
+        );
+        assert_eq!(
+            check_event(&c, &bash("sed -i '' 's|a|b|' /Users/me/notes.txt")),
+            Decision::Allow
+        );
+        assert_eq!(
+            check_event(
+                &c,
+                &GuardEvent::FileWrite {
+                    path: "/Users/me/.agentstack/agentstack.toml".into()
+                }
+            ),
             Decision::Allow
         );
     }

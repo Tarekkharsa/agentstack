@@ -138,6 +138,7 @@ fn check(protocol: Option<&str>) -> Result<()> {
             .iter()
             .map(|r| paths::expand_tilde(r))
             .collect(),
+        agentstack_home: paths::agentstack_home(),
         ruleset: agentstack_policy::compile(&machine_policy, &project_policy, &[]),
     };
     let decision = check_event(&ctx, &event);
@@ -265,6 +266,7 @@ fn test(command: &str) -> Result<()> {
             .iter()
             .map(|r| paths::expand_tilde(r))
             .collect(),
+        agentstack_home: paths::agentstack_home(),
         ruleset: agentstack_policy::compile(&machine_policy, &project_policy, &[]),
     };
     match check_event(
