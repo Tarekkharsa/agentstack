@@ -604,6 +604,9 @@ Adding a CLI is one YAML descriptor — copy `crates/adapters/descriptors/codex.
 `~/.agentstack/adapters/` (no rebuild). `agentstack adapters list` marks which
 adapters are yours; a broken drop-in is skipped with a warning, never fatal.
 
+Ground rules, the security invariants, and what a good PR looks like:
+[CONTRIBUTING.md](CONTRIBUTING.md). Release history: [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 Dual-licensed under either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE)

@@ -1,12 +1,16 @@
 # Releasing agentstack
 
-Distribution is set up but **not yet published**. To cut the first release:
+Releases are published from tags (v0.2.0 onward). Per release:
 
-## 0. One-time
+## 0. Before tagging
 
-- Push to GitHub and set the real repo slug everywhere it says `Tarekkharsa/agentstack`
-  (`Cargo.toml`, `install.sh`, `packaging/homebrew/agentstack.rb`, this file).
-- CI (`.github/workflows/ci.yml`) runs fmt + clippy + tests on every push/PR.
+- CI (`.github/workflows/ci.yml`) must be green on `main` — fmt + clippy +
+  tests + the asserted example suite + the Docker sandbox job.
+- The README on `main` documents whatever binary the installer serves as
+  `latest`, so tag the commit whose README matches the surface you are
+  shipping — a version bump left untagged means the installer hands users a
+  binary that no longer matches the docs.
+- Update `CHANGELOG.md` with the release entry.
 
 ## 1. Release binaries (GitHub Releases)
 
@@ -50,14 +54,18 @@ binary to `/usr/local/bin` (or `~/.local/bin`).
 
 ```sh
 # compute the per-arch checksums from the published assets:
+TAG="v$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d'"' -f2)"
 for t in aarch64-apple-darwin x86_64-apple-darwin \
          aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu; do
-  curl -fsSL "https://github.com/Tarekkharsa/agentstack/releases/download/v0.1.0/agentstack-$t.tar.gz" | shasum -a 256
+  curl -fsSL "https://github.com/Tarekkharsa/agentstack/releases/download/$TAG/agentstack-$t.tar.gz" | shasum -a 256
 done
 ```
 
-Fill the `sha256` fields in `packaging/homebrew/agentstack.rb`, commit it to a tap
-repo `tarekkh/homebrew-tap`, then:
+Update `version` and the `sha256` fields in
+`packaging/homebrew/agentstack.rb` (the checked-in file is a template whose
+values are from the version named in its `version` line — regenerate per
+release), commit it to a tap repo `tarekkh/homebrew-tap` (create it on first
+use), then:
 
 ```sh
 brew install Tarekkharsa/tap/agentstack
