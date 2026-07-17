@@ -25,6 +25,32 @@ gateway refuses a library definition that drifted from its pin). Secrets are
 `.env`); an unresolved secret **blocks** the write — and blocks the call, at
 the gateway. Nothing touches disk without `--write`.
 
+## The adoption ladder (meet the user where they are)
+
+agentstack is adopted in six steps; most projects sit partway up. Before
+proposing anything, detect the current step — bare `agentstack` reports the
+directory's state and next step, `agentstack doctor` names what's unwired,
+`agentstack guard status` shows hook coverage, and the trust state shows in
+`tools_search` / `agentstack_doctor`. Then propose the **next** step, not the
+whole ladder:
+
+1. **Unify** — no manifest? Propose `agentstack init` (or interactive
+   `agentstack setup` for the human) and `apply` to render every CLI.
+2. **Verify** — manifest exists but `doctor` complains? Surface its exact fix
+   commands.
+3. **Guard** — CLIs unwired in `guard status`? Suggest
+   `agentstack guard install` (human decision, one command).
+4. **Trust** — a cloned repo declares servers that stay inert? Explain the
+   review, surface `agentstack trust .`, and stop — never run it yourself.
+5. **Scale** — the same skills/servers copied across projects? Propose the
+   central library (`lib add`, reference by name) and profiles.
+6. **Confine** — sensitive or untrusted work on a machine with Docker?
+   Mention `run --sandbox` / `--lockdown` honestly (kernel-enforced, needs
+   Docker); don't present the guard or trust gate as a substitute.
+
+Don't push a user up the ladder mid-task — recommend the next step when it
+solves the problem at hand, and note the rest only if asked.
+
 ## The three artifact modes (recognize which one a project uses)
 
 1. **Static** — `.mcp.json` / `.claude/skills/` exist on disk, gitignored via a
