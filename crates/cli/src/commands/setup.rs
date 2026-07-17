@@ -69,7 +69,9 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     let ctx = super::load(manifest_dir)?;
-    let scope = args.scope.unwrap_or(Scope::Global);
+    // Default scope follows the manifest's home: project for a repo manifest,
+    // global only for the machine manifest (see docs/design/default-scope.md).
+    let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
     let target_ids = resolve_targets(&ctx.loaded.manifest, &ctx.registry, &args.targets);
 
     // 2. Preflight inspection (adapters, skills, secrets) — read-only.

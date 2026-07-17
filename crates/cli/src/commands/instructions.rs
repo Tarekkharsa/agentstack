@@ -14,7 +14,7 @@ use crate::scope::Scope;
 pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
-    let scope = args.scope.unwrap_or(Scope::Global);
+    let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
 
     if manifest.instructions.is_empty() {
         println!("Manifest defines no [instructions].");

@@ -28,7 +28,7 @@ pub fn run(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<()> {
 pub fn report(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<Outcome> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
-    let scope = args.scope.unwrap_or(Scope::Global);
+    let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
 
     let selection = match &args.profile {
         Some(p) => Selection::Profile(p.clone()),

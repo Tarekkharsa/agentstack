@@ -102,7 +102,9 @@ fn render(
 ) -> Result<Outcome> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
-    let scope = args.scope.unwrap_or(Scope::Global);
+    // Default scope follows the manifest's home: project for a repo manifest,
+    // global only for the machine manifest (see docs/design/default-scope.md).
+    let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
 
     let selection = match &args.profile {
         Some(p) => Selection::Profile(p.clone()),

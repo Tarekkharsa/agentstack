@@ -15,6 +15,7 @@ use std::sync::Mutex;
 
 use agentstack::cli::{ApplyArgs, DiffArgs, UseArgs};
 use agentstack::commands::{apply, diff, use_profile};
+use agentstack::scope::Scope;
 use agentstack::state::{manifest_identity, State};
 
 // apply mutates the process-global HOME; serialize these tests.
@@ -32,7 +33,9 @@ fn apply_args(prune_foreign: bool) -> ApplyArgs {
         profile: None,
         dry_run: false,
         write: true,
-        scope: None,
+        // The cross-manifest guard is a GLOBAL-scope concern (project keys are
+        // per-repo); the default scope in a repo is project, so say global.
+        scope: Some(Scope::Global),
         allow_unresolved: false,
         prune_foreign,
         no_gitignore: true,
@@ -232,7 +235,7 @@ fn use_prune_foreign_still_works_after_guarded_use() {
     let use_args = |prune_foreign: bool| UseArgs {
         profile: Some("p".into()),
         targets: vec![],
-        scope: None,
+        scope: Some(Scope::Global),
         write: true,
         allow_unresolved: false,
         prune_foreign,
@@ -264,7 +267,7 @@ fn diff_args() -> DiffArgs {
     DiffArgs {
         targets: vec![],
         profile: None,
-        scope: None,
+        scope: Some(Scope::Global),
     }
 }
 

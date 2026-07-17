@@ -346,6 +346,10 @@ fn run_checks(
     report.section("Drift");
     let mut any_drift = false;
     let identity = state::manifest_identity(&ctx.dir);
+    // Context-default scope: project for a repo manifest, global for the
+    // machine manifest — the scope `apply` writes here when none is passed
+    // (see docs/design/default-scope.md).
+    let default_scope = Scope::default_for(&ctx.dir);
     // Owner-refreshed servers: the drift check renders with the owning app's
     // on-disk values, so an owned server that changed on disk is reported as
     // "refresh the manifest", never as a pending revert of what the app wrote
@@ -355,7 +359,7 @@ fn run_checks(
     let owned = crate::render::refresh_owned_servers(
         &mut server_map,
         &ctx.registry,
-        Scope::Global,
+        default_scope,
         &ctx.dir,
     );
     for o in owned.iter().filter(|o| o.stale) {
@@ -385,176 +389,198 @@ fn run_checks(
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
-        let key = target_key(id, Scope::Global, &ctx.dir);
-        // Was this key's managed set recorded by a different manifest? Its
-        // leftover entries are then not ours to prune (see
-        // State::foreign_prunes): `--fix` keeps them, and the report points at
-        // `apply --prune-foreign` instead of `apply --write`.
-        let foreign_key = state
-            .manifest_source(&key)
-            .is_some_and(|src| src != identity);
-        let mut previously = state.managed_servers(&key);
-        let kept = if args.fix {
-            state.foreign_prunes(&key, Scope::Global, &ctx.dir, &mut previously, |n| {
-                server_map.contains_key(n)
-            })
-        } else {
-            Vec::new()
-        };
-        // Names an earlier guarded write kept on disk (state bookkeeping —
-        // they left `managed_servers` when the writing manifest recorded its
-        // own set, so neither `foreign_key` nor the plan sees them). Keep
-        // reporting the adopt-or-prune choice until one of them happens.
-        let mut kept_report: Vec<String> = state
-            .kept_foreign(&key)
+        // Which scopes to check for this target: every scope a previous write
+        // recorded state at — a deliberate `--scope` choice keeps being
+        // honored, never second-guessed — falling back to the context default
+        // for fresh setups so quickstart → doctor stays clean.
+        let mut scopes: Vec<Scope> = [Scope::Global, Scope::Project]
             .into_iter()
-            .filter(|n| !server_map.contains_key(n))
+            .filter(|s| state.targets.contains_key(&target_key(id, *s, &ctx.dir)))
             .collect();
-        for k in &kept {
-            if !kept_report.contains(k) {
-                kept_report.push(k.clone());
+        if scopes.is_empty() {
+            scopes.push(default_scope);
+        }
+        for scope in scopes {
+            // Fix-command hints must name the scope when it isn't the default the
+            // bare command would pick here.
+            let scope_flag = if scope == default_scope {
+                String::new()
+            } else {
+                format!(" --scope {scope}")
+            };
+            let key = target_key(id, scope, &ctx.dir);
+            // Was this key's managed set recorded by a different manifest? Its
+            // leftover entries are then not ours to prune (see
+            // State::foreign_prunes): `--fix` keeps them, and the report points at
+            // `apply --prune-foreign` instead of `apply --write`.
+            let foreign_key = state
+                .manifest_source(&key)
+                .is_some_and(|src| src != identity);
+            let mut previously = state.managed_servers(&key);
+            let kept = if args.fix {
+                state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
+                    server_map.contains_key(n)
+                })
+            } else {
+                Vec::new()
+            };
+            // Names an earlier guarded write kept on disk (state bookkeeping —
+            // they left `managed_servers` when the writing manifest recorded its
+            // own set, so neither `foreign_key` nor the plan sees them). Keep
+            // reporting the adopt-or-prune choice until one of them happens.
+            let mut kept_report: Vec<String> = state
+                .kept_foreign(&key)
+                .into_iter()
+                .filter(|n| !server_map.contains_key(n))
+                .collect();
+            for k in &kept {
+                if !kept_report.contains(k) {
+                    kept_report.push(k.clone());
+                }
             }
-        }
-        let Some(ruleset) = ruleset.as_ref() else {
-            continue;
-        };
-        let Some(plan) = plan_target_with_servers(
-            desc,
-            &ctx.resolver,
-            ruleset,
-            &server_map,
-            &previously,
-            Scope::Global,
-            &ctx.dir,
-        )?
-        else {
-            continue;
-        };
+            let Some(ruleset) = ruleset.as_ref() else {
+                continue;
+            };
+            let Some(plan) = plan_target_with_servers(
+                desc,
+                &ctx.resolver,
+                ruleset,
+                &server_map,
+                &previously,
+                scope,
+                &ctx.dir,
+            )?
+            else {
+                continue;
+            };
 
-        if !kept_report.is_empty() {
-            any_drift = true;
-            report.line(
-                Level::Warn,
-                format!(
-                    "{:<14} kept {} — applied by another manifest ↳ keep them: \
-                     agentstack adopt · prune them: agentstack apply --prune-foreign",
-                    desc.display,
-                    kept_report.join(", ")
-                ),
-            );
-        }
-        // Hand-edit since our last write?
-        if let Some(ts) = state.targets.get(&key) {
-            if !ts.last_hash.is_empty() {
-                let on_disk = state::hash(&plan.existing);
-                if on_disk != ts.last_hash {
-                    // The owner of an owned server rewrites its own config by
-                    // design. When the mismatch is fully explained — this
-                    // target owns a refreshed server and the owner-refreshed
-                    // render proposes no change — it's app churn, not a
-                    // hand-edit to review.
-                    let owner_churn =
-                        !plan.changed() && owned.iter().any(|o| o.stale && o.owner == **id);
-                    if owner_churn {
-                        report.line(
-                            Level::Ok,
-                            format!(
-                                "{:<14} rewritten by the app itself (owned server) — \
-                                 refresh the manifest: agentstack apply --write",
-                                desc.display
-                            ),
-                        );
-                    } else {
-                        any_drift = true;
-                        report.line(
-                            Level::Warn,
-                            format!(
-                                "{:<14} edited on disk since last apply ↳ review: agentstack diff · \
-                                 keep the hand-edit: agentstack adopt",
-                                desc.display
-                            ),
-                        );
+            if !kept_report.is_empty() {
+                any_drift = true;
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<14} kept {} — applied by another manifest ↳ keep them: \
+                     agentstack adopt{scope_flag} · prune them: agentstack apply \
+                     --prune-foreign{scope_flag}",
+                        desc.display,
+                        kept_report.join(", ")
+                    ),
+                );
+            }
+            // Hand-edit since our last write?
+            if let Some(ts) = state.targets.get(&key) {
+                if !ts.last_hash.is_empty() {
+                    let on_disk = state::hash(&plan.existing);
+                    if on_disk != ts.last_hash {
+                        // The owner of an owned server rewrites its own config by
+                        // design. When the mismatch is fully explained — this
+                        // target owns a refreshed server and the owner-refreshed
+                        // render proposes no change — it's app churn, not a
+                        // hand-edit to review.
+                        let owner_churn =
+                            !plan.changed() && owned.iter().any(|o| o.stale && o.owner == **id);
+                        if owner_churn {
+                            report.line(
+                                Level::Ok,
+                                format!(
+                                    "{:<14} rewritten by the app itself (owned server) — \
+                                 refresh the manifest: agentstack apply --write{scope_flag}",
+                                    desc.display
+                                ),
+                            );
+                        } else {
+                            any_drift = true;
+                            report.line(
+                                Level::Warn,
+                                format!(
+                                    "{:<14} edited on disk since last apply ↳ review: agentstack \
+                                 diff{scope_flag} · keep the hand-edit: agentstack \
+                                 adopt{scope_flag}",
+                                    desc.display
+                                ),
+                            );
+                        }
                     }
                 }
             }
-        }
-        // Pending manifest changes?
-        if plan.changed() {
-            // An unresolved `${REF}` must never reach a live config — same gate
-            // as `apply`/`toggle`. `doctor --fix` has no override, so we refuse.
-            if args.fix
-                && (!plan.unresolved.is_empty()
-                    || !plan.failed.is_empty()
-                    || !plan.denied.is_empty())
-            {
-                any_drift = true;
-                if !plan.unresolved.is_empty() {
+            // Pending manifest changes?
+            if plan.changed() {
+                // An unresolved `${REF}` must never reach a live config — same gate
+                // as `apply`/`toggle`. `doctor --fix` has no override, so we refuse.
+                if args.fix
+                    && (!plan.unresolved.is_empty()
+                        || !plan.failed.is_empty()
+                        || !plan.denied.is_empty())
+                {
+                    any_drift = true;
+                    if !plan.unresolved.is_empty() {
+                        report.line(
+                            Level::Error,
+                            format!(
+                                "{:<14} not fixed — unresolved secret(s): {}",
+                                desc.display,
+                                plan.unresolved.join(", ")
+                            ),
+                        );
+                    }
+                    if !plan.failed.is_empty() {
+                        report.line(
+                            Level::Error,
+                            format!(
+                                "{:<14} not fixed — secret read failure(s): {}",
+                                desc.display,
+                                plan.failed.join(", ")
+                            ),
+                        );
+                    }
+                } else if args.fix {
+                    plan.write()?;
+                    state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                    // A --fix write is a guarded write too: keep the kept-foreign
+                    // names reachable for a later `apply --prune-foreign`.
+                    state.record_kept_foreign(&key, kept_report.clone());
+                    fixed += 1;
                     report.line(
-                        Level::Error,
+                        Level::Ok,
                         format!(
-                            "{:<14} not fixed — unresolved secret(s): {}",
+                            "{:<14} re-applied {} change(s)",
                             desc.display,
-                            plan.unresolved.join(", ")
+                            plan.managed.len()
                         ),
                     );
-                }
-                if !plan.failed.is_empty() {
+                } else if plan.removed.is_empty() {
+                    any_drift = true;
                     report.line(
-                        Level::Error,
+                        Level::Warn,
                         format!(
-                            "{:<14} not fixed — secret read failure(s): {}",
+                            "{:<14} {} change(s) pending ↳ agentstack apply --write{scope_flag}",
                             desc.display,
-                            plan.failed.join(", ")
+                            plan.managed.len()
                         ),
                     );
-                }
-            } else if args.fix {
-                plan.write()?;
-                state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
-                // A --fix write is a guarded write too: keep the kept-foreign
-                // names reachable for a later `apply --prune-foreign`.
-                state.record_kept_foreign(&key, kept_report.clone());
-                fixed += 1;
-                report.line(
-                    Level::Ok,
-                    format!(
-                        "{:<14} re-applied {} change(s)",
-                        desc.display,
-                        plan.managed.len()
-                    ),
-                );
-            } else if plan.removed.is_empty() {
-                any_drift = true;
-                report.line(
-                    Level::Warn,
-                    format!(
-                        "{:<14} {} change(s) pending ↳ agentstack apply --write",
-                        desc.display,
-                        plan.managed.len()
-                    ),
-                );
-            } else {
-                // A pending prune deletes real entries from a live config —
-                // name the victims and offer the keep path, never just the
-                // one-way "apply --write" hint (which would silently remove
-                // them, e.g. hand-added or foreign-manifest servers).
-                any_drift = true;
-                let prune_cmd = if foreign_key {
-                    // apply's guard keeps foreign entries — pruning them
-                    // takes the explicit flag.
-                    "agentstack apply --prune-foreign"
                 } else {
-                    "agentstack apply --write"
-                };
-                report.line(
-                    Level::Warn,
-                    format!(
-                        "{:<14} would REMOVE {} ↳ keep them: agentstack adopt · \
-                         prune them: {prune_cmd}",
-                        desc.display,
-                        plan.removed.join(", ")
-                    ),
-                );
+                    // A pending prune deletes real entries from a live config —
+                    // name the victims and offer the keep path, never just the
+                    // one-way "apply --write" hint (which would silently remove
+                    // them, e.g. hand-added or foreign-manifest servers).
+                    any_drift = true;
+                    let prune_cmd = if foreign_key {
+                        // apply's guard keeps foreign entries — pruning them
+                        // takes the explicit flag.
+                        "agentstack apply --prune-foreign"
+                    } else {
+                        "agentstack apply --write"
+                    };
+                    report.line(
+                        Level::Warn,
+                        format!(
+                            "{:<14} would REMOVE {} ↳ keep them: agentstack adopt{scope_flag} · \
+                         prune them: {prune_cmd}{scope_flag}",
+                            desc.display,
+                            plan.removed.join(", ")
+                        ),
+                    );
+                }
             }
         }
     }

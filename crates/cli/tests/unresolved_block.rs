@@ -194,8 +194,10 @@ fn partially_blocked_apply_counts_once_and_exits_nonzero() {
     )
     .unwrap();
 
+    // --scope global: the assertions read ~/.claude/CLAUDE.md, and a repo
+    // manifest defaults to project scope.
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
-        .args(["apply", "--write", "--no-gitignore"])
+        .args(["apply", "--write", "--no-gitignore", "--scope", "global"])
         .current_dir(&proj)
         .env("HOME", &home)
         .env("AGENTSTACK_HOME", home.join(".agentstack"))

@@ -167,8 +167,13 @@ and secrets left as `${REF}`s:
 
 ![agentstack first run: init → apply](docs/firstrun.svg)
 
-Two things worth knowing before you climb further:
+Three things worth knowing before you climb further:
 
+- **Writes stay where the manifest lives.** In a repo, `apply`/`use` default
+  to **project** scope — artifacts land repo-local (`.mcp.json`,
+  `.claude/skills/`), kept out of git by a managed `.gitignore` block. Only
+  the machine manifest (`~/.agentstack/`) defaults to your global configs.
+  Pass `--scope` to override either way.
 - **Skills activate through `use`, not `apply`.** `setup` runs this for you as
   its final step. Standalone `apply` renders servers, instructions, settings,
   and hooks only; `agentstack use --write` activates skills — your named
