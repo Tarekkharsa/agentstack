@@ -355,7 +355,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@v0.10.1  # pin a release tag, not @main
+  - uses: Tarekkharsa/agentstack@v0.11.0  # pin a release tag, not @main
 ```
 
 ## Where rendered files live — pick a mode

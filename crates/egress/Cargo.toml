@@ -1,6 +1,6 @@
 [package]
 name = "agentstack-egress"
-version = "0.10.3"
+version = "0.11.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "agentstack egress proxy enforcement: CONNECT/SNI parsing + per-host policy decisions (Phase 2)"

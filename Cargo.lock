@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "age",
  "agentstack-adapters",
@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack-adapters"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "agentstack-core",
  "anyhow",
@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack-core"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack-egress"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "agentstack-core",
  "agentstack-policy",
@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack-executor"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "proptest",
  "serde",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack-policy"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "agentstack-core",
  "indexmap",
@@ -175,7 +175,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack-recorder"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "agentstack-core",
  "assert_fs",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack-runtime"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "agentstack-core",
  "agentstack-policy",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack-trust"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "agentstack-core",
  "assert_fs",
