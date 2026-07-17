@@ -1,5 +1,6 @@
 //! Machine-local commitment key and argv commitment for the locked-run
-//! `AuthorityGrant` (Phase 0A). **Not wired to any runtime path yet.**
+//! `AuthorityGrant` (Phase 0A), consumed by `run --locked` (grant freeze +
+//! digest) and the `agentstack mcp --grant` bridge (the sealed handoff).
 //!
 //! The `AuthorityGrant`'s canonical digest (increment 3b) binds the exact
 //! invocation without recording raw argv (which may carry caller tokens or
@@ -19,12 +20,10 @@
 //! it is opaque, redacted, non-serializable, and exposed only to the outer grant
 //! digest — never recorded or displayed on its own.
 
-// STAGED: 3b-i landed the grant types + the sealed `GrantBuilder`; 3b-ii landed
-// the canonical V1 digest (KAT-frozen, reads every field). Still unwired. The
-// run-flow increment consumes this surface and also lands `RunEnvelope`
-// (contract §6.2: run id + recorder identity + grant digest) — deferred there
-// because a run id and recorder identity only exist on a live run, and
-// `--plan` must never invent them.
+// 3b-i landed the grant types + the sealed `GrantBuilder`; 3b-ii landed the
+// canonical V1 digest (KAT-frozen, reads every field); the run-flow keystone
+// wired both into `run --locked` and landed `RunEnvelope` (contract §6.2) and
+// the sealed `GrantHandoff` the bridge consumes.
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1180,11 +1179,20 @@ impl AuthorityGrant {
 /// Parse and structurally validate a handoff artifact. Fail-closed on schema
 /// or ruleset-version skew: a stale-schema ruleset from a different binary
 /// must never be accepted silently (it could predate a policy dimension).
-/// The handoff plus a keyed authenticator over its bytes. The MAC is the
-/// machine binding: only an artifact `agentstack` itself sealed with the
-/// machine-local commitment key is honored, so a same-user agent cannot forge
-/// a `grant.json` naming arbitrary servers/ruleset and load it via `--grant`
-/// (the artifact fields are otherwise computable from readable project files).
+/// The handoff plus a keyed authenticator over its bytes. What the MAC
+/// provides — stated honestly, per the module header's "cooperative local
+/// commitment, not attestation": it binds the artifact to THIS machine's
+/// commitment key, so it stops cross-machine replay, on-disk tampering, and
+/// forgery by any principal that cannot read the 0600 key file — which
+/// includes confined postures (sandbox/lockdown) where the agent is fenced
+/// away from the key. It does NOT stop a same-user unconfined agent: that
+/// agent can read the key and seal a valid MAC over arbitrary fields. On the
+/// host tier such an agent already executes arbitrary commands, but a forged
+/// server definition reusing a trusted name would still reach the bridge's
+/// secret broker; the hardening that closes this — re-resolving the fenced
+/// `(name, checksum)` set from the trusted manifest at consumption instead of
+/// consuming the artifact's definitions verbatim — is recorded in TODO.md and
+/// becomes load-bearing when the confined postures ship.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SignedHandoff {

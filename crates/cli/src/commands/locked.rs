@@ -999,10 +999,12 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     // while the launch claims the locked contract, so no artifact, no launch.
     let handoff_path = run_dir.join(crate::grant::HANDOFF_FILE);
     let handoff = grant.handoff(&envelope);
-    // Machine-authenticate the artifact under the SAME commitment key: only a
-    // grant agentstack itself froze on this machine is honored by the bridge,
-    // so a same-user agent cannot forge a grant.json (its fields are otherwise
-    // derivable from readable project files) and load it via --grant.
+    // Machine-authenticate the artifact under the SAME commitment key: the
+    // bridge only honors an artifact sealed with this machine's key, which
+    // stops cross-machine replay, tampering, and forgery by anything that
+    // cannot read the 0600 key file (confined postures). A same-user
+    // unconfined agent CAN read the key — see `SignedHandoff`'s docstring for
+    // the honest threat model and the recorded manifest-cross-check hardening.
     let write = crate::grant::seal_handoff(handoff, &key)
         .and_then(|signed| serde_json::to_string_pretty(&signed).map_err(anyhow::Error::from))
         .and_then(|text| crate::util::atomic::write(&handoff_path, &text));

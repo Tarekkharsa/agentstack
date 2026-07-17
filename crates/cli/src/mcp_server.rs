@@ -28,6 +28,16 @@ pub fn serve(
     transparent: bool,
     grant: Option<&Path>,
 ) -> Result<()> {
+    // `--grant` is the eager one-project locked bridge; `--auto-project`
+    // re-derives a gateway per session from disk. Combined, the grant gateway
+    // would be computed and then silently ignored by the auto-project loop —
+    // a silent downgrade to disk re-derivation, exactly what grant mode
+    // exists to prevent. Refuse the combination outright (fail closed).
+    if auto_project && grant.is_some() {
+        anyhow::bail!(
+            "`--grant` cannot be combined with `--auto-project`: a frozen run grant fixes one project's surface for the whole process"
+        );
+    }
     let mut dir = manifest_dir.map(Path::to_path_buf);
     let stdin = std::io::stdin();
     // On stdio, stdout must carry only JSON-RPC. Library code (apply, profiles,
@@ -104,22 +114,24 @@ pub fn serve(
             let Ok(req) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
-            if is_lease_mutation(&req) {
-                // Under a frozen run grant the served surface is FIXED — a
-                // lease open/close would swap in a gateway re-derived from
-                // disk, exactly the re-derivation grant mode exists to
-                // prevent. Refuse loudly (the client learns the truth) rather
-                // than silently ignoring the narrowing request.
-                if grant_mode {
+            if grant_mode {
+                // Under a frozen run grant the served surface is FIXED —
+                // refuse every control-plane tool that would swap it (lease
+                // transitions re-derive a gateway from disk), resolve secrets
+                // into native configs (`session_start`), or mutate project /
+                // session state mid-run. Refuse loudly (the client learns the
+                // truth) rather than silently ignoring the request.
+                if let Some(tool) = grant_refused_tool(&req) {
                     respond(
                         &out,
                         &result(
                             req.get("id").cloned(),
-                            json!({ "content": [{ "type": "text", "text": "Error: lease transitions are unavailable under a frozen run grant — the served surface was fixed by `agentstack run --locked` and cannot be re-derived mid-run." }], "isError": true }),
+                            json!({ "content": [{ "type": "text", "text": format!("Error: {tool} is unavailable under a frozen run grant — the served surface was fixed by `agentstack run --locked`; state-mutating and secret-resolving control-plane tools are refused for the run's duration (fail closed).") }], "isError": true }),
                         ),
                     );
                     continue;
                 }
+            } else if is_lease_mutation(&req) {
                 // A tighter/looser profile boundary must not race an in-flight
                 // call through the previous gateway.
                 workers.join_all();
@@ -377,11 +389,23 @@ fn lease_profile(store: &LeaseStore) -> Option<String> {
 }
 
 /// Build the bridge gateway from a frozen run-grant artifact (D2): load,
-/// validate against the project AS IT EXISTS NOW (root identity, consent
-/// freshness, trust), then hand `Gateway::from_frozen` the artifact's ruleset
-/// and server set verbatim — one resolution, one ruleset, no re-derivation.
-/// `from_frozen` re-checks trust itself; the consent-equality check here is
-/// the artifact-binding on top (rule 4: any pinned byte changed → stale).
+/// validate against the project AS IT EXISTS NOW (consent freshness, trust,
+/// current machine ceiling), then hand `Gateway::from_frozen` the artifact's
+/// ruleset and server set verbatim — one resolution, one ruleset, no
+/// re-derivation. `from_frozen` re-checks trust itself; the consent-equality
+/// check here is the artifact-binding on top (rule 4: any pinned byte
+/// changed → stale).
+///
+/// Honest limit: `base` is DERIVED from the artifact's own `project_root`, so
+/// `verify_handoff_for`'s root-equality check is satisfied by construction on
+/// this path — the bridge has no independent root to compare against (the
+/// harness's cwd when launching stdio servers is not contractual across 13
+/// CLIs, and a false refusal would break every locked run on such a harness).
+/// The binding that actually holds here is the MAC (the root field is
+/// machine-authentic) plus the consent/trust/ceiling re-checks against that
+/// root; same-machine cross-project replay of a valid artifact is bounded by
+/// the residual-(ii) analysis in TODO.md, with per-run artifact identity as
+/// the recorded follow-up.
 fn grant_gateway(path: &Path) -> Result<(crate::gateway::Gateway, PathBuf)> {
     // The commitment key authenticates the artifact: a missing/unreadable key
     // fails closed exactly like a forged artifact (no key, no trust).
@@ -406,6 +430,35 @@ fn is_lease_mutation(req: &Value) -> bool {
             req.pointer("/params/name").and_then(Value::as_str),
             Some("agentstack_lease_open" | "agentstack_lease_close")
         )
+}
+
+/// Control-plane tools refused under a frozen run grant (D2), by name. The
+/// grant fixed the served surface at `run --locked` time; anything that would
+/// swap that surface (lease transitions), resolve secrets into native configs
+/// on disk (`session_start` renders server configs with resolved values — a
+/// breach of the secret-broker boundary the locked run draws), or mutate
+/// manifest/session state mid-run is refused fail-closed for the run's
+/// duration. Read-only discovery (list/search/explain/diff/doctor/status) and
+/// trust-gated skill loading stay available: they grant nothing beyond the
+/// frozen surface. Returns the offending tool name so the refusal names it.
+fn grant_refused_tool(req: &Value) -> Option<&str> {
+    if req.get("method").and_then(Value::as_str) != Some("tools/call") {
+        return None;
+    }
+    let name = req.pointer("/params/name").and_then(Value::as_str)?;
+    const REFUSED: [&str; 10] = [
+        "agentstack_lease_open",
+        "agentstack_lease_close",
+        "agentstack_lease_freeze",
+        "agentstack_session_start",
+        "agentstack_session_end",
+        "agentstack_session_freeze",
+        "agentstack_add_skill",
+        "agentstack_add_server",
+        "agentstack_add_from",
+        "agentstack_create_profile",
+    ];
+    REFUSED.contains(&name).then_some(name)
 }
 
 impl WorkerPool {
@@ -2415,6 +2468,51 @@ mod tests {
         assert!(!is_upstream_call(
             &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call" })
         ));
+    }
+
+    #[test]
+    fn grant_mode_refuses_mutating_and_secret_resolving_control_plane_tools() {
+        let call = |name: &str| {
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": { "name": name, "arguments": {} } })
+        };
+        // Everything that swaps the frozen surface, resolves secrets into
+        // native configs, or mutates manifest/session state mid-run.
+        for name in [
+            "agentstack_lease_open",
+            "agentstack_lease_close",
+            "agentstack_lease_freeze",
+            "agentstack_session_start",
+            "agentstack_session_end",
+            "agentstack_session_freeze",
+            "agentstack_add_skill",
+            "agentstack_add_server",
+            "agentstack_add_from",
+            "agentstack_create_profile",
+        ] {
+            assert_eq!(grant_refused_tool(&call(name)), Some(name));
+        }
+        // Read-only discovery, trust-gated loading, and upstream proxying
+        // stay served — they grant nothing beyond the frozen surface.
+        for name in [
+            "agentstack_list",
+            "agentstack_search",
+            "agentstack_explain",
+            "agentstack_diff",
+            "agentstack_doctor",
+            "agentstack_list_loadable",
+            "agentstack_load",
+            "agentstack_lease_status",
+            "agentstack_session_list",
+            "figma__get_file",
+        ] {
+            assert_eq!(grant_refused_tool(&call(name)), None);
+        }
+        // Non-tools/call frames are never classified.
+        assert_eq!(
+            grant_refused_tool(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })),
+            None
+        );
     }
 
     #[test]
