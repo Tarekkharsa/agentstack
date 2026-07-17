@@ -81,6 +81,26 @@ A refused call says which rule blocked it:
 Denied tools are also invisible to discovery — a tool you can't find may be
 firewalled, not missing. `explain <server>` shows both policy layers.
 
+## Locked runs (a frozen capability surface)
+
+If the session was launched with `agentstack run <cli> --locked`, the bridge
+serves a **frozen run grant**: the exact server set and policy ceiling that
+passed the pre-launch gates, sealed at launch. Refusals that say
+*"unavailable under a frozen run grant"* are by design, not breakage:
+
+- Lease transitions, `agentstack_session_start`/`end`/`freeze`, and manifest
+  editors (`add_skill`, `add_server`, `add_from`, `create_profile`) are
+  refused for the run's duration — the surface cannot be re-derived or
+  widened mid-run, and nothing may resolve secrets into native configs.
+- Proxied upstream tools, read-only discovery (`list`, `search`, `explain`,
+  `diff`, `doctor`, `lease_status`), and trust-gated skill loading work
+  normally.
+- If the bridge reports the grant itself refused (stale consent, lost trust,
+  changed policy), someone edited pinned content mid-run: tell the human to
+  review and re-run `agentstack run --locked` — never work around it.
+- Want a capability the fence excludes? Propose the manifest/profile change
+  in chat; the human applies it and starts a new locked run.
+
 ## Commands you'll actually use
 
 ```bash

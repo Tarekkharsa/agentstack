@@ -744,7 +744,7 @@ appears on the run banner, in `agentstack run --sandbox --plan`, and in
 | Posture                                 | Mode                          | What it means |
 |-----------------------------------------|-------------------------------|---------------|
 | `HOST / ADVISORY`                       | `agentstack run` (host)       | No container. The gateway still brokers MCP tool calls, but nothing confines the process's own egress or filesystem — policy is advisory. The banner says so, once. |
-| `HOST / PROTECTED`                       | `run --locked`                | No container either — but content trust, strict lock verification, and policy admission are enforced *before* launch and every decision is recorded, a fail-closed pre-launch gate. Not kernel isolation: the harness still runs as you, on the host, and the evidence is a cooperative local audit trail. |
+| `HOST / PROTECTED`                       | `run --locked`                | No container either — but content trust, strict lock verification (including D3 executable pins), and policy admission are enforced *before* launch, the run's MCP surface is frozen into a machine-authenticated grant the bridge serves verbatim (no mid-run re-derivation, mutating control-plane tools refused), and every decision is recorded. Not kernel isolation: the harness still runs as you, on the host, and the evidence is a cooperative local audit trail. See [The Protected tier in detail](#the-protected-tier-in-detail-run---locked). |
 | `SANDBOX / PROXIED · DIRECT ROUTE OPEN` | `run --sandbox`               | Container with a host-side egress proxy; proxied HTTPS egress is checked against compiled policy, but the container's bridge network still has a direct route a proxy-ignoring process could use — only `--lockdown` removes it. |
 | `LOCKDOWN / ENFORCED · NO DIRECT ROUTE` | `run --lockdown`              | Container on an internal-only network whose sole peer is the egress sidecar — enforced *and* topologically confined (no host route, no direct internet). |
 
@@ -766,6 +766,56 @@ Ready-to-use machine policies for the common postures live in
 [`examples/policies/`](../examples/policies/) (`compatible`, `developer`,
 `locked-down`, `ci`), each a parseable `~/.agentstack/agentstack.toml` with
 comments explaining every choice.
+
+### The Protected tier in detail (`run --locked`)
+
+A locked run is a fail-closed **pre-launch gate sequence plus a frozen
+capability surface** — every decision recorded, nothing re-derived mid-run:
+
+1. **Gates, in order** (each records a `gate_decision` event; the first
+   refusal stops the launch): enforced **trust** (explicit consent, current
+   digest), strict **lock verification** including the D3 executable pins
+   (a one-byte edit to a pinned local server executable refuses the run) and
+   the `rendered-verify` re-check of delivered extension copies, then
+   **policy admission** (every declared capability must fit under the machine
+   ceiling — an unclassifiable host, e.g. a `${REF}` in a URL's host portion,
+   refuses because it *cannot* be checked).
+2. **Grant freeze.** The run's entire authority — compiled machine ∩ project
+   ruleset, the resolved `${REF}`-only server set, project root + consent
+   digest, the fencing profile — is frozen into an `AuthorityGrant` whose
+   canonical digest is printed and recorded (`grant_frozen`).
+3. **Bridge handoff.** A reviewed projection of the grant (never argv, never
+   secret values) is sealed under a machine-local HMAC key into the run's
+   private dir, and the **launch-scoped** project MCP config points the
+   harness at `agentstack mcp --grant <artifact>`. The bridge consumes the
+   artifact **verbatim** — same ruleset, same servers the gates admitted — and
+   fails closed (serving nothing, loudly) on a failed MAC, schema/version
+   skew, a consent digest that no longer matches (any post-freeze manifest
+   edit), lost trust, or a machine ceiling that changed since freeze. It
+   never falls back to re-deriving authority from disk.
+4. **Frozen control plane.** Under `--grant`, control-plane tools that would
+   swap the surface or mutate state mid-run — lease open/close/freeze,
+   `session_start` (which resolves secrets into native configs),
+   `session_end`/`freeze`, `add_skill`/`add_server`/`add_from`,
+   `create_profile` — are refused for the run's duration. Read-only
+   discovery and trust-gated skill loading still answer.
+5. **`--profile <name>` is a fence**, not a session: gates, grant, artifact,
+   and bridge all see only that profile's server subset; no native session
+   state is applied or reverted.
+6. **Hygiene.** The original project MCP config is parked in the run's
+   private dir (never left in the repo) and restored byte-identical; a
+   sentinel makes overlapping locked runs refuse instead of stacking; a
+   crash leaves the more restrictive state.
+
+`run --locked --plan` prints the same fully-aggregated picture — every
+blocker at once, the grant digest a live run would freeze — and mutates
+nothing. Honest limits: this is pre-launch gating and a frozen surface on the
+HOST tier, not isolation (the harness still runs as you — `--lockdown` is the
+kernel fence), and the sealing key is readable by the same user, so the
+artifact MAC defeats cross-machine replay and tampering, not a same-user
+process (which already runs unconfined here). The asserted walkthrough is
+[`examples/projects/locked-run/`](../examples/projects/locked-run/); the full
+contract is [`docs/design/locked-run-contract.md`](design/locked-run-contract.md).
 
 ## Agent-operable (`agentstack mcp`)
 

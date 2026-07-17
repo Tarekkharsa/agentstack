@@ -337,6 +337,36 @@ Docker container behind the egress proxy.
   enforcement. (`crates/cli/src/render/extensions.rs` `render` / `verify_rendered`,
   `crates/cli/src/commands/locked.rs`, `agentstack_core::digest::integrity_root_digest`)
 
+### The locked run's frozen grant (`run --locked`)
+
+- **What is enforced.** The launch is gated fail-closed *before* the harness
+  starts: enforced trust, strict lock verification (including the D3
+  executable pins — pin derivation and verification share one classifier and
+  both anchor at the project root, so record and verify can never disagree),
+  `rendered-verify`, and policy admission against the machine ceiling. The
+  run's MCP surface is then **frozen**: the compiled machine ∩ project
+  ruleset and the `${REF}`-only server set are sealed (HMAC, machine-local
+  key) into a private run artifact, and the launch-scoped bridge
+  (`agentstack mcp --grant`) serves exactly that — refusing on a failed MAC,
+  consent drift, lost trust, version skew, or a machine ceiling that changed
+  since freeze, and refusing every mutating/secret-resolving control-plane
+  tool (lease transitions, `session_start`, manifest editors) for the run's
+  duration. It never falls back to disk re-derivation.
+  (`crates/cli/src/commands/locked.rs`, `crates/cli/src/grant.rs`,
+  `crates/cli/src/mcp_server.rs`; asserted end-to-end in
+  `examples/projects/locked-run/`.)
+- **What is NOT claimed.** No kernel isolation — the harness runs as you on
+  the host; `--lockdown` is the fence. The sealing key is readable by the
+  same user, so the artifact MAC stops cross-machine replay, on-disk
+  tampering, and forgery by anything that cannot read the key file — not a
+  same-user unconfined process (which already runs at full permission here;
+  the manifest cross-check hardening is staged for the confined tiers).
+  Ambient **user/global-scope** MCP entries are named in an honest
+  content-derived warning, not neutralized (parking a shared global config
+  that harness apps rewrite mid-run would risk clobbering user state). A
+  machine-policy tightening mid-run takes effect at the next run, matching
+  the in-process gateway's snapshot-at-start semantics.
+
 ### Not yet wired: trust-store mutation logging
 
 ARCHITECTURE Layer 2 describes logging every trust-store mutation as tamper
