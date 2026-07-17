@@ -47,6 +47,29 @@ bash examples/projects/locked-run/assert.sh
 Isolated temp `HOME` + `AGENTSTACK_HOME`, a stub `claude` harness on `PATH` —
 nothing touches your real config, no network, no Docker.
 
+## Watch it
+
+Three paced scenes ([`demo.sh`](demo.sh)) tell the same story `assert.sh`
+proves — real terminal output, no Docker. Each runs in a throwaway `HOME`:
+
+**Safe repo** — pin it, review it, trust it, launch it locked; the gates pass,
+the grant freezes, the harness runs.
+
+![run --locked, safe repo: lock, trust, plan, launch](../../../docs/demos/locked-safe.gif)
+
+**Policy violation** — the repo asks for egress your machine policy forbids;
+the run is refused at admission, before launch, with the exact rule named.
+
+![run --locked, policy violation: refused at admission](../../../docs/demos/locked-policy.gif)
+
+**Drift** — a pinned server executable is edited after `lock`; the next run
+refuses before launch until you re-lock and re-trust.
+
+![run --locked, drift: refused on a changed pinned byte](../../../docs/demos/locked-drift.gif)
+
+Re-record them with `DEMO_PAUSE=2.5 asciinema rec … -c './demo.sh <scene>'`
+then `agg` — exact commands are in [`demo.sh`](demo.sh)'s header.
+
 ## Historical note
 
 Writing this example exposed a real gap: in the preferred `.agentstack/`

@@ -1,0 +1,3 @@
+# Regenerable recording artifacts — the .cast files are rebuilt from demo.sh.
+# The rendered GIFs live in docs/demos/ and are committed there.
+runtime/
