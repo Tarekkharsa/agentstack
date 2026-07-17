@@ -70,7 +70,13 @@ fn apply_dry_run_masks_secret_but_write_persists_it() {
     write_manifest(&proj);
 
     // 1. Dry-run preview: the resolved secret must NOT appear in stdout…
-    let dry = run(&proj, &home, &["apply", "--dry-run", "--no-gitignore"]);
+    // (--scope global: the assertions read ~/.claude.json, and a repo
+    // manifest defaults to project scope.)
+    let dry = run(
+        &proj,
+        &home,
+        &["apply", "--dry-run", "--no-gitignore", "--scope", "global"],
+    );
     assert!(
         !dry.contains(SECRET),
         "resolved secret leaked into the apply preview:\n{dry}"
@@ -86,7 +92,11 @@ fn apply_dry_run_masks_secret_but_write_persists_it() {
     assert!(!claude_cfg.exists(), "dry-run must not write");
 
     // 2. `--write`: the REAL secret must land on disk unchanged.
-    let written_out = run(&proj, &home, &["apply", "--write", "--no-gitignore"]);
+    let written_out = run(
+        &proj,
+        &home,
+        &["apply", "--write", "--no-gitignore", "--scope", "global"],
+    );
     assert!(
         !written_out.contains(SECRET),
         "the --write summary/diff must also mask the secret:\n{written_out}"

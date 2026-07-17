@@ -86,7 +86,7 @@ pub fn prepare(
     crate::render::refresh_owned_servers(
         &mut server_map,
         &ctx.registry,
-        args.scope.unwrap_or(Scope::Global),
+        args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir)),
         &ctx.dir,
     );
 
@@ -152,7 +152,9 @@ pub fn activate(
     prepared: &Prepared,
 ) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
-    let scope = args.scope.unwrap_or(Scope::Global);
+    // Default scope follows the manifest's home: project for a repo manifest,
+    // global only for the machine manifest (see docs/design/default-scope.md).
+    let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
     let resolved_skills = &prepared.resolved_skills;
     let resolved_servers = &prepared.resolved_servers;
     let server_map = &prepared.server_map;

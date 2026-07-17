@@ -33,7 +33,9 @@ fn apply_write() -> ApplyArgs {
         profile: None,
         dry_run: false,
         write: true,
-        scope: None,
+        // These tests assert against the global ~/.claude.json; in a repo the
+        // default scope is project, so pin global explicitly.
+        scope: Some(agentstack::scope::Scope::Global),
         allow_unresolved: false,
         prune_foreign: false,
         no_gitignore: true,

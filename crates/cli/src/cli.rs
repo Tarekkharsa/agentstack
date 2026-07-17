@@ -631,7 +631,9 @@ pub struct SetupArgs {
     #[arg(long, value_name = "NAME")]
     pub profile: Option<String>,
 
-    /// Which scope to write: global (~) or project (repo). Defaults to global.
+    /// Which scope to write: global (~) or project (repo). Defaults to the
+    /// manifest's home — project for a repo manifest, global for the machine
+    /// manifest (~/.agentstack).
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
 }
@@ -798,8 +800,9 @@ pub struct ApplyArgs {
     #[arg(long)]
     pub write: bool,
 
-    /// Which scope to write: global (~) or project (repo). Defaults to global;
-    /// pass `--scope project` to write repo-local config.
+    /// Which scope to write: global (~) or project (repo). Defaults to the
+    /// manifest's home — project (repo-local config) for a repo manifest,
+    /// global for the machine manifest (~/.agentstack).
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
 

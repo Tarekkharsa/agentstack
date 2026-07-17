@@ -25,7 +25,7 @@ use crate::util::diff;
 pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
-    let scope = args.scope.unwrap_or(Scope::Global);
+    let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
 
     // Collect servers present on disk but absent from the manifest.
     let mut collected: IndexMap<String, Server> = IndexMap::new();

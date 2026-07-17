@@ -41,7 +41,11 @@ pub fn run(args: &RestoreArgs, manifest_dir: Option<&Path>) -> Result<()> {
             &registry,
             &dir,
             id,
-            args.scope.unwrap_or(Scope::Global),
+            // Same context-derived default as apply/use: the slot restore
+            // targets the scope those commands write by default here.
+            args.scope.unwrap_or_else(|| {
+                Scope::default_for(&crate::manifest::resolve_manifest_dir(&dir))
+            }),
             args.write,
         ),
         Some(id) => {

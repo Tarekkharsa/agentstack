@@ -191,7 +191,9 @@ fn kept_foreign_stays_reported_after_guarded_apply() {
             profile: None,
             dry_run: false,
             write: true,
-            scope: None,
+            // Guarded-keep is a global-scope behavior; pin it explicitly now
+            // that a repo manifest defaults to project scope.
+            scope: Some(agentstack::scope::Scope::Global),
             allow_unresolved: false,
             prune_foreign: false,
             no_gitignore: true,

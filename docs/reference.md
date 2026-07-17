@@ -151,10 +151,14 @@ which fix to run.
 
 ### Scopes
 
-Writes default to **global** (each CLI's `~/.claude.json`,
-`~/.claude/skills`); pass `--scope project` to write a repo's project
-locations (`.mcp.json`, `.claude/skills/`) so any agent opening the repo
-inherits the setup.
+Writes default to the **manifest's home**: a repo manifest writes **project**
+locations (`.mcp.json`, `.claude/skills/` — repo-local, behind the managed
+`.gitignore` block), while the machine manifest (`~/.agentstack/`) writes
+**global** locations (each CLI's `~/.claude.json`, `~/.claude/skills`).
+`--scope` overrides either way — e.g. `apply --scope global` in a repo puts
+its servers in every project's config on this machine. `doctor` follows the
+scope your writes actually recorded, so a deliberate `--scope` choice is
+honored, not second-guessed.
 
 ## Where rendered files live (three modes)
 
