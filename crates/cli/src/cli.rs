@@ -329,6 +329,19 @@ pub struct McpArgs {
     /// keeping the agent's tool context small.
     #[arg(long)]
     pub transparent: bool,
+
+    /// Consume a frozen run-grant artifact written by `agentstack run
+    /// --locked` instead of re-deriving authority from disk (D2). Fail-closed:
+    /// a missing, stale, wrong-project, or version-skewed artifact serves
+    /// NOTHING — never a fallback to disk re-derivation. Not meant to be set
+    /// by hand; the launch-scoped config written by `run --locked` carries it.
+    #[arg(
+        long,
+        value_name = "PATH",
+        hide = true,
+        conflicts_with = "auto_project"
+    )]
+    pub grant: Option<std::path::PathBuf>,
 }
 
 #[derive(Args, Debug)]

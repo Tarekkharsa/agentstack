@@ -24,9 +24,7 @@
 // run-flow increment consumes this surface and also lands `RunEnvelope`
 // (contract §6.2: run id + recorder identity + grant digest) — deferred there
 // because a run id and recorder identity only exist on a live run, and
-// `--plan` must never invent them. Remove this allow once the grant is wired
-// into the run path.
-#![allow(dead_code)]
+// `--plan` must never invent them.
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
@@ -716,8 +714,23 @@ pub enum AdapterSourceIdentity {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ProfileEffect {
     None,
-    Temporary { name: String, scope: Scope },
-    Kept { name: String, scope: Scope },
+    Temporary {
+        name: String,
+        scope: Scope,
+    },
+    Kept {
+        name: String,
+        scope: Scope,
+    },
+    /// `--locked --profile`: the profile FENCES the granted server surface
+    /// (the grant's servers are the profile's subset, resolved once) but no
+    /// native session state is applied — skills/native render under a locked
+    /// profile land with the D2 render/session unification. A new variant is
+    /// additive to the V1 digest encoding (new tag value; existing variants'
+    /// bytes unchanged), so the KAT stays frozen.
+    Fenced {
+        name: String,
+    },
 }
 
 /// Secret authorization scope — concrete server, never unscoped.
@@ -979,7 +992,13 @@ impl GrantedServer {
 /// classifier, and the grant must carry the lock's identity byte-for-byte.
 #[derive(Clone, Debug)]
 pub struct GrantedExecutable {
+    // Read via the executables map KEY (path, kind) everywhere today; kept on
+    // the value too so an entry is self-describing when carried alone. The
+    // narrow allow replaces the former module-wide dead_code allow (retired
+    // when the grant was wired into the run path).
+    #[allow(dead_code)]
     path: String,
+    #[allow(dead_code)]
     kind: ExecutableKind,
     checksum: ContentDigest,
     /// Every granted server whose surface this input belongs to (≥ 1).
@@ -1055,6 +1074,187 @@ impl RunEnvelope {
     pub fn grant_digest(&self) -> &GrantDigest {
         &self.grant_digest
     }
+}
+
+// ===== Run-grant handoff artifact (D2 keystone: bridge consumes the grant) =====
+
+/// Artifact schema version — bumped on any shape change so a bridge from a
+/// different binary version fails closed instead of misreading fields.
+pub const HANDOFF_SCHEMA: u32 = 1;
+/// File name inside the run's private (0700) run directory.
+pub const HANDOFF_FILE: &str = "grant.json";
+
+/// The narrowly-scoped, serializable projection of a frozen [`AuthorityGrant`]
+/// handed to the separate `agentstack mcp` bridge process: ONLY what the
+/// bridge needs to serve this run's MCP surface verbatim — the compiled
+/// ruleset, the frozen server definitions (`${REF}` placeholders intact, rule
+/// 5), and the identity needed to validate the artifact belongs to THIS
+/// project at THIS trust state. Deliberately NOT the grant itself:
+/// `AuthorityGrant` stays non-`Serialize` because `Invocation.argv` is
+/// sensitive; nothing in this projection is (argv, secrets, skills, and
+/// executables never enter it).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GrantHandoff {
+    pub schema: u32,
+    pub run_id: String,
+    /// `digest(AuthorityGrant)` in its display form (`sha256:<hex>`), for
+    /// evidence correlation only — authority comes from the fields below.
+    pub grant_digest: String,
+    /// Canonical project root the grant was frozen for.
+    pub project_root: String,
+    /// The consent digest (`sha256:<hex>`, trust::digest_for's exact spelling)
+    /// at freeze time. The bridge requires equality with the CURRENT digest —
+    /// any manifest/lock edit after freeze makes the artifact stale and inert.
+    pub consent: String,
+    /// The fencing profile, when the run was `--locked --profile <name>`.
+    pub profile: Option<String>,
+    pub ruleset: CompiledRuleset,
+    pub servers: Vec<HandoffServer>,
+}
+
+/// One frozen server definition, exactly as the grant bound it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HandoffServer {
+    pub name: String,
+    /// `"inline"` or `"library"` — anything else fails closed at load.
+    pub origin: String,
+    /// The `${REF}`-only definition (never resolved secret values).
+    pub server: agentstack_core::manifest::Server,
+    /// SHA-256 of the definition, from the grant's honest binding digest.
+    pub checksum: String,
+    pub provenance: Option<String>,
+}
+
+impl AuthorityGrant {
+    /// Project this grant into its bridge handoff artifact. Lives here so the
+    /// selection of what crosses the process boundary is a reviewed, explicit
+    /// list — never a blanket `Serialize` on the sealed grant.
+    pub(crate) fn handoff(&self, envelope: &RunEnvelope) -> GrantHandoff {
+        let servers = self
+            .servers
+            .iter()
+            .map(|(name, s)| {
+                let (origin, checksum, provenance) = match &s.binding {
+                    GrantedServerBinding::Inline { definition } => {
+                        ("inline", definition.hex().to_string(), None)
+                    }
+                    GrantedServerBinding::Library {
+                        definition,
+                        provenance,
+                    } => ("library", definition.hex().to_string(), provenance.clone()),
+                };
+                HandoffServer {
+                    name: name.clone(),
+                    origin: origin.to_string(),
+                    server: s.server.clone(),
+                    checksum,
+                    provenance,
+                }
+            })
+            .collect();
+        let profile = match &self.invocation.profile {
+            ProfileEffect::Fenced { name } => Some(name.clone()),
+            ProfileEffect::Temporary { name, .. } | ProfileEffect::Kept { name, .. } => {
+                Some(name.clone())
+            }
+            ProfileEffect::None => None,
+        };
+        GrantHandoff {
+            schema: HANDOFF_SCHEMA,
+            run_id: envelope.run_id().to_string(),
+            grant_digest: envelope.grant_digest().to_string(),
+            project_root: self.project.root.as_str().to_string(),
+            consent: format!("sha256:{}", self.project.consent.hex()),
+            profile,
+            ruleset: self.policy.ruleset.clone(),
+            servers,
+        }
+    }
+}
+
+/// Parse and structurally validate a handoff artifact. Fail-closed on schema
+/// or ruleset-version skew: a stale-schema ruleset from a different binary
+/// must never be accepted silently (it could predate a policy dimension).
+pub fn load_handoff(path: &Path) -> Result<GrantHandoff> {
+    let text = crate::util::read_to_string_bounded(path, crate::util::MAX_CONFIG_BYTES)
+        .with_context(|| format!("reading run-grant artifact {}", path.display()))?;
+    let handoff: GrantHandoff = serde_json::from_str(&text)
+        .with_context(|| format!("parsing run-grant artifact {}", path.display()))?;
+    if handoff.schema != HANDOFF_SCHEMA {
+        bail!(
+            "run-grant artifact schema {} is not this binary's {} — refusing (was it written by a different agentstack version?)",
+            handoff.schema,
+            HANDOFF_SCHEMA
+        );
+    }
+    if handoff.ruleset.version != agentstack_policy::ruleset::RULESET_VERSION {
+        bail!(
+            "run-grant artifact carries ruleset version {} but this binary compiles version {} — refusing (fail closed on version skew)",
+            handoff.ruleset.version,
+            agentstack_policy::ruleset::RULESET_VERSION
+        );
+    }
+    Ok(handoff)
+}
+
+/// Validate a loaded artifact against the project as it exists RIGHT NOW:
+/// same canonical root, consent digest equal to the CURRENT trust digest
+/// (any pinned byte changed since freeze → stale → inert, rule 4), and trust
+/// still granted. Equality with current bytes IS the freshness check — an
+/// artifact can never outlive the content identity it was frozen for.
+pub fn verify_handoff_for(handoff: &GrantHandoff, base: &Path) -> Result<()> {
+    let artifact_root = std::fs::canonicalize(&handoff.project_root)
+        .with_context(|| format!("grant artifact project root {}", handoff.project_root))?;
+    let current_root =
+        std::fs::canonicalize(base).with_context(|| format!("project root {}", base.display()))?;
+    if artifact_root != current_root {
+        bail!(
+            "run-grant artifact was frozen for {} but this bridge serves {} — refusing",
+            artifact_root.display(),
+            current_root.display()
+        );
+    }
+    let current =
+        crate::trust::digest_for(base).context("project consent digest could not be recomputed")?;
+    if current != handoff.consent {
+        bail!(
+            "project content changed since the run grant was frozen (consent digest mismatch) — refusing; re-run `agentstack run --locked`"
+        );
+    }
+    if crate::trust::check(base) != agentstack_trust::TrustState::Trusted {
+        bail!("project is no longer trusted — refusing the frozen grant");
+    }
+    Ok(())
+}
+
+/// Rebuild the gateway-shaped frozen server set from the artifact — the same
+/// `Vec<FrozenServer>` `Gateway::from_frozen` consumes, so bridge dispatch and
+/// the D4 host fence derive from ONE source. Every entry is `Ok` by
+/// construction (a locked run refuses on any pin failure before freezing).
+pub fn frozen_from_handoff(handoff: &GrantHandoff) -> Result<Vec<crate::resolve::FrozenServer>> {
+    handoff
+        .servers
+        .iter()
+        .map(|s| {
+            let origin = match s.origin.as_str() {
+                "inline" => crate::resolve::ServerOrigin::Inline,
+                "library" => crate::resolve::ServerOrigin::Library,
+                other => bail!("unknown server origin {other:?} in run-grant artifact"),
+            };
+            Ok((
+                s.name.clone(),
+                Ok(crate::resolve::ResolvedServer {
+                    name: s.name.clone(),
+                    origin,
+                    server: s.server.clone(),
+                    checksum: s.checksum.clone(),
+                    provenance: s.provenance.clone(),
+                }),
+            ))
+        })
+        .collect()
 }
 
 // ===== 3b-ii: the canonical V1 grant digest =====
@@ -1149,6 +1349,10 @@ impl AuthorityGrant {
         e.text("cwd", inv.cwd.as_str());
         match &inv.profile {
             ProfileEffect::None => e.text("profile", "none"),
+            ProfileEffect::Fenced { name } => {
+                e.text("profile", "fenced");
+                e.text("profile.name", name);
+            }
             ProfileEffect::Temporary { name, scope } => {
                 e.text("profile", "temporary");
                 e.text("profile.name", name);
@@ -1439,6 +1643,9 @@ impl GrantBuilder {
             ProfileEffect::Temporary { name, .. } | ProfileEffect::Kept { name, .. }
                 if name.trim().is_empty() =>
             {
+                bail!("profile name must be non-empty")
+            }
+            ProfileEffect::Fenced { name } if name.trim().is_empty() => {
                 bail!("profile name must be non-empty")
             }
             _ => {}
@@ -2386,5 +2593,166 @@ mod tests {
             scope: Scope::Project,
         };
         assert!(b.build().is_err());
+    }
+
+    // ---- D2 handoff witnesses ----
+
+    /// The artifact carries the bridge surface verbatim (servers, checksums,
+    /// origins, profile fence) and NEVER the sensitive argv; `${REF}`
+    /// placeholders cross unresolved (rule 5).
+    #[test]
+    fn handoff_round_trips_frozen_servers_and_never_carries_argv() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let mut b = host_builder(&root); // argv contains "s3cr3t"
+        b.invocation.profile = ProfileEffect::Fenced {
+            name: "review".into(),
+        };
+        b.add_server(
+            "gh",
+            granted_server(
+                "type = \"stdio\"\ncommand = \"npx\"\nargs = [\"-y\", \"gh\"]\n\n[env]\nTOKEN = \"${GH_TOKEN}\"\n",
+                GrantedServerBinding::Inline {
+                    definition: ContentDigest::parse(&h64('5')).unwrap(),
+                },
+            ),
+        )
+        .unwrap();
+        let grant = b.build().unwrap();
+        let envelope = RunEnvelope::new(
+            "run-1".into(),
+            "events.jsonl".into(),
+            GrantDigest::parse(&h64('d')).unwrap(),
+        );
+        let handoff = grant.handoff(&envelope);
+        assert_eq!(handoff.profile.as_deref(), Some("review"));
+        assert_eq!(handoff.schema, HANDOFF_SCHEMA);
+
+        let json = serde_json::to_string_pretty(&handoff).unwrap();
+        assert!(
+            !json.contains("s3cr3t"),
+            "argv must never cross the boundary"
+        );
+        assert!(
+            json.contains("${GH_TOKEN}"),
+            "placeholders cross unresolved"
+        );
+
+        let file = tmp.child("grant.json");
+        file.write_str(&json).unwrap();
+        let loaded = load_handoff(file.path()).unwrap();
+        let frozen = frozen_from_handoff(&loaded).unwrap();
+        assert_eq!(frozen.len(), 1);
+        let (name, res) = &frozen[0];
+        let rs = res.as_ref().unwrap();
+        assert_eq!(name, "gh");
+        assert_eq!(rs.checksum, h64('5'));
+        assert!(matches!(rs.origin, crate::resolve::ServerOrigin::Inline));
+    }
+
+    /// Fail-closed on every skew axis: artifact schema, compiled-ruleset
+    /// version, and an unknown server origin.
+    #[test]
+    fn handoff_load_fails_closed_on_schema_version_and_origin_skew() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let handoff = GrantHandoff {
+            schema: HANDOFF_SCHEMA,
+            run_id: "r".into(),
+            grant_digest: format!("sha256:{}", h64('d')),
+            project_root: tmp.path().display().to_string(),
+            consent: format!("sha256:{}", h64('c')),
+            profile: None,
+            ruleset: agentstack_policy::compile(&Default::default(), &Default::default(), &[]),
+            servers: Vec::new(),
+        };
+        let base: serde_json::Value = serde_json::to_value(&handoff).unwrap();
+
+        let mut skewed = base.clone();
+        skewed["schema"] = serde_json::json!(HANDOFF_SCHEMA + 1);
+        let f = tmp.child("schema.json");
+        f.write_str(&skewed.to_string()).unwrap();
+        assert!(load_handoff(f.path())
+            .unwrap_err()
+            .to_string()
+            .contains("schema"));
+
+        let mut skewed = base.clone();
+        skewed["ruleset"]["version"] =
+            serde_json::json!(agentstack_policy::ruleset::RULESET_VERSION + 1);
+        let f = tmp.child("ruleset.json");
+        f.write_str(&skewed.to_string()).unwrap();
+        assert!(load_handoff(f.path())
+            .unwrap_err()
+            .to_string()
+            .contains("ruleset version"));
+
+        let mut bad = handoff;
+        bad.servers.push(HandoffServer {
+            name: "x".into(),
+            origin: "weird".into(),
+            server: toml::from_str("type = \"stdio\"\ncommand = \"true\"\n").unwrap(),
+            checksum: h64('5'),
+            provenance: None,
+        });
+        assert!(frozen_from_handoff(&bad).is_err());
+    }
+
+    /// Rule 4 across the process boundary: the artifact binds to the consent
+    /// digest at freeze time. Any pinned byte changed since → stale → inert;
+    /// an artifact frozen for another project never applies.
+    #[test]
+    fn handoff_verify_binds_to_current_consent_and_refuses_stale() {
+        with_home(|| {
+            let proj = assert_fs::TempDir::new().unwrap();
+            proj.child(".agentstack/agentstack.toml")
+                .write_str("version = 1\n")
+                .unwrap();
+            agentstack_trust::trust(proj.path()).unwrap();
+            let consent = crate::trust::digest_for(proj.path()).unwrap();
+            let mut handoff = GrantHandoff {
+                schema: HANDOFF_SCHEMA,
+                run_id: "r".into(),
+                grant_digest: format!("sha256:{}", h64('d')),
+                project_root: std::fs::canonicalize(proj.path())
+                    .unwrap()
+                    .display()
+                    .to_string(),
+                consent,
+                profile: None,
+                ruleset: agentstack_policy::compile(&Default::default(), &Default::default(), &[]),
+                servers: Vec::new(),
+            };
+            verify_handoff_for(&handoff, proj.path()).unwrap();
+
+            // A different project root never accepts this artifact.
+            let other = assert_fs::TempDir::new().unwrap();
+            other
+                .child(".agentstack/agentstack.toml")
+                .write_str("version = 1\n")
+                .unwrap();
+            assert!(verify_handoff_for(&handoff, other.path())
+                .unwrap_err()
+                .to_string()
+                .contains("frozen for"));
+
+            // Any pinned byte changed after freeze → consent mismatch → inert.
+            proj.child(".agentstack/agentstack.toml")
+                .write_str("version = 1\n# edited\n")
+                .unwrap();
+            assert!(format!(
+                "{:#}",
+                verify_handoff_for(&handoff, proj.path()).unwrap_err()
+            )
+            .contains("consent digest mismatch"));
+
+            // Even with a matching consent digest, lost trust refuses: rebuild
+            // the artifact against the edited bytes WITHOUT re-trusting.
+            handoff.consent = crate::trust::digest_for(proj.path()).unwrap();
+            assert!(format!(
+                "{:#}",
+                verify_handoff_for(&handoff, proj.path()).unwrap_err()
+            )
+            .contains("no longer trusted"));
+        });
     }
 }

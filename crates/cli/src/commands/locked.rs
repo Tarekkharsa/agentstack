@@ -35,13 +35,14 @@ use super::Context;
 pub fn run_locked(manifest_dir: Option<&Path>, args: &RunArgs) -> Result<()> {
     // Named limitations, checked before anything resolves. Refusing loudly is
     // honest; silently degrading the contract's semantics is not.
-    if args.profile.is_some() {
-        anyhow::bail!(
-            "--locked --profile is not available yet: under --locked, profile application \
-             must render from the frozen AuthorityGrant (contract §2.1/§7), which lands \
-             with the D2 render/session unification. Run without --profile or without --locked."
-        );
-    }
+    //
+    // `--locked --profile <name>` FENCES the run: the one-time resolution,
+    // every gate, the frozen grant, and the bridge handoff all see only the
+    // profile's server subset (contract §2.1 "the strict gate runs against
+    // the profile-fenced capability set"). No native session state is applied
+    // (no pre-gate mutation, per the same ruling); skills/native render under
+    // a locked profile land with the D2 render/session unification and are
+    // stated honestly at launch.
     if args.sandbox || args.lockdown {
         anyhow::bail!(
             "--locked --sandbox/--lockdown is not wired yet: the strict gate must run \
@@ -145,7 +146,7 @@ struct LockedInputs {
     executable_pins: Vec<(String, agentstack_core::lock::LockedExecutable)>,
 }
 
-fn resolve_inputs(ctx: &Context) -> Result<LockedInputs> {
+fn resolve_inputs(ctx: &Context, profile: Option<&str>) -> Result<LockedInputs> {
     let m = &ctx.loaded.manifest;
     // A broken lockfile is a refusal, not a default: its pins are exactly what
     // strict verification is about to assert.
@@ -208,7 +209,11 @@ fn resolve_inputs(ctx: &Context) -> Result<LockedInputs> {
         })
         .collect();
 
-    let frozen = crate::resolve::frozen_runtime_servers(m, &library, &lib_home, &ctx.dir, None)?;
+    // The profile fence (contract §2.1): resolved ONCE here with the fence
+    // applied, so verification, admission, the grant, and the bridge handoff
+    // all see the identical subset. An absent/renamed profile is a hard error
+    // inside frozen_runtime_servers — it never broadens to every server.
+    let frozen = crate::resolve::frozen_runtime_servers(m, &library, &lib_home, &ctx.dir, profile)?;
 
     let exec_servers: Vec<(String, crate::manifest::Server)> = frozen
         .iter()
@@ -313,12 +318,19 @@ fn freeze_grant(
         crate::grant::ProjectIdentity::new(GrantPath::new(base)?, ConsentDigest::parse(&consent)?);
 
     let adapter = GrantedAdapter::from_registry(&ctx.registry, &args.harness)?;
+    // Under --locked a profile is a FENCE on the granted surface, recorded in
+    // the invocation identity (contract §6.1 lists --profile) — never a native
+    // session application at this tier.
+    let profile_effect = match &args.profile {
+        Some(name) => ProfileEffect::Fenced { name: name.clone() },
+        None => ProfileEffect::None,
+    };
     let invocation = Invocation::new(
         adapter,
         HarnessExecutable::external(GrantPath::new(bin_path)?),
         args.args.clone(),
         GrantPath::new(&ctx.dir)?,
-        ProfileEffect::None,
+        profile_effect,
     );
 
     // Policy provenance: the digest of each layer's INPUT (what was compiled),
@@ -474,6 +486,7 @@ impl ScopedMcpConfig {
         project_dir: &Path,
         run_id: &str,
         run_dir: &Path,
+        handoff_path: &Path,
     ) -> Result<Option<ScopedMcpConfig>> {
         use crate::adapter::descriptor::Format;
         let (Some((path, format)), Some(mcp)) = (
@@ -482,7 +495,16 @@ impl ScopedMcpConfig {
         ) else {
             return Ok(None);
         };
-        let bridge = super::connect::bridge_server(&super::connect::bridge_command(None), false);
+        // The launch-scoped entry carries the grant artifact EXPLICITLY
+        // (`--grant <path>`), not via env sniffing: an ordinary bridge config
+        // never has the flag, so no unrelated `agentstack mcp` invocation can
+        // pick up (or spoof its way into) another run's frozen authority, and
+        // the flag disappears with the parked config when the run ends.
+        let bridge = super::connect::bridge_server(
+            &super::connect::bridge_command(None),
+            false,
+            Some(handoff_path),
+        );
         let rendered =
             crate::adapter::render_server(desc, &bridge, &crate::secret::MapResolver::default());
         if !rendered.representable {
@@ -668,7 +690,7 @@ fn resolve_bin_path(bin: &str) -> Result<PathBuf> {
         .with_context(|| format!("'{bin}' is not on your PATH"))
 }
 
-fn print_posture_and_limits() {
+fn print_posture_and_limits(desc: Option<&crate::adapter::AdapterDescriptor>, project_dir: &Path) {
     println!("  posture: {}", "HOST / PROTECTED".green().bold());
     eprintln!(
         "  {} protected host run: content trust, strict lock verification, and policy \
@@ -678,17 +700,101 @@ fn print_posture_and_limits() {
          trail. Use --sandbox/--lockdown for runtime containment.",
         "ℹ".cyan()
     );
-    // Contract §3 step 7, the honest remainder — its own loud line, not a
-    // buried clause: USER/GLOBAL-scope native MCP entries are not swapped
-    // (harness apps rewrite their own global configs mid-run; racing that
-    // risks clobbering user state). Project scope IS launch-scoped below.
-    eprintln!(
-        "  {} user/global-scope native MCP entries are NOT shadowed for this run — only \
-         the project scope is launch-scoped to the gateway (run-grant handoff for the \
-         bridge lands in the follow-up D2 session). Host-guard hooks apply where the \
-         machine [guard] config installed them (cooperative).",
-        "⚠".yellow()
-    );
+    // Contract §3 step 7, the honest remainder — content-derived: the warning
+    // names the ACTUAL ambient entries (or reports the scope clean) instead
+    // of a generic disclaimer. Host-tier neutralization by swapping the file
+    // stays out deliberately: the global config is one shared file per
+    // machine that harness apps rewrite mid-run — racing that clobbers user
+    // state (see ScopedMcpConfig). Honesty per §3.1 is the right tier here;
+    // kernel-level fencing is --lockdown's job.
+    match desc.and_then(|d| ambient_global_mcp_entries(d, project_dir)) {
+        Some(names) if names.is_empty() => eprintln!(
+            "  {} no ambient user/global-scope MCP entries for this harness — nothing is \
+             reachable around the gateway at that scope. Host-guard hooks apply where the \
+             machine [guard] config installed them (cooperative).",
+            "✓".green()
+        ),
+        Some(names) => eprintln!(
+            "  {} user/global-scope MCP entries are NOT shadowed on the host tier and stay \
+             reachable around the gateway: {}. Remove them from the global config, or use \
+             --lockdown for kernel-level fencing. Host-guard hooks apply where installed \
+             (cooperative).",
+            "⚠".yellow(),
+            names.join(", ")
+        ),
+        None => eprintln!(
+            "  {} user/global-scope native MCP entries are NOT shadowed for this run (scope \
+             contents could not be read — treat it as occupied). Only the project scope is \
+             launch-scoped to the gateway. Host-guard hooks apply where installed \
+             (cooperative).",
+            "⚠".yellow()
+        ),
+    }
+}
+
+/// Content-derived ambient-scope audit: which MCP servers does the harness's
+/// USER/GLOBAL-scope native config declare right now? Those entries stay
+/// reachable AROUND the gateway on the host tier, so the posture output names
+/// them. Read-only and defensive (bounded read, parse failures → `None`,
+/// never a crash): the file is local machine state, but it is still parsed as
+/// hostile input (rule 7). The bridge's own entry is excluded — it IS the
+/// gateway. Claude Code additionally nests per-project MCP state under
+/// `projects.<abs-path>` inside the same global file; the top-level location
+/// alone would silently under-report for exactly this project.
+fn ambient_global_mcp_entries(
+    desc: &crate::adapter::AdapterDescriptor,
+    project_dir: &Path,
+) -> Option<Vec<String>> {
+    use crate::adapter::descriptor::Format;
+    let (path, format) = desc.config_for(agentstack_core::scope::Scope::Global, project_dir)?;
+    let mcp = desc.mcp.as_ref()?;
+    if !path.exists() {
+        return Some(Vec::new());
+    }
+    let text = crate::util::read_to_string_bounded(&path, crate::util::MAX_CONFIG_BYTES).ok()?;
+    let value: serde_json::Value = match format {
+        Format::Json => serde_json::from_str(&text).ok()?,
+        Format::Toml => toml::from_str::<toml::Value>(&text)
+            .ok()
+            .and_then(|v| serde_json::to_value(v).ok())?,
+    };
+    let mut names = keys_at(&value, &mcp.location);
+    if desc.id == "claude-code" {
+        let canon =
+            std::fs::canonicalize(project_dir).unwrap_or_else(|_| project_dir.to_path_buf());
+        if let Some(projects) = value.get("projects").and_then(serde_json::Value::as_object) {
+            for (proj_path, v) in projects {
+                if Path::new(proj_path) == canon.as_path() {
+                    if let Some(servers) =
+                        v.get("mcpServers").and_then(serde_json::Value::as_object)
+                    {
+                        names.extend(servers.keys().map(|k| format!("{k} (projects key)")));
+                    }
+                }
+            }
+        }
+    }
+    names.retain(|n| {
+        n != super::connect::BRIDGE_ENTRY
+            && n != &format!("{} (projects key)", super::connect::BRIDGE_ENTRY)
+    });
+    names.sort();
+    Some(names)
+}
+
+/// Object keys at a dotted location inside a JSON value (`mcp.servers` →
+/// `value["mcp"]["servers"]` keys); missing path or non-object → empty.
+fn keys_at(value: &serde_json::Value, dotted: &str) -> Vec<String> {
+    let mut cur = value;
+    for seg in dotted.split('.') {
+        match cur.get(seg) {
+            Some(v) => cur = v,
+            None => return Vec::new(),
+        }
+    }
+    cur.as_object()
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default()
 }
 
 fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
@@ -712,7 +818,15 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         "▶".green(),
         args.harness.bold()
     );
-    print_posture_and_limits();
+    print_posture_and_limits(Some(desc), &ctx.dir);
+    if let Some(p) = args.profile.as_deref() {
+        println!(
+            "  {} profile fence: '{}' — the gates, grant, and bridge see only this profile's \
+             servers; no native session state is applied under --locked",
+            "✓".green(),
+            p
+        );
+    }
 
     // §3 step 2: run identity + recorder BEFORE any gate, so a refusal is
     // itself recorded evidence. No recorder, no run.
@@ -757,7 +871,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     }
 
     // §3 step 4: strict locked-input verification; missing pins block.
-    let inputs = match resolve_inputs(ctx) {
+    let inputs = match resolve_inputs(ctx, args.profile.as_deref()) {
         Ok(i) => i,
         Err(e) => return Err(ev.refuse("locked-verify", e)),
     };
@@ -874,7 +988,29 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 .join("runs")
                 .join(&run_id)
         });
-    let mut scoped = match ScopedMcpConfig::apply(desc, &ctx.dir, &run_id, &run_dir) {
+
+    // D2 handoff: persist the grant's bridge projection into the run's
+    // private dir so the separate `agentstack mcp` process consumes the SAME
+    // frozen ruleset + server set verbatim — never a re-derivation from disk.
+    // Material: without the artifact the bridge would fail closed mid-run
+    // while the launch claims the locked contract, so no artifact, no launch.
+    let handoff_path = run_dir.join(crate::grant::HANDOFF_FILE);
+    let handoff = grant.handoff(&envelope);
+    let write = serde_json::to_string_pretty(&handoff)
+        .map_err(anyhow::Error::from)
+        .and_then(|text| crate::util::atomic::write(&handoff_path, &text));
+    if let Err(e) = write {
+        return Err(ev.refuse("grant-handoff", e));
+    }
+    crate::util::restrict(&handoff_path, false);
+    println!(
+        "  {} run grant handed to the bridge ({})",
+        "✓".green(),
+        handoff_path.display()
+    );
+
+    let mut scoped = match ScopedMcpConfig::apply(desc, &ctx.dir, &run_id, &run_dir, &handoff_path)
+    {
         Ok(Some(s)) => {
             println!(
                 "  {} project MCP config launch-scoped to the gateway ({})",
@@ -962,11 +1098,18 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         "→".cyan(),
         args.harness.bold()
     );
-    print_posture_and_limits();
 
     let mut blockers: Vec<(String, String)> = Vec::new();
 
     let desc = ctx.registry.get(&args.harness);
+    print_posture_and_limits(desc, &ctx.dir);
+    if let Some(p) = args.profile.as_deref() {
+        println!(
+            "  {} profile fence: '{}' — evaluation runs against this profile's server subset",
+            "✓".green(),
+            p
+        );
+    }
     let bin_path = match desc {
         None => {
             blockers.push((
@@ -1003,7 +1146,7 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         )),
     }
 
-    let inputs = match resolve_inputs(ctx) {
+    let inputs = match resolve_inputs(ctx, args.profile.as_deref()) {
         Ok(inputs) => {
             if let Err(e) = crate::verify::ensure_locked_inputs(
                 &args.harness,

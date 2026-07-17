@@ -29,7 +29,7 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
         /*for_removal=*/ false,
     )?;
     let command = bridge_command(args.command.as_deref());
-    let bridge = bridge_server(&command, args.transparent);
+    let bridge = bridge_server(&command, args.transparent, None);
 
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
     let mut touched: Vec<String> = Vec::new();
@@ -237,8 +237,24 @@ fn select_targets<'r>(
 
 /// The bridge, expressed as a manifest server so the existing per-adapter
 /// renderer shapes it (transport tags, field names, command arrays).
-pub(crate) fn bridge_server(command: &str, transparent: bool) -> Server {
-    let mut args = vec!["mcp".to_string(), "--auto-project".to_string()];
+///
+/// With `grant` (a `run --locked` launch-scoped entry), the bridge consumes
+/// the frozen run-grant artifact instead of discovering a project — the
+/// artifact IS the project pointer, so `--auto-project` is omitted and the
+/// two modes can never disagree about which project is served.
+pub(crate) fn bridge_server(
+    command: &str,
+    transparent: bool,
+    grant: Option<&std::path::Path>,
+) -> Server {
+    let mut args = vec!["mcp".to_string()];
+    match grant {
+        Some(path) => {
+            args.push("--grant".to_string());
+            args.push(path.display().to_string());
+        }
+        None => args.push("--auto-project".to_string()),
+    }
     if transparent {
         args.push("--transparent".to_string());
     }
@@ -363,7 +379,7 @@ mod tests {
     #[test]
     fn bridge_renders_into_claude_json_and_codex_toml() {
         let reg = Registry::load().unwrap();
-        let bridge = bridge_server("/usr/local/bin/agentstack", false);
+        let bridge = bridge_server("/usr/local/bin/agentstack", false, None);
 
         // Claude Code: JSON, transport-tagged.
         let desc = reg.get("claude-code").unwrap();

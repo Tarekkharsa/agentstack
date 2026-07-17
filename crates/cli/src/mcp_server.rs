@@ -22,13 +22,49 @@ const PROTOCOL_VERSION: &str = "2025-06-18";
 /// Server-initiated ids live in their own namespace, so a string is safe.
 const ROOTS_REQUEST_ID: &str = "agentstack:roots";
 
-pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool) -> Result<()> {
-    let dir = manifest_dir.map(Path::to_path_buf);
+pub fn serve(
+    manifest_dir: Option<&Path>,
+    auto_project: bool,
+    transparent: bool,
+    grant: Option<&Path>,
+) -> Result<()> {
+    let mut dir = manifest_dir.map(Path::to_path_buf);
     let stdin = std::io::stdin();
     // On stdio, stdout must carry only JSON-RPC. Library code (apply, profiles,
     // plugins…) prints human progress to stdout, which would corrupt the stream,
     // so reserve the real stdout for responses and redirect fd 1 to stderr.
     let out = protocol_writer();
+
+    // D2 grant mode (`--grant`, written into the launch-scoped config by
+    // `run --locked`): consume the frozen run-grant artifact VERBATIM — the
+    // same ruleset and server set the gates admitted — instead of re-deriving
+    // authority from disk. Fail closed on any mismatch: a missing, stale,
+    // wrong-project, or version-skewed artifact serves an empty gateway with
+    // a loud reason. NEVER a fallback to disk re-derivation: the harness was
+    // launched under the locked contract, and a silent downgrade to weaker
+    // re-derived authority is exactly what the artifact exists to prevent.
+    let grant_mode = grant.is_some();
+    let grant_gateway: Option<crate::gateway::Gateway> = match grant {
+        None => None,
+        Some(path) => match grant_gateway(path) {
+            Ok((gw, base)) => {
+                eprintln!(
+                    "agentstack mcp: serving the frozen run grant for {} (no re-derivation)",
+                    base.display()
+                );
+                dir = Some(base);
+                Some(gw)
+            }
+            Err(e) => {
+                eprintln!(
+                    "agentstack mcp: REFUSING the frozen run grant — {e:#}. Nothing is \
+                     proxied (fail closed; a locked run's bridge never falls back to \
+                     disk re-derivation)."
+                );
+                Some(crate::gateway::Gateway::empty())
+            }
+        },
+    };
 
     if !auto_project {
         // Eager, one-project-per-process mode (the default): the manifest is
@@ -37,8 +73,10 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
         // connections / stdio children per process, not one per surface).
         // No global lock: the gateway is Sync with per-upstream mutexes, so
         // concurrent calls to different servers proceed in parallel.
-        let mut gateway =
-            std::sync::Arc::new(crate::gateway::Gateway::from_manifest(dir.as_deref()));
+        let mut gateway = std::sync::Arc::new(match grant_gateway {
+            Some(gw) => gw,
+            None => crate::gateway::Gateway::from_manifest(dir.as_deref()),
+        });
         if !gateway.is_empty() {
             eprintln!("agentstack mcp: gateway active — proxying this project's MCP servers");
         }
@@ -67,6 +105,21 @@ pub fn serve(manifest_dir: Option<&Path>, auto_project: bool, transparent: bool)
                 continue;
             };
             if is_lease_mutation(&req) {
+                // Under a frozen run grant the served surface is FIXED — a
+                // lease open/close would swap in a gateway re-derived from
+                // disk, exactly the re-derivation grant mode exists to
+                // prevent. Refuse loudly (the client learns the truth) rather
+                // than silently ignoring the narrowing request.
+                if grant_mode {
+                    respond(
+                        &out,
+                        &result(
+                            req.get("id").cloned(),
+                            json!({ "content": [{ "type": "text", "text": "Error: lease transitions are unavailable under a frozen run grant — the served surface was fixed by `agentstack run --locked` and cannot be re-derived mid-run." }], "isError": true }),
+                        ),
+                    );
+                    continue;
+                }
                 // A tighter/looser profile boundary must not race an in-flight
                 // call through the previous gateway.
                 workers.join_all();
@@ -321,6 +374,26 @@ fn lease_snapshot(store: &LeaseStore) -> Option<McpLease> {
 
 fn lease_profile(store: &LeaseStore) -> Option<String> {
     lease_snapshot(store).map(|l| l.profile)
+}
+
+/// Build the bridge gateway from a frozen run-grant artifact (D2): load,
+/// validate against the project AS IT EXISTS NOW (root identity, consent
+/// freshness, trust), then hand `Gateway::from_frozen` the artifact's ruleset
+/// and server set verbatim — one resolution, one ruleset, no re-derivation.
+/// `from_frozen` re-checks trust itself; the consent-equality check here is
+/// the artifact-binding on top (rule 4: any pinned byte changed → stale).
+fn grant_gateway(path: &Path) -> Result<(crate::gateway::Gateway, PathBuf)> {
+    let handoff = crate::grant::load_handoff(path)?;
+    let base = PathBuf::from(&handoff.project_root);
+    crate::grant::verify_handoff_for(&handoff, &base)?;
+    let frozen = crate::grant::frozen_from_handoff(&handoff)?;
+    let gateway = crate::gateway::Gateway::from_frozen(
+        Some(&base),
+        handoff.ruleset.clone(),
+        frozen,
+        &handoff.run_id,
+    );
+    Ok((gateway, base))
 }
 
 fn is_lease_mutation(req: &Value) -> bool {
