@@ -266,13 +266,8 @@ fn render(
                 foreign.join(", ")
             );
         }
-        for s in &plan.skipped {
-            println!(
-                "  {} skipping '{s}' — {} can't represent this server's transport \
-                 (add it via the harness's own UI/connector)",
-                "↳".cyan(),
-                plan.display
-            );
+        for (name, reason) in &plan.skipped {
+            println!("  {} skipping '{name}' — {reason}", "↳".cyan());
         }
         for w in &plan.warnings {
             println!(

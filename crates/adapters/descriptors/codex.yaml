@@ -31,6 +31,10 @@ mcp:
   transport: null
   headers_as_subtable: true
   secret_mode: literal
+  # Codex validates server names at startup: ^[a-zA-Z0-9_-]+$. A name like
+  # "upstash/context7" renders fine into TOML but fails every Codex launch
+  # with "Invalid MCP server name" — skip it at render time instead.
+  name_charset: ascii-word-dash
 # Skills: Codex reads the cross-tool `.agents/skills` convention — the repo's
 # .agents/skills (scanned cwd → repo root) and $HOME/.agents/skills — and
 # explicitly follows symlinked skill folders. (~/.codex/skills was never a

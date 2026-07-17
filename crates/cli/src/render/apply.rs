@@ -45,11 +45,13 @@ pub struct TargetPlan {
     /// message names the rule and layer. Blocks writes fail-closed; an
     /// egress-refused server is also skipped from the render entirely.
     pub denied: Vec<String>,
-    /// Selected servers this target's config format can't represent (e.g. an
-    /// HTTP server for the stdio-only Claude Desktop config). Skipped from the
-    /// render rather than written as an empty entry; surfaced so the user knows
-    /// to wire them up by the harness's other mechanism (e.g. in-app Connectors).
-    pub skipped: Vec<String>,
+    /// Selected servers skipped from this target's render, as
+    /// `(name, reason)`: a transport its config format can't represent (e.g.
+    /// an HTTP server for the stdio-only Claude Desktop config), or a server
+    /// NAME the CLI itself refuses at startup (e.g. Codex's
+    /// `^[a-zA-Z0-9_-]+$`). Skipped rather than written as an entry the CLI
+    /// rejects on every launch; the reason is surfaced verbatim.
+    pub skipped: Vec<(String, String)>,
     /// Every `${REF}` resolved into this render, as `(ref-name, value)`. Used
     /// ONLY to redact the human-facing diff/apply preview — `proposed` still
     /// holds the real resolved values, and that is what `write` persists.
@@ -221,7 +223,7 @@ pub fn plan_target_with_servers(
     let mut failed: Vec<String> = Vec::new();
     let mut denied: Vec<String> = Vec::new();
     let mut managed: Vec<String> = Vec::new();
-    let mut skipped: Vec<String> = Vec::new();
+    let mut skipped: Vec<(String, String)> = Vec::new();
     let mut secrets: Vec<(String, String)> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     for (name, server) in servers {
@@ -232,6 +234,22 @@ pub fn plan_target_with_servers(
         // prune set below, like any other deselection.
         if !server.applies_to(&desc.id) {
             continue;
+        }
+        // A server NAME this CLI refuses at its own startup (e.g. Codex's
+        // ^[a-zA-Z0-9_-]+$) would render into a config that errors on every
+        // launch — skip the entry and say exactly why, never write it.
+        if let Some(charset) = mcp.name_charset {
+            if !charset.permits(name) {
+                skipped.push((
+                    name.clone(),
+                    format!(
+                        "{} rejects this server name at startup ({}) — rename the server in the manifest",
+                        desc.display,
+                        charset.describe()
+                    ),
+                ));
+                continue;
+            }
         }
         // Write-time egress check (HTTP only): the DECLARED URL host must
         // pass the effective [policy.egress] before this server is rendered
@@ -266,7 +284,13 @@ pub fn plan_target_with_servers(
         // The adapter's format can't express this transport — skip it rather
         // than emit an empty `{}` entry into a real config file.
         if !rendered.representable {
-            skipped.push(name.clone());
+            skipped.push((
+                name.clone(),
+                format!(
+                    "{} can't represent this server's transport (add it via the harness's own UI/connector)",
+                    desc.display
+                ),
+            ));
             continue;
         }
         for u in rendered.unresolved {

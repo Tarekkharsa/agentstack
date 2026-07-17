@@ -225,6 +225,43 @@ pub struct McpSpec {
     pub command_array: bool,
     #[serde(default)]
     pub secret_mode: SecretMode,
+    /// Server-NAME constraint this CLI enforces at its own startup, when we
+    /// know one. A name outside the charset must be skipped from the render
+    /// (with a loud reason) — writing it produces a config the CLI rejects
+    /// with a startup error on every launch. Absent = no known constraint.
+    #[serde(default)]
+    pub name_charset: Option<NameCharset>,
+}
+
+/// Known server-name charsets, by id. An enum (not a regex) on purpose: the
+/// reviewed crates avoid a regex dependency, and each variant documents the
+/// CLI that demands it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum NameCharset {
+    /// `^[A-Za-z0-9_-]+$` — Codex refuses any other name at startup
+    /// ("Invalid MCP server name … must match pattern ^[a-zA-Z0-9_-]+$").
+    #[serde(rename = "ascii-word-dash")]
+    AsciiWordDash,
+}
+
+impl NameCharset {
+    pub fn permits(self, name: &str) -> bool {
+        match self {
+            NameCharset::AsciiWordDash => {
+                !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            }
+        }
+    }
+
+    /// Human phrase for the rule, used in the skip reason.
+    pub fn describe(self) -> &'static str {
+        match self {
+            NameCharset::AsciiWordDash => "letters, digits, '_' and '-' only",
+        }
+    }
 }
 
 /// Target field names for each canonical field. `None` means the CLI does not
@@ -416,4 +453,24 @@ pub struct ProjectSpec {
     /// Format if it differs from the global config (else inferred / inherited).
     #[serde(default)]
     pub format: Option<Format>,
+}
+
+#[cfg(test)]
+mod name_charset_tests {
+    use super::NameCharset;
+
+    /// Security-adjacent witness: the codex charset must track Codex's own
+    /// startup validation (^[a-zA-Z0-9_-]+$) — a name it wrongly permits
+    /// renders a config Codex errors on at every launch; a name it wrongly
+    /// rejects silently drops a working server.
+    #[test]
+    fn ascii_word_dash_matches_codexs_startup_rule() {
+        let cs = NameCharset::AsciiWordDash;
+        for good in ["kibana", "gha-search", "node_repl", "Context7", "a1"] {
+            assert!(cs.permits(good), "{good} must be permitted");
+        }
+        for bad in ["upstash/context7", "a.b", "a b", "café", "", "a:b"] {
+            assert!(!cs.permits(bad), "{bad:?} must be rejected");
+        }
+    }
 }

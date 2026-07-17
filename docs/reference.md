@@ -49,6 +49,16 @@ existing configs back into a manifest. Mergers are non-destructive: JSON
 splices only the managed section (untouched bytes, including floats, preserved
 exactly); TOML uses `toml_edit` to keep comments and formatting.
 
+Nothing is dropped silently. A server whose transport a target's config can't
+express is skipped with a spoken reason, and so is a server whose **name**
+the CLI itself would refuse at startup — Codex validates names against
+`^[a-zA-Z0-9_-]+$` (declared as `mcp.name_charset` in its descriptor), so a
+name like `upstash/context7` renders for Claude Code but is skipped for
+Codex with *"rename the server in the manifest"* rather than written into a
+config that errors on every Codex launch. The conformance smoke
+(`examples/sandbox/conformance-smoke.sh`) proves both sides against the real
+CLIs.
+
 Native keys with no transport-neutral equivalent — Codex's
 `startup_timeout_sec`, say — live under a per-target `extra` table and are
 passed through verbatim by that one adapter (string values still get `${REF}`

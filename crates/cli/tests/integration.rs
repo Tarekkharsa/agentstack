@@ -328,13 +328,97 @@ fn unrepresentable_http_server_is_skipped_not_emptied() {
     .unwrap()
     .unwrap();
 
-    assert_eq!(plan.skipped, vec!["kibana_mcp".to_string()]);
+    assert_eq!(plan.skipped.len(), 1);
+    assert_eq!(plan.skipped[0].0, "kibana_mcp");
+    assert!(
+        plan.skipped[0].1.contains("transport"),
+        "the skip carries its reason: {}",
+        plan.skipped[0].1
+    );
     assert!(plan.managed.is_empty(), "nothing managed for this target");
     assert!(
         !plan.proposed.contains("kibana_mcp"),
         "no empty entry written for the unrepresentable server"
     );
     assert!(!plan.changed(), "config left untouched");
+}
+
+/// A server whose NAME the CLI refuses at its own startup (Codex's
+/// `^[a-zA-Z0-9_-]+$`, declared via `mcp.name_charset`) is skipped with a
+/// spoken reason — never rendered into a config that errors on every launch
+/// (the live `upstash/context7` failure). An unconstrained adapter renders
+/// the same name untouched.
+#[test]
+fn name_the_cli_rejects_is_skipped_for_that_adapter_only() {
+    let m: Manifest = toml::from_str(
+        r#"
+        version = 1
+        [servers."upstash/context7"]
+        type = "stdio"
+        command = "npx"
+        args = ["-y", "@upstash/context7-mcp"]
+        "#,
+    )
+    .unwrap();
+    let resolver = MapResolver::default();
+
+    // Constrained adapter (codex-shaped): skipped, with the reason spoken.
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let cfg = tmp.child("codex.toml");
+    let yaml = format!(
+        r#"
+id: codex-like
+display: Codex Like
+config:
+  path: {}
+  format: toml
+mcp:
+  location: mcp_servers
+  fields:
+    command: command
+    args: args
+  name_charset: ascii-word-dash
+"#,
+        cfg.path().to_str().unwrap()
+    );
+    let desc: AdapterDescriptor = serde_yaml::from_str(&yaml).unwrap();
+    let plan = plan_target(
+        &m,
+        &desc,
+        &resolver,
+        &Selection::All,
+        &[],
+        Scope::Global,
+        Path::new("/"),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(plan.skipped.len(), 1);
+    assert_eq!(plan.skipped[0].0, "upstash/context7");
+    assert!(
+        plan.skipped[0].1.contains("rejects this server name"),
+        "reason must be spoken: {}",
+        plan.skipped[0].1
+    );
+    assert!(!plan.proposed.contains("upstash/context7"));
+
+    // Unconstrained adapter: the same name renders verbatim.
+    let cfg2 = tmp.child("open.json");
+    cfg2.write_str("{}").unwrap();
+    let desc2 = json_descriptor(cfg2.path().to_str().unwrap());
+    let plan2 = plan_target(
+        &m,
+        &desc2,
+        &resolver,
+        &Selection::All,
+        &[],
+        Scope::Global,
+        Path::new("/"),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(plan2.skipped.is_empty());
+    assert!(plan2.proposed.contains("upstash/context7"));
 }
 
 #[test]

@@ -8,6 +8,12 @@
 #   ./conformance-smoke.sh claude-code claude .claude.json
 #   ./conformance-smoke.sh codex codex .codex/config.toml
 #   ./conformance-smoke.sh gemini gemini .gemini/settings.json
+#   ./conformance-smoke.sh pi pi -          # no MCP by design: skills render instead
+#
+# Beyond the happy path, the MCP manifest carries a server named "slash/probe":
+# legal in most CLIs, but Codex validates names at startup (^[a-zA-Z0-9_-]+$),
+# so for codex the render must SKIP it with a spoken reason — writing it would
+# error every Codex launch (the upstash/context7 failure, seen live).
 set -euo pipefail
 
 # A nonzero CLI exit is a FAILURE unless it matches this auth/onboarding
@@ -59,7 +65,52 @@ proj="$sandbox/proj"
 rm -rf "$sandbox"
 mkdir -p "$home" "$proj/.agentstack"
 
-# Minimal secret-free manifest: one stdio + one http server, this adapter only.
+as() { env HOME="$home" AGENTSTACK_HOME="$sandbox/ashome" "$bin" "$@"; }
+
+# ── skills mode (config "-"): the CLI has no MCP support by design (pi) —
+# conformance means skills render where the CLI actually loads them.
+if [[ "$config_rel" == "-" ]]; then
+  mkdir -p "$proj/.agentstack/skills/conformance-skill"
+  printf -- '---\nname: conformance-skill\ndescription: conformance probe\n---\nprobe body\n' \
+    > "$proj/.agentstack/skills/conformance-skill/SKILL.md"
+  cat > "$proj/.agentstack/agentstack.toml" <<TOML
+version = 1
+
+[skills.conformance-skill]
+path = "./skills/conformance-skill"
+
+[profiles.default]
+skills = ["conformance-skill"]
+
+[targets]
+default = ["$adapter"]
+TOML
+  (cd "$proj" && as use default --scope global --write)
+  skill_md="$home/.pi/agent/skills/conformance-skill/SKILL.md"
+  if [[ "$adapter" != "pi" ]]; then
+    echo "FAIL: skills mode only knows pi's layout; got adapter '$adapter'"
+    exit 1
+  fi
+  if ! grep -q "probe body" "$skill_md"; then
+    echo "FAIL: rendered skill not readable at $skill_md"
+    exit 1
+  fi
+  echo "structural: OK — skill renders (and reads back) under ~/.pi/agent/skills"
+  if command -v "$cli_bin" >/dev/null; then
+    if env HOME="$home" "$cli_bin" --version >/dev/null 2>&1; then
+      echo "live: OK — '$cli_bin --version' runs against the fenced HOME"
+    else
+      echo "live: SKIPPED — '$cli_bin --version' exited nonzero (recorded, not fatal: pi exposes no config introspection)"
+    fi
+  else
+    echo "live: SKIPPED — $cli_bin not on PATH"
+  fi
+  echo "Done."
+  exit 0
+fi
+
+# Minimal secret-free manifest: one stdio + one http server, plus the
+# slash-named startup-validation probe, this adapter only.
 cat > "$proj/.agentstack/agentstack.toml" <<TOML
 version = 1
 
@@ -72,12 +123,17 @@ args = ["conformance"]
 type = "http"
 url = "https://example.com/mcp"
 
+[servers."slash/probe"]
+type = "stdio"
+command = "echo"
+args = ["slash"]
+
 [targets]
 default = ["$adapter"]
 TOML
 
-as() { env HOME="$home" AGENTSTACK_HOME="$sandbox/ashome" "$bin" "$@"; }
-(cd "$proj" && as apply --write)
+apply_out="$(cd "$proj" && as apply --write 2>&1)"
+printf '%s\n' "$apply_out"
 
 config="$home/$config_rel"
 if [[ ! -f "$config" ]]; then
@@ -90,16 +146,46 @@ if ! grep -q conformance_probe "$config"; then
   exit 1
 fi
 
-# Structural: the file must parse in its native format.
+# Structural: the file must parse in its native format. A python3 too old for
+# tomllib (<3.11) degrades LOUDLY to skip-parse — a parse error still fails.
 case "$config" in
   *.toml)
-    python3 -c 'import sys, tomllib; tomllib.load(open(sys.argv[1], "rb"))' "$config"
+    if python3 -c 'import tomllib' 2>/dev/null; then
+      python3 -c 'import sys, tomllib; tomllib.load(open(sys.argv[1], "rb"))' "$config"
+    else
+      echo "structural parse: SKIPPED — python3 lacks tomllib (<3.11); content checks still run"
+    fi
     ;;
   *)
     python3 -m json.tool "$config" >/dev/null
     ;;
 esac
 echo "structural: OK — $config_rel parses and contains the probe server"
+
+# Startup-validation probe: a CLI that rejects the name must get a config
+# WITHOUT it plus a spoken skip; every other CLI must receive it verbatim.
+case "$adapter" in
+  codex)
+    if grep -q 'slash/probe' "$config"; then
+      echo "FAIL: codex config contains 'slash/probe' — Codex rejects that name at every startup"
+      exit 1
+    fi
+    if ! grep -q "skipping 'slash/probe'" <<<"$apply_out" \
+       || ! grep -qi "rejects this server name" <<<"$apply_out"; then
+      echo "FAIL: the skip must be spoken, not silent. apply output:"
+      printf '%s\n' "$apply_out"
+      exit 1
+    fi
+    echo "name-validation: OK — slash/probe skipped for codex, loudly"
+    ;;
+  *)
+    if ! grep -q 'slash/probe' "$config"; then
+      echo "FAIL: $adapter accepts slash names but the render dropped 'slash/probe'"
+      exit 1
+    fi
+    echo "name-validation: OK — slash/probe rendered for $adapter"
+    ;;
+esac
 
 # Live: ask the real CLI to read its own config. Strongest signal, but some
 # CLIs refuse to run unauthenticated — degrade to structural-only, loudly.

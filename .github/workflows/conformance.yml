@@ -48,6 +48,12 @@ jobs:
             npm: "@google/gemini-cli"
             bin: gemini
             config: .gemini/settings.json
+          # pi has no MCP support by design — "-" switches the smoke to its
+          # skills-render leg (symlinks under ~/.pi/agent/skills).
+          - adapter: pi
+            npm: "@mariozechner/pi-coding-agent"
+            bin: pi
+            config: "-"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       # Intentionally floating: `stable` is a branch ref with no resolvable tag.
