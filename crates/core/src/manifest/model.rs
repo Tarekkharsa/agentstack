@@ -127,11 +127,19 @@ pub struct GuardConfig {
     /// everything else is deny-by-default for writes/deletes.
     #[serde(default)]
     pub allow_roots: Vec<String>,
+    /// `[guard.project_roots]` — extra allow-roots granted ONLY when the
+    /// guard's anchored workspace sits under the key path. This keeps a
+    /// scoped grant ("sessions in ~/x may also write ~/y") in the MACHINE
+    /// manifest, where the authority lives — a project manifest can never
+    /// widen the guard's write scope for itself (rule 2), and the guard
+    /// already denies shell writes to its own config file.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub project_roots: IndexMap<String, Vec<String>>,
 }
 
 impl GuardConfig {
     pub fn is_empty(&self) -> bool {
-        self.enabled.is_none() && self.allow_roots.is_empty()
+        self.enabled.is_none() && self.allow_roots.is_empty() && self.project_roots.is_empty()
     }
 
     pub fn enabled(&self) -> bool {

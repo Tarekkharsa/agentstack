@@ -129,20 +129,40 @@ fn check(protocol: Option<&str>) -> Result<()> {
     // machine layer still applies in full.
     let project_policy = project_policy_at(&workspace);
 
+    let allow_roots = effective_allow_roots(&guard_cfg, &workspace);
     let ctx = GuardContext {
         workspace,
         home: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
         tmp: tmp_dirs(),
-        allow_roots: guard_cfg
-            .allow_roots
-            .iter()
-            .map(|r| paths::expand_tilde(r))
-            .collect(),
+        allow_roots,
         agentstack_home: paths::agentstack_home(),
         ruleset: agentstack_policy::compile(&machine_policy, &project_policy, &[]),
     };
     let decision = check_event(&ctx, &event);
     finish(proto, &decision, Some((&event, &ctx)))
+}
+
+/// The effective extra write roots for one workspace: the global
+/// `[guard] allow_roots` plus every `[guard.project_roots]` entry whose key
+/// path contains the anchored workspace. The scoped grants live in the
+/// MACHINE manifest — a project can never widen its own write scope, and the
+/// guard already denies shell writes to that manifest's directory. Pure, so
+/// it is unit-testable.
+fn effective_allow_roots(
+    cfg: &agentstack_core::manifest::GuardConfig,
+    workspace: &Path,
+) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = cfg
+        .allow_roots
+        .iter()
+        .map(|r| paths::expand_tilde(r))
+        .collect();
+    for (scope, extra) in &cfg.project_roots {
+        if workspace.starts_with(paths::expand_tilde(scope)) {
+            roots.extend(extra.iter().map(|r| paths::expand_tilde(r)));
+        }
+    }
+    roots
 }
 
 /// Anchor the guard's workspace at the project root: the nearest ancestor of
@@ -255,17 +275,17 @@ fn test(command: &str) -> Result<()> {
         None => Default::default(),
     };
     let machine_policy = crate::machine_policy::load()?;
-    let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    // Anchor exactly like the live hook does, so `guard test` reproduces the
+    // hook's decision — including workspace-scoped [guard.project_roots].
+    let workspace =
+        anchor_workspace(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
     let project_policy = project_policy_at(&workspace);
+    let allow_roots = effective_allow_roots(&guard_cfg, &workspace);
     let ctx = GuardContext {
         workspace,
         home: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
         tmp: tmp_dirs(),
-        allow_roots: guard_cfg
-            .allow_roots
-            .iter()
-            .map(|r| paths::expand_tilde(r))
-            .collect(),
+        allow_roots,
         agentstack_home: paths::agentstack_home(),
         ruleset: agentstack_policy::compile(&machine_policy, &project_policy, &[]),
     };
@@ -888,6 +908,32 @@ fn set_guard_enabled(enabled: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `[guard.project_roots]` is a MACHINE-owned, workspace-scoped grant:
+    /// the extra root applies inside the keyed workspace (and its subdirs,
+    /// e.g. worktrees), and NOT anywhere else — a different project gets only
+    /// the global allow_roots.
+    #[test]
+    fn project_roots_grant_only_inside_the_keyed_workspace() {
+        let cfg = agentstack_core::manifest::GuardConfig {
+            enabled: Some(true),
+            allow_roots: vec!["/machines/shared".into()],
+            project_roots: indexmap::IndexMap::from([(
+                "/work/agentstack".to_string(),
+                vec!["/home/me/agent-setup".to_string()],
+            )]),
+        };
+        let inside = effective_allow_roots(&cfg, Path::new("/work/agentstack"));
+        assert!(inside.contains(&PathBuf::from("/home/me/agent-setup")));
+        let nested = effective_allow_roots(&cfg, Path::new("/work/agentstack/.claude/worktrees/x"));
+        assert!(nested.contains(&PathBuf::from("/home/me/agent-setup")));
+        let elsewhere = effective_allow_roots(&cfg, Path::new("/work/other-repo"));
+        assert!(!elsewhere.contains(&PathBuf::from("/home/me/agent-setup")));
+        assert!(
+            elsewhere.contains(&PathBuf::from("/machines/shared")),
+            "global allow_roots still apply everywhere"
+        );
+    }
 
     #[test]
     fn nearest_ancestor_walks_up_to_the_first_matching_root() {

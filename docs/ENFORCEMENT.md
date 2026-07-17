@@ -248,7 +248,12 @@ Docker container behind the egress proxy.
   commands (`rm -rf` outside the workspace, `git reset --hard`, `git clean
   -f`, disk writes, …), any access to `[policy.filesystem] deny` globs
   (machine ∪ project — a repo can only add), and file-tool writes outside
-  the workspace + `[guard] allow_roots` + temp. Denials are recorded to the
+  the workspace + `[guard] allow_roots` + temp. `[guard.project_roots]`
+  scopes an extra root to one workspace ("sessions under `~/x` may also
+  write `~/y`") — the grant lives in the MACHINE manifest, so a project can
+  never widen its own write scope, and the guard denies shell writes to that
+  manifest's directory precisely so this table can't be edited into
+  allowlisting itself. Denials are recorded to the
   audit log (`host-guard` entries in `calls.jsonl`). The ceiling is the
   legend's: the harness must honor its own hook protocol — this catches
   accidents, not malice, and Claude Desktop / Junie expose no hook surface
