@@ -408,6 +408,12 @@ dirs. When a prune empties the managed skills dir (deactivation,
 `session end`), the dir itself is removed too — rmdir semantics, so a dir
 holding any user content always survives.
 
+`setup` finishes with the same activation: it picks the profile (an explicit
+`--profile`, the only one declared, or an interactive offer of the
+first-declared) and materializes its skills through the exact `use` code
+path — so a completed setup leaves nothing left to activate. Plain `apply`
+still never touches skills; it reminds you which profile activates them.
+
 ### Instruction files
 
 Compile shared + harness-specific `[instructions.*]` fragments into each

@@ -3,7 +3,8 @@
 //! Pure orchestration over the everyday commands: `init` (only if there's no
 //! manifest yet), the shared `bootstrap` preflight, inline secret prompts, an
 //! `apply` preview, a single confirm, then `install` + `apply --write` +
-//! `doctor`. It introduces no rendering or validation logic of its own, and it
+//! profile activation (skills) + `doctor`. It introduces no rendering or
+//! validation logic of its own, and it
 //! reuses the shared confirm helper so a non-interactive shell (CI, pipes) only
 //! ever previews — it never writes and never blocks on input.
 
@@ -132,6 +133,41 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // prints only the per-target write results rather than repeating it.
     super::apply::write_quiet(&apply_args(args, scope, true), manifest_dir)?;
 
+    // 6b. Skills — `apply` renders servers/instructions/hooks/settings but
+    //     never skills; they activate through a profile. Finish the job here
+    //     via the same prepare/activate seam `use` and `session start` share,
+    //     so the first agent session actually has the manifest's skills.
+    //     Reload first: the apply pass above may have refreshed owned-server
+    //     tables in the manifest on disk.
+    let ctx = super::load(manifest_dir)?;
+    match select_profile(&ctx, args)? {
+        Some(profile) => {
+            println!("\n{}", "Skills".bold());
+            if let Err(err) = materialize_profile(&ctx, args, scope, &profile) {
+                // Configs are already written at this point — surface the
+                // problem and the exact recovery command instead of failing
+                // the whole setup on its last step.
+                println!(
+                    "  {} could not activate profile '{profile}' ({err:#})",
+                    "⚠".yellow()
+                );
+                println!(
+                    "  Fix the issue, then run: {}",
+                    format!("agentstack use {profile} --write").bold()
+                );
+            }
+        }
+        None if !ctx.loaded.manifest.skills.is_empty() => {
+            println!(
+                "\n{} {} skill(s) in the manifest have no profile to activate them — add a `[profiles.<name>]` with a `skills` list, then run {}.",
+                "ℹ".cyan(),
+                ctx.loaded.manifest.skills.len(),
+                "agentstack use <name> --write".bold()
+            );
+        }
+        None => {}
+    }
+
     println!("\n{}", "Doctor".bold());
     super::doctor::run(
         &DoctorArgs {
@@ -148,8 +184,11 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     //    repo's agents get them via the global CLAUDE.md / AGENTS.md.
     offer_house_rules(&ctx, &target_ids)?;
 
-    // 8. Done — point at the obvious next step.
+    // 8. Done — point at the obvious next steps. Harnesses read their config
+    //    at startup, so an already-open session won't see what was written.
     println!("\n{} Setup complete.", "✓".green());
+    println!("\n{}", "Next".bold());
+    println!("  Restart or reopen your agent CLI(s) so they pick up the new config.");
     match ctx.loaded.manifest.profiles.keys().next() {
         Some(profile) => println!(
             "  Launch an agent with it: {}",
@@ -161,6 +200,68 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
         ),
     }
     Ok(())
+}
+
+/// Pick the profile setup should activate: an explicit `--profile` wins, a
+/// single declared profile is unambiguous, and with several we offer the
+/// first-declared (manifest order) rather than guessing silently — `use`
+/// remains the way to switch later. `Ok(None)` means "activate nothing".
+fn select_profile(ctx: &super::Context, args: &SetupArgs) -> Result<Option<String>> {
+    if let Some(p) = &args.profile {
+        return Ok(Some(p.clone()));
+    }
+    let names: Vec<&String> = ctx.loaded.manifest.profiles.keys().collect();
+    match names.as_slice() {
+        [] => Ok(None),
+        [only] => Ok(Some((*only).clone())),
+        [first, ..] => {
+            println!(
+                "\nThis manifest declares {} profiles: {}.",
+                names.len(),
+                names
+                    .iter()
+                    .map(|n| n.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            if crate::util::confirm::confirm(&format!(
+                "Activate '{first}' now? (switch later with `agentstack use <profile> --write`)"
+            ))? {
+                Ok(Some((*first).clone()))
+            } else {
+                println!(
+                    "  {} skipped — activate one later with {}",
+                    "·".dimmed(),
+                    "agentstack use <profile> --write".bold()
+                );
+                Ok(None)
+            }
+        }
+    }
+}
+
+/// Activate `profile` (servers + skills) through the shared `use` seam — the
+/// same `prepare`/`activate` pair `session start` composes. Public so the
+/// integration test can drive this phase directly: `setup::run` stops at its
+/// interactive confirm in a test shell, so the phase is otherwise unreachable.
+pub fn materialize_profile(
+    ctx: &super::Context,
+    args: &SetupArgs,
+    scope: Scope,
+    profile: &str,
+) -> Result<()> {
+    let use_args = crate::cli::UseArgs {
+        profile: profile.to_string(),
+        targets: args.targets.clone(),
+        scope: Some(scope),
+        write: true,
+        allow_unresolved: false,
+        prune_foreign: false,
+        no_gitignore: false,
+    };
+    let libctx = ctx.library_ctx();
+    let prepared = super::use_profile::prepare(ctx, &libctx, &use_args)?;
+    super::use_profile::activate(ctx, &libctx, &use_args, &prepared)
 }
 
 fn apply_args(args: &SetupArgs, scope: Scope, write: bool) -> ApplyArgs {

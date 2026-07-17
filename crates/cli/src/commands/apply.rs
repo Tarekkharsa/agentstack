@@ -27,6 +27,9 @@ pub(crate) struct Outcome {
     /// let a user confirm a partial write; setup uses this to stop before any
     /// newcomer wizard write.
     pub write_blockers: usize,
+    /// Targets actually written this pass (0 on any dry run) — drives the
+    /// "restart your CLI" hint, which only matters once something changed on disk.
+    pub written_count: usize,
 }
 
 pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
@@ -34,7 +37,8 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     if requested {
         // `--write`: apply directly. The scripting / CI escape hatch — never
         // prompts, whatever the terminal is.
-        render(args, manifest_dir, true, false, true)?;
+        let outcome = render(args, manifest_dir, true, false, true)?;
+        restart_hint(&outcome);
         return Ok(());
     }
     // No `--write`. An explicit `--dry-run`, or any non-interactive shell (CI,
@@ -53,11 +57,23 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
     if crate::util::confirm::confirm("\nApply these changes?")? {
         // Confirmed: a quiet second pass writes without re-printing the diff.
-        render(args, manifest_dir, true, true, true)?;
+        let outcome = render(args, manifest_dir, true, true, true)?;
+        restart_hint(&outcome);
     } else {
         println!("Not written. Re-run with {} to apply.", "--write".bold());
     }
     Ok(())
+}
+
+/// Configs changed on disk, but a harness only reads them at startup — say so.
+/// Standalone `apply` only; `setup` prints its own closing "Next" block.
+fn restart_hint(outcome: &Outcome) {
+    if outcome.written_count > 0 {
+        println!(
+            "{} Restart or reopen your agent CLI(s) so they pick up the new config.",
+            "→".cyan()
+        );
+    }
 }
 
 /// Show the dry-run diff without the "re-run with `--write`" hint, for a caller
@@ -167,6 +183,7 @@ fn render(
             changed_count: 0,
             validation_errors: has_errors,
             write_blockers: 0,
+            written_count: 0,
         });
     }
 
@@ -677,13 +694,20 @@ fn render(
 
     // `apply` renders servers/instructions/hooks/settings — never skills.
     // Say so, or a manifest's skills look silently dropped (they activate
-    // through a profile via `use`).
+    // through a profile via `use`). Name a real profile when one exists;
+    // without one, "use <profile>" would send the user to a dead end.
     if !manifest.skills.is_empty() && !quiet {
-        println!(
-            "\n{} {} skill(s) in the manifest are not rendered by `apply` — skills activate through a profile: `agentstack use <profile> --write`",
-            "ℹ".cyan(),
-            manifest.skills.len()
-        );
+        let n = manifest.skills.len();
+        match manifest.profiles.keys().next() {
+            Some(first) => println!(
+                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them through a profile: `agentstack use {first} --write` (or `agentstack setup`, which does this for you)",
+                "ℹ".cyan()
+            ),
+            None => println!(
+                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — define a `[profiles.<name>]` with a `skills` list, then run `agentstack use <name> --write`",
+                "ℹ".cyan()
+            ),
+        }
     }
 
     println!();
@@ -718,6 +742,7 @@ fn render(
         changed_count,
         validation_errors: has_errors,
         write_blockers,
+        written_count: if will_write { written_count } else { 0 },
     })
 }
 

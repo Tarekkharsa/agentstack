@@ -102,9 +102,11 @@ agentstack apply        # preview every CLI's changes, confirm to write
 
 Two things worth knowing before you go further:
 
-- **Skills activate through profiles**, not `apply`: `apply` renders servers,
-  instructions, and hooks; `agentstack use <profile> --write` materializes
-  that profile's skills. (`apply` will remind you if the manifest has skills.)
+- **Skills activate through profiles.** `setup` handles this for you — it picks
+  your profile and materializes its skills as its final step. Standalone
+  `apply` renders servers, instructions, settings, and hooks only;
+  `agentstack use <profile> --write` activates a profile's skills.
+  (`apply` will remind you if the manifest has skills.)
 - Prefer **no rendered files at all**? Skip `apply` entirely and jump to
   [the trust gate](#the-trust-gate--keep-repo-declared-capabilities-inert-until-review) — one gateway
   registration serves every repo live.

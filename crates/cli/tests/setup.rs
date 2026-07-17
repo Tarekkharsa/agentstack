@@ -57,6 +57,40 @@ fn setup_previews_but_writes_nothing_without_a_terminal() {
 }
 
 #[test]
+fn materialize_profile_writes_skills_and_pins_the_lock() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("skills/helper")).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [skills.helper]\npath = \"./skills/helper\"\n\
+         [profiles.p]\nskills = [\"helper\"]\n",
+    )
+    .unwrap();
+    fs::write(proj.join("skills/helper/SKILL.md"), "# helper\n").unwrap();
+
+    // Drive the setup phase directly: `setup::run` stops at its interactive
+    // confirm in a test shell, so the phase function is the testable seam.
+    let ctx = agentstack::commands::load(Some(&proj)).unwrap();
+    setup::materialize_profile(&ctx, &args(), Scope::Global, "p").unwrap();
+
+    assert!(
+        home.join(".claude/skills/helper").exists(),
+        "the profile's skill must be materialized into the target's skills dir"
+    );
+    let lock = fs::read_to_string(proj.join("agentstack.lock")).unwrap();
+    assert!(
+        lock.contains("helper"),
+        "activation must pin the skill in agentstack.lock: {lock}"
+    );
+}
+
+#[test]
 fn setup_does_not_run_init_without_a_terminal() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
