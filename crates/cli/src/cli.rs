@@ -202,7 +202,9 @@ pub enum Command {
     #[command(subcommand, hide = true)]
     Proxy(ProxyCmd),
 
-    /// Restore a CLI config from its pre-write backup (undo an apply).
+    /// Undo a recorded write: revert an apply/use/session history entry
+    /// (servers, settings, hooks, instructions), or restore one adapter's
+    /// config from its single-slot backup.
     #[command(hide = true)]
     Restore(RestoreArgs),
 
@@ -907,8 +909,14 @@ pub enum SessionCmd {
 
 #[derive(Args, Debug)]
 pub struct RestoreArgs {
-    /// Adapter id to restore (omit to list available backups).
+    /// What to undo: a recorded change id (unique prefix; `restore` with no
+    /// argument lists them) or an adapter id for its single-slot config
+    /// backup. Omit to list everything undoable.
     pub adapter: Option<String>,
+
+    /// Undo the most recent recorded change that isn't already undone.
+    #[arg(long, conflicts_with = "adapter")]
+    pub last: bool,
 
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,

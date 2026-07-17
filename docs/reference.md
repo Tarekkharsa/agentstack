@@ -301,6 +301,15 @@ dashboard's Doctor pane runs it too.
 Real MCP `initialize` handshake over HTTP; reports server name + tool count,
 or classifies the error (auth / http / connect).
 
+### One undo verb: `restore`
+
+Every write agentstack makes (servers, settings, hooks, instructions — even
+the owned-server manifest refresh) is captured in the history engine before it
+lands. `agentstack restore` lists the recorded changes; `restore <id> --write`
+(unique prefix) or `restore --last --write` reverts one — the same undo the
+dashboard button drives. `restore <adapter>` keeps the original single-slot
+config restore as a fallback. Reverted files simply show up as pending again.
+
 ### `doctor` shows what you use
 
 Every check always runs, but the default report prints only the sections
@@ -1143,7 +1152,8 @@ packs), `remove`, `apply` (`--scope`, `--write`, `--prune-foreign`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`,
 `lib add|add-server|list|remove|remove-server|sync|consolidate|pack-init`
 (`lib add`: `--path`, `--git`/`--subpath`, `--allow-flagged`; `lib sync`:
-`--init`, `--remote`, `--status`, `--allow-secrets`), `restore`,
+`--init`, `--remote`, `--status`, `--allow-secrets`), `restore` (`--last`; a
+recorded-change id or an adapter id),
 `doctor` (`--ci`, `--live`, `--fix`, `--deep`, `--all`), `audit` (`--json`), `optimize` (`--json`, `--write`, `--since`),
 `report run <id>|runs|usage|calls` (`run`/`runs`/`calls`: `--json`; `usage`:
 `--live`; `calls`: `--since`, `--transcripts`), `proxy start|report` (`start`: `--port`,
