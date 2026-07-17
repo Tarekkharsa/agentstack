@@ -380,11 +380,20 @@ fn grant(base: &Path) -> Result<()> {
 /// (ro unless covered); read scopes are informational, and host mode
 /// enforces neither.
 fn review_policy(p: &crate::manifest::Policy) {
-    if p.tools.is_empty() && p.egress.is_empty() && p.secrets.is_empty() && p.filesystem.is_empty()
-    {
+    let lines = policy_requested_lines(p);
+    if lines.is_empty() {
         return;
     }
     println!("  policy requested by this project (can only narrow the machine layer):");
+    for line in lines {
+        println!("{line}");
+    }
+}
+
+/// The requested-policy lines the trust review prints, as a pure builder —
+/// public so the regression test asserts on exactly what the human sees.
+pub fn policy_requested_lines(p: &crate::manifest::Policy) -> Vec<String> {
+    let mut lines = Vec::new();
     let dims: [(&str, &indexmap::IndexMap<String, Vec<String>>); 3] = [
         ("tools", &p.tools),
         ("egress", &p.egress),
@@ -392,21 +401,28 @@ fn review_policy(p: &crate::manifest::Policy) {
     ];
     for (label, map) in dims {
         for (server, rules) in map {
-            println!("  · {label:<7} {server}: {}", rules.join(", "));
+            lines.push(format!("  · {label:<7} {server}: {}", rules.join(", ")));
         }
     }
     if !p.filesystem.read.is_empty() {
-        println!(
+        lines.push(format!(
             "  · filesystem read {} (informational — the sandbox mounts one whole workspace)",
             p.filesystem.read.join(", ")
-        );
+        ));
     }
     if !p.filesystem.write.is_empty() {
-        println!(
+        lines.push(format!(
             "  · filesystem write {} (sandbox mode mounts the workspace read-only unless this covers it; advisory in host mode)",
             p.filesystem.write.join(", ")
-        );
+        ));
     }
+    if !p.filesystem.deny.is_empty() {
+        lines.push(format!(
+            "  · filesystem deny {} (blocklist — UNIONS with the machine layer; enforced by the host guard)",
+            p.filesystem.deny.join(", ")
+        ));
+    }
+    lines
 }
 
 /// The skill names a trust review covers: the manifest's inline `[skills.*]`

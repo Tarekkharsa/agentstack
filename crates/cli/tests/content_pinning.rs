@@ -157,6 +157,51 @@ fn trust_grant_requires_a_pinned_matching_surface() {
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 }
 
+/// A project declaring `[policy.tools]` gets that surfaced in the trust
+/// review — the human sees what the bundle REQUESTS on every policy
+/// dimension, not just servers/skills/instructions — and trust still grants
+/// once the loadable surface is pinned (policy is display-only here: it
+/// can only narrow at runtime, never widen, so it is never a blocker).
+#[test]
+fn trust_grant_surfaces_requested_policy() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    write_project(&proj);
+    // Append a policy declaration onto the existing project manifest.
+    let mut manifest_toml = fs::read_to_string(proj.join("agentstack.toml")).unwrap();
+    manifest_toml.push_str("[policy.tools]\ngithub = [\"!delete_*\"]\n");
+    fs::write(proj.join("agentstack.toml"), manifest_toml).unwrap();
+
+    // The pure line-builder shows the requested rule (no need to capture
+    // `grant`'s stdout — it prints exactly these lines).
+    let loaded = agentstack::manifest::load_from_dir(&proj).unwrap();
+    let lines = trust_cmd::policy_requested_lines(&loaded.manifest.policy);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("tools") && l.contains("github: !delete_*")),
+        "expected a tools/github requested line, got: {lines:?}"
+    );
+
+    // And granting still succeeds once the (unrelated) skill surface is pinned
+    // — requested policy is reviewed, never blocking.
+    lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
+    let grant_args = TrustArgs {
+        path: Some(proj.clone()),
+        list: false,
+        revoke: false,
+    };
+    trust_cmd::run(&grant_args).unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Trusted);
+}
+
 fn apply_args() -> ApplyArgs {
     ApplyArgs {
         targets: vec!["claude-code".into()],
