@@ -22,7 +22,7 @@ classify_cli_failure() {
   # Contextual phrases only: bare tokens like `auth`, `credential`, `api_key`,
   # or `browser` also appear in CONFIG and crash errors ("invalid auth mode in
   # config.toml"), which must FAIL — the self-test pins those as negatives.
-  if grep -qiE 'authentication required|not logged in|logged out|please sign in|sign in to continue|log ?in required|run [a-z. -]+(login|auth)|missing [a-z_ ]{0,40}api.?key|set [a-z_ ]{0,40}api.?key|api.?key (required|not set|is missing)|unauthorized|onboarding|open [a-z ]{0,40}browser to|session expired|token expired' <<<"$1"; then
+  if grep -qiE 'authentication required|no authentication information|not logged in|logged out|please sign in|sign in to continue|log ?in required|run [a-z. -]+(login|auth)|missing [a-z_ ]{0,40}api.?key|set [a-z_ ]{0,40}api.?key|api.?key (required|not set|is missing)|unauthorized|onboarding|open [a-z ]{0,40}browser to|session expired|token expired' <<<"$1"; then
     echo skip
   else
     echo fail
@@ -194,9 +194,21 @@ if ! command -v "$cli_bin" >/dev/null; then
   echo "Done."
   exit 0
 fi
-if out="$(env HOME="$home" "$cli_bin" mcp list 2>&1)"; then
+# Per-CLI probe: most CLIs expose `mcp list` as a subcommand; Copilot CLI
+# (>= 1.0.x) runs slash-style commands through -i instead.
+probe() {
+  case "$adapter" in
+    copilot-cli) env HOME="$home" "$cli_bin" -i "mcp list" 2>&1 ;;
+    *) env HOME="$home" "$cli_bin" mcp list 2>&1 ;;
+  esac
+}
+if out="$(probe)"; then
   if grep -q conformance_probe <<<"$out"; then
     echo "live: OK — '$cli_bin mcp list' sees the probe server"
+  elif [[ "$(classify_cli_failure "$out")" == skip ]]; then
+    # Some CLIs (Copilot) print their auth gate and still exit 0.
+    echo "live: SKIPPED — '$cli_bin' hit an auth/onboarding gate (exit 0). Output:"
+    echo "$out" | head -20
   else
     echo "FAIL: $cli_bin ran but does not see the probe server. Output:"
     echo "$out"
