@@ -86,7 +86,7 @@ The keystone is the last engineering prerequisite for everything staged on
 `AuthorityGrant`, KAT-frozen digest) to become an enforced claim instead of
 unwired machinery.
 
-- [ ] Implement the canonical `run <harness> --locked` flow as **one
+- [x] Implement the canonical `run <harness> --locked` flow as **one
   supervised increment** (contract §3 sequence): recorder-open
   (`AttemptStarted`) → enforced trust → strict lock verification including D3
   executables (`ensure_locked_inputs`) → policy admission → freeze
@@ -94,7 +94,7 @@ unwired machinery.
   launch-scoped MCP config with cooperative host guards → recorded outcome.
   Lands `RunEnvelope` (contract §6.2) and the material checked-append recorder
   events (contract §9); consumes the staged `grant.rs`/`verify.rs` surface.
-  - **Landed (needs line-by-line review):** everything through GrantFrozen +
+  - **Landed (line-by-line reviewed 2026-07-17):** everything through GrantFrozen +
     launch + recorded outcome, the checked-append recorder events, `--plan`
     (aggregates all blockers, mutates nothing, digest equals the live run's
     once the commitment key exists; a never-provisioned key is informational
@@ -120,7 +120,7 @@ unwired machinery.
     search` covers the central library (name + frontmatter description);
     `agentstack_list_loadable` takes a `query`; `lib list` shows
     descriptions.
-  - **Also landed (2026-07-17, needs line-by-line review — the three
+  - **Also landed (2026-07-17, line-by-line reviewed same day — the three
     remainders):** (a) the run-grant artifact handoff: `live()` writes a
     reviewed `GrantHandoff` projection (ruleset + `${REF}`-only frozen
     servers + project/consent identity; never argv or secret values) into
@@ -151,6 +151,28 @@ unwired machinery.
     (`SignedHandoff`), verified before any field is trusted. (3) the ambient
     audit matched the manifest dir not the project root (false "clean").
     Witnesses added; all verified live (forged + stale-ceiling both refuse).
+  - **Keystone line-by-line review (2026-07-17, closes the review debt):**
+    full read of `grant.rs`/`locked.rs`/`mcp_server.rs` plus an independent
+    opus refuter and a codex second-perspective review, converging. Verified
+    sound: MAC round-trip determinism (`CompiledRuleset`/`Server` are all
+    BTreeMap/IndexMap/scalars — serialize∘deserialize is byte-identical, so
+    the MAC never false-rejects); the rule-2 re-check compiles over the full
+    `manifest.servers` set on BOTH freeze and consumption, so the `--profile`
+    fence narrows only the served subset and `--locked --profile` cannot
+    falsely refuse; untrusted-inert, consent re-gate, and no-secret-
+    serialization all hold. Two findings fixed the same day: (1) the
+    grant-mode bridge still served mutating/secret-resolving control-plane
+    tools — `agentstack_session_start` resolves secrets into native configs
+    mid-run, a secret-broker-boundary breach; now the whole mutating set
+    (lease open/close/freeze, session start/end/freeze, add_skill/add_server/
+    add_from, create_profile) is refused fail-closed under `--grant` (with a
+    classification witness), and `--auto-project --grant` refuses at startup
+    instead of computing the grant and silently serving disk re-derivation.
+    (2) doc honesty on the handoff HMAC: the docstrings claimed "a same-user
+    agent cannot forge a grant.json", but a same-user unconfined agent can
+    read the 0600 commitment key and seal a valid MAC; the docs now state
+    what the MAC actually provides (cross-machine replay + tamper +
+    confined-attacker forgery resistance — see residual iii).
   - **Remaining (honest limits, not blockers):** (i) actual NEUTRALIZATION
     of ambient global-scope entries on the host tier stays out deliberately —
     the global config is one shared file harness apps rewrite mid-run, so
@@ -161,7 +183,20 @@ unwired machinery.
     write access — but its servers are all from the same trusted manifest and
     the ruleset is capped at the current machine ceiling, so effective
     authority is ≤ what `agentstack mcp --auto-project` already grants that
-    trusted project. Per-run artifact identity is follow-up.
+    trusted project. Per-run artifact identity is follow-up. (iii) the
+    handoff MAC key is same-user-readable, so an UNCONFINED same-user agent
+    can seal a forged artifact whose server definitions reach the secret
+    broker under trusted names — on the host tier that agent already executes
+    arbitrary commands, so this adds no command authority, but the recorded
+    hardening (have `verify_handoff_for` re-resolve the fenced
+    `(name, checksum)` set from the trusted manifest and refuse any artifact
+    definition that differs, instead of consuming definitions verbatim)
+    becomes load-bearing the moment a sandbox/lockdown posture confines the
+    agent away from the key file — land it with those postures. Relatedly,
+    the bridge path derives its root FROM the artifact, so the root-equality
+    check in `verify_handoff_for` is satisfied by construction there; the MAC
+    binds the root field, and same-machine cross-project replay stays bounded
+    by the (ii) analysis.
   - The wiring must assert a `GrantedServer`'s definition digest was honestly
     derived from its stored `Server` bytes (carried 3b-ii review note).
     (Done: `GrantedServer::from_resolved` is the only wiring constructor.)
