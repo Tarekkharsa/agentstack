@@ -14,7 +14,6 @@ use std::thread;
 use serde_json::{json, Value};
 use tiny_http::{Header, Response, Server};
 
-use agentstack::cli::CodemodeArgs;
 use agentstack::codemode::endpoint;
 use agentstack::gateway::Gateway;
 
@@ -116,7 +115,10 @@ fn endpoint_round_trips_through_gateway_to_mock_upstream() {
 }
 
 #[test]
-fn codemode_write_materializes_contained_secret_free_files() {
+fn generated_bindings_are_secret_free() {
+    // The `codemode` CLI verb is retired — agents fetch the identical client
+    // via the MCP `tools_bindings` tool, which calls the same generator. Pin
+    // the security property here: the generated text never carries secrets.
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
     let home = tmp.path().join("home");
@@ -124,14 +126,12 @@ fn codemode_write_materializes_contained_secret_free_files() {
     let port = start_mock_upstream();
     setup_project(&home, &proj, port);
 
-    agentstack::commands::codemode::run(&CodemodeArgs { write: true }, Some(&proj)).unwrap();
-
-    let dir = proj.join("codemode");
-    let client = std::fs::read_to_string(dir.join("client.ts")).unwrap();
-    assert!(client.contains(r#"call("mock__echo", input)"#));
-    assert!(!client.contains("${"), "client carries no secret tokens");
-    assert!(dir.join("agentstack-runtime.ts").exists());
-    // endpoint.json (machine-local port+token) is gitignored, never committed.
-    let gitignore = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
-    assert!(gitignore.contains("endpoint.json"));
+    let gw = Gateway::from_manifest(Some(&proj));
+    let bindings = gw.generate_bindings();
+    assert!(bindings.client_ts.contains(r#"call("mock__echo", input)"#));
+    assert!(
+        !bindings.client_ts.contains("${"),
+        "client carries no secret tokens"
+    );
+    assert!(!bindings.runtime_ts.is_empty());
 }

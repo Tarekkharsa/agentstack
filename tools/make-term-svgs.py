@@ -280,7 +280,7 @@ CLOSED_LOOP = (
         gap(),
         out(("c", "  acme__search_docs     "), ("ok", "✓ ok")),
         out(("c", "  acme__delete_index    "), ("no", "✗ refused"), ("c", '   [policy.tools] rule "!delete_*"'), d=0.8),
-        cmd("agentstack audit --calls"),
+        cmd("agentstack report calls"),
         out(("c", "  2 calls · 2 tools · "), ("no", "1 denied by policy"), ("c", " — digests, never values"), d=0.9),
         gap(),
         cmd("agentstack lock --upgrade acme --yes --write", "   # vendor ships v1.1.0"),
@@ -305,7 +305,7 @@ GUARD = (
         out(("c", "  agent → "), ("i", "ls -la")),
         out(("ok", "    ✓ allowed"), d=0.9),
         gap(),
-        cmd("agentstack audit --calls"),
+        cmd("agentstack report calls"),
         out(("c", "  3 denials recorded (host-guard) — tool + outcome, never file contents")),
     ],
 )

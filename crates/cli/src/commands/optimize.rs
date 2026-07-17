@@ -418,7 +418,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                             .join(", ")
                     ),
                     safe_auto: false,
-                    safety: "manual: an allowlist makes every other tool invisible to agents at the gateway — future workflows may legitimately need more. Denied tools show up in `agentstack audit --calls` if you cut too deep.".into(),
+                    safety: "manual: an allowlist makes every other tool invisible to agents at the gateway — future workflows may legitimately need more. Denied tools show up in `agentstack report calls` if you cut too deep.".into(),
                 });
             }
         }
@@ -444,7 +444,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 format!("({} total call(s) to this server in the window)", s.total),
             ],
             action: format!(
-                "review `[policy.tools]` for '{server}' (agentstack audit --calls for the full log) — loosen the rule if these were legitimate, keep it if not"
+                "review `[policy.tools]` for '{server}' (agentstack report calls for the full log) — loosen the rule if these were legitimate, keep it if not"
             ),
             safe_auto: false,
             safety: "manual: a denial is the firewall working as configured — only a human knows whether the agent should have been allowed".into(),

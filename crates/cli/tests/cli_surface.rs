@@ -37,6 +37,8 @@ fn consolidated_verbs_parse() {
         vec!["agentstack", "gateway", "connect", "--all"],
         vec!["agentstack", "gateway", "disconnect", "--all"],
         vec!["agentstack", "lib", "pack-init", "my-pack"],
+        vec!["agentstack", "lib", "consolidate", "--list"],
+        vec!["agentstack", "report", "calls", "--since", "7"],
         // The machine-invoked entrypoint written into harness configs must
         // keep parsing exactly as `connect` renders it.
         vec!["agentstack", "mcp", "--auto-project"],
@@ -57,6 +59,12 @@ fn retired_top_level_verbs_are_gone() {
         vec!["agentstack", "connect"],
         vec!["agentstack", "disconnect"],
         vec!["agentstack", "pack", "init"],
+        // Round-2 cuts: broken/duplicate/ungoverned surfaces.
+        vec!["agentstack", "hook", "zsh"],
+        vec!["agentstack", "codemode"],
+        vec!["agentstack", "consolidate"],
+        vec!["agentstack", "lib", "migrate"],
+        vec!["agentstack", "audit", "--calls"],
     ] {
         assert!(
             Cli::try_parse_from(&argv).is_err(),

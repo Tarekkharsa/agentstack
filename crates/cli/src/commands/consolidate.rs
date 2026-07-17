@@ -1,4 +1,4 @@
-//! `agentstack consolidate` — gather scattered skills into the managed home.
+//! `agentstack lib consolidate` — gather scattered skills into the central library.
 
 use std::path::Path;
 

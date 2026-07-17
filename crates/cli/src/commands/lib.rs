@@ -5,7 +5,7 @@
 //! This module owns the **library write contract**: [`add_skill`] is the single
 //! insertion path — how an item enters `library.toml`, how its files land under
 //! `lib/skills/`, and how its checksum + provenance are recorded. Future
-//! surface (`lib migrate`, `consolidate` emitting name refs) reuses it rather
+//! surface (`lib consolidate` emitting name refs) reuses it rather
 //! than inventing its own file/index logic.
 
 use agentstack_core::digest::Sha256Hex;
@@ -16,8 +16,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::{
     LibAddArgs, LibAddExtensionArgs, LibAddHookArgs, LibAddServerArgs, LibArgs, LibKind,
-    LibMigrateArgs, LibRemoveArgs, LibRemoveExtensionArgs, LibRemoveHookArgs, LibRemoveServerArgs,
-    LibSyncArgs,
+    LibRemoveArgs, LibRemoveExtensionArgs, LibRemoveHookArgs, LibRemoveServerArgs, LibSyncArgs,
 };
 use crate::library::{Library, LibraryExtension, LibraryHook, LibraryServer, LibrarySkill};
 use crate::manifest::{Hook, Server, Skill};
@@ -40,8 +39,8 @@ pub fn run(args: &LibArgs, manifest_dir: Option<&Path>) -> Result<()> {
         LibKind::RemoveServer(a) => remove_server_cli(a),
         LibKind::RemoveExtension(a) => remove_extension_cli(a),
         LibKind::RemoveHook(a) => remove_hook_cli(a),
-        LibKind::Migrate(a) => migrate(a),
         LibKind::Sync(a) => sync(a),
+        LibKind::Consolidate(a) => super::consolidate::run(a, manifest_dir),
         LibKind::PackInit(a) => super::pack::init(a.name.as_deref()),
     }
 }
@@ -84,7 +83,7 @@ pub struct AddOutcome {
 }
 
 /// Insert a skill into the central library at `lib_home`. The single library
-/// write path, reused by the CLI and (later) migrate/consolidate.
+/// write path, reused by the CLI and `lib consolidate`.
 ///
 /// - `Path`: validated to contain `SKILL.md`, copied into `lib/skills/<name>`,
 ///   digested there, recorded as `path = "<name>"`.
@@ -1585,224 +1584,6 @@ fn remove(args: &LibRemoveArgs) -> Result<()> {
     Ok(())
 }
 
-/// A migration plan/result: which skills were (or would be) migrated and which
-/// on-disk entries were skipped and why.
-#[derive(Debug)]
-pub struct MigrateReport {
-    pub migrated: Vec<String>,
-    /// `(entry name, reason)` for directories that were not valid skills.
-    pub skipped: Vec<(String, String)>,
-    /// `(adapter id, link path)` for provider symlinks that were (or would be)
-    /// re-pointed from the legacy home to the library.
-    pub repointed: Vec<(String, PathBuf)>,
-    pub written: bool,
-}
-
-/// Migrate skills from the legacy skills home (`old`) into the central library
-/// at `lib_home`, reusing [`add_skill`] for each. **Copy-first and reversible**:
-/// originals under `old` are never touched, so a failed or unwanted migration
-/// leaves the source intact.
-///
-/// Only directories containing `SKILL.md` with a safe name are migrated; other
-/// entries are recorded in `skipped`. Collisions with existing library entries
-/// are a hard error (checked up front, before any write) unless `replace`.
-pub fn migrate_skills(
-    old: &Path,
-    lib_home: &Path,
-    replace: bool,
-    write: bool,
-) -> Result<MigrateReport> {
-    let mut candidates: Vec<(String, PathBuf)> = Vec::new();
-    let mut skipped: Vec<(String, String)> = Vec::new();
-
-    if old.exists() {
-        let mut entries: Vec<_> = std::fs::read_dir(old)
-            .with_context(|| format!("reading {}", old.display()))?
-            .collect::<std::io::Result<Vec<_>>>()?;
-        entries.sort_by_key(|e| e.file_name());
-        for e in entries {
-            let path = e.path();
-            let name = e.file_name().to_string_lossy().to_string();
-            if !path.is_dir() {
-                continue; // ignore stray files at the skills-home root
-            }
-            if !path.join("SKILL.md").exists() {
-                skipped.push((name, "no SKILL.md".into()));
-                continue;
-            }
-            if !valid_lib_name(&name) {
-                skipped.push((name, "unsafe name".into()));
-                continue;
-            }
-            candidates.push((name, path));
-        }
-    }
-
-    // Fail fast on collisions (matching `lib add`) before mutating anything.
-    if !replace {
-        let library = Library::load(lib_home)?;
-        let collisions: Vec<String> = candidates
-            .iter()
-            .filter(|(n, _)| library.get(n).is_some())
-            .map(|(n, _)| n.clone())
-            .collect();
-        if !collisions.is_empty() {
-            bail!(
-                "already in the central library: {} — pass --replace to overwrite",
-                collisions.join(", ")
-            );
-        }
-    }
-
-    let mut migrated = Vec::new();
-    for (name, path) in &candidates {
-        // Migration adopts the user's own existing skills; scan findings are
-        // surfaced by audit/doctor, never a reason to block a move here.
-        add_skill(lib_home, name, LibSource::Path(path), replace, write, true)?;
-        migrated.push(name.clone());
-    }
-
-    // Finish the move: any CLI's global skills symlink still targeting the
-    // legacy home is re-pointed at the library copy, so harnesses actually
-    // read from the library after a migration (legacy content stays intact,
-    // so this remains reversible).
-    let repointed = repoint_provider_links(old, lib_home, &migrated, write)?;
-
-    Ok(MigrateReport {
-        migrated,
-        skipped,
-        repointed,
-        written: write,
-    })
-}
-
-/// Whether a symlink (at `link_dir/<name>`, pointing at `target`) resolves
-/// into the legacy skills home `old`.
-fn link_targets_legacy(target: &Path, link_dir: &Path, old: &Path) -> bool {
-    let absolute = if target.is_absolute() {
-        target.to_path_buf()
-    } else {
-        link_dir.join(target)
-    };
-    // Normalize `..` components lexically (no fs access, so dry-run works on
-    // links whose targets are gone).
-    let mut norm = PathBuf::new();
-    for c in absolute.components() {
-        match c {
-            std::path::Component::ParentDir => {
-                norm.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => norm.push(other),
-        }
-    }
-    norm.starts_with(old)
-}
-
-/// Re-point per-CLI global skills symlinks from the legacy home to the
-/// library for every migrated skill. Returns `(adapter id, link path)` pairs.
-fn repoint_provider_links(
-    old: &Path,
-    lib_home: &Path,
-    migrated: &[String],
-    write: bool,
-) -> Result<Vec<(String, PathBuf)>> {
-    let mut repointed = Vec::new();
-    let registry = crate::adapter::Registry::load()?;
-    for desc in registry.iter() {
-        let Some(dir) = desc.skills_dir_for(crate::scope::Scope::Global, Path::new(".")) else {
-            continue;
-        };
-        for name in migrated {
-            let link = dir.join(name);
-            let Ok(target) = std::fs::read_link(&link) else {
-                continue; // not a symlink (or absent) — never touch real dirs
-            };
-            if !link_targets_legacy(&target, &dir, old) {
-                continue;
-            }
-            let dest = lib_home.join("skills").join(name);
-            if !dest.exists() {
-                continue;
-            }
-            if write {
-                std::fs::remove_file(&link)
-                    .with_context(|| format!("removing old link {}", link.display()))?;
-                #[cfg(unix)]
-                std::os::unix::fs::symlink(&dest, &link)
-                    .with_context(|| format!("linking {} → {}", link.display(), dest.display()))?;
-                #[cfg(not(unix))]
-                bail!("re-pointing symlinks is unix-only for now");
-            }
-            repointed.push((desc.id.clone(), link));
-        }
-    }
-    Ok(repointed)
-}
-
-fn migrate(args: &LibMigrateArgs) -> Result<()> {
-    let old = paths::skills_home();
-    let lib_home = paths::lib_home();
-    let report = migrate_skills(&old, &lib_home, args.replace, args.write)?;
-
-    if report.migrated.is_empty() && report.skipped.is_empty() {
-        println!("Nothing to migrate — {} is empty or absent.", old.display());
-        return Ok(());
-    }
-
-    let verb = if report.written {
-        "Migrated"
-    } else {
-        "Would migrate"
-    };
-    println!(
-        "{verb} {} skill(s) from {} → {}:",
-        report.migrated.len(),
-        old.display(),
-        lib_home.join("skills").display()
-    );
-    for n in &report.migrated {
-        let mark = if report.written {
-            "✓".green().to_string()
-        } else {
-            "→".cyan().to_string()
-        };
-        println!("  {mark} {n}");
-    }
-    for (n, why) in &report.skipped {
-        println!("  {} skipped {n} — {why}", "⚠".yellow());
-    }
-    if !report.repointed.is_empty() {
-        let verb = if report.written {
-            "Re-pointed"
-        } else {
-            "Would re-point"
-        };
-        println!(
-            "\n{verb} {} CLI symlink(s) from the legacy home to the library:",
-            report.repointed.len()
-        );
-        for (cli, link) in &report.repointed {
-            let mark = if report.written {
-                "✓".green().to_string()
-            } else {
-                "→".cyan().to_string()
-            };
-            println!("  {mark} {} ({cli})", link.display());
-        }
-    }
-
-    if report.written {
-        println!(
-            "\nOriginals left in place at {} (migration is reversible).",
-            old.display()
-        );
-    } else {
-        println!("\nDry run. Re-run with {} to apply.", "--write".bold());
-    }
-    Ok(())
-}
-
 /// Resolve a library entry's `path` to the exact contained `lib/skills/<...>`
 /// dir that is safe to `remove_dir_all`. Rejects any path with a `.`, `..`,
 /// root, or drive-prefix component so a hand-edited index can never delete
@@ -3055,105 +2836,6 @@ mod tests {
         assert!(Library::load(lib.path()).unwrap().get("evil").is_none());
     }
 
-    // ---------- migrate ----------
-
-    /// Create `<old>/<name>/SKILL.md` in a legacy skills-home layout.
-    fn old_skill(old: &Path, name: &str, body: &str) {
-        let dir = old.join(name);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("SKILL.md"), body).unwrap();
-    }
-
-    #[test]
-    fn migrate_empty_source_migrates_nothing() {
-        let lib = assert_fs::TempDir::new().unwrap();
-        let old = assert_fs::TempDir::new().unwrap();
-        let report = migrate_skills(old.path(), lib.path(), false, true).unwrap();
-        assert!(report.migrated.is_empty());
-        assert!(report.skipped.is_empty());
-    }
-
-    #[test]
-    fn migrate_dry_run_writes_nothing() {
-        let lib = assert_fs::TempDir::new().unwrap();
-        let old = assert_fs::TempDir::new().unwrap();
-        old_skill(old.path(), "a", "# a\n");
-        old_skill(old.path(), "b", "# b\n");
-
-        let report = migrate_skills(old.path(), lib.path(), false, false).unwrap();
-
-        assert_eq!(report.migrated, vec!["a".to_string(), "b".to_string()]);
-        assert!(!lib.child("skills/a").path().exists(), "no files written");
-        assert!(
-            Library::load(lib.path()).unwrap().skills.is_empty(),
-            "index untouched"
-        );
-    }
-
-    #[test]
-    fn migrate_write_copies_and_indexes_multiple() {
-        let lib = assert_fs::TempDir::new().unwrap();
-        let old = assert_fs::TempDir::new().unwrap();
-        old_skill(old.path(), "a", "# a\n");
-        old_skill(old.path(), "b", "# b\n");
-
-        let report = migrate_skills(old.path(), lib.path(), false, true).unwrap();
-
-        assert_eq!(report.migrated.len(), 2);
-        assert!(lib.child("skills/a/SKILL.md").path().exists());
-        assert!(lib.child("skills/b/SKILL.md").path().exists());
-        let library = Library::load(lib.path()).unwrap();
-        assert!(library.get("a").is_some() && library.get("b").is_some());
-        // Copy-first: originals remain.
-        assert!(
-            old.child("a/SKILL.md").path().exists(),
-            "source left in place"
-        );
-        assert!(old.child("b/SKILL.md").path().exists());
-    }
-
-    #[test]
-    fn migrate_collision_fails_without_replace_and_succeeds_with() {
-        let lib = assert_fs::TempDir::new().unwrap();
-        let old = assert_fs::TempDir::new().unwrap();
-        let work = assert_fs::TempDir::new().unwrap();
-        let src = src_skill(&work, "# existing\n");
-        add_skill(lib.path(), "a", LibSource::Path(&src), false, true, false).unwrap();
-        old_skill(old.path(), "a", "# migrated\n");
-
-        // Same name already in the library → hard error, nothing written.
-        let err = migrate_skills(old.path(), lib.path(), false, true).unwrap_err();
-        assert!(err.to_string().contains("--replace"));
-
-        // With --replace it overwrites.
-        let report = migrate_skills(old.path(), lib.path(), true, true).unwrap();
-        assert_eq!(report.migrated, vec!["a".to_string()]);
-        let body = std::fs::read_to_string(lib.child("skills/a/SKILL.md").path()).unwrap();
-        assert_eq!(body, "# migrated\n");
-    }
-
-    #[test]
-    fn migrate_reports_dirs_without_skill_md() {
-        let lib = assert_fs::TempDir::new().unwrap();
-        let old = assert_fs::TempDir::new().unwrap();
-        old_skill(old.path(), "good", "# good\n");
-        // A directory that is not a valid skill.
-        std::fs::create_dir_all(old.path().join("notaskill")).unwrap();
-        std::fs::write(old.path().join("notaskill/readme.txt"), "x").unwrap();
-
-        let report = migrate_skills(old.path(), lib.path(), false, true).unwrap();
-
-        assert_eq!(report.migrated, vec!["good".to_string()]);
-        assert!(report
-            .skipped
-            .iter()
-            .any(|(n, why)| n == "notaskill" && why.contains("SKILL.md")));
-        assert!(Library::load(lib.path())
-            .unwrap()
-            .get("notaskill")
-            .is_none());
-    }
-
     // ---------- servers (add / list / remove) ----------
 
     /// Write a server definition `.toml` (with a `${REF}` header) and return it.
@@ -3473,35 +3155,5 @@ mod tests {
             .unwrap()
             .get_server("../../../../etc")
             .is_none());
-    }
-
-    #[test]
-    fn legacy_link_detection() {
-        let old = Path::new("/home/u/.agentstack/skills");
-        let dir = Path::new("/home/u/.claude/skills");
-        // Absolute target into the legacy home.
-        assert!(link_targets_legacy(
-            Path::new("/home/u/.agentstack/skills/figma"),
-            dir,
-            old
-        ));
-        // Relative target that resolves into the legacy home.
-        assert!(link_targets_legacy(
-            Path::new("../../.agentstack/skills/figma"),
-            dir,
-            old
-        ));
-        // Target owned by a different manager — leave alone.
-        assert!(!link_targets_legacy(
-            Path::new("../../.agents/skills/find-skills"),
-            dir,
-            old
-        ));
-        // Already pointing at the library — leave alone.
-        assert!(!link_targets_legacy(
-            Path::new("/home/u/.agentstack/lib/skills/figma"),
-            dir,
-            old
-        ));
     }
 }

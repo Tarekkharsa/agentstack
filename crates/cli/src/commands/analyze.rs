@@ -19,7 +19,12 @@ use crate::library::Library;
 use crate::usage::Usage;
 
 pub fn run(args: &AnalyzeArgs) -> Result<()> {
-    let mut report = collect();
+    let mut calls = calllog::read_all();
+    if let Some(days) = args.since {
+        let cutoff = calllog::now_epoch().saturating_sub(days * 86_400);
+        calls.retain(|e| e.ts >= cutoff);
+    }
+    let mut report = collect_with(&calls);
     if args.transcripts {
         report["transcripts"] = transcripts_summary(&crate::transcripts::read_default());
     }
@@ -27,6 +32,7 @@ pub fn run(args: &AnalyzeArgs) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         print_human(&report);
+        print_tool_table(&calls);
         if args.transcripts {
             print_transcripts(&report["transcripts"]);
         }
@@ -38,15 +44,78 @@ pub fn run(args: &AnalyzeArgs) -> Result<()> {
 /// dashboard can consume. Every source is best-effort: a missing/corrupt file
 /// degrades to empty rather than failing.
 pub fn collect() -> Value {
-    let calls = calllog::read_all();
+    collect_with(&calllog::read_all())
+}
+
+fn collect_with(calls: &[CallRecord]) -> Value {
     let usage = Usage::load().unwrap_or_default();
     let footprints = Footprints::load().unwrap_or_default();
     let library = Library::load_default().unwrap_or_default();
 
     json!({
-        "calls": calls_summary(&calls),
-        "dead_weight": dead_weight(&library, &usage, &footprints, &calls),
+        "calls": calls_summary(calls),
+        "dead_weight": dead_weight(&library, &usage, &footprints, calls),
     })
+}
+
+/// The full per-tool table (every `server__tool`, ok/err/denied/last-seen) —
+/// the detail view the retired `audit --calls` used to print, kept here so
+/// `report calls` is a strict superset of it.
+fn print_tool_table(calls: &[CallRecord]) {
+    if calls.is_empty() {
+        return;
+    }
+    struct Row {
+        ok: u64,
+        err: u64,
+        denied: u64,
+        last: u64,
+    }
+    let mut rows: BTreeMap<String, Row> = BTreeMap::new();
+    for e in calls {
+        let r = rows
+            .entry(format!("{}__{}", e.server, e.tool))
+            .or_insert(Row {
+                ok: 0,
+                err: 0,
+                denied: 0,
+                last: 0,
+            });
+        match e.outcome.as_str() {
+            "ok" => r.ok += 1,
+            "denied" => r.denied += 1,
+            _ => r.err += 1,
+        }
+        r.last = r.last.max(e.ts);
+    }
+    println!(
+        "\n{:<40} {:>6} {:>6} {:>7}  {}",
+        "tool".bold(),
+        "ok".bold(),
+        "err".bold(),
+        "denied".bold(),
+        "last".bold()
+    );
+    for (name, r) in &rows {
+        let age_d = calllog::now_epoch().saturating_sub(r.last) / 86_400;
+        let last = if age_d == 0 {
+            "today".to_string()
+        } else {
+            format!("{age_d}d ago")
+        };
+        // Pad BEFORE coloring — ANSI escapes would break the column width.
+        let denied = format!("{:>7}", r.denied);
+        let denied = if r.denied > 0 {
+            denied.red().to_string()
+        } else {
+            denied
+        };
+        println!("{name:<40} {:>6} {:>6} {denied}  {last}", r.ok, r.err);
+    }
+    println!(
+        "\nLog: {} (argument digests only — never values)",
+        calllog::log_path().display()
+    );
 }
 
 fn calls_summary(calls: &[CallRecord]) -> Value {

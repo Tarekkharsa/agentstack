@@ -48,12 +48,6 @@ pub fn backups_dir() -> PathBuf {
     agentstack_home().join("backups")
 }
 
-/// `~/.agentstack/skills` — the single managed home that consolidated skills are
-/// moved into (the CLIs then symlink back to here).
-pub fn skills_home() -> PathBuf {
-    agentstack_home().join("skills")
-}
-
 /// `~/.agentstack/lib` — the central capability library. Projects reference its
 /// contents by name instead of copying capability files (see
 /// `docs/reference.md#the-central-library`). Library commands populate

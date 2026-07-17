@@ -457,7 +457,7 @@
       <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>how a name becomes config</b></div>
       <pre><code><span class="c">sources                 the library                 each project</span>
 local dirs ───┐
-git skills ───┼──▶  <span class="hi">~/.agentstack/lib</span>  ◀──── lib add · consolidate
+git skills ───┼──▶  <span class="hi">~/.agentstack/lib</span>  ◀──── lib add · lib consolidate
 catalog ──────┘     ├─ library.toml
                     ├─ skills/sql-review/
                     └─ servers/kibana.toml
@@ -514,7 +514,7 @@ skills  = [<span class="ok">"sql-review"</span>]
           </tr>
           <tr>
             <td>Skills scattered across provider folders</td>
-            <td class="muted"><code>agentstack consolidate</code> — preview, then <code>--write</code>. Skills move into the library; originals become symlinks.</td>
+            <td class="muted"><code>agentstack lib consolidate</code> — preview, then <code>--write</code>. Skills move into the library; originals become symlinks.</td>
           </tr>
           <tr>
             <td>New project</td>
@@ -620,11 +620,10 @@ skills  = ["sql-review"]</code></pre>
           <tr><td><code>lib sync</code></td><td class="muted">Version the whole library as a git repo across machines (<code>--init --remote</code> to set up or clone, then commit + pull + push). The store cache stays local; a fail-closed gate blocks a literal secret in any server field — or in the outgoing commits — from travelling.</td></tr>
           <tr><td><code>lib list</code> / <code>lib remove</code></td><td class="muted">See or drop entries; provenance and checksums included.</td></tr>
           <tr><td><code>search</code> / <code>add from &lt;id&gt;</code></td><td class="muted">Find shipped skills + registry servers and install them; the bundled catalog ships <code>run-codex</code>, <code>sync-library</code>, <code>analyze-usage</code>, <code>route-by-cost</code>, <code>using-agentstack</code>, and more.</td></tr>
-          <tr><td><code>consolidate</code></td><td class="muted">Sweep skills from every CLI's folder into the library, symlinking originals back. Preview first.</td></tr>
-          <tr><td><code>lib migrate</code></td><td class="muted">Copy a legacy <code>~/.agentstack/skills/</code> home in — copy-first, reversible.</td></tr>
-          <tr><td><code>lock [--profile &lt;p&gt;]</code></td><td class="muted">Pin every profile's name refs in the lockfile without rendering configs or materializing skills.</td></tr>
+          <tr><td><code>lib consolidate</code></td><td class="muted">Sweep skills from every CLI's folder into the library, symlinking originals back. Preview first.</td></tr>
+                    <tr><td><code>lock [--profile &lt;p&gt;]</code></td><td class="muted">Pin every profile's name refs in the lockfile without rendering configs or materializing skills.</td></tr>
           <tr><td><code>explain &lt;name&gt;</code> / <code>doctor</code></td><td class="muted">Provenance, lock status, drift — with the exact fix command.</td></tr>
-          <tr><td><code>audit --calls</code> / <code>optimize</code></td><td class="muted">Evidence from the gateway call log; <code>optimize --write</code> applies only the provably-safe class.</td></tr>
+          <tr><td><code>report calls</code> / <code>optimize</code></td><td class="muted">Evidence from the gateway call log; <code>optimize --write</code> applies only the provably-safe class.</td></tr>
         </tbody>
       </table>
     </div>
@@ -681,7 +680,7 @@ Authorization = "Bearer real-token-value"</code></pre>
       <li data-case="central project"><b>Clean central project</b>
         <p>An <code>agentstack.toml</code> that references <code>kibana</code> and <code>sql-review</code> by name — and nothing else. <span class="tag">source of truth</span></p></li>
       <li data-case="central safety"><b>Central skill</b>
-        <p><code>lib/skills/sql-review/SKILL.md</code> is the real managed copy; provider folders receive symlinks or views. <span class="tag">lib add · consolidate</span></p></li>
+        <p><code>lib/skills/sql-review/SKILL.md</code> is the real managed copy; provider folders receive symlinks or views. <span class="tag">lib add · lib consolidate</span></p></li>
       <li data-case="central safety"><b>Central MCP server</b>
         <p><code>lib/servers/kibana.toml</code> holds the reusable definition with <code>${REF}</code> placeholders. <span class="tag">lib add-server</span></p></li>
       <li data-case="project"><b>Inline override</b>

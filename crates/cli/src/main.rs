@@ -34,7 +34,6 @@ fn run() -> Result<()> {
         Command::Session(args) => commands::session::run(args, dir),
         Command::Instructions(args) => commands::instructions::run(args, dir),
         Command::Adopt(args) => commands::adopt::run(args, dir),
-        Command::Consolidate(args) => commands::consolidate::run(args, dir),
         Command::Lib(args) => commands::lib::run(args, dir),
         Command::Restore(args) => commands::restore::run(args, dir),
         Command::Doctor(args) => commands::doctor::run(args, dir),
@@ -62,8 +61,6 @@ fn run() -> Result<()> {
             }
         },
         Command::Trust(args) => commands::trust::run(args),
-        Command::Codemode(args) => commands::codemode::run(args, dir),
-        Command::Hook(args) => commands::hook::run(args),
         Command::Guard(args) => commands::guard::run(args),
         Command::SelfCmd(args) => commands::self_cmd::run(args),
         Command::Run(args) => commands::runs::run(args, dir),

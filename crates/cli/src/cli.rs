@@ -26,9 +26,9 @@ Start here:
 The list above is the everyday surface. Everything else is grouped below —
 run `agentstack <command> --help` for any of them:
 
-  Capabilities & library   remove · install · lock · lib · consolidate · adopt
-  Activate & run           session · kill · hook
-  Zero-files bridge        gateway · mcp · codemode
+  Capabilities & library   remove · install · lock · lib · adopt
+  Activate & run           session · kill
+  Zero-files bridge        gateway · mcp
   Inspect & tune           diff · explain · audit · optimize · proxy · restore · settings · sign · verify
   Share & extend           export · import · plugins · adapters · self"
 )]
@@ -108,11 +108,6 @@ pub enum Command {
     #[command(hide = true)]
     Lib(LibArgs),
 
-    /// Gather scattered skills from every CLI's skills dir into one managed
-    /// home (`~/.agentstack/skills/`), symlinking the originals back.
-    #[command(hide = true)]
-    Consolidate(ConsolidateArgs),
-
     /// Pull hand-added servers from a target config back into the manifest.
     #[command(hide = true)]
     Adopt(AdoptArgs),
@@ -150,10 +145,6 @@ pub enum Command {
     #[command(hide = true)]
     Verify(VerifyArgs),
 
-    /// Print a shell hook for per-directory profile auto-activation.
-    #[command(hide = true)]
-    Hook(HookArgs),
-
     /// Machine-level destructive-command guard: wires `agentstack guard
     /// check` into every detected agent CLI as a pre-tool-use hook. Blocks
     /// destructive commands (rm -rf, git reset --hard, …), reads/writes of
@@ -179,12 +170,6 @@ pub enum Command {
     /// Run agentstack as an MCP server over stdio (for an agent to call).
     #[command(hide = true)]
     Mcp(McpArgs),
-
-    /// Generate a typed code-mode client for this project's proxied MCP servers,
-    /// so an agent can call several upstream tools from one program it runs in
-    /// its own sandbox. Read-only by default; `--write` materializes the files.
-    #[command(hide = true)]
-    Codemode(CodemodeArgs),
 
     // ── Inspect & tune ───────────────────────────────────────────────────
     /// Show drift between the manifest and the on-disk configs.
@@ -515,21 +500,6 @@ pub struct KillArgs {
 }
 
 #[derive(Args, Debug)]
-pub struct CodemodeArgs {
-    /// Write the generated client to `.agentstack/codemode/` (else dry-run: just
-    /// show what would be written).
-    #[arg(long)]
-    pub write: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct HookArgs {
-    /// Which shell to emit the hook for.
-    #[arg(value_enum)]
-    pub shell: Shell,
-}
-
-#[derive(Args, Debug)]
 pub struct GuardArgs {
     #[command(subcommand)]
     pub cmd: GuardCmd,
@@ -561,13 +531,6 @@ pub enum GuardCmd {
     Uninstall {},
     /// Show guard config and per-CLI installation state.
     Status {},
-}
-
-#[derive(Clone, Copy, Debug, clap::ValueEnum)]
-pub enum Shell {
-    Zsh,
-    Bash,
-    Fish,
 }
 
 #[derive(Args, Debug)]
@@ -1017,12 +980,13 @@ pub enum LibKind {
     RemoveExtension(LibRemoveExtensionArgs),
     /// Remove a hook from the central library.
     RemoveHook(LibRemoveHookArgs),
-    /// Migrate skills from the legacy `~/.agentstack/skills/` home into the
-    /// central library. Copy-first and reversible: originals are left in place.
-    Migrate(LibMigrateArgs),
     /// Sync the central library across machines as a git repo (commit local
     /// changes, pull, push). Secrets never travel — server defs are `${REF}`.
     Sync(LibSyncArgs),
+    /// Gather scattered skills from every CLI's skills dir into the central
+    /// library (`~/.agentstack/lib/skills/`), symlinking the originals back.
+    /// Preview first; `--write` moves them.
+    Consolidate(ConsolidateArgs),
     /// Scaffold a publishable pack (pack.toml + example skill) in the current
     /// directory. Publish by pushing the repo and tagging a version (e.g.
     /// v0.1.0); install with `agentstack add from git:<host>/<repo>@<tag>`.
@@ -1153,16 +1117,6 @@ pub struct LibRemoveExtensionArgs {
 }
 
 #[derive(Args, Debug)]
-pub struct LibMigrateArgs {
-    /// Overwrite library entries that already exist with the same name.
-    #[arg(long)]
-    pub replace: bool,
-    /// Write the change (else dry-run/preview).
-    #[arg(long)]
-    pub write: bool,
-}
-
-#[derive(Args, Debug)]
 pub struct LibRemoveArgs {
     /// The library skill name to remove.
     pub name: String,
@@ -1243,16 +1197,6 @@ pub struct AuditArgs {
     /// Emit machine-readable JSON instead of the text report.
     #[arg(long)]
     pub json: bool,
-
-    /// Summarize the runtime call audit log (~/.agentstack/audit/calls.jsonl):
-    /// every tool call brokered by the gateway, grouped by server/tool, with
-    /// denials. Argument values are never logged — only digests.
-    #[arg(long)]
-    pub calls: bool,
-
-    /// With --calls: only entries from the last N days.
-    #[arg(long, value_name = "DAYS")]
-    pub since: Option<u64>,
 }
 
 #[derive(Args, Debug)]
@@ -1275,6 +1219,10 @@ pub struct AnalyzeArgs {
     /// Emit the report as JSON (for the dashboard or further processing).
     #[arg(long)]
     pub json: bool,
+
+    /// Only count call-log entries from the last N days.
+    #[arg(long, value_name = "DAYS")]
+    pub since: Option<u64>,
 
     /// Also read local session transcripts (Claude Code, Codex) for
     /// cross-harness reach: sessions, token totals, top tools. Read-only;

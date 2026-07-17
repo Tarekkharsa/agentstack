@@ -971,7 +971,7 @@ max_output_bytes = 131072</code></pre>
   <!-- ============ CATEGORY 4 · OBSERVE ============ -->
   <div class="cathead">
     <p class="catname">Observe</p>
-    <p class="cmdline"><b>$</b> agentstack report &nbsp;·&nbsp; <b>$</b> agentstack audit --calls</p>
+    <p class="cmdline"><b>$</b> agentstack report calls &nbsp;·&nbsp; <b>$</b> agentstack audit</p>
   </div>
 
   <!-- ============ OBSERVE ============ -->
@@ -982,7 +982,7 @@ max_output_bytes = 131072</code></pre>
     <h3 class="ex" id="e20"><span class="num">20</span> See what happened — audit, analyze, report</h3>
     <p class="intent">Every brokered call is recorded (digests and outcomes, never argument values or secrets). Turn that into insight.</p>
     <div class="copywrap">
-      <pre><code>agentstack audit --calls --since 7            <span class="cm"># recent brokered calls: tool · outcome · latency</span>
+      <pre><code>agentstack report calls --since 7             <span class="cm"># recent brokered calls: tool · outcome · latency</span>
 agentstack report &lt;run-id&gt;                    <span class="cm"># per-run tree, incl. sandbox egress decisions</span>
 agentstack report calls                            <span class="cm"># what you actually call; flags installed-but-unused</span>
 agentstack report calls --transcripts              <span class="cm"># + cross-harness reach from local session logs</span></code></pre>

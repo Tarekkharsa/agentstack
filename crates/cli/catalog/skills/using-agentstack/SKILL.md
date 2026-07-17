@@ -115,7 +115,7 @@ agentstack lib sync              # commit/pull/push the library across machines 
 agentstack explain <name>        # provenance, secrets, footprint of a capability
 agentstack doctor --ci           # the full trust gate (validation, lock, policy, content scan)
 agentstack audit --json          # re-scan skills/instructions for hidden-unicode/injection
-agentstack audit --calls         # summarize the gateway call log (who called what, outcomes)
+agentstack report calls          # summarize the gateway call log (who called what, outcomes)
 agentstack guard status          # which CLIs have the destructive-command hook wired
 agentstack guard test <command>  # judge a shell command against guard policy (nonzero on deny)
 agentstack report calls          # usage analysis: unused servers, context cost, recommendations

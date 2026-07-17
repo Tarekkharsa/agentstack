@@ -275,8 +275,8 @@ digest** (never values — keyed with a per-machine secret so an exfiltrated log
 can't confirm guessed arguments), outcome (`ok`/`error`/`denied`), latency,
 and a detail that is either the policy rule (denials) or a **fixed error
 class** (failures) — upstream error text is never written, so a malicious
-server can't inject content into the log. Summarize with `agentstack audit
---calls [--since <days>] [--json]`; the dashboard's Runs panel shows each
+server can't inject content into the log. Summarize with `agentstack report
+calls [--since <days>] [--json]`; the dashboard's Runs panel shows each
 run's trust footprint and an all-runs view.
 
 Honest scope: this is best-effort local **diagnostics** (logging can never
@@ -389,10 +389,9 @@ skills it changed, so long-accepted content isn't re-flagged on every sync.
 
 ### Sweeping in what you already have
 
-`consolidate` moves scattered skills from every CLI's folder into the library
-and symlinks the originals back — preview first. `lib migrate` copies a
-legacy `~/.agentstack/skills/` home in, preview-first and reversible. Manage
-the rest with `lib list` / `remove` / `remove-server`.
+`lib consolidate` moves scattered skills from every CLI's folder into the
+library and symlinks the originals back — preview first. Manage the rest with
+`lib list` / `remove` / `remove-server`.
 
 ## Capabilities
 
@@ -1035,12 +1034,8 @@ server you add), the proxied surface collapses behind two stable tools:
 agentstack emits the bindings and brokers the real MCP calls over a loopback,
 token-gated endpoint (`${REF}`s are resolved once per gateway session, at
 launch — never emitted into bindings or logs); the agent's code runs in the
-**harness's** own sandbox. Materialize the client to `.agentstack/codemode/` with:
-
-```bash
-agentstack codemode            # dry-run: what would be generated
-agentstack codemode --write    # write client.ts + agentstack-runtime.ts (+ .gitignore)
-```
+**harness's** own sandbox. The client is fetched through the same MCP surface
+(`tools_bindings` returns it inline) — there is nothing to install on disk.
 
 ### Experimental `tools_execute`
 
@@ -1142,21 +1137,20 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 `lock` (`--profile`; `--update [NAME]` re-resolves git skills, `--upgrade
 [PACK]` + `--all`/`--with-instructions`/`--yes`/`--write` re-resolves vendor
 packs), `remove`, `apply` (`--scope`, `--write`, `--prune-foreign`), `diff`,
-`explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
-`lib add|add-server|list|remove|remove-server|migrate|sync|pack-init`
+`explain`, `use <profile>`, `session`, `instructions`, `adopt`,
+`lib add|add-server|list|remove|remove-server|sync|consolidate|pack-init`
 (`lib add`: `--path`, `--git`/`--subpath`, `--allow-flagged`; `lib sync`:
 `--init`, `--remote`, `--status`, `--allow-secrets`), `restore`,
-`doctor` (`--ci`, `--live`, `--fix`, `--deep`, `--all`), `audit` (`--json`, `--calls`,
-`--since`), `optimize` (`--json`, `--write`, `--since`),
+`doctor` (`--ci`, `--live`, `--fix`, `--deep`, `--all`), `audit` (`--json`), `optimize` (`--json`, `--write`, `--since`),
 `report run <id>|runs|usage|calls` (`run`/`runs`/`calls`: `--json`; `usage`:
-`--live`; `calls`: `--transcripts`), `proxy start|report` (`start`: `--port`,
+`--live`; `calls`: `--since`, `--transcripts`), `proxy start|report` (`start`: `--port`,
 `--upstream`; `report`: `--json`),
 `secret set|get|rm|list`, `export`/`import`, `adapters` (`list|show|validate`),
 `plugins`, `settings`,
 `dashboard`, `mcp` (`--auto-project`, `--transparent`),
 `gateway connect|disconnect` (`connect`: `--all`, `--transparent`, `--write`),
 `trust` (`--list`, `--revoke` — pins the manifest layers **and lockfile**;
-re-locking re-gates), `codemode` (`--write`), `hook`,
+re-locking re-gates),
 `guard` (`install|uninstall|status|test|check` —
 the machine-level destructive-command hook for every agent CLI; cooperative,
 see ENFORCEMENT.md), `run` (`--sandbox`)/`kill`,
@@ -1172,7 +1166,7 @@ here.
 13 adapters · `init`/`add`/`apply`/`diff`/`use`/`instructions`/`adopt` ·
 package manager (`install`/`lock --update`/`remove` + lockfile) · central capability
 library (`lib` skills + servers referenced by name, digest-pinned in the lock,
-drift in `doctor`/`explain`, `consolidate` into `lib/skills`) · secrets (keychain +
+drift in `doctor`/`explain`, `lib consolidate` into `lib/skills`) · secrets (keychain +
 varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`/`--deep`) ·
 content scanning on install + `audit` · official MCP Registry provider +
 `search`/`add from` · `[policy]` trust gate · native per-CLI settings

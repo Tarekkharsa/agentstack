@@ -547,7 +547,7 @@
 <span class="row"><span class="c">  agent → </span>ls -la</span>
 <span class="row"><span class="ok">    ✓ allowed</span></span>
 <span class="row"> </span>
-<span class="row"><span class="p">$</span> <span class="t">agentstack audit --calls</span></span>
+<span class="row"><span class="p">$</span> <span class="t">agentstack report calls</span></span>
 <span class="row"><span class="c">  3 denials recorded (host-guard) — tool + outcome, never file contents</span></span></code></pre>
           </div>
         </div>
@@ -1125,7 +1125,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
 <span class="row" data-d="450"> </span>
 <span class="row"><span class="c">  acme__search_docs     </span><span class="ok">✓ ok</span></span>
 <span class="row" data-d="700"><span class="c">  acme__delete_index    </span><span class="no">✗ refused</span><span class="c">   [policy.tools] rule "!delete_*"</span></span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack audit --calls</span></span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack report calls</span></span>
 <span class="row" data-d="800"><span class="c">  2 calls · 2 tools · </span><span class="no">1 denied by policy</span><span class="c"> — digests, never values</span></span>
 <span class="row" data-d="450"> </span>
 <span class="row cmd"><span class="p">$</span> <span class="t">agentstack lock --upgrade acme --yes --write</span><span class="c">   # vendor ships v1.1.0</span></span>

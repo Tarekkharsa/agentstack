@@ -214,46 +214,6 @@ pub fn import_settings(manifest_dir: Option<&Path>, target: &str) -> Result<usiz
     Ok(count)
 }
 
-/// Install a Pi package from the marketplace by running `pi install npm:<name>`.
-/// Best-effort: surfaces a clear message if the local `pi` can't run it (the
-/// search/copy command path still works).
-pub fn pi_install(name: &str) -> Result<()> {
-    if name.is_empty() || name.contains(char::is_whitespace) {
-        anyhow::bail!("invalid package name");
-    }
-    let spec = format!("npm:{name}");
-    let mut cmd = std::process::Command::new("pi");
-    cmd.args(["install", &spec]);
-    // Pi's `#!/usr/bin/env node` launcher uses whatever node is first on PATH,
-    // which may be too old (Pi needs Node 20+). Prepend Pi's own bin dir so its
-    // sibling `node` (the version Pi was installed under) is used.
-    if let Some(dir) = pi_bin_dir() {
-        let path = std::env::var("PATH").unwrap_or_default();
-        cmd.env("PATH", format!("{}:{}", dir.display(), path));
-    }
-    match cmd.output() {
-        Ok(o) if o.status.success() => Ok(()),
-        Ok(o) => {
-            let err = String::from_utf8_lossy(&o.stderr);
-            let tail = err.lines().last().unwrap_or("").trim();
-            anyhow::bail!("`pi install {spec}` failed: {tail}. Run it in your terminal to install.")
-        }
-        Err(_) => anyhow::bail!(
-            "`pi` is not runnable here — run `pi install {spec}` in your terminal to install."
-        ),
-    }
-}
-
-/// Directory containing the `pi` binary on PATH (its sibling `node` is the
-/// version Pi was installed under).
-fn pi_bin_dir() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|d| d.join("pi"))
-        .find(|p| p.is_file())
-        .and_then(|p| p.parent().map(Path::to_path_buf))
-}
-
 /// Add a lifecycle hook to the manifest from dashboard form fields.
 pub fn add_hook(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
     let name = args
