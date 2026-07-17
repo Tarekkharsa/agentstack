@@ -396,6 +396,23 @@ mod tests {
     }
 
     #[test]
+    fn sha256hex_parse_normalizes_case_to_one_value() {
+        // Hex case is spelling, not value: normalization maps both spellings
+        // to the SAME 256-bit digest, so it can never widen the accepted
+        // preimage set. Trust is separately unaffected — `digest_for` hashes
+        // raw lock BYTES, so a respelled lockfile still re-gates (witnessed by
+        // trust's any_single_byte_flip_in_any_pinned_file_regates).
+        let lower = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        let upper = lower.to_ascii_uppercase();
+        let a = Sha256Hex::parse(lower).unwrap();
+        let b = Sha256Hex::parse(&upper).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(b.hex(), lower, "stored form is canonical lowercase");
+        let prefixed = Sha256Hex::parse(&format!("sha256:{upper}")).unwrap();
+        assert_eq!(prefixed.hex(), lower);
+    }
+
+    #[test]
     fn dir_digest_stable_and_sensitive() {
         let tmp = assert_fs::TempDir::new().unwrap();
         tmp.child("a.txt").write_str("hello").unwrap();
