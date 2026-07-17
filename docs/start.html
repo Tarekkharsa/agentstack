@@ -331,19 +331,20 @@
     <ul>
       <li><a class="on-page" href="start.html">Get started</a>
         <ul class="sub">
-          <li><a href="#s-install"><span class="n">1</span>Install the binary</a></li>
-          <li class="subhead">Track A — unify your setup</li>
-          <li><a href="#s-import"><span class="n">A1</span>Import what's there</a></li>
-          <li><a href="#s-render"><span class="n">A2</span>Render into every CLI</a></li>
-          <li><a href="#s-guard"><span class="n">A3</span>Wire the guardrails</a></li>
-          <li><a href="#s-verify"><span class="n">A4</span>Verify the loop</a></li>
-          <li class="subhead">Track B — govern a repo</li>
-          <li><a href="#s-connect"><span class="n">B1</span>Register the gateway</a></li>
-          <li><a href="#s-clone"><span class="n">B2</span>Clone — it stays inert</a></li>
-          <li><a href="#s-trust"><span class="n">B3</span>Review, then trust</a></li>
-          <li><a href="#s-secret"><span class="n">B4</span>Secrets in the keychain</a></li>
-          <li><a href="#s-run"><span class="n">B5</span>Run it confined</a></li>
-          <li><a href="#s-report"><span class="n">B6</span>Read the flight recorder</a></li>
+          <li><a href="#s-install"><span class="n">0</span>Install the binary</a></li>
+          <li class="subhead">Steps 1–3 — unify your setup</li>
+          <li><a href="#s-import"><span class="n">1a</span>Import what's there</a></li>
+          <li><a href="#s-render"><span class="n">1b</span>Render into every CLI</a></li>
+          <li><a href="#s-verify"><span class="n">2</span>Verify the loop</a></li>
+          <li><a href="#s-guard"><span class="n">3</span>Wire the guardrails</a></li>
+          <li class="subhead">Steps 4–6 — govern a repo</li>
+          <li><a href="#s-connect"><span class="n">4a</span>Register the gateway</a></li>
+          <li><a href="#s-clone"><span class="n">4b</span>Clone — it stays inert</a></li>
+          <li><a href="#s-trust"><span class="n">4c</span>Review, then trust</a></li>
+          <li><a href="#s-secret"><span class="n">4d</span>Secrets in the keychain</a></li>
+          <li><a href="#s-run"><span class="n">6a</span>Run it confined</a></li>
+          <li><a href="#s-report"><span class="n">6b</span>Read the flight recorder</a></li>
+          <li><a href="#next"><span class="n">5+</span>Scale it up — the rest</a></li>
         </ul>
       </li>
       <li><a href="index.html#install">Install</a>
@@ -431,30 +432,29 @@
 
   <section id="intro" style="margin-top:1.9rem">
     <a class="crumb" href="docs.html">← all docs</a>
-    <p class="eyebrow">Get started · two paths · ~10 minutes</p>
-    <h1 style="margin:0.7rem 0 0.85rem">Unify the stack you have—or test its strongest boundary.</h1>
+    <p class="eyebrow">Get started · one ladder · six steps</p>
+    <h1 style="margin:0.7rem 0 0.85rem">Start with one command. Climb as far as you need.</h1>
     <p class="lede">
-      Install once, then pick the track that matches you today.
-      <strong>Track&nbsp;A</strong> — you juggle several CLIs: import what's
-      already on your machine and render one manifest into all of them, guarded.
-      <strong>Track&nbsp;B</strong> — you clone repos you didn't write: keep
-      them inert until review, run them <strong>confined</strong>, read the
-      evidence. The tracks are independent; most people end up doing both.
+      agentstack is adopted in steps, not all at once. Install once, then:
+      <strong>steps&nbsp;1–3</strong> unify the CLIs already on your machine
+      into one guarded manifest; <strong>steps&nbsp;4–6</strong> govern the
+      repos you didn't write — inert until review, run
+      <strong>confined</strong>, with readable evidence. Every step pays off
+      on its own, and nothing later is required to keep the earlier wins.
     </p>
     <div class="callout">
-      <b>Which track first?</b>
-      <p>If agentstack is new to your machine, <strong>Track A</strong> pays off
-        immediately — one source of truth for every CLI plus guardrails, in
-        about five minutes, no Docker. Come back for <strong>Track B</strong>
-        the first time an unfamiliar repo declares MCP servers you've never
-        read.</p>
+      <b>Where to start</b>
+      <p>At step 1 — it pays off immediately: one source of truth for every
+        CLI plus guardrails, in about five minutes, no Docker. Stop wherever
+        your setup stops hurting, and come back for steps&nbsp;4–6 the first
+        time an unfamiliar repo declares MCP servers you've never read.</p>
     </div>
     <div class="callout">
       <b>What needs Docker, and what doesn't</b>
       <p>The trust gate, the tool firewall, secret resolution, and the call
         audit log all run natively — no container, no Docker. Only the
-        <code>--sandbox</code> / <code>--lockdown</code> run at the end of
-        Track&nbsp;B spawns a container, so that is the only step that needs
+        <code>--sandbox</code> / <code>--lockdown</code> run at the top of
+        the ladder spawns a container, so that is the only step that needs
         Docker installed and running. Without Docker, stop before it: you'll
         still have a trust-gated, firewalled, audited setup for brokered MCP
         capabilities; the host agent process itself is not confined.</p>
@@ -492,7 +492,7 @@
   </ol>
 
   <div class="track" id="track-a">
-    <p class="eyebrow">Track A · you juggle several CLIs</p>
+    <p class="eyebrow">Steps 1–3 · unify, verify, guard</p>
     <h2>Unify the stack you already have</h2>
     <p class="muted">~5 minutes · no Docker · ends with every CLI in sync, and guarded.</p>
   </div>
@@ -551,6 +551,21 @@
       </div>
     </li>
 
+    <li id="s-verify">
+      <h2>Verify, and keep the habit</h2>
+      <p class="muted">
+        <code>agentstack doctor</code> checks that everything is wired up and
+        names the exact fix for anything that isn't. And from any directory,
+        bare <code>agentstack</code> tells you the one next step for where
+        you're standing. That's the whole everyday loop — edit the manifest,
+        <code>apply</code>, and every CLI follows.
+      </p>
+      <div class="copywrap">
+        <pre><code>agentstack doctor</code></pre>
+        <button class="copybtn" data-copy="agentstack doctor">copy</button>
+      </div>
+    </li>
+
     <li id="s-guard">
       <h2>Wire the guardrails</h2>
       <p class="muted">
@@ -560,7 +575,7 @@
         and reads of <code>[policy.filesystem]</code> deny-globs like
         <code>.env</code> are blocked before they land, and every denial is
         recorded in the audit log. It catches an agent's <em>accidents</em>, not
-        a determined attacker — kernel-enforced confinement is Track&nbsp;B's
+        a determined attacker — kernel-enforced confinement is step&nbsp;6's
         confined run.
       </p>
       <div class="copywrap">
@@ -581,32 +596,15 @@
         Want to see a denial without involving an agent? <code>agentstack guard
         test rm -rf /</code> judges any command against the current guard policy
         and exits nonzero on deny. <code>agentstack guard status</code> shows
-        which CLIs are wired.
-      </p>
-    </li>
-
-    <li id="s-verify">
-      <h2>Verify, and keep the habit</h2>
-      <p class="muted">
-        <code>agentstack doctor</code> checks that everything is wired up and
-        names the exact fix for anything that isn't. And from any directory,
-        bare <code>agentstack</code> tells you the one next step for where
-        you're standing. That's the whole everyday loop — edit the manifest,
-        <code>apply</code>, and every CLI follows.
-      </p>
-      <div class="copywrap">
-        <pre><code>agentstack doctor</code></pre>
-        <button class="copybtn" data-copy="agentstack doctor">copy</button>
-      </div>
-      <p class="small muted">
-        The first time a repo you didn't write declares its own MCP servers,
-        continue below — that's what Track&nbsp;B is for.
+        which CLIs are wired. The first time a repo you didn't write declares
+        its own MCP servers, continue below — that's what steps&nbsp;4–6 are
+        for.
       </p>
     </li>
   </ol>
 
   <div class="track" id="track-b">
-    <p class="eyebrow">Track B · you clone repos you didn't write</p>
+    <p class="eyebrow">Steps 4–6 · you clone repos you didn't write</p>
     <h2>Govern an unfamiliar repo</h2>
     <p class="muted">~10 minutes · Docker only for the confined run at the end.</p>
   </div>
