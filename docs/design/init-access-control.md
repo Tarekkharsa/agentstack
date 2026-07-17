@@ -135,6 +135,13 @@ performs no guard changes. The dashboard's non-interactive init gets the
 same template but never auto-installs the guard (it reports the pending
 offer instead).
 
+**A1 implementation note (2026-07-18):** the offer ships default-No
+(`[y/N]`), not the `[Y/n]` sketched above. Installing the guard edits other
+CLIs' config files — a write-class action — and the house `confirm` contract
+deliberately makes bare-Enter decline for writes (non-interactive callers
+never prompt and never install, which is also the dashboard/CI parity
+contract). The wording is unchanged; only the bracket default is safer.
+
 ## 4. The default deny list is a reviewed security artifact
 
 The template list above is the proposal; it is deliberately conservative,

@@ -161,11 +161,19 @@ fn run_global(args: &InitArgs) -> Result<()> {
     }
 
     // Preview before ANY filesystem write (and before the house-rules prompt).
+    // The preview is the SEEDED template — [guard] + [policy.filesystem]
+    // included — because seed_machine_toml is pure (A1 witness: --dry-run
+    // shows the policy blocks and writes nothing).
     if args.dry_run {
+        let seeded = super::guard::seed_machine_toml(GLOBAL_MANIFEST_TEMPLATE)?;
         println!("\n{} (preview — nothing written)\n", MANIFEST_FILE.bold());
-        println!("{GLOBAL_MANIFEST_TEMPLATE}");
+        println!("{seeded}");
         println!("Would write {}", manifest_path.display());
         println!("Would create {}/", instr_dir.display());
+        println!(
+            "Would offer to install the host guard into detected CLIs \
+             (never installed without an explicit yes)."
+        );
         println!(
             "Would offer the agentstack house rules fragment ([instructions.{HOUSE_RULES_NAME}])."
         );
@@ -179,8 +187,47 @@ fn run_global(args: &InitArgs) -> Result<()> {
     }
 
     ensure_global_manifest()?;
+    // Seed [guard] + [policy.filesystem] deny through the SAME path as
+    // `guard install` — one canonical default list, idempotent, and an
+    // explicitly-empty user deny list is respected as an opt-out.
+    super::guard::seed_machine_config()?;
     println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());
     println!("{}  Created {}/", "📁".dimmed(), instr_dir.display());
+    println!(
+        "{}  Seeded [guard] + [policy.filesystem] deny ({} default entries — edit anytime)",
+        "🛡️".dimmed(),
+        super::guard::DEFAULT_DENY.len()
+    );
+
+    // The guard-install offer (A1). Never silent: installing edits other
+    // CLIs' config files, so it happens only on an explicit yes — and
+    // `confirm` returns false without prompting when non-interactive, which
+    // is exactly the dashboard/CI contract (report the pending offer, never
+    // auto-install).
+    println!(
+        "\nThe host guard enforces that deny list inside each CLI's own hook system —\n\
+         it blocks accidental secret reads and destructive commands; it is not a sandbox."
+    );
+    let detected = super::guard::detected_target_ids();
+    if detected.is_empty() {
+        println!(
+            "  {} no hook-capable CLIs detected — run `agentstack guard install` after installing one.",
+            "·".dimmed()
+        );
+    } else {
+        println!("  Detected CLIs: {}", detected.join(" · "));
+        if crate::util::confirm::confirm(&format!(
+            "Install the guard into these {} CLI(s)?",
+            detected.len()
+        ))? {
+            super::guard::install()?;
+        } else {
+            println!(
+                "  {} skipped — run `agentstack guard install` anytime.",
+                "·".dimmed()
+            );
+        }
+    }
 
     // Offer the agentstack house rules — the fragment that teaches every agent
     // the manifest-first workflow. Opt-in (it steers the daily-driver agent),

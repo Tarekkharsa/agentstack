@@ -31,9 +31,15 @@ use crate::util::paths;
 
 /// Default `[policy.filesystem] deny` seeded into the machine manifest on
 /// first install (explicit and user-editable — never a hidden built-in).
+/// THE one canonical list — `guard install` and `init --global` both seed
+/// through it (A1 condition: reconcile, don't fork). Reviewed at A0
+/// (docs/design/init-access-control.md §4); `credentials.json` deliberately
+/// ships as a commented opt-in (see `default_deny_array`), and home-anchored
+/// entries (`~/...`) are forbidden here until pattern-side `~` expansion
+/// lands — today they would match nothing and fail open.
 /// Deliberately excludes template names like `.env.example`: patterns match
 /// the bare file name too, so keep them tight.
-const DEFAULT_DENY: &[&str] = &[
+pub(crate) const DEFAULT_DENY: &[&str] = &[
     ".env",
     ".env.local",
     ".env.*.local",
@@ -41,7 +47,9 @@ const DEFAULT_DENY: &[&str] = &[
     ".env.development",
     "id_rsa",
     "id_ed25519",
+    "id_ecdsa",
     "*.pem",
+    ".netrc",
 ];
 
 /// Hooks stdin is hostile input: bound it (a tool-call payload is KBs).
@@ -590,7 +598,7 @@ export default function (pi: any) {{
     )
 }
 
-fn install() -> Result<()> {
+pub(crate) fn install() -> Result<()> {
     seed_machine_config()?;
     write_wrappers()?;
     let exe = exe();
@@ -849,18 +857,49 @@ fn write_wrappers() -> Result<()> {
 
 // ── machine manifest seeding (toml_edit keeps user comments intact) ─────────
 
-fn seed_machine_config() -> Result<()> {
-    let path = paths::agentstack_home().join("agentstack.toml");
-    fs::create_dir_all(paths::agentstack_home())?;
-    let text = fs::read_to_string(&path).unwrap_or_else(|_| "version = 1\n".to_string());
-    let mut doc: toml_edit::DocumentMut = text
-        .parse()
-        .with_context(|| format!("{} is not valid TOML", path.display()))?;
+/// The default deny entries as a hand-editable multiline TOML array. The
+/// `credentials.json` opt-in rides along as a comment (A0 decision: it is a
+/// real non-secret filename in several toolchains, so the user enables it by
+/// uncommenting rather than agentstack enabling it by default).
+fn default_deny_array() -> toml_edit::Array {
+    let mut arr = toml_edit::Array::new();
+    for d in DEFAULT_DENY {
+        // Rust note: `(*d).into()` converts the `&str` into a
+        // `toml_edit::Value` so we can attach per-element formatting (the
+        // newline prefix) before pushing — `push` alone would render the
+        // whole array on one line.
+        let mut v: toml_edit::Value = (*d).into();
+        v.decor_mut().set_prefix("\n    ");
+        arr.push_formatted(v);
+    }
+    arr.set_trailing_comma(true);
+    arr.set_trailing(
+        "\n    # \"credentials.json\",  # common cloud-SDK download name — uncomment to opt in\n",
+    );
+    arr
+}
+
+/// Seed `[guard]` + `[policy.filesystem] deny` into machine-manifest TOML,
+/// returning the new text. Pure (no filesystem) so `init --global` can
+/// preview it under `--dry-run` and both seeding call sites — `guard
+/// install` and `init --global` — share one implementation (A0 condition:
+/// one canonical list, idempotent, never clobbering a user's edits).
+pub(crate) fn seed_machine_toml(text: &str) -> Result<String> {
+    let mut doc: toml_edit::DocumentMut = text.parse().context("not valid TOML")?;
     // Real `[guard]` / `[policy.filesystem]` tables (not inline) — this file
     // is hand-edited (allow_roots, deny), so it should read like TOML people
-    // write.
+    // write. Explanatory comments are attached only when a table is first
+    // created, so re-seeding never rewrites a user's own formatting.
     if !doc.contains_key("guard") {
-        doc["guard"] = toml_edit::Item::Table(toml_edit::Table::new());
+        let mut t = toml_edit::Table::new();
+        t.decor_mut().set_prefix(
+            "\n# Cooperative host guard — wired into each CLI's own pre-tool-use hook by\n\
+             # `agentstack guard install`. Blocks an agent's accidents: destructive\n\
+             # commands, reads/writes of the deny list below, writes outside the\n\
+             # workspace + allow_roots. Not a sandbox — `run --sandbox`/`--lockdown`\n\
+             # is the kernel-enforced tier.\n",
+        );
+        doc["guard"] = toml_edit::Item::Table(t);
     }
     doc["guard"]["enabled"] = toml_edit::value(true);
     if doc["guard"].get("allow_roots").is_none() {
@@ -880,16 +919,37 @@ fn seed_machine_config() -> Result<()> {
             doc["policy"] = toml_edit::Item::Table(t);
         }
         if doc["policy"].get("filesystem").is_none() {
-            doc["policy"]["filesystem"] = toml_edit::Item::Table(toml_edit::Table::new());
+            let mut t = toml_edit::Table::new();
+            t.decor_mut().set_prefix(
+                "\n# Files no agent on this machine may read or write, in any project.\n\
+                 # Entries match the absolute path, the workspace-relative path, and the\n\
+                 # bare file name. Projects can ADD entries in their own manifest; nothing\n\
+                 # can subtract from this list.\n",
+            );
+            doc["policy"]["filesystem"] = toml_edit::Item::Table(t);
         }
-        let mut arr = toml_edit::Array::new();
-        for d in DEFAULT_DENY {
-            arr.push(*d);
-        }
-        doc["policy"]["filesystem"]["deny"] = toml_edit::value(arr);
+        doc["policy"]["filesystem"]["deny"] = toml_edit::value(default_deny_array());
     }
-    crate::util::atomic::write(&path, &doc.to_string())?;
+    Ok(doc.to_string())
+}
+
+pub(crate) fn seed_machine_config() -> Result<()> {
+    let path = paths::agentstack_home().join("agentstack.toml");
+    fs::create_dir_all(paths::agentstack_home())?;
+    let text = fs::read_to_string(&path).unwrap_or_else(|_| "version = 1\n".to_string());
+    let seeded = seed_machine_toml(&text).with_context(|| format!("seeding {}", path.display()))?;
+    crate::util::atomic::write(&path, &seeded)?;
     Ok(())
+}
+
+/// The hook-capable CLIs actually present on this machine — what the
+/// `init --global` guard offer names before asking.
+pub(crate) fn detected_target_ids() -> Vec<&'static str> {
+    targets()
+        .into_iter()
+        .filter(|t| paths::expand_tilde(t.detect).exists())
+        .map(|t| t.id)
+        .collect()
 }
 
 fn set_guard_enabled(enabled: bool) -> Result<()> {
@@ -908,6 +968,66 @@ fn set_guard_enabled(enabled: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A1 witness: seeding is idempotent, carries the canonical defaults
+    /// (including the new `id_ecdsa` / `.netrc` entries), ships the
+    /// `credentials.json` opt-in as a COMMENT, and respects an explicitly
+    /// empty deny list as a user opt-out.
+    #[test]
+    fn seed_machine_toml_is_idempotent_and_respects_optout() {
+        let seeded = seed_machine_toml("version = 1\n\n[instructions]\n").unwrap();
+        for entry in DEFAULT_DENY {
+            assert!(
+                seeded.contains(&format!("\"{entry}\"")),
+                "seeded manifest missing default deny entry {entry:?}"
+            );
+        }
+        assert!(
+            seeded.contains("# \"credentials.json\""),
+            "the opt-in entry must ship commented, never active"
+        );
+        assert!(seeded.contains("[guard]") && seeded.contains("[policy.filesystem]"));
+        // Round-trip stability: seeding a seeded manifest changes nothing.
+        assert_eq!(seed_machine_toml(&seeded).unwrap(), seeded);
+        // An explicitly empty deny list is an opt-out, never re-seeded.
+        let optout = "version = 1\n\n[policy.filesystem]\ndeny = []\n";
+        let reseeded = seed_machine_toml(optout).unwrap();
+        assert!(
+            !reseeded.contains(".env"),
+            "an explicit empty deny list must never be refilled"
+        );
+    }
+
+    /// A1 witness: the seeded defaults flow through the real compile path —
+    /// the new entries deny at the ruleset, and unlisted files stay allowed.
+    #[test]
+    fn seeded_defaults_deny_through_the_compiled_ruleset() {
+        let dir = tempdir().join(format!("seedpol-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let seeded = seed_machine_toml("version = 1\n").unwrap();
+        std::fs::write(dir.join("agentstack.toml"), &seeded).unwrap();
+        let machine = project_policy_at(&dir);
+        let ruleset = agentstack_policy::compile(
+            &machine,
+            &agentstack_core::manifest::Policy::default(),
+            &[],
+        );
+        for denied in [".env", "id_ecdsa", ".netrc", "server.pem"] {
+            assert!(
+                ruleset.fs_deny_decision(&[denied]).is_err(),
+                "{denied} should be denied by the seeded defaults"
+            );
+        }
+        assert!(
+            ruleset.fs_deny_decision(&["notes.txt"]).is_ok(),
+            "unlisted files stay allowed"
+        );
+        assert!(
+            ruleset.fs_deny_decision(&["credentials.json"]).is_ok(),
+            "the commented opt-in must NOT be active until uncommented"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// `[guard.project_roots]` is a MACHINE-owned, workspace-scoped grant:
     /// the extra root applies inside the keyed workspace (and its subdirs,

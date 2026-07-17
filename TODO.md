@@ -478,9 +478,17 @@ ledger entries D8 and D9 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger
   source of truth for the default list (shared with `guard install`'s
   `DEFAULT_DENY`), and no home-anchored entries until the `~`-expansion task
   lands (see below).
-- [ ] A1: extend the `init --global` template with `[guard]` +
+- [x] A1: extend the `init --global` template with `[guard]` +
   `[policy.filesystem]` defaults; post-write guard-install offer; dashboard
-  parity (report, never auto-install). Witnesses per design §7.
+  parity (report, never auto-install). **Landed 2026-07-18.** One canonical
+  seeder (`guard::seed_machine_toml`, pure) shared by `guard install` and
+  `init --global`; `DEFAULT_DENY` + `{id_ecdsa, .netrc}` with
+  `credentials.json` as a commented opt-in; the offer is default-No and
+  auto-declines non-interactively (the dashboard/CI contract). All §7
+  witnesses green: dry-run previews the blocks and writes nothing; no
+  overwrite without `--force`; an explicitly-empty user deny list is never
+  refilled; declining performs zero guard writes; seeded entries deny
+  through the compiled ruleset and live `guard test`.
 - [ ] A2: commented `[policy.filesystem]` block in project init output;
   protection-status line; the two doctor informational findings.
 - [ ] A3: "protect this device" docs page; optional fourth demo clip. The
