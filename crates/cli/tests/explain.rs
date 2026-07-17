@@ -50,6 +50,64 @@ fn explain_server_reports_secret_and_safety() {
     assert!(explain_text("nope-not-here", Some(&proj)).is_err());
 }
 
+/// The egress/secret policy dimensions surface for a server, both project and
+/// machine layers, and the "connects out to" safety bullet says whether the
+/// declared host actually passes the compiled [policy.egress].
+#[test]
+fn explain_server_reports_egress_and_secret_policy() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    // Machine layer: a "*" secrets rule, rename-proof across every server.
+    let machine_dir = home.join(".agentstack");
+    fs::create_dir_all(&machine_dir).unwrap();
+    fs::write(
+        machine_dir.join("agentstack.toml"),
+        "version = 1\n[policy.secrets]\n\"*\" = [\"!SUPER_SECRET\"]\n",
+    )
+    .unwrap();
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.kibana]\ntype = \"http\"\nurl = \"https://kibana.example/mcp\"\n\
+         [policy.egress]\nkibana = [\"!kibana.example\"]\n\
+         [policy.secrets]\nkibana = [\"KIBANA_TOKEN\"]\n",
+    )
+    .unwrap();
+
+    let out = explain_text("kibana", Some(&proj)).unwrap();
+    assert!(
+        out.contains("Egress (policy)") && out.contains("deny [kibana.example]"),
+        "shows the project egress rule: {out}"
+    );
+    assert!(
+        out.contains("Secret access (policy)") && out.contains("allow only [KIBANA_TOKEN]"),
+        "shows the project secret rule: {out}"
+    );
+    assert!(
+        out.contains("Secret access (machine)")
+            && out.contains("SUPER_SECRET")
+            && out.contains("(via \"*\")"),
+        "shows the machine secret rule via the \"*\" key: {out}"
+    );
+    // The declared host is denied by the project's own egress rule, so the
+    // safety bullet must say so rather than silently pass.
+    assert!(
+        out.contains("BLOCKED by [policy.egress]"),
+        "annotates the declared host as blocked: {out}"
+    );
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
 #[test]
 fn explain_skill_reports_resolution_and_lock() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
