@@ -175,6 +175,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             live: false,
             fix: false,
             deep: false,
+            all: false,
         },
         manifest_dir,
     )?;

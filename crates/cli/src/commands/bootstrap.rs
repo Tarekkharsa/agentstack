@@ -74,6 +74,7 @@ pub fn run(args: &BootstrapArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 live: false,
                 fix: false,
                 deep: false,
+                all: false,
             },
             manifest_dir,
         )?;

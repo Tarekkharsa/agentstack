@@ -71,6 +71,7 @@ fn apply_write_compiles_instructions_into_the_global_file() {
             live: false,
             fix: false,
             deep: false,
+            all: false,
         },
         Some(&proj),
     )
@@ -345,6 +346,7 @@ fn doctor_ci_fails_on_a_missing_fragment_source() {
             live: false,
             fix: false,
             deep: false,
+            all: false,
         },
         Some(&proj),
     )

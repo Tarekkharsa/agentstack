@@ -1,8 +1,11 @@
-//! `agentstack doctor` — the trust layer. Static, offline checks across five
-//! categories: adapters/CLIs, secrets, drift, quirks, and skills. `--ci` exits
-//! nonzero on any error (team gate); `--live` adds MCP `initialize` handshakes;
-//! `--fix` re-applies drifted target configs (safe class). Drift/fix operate on
-//! global scope.
+//! `agentstack doctor` — the trust layer. Static, offline checks across every
+//! wired-up surface: adapters/CLIs, bridge/trust, secrets, drift, instructions,
+//! quirks, skills, library, content, reproducibility, recipes, and policy.
+//! Every check always runs; the default report shows only the sections relevant
+//! to this project (plus anything warning/erroring) — `--all` prints the rest.
+//! `--ci` exits nonzero on any error (team gate) and always shows everything;
+//! `--live` adds MCP `initialize` handshakes; `--fix` re-applies drifted target
+//! configs (safe class). Drift/fix operate on global scope.
 
 use std::path::Path;
 
@@ -24,18 +27,23 @@ enum Level {
     Error,
 }
 
-/// Accumulates every check result (grouped by section) while printing the
-/// familiar terminal report as it goes — unless `quiet`, which is how the
-/// dashboard runs the same checks and renders them itself.
+/// Accumulates every check result (grouped by section). Nothing prints while
+/// checks run — `print` renders the terminal report at the end, filtered by
+/// per-section relevance, and the dashboard renders `to_json` itself. The
+/// error/warning counters are display-independent: every check always runs and
+/// always counts, whether or not its section is shown.
 struct Report {
     errors: usize,
     warnings: usize,
-    quiet: bool,
     sections: Vec<Section>,
 }
 
 struct Section {
     title: String,
+    /// Does this project use the feature this section checks? Irrelevant
+    /// sections are hidden from the default terminal report (never from
+    /// `--all`, `--ci`, or the JSON) — progressive disclosure, not skipping.
+    relevant: bool,
     /// (level, message) — level is `ok` / `warn` / `error`.
     lines: Vec<(&'static str, String)>,
 }
@@ -45,47 +53,44 @@ impl Report {
         Report {
             errors: 0,
             warnings: 0,
-            quiet: false,
             sections: Vec::new(),
         }
     }
 
-    fn quiet() -> Self {
-        Report {
-            quiet: true,
-            ..Report::new()
-        }
-    }
-
     fn section(&mut self, title: &str) {
-        if !self.quiet {
-            println!("{}", title.bold());
-        }
         self.sections.push(Section {
             title: title.to_string(),
+            relevant: true,
             lines: Vec::new(),
         });
     }
 
+    /// Mark the current section as not relevant to this project. Call once the
+    /// section's own data shows the feature is unused — a section with any
+    /// warn/error line is shown regardless, so this only ever hides all-Ok noise.
+    fn mark_irrelevant(&mut self) {
+        if let Some(s) = self.sections.last_mut() {
+            s.relevant = false;
+        }
+    }
+
     fn line(&mut self, level: Level, msg: impl AsRef<str>) {
-        let (mark, tag) = match level {
-            Level::Ok => ("✓".green().to_string(), "ok"),
+        let tag = match level {
+            Level::Ok => "ok",
             Level::Warn => {
                 self.warnings += 1;
-                ("⚠".yellow().to_string(), "warn")
+                "warn"
             }
             Level::Error => {
                 self.errors += 1;
-                ("✗".red().to_string(), "error")
+                "error"
             }
         };
-        if !self.quiet {
-            println!("  {mark} {}", msg.as_ref());
-        }
         if self.sections.is_empty() {
             // Validation issues land before the first titled section.
             self.sections.push(Section {
                 title: "Manifest".to_string(),
+                relevant: true,
                 lines: Vec::new(),
             });
         }
@@ -96,12 +101,43 @@ impl Report {
             .push((tag, msg.as_ref().to_string()));
     }
 
+    /// Render the terminal report. Default: only sections that are relevant to
+    /// this project or carry a warn/error. `show_all` (from `--all` or `--ci`)
+    /// prints everything, matching the JSON the dashboard gets.
+    fn print(&self, show_all: bool) {
+        let mut hidden = 0;
+        for s in &self.sections {
+            let flagged = s.lines.iter().any(|(tag, _)| *tag != "ok");
+            if !(show_all || s.relevant || flagged) {
+                hidden += 1;
+                continue;
+            }
+            println!("{}", s.title.bold());
+            for (tag, msg) in &s.lines {
+                let mark = match *tag {
+                    "warn" => "⚠".yellow().to_string(),
+                    "error" => "✗".red().to_string(),
+                    _ => "✓".green().to_string(),
+                };
+                println!("  {mark} {msg}");
+            }
+        }
+        if hidden > 0 {
+            println!(
+                "{} {hidden} section(s) for features this project doesn't use are hidden — {} shows everything.",
+                "·".dimmed(),
+                "agentstack doctor --all".bold()
+            );
+        }
+    }
+
     fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "errors": self.errors,
             "warnings": self.warnings,
             "sections": self.sections.iter().map(|s| serde_json::json!({
                 "title": s.title,
+                "relevant": s.relevant,
                 "lines": s.lines.iter().map(|(level, msg)| serde_json::json!({
                     "level": level,
                     "msg": msg,
@@ -114,6 +150,10 @@ impl Report {
 pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let mut report = Report::new();
     let fixed = run_checks(args, manifest_dir, &mut report)?;
+
+    // `--ci` always shows the full report: a team gate should print exactly
+    // what it evaluated, not a per-project selection of it.
+    report.print(args.all || args.ci);
 
     println!();
     if fixed > 0 {
@@ -137,13 +177,14 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
 /// the dashboard's Doctor pane. Deep stays on: the pane is an explicit
 /// "run the check-up" surface, so it keeps the content scan's findings.
 pub fn collect(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
-    let mut report = Report::quiet();
+    let mut report = Report::new();
     run_checks(
         &DoctorArgs {
             ci: false,
             live: false,
             fix: false,
             deep: true,
+            all: true,
         },
         manifest_dir,
         &mut report,
@@ -245,7 +286,8 @@ fn run_checks(
         );
     }
     let base = crate::manifest::project_root_of(&ctx.dir);
-    match crate::trust::check(&base) {
+    let trust_state = crate::trust::check(&base);
+    match trust_state {
         crate::trust::TrustState::Trusted => {
             report.line(Level::Ok, "this project is trusted for auto mode")
         }
@@ -276,11 +318,17 @@ fn run_checks(
             }
         }
     }
+    // Relevant once the bridge is in play on either side: a harness registered
+    // it, or this project entered the trust lifecycle.
+    if connected == 0 && trust_state == crate::trust::TrustState::Untrusted {
+        report.mark_irrelevant();
+    }
 
     report.section("Secrets");
     let refs = manifest.referenced_secrets();
     if refs.is_empty() {
         report.line(Level::Ok, "no secrets referenced");
+        report.mark_irrelevant();
     }
     for name in &refs {
         if ctx.resolver.resolve(name).is_some() {
@@ -514,6 +562,12 @@ fn run_checks(
     if !any_drift {
         report.line(Level::Ok, "all targets in sync");
     }
+    // No servers declared and nothing drifting: there is nothing to fall out
+    // of sync (any leftover prune/foreign findings above are warn lines, which
+    // keep the section visible on their own).
+    if manifest.servers.is_empty() && !any_drift {
+        report.mark_irrelevant();
+    }
 
     // Instruction fragments: the managed region of each CLAUDE.md / AGENTS.md
     // must match what the manifest would compile at SOME scope the project
@@ -523,6 +577,9 @@ fn run_checks(
     report.section("Instructions");
     if manifest.instructions.is_empty() {
         report.line(Level::Ok, "no instruction fragments defined");
+        // Codex quirk checks below may still append warn lines here — a
+        // flagged section is shown regardless of relevance.
+        report.mark_irrelevant();
     } else {
         // Provenance: fragments inherited from the machine-level manifest.
         let inherited = manifest
@@ -672,6 +729,9 @@ fn run_checks(
     let quirks = check_quirks(manifest);
     if quirks.is_empty() {
         report.line(Level::Ok, "no unsupported syntax for any target");
+        if manifest.servers.is_empty() {
+            report.mark_irrelevant();
+        }
     }
     for q in quirks {
         report.line(Level::Warn, q);
@@ -686,6 +746,9 @@ fn run_checks(
     let skill_names = super::trust::review_skill_names(manifest);
     if skill_names.is_empty() {
         report.line(Level::Ok, "no skills defined");
+        // The broken-symlink sweep below still appends warn lines when a
+        // detected adapter's skills dir is unhealthy — those keep it visible.
+        report.mark_irrelevant();
     }
     let store = crate::store::Store::default_store();
     let skills_library = crate::library::Library::load_default().unwrap_or_default();
@@ -802,6 +865,10 @@ fn run_checks(
     // It reads every skill body, so the everyday run skips it — `--deep` opts
     // in and `--ci` (the trust gate) always includes it.
     report.section("Content scan");
+    // Nothing with scannable content declared → nothing this could ever find.
+    if skill_names.is_empty() && manifest.servers.is_empty() {
+        report.mark_irrelevant();
+    }
     if args.ci || args.deep {
         let mut flagged = 0usize;
         for unit in crate::commands::audit::collect(manifest, &ctx.dir, &store) {
@@ -828,6 +895,16 @@ fn run_checks(
     // agentstack.lock pins. Central-library (and inline path) skills are checked
     // offline; git-backed refs are skipped (resolution would fetch).
     report.section("Reproducibility");
+    // Anything lockable at all? Profiles (skill/server pins), instruction
+    // fragments, extensions, and server executables are what the sub-checks
+    // verify; with none declared this is definitionally a no-op section.
+    if manifest.profiles.is_empty()
+        && manifest.instructions.is_empty()
+        && manifest.extensions.is_empty()
+        && manifest.servers.is_empty()
+    {
+        report.mark_irrelevant();
+    }
     check_reproducibility(manifest, &ctx.dir, &store, report);
     check_server_reproducibility(manifest, &ctx.dir, report);
     check_instruction_reproducibility(manifest, &ctx.dir, report);
@@ -839,6 +916,7 @@ fn run_checks(
     let recipe_statuses = crate::plugin_recipes::statuses(manifest, &ctx.registry, &ctx.dir);
     if recipe_statuses.is_empty() {
         report.line(Level::Ok, "no plugin recipes defined");
+        report.mark_irrelevant();
     }
     for recipe in recipe_statuses {
         if let Some(conflict) = &recipe.conflict {
@@ -2051,7 +2129,7 @@ mod tests {
         assert!(ext_dir.join("checkpoint/index.ts").exists());
 
         // Clean: the rendered copy matches its pin — no error.
-        let mut clean = Report::quiet();
+        let mut clean = Report::new();
         check_rendered_extensions(proj.path(), &registry, &mut clean);
         assert_eq!(clean.errors, 0, "a matching rendered copy is not an error");
 
@@ -2064,7 +2142,7 @@ mod tests {
         .unwrap();
         std::fs::write(ext_dir.join("stranger.js"), b"// hand-installed\n").unwrap();
 
-        let mut report = Report::quiet();
+        let mut report = Report::new();
         check_rendered_extensions(proj.path(), &registry, &mut report);
         let text = report.to_json().to_string();
 
@@ -2216,7 +2294,7 @@ mod tests {
             "version = 1\n[servers.known]\ntype = \"http\"\nurl = \"https://example.com\"\n",
         )
         .unwrap();
-        let mut report = Report::quiet();
+        let mut report = Report::new();
         check_named_policy_keys(
             "egress",
             "checked against the declared host at write/spawn time",
@@ -2242,7 +2320,7 @@ mod tests {
             "version = 1\n[policy.filesystem]\nread = [\"/tmp/**\"]\nwrite = [\"/tmp/out/**\"]\n",
         )
         .unwrap();
-        let mut report = Report::quiet();
+        let mut report = Report::new();
         check_policy(&manifest, &mut report);
         let lines = report_lines(&report);
         assert!(lines
@@ -2272,7 +2350,7 @@ mod tests {
              [policy.secrets]\nfigma = [\"!FIGMA_TOKEN\"]\n",
         )
         .unwrap();
-        let mut report = Report::quiet();
+        let mut report = Report::new();
         check_effective_policy(&manifest, &mut report);
         std::env::remove_var("AGENTSTACK_HOME");
         let lines = report_lines(&report);
@@ -2299,7 +2377,7 @@ mod tests {
              [policy.egress]\nsneaky = [\"!evil.example\"]\n",
         )
         .unwrap();
-        let mut report = Report::quiet();
+        let mut report = Report::new();
         check_effective_policy(&manifest, &mut report);
         std::env::remove_var("AGENTSTACK_HOME");
         let lines = report_lines(&report);
@@ -2329,7 +2407,7 @@ mod tests {
              [policy.egress]\ndyn = [\"api.example\"]\n",
         )
         .unwrap();
-        let mut report = Report::quiet();
+        let mut report = Report::new();
         check_effective_policy(&constrained, &mut report);
         let lines = report_lines(&report);
         assert!(
@@ -2343,7 +2421,7 @@ mod tests {
             "version = 1\n[servers.dyn]\ntype = \"http\"\nurl = \"https://${HOST_REF}/mcp\"\n",
         )
         .unwrap();
-        let mut report2 = Report::quiet();
+        let mut report2 = Report::new();
         check_effective_policy(&unconstrained, &mut report2);
         std::env::remove_var("AGENTSTACK_HOME");
         assert!(
@@ -2355,13 +2433,14 @@ mod tests {
 
     /// The one line under "Content scan" for a run with the given flags.
     fn scan_line(deep: bool, ci: bool, proj: &Path) -> String {
-        let mut report = Report::quiet();
+        let mut report = Report::new();
         run_checks(
             &DoctorArgs {
                 ci,
                 live: false,
                 fix: false,
                 deep,
+                all: false,
             },
             Some(proj),
             &mut report,

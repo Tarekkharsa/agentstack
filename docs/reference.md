@@ -301,6 +301,17 @@ dashboard's Doctor pane runs it too.
 Real MCP `initialize` handshake over HTTP; reports server name + tool count,
 or classifies the error (auth / http / connect).
 
+### `doctor` shows what you use
+
+Every check always runs, but the default report prints only the sections
+relevant to this project — a feature you've never touched (the zero-files
+bridge, plugin recipes, reproducibility pins…) stays out of the way until it
+either gets used or produces a warning/error, which always shows. A closing
+line counts what was hidden; `doctor --all` prints everything, and `--ci`
+always shows the full report (a team gate prints exactly what it evaluated).
+The dashboard's Doctor pane gets every section regardless, each tagged
+`relevant`.
+
 ## The central library
 
 One managed home — `~/.agentstack/lib/` — that projects reference **by name**
@@ -1134,7 +1145,7 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 `lib add|add-server|list|remove|remove-server|migrate|sync`
 (`lib add`: `--path`, `--git`/`--subpath`, `--allow-flagged`; `lib sync`:
 `--init`, `--remote`, `--status`, `--allow-secrets`), `restore`,
-`doctor` (`--ci`, `--live`, `--fix`, `--deep`), `audit` (`--json`, `--calls`,
+`doctor` (`--ci`, `--live`, `--fix`, `--deep`, `--all`), `audit` (`--json`, `--calls`,
 `--since`), `optimize` (`--json`, `--write`, `--since`), `analyze` (`--json`),
 `search`, `stats` (`--live`), `proxy start|report` (`start`: `--port`,
 `--upstream`; `report`: `--json`),

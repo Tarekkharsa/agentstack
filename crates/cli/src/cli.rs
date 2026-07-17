@@ -1217,6 +1217,11 @@ pub struct DoctorArgs {
     /// large libraries). Always on with --ci.
     #[arg(long)]
     pub deep: bool,
+
+    /// Show every section, including ones for features this project doesn't
+    /// use (hidden by default; --ci always shows everything).
+    #[arg(long)]
+    pub all: bool,
 }
 
 #[derive(Args, Debug)]

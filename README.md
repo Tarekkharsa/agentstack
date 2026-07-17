@@ -45,23 +45,21 @@ that follow:
 2. **Nothing narrows or records what agents do.** Consent today is
    all-or-nothing and unlogged; an injected prompt can turn a legitimate tool
    against you. Here your *machine policy* — which no repo can loosen —
-   fences tools, secrets, and egress; every brokered call lands in an audit
-   log; `--lockdown` removes the agent's direct network route while approved
-   traffic can still pass through the enforcing proxy. (Honest scope: what
-   each mode enforces is spelled out in the
+   fences tools, secrets, and egress, and every brokered call lands in an
+   audit log; `--lockdown` goes further and removes the agent's direct
+   network route. (Honest scope per mode: the
    [enforcement matrix](docs/ENFORCEMENT.md).)
 3. **Every CLI spells the same setup differently** — six config syntaxes,
    drifting copies, real tokens pasted into files that were never meant to be
    shared. Here one reviewed manifest renders them all, secrets stay
    references, and a lockfile makes it reproducible.
 4. **An agent can wreck your working tree by accident.** No prompt injection
-   needed — a wrong `rm -rf`, a `git reset --hard`, a `git clean -f`, with
-   nothing between the command and your filesystem. Here `agentstack guard`
-   wires a **cooperative** pre-tool-use hook into your CLIs that blocks
-   destructive commands and out-of-workspace writes before they run and
-   records each denial. It catches an agent's *accidents*; a harness that
-   ignores its own hook protocol bypasses it, so kernel-enforced confinement
-   stays `run --sandbox` / `--lockdown`.
+   needed — a wrong `rm -rf` or `git reset --hard`, with nothing between the
+   command and your filesystem. Here `agentstack guard` blocks destructive
+   commands and out-of-workspace writes before they run and records each
+   denial — a **cooperative** net for accidents
+   ([how it works](#guardrails-against-accidental-destruction)); kernel-enforced
+   confinement stays `run --sandbox` / `--lockdown`.
 
 If you use a single agent with one hand-managed server, you may not need this
 yet. The moment capabilities come from repos you didn't write, you do.
@@ -124,6 +122,62 @@ That's the whole everyday loop. Two habits worth keeping:
   you're in.
 - `agentstack doctor` verifies everything is wired up and names the exact fix
   for anything that isn't.
+
+## One manifest, 13 CLIs
+
+```toml
+version = 1
+
+[servers.github]
+type = "http"
+url = "https://api.githubcopilot.com/mcp/"
+headers = { Authorization = "Bearer ${GH_PAT}" } # resolved per machine — the manifest never holds the value
+
+[servers.github.extra.codex]                 # native keys one CLI needs pass
+startup_timeout_sec = 20                     # through verbatim, per adapter
+
+[servers.kibana]
+type = "http"
+url = "https://kibana-mcp.example.com/mcp"
+headers = { Authorization = "Bearer ${KIBANA_TOKEN}" }
+
+[profiles.backend]
+servers = ["kibana", "github"]
+skills = ["sql-review"]                      # resolves from your central library
+
+[targets]
+default = ["claude-code", "codex"]
+```
+
+Relative paths in the manifest (a skill's `path`, a server's `cwd`) anchor at
+the **manifest's directory** — `.agentstack/` in the preferred layout — so
+`path = "./skills/x"` lives at `.agentstack/skills/x`, not the repo root.
+(`cwd` is the exception: it anchors at the project root, matching what a
+harness gives a rendered config.)
+
+One `agentstack apply` compiles this single manifest into the native config of
+every CLI in `[targets]` — up to all 13 — each adapter's quirks handled for you
+and secrets left as `${REF}`s:
+
+![agentstack first run: init → bootstrap → apply](docs/firstrun.svg)
+
+## Everyday commands
+
+| Command | What it does |
+| --- | --- |
+| `agentstack init` | Reverse-engineer a manifest from the configs you already have |
+| `agentstack bootstrap` | Preflight: installed CLIs, skills, secrets, pending diff |
+| `agentstack apply` | Preview each CLI's config changes; confirm (or `--write`) to render |
+| `agentstack doctor` | Verify wiring; every warning comes with the exact fix command |
+| `agentstack diff` | What would change, read-only |
+| `agentstack secret set NAME` | Store a secret in the OS keychain |
+| `agentstack use <profile> --write` | Activate one profile's servers + skills |
+| `agentstack run <cli> --profile <p>` | Launch a harness with a profile for its lifetime |
+| `agentstack guard install` | Wire the destructive-command guard into your CLIs' hooks |
+| `agentstack lock` | Pin profile refs in the lockfile without rendering anything |
+| `agentstack dashboard` | The same lifecycle in a local web UI |
+
+The [feature reference](docs/reference.md) has the complete command list.
 
 ## The trust gate — keep repo-declared capabilities inert until review
 
@@ -202,62 +256,6 @@ Kernel-enforced confinement is `run --sandbox` / `--lockdown`. Runnable
 walkthrough: [`examples/guard-demo/`](examples/guard-demo/).
 
 ![agentstack guard blocking rm -rf, git reset --hard, and cat .env](docs/guard.svg)
-
-## One manifest, 13 CLIs
-
-```toml
-version = 1
-
-[servers.github]
-type = "http"
-url = "https://api.githubcopilot.com/mcp/"
-headers = { Authorization = "Bearer ${GH_PAT}" } # resolved per machine — the manifest never holds the value
-
-[servers.github.extra.codex]                 # native keys one CLI needs pass
-startup_timeout_sec = 20                     # through verbatim, per adapter
-
-[servers.kibana]
-type = "http"
-url = "https://kibana-mcp.example.com/mcp"
-headers = { Authorization = "Bearer ${KIBANA_TOKEN}" }
-
-[profiles.backend]
-servers = ["kibana", "github"]
-skills = ["sql-review"]                      # resolves from your central library
-
-[targets]
-default = ["claude-code", "codex"]
-```
-
-Relative paths in the manifest (a skill's `path`, a server's `cwd`) anchor at
-the **manifest's directory** — `.agentstack/` in the preferred layout — so
-`path = "./skills/x"` lives at `.agentstack/skills/x`, not the repo root.
-(`cwd` is the exception: it anchors at the project root, matching what a
-harness gives a rendered config.)
-
-One `agentstack apply` compiles this single manifest into the native config of
-every CLI in `[targets]` — up to all 13 — each adapter's quirks handled for you
-and secrets left as `${REF}`s:
-
-![agentstack first run: init → bootstrap → apply](docs/firstrun.svg)
-
-## Everyday commands
-
-| Command | What it does |
-| --- | --- |
-| `agentstack init` | Reverse-engineer a manifest from the configs you already have |
-| `agentstack bootstrap` | Preflight: installed CLIs, skills, secrets, pending diff |
-| `agentstack apply` | Preview each CLI's config changes; confirm (or `--write`) to render |
-| `agentstack doctor` | Verify wiring; every warning comes with the exact fix command |
-| `agentstack diff` | What would change, read-only |
-| `agentstack secret set NAME` | Store a secret in the OS keychain |
-| `agentstack use <profile> --write` | Activate one profile's servers + skills |
-| `agentstack run <cli> --profile <p>` | Launch a harness with a profile for its lifetime |
-| `agentstack guard install` | Wire the destructive-command guard into your CLIs' hooks |
-| `agentstack lock` | Pin profile refs in the lockfile without rendering anything |
-| `agentstack dashboard` | The same lifecycle in a local web UI |
-
-The [feature reference](docs/reference.md) has the complete command list.
 
 ## See what your tools cost on the wire
 

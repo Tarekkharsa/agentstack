@@ -95,6 +95,7 @@ fn doctor_fix_refuses_unresolved_secret() {
         live: false,
         fix: true,
         deep: false,
+        all: false,
     };
     doctor::run(&dargs, Some(&proj)).unwrap();
     assert!(
