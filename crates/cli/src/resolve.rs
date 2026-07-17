@@ -302,7 +302,7 @@ pub fn verify_library_pin(
         );
     };
     match lock.get_server(name) {
-        Some(entry) if entry.checksum != resolved.checksum => Err(format!(
+        Some(entry) if entry.checksum.hex() != resolved.checksum => Err(format!(
             "library definition drifted from agentstack.lock (locked {}, current {}) — \
              review it and re-run `agentstack lock`",
             entry.checksum, resolved.checksum
@@ -520,10 +520,12 @@ pub fn classify_instruction(
 ) -> InstructionLockStatus {
     match lock.get_instruction(name) {
         None => InstructionLockStatus::MissingLockEntry,
-        Some(entry) if entry.checksum != current_checksum => InstructionLockStatus::ChecksumDrift {
-            locked: entry.checksum.clone(),
-            current: current_checksum.to_string(),
-        },
+        Some(entry) if entry.checksum.hex() != current_checksum => {
+            InstructionLockStatus::ChecksumDrift {
+                locked: entry.checksum.hex().to_string(),
+                current: current_checksum.to_string(),
+            }
+        }
         Some(_) => InstructionLockStatus::Matches,
     }
 }
@@ -555,10 +557,12 @@ pub fn instruction_lock_status(
 pub fn classify_server(name: &str, current_checksum: &str, lock: &Lock) -> ServerLockStatus {
     match lock.get_server(name) {
         None => ServerLockStatus::MissingLockEntry,
-        Some(entry) if entry.checksum != current_checksum => ServerLockStatus::ChecksumDrift {
-            locked: entry.checksum.clone(),
-            current: current_checksum.to_string(),
-        },
+        Some(entry) if entry.checksum.hex() != current_checksum => {
+            ServerLockStatus::ChecksumDrift {
+                locked: entry.checksum.hex().to_string(),
+                current: current_checksum.to_string(),
+            }
+        }
         Some(_) => ServerLockStatus::Matches,
     }
 }
@@ -659,8 +663,8 @@ pub fn classify_skill(
 ) -> SkillLockStatus {
     match lock.get(name) {
         None => SkillLockStatus::MissingLockEntry,
-        Some(entry) if entry.checksum != current_checksum => SkillLockStatus::ChecksumDrift {
-            locked: entry.checksum.clone(),
+        Some(entry) if entry.checksum.hex() != current_checksum => SkillLockStatus::ChecksumDrift {
+            locked: entry.checksum.hex().to_string(),
             current: current_checksum.to_string(),
         },
         Some(entry) => match (entry.rev.as_deref(), current_rev) {
@@ -677,6 +681,7 @@ pub fn classify_skill(
 mod tests {
     use super::*;
     use crate::library::LibrarySkill;
+    use agentstack_core::digest::Sha256Hex;
     use assert_fs::prelude::*;
 
     fn server_from_toml(toml_src: &str) -> agentstack_core::manifest::Server {
@@ -800,17 +805,17 @@ mod tests {
         lock.upsert_instruction(agentstack_core::lock::LockedInstruction {
             name: "house".into(),
             path: "./instructions/house.md".into(),
-            checksum: "aaaa".into(),
+            checksum: Sha256Hex::of(b"aaaa"),
         });
         assert_eq!(
-            classify_instruction("house", "aaaa", &lock),
+            classify_instruction("house", Sha256Hex::of(b"aaaa").hex(), &lock),
             InstructionLockStatus::Matches
         );
         assert_eq!(
-            classify_instruction("house", "bbbb", &lock),
+            classify_instruction("house", Sha256Hex::of(b"bbbb").hex(), &lock),
             InstructionLockStatus::ChecksumDrift {
-                locked: "aaaa".into(),
-                current: "bbbb".into()
+                locked: Sha256Hex::of(b"aaaa").hex().to_string(),
+                current: Sha256Hex::of(b"bbbb").hex().to_string()
             }
         );
         assert_eq!(
@@ -827,7 +832,7 @@ mod tests {
             .unwrap();
         let instr: crate::manifest::Instruction =
             toml::from_str("path = \"./instructions/house.md\"").unwrap();
-        let checksum = agentstack_core::digest::sha256_hex(b"be kind\n");
+        let checksum = Sha256Hex::of(b"be kind\n");
         let mut lock = Lock::default();
         lock.upsert_instruction(agentstack_core::lock::LockedInstruction {
             name: "house".into(),
@@ -1015,7 +1020,7 @@ mod tests {
             path: Some("sql-review".into()),
             git: None,
             rev: None,
-            checksum: resolved.checksum.clone(),
+            checksum: Sha256Hex::parse(&resolved.checksum).unwrap(),
         });
 
         let report = skill_lock_status(
@@ -1048,7 +1053,7 @@ mod tests {
             path: Some("sql-review".into()),
             git: None,
             rev: None,
-            checksum: "staledigest".into(),
+            checksum: Sha256Hex::of(b"staledigest"),
         });
         lib_home
             .child("skills/sql-review/SKILL.md")
@@ -1066,7 +1071,9 @@ mod tests {
             ResolveMode::Fetch,
         );
         match report.status {
-            SkillLockStatus::ChecksumDrift { locked, .. } => assert_eq!(locked, "staledigest"),
+            SkillLockStatus::ChecksumDrift { locked, .. } => {
+                assert_eq!(locked, Sha256Hex::of(b"staledigest").hex());
+            }
             other => panic!("expected ChecksumDrift, got {other:?}"),
         }
     }
@@ -1221,7 +1228,7 @@ mod tests {
             path: None,
             git: resolved.rev.clone().map(|_| "url".into()),
             rev: Some("0000000000000000000000000000000000000000".into()),
-            checksum: resolved.checksum.clone(),
+            checksum: Sha256Hex::parse(&resolved.checksum).unwrap(),
         });
 
         let report = skill_lock_status(
@@ -1567,7 +1574,9 @@ mod tests {
         lock.upsert_server(crate::lock::LockedServer {
             name: name.into(),
             source: crate::lock::ServerSource::Library,
-            checksum: checksum.into(),
+            // `checksum` is a real digest from the resolver — parse it, don't
+            // re-hash it.
+            checksum: Sha256Hex::parse(checksum).unwrap(),
         });
         lock
     }
@@ -1603,7 +1612,7 @@ mod tests {
         let manifest = empty_manifest();
         let (library, _) = library_with_server(&lib_home, "kibana", "https://x/mcp");
         // Lock a stale digest, then change the definition file underneath it.
-        let lock = server_lock("kibana", "staledigest");
+        let lock = server_lock("kibana", Sha256Hex::of(b"staledigest").hex());
         lib_home
             .child("servers/kibana.toml")
             .write_str("type = \"http\"\nurl = \"https://changed/mcp\"\n")
@@ -1611,7 +1620,9 @@ mod tests {
 
         let r = server_lock_status("kibana", &manifest, &library, lib_home.path(), &lock);
         match r.status {
-            ServerLockStatus::ChecksumDrift { locked, .. } => assert_eq!(locked, "staledigest"),
+            ServerLockStatus::ChecksumDrift { locked, .. } => {
+                assert_eq!(locked, Sha256Hex::of(b"staledigest").hex());
+            }
             other => panic!("expected ChecksumDrift, got {other:?}"),
         }
     }

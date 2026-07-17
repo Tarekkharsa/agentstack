@@ -6,6 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+
+use crate::digest::Sha256Hex;
 use serde::{Deserialize, Serialize};
 
 pub const LOCK_FILE: &str = "agentstack.lock";
@@ -79,7 +81,7 @@ pub enum SkillLockSource {
 pub struct LockedServer {
     pub name: String,
     pub source: ServerSource,
-    pub checksum: String,
+    pub checksum: Sha256Hex,
 }
 
 /// A pinned instruction fragment: the SHA-256 of the file's raw bytes.
@@ -90,7 +92,7 @@ pub struct LockedServer {
 pub struct LockedInstruction {
     pub name: String,
     pub path: String,
-    pub checksum: String,
+    pub checksum: Sha256Hex,
 }
 
 /// How a D3 executable pin's digest was computed — the two families are not
@@ -118,7 +120,7 @@ pub enum ExecutableKind {
 pub struct LockedExecutable {
     pub path: String,
     pub kind: ExecutableKind,
-    pub checksum: String,
+    pub checksum: Sha256Hex,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -131,7 +133,7 @@ pub struct LockedSkill {
     pub git: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
-    pub checksum: String,
+    pub checksum: Sha256Hex,
 }
 
 impl Lock {
@@ -265,6 +267,36 @@ impl Lock {
 mod tests {
     use super::*;
 
+    /// The typed `Sha256Hex` checksum must serialize as the SAME bare hex the
+    /// `String` field emitted — the lockfile feeds the trust digest (rule 4),
+    /// so one changed byte would re-gate every trusted project. Also pins the
+    /// validate-on-read contract: a malformed checksum fails the parse loudly
+    /// instead of riding along to a silent mismatch. NEVER weaken.
+    #[test]
+    fn locked_checksums_are_bare_hex_on_the_wire_and_validated_on_read() {
+        let hex = "a".repeat(64);
+        let mut lock = Lock::default();
+        lock.skills.push(LockedSkill {
+            name: "k".into(),
+            source: SkillLockSource::Path,
+            path: Some("./k".into()),
+            git: None,
+            rev: None,
+            checksum: Sha256Hex::parse(&hex).unwrap(),
+        });
+        let text = toml::to_string_pretty(&lock).unwrap();
+        // Bare hex, no `sha256:` prefix, no struct wrapper — byte-identical to
+        // the pre-newtype String field.
+        assert!(text.contains(&format!("checksum = \"{hex}\"")), "{text}");
+        // Round-trips through the real lockfile parser.
+        let back: Lock = toml::from_str(&text).unwrap();
+        assert_eq!(back.skills[0].checksum.hex(), hex);
+        // A garbage checksum is refused at parse (it used to be accepted as an
+        // opaque String and only fail later as a mismatch).
+        let bad = text.replace(&hex, "not-a-digest");
+        assert!(toml::from_str::<Lock>(&bad).is_err(), "{bad}");
+    }
+
     /// The typed sources must serialize to exactly the lowercase strings the
     /// lockfile has always used — the lockfile feeds the trust digest (rule 4),
     /// so a byte change here would spuriously re-gate every project. NEVER
@@ -275,7 +307,7 @@ mod tests {
         lock.servers.push(LockedServer {
             name: "s".into(),
             source: ServerSource::Library,
-            checksum: "sha256:aa".into(),
+            checksum: Sha256Hex::of(b"sha256:aa"),
         });
         lock.skills.push(LockedSkill {
             name: "k".into(),
@@ -283,7 +315,7 @@ mod tests {
             path: None,
             git: Some("u".into()),
             rev: None,
-            checksum: "sha256:bb".into(),
+            checksum: Sha256Hex::of(b"sha256:bb"),
         });
         let toml = toml::to_string_pretty(&lock).unwrap();
         assert!(toml.contains("source = \"library\""), "{toml}");
@@ -347,7 +379,7 @@ mod tests {
             path: Some("./b".into()),
             git: None,
             rev: None,
-            checksum: "deadbeef".into(),
+            checksum: Sha256Hex::of(b"deadbeef"),
         });
         lock.upsert(LockedSkill {
             name: "a".into(),
@@ -355,7 +387,7 @@ mod tests {
             path: None,
             git: Some("https://x".into()),
             rev: Some("abc".into()),
-            checksum: "cafe".into(),
+            checksum: Sha256Hex::of(b"cafe"),
         });
         // Sorted by name.
         assert_eq!(lock.skills[0].name, "a");
@@ -371,12 +403,12 @@ mod tests {
         lock.upsert_server(LockedServer {
             name: "kibana".into(),
             source: ServerSource::Library,
-            checksum: "cafe".into(),
+            checksum: Sha256Hex::of(b"cafe"),
         });
         lock.upsert_server(LockedServer {
             name: "figma".into(),
             source: ServerSource::Inline,
-            checksum: "beef".into(),
+            checksum: Sha256Hex::of(b"beef"),
         });
         assert_eq!(lock.servers[0].name, "figma", "sorted by name");
         assert_eq!(
@@ -396,12 +428,12 @@ mod tests {
         lock.upsert_executable(LockedExecutable {
             path: "tools".into(),
             kind: ExecutableKind::Root,
-            checksum: "cafe".into(),
+            checksum: Sha256Hex::of(b"cafe"),
         });
         lock.upsert_executable(LockedExecutable {
             path: "scripts/run.sh".into(),
             kind: ExecutableKind::File,
-            checksum: "beef".into(),
+            checksum: Sha256Hex::of(b"beef"),
         });
         assert_eq!(lock.executables[0].path, "scripts/run.sh", "sorted by path");
 
@@ -409,34 +441,34 @@ mod tests {
         lock.upsert_executable(LockedExecutable {
             path: "tools".into(),
             kind: ExecutableKind::File,
-            checksum: "f00d".into(),
+            checksum: Sha256Hex::of(b"f00d"),
         });
         assert_eq!(lock.executables.len(), 3);
         assert_eq!(
             lock.get_executable("tools", ExecutableKind::File)
                 .unwrap()
                 .checksum,
-            "f00d"
+            Sha256Hex::of(b"f00d")
         );
         assert_eq!(
             lock.get_executable("tools", ExecutableKind::Root)
                 .unwrap()
                 .checksum,
-            "cafe"
+            Sha256Hex::of(b"cafe")
         );
 
         // Upsert replaces in place, keyed by both path and kind.
         lock.upsert_executable(LockedExecutable {
             path: "tools".into(),
             kind: ExecutableKind::Root,
-            checksum: "0000".into(),
+            checksum: Sha256Hex::of(b"0000"),
         });
         assert_eq!(lock.executables.len(), 3);
         assert_eq!(
             lock.get_executable("tools", ExecutableKind::Root)
                 .unwrap()
                 .checksum,
-            "0000"
+            Sha256Hex::of(b"0000")
         );
 
         let text = toml::to_string_pretty(&lock).unwrap();
@@ -469,12 +501,12 @@ mod tests {
         lock.upsert_instruction(LockedInstruction {
             name: "style".into(),
             path: "./instructions/style.md".into(),
-            checksum: "cafe".into(),
+            checksum: Sha256Hex::of(b"cafe"),
         });
         lock.upsert_instruction(LockedInstruction {
             name: "house".into(),
             path: "./instructions/house.md".into(),
-            checksum: "beef".into(),
+            checksum: Sha256Hex::of(b"beef"),
         });
         assert_eq!(lock.instructions[0].name, "house", "sorted by name");
 
@@ -482,9 +514,12 @@ mod tests {
         lock.upsert_instruction(LockedInstruction {
             name: "house".into(),
             path: "./instructions/house.md".into(),
-            checksum: "f00d".into(),
+            checksum: Sha256Hex::of(b"f00d"),
         });
-        assert_eq!(lock.get_instruction("house").unwrap().checksum, "f00d");
+        assert_eq!(
+            lock.get_instruction("house").unwrap().checksum,
+            Sha256Hex::of(b"f00d")
+        );
 
         let text = toml::to_string_pretty(&lock).unwrap();
         assert!(text.contains("[[instruction]]"));

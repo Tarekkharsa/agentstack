@@ -16,6 +16,7 @@
 //! removed, and real directories are backed up before deletion. Dry-run by
 //! default; nothing is touched unless `write` is set.
 
+use agentstack_core::digest::Sha256Hex;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -215,7 +216,10 @@ pub fn consolidate(
 /// Whether the library already holds a `name` entry whose recorded checksum
 /// matches the source directory's current content (an idempotent re-run).
 fn library_has_same(library: &Library, name: &str, source: &Path) -> bool {
-    match library.get(name).and_then(|e| e.checksum.as_deref()) {
+    match library
+        .get(name)
+        .and_then(|e| e.checksum.as_ref().map(Sha256Hex::hex))
+    {
         Some(locked) => dir_digest(source).ok().as_deref() == Some(locked),
         None => false,
     }

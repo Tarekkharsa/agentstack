@@ -346,7 +346,7 @@ fn freeze_grant(
         b.add_executable(
             &pin.path,
             pin.kind,
-            ContentDigest::parse(&pin.checksum)?,
+            ContentDigest::parse(pin.checksum.hex())?,
             server,
         )?;
     }
@@ -400,7 +400,7 @@ fn freeze_grant(
             name,
             GrantedInstruction::project_pinned(
                 GrantPath::new(&src)?,
-                ContentDigest::parse(&entry.checksum)?,
+                ContentDigest::parse(entry.checksum.hex())?,
                 instr.targets.iter().cloned().collect::<BTreeSet<String>>(),
             ),
         )?;

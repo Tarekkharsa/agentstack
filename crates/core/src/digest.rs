@@ -28,6 +28,79 @@ const DIR_DIGEST_DOMAIN: &[u8] = b"agentstack-dir-digest-v2\0";
 const INTEGRITY_ROOT_DOMAIN: &[u8] = b"agentstack-integrity-root-v1\0";
 const MAX_DIRECTORY_DEPTH: usize = 64;
 
+/// A validated SHA-256 digest: exactly 64 lowercase hex chars, stored bare
+/// (no `sha256:` prefix). Extracted from `cli::grant`, where it already guarded
+/// the grant digests, so `trust`, `lock`, and `adapters` share ONE digest type
+/// instead of each passing an unvalidated `String` around.
+///
+/// Wire form is the bare hex string, byte-identical to the `String` fields this
+/// replaces — `agentstack.lock` bytes (and so the trust digest over them) do not
+/// change. Deserialization goes through [`Sha256Hex::parse`], so a malformed
+/// digest in a lockfile fails loudly at parse instead of silently mismatching
+/// later (rule 7: bundle content is hostile input).
+///
+/// (TS mental model: a branded/opaque type — you can't hand a random string to
+/// something expecting a digest without going through the validating parser.)
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Sha256Hex(String);
+
+impl Sha256Hex {
+    /// Validate a digest string. Accepts an optional `sha256:` prefix (the
+    /// spelling `trust` stores) and normalizes to bare lowercase hex.
+    pub fn parse(s: &str) -> Result<Self> {
+        let h = s.strip_prefix("sha256:").unwrap_or(s);
+        if h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()) {
+            Ok(Sha256Hex(h.to_ascii_lowercase()))
+        } else {
+            anyhow::bail!("not a sha256 hex digest: {s:?}");
+        }
+    }
+
+    /// The bare lowercase hex (no prefix).
+    pub fn hex(&self) -> &str {
+        &self.0
+    }
+
+    /// The digest OF some bytes, typed — the one-shot companion to
+    /// [`sha256_hex`] for callers that want the validated type rather than a
+    /// bare `String`. Cannot fail: a sha2 finalize is always 64 lowercase hex.
+    pub fn of(bytes: &[u8]) -> Sha256Hex {
+        Sha256Hex(sha256_hex(bytes))
+    }
+}
+
+/// Renders bare hex — the stored form. Callers that need the prefixed
+/// `sha256:<hex>` spelling add it themselves (see `trust`'s digest field and
+/// `cli::grant`'s wrapper types).
+impl std::fmt::Display for Sha256Hex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A digest is public, non-secret data, so `Debug` shows it — but via `Display`
+/// so the two never drift.
+impl std::fmt::Debug for Sha256Hex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self}")
+    }
+}
+
+impl serde::Serialize for Sha256Hex {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        // Bare hex: byte-identical to the String field this replaces.
+        s.serialize_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Sha256Hex {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        // Validate on the way in — a lockfile is hostile input.
+        let s = String::deserialize(d)?;
+        Sha256Hex::parse(&s).map_err(serde::de::Error::custom)
+    }
+}
+
 /// SHA-256 hex digest of a byte string.
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();

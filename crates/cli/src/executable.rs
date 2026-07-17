@@ -18,6 +18,7 @@
 //!   flag-like strings are not local content and are never pinned (§3.1:
 //!   the harness/interpreter binary is explicitly unbound).
 
+use agentstack_core::digest::Sha256Hex;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -129,7 +130,7 @@ pub fn derive_executable_pins(
                 match classify_local_executable(project_dir, &anchor, candidate) {
                     LocalExecutable::NotLocal => {}
                     LocalExecutable::File(path) => pins.push(LockedExecutable {
-                        checksum: contained_file_digest(project_dir, &path)?,
+                        checksum: Sha256Hex::parse(&contained_file_digest(project_dir, &path)?)?,
                         path,
                         kind: ExecutableKind::File,
                     }),
@@ -141,8 +142,10 @@ pub fn derive_executable_pins(
         }
     }
     for root in &server.integrity_roots {
-        let checksum = integrity_root_digest(project_dir, root)
-            .with_context(|| format!("server '{name}': pinning integrity root '{root}'"))?;
+        let checksum = Sha256Hex::parse(
+            &integrity_root_digest(project_dir, root)
+                .with_context(|| format!("server '{name}': pinning integrity root '{root}'"))?,
+        )?;
         pins.push(LockedExecutable {
             path: normalize_declared(root),
             kind: ExecutableKind::Root,
@@ -246,8 +249,8 @@ pub fn executable_lock_statuses_and_pins(
                         None => ExecutableLockStatus::MissingLockEntry,
                         Some(entry) if entry.checksum != pin.checksum => {
                             ExecutableLockStatus::ChecksumDrift {
-                                locked: entry.checksum.clone(),
-                                current: pin.checksum.clone(),
+                                locked: entry.checksum.hex().to_string(),
+                                current: pin.checksum.hex().to_string(),
                             }
                         }
                         Some(_) => ExecutableLockStatus::Matches,
@@ -392,11 +395,11 @@ mod tests {
 
         // The pinned digests match the core routines (same inputs, same pins).
         assert_eq!(
-            pins[0].checksum,
+            pins[0].checksum.hex(),
             contained_file_digest(tmp.path(), "scripts/entry.py").unwrap()
         );
         assert_eq!(
-            pins[1].checksum,
+            pins[1].checksum.hex(),
             integrity_root_digest(tmp.path(), "tools").unwrap()
         );
     }

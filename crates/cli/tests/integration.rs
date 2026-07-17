@@ -489,11 +489,11 @@ fn store_resolves_path_skill_and_lock_roundtrips() {
         path: Some("./skills/x".into()),
         git: None,
         rev: None,
-        checksum: resolved.checksum.clone(),
+        checksum: agentstack_core::digest::Sha256Hex::parse(&resolved.checksum).unwrap(),
     });
     lock.save(tmp.path()).unwrap();
     let reloaded = Lock::load(tmp.path()).unwrap();
-    assert_eq!(reloaded.get("x").unwrap().checksum, resolved.checksum);
+    assert_eq!(reloaded.get("x").unwrap().checksum.hex(), resolved.checksum);
 }
 
 #[test]

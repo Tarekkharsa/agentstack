@@ -85,7 +85,9 @@ fn grant(base: &Path) -> Result<()> {
         let origin = match r.origin {
             crate::resolve::ServerOrigin::Inline => String::new(),
             crate::resolve::ServerOrigin::Library => match lock.get_server(name) {
-                Some(entry) if entry.checksum == r.checksum => "   [library, pinned]".to_string(),
+                Some(entry) if entry.checksum.hex() == r.checksum => {
+                    "   [library, pinned]".to_string()
+                }
                 Some(_) => {
                     blockers.push((
                         name.clone(),

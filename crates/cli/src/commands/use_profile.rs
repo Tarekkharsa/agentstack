@@ -2,6 +2,7 @@
 //! target's config and materialize its skills into the target's skills dir, for
 //! the chosen scope. Dry-run by default; `--write` performs changes.
 
+use agentstack_core::digest::Sha256Hex;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -529,7 +530,7 @@ pub(crate) fn record_lock(
                 ServerOrigin::Inline => ServerSource::Inline,
                 ServerOrigin::Library => ServerSource::Library,
             },
-            checksum: r.checksum.clone(),
+            checksum: Sha256Hex::parse(&r.checksum)?,
         });
         // D3: pin the server's repository-local executable surface alongside
         // its definition — auto-detected command/args files plus declared
@@ -576,7 +577,8 @@ fn locked_from_resolved(
         path,
         git,
         rev: resolved.rev.clone(),
-        checksum: resolved.checksum.clone(),
+        checksum: Sha256Hex::parse(&resolved.checksum)
+            .expect("a resolved skill checksum is a digest this process computed"),
     }
 }
 
@@ -840,8 +842,8 @@ mod tests {
         let entry = lock.get("sql-review").expect("lock entry written");
         assert_eq!(entry.source, SkillLockSource::Path);
         assert_eq!(entry.path.as_deref(), Some("sql-review"));
-        assert_eq!(entry.checksum, resolved[0].checksum);
-        assert_eq!(entry.checksum.len(), 64);
+        assert_eq!(entry.checksum.hex(), resolved[0].checksum);
+        assert_eq!(entry.checksum.hex().len(), 64);
     }
 
     #[test]
@@ -859,7 +861,7 @@ mod tests {
             path: Some("other".into()),
             git: None,
             rev: None,
-            checksum: "beef".into(),
+            checksum: Sha256Hex::of(b"beef"),
         });
         lock.save(proj.path()).unwrap();
 
@@ -962,7 +964,7 @@ mod tests {
                 "type = \"http\"\nurl = \"https://x/mcp\"\nheaders = { Authorization = \"Bearer ${TOKEN}\" }\n",
             )
             .unwrap(),
-            checksum: "cafebabe".into(),
+            checksum: Sha256Hex::of(b"cafebabe").hex().to_string(),
             provenance: Some("consolidated:codex".into()),
         };
 
@@ -982,7 +984,7 @@ mod tests {
             .get_server("kibana")
             .expect("server lock entry written");
         assert_eq!(entry.source, ServerSource::Library);
-        assert_eq!(entry.checksum, "cafebabe");
+        assert_eq!(entry.checksum, Sha256Hex::of(b"cafebabe"));
         // The lock holds only name/source/checksum — never a secret value.
         let text = std::fs::read_to_string(Lock::path(proj.path())).unwrap();
         assert!(

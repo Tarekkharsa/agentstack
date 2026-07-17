@@ -395,23 +395,11 @@ pub fn commit_argv(key: &CommitmentKey, argv: &[String]) -> ArgvCommitment {
 // tied and validated in `build()`), so the canonical V1 digest/KAT (3b-ii) may
 // now freeze over the complete field set.
 
-/// Validated SHA-256 hex (exactly 64 lowercase hex chars). Parsing accepts an
-/// optional `sha256:` prefix; consumers emit one canonical form.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Sha256Hex(String);
-impl Sha256Hex {
-    fn parse(s: &str) -> Result<Self> {
-        let h = s.strip_prefix("sha256:").unwrap_or(s);
-        if h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()) {
-            Ok(Sha256Hex(h.to_ascii_lowercase()))
-        } else {
-            bail!("not a sha256 hex digest: {s:?}");
-        }
-    }
-    fn hex(&self) -> &str {
-        &self.0
-    }
-}
+// The validated digest type now lives in core, shared with `trust`, `lock`, and
+// `adapters` (it was private here first). The grant wrappers below still give
+// each digest KIND its own type, so a consent digest can't stand in for a
+// content digest.
+use agentstack_core::digest::Sha256Hex;
 
 /// The AuthorityGrant's own canonical digest.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1114,10 +1102,12 @@ impl GrantEncoder {
         self.bytes(tag, &(n as u64).to_le_bytes());
     }
     fn finish(self) -> GrantDigest {
-        GrantDigest(Sha256Hex(format!(
-            "{:x}",
-            sha2::Digest::finalize(self.hasher)
-        )))
+        // Now that `Sha256Hex`'s field is private to core, construction goes
+        // through the validating parser — so there is exactly one way to build
+        // a digest. sha2's finalize always yields 64 lowercase hex chars, so
+        // the parse cannot reject it; the expect states that invariant.
+        let hex = format!("{:x}", sha2::Digest::finalize(self.hasher));
+        GrantDigest::parse(&hex).expect("sha2 finalize yields 64 lowercase hex chars")
     }
 }
 

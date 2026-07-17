@@ -2,6 +2,7 @@
 //! maintain `agentstack.lock` (PLAN §9d). `install` is reproducible (prefers the
 //! locked rev); `update` re-resolves git skills to their latest.
 
+use agentstack_core::digest::Sha256Hex;
 use std::path::Path;
 
 use anyhow::Result;
@@ -199,6 +200,6 @@ pub(crate) fn locked_entry(
         path,
         git,
         rev,
-        checksum: resolved.checksum.clone(),
+        checksum: Sha256Hex::parse(&resolved.checksum)?,
     })
 }

@@ -327,6 +327,7 @@ pub use agentstack_core::digest::{collect_files, dir_digest};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agentstack_core::digest::Sha256Hex;
     use assert_fs::prelude::*;
 
     #[test]
@@ -396,7 +397,7 @@ mod tests {
                     path: Some("./skills/x".into()),
                     git: None,
                     rev: None,
-                    checksum: pin,
+                    checksum: Sha256Hex::parse(&pin).unwrap(),
                 }],
                 servers: Vec::new(),
                 instructions: Vec::new(),

@@ -73,7 +73,7 @@ fn consolidate_indexes_into_library_and_symlinks_back() {
     let library = Library::load(&home.join(".agentstack/lib")).unwrap();
     let figma = library.get("figma").expect("figma indexed");
     assert_eq!(figma.source, "path");
-    assert!(figma.checksum.as_deref().unwrap().len() == 64);
+    assert!(figma.checksum.as_ref().unwrap().hex().len() == 64);
     assert!(library.get("shared").is_some());
 
     // Originals are symlinks resolving to the library copy (old behavior works).

@@ -8,6 +8,7 @@
 //! surface (`lib migrate`, `consolidate` emitting name refs) reuses it rather
 //! than inventing its own file/index logic.
 
+use agentstack_core::digest::Sha256Hex;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -186,7 +187,7 @@ fn add_skill_inner(
                 git: None,
                 rev: None,
                 subpath: None,
-                checksum: Some(checksum.clone()),
+                checksum: Some(Sha256Hex::parse(&checksum)?),
                 version: None,
                 provenance: Some(
                     provenance_override
@@ -231,7 +232,7 @@ fn add_skill_inner(
                 git: Some(url.to_string()),
                 rev: resolved.rev.clone(),
                 subpath: subpath.map(str::to_string),
-                checksum: Some(resolved.checksum.clone()),
+                checksum: Some(Sha256Hex::parse(&resolved.checksum)?),
                 version: None,
                 provenance: Some(
                     provenance_override
@@ -446,7 +447,7 @@ pub fn add_server_def(
             .with_context(|| format!("writing {}", dest.display()))?;
         library.upsert_server(LibraryServer {
             name: name.to_string(),
-            checksum: Some(checksum.clone()),
+            checksum: Some(Sha256Hex::parse(&checksum)?),
             version: None,
             provenance: Some(provenance),
         });
@@ -781,7 +782,7 @@ fn render_list(library: &Library, lib_home: &Path) -> String {
         o.push_str("  (none)\n");
     }
     for s in &servers {
-        let sum = s.checksum.as_deref().map(short).unwrap_or("-");
+        let sum = s.checksum.as_ref().map(|c| short(c.hex())).unwrap_or("-");
         o.push_str(&format!(
             "  {:<20} {:<16} {}\n",
             s.name,
@@ -799,7 +800,7 @@ fn locator(s: &LibrarySkill) -> String {
         return format!("rev {}", short(rev));
     }
     match &s.checksum {
-        Some(c) => short(c).to_string(),
+        Some(c) => short(c.hex()).to_string(),
         None => "-".to_string(),
     }
 }
@@ -1782,7 +1783,10 @@ mod tests {
         let library = Library::load(lib.path()).unwrap();
         let entry = library.get("sql-review").unwrap();
         assert_eq!(entry.path.as_deref(), Some("sql-review"));
-        assert_eq!(entry.checksum.as_deref(), Some(out.checksum.as_str()));
+        assert_eq!(
+            entry.checksum.as_ref().map(Sha256Hex::hex),
+            Some(out.checksum.as_str())
+        );
         assert!(entry.provenance.as_deref().unwrap().starts_with("path:"));
     }
 
@@ -1998,7 +2002,7 @@ mod tests {
             git: None,
             rev: None,
             subpath: None,
-            checksum: Some(checksum.into()),
+            checksum: Some(Sha256Hex::of(checksum.as_bytes())),
             version: None,
             provenance: Some(format!("path:/src/{name}")),
         }
@@ -2017,7 +2021,11 @@ mod tests {
         let out = render_list(&library, Path::new("/no-such-lib-home"));
         assert!(out.contains("sql-review"));
         assert!(out.contains("path"));
-        assert!(out.contains("abcdef012345"), "short checksum (12 chars)");
+        let digest = Sha256Hex::of(b"abcdef0123456789deadbeef");
+        assert!(
+            out.contains(&digest.hex()[..12]),
+            "short checksum (12 chars)"
+        );
         assert!(out.contains("path:/src/sql-review"), "provenance");
     }
 
@@ -2041,7 +2049,7 @@ mod tests {
             git: None,
             rev: None,
             subpath: None,
-            checksum: Some("deadbeef".into()),
+            checksum: Some(Sha256Hex::of(b"deadbeef")),
             version: None,
             provenance: Some("manual".into()),
         });
@@ -2062,7 +2070,7 @@ mod tests {
             git: Some("https://example.com/x.git".into()),
             rev: Some("0123456789abcdef0123456789abcdef01234567".into()),
             subpath: None,
-            checksum: Some("feedface00001111".into()),
+            checksum: Some(Sha256Hex::of(b"feedface00001111")),
             version: None,
             provenance: Some("git:https://example.com/x.git".into()),
         });
@@ -2301,7 +2309,7 @@ mod tests {
             git: Some("https://example.com/x.git".into()),
             rev: Some("abc123".into()),
             subpath: None,
-            checksum: Some("deadbeef".into()),
+            checksum: Some(Sha256Hex::of(b"deadbeef")),
             version: None,
             provenance: Some("git:https://example.com/x.git".into()),
         });
@@ -2341,7 +2349,7 @@ mod tests {
             git: None,
             rev: None,
             subpath: None,
-            checksum: Some("x".into()),
+            checksum: Some(Sha256Hex::of(b"x")),
             version: None,
             provenance: None,
         });
@@ -2487,7 +2495,10 @@ mod tests {
         // Indexed with the checksum + provenance.
         let library = Library::load(lib.path()).unwrap();
         let entry = library.get_server("kibana").unwrap();
-        assert_eq!(entry.checksum.as_deref(), Some(out.checksum.as_str()));
+        assert_eq!(
+            entry.checksum.as_ref().map(Sha256Hex::hex),
+            Some(out.checksum.as_str())
+        );
         assert!(entry.provenance.as_deref().unwrap().starts_with("file:"));
     }
 
@@ -2570,14 +2581,18 @@ mod tests {
         let mut library = Library::default();
         library.upsert_server(LibraryServer {
             name: "kibana".into(),
-            checksum: Some("abcdef0123456789".into()),
+            checksum: Some(Sha256Hex::of(b"abcdef0123456789")),
             version: None,
             provenance: Some("file:/x/kibana.toml".into()),
         });
         let out = render_list(&library, Path::new("/no-such-lib-home"));
         assert!(out.contains("Servers"));
         assert!(out.contains("kibana"));
-        assert!(out.contains("abcdef012345"), "short checksum shown");
+        // Bind the digest: `&Sha256Hex::of(..).hex()[..12]` would borrow from a
+        // temporary that is dropped at the end of the statement.
+        let digest = Sha256Hex::of(b"abcdef0123456789");
+        let want = &digest.hex()[..12];
+        assert!(out.contains(want), "short checksum shown");
     }
 
     #[test]

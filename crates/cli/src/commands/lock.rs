@@ -8,6 +8,7 @@
 //! fetches git-backed sources as needed (like `use --write`), and lock entries
 //! for names outside the selected profiles are preserved.
 
+use agentstack_core::digest::Sha256Hex;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -119,7 +120,7 @@ pub(crate) fn record_instruction_pins(
                 lock.upsert_instruction(agentstack_core::lock::LockedInstruction {
                     name: name.clone(),
                     path: instr.path.clone(),
-                    checksum: agentstack_core::digest::sha256_hex(&bytes),
+                    checksum: Sha256Hex::of(&bytes),
                 });
                 pinned += 1;
             }
@@ -306,7 +307,7 @@ mod tests {
 
         let lock = Lock::load(proj.path()).unwrap();
         let skill = lock.get("sql-review").expect("skill pinned");
-        assert_eq!(skill.checksum.len(), 64);
+        assert_eq!(skill.checksum.hex().len(), 64);
         let server = lock.get_server("kibana").expect("server pinned");
         assert_eq!(server.source, agentstack_core::lock::ServerSource::Library);
         // Lock-only: nothing was rendered or materialized in the project.
@@ -359,11 +360,11 @@ mod tests {
         let file = lock
             .get_executable("scripts/entry.py", ExecutableKind::File)
             .expect("entry script pinned");
-        assert_eq!(file.checksum.len(), 64);
+        assert_eq!(file.checksum.hex().len(), 64);
         let root = lock
             .get_executable("tools", ExecutableKind::Root)
             .expect("declared root pinned");
-        assert_eq!(root.checksum.len(), 64);
+        assert_eq!(root.checksum.hex().len(), 64);
 
         // The one-byte re-gate chain: an edit inside the declared root makes
         // a re-lock rewrite the pin (new checksum → new lock bytes → the

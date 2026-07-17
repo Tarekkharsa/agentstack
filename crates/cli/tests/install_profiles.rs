@@ -33,10 +33,15 @@ fn setup_project(tmp: &Path, manifest: &str) -> PathBuf {
     let proj = tmp.join("proj");
     std::fs::create_dir_all(&proj).unwrap();
     std::fs::write(proj.join("agentstack.toml"), manifest).unwrap();
+    // The checksum must be a well-formed sha256 — the lockfile's digest type
+    // validates on read, so a stub like "cafe" no longer parses.
     std::fs::write(
         proj.join("agentstack.lock"),
-        "version = 1\n\n[[skill]]\nname = \"sql-review\"\nsource = \"path\"\n\
-         path = \"sql-review\"\nchecksum = \"cafe\"\n",
+        format!(
+            "version = 1\n\n[[skill]]\nname = \"sql-review\"\nsource = \"path\"\n\
+             path = \"sql-review\"\nchecksum = \"{}\"\n",
+            "ca".repeat(32)
+        ),
     )
     .unwrap();
     proj

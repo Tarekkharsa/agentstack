@@ -12,6 +12,7 @@
 //! index, not a scan target: entries carry provenance and an integrity digest so
 //! `lib list`, `explain`, and drift checks have metadata to work with.
 
+use agentstack_core::digest::Sha256Hex;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -139,7 +140,7 @@ pub struct LibrarySkill {
     /// SHA-256 of the skill content. Optional until the entry has been resolved
     /// and hashed; the resolver populates it and records it in project locks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub checksum: Option<String>,
+    pub checksum: Option<Sha256Hex>,
     /// Optional declared version for the entry (informational).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
@@ -200,7 +201,7 @@ pub struct LibraryServer {
     /// SHA-256 of the server definition file (`servers/<name>.toml`). Optional
     /// until the entry has been written and hashed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub checksum: Option<String>,
+    pub checksum: Option<Sha256Hex>,
     /// Optional declared version for the entry (informational).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
@@ -439,7 +440,7 @@ mod tests {
             git: Some("https://example.com/skills.git".into()),
             rev: Some("abc123".into()),
             subpath: None,
-            checksum: Some("deadbeef".into()),
+            checksum: Some(Sha256Hex::of(b"deadbeef")),
             version: Some("0.1.0".into()),
             provenance: Some("catalog:sql-pack".into()),
         });
@@ -465,7 +466,7 @@ mod tests {
     fn server(name: &str) -> LibraryServer {
         LibraryServer {
             name: name.into(),
-            checksum: Some("cafe".into()),
+            checksum: Some(Sha256Hex::of(b"cafe")),
             version: None,
             provenance: Some("consolidated:codex".into()),
         }

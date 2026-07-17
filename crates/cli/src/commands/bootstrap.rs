@@ -221,7 +221,7 @@ fn print_skills(ctx: &super::Context) -> Result<usize> {
             continue;
         };
         match dir_digest(&local) {
-            Ok(sum) if sum == locked.checksum => {
+            Ok(sum) if sum == locked.checksum.hex() => {
                 println!("  {} {name:<20} present · locked", "✓".green());
             }
             Ok(_) => {
