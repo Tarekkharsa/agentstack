@@ -282,7 +282,7 @@ fn run_checks(
     if connected == 0 {
         report.line(
             Level::Ok,
-            "no harness connected — optional ↳ agentstack connect --all",
+            "no harness connected — optional ↳ agentstack gateway connect --all",
         );
     }
     let base = crate::manifest::project_root_of(&ctx.dir);

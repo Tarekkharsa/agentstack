@@ -386,7 +386,7 @@ strategy, and event hooks are good prior art for orchestration shape.
 Append-only, per-run JSONL records execution start/finish/limits, sandbox
 lifecycle, egress decisions, brokered tool calls (with argument digests), and
 secret-reference access (reference names, never values). `agentstack report
-<run>` renders that evidence for humans or JSON consumers and can supplement
+run <id>` renders that evidence for humans or JSON consumers and can supplement
 older runs from the separate global call audit log.
 
 Trust-store mutations and per-run token/cost events are not yet wired. The

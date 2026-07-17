@@ -1,4 +1,4 @@
-//! `agentstack upgrade <vendor>` — re-resolve an installed vendor pack from its
+//! `agentstack lock --upgrade <vendor>` — re-resolve an installed vendor pack from its
 //! recorded source (`catalog:<id>`) and apply any changes to its members
 //! (server, skills, house rules), re-pinning the lockfile. The counterpart to
 //! `add <pack>` / `remove <pack>` that completes the pack lifecycle (Phase 6 of

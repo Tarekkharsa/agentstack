@@ -566,7 +566,7 @@
         <div class="show-visual">
           <div class="term" data-replay style="margin:0">
             <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → trust → firewalled → logged</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
-            <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack connect --all --write</span><span class="c">     # once: the gateway, in every CLI</span></span>
+            <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack gateway connect --all --write</span><span class="c">     # once: the gateway, in every CLI</span></span>
 <span class="row cmd"><span class="p">$</span> <span class="t">git clone some-repo &amp;&amp; cd some-repo</span><span class="c">  # declares servers you've never seen</span></span>
 <span class="row" data-d="450"><span class="c">  agent session starts…</span></span>
 <span class="row" data-d="800"><span class="no">  ✗ untrusted — no servers spawned, no secrets resolved</span></span>
@@ -684,7 +684,7 @@
     <p class="eyebrow">The trust gate</p>
     <h2>Repo-declared servers wait for your consent.</h2>
     <p class="muted">
-      Register the gateway once (<code>agentstack connect --all --write</code>)
+      Register the gateway once (<code>agentstack gateway connect --all --write</code>)
       and every repo you open brings its own servers — no files copied in. But
       a repo you haven't reviewed is <strong>inert</strong>: none of its MCP
       servers are spawned or contacted, no secrets resolved. You review what it
@@ -947,12 +947,12 @@
         <p>Imports the servers and skills you already have; inline tokens become <code>${REF}</code>s in your OS keychain.</p>
       </li>
       <li>
-        <b>agentstack bootstrap</b>
-        <p>Preflight: which CLIs are installed, which skills and secrets are missing, what would change.</p>
-      </li>
-      <li>
         <b>agentstack apply</b>
         <p>Preview each CLI's config diff, confirm to write. Writes are atomic, backed up, and tracked — <code>restore</code> undoes them.</p>
+      </li>
+      <li>
+        <b>agentstack use &lt;profile&gt; --write</b>
+        <p>Activate a profile: its servers and skills, materialized for every CLI. <code>setup</code> runs this step for you.</p>
       </li>
       <li>
         <b>agentstack doctor</b>
@@ -960,13 +960,13 @@
       </li>
     </ol>
     <div class="term" data-replay style="margin-top:1.6rem">
-      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>init → bootstrap → apply → every CLI in sync</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
+      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>init → apply → every CLI in sync</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
       <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack init</span></span>
 <span class="row"><span class="c">  🔍 Detected 6 CLIs: Claude Code · Codex · Copilot · Gemini · OpenCode · Pi</span></span>
 <span class="row"><span class="c">  📥 Imported 1 MCP server from existing configs</span></span>
 <span class="row" data-d="600"><span class="ok">  ✅ Wrote .agentstack/agentstack.toml</span></span>
 <span class="row" data-d="500"> </span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack bootstrap</span></span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack apply</span></span>
 <span class="row"><span class="ok">  ✓</span><span class="c"> manifest validates · 6 adapters installed · no missing secrets</span></span>
 <span class="row" data-d="500"> </span>
 <span class="row cmd"><span class="p">$</span> <span class="t">agentstack apply --write</span></span>
@@ -1041,11 +1041,11 @@ default = ["claude-code", "codex"]</code></pre>
 
   <section id="team" class="reveal">
     <p class="eyebrow">Teams &amp; CI</p>
-    <h2>Clone, bootstrap, done</h2>
+    <h2>Clone, apply, done</h2>
     <pre><code>git clone &lt;repo&gt;
-agentstack bootstrap
 agentstack secret set GH_PAT     # local only; never committed
-agentstack apply --write</code></pre>
+agentstack apply --write
+agentstack doctor                # verify the wiring</code></pre>
     <p class="muted">In CI, the trust gate is two commands — or the one-line GitHub Action:</p>
     <pre><code>agentstack install --locked   # fail if sources drifted from the pinned lock
 agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</code></pre>
@@ -1083,7 +1083,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
       </div>
       <div class="fcard">
         <h3>Usage insight</h3>
-        <p><code>agentstack analyze</code> reports what you actually call, from the
+        <p><code>agentstack report calls</code> reports what you actually call, from the
            runtime audit log, and flags library skills and servers you installed but
            never use — read-only and local, so pruning is data-driven.</p>
         <span class="tag" style="color:var(--faint)">Read-only &amp; local</span>
@@ -1128,7 +1128,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
 <span class="row cmd"><span class="p">$</span> <span class="t">agentstack audit --calls</span></span>
 <span class="row" data-d="800"><span class="c">  2 calls · 2 tools · </span><span class="no">1 denied by policy</span><span class="c"> — digests, never values</span></span>
 <span class="row" data-d="450"> </span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack upgrade acme --yes --write</span><span class="c">   # vendor ships v1.1.0</span></span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack lock --upgrade acme --yes --write</span><span class="c">   # vendor ships v1.1.0</span></span>
 <span class="row"><span class="ok">  ✓ upgraded pack 'acme'</span><span class="c"> — previewed, re-pinned @v1.1.0</span></span></code></pre>
     </div>
     <p class="small muted" style="margin-top:0.8rem">

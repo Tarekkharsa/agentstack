@@ -545,7 +545,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 inp.manifest.servers.len()
             ),
             evidence: vec!["cost-based recommendations above are incomplete without it (footprint.json)".into()],
-            action: "agentstack stats --live".into(),
+            action: "agentstack report usage --live".into(),
             safe_auto: false,
             safety: "manual only because it spawns/contacts the manifest's servers once to measure them; the measurement itself is read-only".into(),
         });

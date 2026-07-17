@@ -42,6 +42,7 @@ pub fn run(args: &LibArgs, manifest_dir: Option<&Path>) -> Result<()> {
         LibKind::RemoveHook(a) => remove_hook_cli(a),
         LibKind::Migrate(a) => migrate(a),
         LibKind::Sync(a) => sync(a),
+        LibKind::PackInit(a) => super::pack::init(a.name.as_deref()),
     }
 }
 

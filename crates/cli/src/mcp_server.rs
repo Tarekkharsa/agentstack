@@ -212,7 +212,7 @@ pub fn serve(
     }
 
     // --auto-project (the zero-files bridge, registered once globally by
-    // `agentstack connect`): discover the active project per session — client
+    // `agentstack gateway connect`): discover the active project per session — client
     // roots → cwd walk-up → $AGENTSTACK_MANIFEST_DIR — and trust-gate it. The
     // gateway is built lazily on the first tools/call, which gives the client
     // time to answer our roots/list request; tools/list is static and needs

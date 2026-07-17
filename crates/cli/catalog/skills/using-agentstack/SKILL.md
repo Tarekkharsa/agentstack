@@ -105,7 +105,7 @@ passed the pre-launch gates, sealed at launch. Refusals that say
 
 ```bash
 agentstack                       # orientation: CLIs detected, manifest state, next step
-agentstack bootstrap             # preflight: skills, secrets, diff, next action
+agentstack doctor                # verify wiring: adapters, secrets, drift — with exact fixes
 agentstack use <profile> --scope project           # dry-run (always safe)
 agentstack use <profile> --scope project --write   # activate
 agentstack search <query>        # your central library + catalog + official MCP Registry
@@ -118,7 +118,7 @@ agentstack audit --json          # re-scan skills/instructions for hidden-unicod
 agentstack audit --calls         # summarize the gateway call log (who called what, outcomes)
 agentstack guard status          # which CLIs have the destructive-command hook wired
 agentstack guard test <command>  # judge a shell command against guard policy (nonzero on deny)
-agentstack analyze               # usage analysis: unused servers, context cost, recommendations
+agentstack report calls          # usage analysis: unused servers, context cost, recommendations
 agentstack secret set NAME       # store a secret in the OS keychain
 agentstack restore <target>      # undo a write from its pre-write backup
 ```

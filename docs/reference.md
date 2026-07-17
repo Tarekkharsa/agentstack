@@ -282,7 +282,7 @@ run's trust footprint and an all-runs view.
 Honest scope: this is best-effort local **diagnostics** (logging can never
 fail a call; size-rotated at ~5 MB × 2). It is not durable or tamper-evident —
 any process running as your user can edit it. Treat it as the input to
-`analyze`/`optimize` and incident triage, not as forensic evidence.
+`report calls`/`optimize` and incident triage, not as forensic evidence.
 
 ### Content scanning and `audit`
 
@@ -400,7 +400,7 @@ the rest with `lib list` / `remove` / `remove-server`.
 
 Skills declare a source (`path` or `git`); `install` fetches them into
 `~/.agentstack/store/` and writes a SHA-256 `agentstack.lock`;
-`install --locked` is reproducible (CI-safe); `update` re-resolves git skills;
+`install --locked` is reproducible (CI-safe); `lock --update` re-resolves git skills;
 `remove` drops a capability from manifest + lock. `install` is profile-aware:
 skills a profile references by name (resolved from the central library, no
 inline `[skills.*]` entry) keep their lock pins through the reconcile pass —
@@ -557,7 +557,7 @@ extracted skills are digest-pinned in the lock so `install --locked`
 reproduces. `upgrade <pack>` lists remote tags, resolves the newest (never
 downgrades), previews the member diff, and re-pins on `--write`.
 `[policy] allowed_sources` is enforced **before** any fetch, and the clone's
-content passes the install scan gate. `agentstack pack init` scaffolds a
+content passes the install scan gate. `agentstack lib pack-init` scaffolds a
 publishable pack; the dashboard's Discover pane installs from a git URL with
 the same gates. (Semver ranges and transitive pack dependencies are
 deliberately not in v1.)
@@ -570,19 +570,19 @@ comments — the keep-side of every [drift decision](#drift-adopt-or-apply).
 `add` is the flag-driven (scriptable / agent-operable) way to add a server or
 skill to the manifest, optionally into a profile; comments preserved.
 
-### `stats`
+### `report usage` (usage analytics)
 
 Local usage analytics: activation counts + per-capability footprint (which
-target/scope slots it's live in) + **context cost**. `stats --live` measures
+target/scope slots it's live in) + **context cost**. `report usage --live` measures
 each server's `tools/list` token footprint through the gateway (HTTP + stdio)
-and caches it (`~/.agentstack/footprint.json`); `stats`, `explain`, and the
+and caches it (`~/.agentstack/footprint.json`); `report usage`, `explain`, and the
 dashboard's Servers matrix then show what each server taxes every session
-offline, and `stats` flags dead weight — high-cost, never-activated servers —
+offline, and `report usage` flags dead weight — high-cost, never-activated servers —
 with the exact `remove` command.
 
 ### Wire proxy (`proxy`)
 
-Where `stats --live` gives you a **static** estimate — what a server's
+Where `report usage --live` gives you a **static** estimate — what a server's
 `tools/list` *would* cost — the wire proxy gives you **runtime ground truth**:
 what the `tools` block actually costs, in input tokens, on every real turn your
 harness sends. It's the on-wire complement to `src/footprint.rs`'s static
@@ -629,7 +629,7 @@ capability called at least once is `keep`; the costliest never-called one is a
 `drop / lazy` candidate (demote to a lazy server or drop it from the profile);
 the cheap-and-unused rest is `watch`. Those names are the same servers and
 profiles agentstack already manages, so the report closes the loop with the
-static `footprint` / `stats` / `doctor` lenses using on-wire evidence.
+static `footprint` / `report usage` / `doctor` lenses using on-wire evidence.
 
 **Phase-1 guardrails.** The proxy is **observe-only** (it never injects or
 mutates the tools/system block, so the prompt-prefix cache stays warm), all
@@ -749,14 +749,14 @@ agentstack run codex --profile backend --scope project
 agentstack run claude-code --keep        # leave the profile applied after exit
 
 # See and stop runs (from here or the dashboard's Runs panel).
-agentstack runs                # table; add --json for scripting
+agentstack report runs         # table; add --json for scripting
 agentstack kill <id>           # SIGTERM, then SIGKILL if it won't go
 agentstack kill <id> --force   # SIGKILL immediately
 ```
 
 Launching is a terminal act (the harnesses are interactive TUIs); the dashboard's
 **Runs** panel is for observing and killing tracked runs. The registry is
-self-healing: a run whose wrapper died is pruned on the next `runs`. A
+self-healing: a run whose wrapper died is pruned on the next `report runs`. A
 profile-bound run uses the session engine, so one is allowed per directory at a
 time. Unix only for now. Showing the full per-run trust footprint in the
 dashboard is part of the portable-runtime roadmap.
@@ -766,7 +766,7 @@ dashboard is part of the portable-runtime roadmap.
 Every run is labelled with its **enforcement posture** — how strongly the
 effective policy is actually enforced at runtime, not merely declared. The label
 appears on the run banner, in `agentstack run --sandbox --plan`, and in
-`agentstack report <run>`:
+`agentstack report run <id>`:
 
 | Posture                                 | Mode                          | What it means |
 |-----------------------------------------|-------------------------------|---------------|
@@ -853,12 +853,12 @@ and propose capabilities — tools: `agentstack_search`, `agentstack_list`,
 and runs `apply` (the §9g/D20 trust gate). Register it once per harness:
 
 ```bash
-agentstack connect claude-code codex   # dry-run: shows the config diff
-agentstack connect --all --write       # every installed harness with MCP support
+agentstack gateway connect claude-code codex   # dry-run: shows the config diff
+agentstack gateway connect --all --write       # every installed harness
 ```
 
-`connect` writes one small entry — `agentstack mcp --auto-project` — into the
-harness's **global** MCP config (undo with `disconnect`, verify with `doctor`).
+`gateway connect` writes one small entry — `agentstack mcp --auto-project` — into the
+harness's **global** MCP config (undo with `gateway disconnect`, verify with `doctor`).
 You can still register it by hand like any stdio MCP server if you prefer:
 
 ```json
@@ -964,7 +964,7 @@ Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
 skills-over-MCP (`agentstack_list_loadable`/`agentstack_load`) create no
 per-project native artifacts. Native skill folders and instruction files (`CLAUDE.md`/`AGENTS.md`)
 are read from disk by the harnesses themselves and still need render mode
-(`apply`/`use`) — `connect` prints this per harness.
+(`apply`/`use`) — `gateway connect` prints this per harness.
 
 ### MCP profile leases: one connection, one capability fence
 
@@ -1113,7 +1113,7 @@ outstanding.
 ## Optimize (`agentstack optimize`)
 
 Turns the signals agentstack already collects — activation counts, the gateway
-call audit log, per-server context costs (`stats --live`), the trust ledger —
+call audit log, per-server context costs (`report usage --live`), the trust ledger —
 into concrete recommendations: inert servers to remove, `[policy.tools]`
 allowlists to narrow high-cost servers to the tools you actually use, denied
 and erroring calls to review, stale trust grants to refresh or revoke.
@@ -1137,27 +1137,29 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 
 ## All commands
 
-`init` (`--global`), `add`, `install` (`--locked`, `--allow-flagged`), `update`,
-`lock` (`--profile`), `remove`,
-`upgrade`, `bootstrap` (`--write`), `apply` (`--scope`, `--write`,
-`--prune-foreign`), `diff`,
+`setup`, `init` (`--global`), `add`, `search`,
+`install` (`--locked`, `--allow-flagged`),
+`lock` (`--profile`; `--update [NAME]` re-resolves git skills, `--upgrade
+[PACK]` + `--all`/`--with-instructions`/`--yes`/`--write` re-resolves vendor
+packs), `remove`, `apply` (`--scope`, `--write`, `--prune-foreign`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`, `consolidate`,
-`lib add|add-server|list|remove|remove-server|migrate|sync`
+`lib add|add-server|list|remove|remove-server|migrate|sync|pack-init`
 (`lib add`: `--path`, `--git`/`--subpath`, `--allow-flagged`; `lib sync`:
 `--init`, `--remote`, `--status`, `--allow-secrets`), `restore`,
 `doctor` (`--ci`, `--live`, `--fix`, `--deep`, `--all`), `audit` (`--json`, `--calls`,
-`--since`), `optimize` (`--json`, `--write`, `--since`), `analyze` (`--json`),
-`search`, `stats` (`--live`), `proxy start|report` (`start`: `--port`,
+`--since`), `optimize` (`--json`, `--write`, `--since`),
+`report run <id>|runs|usage|calls` (`run`/`runs`/`calls`: `--json`; `usage`:
+`--live`; `calls`: `--transcripts`), `proxy start|report` (`start`: `--port`,
 `--upstream`; `report`: `--json`),
 `secret set|get|rm|list`, `export`/`import`, `adapters` (`list|show|validate`),
-`pack init`, `plugins`, `setup`, `settings`,
+`plugins`, `settings`,
 `dashboard`, `mcp` (`--auto-project`, `--transparent`),
-`connect`/`disconnect` (`connect`: `--all`, `--transparent`, `--write`),
+`gateway connect|disconnect` (`connect`: `--all`, `--transparent`, `--write`),
 `trust` (`--list`, `--revoke` — pins the manifest layers **and lockfile**;
-re-locking re-gates), `codemode` (`--write`), `analyze` (`--json`,
-`--transcripts`), `hook`, `guard` (`install|uninstall|status|test|check` —
+re-locking re-gates), `codemode` (`--write`), `hook`,
+`guard` (`install|uninstall|status|test|check` —
 the machine-level destructive-command hook for every agent CLI; cooperative,
-see ENFORCEMENT.md), `run` (`--sandbox`)/`runs`/`kill`, `report` (`--json`),
+see ENFORCEMENT.md), `run` (`--sandbox`)/`kill`,
 `sign`/`verify` (`--pubkey`, `--signature` — detached ed25519 lockfile
 signatures), `self link|which`.
 
@@ -1168,7 +1170,7 @@ here.
 ## Everything shipped so far
 
 13 adapters · `init`/`add`/`apply`/`diff`/`use`/`instructions`/`adopt` ·
-package manager (`install`/`update`/`remove` + lockfile) · central capability
+package manager (`install`/`lock --update`/`remove` + lockfile) · central capability
 library (`lib` skills + servers referenced by name, digest-pinned in the lock,
 drift in `doctor`/`explain`, `consolidate` into `lib/skills`) · secrets (keychain +
 varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`/`--deep`) ·
@@ -1178,8 +1180,8 @@ content scanning on install + `audit` · official MCP Registry provider +
 native Claude Code/Codex packages + marketplaces) · atomic writes + backups ·
 `export`/`import` · `hook` · agent-operable `mcp` server · local dashboard
 (server/skill matrices, Discover, add-skill, settings editor) · live runs
-(`run`/`runs`/`kill` + dashboard Runs panel) · GitHub Action trust gate ·
-nightly adapter-conformance CI · zero-file bridge (`connect` + `mcp
+(`run`/`report runs`/`kill` + dashboard Runs panel) · GitHub Action trust gate ·
+nightly adapter-conformance CI · zero-file bridge (`gateway connect` + `mcp
 --auto-project` + digest-pinned `trust`) · `optimize` (evidence-backed
 recommendations from usage/audit/cost signals, safe-class `--write`) ·
 fail-closed `lib sync` secret gate (all server fields + outgoing history) ·

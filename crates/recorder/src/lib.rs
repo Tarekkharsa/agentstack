@@ -260,7 +260,7 @@ pub fn now_epoch() -> u64 {
 // The machine-global `calls.jsonl` above is diagnostics across every project.
 // A *sandboxed run* (Phase 2 `agentstack run --sandbox`) also gets its OWN
 // append-only event log under `~/.agentstack/runs/<run-id>/events.jsonl`, so a
-// Phase 3 `agentstack report <run>` can read exactly one run's lifecycle and
+// Phase 3 `agentstack report run <id>` can read exactly one run's lifecycle and
 // the egress proxy's per-decision output — separate from the cross-project
 // diagnostic log. Synchronous, best-effort, and `core`-only by design: the
 // async runtime/egress crates own a channel and drain it into these plain

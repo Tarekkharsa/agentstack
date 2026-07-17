@@ -1,4 +1,4 @@
-//! `agentstack report <run>` — the flight-recorder viewer.
+//! `agentstack report run <id>` — the flight-recorder viewer.
 //!
 //! Reads one run's append-only event log (sandbox lifecycle + egress
 //! decisions, from `~/.agentstack/runs/<id>/events.jsonl`) and the tool calls

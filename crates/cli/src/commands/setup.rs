@@ -1,12 +1,12 @@
 //! `agentstack setup` — the one-command newcomer path.
 //!
 //! Pure orchestration over the everyday commands: `init` (only if there's no
-//! manifest yet), the shared `bootstrap` preflight, inline secret prompts, an
-//! `apply` preview, a single confirm, then `install` + `apply --write` +
-//! profile activation (skills) + `doctor`. It introduces no rendering or
-//! validation logic of its own, and it
-//! reuses the shared confirm helper so a non-interactive shell (CI, pipes) only
-//! ever previews — it never writes and never blocks on input.
+//! manifest yet), a read-only preflight, inline secret prompts, an `apply`
+//! preview, a single confirm, then `install` + `apply --write` + profile
+//! activation (skills) + `doctor`. It introduces no rendering or validation
+//! logic of its own, and it reuses the shared confirm helper so a
+//! non-interactive shell (CI, pipes) only ever previews — it never writes and
+//! never blocks on input.
 
 use std::path::Path;
 
@@ -14,9 +14,13 @@ use anyhow::Result;
 use owo_colors::OwoColorize;
 
 use crate::cli::{ApplyArgs, DoctorArgs, InitArgs, InstallArgs, SetupArgs};
+use crate::lock::Lock;
 use crate::manifest::load::MANIFEST_FILE;
+use crate::manifest::{validate_with_context, Manifest};
 use crate::render::resolve_targets;
 use crate::scope::Scope;
+use crate::secret::SecretSources;
+use crate::store::{dir_digest, local_source_dir, Store};
 
 pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     println!("{}", "AgentStack setup".bold());
@@ -36,7 +40,8 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             );
             println!("  For scripts/CI, use:");
             println!("    agentstack init");
-            println!("    agentstack bootstrap --write");
+            println!("    agentstack apply --write");
+            println!("    agentstack use <profile> --write   # if the manifest has skills");
             return Ok(());
         }
         println!("\nNo manifest here yet — importing the setup already on this machine.\n");
@@ -67,8 +72,8 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let scope = args.scope.unwrap_or(Scope::Global);
     let target_ids = resolve_targets(&ctx.loaded.manifest, &ctx.registry, &args.targets);
 
-    // 2. Preflight inspection (adapters, skills, secrets) — shared with bootstrap.
-    let pf = super::bootstrap::preflight(&ctx, &target_ids)?;
+    // 2. Preflight inspection (adapters, skills, secrets) — read-only.
+    let pf = preflight(&ctx, &target_ids)?;
 
     // 3. Missing secrets — offer to set each one now (interactive only).
     let missing = resolve_missing_secrets(&ctx, pf.missing_secrets)?;
@@ -354,6 +359,142 @@ fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Resul
         }
     }
     Ok(())
+}
+
+/// The read-only preflight summary the wizard starts from.
+pub(crate) struct Preflight {
+    /// A structural manifest error — nothing should be written until fixed.
+    pub validation_errors: bool,
+    /// Referenced `${REF}`s that don't resolve on this machine.
+    pub missing_secrets: Vec<String>,
+}
+
+/// Inspect adapters, skills, and secrets and print the preflight report,
+/// returning a summary so the wizard can decide what to do next. Read-only —
+/// touches no config. (Moved here from the retired `bootstrap` command.)
+pub(crate) fn preflight(ctx: &super::Context, target_ids: &[String]) -> Result<Preflight> {
+    let manifest = &ctx.loaded.manifest;
+    let validation_errors = print_validation(ctx);
+    print_adapters(ctx, target_ids);
+    print_skills(ctx)?;
+    let missing_secrets = print_secrets(manifest, &ctx.dir);
+    Ok(Preflight {
+        validation_errors,
+        missing_secrets,
+    })
+}
+
+fn print_validation(ctx: &super::Context) -> bool {
+    let manifest = &ctx.loaded.manifest;
+    // Library-aware, mirroring `doctor`/`apply`: a profile or plugin-recipe ref
+    // to a central-library skill/server resolves here too, so it is not flagged
+    // as unknown the way an inline-only view would flag it.
+    let libctx = ctx.library_ctx();
+    let vctx = libctx.validate_ctx(&ctx.dir);
+    let target_ids: Vec<&str> = ctx.registry.ids().collect();
+    let issues = validate_with_context(manifest, target_ids, &vctx);
+    if issues.is_empty() {
+        println!("\n{} {}", "✓".green(), "Manifest validates".bold());
+        return false;
+    }
+
+    println!("\n{}", "Manifest".bold());
+    let mut has_errors = false;
+    for issue in issues {
+        if issue.kind.is_error() {
+            has_errors = true;
+            println!("  {} {}", "✗".red(), issue.message);
+        } else {
+            println!("  {} {}", "⚠".yellow(), issue.message);
+        }
+    }
+    has_errors
+}
+
+fn print_adapters(ctx: &super::Context, target_ids: &[String]) {
+    println!("\n{}", "Adapters".bold());
+    if target_ids.is_empty() {
+        println!("  {} no target adapters selected", "⚠".yellow());
+        return;
+    }
+    for id in target_ids {
+        match ctx.registry.get(id) {
+            Some(desc) if desc.is_installed() => {
+                println!("  {} {:<14} installed", "✓".green(), desc.display)
+            }
+            Some(desc) if desc.config_present() => println!(
+                "  {} {:<14} config present, binary not on PATH",
+                "⚠".yellow(),
+                desc.display
+            ),
+            Some(desc) => println!("  {} {:<14} not detected", "⚠".yellow(), desc.display),
+            None => println!("  {} unknown adapter '{id}'", "✗".red()),
+        }
+    }
+}
+
+fn print_skills(ctx: &super::Context) -> Result<usize> {
+    println!("\n{}", "Skills".bold());
+    let manifest = &ctx.loaded.manifest;
+    if manifest.skills.is_empty() {
+        println!("  {} no skills defined", "✓".green());
+        return Ok(0);
+    }
+
+    let store = Store::default_store();
+    let lock = Lock::load(&ctx.dir)?;
+    let mut issues = 0;
+    for (name, skill) in &manifest.skills {
+        let Some(local) = local_source_dir(&store, skill, &ctx.dir) else {
+            issues += 1;
+            println!(
+                "  {} {name:<20} source missing — run agentstack install",
+                "⚠".yellow()
+            );
+            continue;
+        };
+        let Some(locked) = lock.get(name) else {
+            issues += 1;
+            println!("  {} {name:<20} present, not locked", "⚠".yellow());
+            continue;
+        };
+        match dir_digest(&local) {
+            Ok(sum) if sum == locked.checksum => {
+                println!("  {} {name:<20} present · locked", "✓".green());
+            }
+            Ok(_) => {
+                issues += 1;
+                println!("  {} {name:<20} lockfile checksum stale", "⚠".yellow());
+            }
+            Err(e) => {
+                issues += 1;
+                println!("  {} {name:<20} cannot checksum: {e}", "✗".red());
+            }
+        }
+    }
+    Ok(issues)
+}
+
+fn print_secrets(manifest: &Manifest, dir: &Path) -> Vec<String> {
+    println!("\n{}", "Secrets".bold());
+    let refs = manifest.referenced_secrets();
+    if refs.is_empty() {
+        println!("  {} no secrets referenced", "✓".green());
+        return Vec::new();
+    }
+
+    let sources = SecretSources::detect(dir);
+    let mut missing = Vec::new();
+    for name in refs {
+        match sources.source_of(&name) {
+            Some(source) => println!("  {} {name:<20} resolved from {source}", "✓".green()),
+            None => {
+                println!("  {} {name:<20} missing", "✗".red());
+                missing.push(name);
+            }
+        }
+    }
+    missing
 }
 
 /// Prompt (hidden input) to store each missing secret in the keychain, then

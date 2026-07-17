@@ -92,8 +92,9 @@ interactively. The same flow as individual commands:
 agentstack init         # existing CLI configs → one manifest
                         # (nothing installed yet? init writes a starter
                         #  manifest with a commented example instead)
-agentstack bootstrap    # check CLIs, skills, secrets; see what's missing
 agentstack apply        # preview every CLI's changes, confirm to write
+agentstack use <profile> --write   # activate a profile's skills
+                                   # (setup does this step for you)
 ```
 
 > ▶ [Watch it live on the site](https://tarekkharsa.github.io/agentstack/#start) — same flow, replayed in your browser.
@@ -109,8 +110,8 @@ Two things worth knowing before you go further:
   [the trust gate](#the-trust-gate--keep-repo-declared-capabilities-inert-until-review) — one gateway
   registration serves every repo live.
 
-If `bootstrap` reports a missing secret, store it once — it goes in your OS
-keychain, never in the manifest:
+If `apply` or `doctor` reports a missing secret, store it once — it goes in
+your OS keychain, never in the manifest:
 
 ```bash
 agentstack secret set GH_PAT
@@ -159,14 +160,13 @@ One `agentstack apply` compiles this single manifest into the native config of
 every CLI in `[targets]` — up to all 13 — each adapter's quirks handled for you
 and secrets left as `${REF}`s:
 
-![agentstack first run: init → bootstrap → apply](docs/firstrun.svg)
+![agentstack first run: init → apply](docs/firstrun.svg)
 
 ## Everyday commands
 
 | Command | What it does |
 | --- | --- |
 | `agentstack init` | Reverse-engineer a manifest from the configs you already have |
-| `agentstack bootstrap` | Preflight: installed CLIs, skills, secrets, pending diff |
 | `agentstack apply` | Preview each CLI's config changes; confirm (or `--write`) to render |
 | `agentstack doctor` | Verify wiring; every warning comes with the exact fix command |
 | `agentstack diff` | What would change, read-only |
@@ -190,7 +190,7 @@ audited.
 
 > ▶ [Watch it live on the site](https://tarekkharsa.github.io/agentstack/#trust) — and run it yourself: [`docs/trust-gate-demo.sh`](docs/trust-gate-demo.sh).
 
-Register the gateway once (`agentstack connect --all --write`) and every repo
+Register the gateway once (`agentstack gateway connect --all --write`) and every repo
 you open brings its own MCP servers with **no files copied in**. But a repo you haven't reviewed
 is **inert** — none of its servers are spawned or contacted, no secrets resolved:
 
@@ -339,9 +339,9 @@ Commit `.agentstack/` (manifest + lock). A teammate — or your CI — then runs
 
 ```bash
 git clone <repo>
-agentstack bootstrap
 agentstack secret set GH_PAT   # local only; never committed
 agentstack apply --write
+agentstack doctor              # verify the wiring
 ```
 
 In CI, the trust gate is two commands — or the one-line GitHub Action:
@@ -371,7 +371,7 @@ artifacts (`.mcp.json`, `.claude/skills/`, and the compiled `CLAUDE.md` /
 - **Clean-at-rest** — nothing generated exists between sessions; profiles are
   injected by `agentstack run` / `session start` and reverted on exit.
   `git status` stays silent.
-- **Zero files** — `agentstack connect` registers the gateway once per
+- **Zero files** — `agentstack gateway connect` registers the gateway once per
   harness; every **trusted** repo then brings its own servers through
   `agentstack mcp --auto-project`, with a tool firewall and call audit log
   included. `agentstack_lease_open(profile)` selects a process-local profile
@@ -422,7 +422,7 @@ Details and trade-offs: [feature reference → three modes](docs/reference.md#wh
   app's config the source of truth: when the app rewrites its own entry (a
   self-update, say), `apply` refreshes the manifest and fans the fresh values
   out to every other CLI — instead of reverting the app.
-- **Usage insight** — `agentstack analyze` reports what you actually call (from
+- **Usage insight** — `agentstack report calls` reports what you actually call (from
   the runtime audit log) and flags library capabilities you installed but never
   use, so pruning is data-driven. `--transcripts` adds cross-harness reach from
   local Claude Code / Codex session logs — sessions, token totals, top tools;

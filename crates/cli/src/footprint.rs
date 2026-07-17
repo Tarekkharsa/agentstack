@@ -6,7 +6,7 @@
 //! Measurement goes through the gateway (so HTTP and stdio servers both work)
 //! and is cached in `~/.agentstack/footprint.json`; offline commands — `stats`,
 //! `explain`, the dashboard — read the cache and never spawn or connect.
-//! Measure with `agentstack stats --live`.
+//! Measure with `agentstack report usage --live`.
 //!
 //! Token counts are the standard ~4-chars-per-token heuristic over the
 //! serialized tool JSON — a ranking signal, not an exact bill. The namespaced

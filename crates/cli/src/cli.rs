@@ -1,5 +1,7 @@
-//! Command-line surface (clap derive). Phase 0 ships the read-only commands:
-//! `apply` (dry-run by default), `diff`, and `adapters`.
+//! Command-line surface (clap derive). The visible set is the everyday loop
+//! (setup/init/add/search/apply/use/run/doctor/report/trust/guard/secret/
+//! dashboard/instructions); everything else is hidden-but-functional and
+//! cataloged in the `after_help` map below.
 
 use std::path::PathBuf;
 
@@ -18,17 +20,17 @@ use crate::scope::Scope;
     after_help = "\
 Start here:
   agentstack                     orientation + the one next step for this directory
-  agentstack setup               guided one-command setup: import, preview, apply
-  init → bootstrap → apply                       the same steps, run individually
+  agentstack setup               guided one-command setup: import, preview, apply, activate
+  init → apply → use                             the same steps, run individually
 
 The list above is the everyday surface. Everything else is grouped below —
 run `agentstack <command> --help` for any of them:
 
-  Capabilities & library   remove · install · update · lock · upgrade · lib · consolidate · adopt
-  Activate & run           use · session · run · runs · kill · hook
-  Zero-files bridge        connect · trust · disconnect · mcp · codemode
-  Inspect & tune           diff · explain · audit · analyze · proxy · stats · restore · secret · settings
-  Share & extend           export · import · pack · plugins · adapters · self"
+  Capabilities & library   remove · install · lock · lib · consolidate · adopt
+  Activate & run           session · kill · hook
+  Zero-files bridge        gateway · mcp · codemode
+  Inspect & tune           diff · explain · audit · optimize · proxy · restore · settings · sign · verify
+  Share & extend           export · import · plugins · adapters · self"
 )]
 pub struct Cli {
     /// Project or manifest directory (prefers .agentstack/agentstack.toml).
@@ -66,9 +68,6 @@ pub enum Command {
     /// Search the capability catalog (and mark what's already added).
     Search(SearchArgs),
 
-    /// Guided setup: install skills, check secrets, preview/apply, then doctor.
-    Bootstrap(BootstrapArgs),
-
     /// Render the manifest into each target's native config.
     ///
     /// Shows the diff first. In a terminal, asks before writing; pass `--write`
@@ -95,21 +94,14 @@ pub enum Command {
     #[command(hide = true)]
     Install(InstallArgs),
 
-    /// Re-resolve git skills to their latest and rewrite the lockfile.
-    #[command(hide = true)]
-    Update(UpdateArgs),
-
     /// Resolve each profile's skill + server refs (library-aware) and pin them
     /// in `agentstack.lock` — no configs rendered, no skills materialized. The
     /// lock-only counterpart of `use <profile> --write`, for clean-at-rest
-    /// repos that keep no generated files.
+    /// repos that keep no generated files. `--update` re-resolves git skills
+    /// to their latest first; `--upgrade` re-resolves an installed vendor pack
+    /// and applies its changes.
     #[command(hide = true)]
     Lock(LockArgs),
-
-    /// Re-resolve an installed vendor pack from its recorded source and apply
-    /// any changes (server, skills, house rules), re-pinning the lockfile.
-    #[command(hide = true)]
-    Upgrade(UpgradeArgs),
 
     /// Manage the central capability library (`~/.agentstack/lib/`) that projects
     /// reference by name instead of copying files.
@@ -127,7 +119,6 @@ pub enum Command {
 
     // ── Activate & run ───────────────────────────────────────────────────
     /// Activate a profile: render its servers + materialize its skills.
-    #[command(hide = true)]
     Use(UseArgs),
 
     /// Manage ephemeral sessions: load a profile (+ optional plugin) for now,
@@ -137,27 +128,26 @@ pub enum Command {
 
     /// Launch an agent CLI as a tracked run: optionally apply a profile for its
     /// lifetime, then observe/kill it here or from the dashboard.
-    #[command(hide = true)]
     Run(RunArgs),
-
-    /// List live tracked runs (harness, pid, profile, uptime).
-    #[command(hide = true)]
-    Runs(RunsArgs),
 
     /// Kill a tracked run by id (and revert its profile if it owned one).
     #[command(hide = true)]
     Kill(KillArgs),
 
-    /// Show a sandboxed run's flight-recorder report (lifecycle, egress
-    /// decisions, and tool calls) by run id.
-    Report(ReportArgs),
+    /// Every "what happened" view in one place: a sandboxed run's flight
+    /// recorder, live tracked runs, usage analytics, and brokered-call
+    /// activity.
+    #[command(subcommand)]
+    Report(ReportCmd),
 
     /// Sign this project's agentstack.lock with a fresh ed25519 key (writes a
     /// detached agentstack.lock.sig, prints the public key to publish).
+    #[command(hide = true)]
     Sign(SignArgs),
 
     /// Verify agentstack.lock against a published ed25519 public key and its
     /// detached signature.
+    #[command(hide = true)]
     Verify(VerifyArgs),
 
     /// Print a shell hook for per-directory profile auto-activation.
@@ -173,24 +163,18 @@ pub enum Command {
     Guard(GuardArgs),
 
     // ── Zero-files bridge ────────────────────────────────────────────────
-    /// Register the agentstack gateway once, globally, in a harness's MCP
-    /// config — after that, every trusted repo brings its own servers through
-    /// `agentstack mcp --auto-project` with no per-project files (zero-files
-    /// mode made automatic). Dry-run by default.
-    #[command(hide = true)]
-    Connect(ConnectArgs),
+    /// The zero-files gateway: register it once per harness (`connect`) and
+    /// every trusted repo brings its own servers through `agentstack mcp
+    /// --auto-project` with no per-project files.
+    #[command(subcommand, hide = true)]
+    Gateway(GatewayCmd),
 
     /// Trust a project's manifest for the zero-files bridge (direnv-style).
     /// Until trusted, an auto-discovered project gets control-plane tools only:
     /// none of its servers are spawned or contacted, no secrets are resolved.
     /// Trust pins the content digest of the manifest layers AND the lockfile —
     /// editing either (a `git pull`, an `agentstack lock`) requires re-trusting.
-    #[command(hide = true)]
     Trust(TrustArgs),
-
-    /// Remove the agentstack gateway entry from a harness's global MCP config.
-    #[command(hide = true)]
-    Disconnect(DisconnectArgs),
 
     /// Run agentstack as an MCP server over stdio (for an agent to call).
     #[command(hide = true)]
@@ -226,19 +210,11 @@ pub enum Command {
     #[command(hide = true)]
     Optimize(OptimizeArgs),
 
-    /// Show local usage analytics (activation counts + footprint + context cost).
-    #[command(hide = true)]
-    Stats(StatsArgs),
-
-    /// Report brokered call activity (from the audit log) and library-wide dead
-    /// weight — capabilities installed but never used. Read-only, local.
-    Analyze(AnalyzeArgs),
-
     /// Watch — and rank — what every tool, server, and skill costs your agent
     /// per turn on the wire. A localhost proxy in front of the Anthropic API
     /// that relays requests verbatim (observe only) and accounts the tools
     /// block's per-turn token cost, then ties it back to loaded-vs-called.
-    #[command(subcommand)]
+    #[command(subcommand, hide = true)]
     Proxy(ProxyCmd),
 
     /// Restore a CLI config from its pre-write backup (undo an apply).
@@ -246,7 +222,6 @@ pub enum Command {
     Restore(RestoreArgs),
 
     /// Manage secrets in the OS keychain.
-    #[command(hide = true)]
     Secret(SecretArgs),
 
     /// Edit a target's native `[settings.<target>]` entries (e.g. Claude Code
@@ -263,10 +238,6 @@ pub enum Command {
     /// Import an encrypted bundle on a new machine.
     #[command(hide = true)]
     Import(ImportArgs),
-
-    /// Author a publishable pack (a git repo with a pack.toml).
-    #[command(subcommand, hide = true)]
-    Pack(PackCmd),
 
     /// Manage AgentStack plugin recipes and generated native marketplaces.
     #[command(hide = true)]
@@ -318,7 +289,7 @@ pub struct McpArgs {
     /// cwd: MCP client roots → cwd walk-up → $AGENTSTACK_MANIFEST_DIR → none.
     /// Auto-discovered projects are trust-gated (`agentstack trust`): an
     /// untrusted manifest exposes control-plane tools only. This is the flag
-    /// `agentstack connect` registers.
+    /// `agentstack gateway connect` registers.
     #[arg(long)]
     pub auto_project: bool,
 
@@ -417,6 +388,42 @@ pub struct ReportArgs {
     pub json: bool,
 }
 
+/// One front door for every "what happened" view. The subcommands keep their
+/// original implementations; only the entry point moved here.
+#[derive(Subcommand, Debug)]
+pub enum ReportCmd {
+    /// Show a sandboxed run's flight-recorder report (lifecycle, egress
+    /// decisions, and tool calls) by run id.
+    Run(ReportArgs),
+
+    /// List live tracked runs (harness, pid, profile, uptime).
+    Runs(RunsArgs),
+
+    /// Show local usage analytics (activation counts + footprint + context
+    /// cost).
+    Usage(StatsArgs),
+
+    /// Report brokered call activity (from the audit log) and library-wide
+    /// dead weight — capabilities installed but never used. Read-only, local.
+    Calls(AnalyzeArgs),
+}
+
+/// The zero-files gateway lifecycle: `connect` registers it in a harness's
+/// global MCP config, `disconnect` removes it. The gateway process itself is
+/// the (machine-invoked) `agentstack mcp` — that name is written into harness
+/// configs, so it stays a top-level command.
+#[derive(Subcommand, Debug)]
+pub enum GatewayCmd {
+    /// Register the agentstack gateway once, globally, in a harness's MCP
+    /// config — after that, every trusted repo brings its own servers through
+    /// `agentstack mcp --auto-project` with no per-project files. Dry-run by
+    /// default.
+    Connect(ConnectArgs),
+
+    /// Remove the agentstack gateway entry from a harness's global MCP config.
+    Disconnect(DisconnectArgs),
+}
+
 #[derive(Args, Debug)]
 pub struct SignArgs {
     /// Print only the public-key line (for scripting).
@@ -499,7 +506,7 @@ pub struct RunArgs {
 
 #[derive(Args, Debug)]
 pub struct KillArgs {
-    /// Run id (from `agentstack runs`).
+    /// Run id (from `agentstack report runs`).
     pub id: String,
 
     /// Send SIGKILL immediately instead of SIGTERM-then-escalate.
@@ -581,11 +588,38 @@ pub struct UpdateArgs {
     pub name: Option<String>,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Default)]
 pub struct LockArgs {
     /// Only pin this profile's refs (default: every profile in the manifest).
     #[arg(long, value_name = "NAME")]
     pub profile: Option<String>,
+
+    /// Re-resolve git skills to their latest and rewrite the lockfile — all
+    /// git skills, or just NAME.
+    #[arg(long, value_name = "NAME", num_args = 0..=1)]
+    pub update: Option<Option<String>>,
+
+    /// Re-resolve an installed vendor pack from its recorded source and apply
+    /// any changes (server, skills, house rules), re-pinning the lockfile.
+    /// Names one pack; combine with --all for every installed pack.
+    #[arg(long, value_name = "PACK", num_args = 0..=1)]
+    pub upgrade: Option<Option<String>>,
+
+    /// With --upgrade: re-resolve every installed pack instead of one.
+    #[arg(long, requires = "upgrade")]
+    pub all: bool,
+
+    /// With --upgrade: accept the vendor's house-rule instructions on upgrade.
+    #[arg(long, requires = "upgrade")]
+    pub with_instructions: bool,
+
+    /// With --upgrade: accept all changes without the confirmation gate (CI).
+    #[arg(long, requires = "upgrade")]
+    pub yes: bool,
+
+    /// With --upgrade: write the change (else dry-run / diff preview).
+    #[arg(long, requires = "upgrade")]
+    pub write: bool,
 }
 
 #[derive(Args, Debug)]
@@ -619,33 +653,9 @@ pub struct UpgradeArgs {
     pub write: bool,
 }
 
-#[derive(Args, Debug)]
-pub struct BootstrapArgs {
-    /// Only act on these target ids (repeatable). Defaults to [targets].default.
-    #[arg(long = "target", value_name = "ID")]
-    pub targets: Vec<String>,
-
-    /// Bootstrap only the servers in this profile.
-    #[arg(long, value_name = "NAME")]
-    pub profile: Option<String>,
-
-    /// Which scope to write: global (~) or project (repo). Defaults to global.
-    #[arg(long, value_enum)]
-    pub scope: Option<Scope>,
-
-    /// Check the lockfile without updating it during the install step.
-    #[arg(long)]
-    pub locked: bool,
-
-    /// Actually install/apply. Without this flag, bootstrap is a read-only
-    /// preflight plus diff preview.
-    #[arg(long)]
-    pub write: bool,
-}
-
 /// `setup` is the interactive newcomer wizard; it deliberately has no `--write`
 /// (it confirms in a terminal and stays dry-run everywhere else). Scripts use
-/// `init` + `bootstrap --write`.
+/// `init` + `apply --write` + `use <profile> --write`.
 #[derive(Args, Debug)]
 pub struct SetupArgs {
     /// Only configure these target ids (repeatable). Defaults to [targets].default.
@@ -1013,6 +1023,10 @@ pub enum LibKind {
     /// Sync the central library across machines as a git repo (commit local
     /// changes, pull, push). Secrets never travel — server defs are `${REF}`.
     Sync(LibSyncArgs),
+    /// Scaffold a publishable pack (pack.toml + example skill) in the current
+    /// directory. Publish by pushing the repo and tagging a version (e.g.
+    /// v0.1.0); install with `agentstack add from git:<host>/<repo>@<tag>`.
+    PackInit(PackInitArgs),
 }
 
 #[derive(Args, Debug)]
@@ -1239,14 +1253,6 @@ pub struct AuditArgs {
     /// With --calls: only entries from the last N days.
     #[arg(long, value_name = "DAYS")]
     pub since: Option<u64>,
-}
-
-#[derive(clap::Subcommand, Debug)]
-pub enum PackCmd {
-    /// Scaffold a pack.toml + example skill in the current directory. Publish
-    /// by pushing the repo and tagging a version (e.g. v0.1.0); install with
-    /// `agentstack add from git:<host>/<repo>@<tag>`.
-    Init(PackInitArgs),
 }
 
 #[derive(Args, Debug)]

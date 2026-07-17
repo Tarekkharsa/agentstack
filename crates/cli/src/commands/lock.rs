@@ -24,6 +24,33 @@ use crate::resolve::{ResolveMode, ResolvedServer, ResolvedSkill};
 
 use super::use_profile::{record_lock, resolve_active_skills};
 
+/// The one lockfile verb: plain `lock` pins, `--update` re-resolves git skills
+/// first (the old `update` command), `--upgrade` re-resolves an installed
+/// vendor pack (the old `upgrade` command). The absorbed implementations are
+/// unchanged — this only routes.
+pub fn dispatch(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    if let Some(name) = &args.update {
+        return super::install::run_update(
+            &crate::cli::UpdateArgs { name: name.clone() },
+            manifest_dir,
+        );
+    }
+    if args.upgrade.is_some() {
+        let name = args.upgrade.clone().flatten();
+        return super::upgrade::run(
+            &crate::cli::UpgradeArgs {
+                name,
+                all: args.all,
+                with_instructions: args.with_instructions,
+                yes: args.yes,
+                write: args.write,
+            },
+            manifest_dir,
+        );
+    }
+    run(args, manifest_dir)
+}
+
 pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;

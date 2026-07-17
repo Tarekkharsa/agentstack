@@ -503,12 +503,12 @@
       <h2>Import what's already there</h2>
       <p class="muted">
         <code>agentstack setup</code> runs the guided
-        <code>init → bootstrap → apply → doctor</code> loop interactively. It
+        <code>init → apply → use → doctor</code> loop interactively. It
         detects your installed CLIs, imports their existing configuration into
         one portable manifest, lifts inline secrets into references, and
         previews every write before making it. Prefer the pieces individually?
-        The same flow is <code>agentstack init</code> then
-        <code>agentstack bootstrap</code>.
+        The same flow is <code>agentstack init</code>, then
+        <code>agentstack apply</code>, then <code>agentstack use &lt;profile&gt; --write</code>.
       </p>
       <div class="copywrap">
         <pre><code>agentstack setup</code></pre>
@@ -516,12 +516,12 @@
       </div>
       <p class="expect">You should see</p>
       <div class="term">
-        <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>init → bootstrap</b></div>
+        <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>init → apply</b></div>
         <pre><code><span class="p">$</span> agentstack init
 <span class="c">  🔍 Detected 6 CLIs: Claude Code · Codex · Copilot · Gemini · OpenCode · Pi</span>
 <span class="c">  📥 Imported 1 MCP server from existing configs</span>
 <span class="ok">  ✅ Wrote .agentstack/agentstack.toml</span>
-<span class="p">$</span> agentstack bootstrap
+<span class="p">$</span> agentstack apply
 <span class="ok">  ✓</span><span class="c"> manifest validates · 6 adapters installed · no missing secrets</span></code></pre>
       </div>
     </li>
@@ -623,9 +623,9 @@
         <code>--write</code> is a dry run that shows the exact config diff first.
       </p>
       <div class="copywrap">
-        <pre><code>agentstack connect --all            # dry run: shows what would change
-agentstack connect --all --write    # write it into each harness's global MCP config</code></pre>
-        <button class="copybtn" data-copy="agentstack connect --all --write">copy</button>
+        <pre><code>agentstack gateway connect --all            # dry run: shows what would change
+agentstack gateway connect --all --write    # write it into each harness's global MCP config</code></pre>
+        <button class="copybtn" data-copy="agentstack gateway connect --all --write">copy</button>
       </div>
       <p class="small muted">
         Undo any time with <code>agentstack disconnect</code>; verify with
@@ -702,7 +702,7 @@ agentstack connect --all --write    # write it into each harness's global MCP co
         write or run is blocked rather than emitting a placeholder into live config.
       </p>
       <div class="copywrap">
-        <pre><code>agentstack bootstrap            # names any missing secret
+        <pre><code>agentstack doctor               # names any missing secret
 agentstack secret set GH_PAT    # store it in the OS keychain</code></pre>
         <button class="copybtn" data-copy="agentstack secret set GH_PAT">copy</button>
       </div>

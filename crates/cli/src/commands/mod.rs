@@ -6,7 +6,6 @@ pub mod adopt;
 pub mod analyze;
 pub mod apply;
 pub mod audit;
-pub mod bootstrap;
 pub mod bundle;
 pub mod codemode;
 pub mod connect;

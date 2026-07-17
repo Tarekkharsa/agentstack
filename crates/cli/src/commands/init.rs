@@ -366,7 +366,7 @@ version = 1
 #   agentstack search <query>          find servers/skills in the catalog
 #   agentstack add from <id> --write   add one to this manifest
 #   agentstack apply                   preview what renders into each CLI
-#   agentstack connect --all --write   or skip rendered files entirely:
+#   agentstack gateway connect --all --write   or skip rendered files entirely:
 #   agentstack trust .                 serve this repo through the gateway
 ";
         if args.dry_run {
@@ -500,7 +500,7 @@ version = 1
     }
     if show_next {
         println!(
-            "\nNext: review the manifest, then `agentstack bootstrap` for the guided preflight."
+            "\nNext: review the manifest, then `agentstack setup` for the guided path (or `agentstack apply` to preview changes)."
         );
     }
     Ok(())

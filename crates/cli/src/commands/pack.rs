@@ -1,4 +1,4 @@
-//! `agentstack pack init` — scaffold a publishable pack: a git repo with a
+//! `agentstack lib pack-init` — scaffold a publishable pack: a git repo with a
 //! `pack.toml` describing its members (server + skills + instructions).
 //! Publishing is just `git push` + a version tag; installing is
 //! `agentstack add from git:<host>/<repo>@<tag>`.
@@ -9,15 +9,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
 
-use crate::cli::PackCmd;
-
-pub fn run(cmd: &PackCmd) -> Result<()> {
-    match cmd {
-        PackCmd::Init(args) => init(args.name.as_deref()),
-    }
-}
-
-fn init(name: Option<&str>) -> Result<()> {
+pub fn init(name: Option<&str>) -> Result<()> {
     let cwd = std::env::current_dir().context("reading current dir")?;
     let name = match name {
         Some(n) => n.to_string(),

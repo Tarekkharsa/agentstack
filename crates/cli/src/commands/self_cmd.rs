@@ -56,7 +56,7 @@ fn run_link(args: &SelfLinkArgs) -> Result<()> {
         println!("Add to PATH:  export PATH=\"{}:$PATH\"", dir.display());
     }
     println!(
-        "Harness configs registered with `agentstack connect` use this stable \
+        "Harness configs registered with `agentstack gateway connect` use this stable \
          path on their next `connect --write`."
     );
     Ok(())

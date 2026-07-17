@@ -65,7 +65,7 @@ line "2. The generated manifest — one server, portable across every CLI"
 cat "$proj/.agentstack/agentstack.toml"
 
 line "3. bootstrap — preflight: validate, list adapters, preview the plan"
-as bootstrap
+as apply --write
 
 line "4. doctor --ci — the trust gate (must exit 0 on a clean manifest)"
 if as doctor --ci; then

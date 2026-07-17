@@ -1,4 +1,4 @@
-//! `agentstack analyze` — read-only usage analytics that complements `stats`.
+//! `agentstack report calls` — read-only usage analytics that complements `stats`.
 //!
 //! `stats` is the per-project inventory (activation counts + context-cost
 //! footprint). `analyze` adds the two things it doesn't show: runtime **call

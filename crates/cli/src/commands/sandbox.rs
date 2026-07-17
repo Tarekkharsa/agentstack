@@ -16,7 +16,7 @@
 //! proxy (one identity for the sandbox) from the effective compiled policy,
 //! points the container's `HTTPS_PROXY` at it,
 //! and records the run's lifecycle + every egress decision to the run's
-//! flight-recorder log (readable with `agentstack report <run>`). The proxy is
+//! flight-recorder log (readable with `agentstack report run <id>`). The proxy is
 //! a CONNECT forward proxy, so it gates the container's HTTPS egress (the model
 //! API, HTTP MCP servers); an allowed host still reaches out — the honest claim
 //! is *unapproved egress is blocked*, not that exfiltration is impossible.
@@ -101,7 +101,7 @@ pub fn build_sandbox_spec(
 
 /// How strongly a run's effective policy is actually *enforced* at runtime, as
 /// opposed to merely declared. This is the one honest label we surface wherever
-/// a run is described (the start banner, `--plan`, and `agentstack report`), so
+/// a run is described (the start banner, `--plan`, and `agentstack report run`), so
 /// nobody mistakes advisory host-mode policy for enforced sandbox policy.
 ///
 /// (This is a plain C-like enum — the Rust analogue of a TypeScript string-union
@@ -167,7 +167,7 @@ impl std::fmt::Display for Posture {
 
 /// Read the enforcement posture recorded for a completed run, if any. The CLI
 /// writes a one-word `posture` file beside the run's `events.jsonl` when a
-/// sandbox starts (see [`execute_plan`]); `agentstack report` reads it back to
+/// sandbox starts (see [`execute_plan`]); `agentstack report run` reads it back to
 /// label the run. `None` when the run predates posture recording, was a host
 /// run (host runs aren't recorded at all), or the file is unreadable.
 ///
@@ -370,7 +370,7 @@ impl ExecutionPlan {
             let _ = writeln!(
                 s,
                 "  {} lockdown: no host route, no internet — the container's only \
-                 peer is the egress sidecar. Review it with `agentstack report {}`.",
+                 peer is the egress sidecar. Review it with `agentstack report run {}`.",
                 "🔒".cyan(),
                 self.run_id
             );
@@ -378,7 +378,7 @@ impl ExecutionPlan {
             let _ = writeln!(
                 s,
                 "  {} egress is routed through the AgentStack proxy; \
-                 review it after with `agentstack report {}`.",
+                 review it after with `agentstack report run {}`.",
                 "🛡".cyan(),
                 self.run_id
             );
@@ -1079,7 +1079,7 @@ fn execute_plan(plan: ExecutionPlan) -> Result<()> {
         );
     }
     // Record the run's enforcement posture beside its event log so
-    // `agentstack report` can label it honestly later. Best-effort (same
+    // `agentstack report run` can label it honestly later. Best-effort (same
     // contract as the recorder itself): a posture-write hiccup must never fail
     // the run it describes. Written to the exact dir `RunLog::create` prepared,
     // so it lands in the run-private 0700 directory.

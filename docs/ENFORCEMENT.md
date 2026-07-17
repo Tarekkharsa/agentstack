@@ -306,7 +306,7 @@ Docker container behind the egress proxy.
   argument *digest* only — never values) and every **secret reference** resolved
   (`SecretAccess`: ref *name* only). The gateway mirrors these into the run's own
   `events.jsonl` because it inherits the run id (`Gateway::from_plan`), so
-  `agentstack report <run>` reads a self-contained record without the
+  `agentstack report run <id>` reads a self-contained record without the
   cross-project audit log. Still missing from a run's log: trust-store mutations
   (below) and cost/tokens. A run that isn't gateway-routed (untrusted bundle, or
   no servers) records only lifecycle + egress. (`crates/cli/src/gateway.rs`
@@ -397,7 +397,7 @@ feature and has no host fallback.
 | Direct egress | **enforced** | Internal Docker network has only the egress sidecar as peer. Its ordinary proxy requires an undisclosed separate token; the fixed raw relay reaches only the host execution relay. The host relay binds the narrowest interface the sidecar can still reach via `host.docker.internal`: the private, non-routable docker0 bridge gateway on a native Linux daemon, or the host loopback on Docker Desktop — never a LAN-facing interface. It stays reachable from Docker containers on the host (not from other LAN hosts); the residual `0.0.0.0` wildcard bind applies only as a fallback when a Linux host cannot bind that gateway (Docker-Desktop-on-Linux, whose gateway lives in the VM). Its random token, exact grant, bounded protocol, and execution-scoped lifetime are the control. No payload/content inspection occurs on allowed tool results. |
 | Process isolation | **enforced** | Non-root uid/gid 65532, capabilities dropped, `no-new-privileges`, 128 MiB memory, one CPU, 32 PIDs. Docker's configured/default seccomp policy, Docker itself, and the host kernel remain trusted computing base; AgentStack does not yet ship a custom executor seccomp profile. |
 | Limits | **enforced** | Machine-owned timeout, output, and call defaults are configurable only below compiled hard ceilings; requests may only narrow them. Aggregate stdout/stderr and separate result/source/input bytes, granted-tool count, and relay call count are bounded. A tool call already dispatched upstream cannot be revoked atomically. |
-| Recording | **enforced** | Run log creation is required. Events store digests and metadata, never source/input/result/secret values; tool calls carry execution IDs and render beneath the execution in `agentstack report`. Recording is evidence, not tamper-proof remote attestation. |
+| Recording | **enforced** | Run log creation is required. Events store digests and metadata, never source/input/result/secret values; tool calls carry execution IDs and render beneath the execution in `agentstack report run`. Recording is evidence, not tamper-proof remote attestation. |
 | Runtime supply chain | **partial** | Node image is pinned by repository digest. AgentStack does not yet publish an executor-specific SBOM, attestation, or independent scan, so the feature remains experimental. |
 
 ## See also

@@ -90,10 +90,10 @@ while task = todo.pop():
 
 ## 5 — Govern and account
 
-- Register the gateway (`agentstack connect`) and let sandboxed agents reach
+- Register the gateway (`agentstack gateway connect`) and let sandboxed agents reach
   MCP through it: the manifest's `[policy]` firewalls every call and
   `~/.agentstack/audit/calls.jsonl` records tool · outcome · latency per run.
-- After a run, `agentstack analyze` shows call activity and dead weight —
+- After a run, `agentstack report calls` shows call activity and dead weight —
   which roles used what, and what you provisioned for nothing.
 
 ## Rules

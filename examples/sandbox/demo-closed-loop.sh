@@ -128,7 +128,7 @@ line "6. Receipts: every brokered call is audited — digests, never values"
 as audit --calls
 
 line "7. What does the server cost? Context-cost lens, measured live"
-as stats --live
+as report usage --live
 
 line "8. The vendor ships v1.1.0 — one command picks it up, previews, re-pins"
 sed -i '' 's/unbounded scans/unbounded scans and lock contention/' \

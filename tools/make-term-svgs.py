@@ -209,14 +209,14 @@ def render(title, rows, out_path):
 # demo-lockdown.sh, demo-closed-loop.sh. Keep lines <= ~92 chars.
 
 FIRSTRUN = (
-    "init → bootstrap → apply → every CLI in sync",
+    "init → apply → every CLI in sync",
     [
         cmd("agentstack init"),
         out(("c", "  🔍 Detected 6 CLIs: Claude Code · Codex · Copilot · Gemini · OpenCode · Pi")),
         out(("c", "  📥 Imported 1 MCP server from existing configs")),
         out(("ok", "  ✅ Wrote .agentstack/agentstack.toml"), d=0.7),
         gap(),
-        cmd("agentstack bootstrap"),
+        cmd("agentstack apply"),
         out(("ok", "  ✓"), ("c", " manifest validates · 6 adapters installed · no missing secrets"), d=0.7),
         gap(),
         cmd("agentstack apply --write"),
@@ -264,7 +264,7 @@ LOCKDOWN = (
         cmd("agentstack run --lockdown shtest -- -c 'curl https://blocked.invalid/steal'"),
         out(("no", "  ✗ refused at the sidecar"), ("c", " — and recorded"), d=0.8),
         gap(),
-        cmd("agentstack report r-0859dcee73"),
+        cmd("agentstack report run r-0859dcee73"),
         out(("c", "  Posture   "), ("am", "LOCKDOWN / ENFORCED · NO DIRECT ROUTE")),
         out(("no", "    ✗ shtest → blocked.invalid"), ("c", '   denied by rule "!blocked.invalid" (machine policy)')),
     ],
@@ -283,7 +283,7 @@ CLOSED_LOOP = (
         cmd("agentstack audit --calls"),
         out(("c", "  2 calls · 2 tools · "), ("no", "1 denied by policy"), ("c", " — digests, never values"), d=0.9),
         gap(),
-        cmd("agentstack upgrade acme --yes --write", "   # vendor ships v1.1.0"),
+        cmd("agentstack lock --upgrade acme --yes --write", "   # vendor ships v1.1.0"),
         out(("ok", "  ✓ upgraded pack 'acme'"), ("c", " — previewed, re-pinned @v1.1.0")),
     ],
 )

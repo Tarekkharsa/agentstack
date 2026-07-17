@@ -600,7 +600,7 @@ url = "https://api.githubcopilot.com/mcp/"
 headers = { Authorization = "Bearer ${GH_PAT}" } <span class="cm"># a reference, never the value</span></code></pre>
     <div class="copywrap">
       <pre><code>agentstack secret set GH_PAT           <span class="cm"># stored in the OS keychain, not a file</span>
-agentstack bootstrap                   <span class="cm"># flags a referenced secret that's missing</span></code></pre>
+agentstack doctor                      <span class="cm"># flags a referenced secret that's missing</span></code></pre>
       <button class="copybtn" data-copy="agentstack secret set GH_PAT">copy</button>
     </div>
     <p class="result">Result</p>
@@ -688,7 +688,7 @@ path = "./house-rules.md"
     </div>
     <div class="copywrap">
       <pre><code>agentstack init         <span class="cm"># reverse-engineer a manifest from configs you already have</span>
-agentstack bootstrap    <span class="cm"># installed CLIs? missing skills/secrets? pending diff?</span>
+agentstack doctor       <span class="cm"># installed CLIs? missing secrets? drift? exact fixes</span>
 agentstack diff         <span class="cm"># read-only: exactly what would change</span>
 agentstack apply        <span class="cm"># preview only</span>
 agentstack apply --write <span class="cm"># after review: render the native files</span>
@@ -835,7 +835,7 @@ forbid = ["network-broker"]                    <span class="cm"># never allow th
       <p class="viz-note"><b>re-gates →</b> edit the manifest or lock and it drops back to <b>inert</b> until you review again.</p>
     </div>
     <div class="copywrap">
-      <pre><code>agentstack connect --all --write       <span class="cm"># register the gateway with your harnesses (once)</span>
+      <pre><code>agentstack gateway connect --all --write       <span class="cm"># register the gateway with your harnesses (once)</span>
 
 git clone &lt;some-repo&gt; &amp;&amp; cd &lt;some-repo&gt;
 agentstack mcp --auto-project          <span class="cm"># an agent asks what's here → nothing (untrusted)</span>
@@ -984,8 +984,8 @@ max_output_bytes = 131072</code></pre>
     <div class="copywrap">
       <pre><code>agentstack audit --calls --since 7            <span class="cm"># recent brokered calls: tool · outcome · latency</span>
 agentstack report &lt;run-id&gt;                    <span class="cm"># per-run tree, incl. sandbox egress decisions</span>
-agentstack analyze                            <span class="cm"># what you actually call; flags installed-but-unused</span>
-agentstack analyze --transcripts              <span class="cm"># + cross-harness reach from local session logs</span></code></pre>
+agentstack report calls                            <span class="cm"># what you actually call; flags installed-but-unused</span>
+agentstack report calls --transcripts              <span class="cm"># + cross-harness reach from local session logs</span></code></pre>
       <button class="copybtn" data-copy="agentstack report &lt;run-id&gt;">copy</button>
     </div>
 

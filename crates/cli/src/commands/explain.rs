@@ -275,7 +275,7 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
         None => kv(
             &mut o,
             "Context cost",
-            "unmeasured — run `agentstack stats --live`",
+            "unmeasured — run `agentstack report usage --live`",
         ),
     }
 

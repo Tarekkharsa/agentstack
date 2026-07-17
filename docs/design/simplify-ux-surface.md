@@ -20,7 +20,7 @@ every doc, test, and demo script referencing an old name is updated in the same 
 
 ---
 
-## Item 1 — `setup` finishes the job
+## Item 1 — `setup` finishes the job ✅ (implemented 2026-07-17)
 
 ### Key facts from exploration
 
@@ -86,36 +86,107 @@ every doc, test, and demo script referencing an old name is updated in the same 
 
 ---
 
-## Item 2 — collapse the verb families
+## Item 2 — collapse the verb families ✅ (implemented 2026-07-17; visible surface now 14 commands)
 
-*(Blast-radius exploration still in flight — final references list to be folded in
-before implementation of this item. Scope as planned:)*
+### Key facts from exploration (blast radius verified)
 
-- **`bootstrap` deleted** as a top-level command; its `preflight()` function stays
-  (setup already calls it). README/CI examples move to `setup` and `doctor --ci`.
-- **`update` + `upgrade` folded into `lock`**: `lock` (pin, as today),
-  `lock --update [name]` (re-resolve git skills = today's `update`),
-  `lock --upgrade [pack]` (re-resolve vendor packs = today's `upgrade`).
-  Implementations move, logic unchanged.
-- **Reporting under one umbrella**: `runs`, `stats`, `analyze`, `report <run-id>`
-  become `agentstack report runs|usage|calls|run <id>`. `audit` keeps its
-  security-scan role (different job); `proxy report` stays under `proxy` (tied to
-  the proxy lifecycle). `kill` stays (paired with `runs`; possibly `report runs
-  --kill <id>` NOT done — kill is an action, not a report).
-- **Packaging**: `pack init` moves to `lib pack-init` (or stays hidden top-level if
-  the explorer finds external references); `plugins` unchanged this pass (its own
-  consolidation is a later, larger design).
-- **Zero-files bridge grouped**: `connect`/`disconnect`/`mcp` become
-  `agentstack gateway connect|disconnect|serve`. `trust` stays a visible top-level
-  command — it's load-bearing in all security docs and is conceptually about the
-  project, not the gateway.
-- Update `after_help` grouping text, `docs/reference.md` "All commands"
-  (docs_commands.rs enforces presence), README table, and any demo scripts/examples
-  the explorer reports.
+- **No alias mechanism exists** in the codebase (zero `visible_alias`/`alias` hits);
+  the only progressive-disclosure pattern is `#[command(hide = true)]`
+  (cli.rs:44-51). Dispatch matches by enum variant, so regrouping is display+enum
+  work, not behavior work.
+- `docs_commands.rs` is **one-directional and substring-weak**: stale docs naming a
+  deleted command will NOT fail CI. The docs sweep must be done by hand.
+- `after_help` (cli.rs:18-31) lists 27 commands in 5 groups and already has a bug:
+  `analyze` and `proxy` are not hidden, so `--help` prints them twice.
+- **Critical compat finding**: `connect::bridge_server` (connect.rs:250) hardcodes
+  `args = ["mcp", ...]` and writes it into every harness config on disk
+  (`~/.claude.json`, Codex config); `locked.rs:503-513` reuses the same helpers for
+  `run --locked` grants; `mcp_lease.rs`, `doctor_ci_gate.rs` fixture,
+  `trust-gate-demo.sh`, and the lease example all invoke literal `agentstack mcp`
+  (~70 references). **Renaming `mcp` breaks every existing installation.**
+- Dashboard seams that must keep working: `analyze::collect` + `stats::collect`
+  (dashboard/snapshot.rs:596-598), `crate::runs::list/kill` (server.rs:165,216),
+  `crate::proxy::aggregate` (snapshot.rs:97), `connect::has_bridge_entry`
+  (snapshot.rs:575, doctor.rs:233). All are module functions, untouched by CLI
+  regrouping.
+- `upgrade.rs` (704 lines) imports internals from `add`/`remove`/`install`;
+  `update` has no file of its own (`install::run_update`); `lock.rs` resolves via
+  `use_profile`, not `install` — three commands, one `Lock` data structure,
+  implementations stay where they are.
+- `pack.rs` is 92 self-contained lines (scaffold only, one sub-verb, 3 references
+  repo-wide, no shared code with `lib`).
+
+### Change
+
+**Files: `crates/cli/src/cli.rs`, `crates/cli/src/main.rs`, small moves in
+`crates/cli/src/commands/{bootstrap,setup,init,lock,pack,lib,optimize,sandbox}.rs`,
+plus the docs/examples sweep listed below.**
+
+1. **Delete `bootstrap`** (enum variant + `bootstrap::run`); move `preflight()` into
+   `setup.rs` (its only caller). Update hint strings: init.rs:503, setup.rs:38
+   (non-interactive path now suggests `agentstack apply --write`). Docs: README
+   (3 sites), catalog skill `using-agentstack`, reference.md. Demo:
+   `examples/sandbox/demo-firstrun.sh:68` and `tools/make-term-svgs.py:219` switch
+   to the new scripted loop (`init → apply --write → use`), regenerate
+   `docs/firstrun.svg`.
+2. **`lock` absorbs `update` + `upgrade`**: delete both enum variants; `LockArgs`
+   gains `--update [NAME]` (dispatches to existing `install::run_update`) and
+   `--upgrade <NAME>|--all` plus the pass-through flags upgrade needs
+   (`--yes`, `--with-instructions`, `--write`), dispatching to existing
+   `upgrade::run`. `install.rs`/`upgrade.rs` implementations unchanged. Literal
+   `agentstack update`/`agentstack upgrade` have ~0 doc hits; doctor's 11
+   `agentstack lock` hints stay valid unchanged.
+3. **`report` becomes the one reporting umbrella** (visible):
+   `report run <id>` (today's `report <id>`), `report runs` (today's `runs`),
+   `report usage` (today's `stats`), `report calls` (today's `analyze`).
+   Delete top-level `Runs`/`Stats`/`Analyze` variants; `kill` stays hidden
+   top-level (it's an action, not a report). `audit` keeps its security-scan role;
+   `proxy report` stays under `proxy` (different data source, tied to proxy
+   lifecycle). Implementation files stay; only dispatch changes — dashboard seams
+   untouched. Hint-string sweep: sandbox.rs (6 sites `agentstack report <id>` →
+   `report run <id>`), optimize.rs:548 (`stats --live` → `report usage --live`),
+   explain.rs:278, proxy.rs:12, footprint.rs:9, recorder/src/lib.rs:263,
+   docs/ENFORCEMENT.md:309,400, docs/ARCHITECTURE.md:388, docs/dashboard.md:50,101,
+   README.md:425, catalog skills (analyze-usage, orchestrate-workflow,
+   using-agentstack), `examples/sandbox/demo-lockdown.sh:110`
+   (`as report "$run_id"` → `as report run "$run_id"`). Fix the duplicate
+   `analyze` rows in reference.md's All-commands list while there.
+4. **`pack init` → `lib pack-init`**: move the 92-line scaffold under `LibCmd`,
+   delete the `Pack` variant. reference.md:543 updated. (The unrelated
+   vendor-pack terminology collision is noted but out of scope.)
+5. **`gateway` groups the human-facing bridge commands**:
+   `gateway connect` / `gateway disconnect` (move `ConnectArgs`/`DisconnectArgs`
+   under a `GatewayCmd`; implementations stay in connect.rs — `locked.rs`,
+   dashboard, and doctor call module functions, not the CLI). **`mcp` stays a
+   hidden top-level command, unchanged** — it is the machine-invoked entrypoint
+   written into on-disk harness configs (like `guard check`); renaming it would
+   break every existing registration for zero UX gain. `trust` stays top-level
+   (load-bearing in all security docs; it's about the project, not the gateway).
+   Hint sweep: README:137,374, doctor.rs:244, init.rs:369, self_cmd.rs:59,
+   mcp_server.rs:215, reference.md, catalog skill orchestrate-workflow.
+6. **Rewrite `after_help`** (cli.rs:18-31) for the new surface and fix the
+   analyze/proxy double-listing. Visible command set after this change (~14):
+   setup, init, add, search, apply, use, run, doctor, report, trust, guard,
+   secret, dashboard, instructions. Everything else hidden-but-functional,
+   grouped in after_help.
+7. **Docs sweep is manual** (docs_commands.rs won't catch stale names): README
+   table + prose, docs/reference.md All-commands list and per-feature sections.
+
+### Tests
+
+- `docs_commands.rs` passes with the updated reference.md (new subcommand names
+  present).
+- Existing tests unaffected by design: `mcp_lease.rs` and the `doctor_ci_gate.rs`
+  fixture invoke `mcp`, which doesn't move; vendor-pack and upgrade tests call
+  implementation functions, not CLI names. `bootstrap.rs`'s one unit test moves
+  with `preflight` into setup.rs.
+- One new smoke test: `Cli::command().debug_assert()` already runs via clap on
+  every parse; add a test asserting the new subcommand tree parses
+  (`lock --update`, `report run <id>`, `gateway connect`, `lib pack-init`).
 
 ---
 
-## Item 3 — `doctor` progressive disclosure + README restructure
+## Item 3 — `doctor` progressive disclosure + README restructure ✅ (implemented 2026-07-17; posture section kept always-visible per its in-code security rationale)
 
 ### Key facts from exploration
 

@@ -97,7 +97,7 @@ fn inline_skill_drift_blocks_activation_until_relocked() {
 
     // Explicit acceptance: `agentstack lock` re-pins, and because the lock
     // bytes are part of the trust digest, the project re-gates automatically.
-    lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
     assert_ne!(
         fs::read_to_string(&lock_path).unwrap(),
         lock_before,
@@ -143,7 +143,7 @@ fn trust_grant_requires_a_pinned_matching_surface() {
     assert_eq!(trust::check(&proj), TrustState::Untrusted);
 
     // Pin it → trust grants.
-    lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
     trust_cmd::run(&grant_args).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 
@@ -152,7 +152,7 @@ fn trust_grant_requires_a_pinned_matching_surface() {
     let err = trust_cmd::run(&grant_args).unwrap_err().to_string();
     assert!(err.contains("drifted"), "{err}");
 
-    lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
     trust_cmd::run(&grant_args).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 }
@@ -192,7 +192,7 @@ fn trust_grant_surfaces_requested_policy() {
 
     // And granting still succeeds once the (unrelated) skill surface is pinned
     // — requested policy is reviewed, never blocking.
-    lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
     let grant_args = TrustArgs {
         path: Some(proj.clone()),
         list: false,
@@ -287,7 +287,7 @@ fn instruction_drift_blocks_apply_until_relocked() {
 
     // Accept via `agentstack lock` (zero profiles — instructions still pin),
     // which re-gates trust through the lock bytes.
-    lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Changed);
 
     // Re-trust → apply flows and the accepted content compiles.
@@ -328,7 +328,7 @@ fn machine_layer_fragments_are_exempt_from_pinning() {
     fs::write(proj.join("instructions/house.md"), "Project rule.\n").unwrap();
 
     // `agentstack lock` pins the project fragment only.
-    lock_cmd::run(&LockArgs { profile: None }, Some(&proj)).unwrap();
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
     let lock = fs::read_to_string(proj.join("agentstack.lock")).unwrap();
     assert!(lock.contains("house"), "{lock}");
     assert!(

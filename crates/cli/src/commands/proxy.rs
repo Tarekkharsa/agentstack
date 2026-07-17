@@ -9,7 +9,7 @@
 //!
 //! `proxy report` aggregates that telemetry into a ranked, per-capability view:
 //! tokens/turn, calls, and a loaded-vs-called hint — the ground-truth companion
-//! to the static estimate in `agentstack stats`.
+//! to the static estimate in `agentstack report usage`.
 
 use std::path::Path;
 

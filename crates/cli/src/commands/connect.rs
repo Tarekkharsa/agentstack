@@ -1,4 +1,4 @@
-//! `agentstack connect` / `disconnect` — register the zero-files bridge.
+//! `agentstack gateway connect` / `disconnect` — register the zero-files bridge.
 //!
 //! One tiny global entry per harness — `agentstack mcp --auto-project` — and
 //! every trusted repo brings its own servers, skills-over-MCP, firewall, and

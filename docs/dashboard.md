@@ -47,7 +47,7 @@ never returns them.
 **Servers** tab: the cross-harness matrix. Toggle any server per CLI, per
 scope (global/project switch at the top). The **context** column shows what
 each server's tool list costs in context-window tokens per session (measured
-by `agentstack stats --live`, cached) — click the header to sort by cost.
+by `agentstack report usage --live`, cached) — click the header to sort by cost.
 
 ## 5. Apply
 
@@ -98,7 +98,7 @@ empty state pointing at `agentstack proxy start`.
 - **Analyze** — runtime call activity from the gateway audit log (ok / error /
   denied, top servers and tools) plus library dead weight: capabilities carried
   but never activated or called anywhere.
-- **Stats** — the per-capability table from `agentstack stats`: activations,
+- **Stats** — the per-capability table from `agentstack report usage`: activations,
   measured context cost, how many slots each is live in, and dead-weight flags.
 
 ---

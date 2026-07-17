@@ -46,5 +46,5 @@ beyond a trivial count — don't hand-roll it in a shell one-liner.
 ## Note
 
 agentstack records some of this natively (activation counts, per-server context
-cost). If `agentstack analyze` exists in your version, prefer it — it joins
+cost). If `agentstack report calls` exists in your version, prefer it — it joins
 usage to the library for you. This skill is the portable, no-code version.

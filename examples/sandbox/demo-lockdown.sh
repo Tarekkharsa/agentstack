@@ -106,8 +106,8 @@ as run --lockdown shtest -- -c \
 cat "$cap"
 run_id="$(strip_ansi < "$cap" | grep -oE 'r-[0-9a-f]+' | head -1)"
 
-line "3. The flight recorder — agentstack report $run_id"
-as report "$run_id" > "$cap" 2>&1 || true
+line "3. The flight recorder — agentstack report run $run_id"
+as report run "$run_id" > "$cap" 2>&1 || true
 cat "$cap"
 if strip_ansi < "$cap" | grep -qE "✗ .*$DENIED"; then
   ok "the block to $DENIED is recorded, naming the machine policy that denied it"
