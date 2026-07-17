@@ -182,7 +182,7 @@ fn use_write_errors_when_all_targets_blocked() {
     .unwrap();
 
     let uargs = agentstack::cli::UseArgs {
-        profile: "p".into(),
+        profile: Some("p".into()),
         targets: vec![],
         scope: Some(Scope::Global),
         write: true,

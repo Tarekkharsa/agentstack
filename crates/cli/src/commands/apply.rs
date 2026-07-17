@@ -704,7 +704,7 @@ fn render(
                 "ℹ".cyan()
             ),
             None => println!(
-                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — define a `[profiles.<name>]` with a `skills` list, then run `agentstack use <name> --write`",
+                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them: `agentstack use --write` (no profiles declared, so everything inline is the default)",
                 "ℹ".cyan()
             ),
         }

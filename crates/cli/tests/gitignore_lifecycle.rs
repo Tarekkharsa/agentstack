@@ -25,7 +25,7 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn use_args(profile: &str) -> UseArgs {
     UseArgs {
-        profile: profile.into(),
+        profile: Some(profile.into()),
         targets: vec![],
         scope: Some(Scope::Project),
         write: true,

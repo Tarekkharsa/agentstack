@@ -230,7 +230,7 @@ fn use_prune_foreign_still_works_after_guarded_use() {
     )
     .unwrap();
     let use_args = |prune_foreign: bool| UseArgs {
-        profile: "p".into(),
+        profile: Some("p".into()),
         targets: vec![],
         scope: None,
         write: true,

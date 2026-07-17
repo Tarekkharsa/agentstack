@@ -79,47 +79,45 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // pruned. Resolution is library-aware and fetches git sources.
     let extensions = record_extension_pins(&ctx.dir, manifest, &library, &lib_home, &store)?;
 
-    let profiles: Vec<String> = match &args.profile {
+    // Profile selection mirrors activation: named → that one; default → every
+    // declared profile; none declared → the implicit default (the full inline
+    // set), so a profile-less manifest is fully pinnable.
+    let profiles: Option<Vec<String>> = match &args.profile {
         Some(p) => {
             manifest
                 .profiles
                 .get(p)
                 .with_context(|| format!("no profile '{p}' in manifest"))?;
-            vec![p.clone()]
+            Some(vec![p.clone()])
         }
-        None => manifest.profiles.keys().cloned().collect(),
+        None if manifest.profiles.is_empty() => None,
+        None => Some(manifest.profiles.keys().cloned().collect()),
     };
-    if profiles.is_empty() {
-        if instructions > 0 || executables > 0 || extensions > 0 {
-            println!(
-                "{} pinned {instructions} instruction(s) + {executables} executable pin(s) + {extensions} extension(s) in {}",
-                "✓".green(),
-                Lock::path(&ctx.dir).display()
-            );
-            println!("  manifest defines no profiles — no skills or profile servers to pin.");
-        } else {
-            println!("Manifest defines no profiles — nothing to lock.");
-        }
-        return Ok(());
-    }
 
-    let (skills, servers) =
-        resolve_profiles(manifest, &ctx.dir, &library, &lib_home, &store, &profiles)?;
+    let (skills, servers) = match &profiles {
+        Some(profiles) => {
+            resolve_profiles(manifest, &ctx.dir, &library, &lib_home, &store, profiles)?
+        }
+        None => resolve_implicit_default(manifest, &ctx.dir, &library, &lib_home, &store)?,
+    };
     record_lock(&ctx.dir, &skills, &servers, manifest, &library)?;
 
+    let from = match &profiles {
+        Some(p) => format!("{} profile(s)", p.len()),
+        None => "the implicit default (no profiles declared)".to_string(),
+    };
     println!(
-        "{} pinned {} skill(s) + {} server(s) from {} profile(s) + {} instruction(s) + {} executable pin(s) + {} extension(s) in {}",
+        "{} pinned {} skill(s) + {} server(s) from {from} + {} instruction(s) + {} executable pin(s) + {} extension(s) in {}",
         "✓".green(),
         skills.len(),
         servers.len(),
-        profiles.len(),
         instructions,
         executables,
         extensions,
         Lock::path(&ctx.dir).display()
     );
     println!(
-        "  no configs rendered, no skills materialized — that stays `agentstack use <profile> --write`."
+        "  no configs rendered, no skills materialized — that stays `agentstack use --write`."
     );
     Ok(())
 }
@@ -293,7 +291,7 @@ fn resolve_profiles(
     for pname in profiles {
         for r in resolve_active_skills(
             manifest,
-            pname,
+            Some(pname),
             dir,
             library,
             lib_home,
@@ -311,6 +309,28 @@ fn resolve_profiles(
             }
         }
     }
+    Ok((skills, servers))
+}
+
+/// The pin set for a profile-less manifest: every inline skill and server —
+/// exactly what `use --write` would activate as the implicit default.
+fn resolve_implicit_default(
+    manifest: &Manifest,
+    dir: &Path,
+    library: &Library,
+    lib_home: &Path,
+    store: &crate::store::Store,
+) -> Result<(Vec<ResolvedSkill>, Vec<ResolvedServer>)> {
+    let skills = resolve_active_skills(
+        manifest,
+        None,
+        dir,
+        library,
+        lib_home,
+        store,
+        ResolveMode::Fetch,
+    )?;
+    let servers = resolve_active_servers(manifest, library, lib_home, &Selection::All)?;
     Ok((skills, servers))
 }
 

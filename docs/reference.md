@@ -414,7 +414,10 @@ safe to delete.)
 
 `use <profile>` materializes only that profile's skills (symlink, with copy
 fallback), pruning the rest it owns and never clobbering hand-made skill
-dirs. When a prune empties the managed skills dir (deactivation,
+dirs. The profile is optional: one declared profile is chosen automatically,
+and a manifest with **no** profiles activates its full inline set as the
+implicit default — `agentstack use --write` just works. Several profiles need
+a name. When a prune empties the managed skills dir (deactivation,
 `session end`), the dir itself is removed too — rmdir semantics, so a dir
 holding any user content always survives.
 

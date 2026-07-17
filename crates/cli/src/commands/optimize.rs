@@ -504,13 +504,15 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
         }
     }
 
-    // Skills that agentstack never materialized anywhere.
+    // Skills that agentstack never materialized anywhere. With no profiles
+    // declared every inline skill is the implicit default — always referenced.
     for (name, _) in &inp.manifest.skills {
-        let referenced = inp
-            .manifest
-            .profiles
-            .values()
-            .any(|p| p.loads_all_skills() || p.skills.iter().any(|s| s == name));
+        let referenced = inp.manifest.profiles.is_empty()
+            || inp
+                .manifest
+                .profiles
+                .values()
+                .any(|p| p.loads_all_skills() || p.skills.iter().any(|s| s == name));
         if inp.usage.count(name) == 0 && !referenced && enough_history {
             recs.push(Recommendation {
                 kind: "unused-skill",

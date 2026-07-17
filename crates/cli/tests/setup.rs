@@ -77,7 +77,7 @@ fn materialize_profile_writes_skills_and_pins_the_lock() {
     // Drive the setup phase directly: `setup::run` stops at its interactive
     // confirm in a test shell, so the phase function is the testable seam.
     let ctx = agentstack::commands::load(Some(&proj)).unwrap();
-    setup::materialize_profile(&ctx, &args(), Scope::Global, "p").unwrap();
+    setup::materialize_profile(&ctx, &args(), Scope::Global, Some("p")).unwrap();
 
     assert!(
         home.join(".claude/skills/helper").exists(),

@@ -208,7 +208,7 @@ pub fn start(
     // prepared set drives the snapshot planning below AND the activation, so
     // start doesn't load and resolve everything twice.
     let use_args = crate::cli::UseArgs {
-        profile: profile.to_string(),
+        profile: Some(profile.to_string()),
         targets: vec![],
         scope: Some(scope),
         write: true,

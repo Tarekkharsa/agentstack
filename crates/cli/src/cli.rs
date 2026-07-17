@@ -833,8 +833,10 @@ pub struct DiffArgs {
 
 #[derive(Args, Debug)]
 pub struct UseArgs {
-    /// Profile name to activate.
-    pub profile: String,
+    /// Profile to activate. Optional: with one profile declared it is chosen
+    /// automatically, and with none declared the implicit default — every
+    /// inline skill and server — activates. Several profiles need a name.
+    pub profile: Option<String>,
 
     /// Only act on these target ids (repeatable).
     #[arg(long = "target", value_name = "ID")]

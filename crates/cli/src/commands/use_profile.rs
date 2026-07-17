@@ -28,6 +28,10 @@ pub struct Prepared {
     pub resolved_servers: Vec<ResolvedServer>,
     /// `name -> Server` view of `resolved_servers` — the shape rendering wants.
     pub server_map: IndexMap<String, crate::manifest::Server>,
+    /// The profile this activation resolved to. `None` is the implicit
+    /// default: the manifest declares no profiles, so the full inline set
+    /// (every `[skills.*]` and `[servers.*]`) is what activates.
+    pub profile: Option<String>,
 }
 
 /// Resolve a profile's skills + servers (inline-first, then central library),
@@ -41,11 +45,9 @@ pub fn prepare(
 ) -> Result<Prepared> {
     let manifest = &ctx.loaded.manifest;
 
-    // Early guard: the profile must exist (its servers are resolved below).
-    manifest
-        .profiles
-        .get(&args.profile)
-        .with_context(|| format!("no profile '{}' in manifest", args.profile))?;
+    // Which profile drives this activation (early, so a bad name fails before
+    // anything resolves). `None` = the implicit default set.
+    let profile = selected_profile(manifest, args.profile.as_deref())?;
 
     let mode = if args.write {
         ResolveMode::Fetch
@@ -54,7 +56,7 @@ pub fn prepare(
     };
     let resolved_skills = resolve_active_skills(
         manifest,
-        &args.profile,
+        profile.as_deref(),
         &ctx.dir,
         &libctx.library,
         &libctx.lib_home,
@@ -65,7 +67,10 @@ pub fn prepare(
     // `${REF}`s stay intact; they are resolved per-target at render time, not
     // here. The resolved list is kept for lock recording; the `name -> Server`
     // map drives rendering.
-    let selection = Selection::Profile(args.profile.clone());
+    let selection = match &profile {
+        Some(p) => Selection::Profile(p.clone()),
+        None => Selection::All,
+    };
     let resolved_servers = crate::render::resolve_active_servers(
         manifest,
         &libctx.library,
@@ -89,7 +94,44 @@ pub fn prepare(
         resolved_skills,
         resolved_servers,
         server_map,
+        profile,
     })
+}
+
+/// Which profile drives an activation. A named profile must exist. With no
+/// name given: the single declared profile is unambiguous; several need a
+/// name; **none declared** selects the implicit default — every inline skill
+/// and server in the manifest (`Ok(None)`). Profiles are opt-in selectivity,
+/// not a prerequisite for activation.
+pub(crate) fn selected_profile(
+    manifest: &Manifest,
+    requested: Option<&str>,
+) -> Result<Option<String>> {
+    match requested {
+        Some(p) => {
+            manifest
+                .profiles
+                .get(p)
+                .with_context(|| format!("no profile '{p}' in manifest"))?;
+            Ok(Some(p.to_string()))
+        }
+        None => {
+            let mut names = manifest.profiles.keys();
+            match (names.next(), names.next()) {
+                (None, _) => Ok(None),
+                (Some(only), None) => Ok(Some(only.clone())),
+                (Some(_), Some(_)) => anyhow::bail!(
+                    "several profiles declared — name one: agentstack use <profile> ({})",
+                    manifest
+                        .profiles
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            }
+        }
+    }
 }
 
 pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
@@ -114,6 +156,15 @@ pub fn activate(
     let resolved_skills = &prepared.resolved_skills;
     let resolved_servers = &prepared.resolved_servers;
     let server_map = &prepared.server_map;
+    // Display label; the implicit no-profiles selection reads as "default".
+    let label = prepared.profile.clone().unwrap_or_else(|| "default".into());
+    // The exact re-run command: with an implicit default there is no profile
+    // word to repeat.
+    let use_cmd_profile = prepared
+        .profile
+        .as_ref()
+        .map(|p| format!("{p} "))
+        .unwrap_or_default();
     // (name, source dir) pairs drive skill materialization; the richer
     // `ResolvedSkill` list is kept for lockfile recording below.
     let active_skills: Vec<(String, PathBuf)> = resolved_skills
@@ -147,7 +198,7 @@ pub fn activate(
             })
             .collect();
         crate::verify::ensure_activatable(
-            &format!("'{}'", args.profile),
+            &format!("'{label}'"),
             &skill_statuses,
             &server_statuses,
         )?;
@@ -164,7 +215,7 @@ pub fn activate(
     let ruleset = crate::render::ruleset_for(manifest)?;
     println!(
         "Activating profile '{}' (scope: {scope}) — {} server(s), {} skill(s)",
-        args.profile.bold(),
+        label.bold(),
         server_map.len(),
         active_skills.len()
     );
@@ -241,10 +292,10 @@ pub fn activate(
                 if !foreign.is_empty() {
                     println!(
                         "  {} keeping {} — applied by another manifest ↳ keep: agentstack adopt · \
-                         prune: agentstack use {} --prune-foreign",
+                         prune: agentstack use {}--prune-foreign",
                         "⚠".yellow(),
                         foreign.join(", "),
-                        args.profile
+                        use_cmd_profile
                     );
                 }
                 for u in &plan.unresolved {
@@ -426,13 +477,13 @@ pub fn activate(
                 println!(
                     "\n{} activated '{}' — wrote skills to {wrote_skill_dirs} location(s); no server configs changed.",
                     "✓".green(),
-                    args.profile
+                    label
                 );
             } else {
                 println!(
                     "\n{} activated '{}' on {wrote} target(s).",
                     "✓".green(),
-                    args.profile
+                    label
                 );
             }
         } else {
@@ -441,7 +492,7 @@ pub fn activate(
             println!(
                 "\n{} activated '{}' on {wrote} target(s); {} target(s) BLOCKED: {}",
                 "⚠".yellow(),
-                args.profile,
+                label,
                 blocked_targets.len(),
                 blocked_targets.join(", ")
             );
@@ -478,33 +529,38 @@ fn strategy_word(s: crate::adapter::descriptor::SkillStrategy) -> &'static str {
 /// materializing anything.
 pub(crate) fn resolve_active_skills(
     manifest: &Manifest,
-    profile_name: &str,
+    profile_name: Option<&str>,
     dir: &Path,
     library: &Library,
     lib_home: &Path,
     store: &crate::store::Store,
     mode: ResolveMode,
 ) -> Result<Vec<ResolvedSkill>> {
-    let profile = match manifest.profiles.get(profile_name) {
-        Some(p) => p,
-        None => return Ok(Vec::new()),
+    // `None` is the implicit default (no profiles declared): every inline
+    // skill — the same inline-only expansion the `"*"` wildcard uses.
+    let names: Vec<String> = match profile_name {
+        None => manifest.skills.keys().cloned().collect(),
+        Some(profile_name) => match manifest.profiles.get(profile_name) {
+            None => return Ok(Vec::new()),
+            Some(profile) => {
+                if profile.loads_all_skills() {
+                    manifest.skills.keys().cloned().collect()
+                } else {
+                    profile.skills.clone()
+                }
+            }
+        },
     };
-    let names: Vec<String> = if profile.loads_all_skills() {
-        manifest.skills.keys().cloned().collect()
-    } else {
-        profile.skills.clone()
-    };
+    let plabel = profile_name.unwrap_or("default");
 
     let mut out = Vec::new();
     for name in names {
         let resolved =
             crate::resolve::resolve_skill(manifest, dir, library, lib_home, store, &name, mode)
-                .with_context(|| {
-                    format!("resolving skill '{name}' for profile '{profile_name}'")
-                })?;
+                .with_context(|| format!("resolving skill '{name}' for profile '{plabel}'"))?;
         if !resolved.path.exists() {
             anyhow::bail!(
-                "skill '{name}' (profile '{profile_name}') resolved to {} but it is not present on disk — run `agentstack install`",
+                "skill '{name}' (profile '{plabel}') resolved to {} but it is not present on disk — run `agentstack install`",
                 resolved.path.display()
             );
         }
@@ -648,7 +704,7 @@ mod tests {
 
         let active = resolve_active_skills(
             &manifest,
-            "p",
+            Some("p"),
             proj.path(),
             &library,
             lib_home.path(),
@@ -689,7 +745,7 @@ mod tests {
 
         let active = resolve_active_skills(
             &manifest,
-            "p",
+            Some("p"),
             proj.path(),
             &library,
             lib_home.path(),
@@ -722,7 +778,7 @@ mod tests {
 
         let err = resolve_active_skills(
             &manifest,
-            "p",
+            Some("p"),
             proj.path(),
             &library,
             lib_home.path(),
@@ -763,7 +819,7 @@ mod tests {
 
         let err = resolve_active_skills(
             &manifest,
-            "p",
+            Some("p"),
             proj.path(),
             &library,
             lib_home.path(),
@@ -799,7 +855,7 @@ mod tests {
 
         let active = resolve_active_skills(
             &manifest,
-            "p",
+            Some("p"),
             proj.path(),
             &library,
             lib_home.path(),
@@ -834,7 +890,7 @@ mod tests {
 
         let resolved = resolve_active_skills(
             &manifest,
-            "p",
+            Some("p"),
             proj.path(),
             &library,
             lib_home.path(),
@@ -883,7 +939,7 @@ mod tests {
         .unwrap();
         let resolved = resolve_active_skills(
             &manifest,
-            "p",
+            Some("p"),
             proj.path(),
             &library,
             lib_home.path(),
@@ -914,7 +970,7 @@ mod tests {
         .unwrap();
         let resolved = resolve_active_skills(
             &manifest,
-            "p",
+            Some("p"),
             proj.path(),
             &library,
             lib_home.path(),
@@ -944,7 +1000,7 @@ mod tests {
             .unwrap();
         let resolved = resolve_active_skills(
             &manifest,
-            "p",
+            Some("p"),
             proj.path(),
             &library,
             lib_home.path(),

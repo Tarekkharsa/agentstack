@@ -93,19 +93,20 @@ agentstack init         # existing CLI configs → one manifest
                         # (nothing installed yet? init writes a starter
                         #  manifest with a commented example instead)
 agentstack apply        # preview every CLI's changes, confirm to write
-agentstack use <profile> --write   # activate a profile's skills
-                                   # (setup does this step for you)
+agentstack use --write             # activate skills (picks your profile,
+                                   #  or everything when none declared;
+                                   #  setup does this step for you)
 ```
 
 > ▶ [Watch it live on the site](https://tarekkharsa.github.io/agentstack/#start) — same flow, replayed in your browser.
 
 Two things worth knowing before you go further:
 
-- **Skills activate through profiles.** `setup` handles this for you — it picks
-  your profile and materializes its skills as its final step. Standalone
-  `apply` renders servers, instructions, settings, and hooks only;
-  `agentstack use <profile> --write` activates a profile's skills.
-  (`apply` will remind you if the manifest has skills.)
+- **Skills activate through `use`, not `apply`.** `setup` runs this for you as
+  its final step. Standalone `apply` renders servers, instructions, settings,
+  and hooks only; `agentstack use --write` activates skills — your named
+  profile, the single declared one, or (with no profiles declared) everything
+  inline. Profiles are opt-in selectivity, not a prerequisite.
 - Prefer **no rendered files at all**? Skip `apply` entirely and jump to
   [the trust gate](#the-trust-gate--keep-repo-declared-capabilities-inert-until-review) — one gateway
   registration serves every repo live.
@@ -171,7 +172,7 @@ and secrets left as `${REF}`s:
 | `agentstack doctor` | Verify wiring; every warning comes with the exact fix command |
 | `agentstack diff` | What would change, read-only |
 | `agentstack secret set NAME` | Store a secret in the OS keychain |
-| `agentstack use <profile> --write` | Activate one profile's servers + skills |
+| `agentstack use --write` | Activate skills + servers (a named profile, or everything when none declared) |
 | `agentstack run <cli> --profile <p>` | Launch a harness with a profile for its lifetime |
 | `agentstack guard install` | Wire the destructive-command guard into your CLIs' hooks |
 | `agentstack lock` | Pin profile refs in the lockfile without rendering anything |

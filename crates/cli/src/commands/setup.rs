@@ -145,32 +145,30 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     //     Reload first: the apply pass above may have refreshed owned-server
     //     tables in the manifest on disk.
     let ctx = super::load(manifest_dir)?;
-    match select_profile(&ctx, args)? {
-        Some(profile) => {
-            println!("\n{}", "Skills".bold());
-            if let Err(err) = materialize_profile(&ctx, args, scope, &profile) {
-                // Configs are already written at this point — surface the
-                // problem and the exact recovery command instead of failing
-                // the whole setup on its last step.
-                println!(
-                    "  {} could not activate profile '{profile}' ({err:#})",
-                    "⚠".yellow()
-                );
-                println!(
-                    "  Fix the issue, then run: {}",
-                    format!("agentstack use {profile} --write").bold()
-                );
-            }
-        }
-        None if !ctx.loaded.manifest.skills.is_empty() => {
+    // What to activate: a selected profile, the implicit default (no profiles
+    // declared, but inline skills exist), or nothing left to do.
+    let selection: Option<Option<String>> = match select_profile(&ctx, args)? {
+        Some(p) => Some(Some(p)),
+        None if !ctx.loaded.manifest.skills.is_empty() => Some(None),
+        None => None,
+    };
+    if let Some(profile) = selection {
+        let label = profile.clone().unwrap_or_else(|| "default".into());
+        let cmd = match &profile {
+            Some(p) => format!("agentstack use {p} --write"),
+            None => "agentstack use --write".to_string(),
+        };
+        println!("\n{}", "Skills".bold());
+        if let Err(err) = materialize_profile(&ctx, args, scope, profile.as_deref()) {
+            // Configs are already written at this point — surface the
+            // problem and the exact recovery command instead of failing
+            // the whole setup on its last step.
             println!(
-                "\n{} {} skill(s) in the manifest have no profile to activate them — add a `[profiles.<name>]` with a `skills` list, then run {}.",
-                "ℹ".cyan(),
-                ctx.loaded.manifest.skills.len(),
-                "agentstack use <name> --write".bold()
+                "  {} could not activate profile '{label}' ({err:#})",
+                "⚠".yellow()
             );
+            println!("  Fix the issue, then run: {}", cmd.bold());
         }
-        None => {}
     }
 
     println!("\n{}", "Doctor".bold());
@@ -254,10 +252,10 @@ pub fn materialize_profile(
     ctx: &super::Context,
     args: &SetupArgs,
     scope: Scope,
-    profile: &str,
+    profile: Option<&str>,
 ) -> Result<()> {
     let use_args = crate::cli::UseArgs {
-        profile: profile.to_string(),
+        profile: profile.map(str::to_string),
         targets: args.targets.clone(),
         scope: Some(scope),
         write: true,

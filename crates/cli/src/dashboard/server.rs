@@ -389,7 +389,7 @@ fn route(
             let v = parse(body);
             let profile = field(&v, "profile")?;
             let args = crate::cli::UseArgs {
-                profile,
+                profile: Some(profile),
                 targets: vec![],
                 scope: Some(scope_of(body)),
                 write: true,
