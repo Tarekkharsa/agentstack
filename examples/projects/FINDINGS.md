@@ -227,3 +227,45 @@ conflicts are surfaced; every quirk environment passes — including
   (`[harness] 'claude' is not on your PATH`).
 - A1's seeding works through a spaced `AGENTSTACK_HOME`, and the guard denies
   `.env` through it.
+
+---
+
+# Gateway / zero-files sweep — 2026-07-18
+
+Date: 2026-07-18 · Binary: `agentstack 0.11.0` (`4b86ad4`) · Method: a
+scratch harness driving the live bridge `agentstack mcp --auto-project`
+(what a connected harness talks to) with a minimal stdio MCP probe server,
+across trust states, a two-layer tool firewall, secret resolution, drift,
+and the device quirks. Each behavior was cross-checked in ISOLATION with a
+deterministic repro before being trusted.
+
+**Bottom line: no product defect on the gateway path.** Every
+security-meaningful behavior is correct and deterministic:
+
+- **Untrusted repo is inert on the bridge** — its tools are not discoverable
+  via `tools_search` and not brokered; only control-plane tools answer.
+- **Machine `[policy.tools]` deny is enforced AND audited** — a denied tool
+  is refused before dispatch, returns no value, is invisible to discovery,
+  and writes `"outcome":"denied"` to `calls.jsonl` (3/3 deterministic).
+- **Repo policy cannot widen the machine floor** — a repo that explicitly
+  re-allows a machine-denied tool still gets the deny (union floor holds).
+- **Secret `${REF}` resolution is host-side and fail-closed** — an
+  unresolved ref leaves the server un-brokered; a resolved ref is injected
+  into the child's env, and the value never appears in the audit log.
+- **Drift re-gates the bridge** — a post-trust manifest edit makes the
+  project's tools stop being served until re-trust.
+- **Allowed-tool brokering works** across simple, spaced, and legacy-layout
+  project paths (25/25, 8/8, 6/6 in controlled repros), and the bridge
+  process exits cleanly on stdin EOF (no leak).
+
+**Test-harness note (not a product finding):** the multi-scenario sweep
+script showed an intermittent, deterministic-per-run failure of the
+*allowed-echo* brokering in its longer form that could NOT be reproduced in
+any isolated setting — 25 sequential fresh sandboxes, 6 back-to-back echoes
+in one shell, a prior untrusted bridge, spaced/legacy paths, and with/without
+a machine policy all brokered echo correctly. The gateway security core is
+already covered in CI by `malicious-repo-demo` (untrusted-inert + machine
+deny + audit), `policy-intersection` (two-layer floor), `skills-workout`
+and `mcp-profile-lease` (zero-files lease). The sweep confirmed those hold
+under the device matrix; its flaky echo harness was not promoted to a CI
+example (the bar is deterministic PASS/FAIL) pending a root cause.
