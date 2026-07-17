@@ -373,6 +373,44 @@ ledger entry D6 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
   and the guard payloads under the same render engine; Gemini extensions;
   static analysis or capability declarations for extension code.
 
+## Init experience lanes (added 2026-07-17, post-keystone)
+
+**Maintainer scope addition (2026-07-17): make the shipped protection and
+secrets machinery visible at first run.** Both lanes are UX over existing
+enforcement — no new policy or resolution semantics. Queued behind the
+minimum-version keystone review; starting either earlier is a deliberate
+scope decision, except S1, which is bugfix-grade and in-cut-sized.
+
+**Details:** [`docs/design/init-access-control.md`](docs/design/init-access-control.md) ·
+[`docs/design/init-secrets-experience.md`](docs/design/init-secrets-experience.md) ·
+ledger entries D8 and D9 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
+
+### Access control (D8)
+
+- [ ] A0: review and approve the design doc (settle the default deny list
+  entry by entry, the guard-offer wording, no-new-verb, and verify whether
+  deny globs support home-anchored entries before templating any).
+- [ ] A1: extend the `init --global` template with `[guard]` +
+  `[policy.filesystem]` defaults; post-write guard-install offer; dashboard
+  parity (report, never auto-install). Witnesses per design §7.
+- [ ] A2: commented `[policy.filesystem]` block in project init output;
+  protection-status line; the two doctor informational findings.
+- [ ] A3: "protect this device" docs page; optional fourth demo clip.
+
+### Secrets (D9)
+
+- [ ] S0: review and approve the design doc (settle the three-option prompt,
+  `--secrets` flag, `[secrets] default_store`, `secret lift`, and the open
+  questions).
+- [ ] S1 (bugfix-grade, may land in-cut): interactive init stops aborting on
+  an unreachable keychain (probe → inform → default to refs-only); dashboard
+  init reports unstored refs by name instead of dropping silently.
+- [ ] S2: the store-choice prompt at the lifting moment, `--secrets`,
+  `.env` write path with managed-gitignore verification,
+  `[secrets] default_store`.
+- [ ] S3: `secret list` plaintext labels, doctor informational finding,
+  `agentstack secret lift`, the "Where do secrets live?" docs page.
+
 ## Phase 2 — paid design partners, Cloudflare runner, saved workflows
 
 **Start only after Phase 1. Execute the experiments in this order.**
@@ -403,6 +441,16 @@ ledger entry D6 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
 - [ ] Prove local and Cloudflare receipts describe the same effective grant.
 
 ### Saved governed workflows
+
+**Design banked (2026-07-17):**
+[`docs/design/workflows-capability.md`](docs/design/workflows-capability.md)
+(ledger D7, W0 review pending). Two directions already settled: no Docker
+dependency — the orchestration script runs on an embedded memory-safe
+interpreter inside the executor domain, never raw on the host; and `agent()`
+takes a `role` (profile) rather than a free-form model/harness, so scripts
+request authority and can never widen it. On W0 approval, its W1–W4 stages
+replace the sketch items below. The evidence gate (first item) still applies
+before W1 starts.
 
 - [ ] Confirm a real repeated task before adding persistence or orchestration.
 - [ ] Import and govern a native workflow format before inventing broad syntax
