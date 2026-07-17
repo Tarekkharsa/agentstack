@@ -18,7 +18,7 @@
 # Record it into a GIF (optional):
 #   mkdir -p runtime
 #   DEMO_PAUSE=2.5 asciinema rec runtime/lockdown.cast --cols 118 --rows 40 -c ./demo-lockdown.sh
-#   agg --font-size 14 runtime/lockdown.cast ../docs/lockdown.gif
+#   agg --font-size 14 runtime/lockdown.cast ../../docs/lockdown.gif
 #
 # Requires: Docker running. Builds the sandbox-feature binary + the sidecar
 # image the first time (cached after).
@@ -37,9 +37,9 @@ if ! docker info >/dev/null 2>&1; then
 fi
 printf 'Preparing (building the sandbox binary + sidecar image if needed)…\n'
 ( cd .. && source "$HOME/.cargo/env" 2>/dev/null || true; cargo build --quiet --features sandbox )
-bin="$here/../target/debug/agentstack"
+bin="$here/../../target/debug/agentstack"
 docker image inspect "$HARNESS_IMAGE" >/dev/null 2>&1 || docker pull -q "$HARNESS_IMAGE" >/dev/null
-docker build -q -f "$here/../docker/egress-proxy.Dockerfile" -t "$EGRESS_IMAGE" "$here/.." >/dev/null
+docker build -q -f "$here/../../docker/egress-proxy.Dockerfile" -t "$EGRESS_IMAGE" "$here/../.." >/dev/null
 
 # ── Fenced machine: a throwaway HOME + a machine policy that denies one host ──
 # Staged under /tmp (short absolute path → a clean `workspace:` line, and

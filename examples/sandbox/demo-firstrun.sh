@@ -7,10 +7,10 @@
 # throwaway HOME each run, so it is always a genuine first run.
 #
 # Record it into a GIF/video (optional):
-#   vhs demo-firstrun.tape                    # writes ../docs/firstrun.gif
+#   vhs demo-firstrun.tape                    # writes ../../docs/firstrun.gif
 #   mkdir -p runtime
 #   asciinema rec runtime/firstrun.cast -c ./demo-firstrun.sh
-#   agg runtime/firstrun.cast ../docs/firstrun.gif    # asciinema → GIF (github.com/asciinema/agg)
+#   agg runtime/firstrun.cast ../../docs/firstrun.gif    # asciinema → GIF (github.com/asciinema/agg)
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 cd "$here"
@@ -18,7 +18,7 @@ cd "$here"
 # Build the debug binary.
 ( cd .. && source "$HOME/.cargo/env" 2>/dev/null || true; cargo build --quiet )
 
-bin="$here/../target/debug/agentstack"
+bin="$here/../../target/debug/agentstack"
 sandbox="$here/runtime/firstrun"          # throwaway simulated machine (gitignored)
 home="$sandbox/home"
 proj="$sandbox/proj"

@@ -3,5 +3,5 @@
 # so nothing touches your real ~/.claude.json etc.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-bin="$here/../target/debug/agentstack"
+bin="$here/../../target/debug/agentstack"
 exec env HOME="$here/runtime/home" AGENTSTACK_HOME="$here/runtime/ashome" "$bin" "$@"

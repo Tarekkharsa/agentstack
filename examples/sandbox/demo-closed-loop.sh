@@ -9,7 +9,7 @@
 # Record it (memory: vhs stalls on this machine — use asciinema + agg):
 #   mkdir -p runtime
 #   DEMO_PAUSE=2.5 asciinema rec runtime/closed-loop.cast -c ./demo-closed-loop.sh --overwrite
-#   agg --font-size 16 runtime/closed-loop.cast ../docs/closed-loop.gif
+#   agg --font-size 16 runtime/closed-loop.cast ../../docs/closed-loop.gif
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 cd "$here"
@@ -17,7 +17,7 @@ cd "$here"
 # Build the debug binary.
 ( cd .. && source "$HOME/.cargo/env" 2>/dev/null || true; cargo build --quiet )
 
-bin="$here/../target/debug/agentstack"
+bin="$here/../../target/debug/agentstack"
 sandbox="$here/runtime/closed-loop"
 home="$sandbox/home"
 proj="$sandbox/proj"

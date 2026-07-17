@@ -444,7 +444,7 @@ Details and trade-offs: [feature reference → three modes](docs/reference.md#wh
   own version (override with `AGENTSTACK_EGRESS_IMAGE`, e.g. a local
   [`docker/egress-proxy.Dockerfile`](docker/egress-proxy.Dockerfile) build).
   Runnable demo (needs Docker):
-  [`agentstack-test/demo-lockdown.sh`](agentstack-test/demo-lockdown.sh).
+  [`examples/sandbox/demo-lockdown.sh`](examples/sandbox/demo-lockdown.sh).
 
   What each mode actually enforces — and where it stops — is spelled out per
   dimension in the [enforcement matrix](docs/ENFORCEMENT.md). AgentStack
@@ -453,7 +453,7 @@ Details and trade-offs: [feature reference → three modes](docs/reference.md#wh
 
 ![agentstack lockdown: a container with no host route — its only egress is the AgentStack proxy sidecar, which blocks a denied host and records it](docs/lockdown.svg)
 
-> ▶ [Watch it live on the site](https://tarekkharsa.github.io/agentstack/#sandbox) — and run it yourself (needs Docker): [`agentstack-test/demo-lockdown.sh`](agentstack-test/demo-lockdown.sh).
+> ▶ [Watch it live on the site](https://tarekkharsa.github.io/agentstack/#sandbox) — and run it yourself (needs Docker): [`examples/sandbox/demo-lockdown.sh`](examples/sandbox/demo-lockdown.sh).
 
 The closed loop in under a minute — install a versioned pack, spread it to
 every CLI, firewall a tool, watch the refusal in the audit log, upgrade to the
@@ -461,7 +461,7 @@ vendor's next tag:
 
 ![agentstack closed loop: install a versioned pack, spread it everywhere, firewall a tool, watch the audited refusal, upgrade](docs/closed-loop.svg)
 
-> ▶ Run it yourself: [`agentstack-test/demo-closed-loop.sh`](agentstack-test/demo-closed-loop.sh).
+> ▶ Run it yourself: [`examples/sandbox/demo-closed-loop.sh`](examples/sandbox/demo-closed-loop.sh).
 
 ### Experimental: governed TypeScript execution
 

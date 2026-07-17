@@ -1,4 +1,4 @@
-Output ../docs/firstrun.gif
+Output ../../docs/firstrun.gif
 
 Set Shell "bash"
 Set Width 1200

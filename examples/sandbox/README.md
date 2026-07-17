@@ -1,4 +1,4 @@
-# agentstack-test — a multi-project sandbox
+# examples/sandbox — a multi-project sandbox
 
 A self-contained harness for exercising agentstack against a *simulated machine*
 without touching your real `~/.claude.json`, `~/.codex/`, etc. Everything runs

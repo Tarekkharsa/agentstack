@@ -18,7 +18,7 @@ Design constraints:
 Transcripts are condensed from real runs (see the demo scripts referenced in
 README) — keep them honest when editing.
 
-Usage: python3 agentstack-test/make-term-svgs.py   # writes docs/*.svg
+Usage: python3 tools/make-term-svgs.py   # writes docs/*.svg
 """
 
 import html

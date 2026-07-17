@@ -51,7 +51,7 @@ cd "$here"
 if [[ -z "${AGENTSTACK_BIN:-}" ]]; then
   (cd .. && cargo build --quiet)
 fi
-bin="${AGENTSTACK_BIN:-$here/../target/debug/agentstack}"
+bin="${AGENTSTACK_BIN:-$here/../../target/debug/agentstack}"
 
 sandbox="$here/runtime/conformance-$adapter"
 home="$sandbox/home"

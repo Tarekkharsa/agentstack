@@ -9,7 +9,7 @@ highlighted and (b) the current page's own sections expand inline beneath its
 entry (the nub-docs pattern). Links that point at the page being generated
 collapse to plain `#anchor`s so in-page navigation doesn't reload.
 
-Usage: python3 agentstack-test/make-docs-sidebar.py   # rewrites docs/*.html
+Usage: python3 tools/make-docs-sidebar.py   # rewrites docs/*.html
 """
 
 import html
@@ -120,7 +120,7 @@ PAGES = {
     "library.html": "library",
 }
 
-BEGIN, END = "<!-- sidebar:begin (generated — edit agentstack-test/make-docs-sidebar.py) -->", "<!-- sidebar:end -->"
+BEGIN, END = "<!-- sidebar:begin (generated — edit tools/make-docs-sidebar.py) -->", "<!-- sidebar:end -->"
 
 
 def esc(s):
@@ -172,7 +172,7 @@ def splice(path, aside):
     path.write_text(s)
 
 
-MAP_BEGIN = "<!-- docmap:begin (generated — edit agentstack-test/make-docs-sidebar.py) -->"
+MAP_BEGIN = "<!-- docmap:begin (generated — edit tools/make-docs-sidebar.py) -->"
 MAP_END = "<!-- docmap:end -->"
 
 # Short per-entry hooks for the index docs-map cards (key -> one-liner).

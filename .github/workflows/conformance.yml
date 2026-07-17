@@ -63,4 +63,4 @@ jobs:
       - name: Smoke ${{ matrix.adapter }}
         env:
           AGENTSTACK_BIN: ${{ github.workspace }}/target/release/agentstack
-        run: ./agentstack-test/conformance-smoke.sh ${{ matrix.adapter }} ${{ matrix.bin }} ${{ matrix.config }}
+        run: ./examples/sandbox/conformance-smoke.sh ${{ matrix.adapter }} ${{ matrix.bin }} ${{ matrix.config }}
