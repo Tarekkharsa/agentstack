@@ -438,7 +438,7 @@ pub fn verify_rendered(
             .get_extension(name)
             .map(|e| e.checksum.as_str())
             .unwrap_or_default();
-        if current != pin {
+        if current.hex() != pin {
             anyhow::bail!(
                 "extension '{name}' (rendered copy) at {} drifted from agentstack.lock \
                  (locked {}, rendered {}) — the delivered bytes no longer match the reviewed \
@@ -446,7 +446,7 @@ pub fn verify_rendered(
                  `agentstack lock`",
                 artifact.display(),
                 short12(pin),
-                short12(&current),
+                short12(current.hex()),
             );
         }
         verified.push(name.clone());

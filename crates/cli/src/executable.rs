@@ -18,7 +18,6 @@
 //!   flag-like strings are not local content and are never pinned (§3.1:
 //!   the harness/interpreter binary is explicitly unbound).
 
-use agentstack_core::digest::Sha256Hex;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -130,7 +129,7 @@ pub fn derive_executable_pins(
                 match classify_local_executable(project_dir, &anchor, candidate) {
                     LocalExecutable::NotLocal => {}
                     LocalExecutable::File(path) => pins.push(LockedExecutable {
-                        checksum: Sha256Hex::parse(&contained_file_digest(project_dir, &path)?)?,
+                        checksum: contained_file_digest(project_dir, &path)?,
                         path,
                         kind: ExecutableKind::File,
                     }),
@@ -142,10 +141,8 @@ pub fn derive_executable_pins(
         }
     }
     for root in &server.integrity_roots {
-        let checksum = Sha256Hex::parse(
-            &integrity_root_digest(project_dir, root)
-                .with_context(|| format!("server '{name}': pinning integrity root '{root}'"))?,
-        )?;
+        let checksum = integrity_root_digest(project_dir, root)
+            .with_context(|| format!("server '{name}': pinning integrity root '{root}'"))?;
         pins.push(LockedExecutable {
             path: normalize_declared(root),
             kind: ExecutableKind::Root,
@@ -395,11 +392,11 @@ mod tests {
 
         // The pinned digests match the core routines (same inputs, same pins).
         assert_eq!(
-            pins[0].checksum.hex(),
+            pins[0].checksum,
             contained_file_digest(tmp.path(), "scripts/entry.py").unwrap()
         );
         assert_eq!(
-            pins[1].checksum.hex(),
+            pins[1].checksum,
             integrity_root_digest(tmp.path(), "tools").unwrap()
         );
     }

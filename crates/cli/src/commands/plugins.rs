@@ -1112,7 +1112,7 @@ fn inspect_native_plugin(
                 .get(&desired_id)
                 .and_then(|e| e.checksum.clone())
                 .zip(crate::store::dir_digest(&dir).ok())
-                .map(|(have, want)| have.hex() == want)
+                .map(|(have, want)| have == want)
                 .unwrap_or(false);
             let (name, reused) = if existing_same {
                 (desired_id, true)

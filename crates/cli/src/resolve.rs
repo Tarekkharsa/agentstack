@@ -628,7 +628,9 @@ pub fn resolve_extension_entry(
     // 1. Inline path source.
     if let Some(path) = ext.path.as_deref() {
         let checksum = agentstack_core::digest::integrity_root_digest(manifest_dir, path)
-            .map_err(ExtensionResolveError::Source)?;
+            .map_err(ExtensionResolveError::Source)?
+            .hex()
+            .to_string();
         return Ok(ResolvedExtension {
             name: name.to_string(),
             origin: ExtensionOrigin::Inline,
@@ -676,7 +678,9 @@ pub fn resolve_extension_entry(
     if let Some(path) = entry.path.as_deref() {
         let anchor = lib_home.join("extensions");
         let checksum = agentstack_core::digest::integrity_root_digest(&anchor, path)
-            .map_err(ExtensionResolveError::Source)?;
+            .map_err(ExtensionResolveError::Source)?
+            .hex()
+            .to_string();
         return Ok(ResolvedExtension {
             name: name.to_string(),
             origin: ExtensionOrigin::Library,
@@ -761,7 +765,9 @@ fn resolve_git_extension(
         },
     };
     let checksum = agentstack_core::digest::integrity_root_digest(&clone_root, sub)
-        .map_err(ExtensionResolveError::Source)?;
+        .map_err(ExtensionResolveError::Source)?
+        .hex()
+        .to_string();
     Ok((checksum, resolved_rev, clone_root, sub.to_string()))
 }
 

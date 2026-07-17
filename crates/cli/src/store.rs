@@ -56,7 +56,7 @@ impl Store {
             SkillSource::Path(p) => {
                 let path = resolve_path(manifest_dir, &p);
                 let checksum = if path.exists() {
-                    dir_digest(&path)?
+                    dir_digest(&path)?.hex().to_string()
                 } else {
                     String::new()
                 };
@@ -85,7 +85,7 @@ impl Store {
                         );
                     }
                 }
-                let checksum = dir_digest(&content)?;
+                let checksum = dir_digest(&content)?.hex().to_string();
                 Ok(Resolved {
                     path: content,
                     rev: Some(resolved_rev),
@@ -107,7 +107,7 @@ impl Store {
             SkillSource::Path(p) => {
                 let path = resolve_path(manifest_dir, &p);
                 let checksum = if path.exists() {
-                    dir_digest(&path)?
+                    dir_digest(&path)?.hex().to_string()
                 } else {
                     String::new()
                 };
@@ -127,7 +127,7 @@ impl Store {
                 let content = git_content_dir(&clone, subpath.as_deref())?;
                 Ok(Some(Resolved {
                     rev: git_head(&clone).ok(),
-                    checksum: dir_digest(&content)?,
+                    checksum: dir_digest(&content)?.hex().to_string(),
                     path: content,
                     fetched: false,
                     source_kind: "git",
@@ -341,7 +341,6 @@ pub use agentstack_core::digest::{collect_files, dir_digest};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agentstack_core::digest::Sha256Hex;
     use assert_fs::prelude::*;
 
     #[test]
@@ -412,7 +411,7 @@ mod tests {
                     path: Some("./skills/x".into()),
                     git: None,
                     rev: None,
-                    checksum: Sha256Hex::parse(&pin).unwrap(),
+                    checksum: pin,
                 }],
                 servers: Vec::new(),
                 instructions: Vec::new(),

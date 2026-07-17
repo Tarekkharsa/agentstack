@@ -1331,7 +1331,7 @@ fn check_rendered_extensions(dir: &Path, registry: &crate::adapter::Registry, re
                     continue; // pre-checksum ledger entry: nothing to verify against
                 }
                 match agentstack_core::digest::integrity_root_digest(&ext_dir, &m.filename) {
-                    Ok(current) if current == m.checksum => report.line(
+                    Ok(current) if current.hex() == m.checksum => report.line(
                         Level::Ok,
                         format!("{:<20} rendered copy matches pin ({})", m.name, desc.id),
                     ),

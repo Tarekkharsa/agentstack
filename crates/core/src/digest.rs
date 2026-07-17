@@ -110,7 +110,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 
 /// SHA-256 digest of a directory's contents (relative paths + file bytes,
 /// sorted; `.git` excluded).
-pub fn dir_digest(root: &Path) -> Result<String> {
+pub fn dir_digest(root: &Path) -> Result<Sha256Hex> {
     let mut files: Vec<PathBuf> = Vec::new();
     collect_files(root, root, &mut files)?;
     files.sort();
@@ -125,7 +125,11 @@ pub fn dir_digest(root: &Path) -> Result<String> {
         hasher.update((bytes.len() as u64).to_le_bytes());
         hasher.update(bytes);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    // Same-module tuple construction (like `Sha256Hex::of`), not `parse`: a
+    // sha2 finalize is always exactly 64 lowercase hex chars, so there is no
+    // fallible case to `unwrap`/`expect` around (both are workspace-denied
+    // outside tests).
+    Ok(Sha256Hex(format!("{:x}", hasher.finalize())))
 }
 
 /// Collect every file under `dir` as a path relative to `root`, recursing into
@@ -227,7 +231,7 @@ pub fn resolve_contained(project_root: &Path, declared: &str) -> Result<PathBuf>
 /// digest shape as instruction pins (raw file bytes), same defensive path
 /// rules as [`resolve_contained`]; a directory or other non-regular file is an
 /// error.
-pub fn contained_file_digest(project_root: &Path, declared: &str) -> Result<String> {
+pub fn contained_file_digest(project_root: &Path, declared: &str) -> Result<Sha256Hex> {
     let path = resolve_contained(project_root, declared)?;
     let meta =
         fs::symlink_metadata(&path).with_context(|| format!("reading {}", path.display()))?;
@@ -238,7 +242,7 @@ pub fn contained_file_digest(project_root: &Path, declared: &str) -> Result<Stri
         );
     }
     let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
-    Ok(sha256_hex(&bytes))
+    Ok(Sha256Hex::of(&bytes))
 }
 
 /// SHA-256 digest of a declared D3 integrity root (contract §8): a file or
@@ -285,7 +289,7 @@ pub fn integrity_root_files(
     Ok((root, files))
 }
 
-pub fn integrity_root_digest(project_root: &Path, declared: &str) -> Result<String> {
+pub fn integrity_root_digest(project_root: &Path, declared: &str) -> Result<Sha256Hex> {
     let (root, files) = integrity_root_files(project_root, declared)?;
 
     let mut hasher = Sha256::new();
@@ -305,7 +309,8 @@ pub fn integrity_root_digest(project_root: &Path, declared: &str) -> Result<Stri
         hasher.update((bytes.len() as u64).to_le_bytes());
         hasher.update(bytes);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    // Same-module tuple construction, not `parse`: see `dir_digest`.
+    Ok(Sha256Hex(format!("{:x}", hasher.finalize())))
 }
 
 /// [`collect_files_at_depth`]'s strict sibling for integrity roots: same
@@ -420,7 +425,7 @@ mod tests {
         let d1 = dir_digest(tmp.path()).unwrap();
         let d2 = dir_digest(tmp.path()).unwrap();
         assert_eq!(d1, d2);
-        assert_eq!(d1.len(), 64);
+        assert_eq!(d1.hex().len(), 64);
         tmp.child("a.txt").write_str("changed").unwrap();
         assert_ne!(d1, dir_digest(tmp.path()).unwrap());
     }
@@ -567,7 +572,7 @@ mod tests {
 
             let d1 = contained_file_digest(tmp.path(), "scripts/run.sh").unwrap();
             assert_eq!(
-                d1,
+                d1.hex(),
                 sha256_hex(b"echo one"),
                 "raw file bytes, like instruction pins"
             );
@@ -594,7 +599,7 @@ mod tests {
             let d1 = integrity_root_digest(tmp.path(), "tools").unwrap();
             assert_eq!(d1, integrity_root_digest(tmp.path(), "tools").unwrap());
             assert_eq!(d1, integrity_root_digest(tmp.path(), "./tools").unwrap());
-            assert_eq!(d1.len(), 64);
+            assert_eq!(d1.hex().len(), 64);
 
             // One byte in a transitive import — not the entry file — re-gates.
             tmp.child("tools/deep/payload.py").write_str("v2").unwrap();

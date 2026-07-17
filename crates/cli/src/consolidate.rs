@@ -220,7 +220,7 @@ fn library_has_same(library: &Library, name: &str, source: &Path) -> bool {
         .get(name)
         .and_then(|e| e.checksum.as_ref().map(Sha256Hex::hex))
     {
-        Some(locked) => dir_digest(source).ok().as_deref() == Some(locked),
+        Some(locked) => dir_digest(source).ok().as_ref().map(Sha256Hex::hex) == Some(locked),
         None => false,
     }
 }

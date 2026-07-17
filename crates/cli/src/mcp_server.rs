@@ -2968,10 +2968,8 @@ mod tests {
             .write_str("---\ndescription: helps\n---\n# helper v1\n")
             .unwrap();
 
-        let checksum = agentstack_core::digest::Sha256Hex::parse(
-            &agentstack_core::digest::dir_digest(proj.child("skills/helper").path()).unwrap(),
-        )
-        .unwrap();
+        let checksum =
+            agentstack_core::digest::dir_digest(proj.child("skills/helper").path()).unwrap();
         let mut lock = crate::lock::Lock::load(proj.path()).unwrap();
         lock.upsert(crate::lock::LockedSkill {
             name: "helper".into(),
@@ -3017,11 +3015,8 @@ mod tests {
                 path: Some(format!("./skills/{name}")),
                 git: None,
                 rev: None,
-                checksum: agentstack_core::digest::Sha256Hex::parse(
-                    &agentstack_core::digest::dir_digest(
-                        manifest_dir.child(format!("skills/{name}")).path(),
-                    )
-                    .unwrap(),
+                checksum: agentstack_core::digest::dir_digest(
+                    manifest_dir.child(format!("skills/{name}")).path(),
                 )
                 .unwrap(),
             });

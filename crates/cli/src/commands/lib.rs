@@ -181,9 +181,9 @@ fn add_skill_inner(
                         .with_context(|| format!("removing {}", dest.display()))?;
                 }
                 crate::consolidate::copy_dir(&src, &dest)?;
-                (dir_digest(&dest)?, dir_size(&dest))
+                (dir_digest(&dest)?.hex().to_string(), dir_size(&dest))
             } else {
-                (dir_digest(&src)?, dir_size(&src))
+                (dir_digest(&src)?.hex().to_string(), dir_size(&src))
             };
             let entry = LibrarySkill {
                 name: name.to_string(),
@@ -1100,7 +1100,9 @@ pub fn add_extension(
             let (clone, head) = crate::store::checkout(&store, url, rev)
                 .with_context(|| format!("resolving git source {url}"))?;
             let checksum = agentstack_core::digest::integrity_root_digest(&clone, sub)
-                .with_context(|| format!("digesting git extension subpath '{sub}'"))?;
+                .with_context(|| format!("digesting git extension subpath '{sub}'"))?
+                .hex()
+                .to_string();
             scan_gate(name, &clone.join(sub), allow_flagged, &mut warnings)?;
             let entry = LibraryExtension {
                 name: name.to_string(),
@@ -1150,6 +1152,7 @@ fn integrity_root_digest_at(path: &Path) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("cannot digest {} — non-UTF-8 basename", path.display()))?;
     agentstack_core::digest::integrity_root_digest(parent, name)
         .with_context(|| format!("digesting {}", path.display()))
+        .map(|d| d.hex().to_string())
 }
 
 /// Copy a path extension source (directory tree or single file) into `dest`,
@@ -3245,9 +3248,10 @@ mod tests {
         )
         .unwrap();
         let lenient = dir_digest(&lib.path().join("extensions/checkpoint")).unwrap();
-        assert_eq!(out.checksum, strict);
+        assert_eq!(out.checksum, strict.hex());
         assert_ne!(
-            out.checksum, lenient,
+            out.checksum,
+            lenient.hex(),
             "must not use the lenient skill digest"
         );
 

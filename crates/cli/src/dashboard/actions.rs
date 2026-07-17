@@ -154,7 +154,7 @@ pub fn toggle_skill(
         .iter()
         .map(|(name, path)| {
             let status = match crate::store::dir_digest(path) {
-                Ok(checksum) => crate::resolve::classify_skill(name, &checksum, None, &lock),
+                Ok(checksum) => crate::resolve::classify_skill(name, checksum.hex(), None, &lock),
                 Err(e) => crate::resolve::SkillLockStatus::ResolveFailed {
                     error: format!("{e:#}"),
                 },
