@@ -13,6 +13,7 @@ agentstack.local.toml
 /.agentstack/
 /.mcp.json
 /.claude/skills/
+/.claude/launch.json
 /skills/
 /plugins/agentstack/
 /.claude-plugin/

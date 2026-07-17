@@ -1,6 +1,0 @@
-{
-  "version": "0.0.1",
-  "configurations": [
-    { "name": "docs-site", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "cd /Users/tarek.k/Documents/GitHub/agentstack/docs && exec python3 -m http.server 4173"], "port": 4173 }
-  ]
-}
