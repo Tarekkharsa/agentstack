@@ -115,11 +115,20 @@ pub fn classify_local_executable(
 /// auto-detected file pins for its stdio `command`/`args`, plus a root pin per
 /// declared integrity root. An unverifiable local candidate or an undigestable
 /// declared root is a hard error naming the server.
+///
+/// `project_dir` accepts either the project root or the manifest dir and is
+/// normalized to the ROOT here, in the one function every pin producer and
+/// verifier funnels through. Server commands like `./tool.sh` are declared
+/// relative to the project root, not `.agentstack/` — before this
+/// normalization, the preferred layout resolved them against the manifest
+/// dir, found nothing, and silently pinned NOTHING, so the D3 gates passed
+/// vacuously and the trust preview never labeled the unpinned code.
 pub fn derive_executable_pins(
     project_dir: &Path,
     name: &str,
     server: &Server,
 ) -> Result<Vec<LockedExecutable>> {
+    let project_dir = &crate::manifest::project_root_of(project_dir);
     let mut pins = Vec::new();
     if server.server_type == ServerType::Stdio {
         if let Some(anchor) = server_anchor(project_dir, server)
@@ -399,6 +408,36 @@ mod tests {
             pins[1].checksum,
             integrity_root_digest(tmp.path(), "tools").unwrap()
         );
+    }
+
+    /// Security witness (D3): the preferred `.agentstack/` layout must pin
+    /// exactly what the flat layout pins. Callers pass `ctx.dir` — the
+    /// MANIFEST dir — and before the `project_root_of` normalization inside
+    /// `derive_executable_pins`, `./tool.sh` resolved against `.agentstack/`,
+    /// matched nothing, and the whole D3 surface silently vanished (no pins
+    /// recorded, verification vacuously green, trust preview silent).
+    #[test]
+    fn manifest_dir_input_pins_against_the_project_root_not_dot_agentstack() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        tmp.child("tool.sh")
+            .write_str("#!/bin/sh\nexit 0\n")
+            .unwrap();
+        tmp.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n")
+            .unwrap();
+
+        let server = stdio(
+            r#"
+            type = "stdio"
+            command = "./tool.sh"
+            "#,
+        );
+        let from_manifest_dir =
+            derive_executable_pins(&tmp.path().join(".agentstack"), "agent", &server).unwrap();
+        let from_root = derive_executable_pins(tmp.path(), "agent", &server).unwrap();
+        assert_eq!(from_manifest_dir.len(), 1, "nested layout must pin");
+        assert_eq!(from_manifest_dir[0].path, "tool.sh");
+        assert_eq!(from_manifest_dir, from_root, "both layouts pin identically");
     }
 
     #[test]

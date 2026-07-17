@@ -173,6 +173,19 @@ unwired machinery.
     read the 0600 commitment key and seal a valid MAC; the docs now state
     what the MAC actually provides (cross-machine replay + tamper +
     confined-attacker forgery resistance — see residual iii).
+  - **Post-review dogfooding catch (2026-07-17, found by the new
+    `examples/projects/locked-run` asserted example):** in the preferred
+    `.agentstack/` layout, D3 executable pins were derived against the
+    MANIFEST dir instead of the project root — `./tool.sh` resolved against
+    `.agentstack/`, matched nothing, `lock` silently pinned NOTHING, the
+    locked/trust gates passed vacuously, and the trust preview never labeled
+    the unpinned code (flat root-manifest projects were unaffected, which is
+    why the existing witnesses stayed green). Fixed by normalizing to the
+    project root inside `derive_executable_pins` — the one function every
+    pin producer and verifier funnels through, so record and verify can't
+    diverge — with a layout-equivalence unit witness; the example's
+    one-byte-edit step is the end-to-end witness. Full example suite re-run
+    green.
   - **Remaining (honest limits, not blockers):** (i) actual NEUTRALIZATION
     of ambient global-scope entries on the host tier stays out deliberately —
     the global config is one shared file harness apps rewrite mid-run, so
