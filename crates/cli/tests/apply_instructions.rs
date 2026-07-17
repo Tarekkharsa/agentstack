@@ -124,8 +124,9 @@ fn apply_write_blocks_on_a_missing_fragment_source() {
     fs::remove_file(proj.join("instructions/house.md")).unwrap();
 
     // A missing source must BLOCK the write — a compile that silently dropped
-    // the fragment would delete the previously compiled region.
-    apply::run(&args(true), Some(&proj)).unwrap();
+    // the fragment would delete the previously compiled region — and the
+    // blocked apply exits nonzero so scripts see it.
+    apply::run(&args(true), Some(&proj)).expect_err("blocked apply --write must be an error");
     let after = fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap();
     assert_eq!(
         after, before,

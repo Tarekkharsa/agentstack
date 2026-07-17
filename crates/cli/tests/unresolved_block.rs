@@ -56,8 +56,14 @@ fn unresolved_secret_blocks_write_unless_allowed() {
 
     let claude_cfg = home.join(".claude.json");
 
-    // Default: write is blocked → the live config is never created.
-    apply::run(&args(true, false), Some(&proj)).unwrap();
+    // Default: write is blocked → the live config is never created, and the
+    // apply itself errors (nonzero exit) so scripts see the blockage.
+    let err = apply::run(&args(true, false), Some(&proj))
+        .expect_err("a fully blocked apply --write must be an error");
+    assert!(
+        err.to_string().contains("blocked"),
+        "error should name the blockage: {err}"
+    );
     assert!(
         !claude_cfg.exists(),
         "unresolved secret must block the write — but {} was written",
@@ -133,28 +139,92 @@ fn blocked_write_summary_counts_written_targets() {
             .env_remove("SOME_UNSET_SECRET")
             .output()
             .unwrap();
-        String::from_utf8_lossy(&out.stdout).into_owned()
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
     };
 
-    let stdout = run(&["apply", "--write", "--no-gitignore"]);
+    let (ok, stdout) = run(&["apply", "--write", "--no-gitignore"]);
     assert!(
         !stdout.contains("Applied to"),
         "a fully blocked apply must not claim success:\n{stdout}"
     );
     assert!(
-        stdout.contains("0 of 2 target(s) written"),
+        stdout.contains("Wrote 0 of 2 target(s); 2 blocked"),
         "summary should count only targets actually written:\n{stdout}"
     );
+    assert!(!ok, "a blocked apply --write must exit nonzero");
     assert!(
         !home.join(".claude.json").exists(),
         "blocked apply must not write the live config"
     );
 
     // Nothing was written, so a follow-up dry-run still shows both pending.
-    let dry = run(&["apply", "--dry-run"]);
+    let (dry_ok, dry) = run(&["apply", "--dry-run"]);
     assert!(
         dry.contains("2 target(s) would change"),
         "blocked targets must still show as pending:\n{dry}"
+    );
+    assert!(
+        dry_ok,
+        "a dry run never blocks a write, so it still exits 0"
+    );
+}
+
+/// A target can be written AND blocked in the same pass — its instructions
+/// land while the server config is refused over an unresolved secret. The old
+/// summary counted it in both columns ("1 of 1 written — 1 blocked"); the
+/// split summary must count it once (blocked, partially written) and the
+/// process must exit nonzero. Runs the real binary to assert both.
+#[test]
+fn partially_blocked_apply_counts_once_and_exits_nonzero() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("instructions")).unwrap();
+    fs::write(proj.join("instructions/house.md"), "House rule one.\n").unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.demo]\ntype = \"http\"\nurl = \"https://d/mcp\"\n\
+         headers = { Authorization = \"Bearer ${DEMO_TOKEN}\" }\n\
+         [instructions.house]\npath = \"./instructions/house.md\"\n",
+    )
+    .unwrap();
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(["apply", "--write", "--no-gitignore"])
+        .current_dir(&proj)
+        .env("HOME", &home)
+        .env("AGENTSTACK_HOME", home.join(".agentstack"))
+        .env_remove("DEMO_TOKEN")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    // The instructions half of the target landed; the server half was blocked.
+    assert!(
+        home.join(".claude/CLAUDE.md").exists(),
+        "instructions should still be written:\n{stdout}"
+    );
+    assert!(
+        !home.join(".claude.json").exists(),
+        "the unresolved server config must not be written:\n{stdout}"
+    );
+    // One target, counted once: blocked (with a partial note), not "written".
+    assert!(
+        stdout.contains("Wrote 0 of 1 target(s); 1 blocked"),
+        "a blocked target must not also count as written:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("(1 partially written)"),
+        "the summary should note the partial write:\n{stdout}"
+    );
+    assert!(
+        !out.status.success(),
+        "an apply with blocked writes must exit nonzero"
     );
 }
 

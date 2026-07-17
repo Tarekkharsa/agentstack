@@ -662,6 +662,10 @@ fn render(
     }
 
     let written_count = touched_targets.len();
+    // A target can be both written and blocked — e.g. its instructions landed
+    // while its server config was refused over an unresolved secret. Split the
+    // overlap out so the summary counts don't cover the same target twice.
+    let partially_written = touched_targets.intersection(&blocked_targets).count();
     if will_write {
         state.save()?;
         // Record one undoable history entry for everything this apply wrote.
@@ -718,8 +722,17 @@ fn render(
         if blocked_targets.is_empty() {
             println!("Applied to {written_count} target(s).");
         } else {
+            // "Wrote F of C; B blocked" with F + B = C: every changed target is
+            // either fully written or in the blocked set, so the two counts
+            // never overlap. Partially written targets count as blocked.
+            let fully_written = written_count - partially_written;
+            let partial_note = if partially_written > 0 {
+                format!(" ({partially_written} partially written)")
+            } else {
+                String::new()
+            };
             println!(
-                "{written_count} of {} target(s) written — {} blocked by unresolved secret(s) or missing fragment source(s); see {} above.",
+                "Wrote {fully_written} of {} target(s); {} blocked by unresolved secret(s) or missing fragment source(s){partial_note}; see {} above.",
                 changed_targets.len(),
                 blocked_targets.len(),
                 "✗".red()
@@ -736,6 +749,17 @@ fn render(
     }
     if error_count > 0 && !quiet {
         println!("{error_count} issue(s) — resolve before writing.");
+    }
+
+    // A blocked write is a failure, not a footnote: exit nonzero so scripts
+    // can't mistake a fail-closed apply for success. Mirrors `use --write`.
+    // (`doctor --ci` runs its own checks and never reads apply's exit code,
+    // and `setup` stops on `write_blockers` before its write pass.)
+    if will_write && !blocked_targets.is_empty() {
+        anyhow::bail!(
+            "blocked write(s) on {} target(s) — set the missing secret(s) (`agentstack secret set <NAME>`), restore missing fragment source(s), or pass --allow-unresolved for unresolved secrets",
+            blocked_targets.len()
+        );
     }
 
     Ok(Outcome {

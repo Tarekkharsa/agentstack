@@ -77,7 +77,8 @@ fn machine_secret_deny_blocks_render_fail_closed() {
     .unwrap();
 
     let claude_cfg = home.join(".claude.json");
-    apply::run(&apply_args(), Some(&proj)).unwrap();
+    // A blocked write is also a nonzero exit, so both runs return Err.
+    apply::run(&apply_args(), Some(&proj)).expect_err("blocked apply --write must be an error");
     assert!(
         !claude_cfg.exists(),
         "policy-denied secret must block the write"
@@ -86,7 +87,7 @@ fn machine_secret_deny_blocks_render_fail_closed() {
     // --allow-unresolved must NOT bypass the policy.
     let mut args = apply_args();
     args.allow_unresolved = true;
-    apply::run(&args, Some(&proj)).unwrap();
+    apply::run(&args, Some(&proj)).expect_err("policy denial must still block and error");
     assert!(
         !claude_cfg.exists(),
         "--allow-unresolved must never override [policy.secrets]"

@@ -264,7 +264,9 @@ fn blocked_write_emits_no_managed_block() {
         no_gitignore: false,
         prune_foreign: false,
     };
-    apply::run(&args, Some(&proj)).unwrap();
+    // The blocked write is an error (nonzero exit) — the assertions below
+    // check that it also left no artifacts behind.
+    apply::run(&args, Some(&proj)).expect_err("blocked apply --write must be an error");
 
     assert!(
         !proj.join(".mcp.json").exists(),

@@ -60,6 +60,12 @@ removed outright, and a parse test pins the retired names as rejected.
   `.agentstack/` layout (previously they could silently pin nothing).
 - Copilot CLI 1.0.x conformance: `mcp list` moved behind `-i`; auth gate at
   exit 0.
+- `apply --write` with blocked writes now exits nonzero (matching
+  `use --write`) and its summary counts each target once: "Wrote N of C
+  target(s); M blocked", with a note when a blocked target was partially
+  written (e.g. instructions landed, server config refused). Previously a
+  target written in one section and blocked in another counted in both
+  columns ("2 of 2 written — 2 blocked") and the process exited 0.
 
 ### Security
 
