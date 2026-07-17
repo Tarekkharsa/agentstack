@@ -719,6 +719,10 @@ pub struct AddServerArgs {
     /// Also add to this profile's server list.
     #[arg(long)]
     pub profile: Option<String>,
+    /// Render only into this CLI (repeatable, e.g. --target claude-code).
+    /// Default: every CLI in [targets]. Unknown adapter ids are an error.
+    #[arg(long = "target", value_name = "CLI")]
+    pub targets: Vec<String>,
     /// Write the change (else dry-run).
     #[arg(long)]
     pub write: bool,

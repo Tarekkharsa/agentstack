@@ -1173,7 +1173,8 @@ fn tool_defs() -> Value {
                     "args": { "type": "array", "items": { "type": "string" } },
                     "env": { "type": "object" },
                     "headers": { "type": "object" },
-                    "profile": { "type": "string" }
+                    "profile": { "type": "string" },
+                    "targets": { "type": "array", "items": { "type": "string" }, "description": "Render only into these CLIs (adapter ids, e.g. [\"claude-code\"]). Omit for every CLI in [targets]; [] keeps it out of the fan-out (recipe-owned)." }
                 }
             }
         }

@@ -641,7 +641,28 @@ pub fn add_server(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
             .unwrap_or_default(),
         cwd: str_field(args, "cwd"),
         integrity_roots: Vec::new(),
-        targets: crate::manifest::model::all_targets(),
+        // Optional per-CLI scoping (`targets: ["claude-code"]`). Validated
+        // eagerly against the adapter registry — a typo'd id would silently
+        // render the server nowhere the caller expected. Absent = every CLI.
+        targets: match args.get("targets").and_then(Value::as_array) {
+            None => crate::manifest::model::all_targets(),
+            Some(list) => {
+                let registry = crate::adapter::Registry::load()?;
+                let targets: Vec<String> = list
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+                for t in &targets {
+                    if t != "*" && registry.get(t).is_none() {
+                        anyhow::bail!(
+                            "unknown target '{t}' — valid adapter ids: {}",
+                            registry.ids().collect::<Vec<_>>().join(", ")
+                        );
+                    }
+                }
+                targets
+            }
+        },
         owner: None,
         headers: obj_to_map(args.get("headers")),
         env: obj_to_map(args.get("env")),

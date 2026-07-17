@@ -717,6 +717,22 @@ fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
         anyhow::bail!("server '{}' already exists in the manifest", a.name);
     }
 
+    // Per-CLI scoping straight from the flag. Validate eagerly against the
+    // adapter registry — manifest validation would catch a typo later, but
+    // "renders nowhere you expected" is cheaper to refuse right here.
+    let targets = if a.targets.is_empty() {
+        crate::manifest::model::all_targets()
+    } else {
+        for t in &a.targets {
+            if ctx.registry.get(t).is_none() {
+                anyhow::bail!(
+                    "unknown target '{t}' — valid adapter ids: {}",
+                    ctx.registry.ids().collect::<Vec<_>>().join(", ")
+                );
+            }
+        }
+        a.targets.clone()
+    };
     let server = Server {
         server_type: a.transport,
         url: a.url.clone(),
@@ -724,7 +740,7 @@ fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
         args: a.args.clone(),
         cwd: a.cwd.clone(),
         integrity_roots: Vec::new(),
-        targets: crate::manifest::model::all_targets(),
+        targets,
         owner: None,
         headers: parse_kv(&a.headers)?,
         env: parse_kv(&a.env)?,
@@ -1021,6 +1037,46 @@ fn parse_kv(pairs: &[String]) -> Result<IndexMap<String, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `--target` scopes the added server to named CLIs (persisted as
+    /// `targets = [...]`), and a typo'd adapter id refuses up front instead
+    /// of silently rendering the server nowhere.
+    #[test]
+    fn add_server_target_flag_scopes_and_validates() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", tmp.path().join("home"));
+        fs::write(tmp.path().join("agentstack.toml"), "version = 1\n").unwrap();
+
+        let args = |targets: Vec<String>| crate::cli::AddServerArgs {
+            name: "tldraw".into(),
+            transport: crate::manifest::ServerType::Stdio,
+            url: None,
+            headers: vec![],
+            command: Some("node".into()),
+            args: vec!["dist/index.js".into()],
+            cwd: None,
+            env: vec![],
+            profile: None,
+            targets,
+            write: true,
+        };
+
+        let err = add_server(&args(vec!["claude-kode".into()]), Some(tmp.path())).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown target 'claude-kode'"),
+            "{err:#}"
+        );
+
+        add_server(&args(vec!["claude-code".into()]), Some(tmp.path())).unwrap();
+        let text = fs::read_to_string(tmp.path().join("agentstack.toml")).unwrap();
+        let m: Manifest = toml::from_str(&text).unwrap();
+        assert_eq!(m.servers["tldraw"].targets, vec!["claude-code"]);
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
 
     #[test]
     fn parses_kv_with_equals_in_value() {
