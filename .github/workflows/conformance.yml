@@ -48,6 +48,10 @@ jobs:
             npm: "@google/gemini-cli"
             bin: gemini
             config: .gemini/settings.json
+          - adapter: opencode
+            npm: "opencode-ai"
+            bin: opencode
+            config: .config/opencode/opencode.json
           # pi has no MCP support by design — "-" switches the smoke to its
           # skills-render leg (symlinks under ~/.pi/agent/skills).
           - adapter: pi

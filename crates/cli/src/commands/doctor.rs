@@ -1406,6 +1406,38 @@ fn check_executable_integrity(manifest: &Manifest, dir: &Path, report: &mut Repo
             ExecutableLockStatus::Matches => {}
         }
     }
+
+    for (name, server) in &servers {
+        if let Some(err) = missing_command_error(name, server) {
+            report.line(Level::Error, err);
+        }
+    }
+}
+
+/// A stdio server whose ABSOLUTE command path no longer exists fails on every
+/// CLI at startup ("ENOENT … posix_spawn"), and the cause is knowable right
+/// here. The live case: an `owner`-synced app-bundled binary whose owning app
+/// relocated itself (Codex.app → ChatGPT.app) — the owner's config has the
+/// fresh path, one `apply --write` away. Relative and bare-name commands are
+/// skipped: they resolve against a cwd or PATH the CLI controls, not knowable
+/// statically. Pure, so it is unit-testable without a `Report`.
+fn missing_command_error(name: &str, server: &crate::manifest::Server) -> Option<String> {
+    if server.server_type != crate::manifest::ServerType::Stdio {
+        return None;
+    }
+    let cmd = server.command.as_ref()?;
+    if !Path::new(cmd).is_absolute() || cmd.contains("${") || Path::new(cmd).exists() {
+        return None;
+    }
+    let hint = match &server.owner {
+        Some(owner) => format!(
+            "its owner ('{owner}') may have moved it ↳ agentstack apply --write refreshes from the owner's config"
+        ),
+        None => "fix the path in the manifest or remove the server".to_string(),
+    };
+    Some(format!(
+        "server '{name}' command does not exist on this machine ({cmd}) — every CLI will fail it at startup; {hint}"
+    ))
 }
 
 /// A machine policy deny keyed to a specific server *name* can be dodged: the
@@ -2508,5 +2540,34 @@ mod tests {
             !quirks.iter().any(|q| is_bare_launcher_warning(q)),
             "{quirks:?}"
         );
+    }
+
+    /// The node_repl lesson: an absolute stdio command that no longer exists
+    /// (owning app relocated itself) errors with the owner hint; bare names,
+    /// relative paths, `${REF}`s, http servers, and existing paths stay quiet.
+    #[test]
+    fn missing_absolute_command_errors_with_owner_hint() {
+        let server = |body: &str| -> crate::manifest::Server { toml::from_str(body).unwrap() };
+        let gone = server(
+            "type = \"stdio\"\ncommand = \"/Applications/Codex.app/Contents/Resources/cua_node/bin/node_repl\"\nowner = \"codex\"",
+        );
+        let err = missing_command_error("node_repl", &gone).expect("must error");
+        assert!(err.contains("does not exist on this machine"), "{err}");
+        assert!(err.contains("owner ('codex')"), "{err}");
+        assert!(err.contains("apply --write"), "{err}");
+
+        let ownerless = server("type = \"stdio\"\ncommand = \"/definitely/not/here/anymore\"");
+        let err = missing_command_error("x", &ownerless).expect("must error");
+        assert!(err.contains("fix the path in the manifest"), "{err}");
+
+        for quiet in [
+            "type = \"stdio\"\ncommand = \"npx\"\nargs = [\"-y\", \"pkg\"]",
+            "type = \"stdio\"\ncommand = \"./local/tool.sh\"",
+            "type = \"stdio\"\ncommand = \"/${APP_HOME}/bin/tool\"",
+            "type = \"stdio\"\ncommand = \"/bin/sh\"",
+            "type = \"http\"\nurl = \"https://example.com/mcp\"",
+        ] {
+            assert_eq!(missing_command_error("s", &server(quiet)), None, "{quiet}");
+        }
     }
 }
