@@ -933,6 +933,10 @@ mod tests {
             elsewhere.contains(&PathBuf::from("/machines/shared")),
             "global allow_roots still apply everywhere"
         );
+        // Component-wise, not string-prefix: a sibling whose NAME merely
+        // starts with the key must not inherit the grant.
+        let sibling = effective_allow_roots(&cfg, Path::new("/work/agentstack-evil"));
+        assert!(!sibling.contains(&PathBuf::from("/home/me/agent-setup")));
     }
 
     #[test]
