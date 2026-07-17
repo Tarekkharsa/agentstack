@@ -1,6 +1,7 @@
 # Device access control as a first-run experience
 
-> **Status:** draft for maintainer review (A0)<br/>
+> **Status:** **A0 approved 2026-07-17 — proceed to A1** (with one blocking
+> correction: home-anchored deny globs, see §4a).<br/>
 > **Date:** 2026-07-17<br/>
 > **Origin:** every agent CLI on a device should have its file access
 > governed; the maintainer wants that to be part of the `init` experience —
@@ -10,6 +11,14 @@
 > already-shipped enforcement — no new policy semantics, no new enforcement
 > code paths. It does not displace the remaining Phase 0A keystone review;
 > it is sized to follow it.
+
+> **Review note (A0, 2026-07-17).** Approved. All five load-bearing code
+> claims were verified against source, and the home-anchored-glob question
+> (Q2) was settled with an empirical witness. The proposed v1 deny list is
+> approved as-is — every entry works via basename/extension matching. One
+> premise is false and corrected below (§4a): `~`-anchored deny globs are
+> silently inert today. Decisions are recorded in §8; the two implementation
+> conditions for A1 are in §7.
 
 ## 0. Motivation
 
@@ -143,11 +152,51 @@ it is the user uninstalling the guard. Selection rules:
 Explicitly **not** in v1 defaults: `*.key` (matches too many non-secret
 files), browser profile directories (guard reads would break nothing, but
 unverified glob anchoring — Q2), and `~/.aws/**` / `~/.ssh/**` style
-home-anchored entries (same Q2; once verified, they are the strongest
-candidates for v2 of the template, shipped as commented examples first).
+home-anchored entries (Q2, now verified broken — see §4a below).
 
 Changing the list later is `agentstack init --global --force` (re-seed) or
 editing the file — `doctor` validates it either way.
+
+**`credentials.json` (A0 decision): in, but commented.** Basename matching
+is aggressive — it matches that filename *anywhere*, and `credentials.json`
+is a real non-secret filename in several toolchains — so it ships commented
+in the template and the user opts in by uncommenting. Every other entry
+above ships uncommented.
+
+**`*.pem` caveat (A0 note).** It is already the shipped default and stays
+uncommented, but it blocks *public* PEM material too (`fullchain.pem`, CA
+bundles), and the machine ∪ project union means a `.pem`-heavy project
+cannot allow those back at project scope — only by editing the machine list.
+The A3 docs page must surface that escape hatch prominently; it is the most
+likely real-world false positive.
+
+## 4a. Verified: home-anchored deny globs are inert today (A0 blocking correction)
+
+Settling Q2 with an empirical witness plus a source trace: a machine deny of
+`~/.aws/credentials` does **not** block a read of that file — it reads
+*allowed* — while `.env`, `*.pem`, and even a bare basename `id_rsa` matched
+at `~/.ssh/id_rsa` all correctly deny. The matcher (`glob_match`,
+`crates/core/src/manifest/model.rs`) is a hand-rolled `*`-only matcher with
+no `~` awareness; only the *subject* path is tilde-expanded
+(`guard.rs::normalize`), never the *pattern*. A `~/`-anchored deny entry
+compiles, matches nothing, and fails open.
+
+Consequences for this design:
+
+- The v1 list is **unaffected** — none of its entries are home-anchored, and
+  all of them are witnessed working. Approved as-is.
+- The §4 idea to ship `~/.aws/**` / `~/.ssh/**` as *commented v2 examples* is
+  **rejected until the matcher expands `~` on the pattern side.** A commented
+  deny a user uncomments would grant zero protection while reading as
+  protective — the exact false sense of security a security tool must never
+  ship. This is tracked as a separate task (pattern-side `~`/`$HOME`
+  expansion in `fs_deny_layer`, mirroring what `normalize()` already does for
+  subjects, with a witness). Until it lands, no home-anchored entries appear
+  anywhere in the template, not even commented.
+- The one genuinely useful home-anchored case (`~/.aws/credentials` — a
+  precise path that avoids basename over-match) is exactly the broken one, so
+  the fix is worth doing before any AWS/cloud-credential defaults are
+  considered.
 
 ## 5. Project scope: encounter, narrow, verify
 
@@ -190,11 +239,20 @@ editing the file — `doctor` validates it either way.
 Small stages; only A1 touches anything security-adjacent (the template
 content and the guard-offer flow), and it changes no enforcement semantics.
 
-- **A0 — approve this design.** Settle: the default deny list (§4, entry by
-  entry), the guard-offer wording, no-new-verb, and the open questions.
+- **A0 — approve this design. ✅ Done 2026-07-17.** Deny list, guard-offer
+  wording, no-new-verb, and all four open questions settled (§8); the
+  home-anchored-glob premise verified and corrected (§4a).
 - **A1 — device setup.** Extend the global template with `[guard]` +
   `[policy.filesystem]` defaults; add the post-write guard-install offer;
   dashboard parity (report, don't auto-install).
+  **A0 conditions:** (1) **Single source of truth for the default list.**
+  `guard install` *already* seeds `DEFAULT_DENY` (`.env` family, `id_rsa`,
+  `id_ed25519`, `*.pem`) via `seed_machine_config()` — `init --global` must
+  read the *same* canonical constant, and seeding must be idempotent (init
+  seeds → a later `guard install` sees it present and neither duplicates nor
+  clobbers). The proposed template = current `DEFAULT_DENY` + `{id_ecdsa,
+  .netrc, credentials.json (commented)}`; reconcile, don't fork. (2) **No
+  home-anchored entries** until the separate `~`-expansion task lands (§4a).
   *Witnesses:* `--dry-run` shows the policy blocks and writes nothing;
   an existing machine manifest is never overwritten without `--force`;
   declining the offer performs zero guard writes; with the seeded default,
@@ -208,21 +266,19 @@ content and the guard-offer flow), and it changes no enforcement semantics.
   README ladder; optionally a fourth demo clip (init --global → guard
   offer → blocked `.env` read) in the established asciinema pipeline.
 
-## 8. Open questions for A0
+## 8. A0 decisions (settled 2026-07-17)
 
-1. **Verb.** Keep everything under `init --global`, or add `agentstack
-   protect` as a discoverable alias for template-seed + guard-install?
-   (Recommend: no alias in v1; one less verb, and the README ladder can
-   market the flow without a new command.)
-2. **Home-anchored deny globs.** Does the ruleset glob matcher expand `~`
-   inside *globs* (the path side expands it; the glob side is unverified)?
-   Verify with a witness before any `~/.aws/**`-style entry ships, even
-   commented. If unsupported, decide whether to add anchoring or keep the
-   template basename-only.
-3. **`credentials.json`.** In or out of the v1 default list? (Recommend:
-   in, commented, so the user opts in by uncommenting — the one entry with
-   real false-positive potential.)
-4. **Doctor severity.** Should "policy exists but guard not installed"
-   escalate from info to warning once the user has run `init --global`
-   (they opted into the model, then lost enforcement)? (Recommend: yes —
-   info before opt-in, warning after.)
+1. **Verb → no new verb.** Everything stays under `init --global`; no
+   `agentstack protect` alias in v1. The visible CLI was just cut 48→14;
+   the README ladder markets the flow without a new command.
+2. **Home-anchored deny globs → verified broken; keep the template
+   basename/extension-only.** An empirical witness plus a source trace
+   confirmed `~`-anchored globs match nothing and fail open (§4a). No
+   home-anchored entries ship — not even commented — until a separate task
+   adds pattern-side `~`/`$HOME` expansion with a witness.
+3. **`credentials.json` → in, but commented** (opt-in by uncommenting). It is
+   the one entry with real false-positive potential under aggressive
+   basename matching (§4).
+4. **Doctor severity → info before `init --global`, warning after.** Once the
+   user has opted into the model, "policy exists but guard not installed"
+   escalates to a warning; before opt-in it stays informational.

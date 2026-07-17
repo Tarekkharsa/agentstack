@@ -471,21 +471,40 @@ ledger entries D8 and D9 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger
 
 ### Access control (D8)
 
-- [ ] A0: review and approve the design doc (settle the default deny list
-  entry by entry, the guard-offer wording, no-new-verb, and verify whether
-  deny globs support home-anchored entries before templating any).
+- [x] A0: review and approve the design doc. **Approved 2026-07-17** — deny
+  list, guard-offer wording, and no-new-verb settled; the home-anchored-glob
+  question verified with a witness and found **broken** (globs fail open on
+  `~`), corrected in the design (§4a). A1 carries two conditions: single
+  source of truth for the default list (shared with `guard install`'s
+  `DEFAULT_DENY`), and no home-anchored entries until the `~`-expansion task
+  lands (see below).
 - [ ] A1: extend the `init --global` template with `[guard]` +
   `[policy.filesystem]` defaults; post-write guard-install offer; dashboard
   parity (report, never auto-install). Witnesses per design §7.
 - [ ] A2: commented `[policy.filesystem]` block in project init output;
   protection-status line; the two doctor informational findings.
-- [ ] A3: "protect this device" docs page; optional fourth demo clip.
+- [ ] A3: "protect this device" docs page; optional fourth demo clip. The
+  docs must surface the `*.pem` false-positive escape hatch (public certs are
+  blocked too; the union means only the machine list can allow them back).
+- [ ] **Pattern-side `~`/`$HOME` expansion in `[policy.filesystem]` deny
+  globs** (unblocks home-anchored entries — A0 §4a). Today `~/.aws/**`
+  compiles, matches nothing, and **fails open** — verified with a witness.
+  Fix: expand `~`/`$HOME` in the deny *pattern* at compile time
+  (`crates/policy/src/compile.rs::fs_deny_layer`, mirroring what
+  `guard.rs::normalize` already does for the *subject* path), or special-case
+  a `~`-prefix in the matcher. Witness: a machine deny `~/.aws/credentials`
+  blocks a read of that exact file and nothing else. Prerequisite for any
+  home-anchored default (e.g. AWS/cloud-credential paths); until it lands the
+  A1 template stays basename/extension-only.
 
 ### Secrets (D9)
 
-- [ ] S0: review and approve the design doc (settle the three-option prompt,
-  `--secrets` flag, `[secrets] default_store`, `secret lift`, and the open
-  questions).
+- [x] S0: review and approve the design doc. **Approved 2026-07-17** — the
+  three-option prompt, `--secrets`, `[secrets] default_store`, `secret lift`,
+  and all four open questions settled (design §8). Verified the chain,
+  `source_of`, rule-5 fail-closed, and two-write-path invariant against
+  source. S2 gains one net-new item the review surfaced: the store
+  reachability probe (S1 landed as attempt-then-catch, not a pre-probe).
 - [x] S1 (bugfix-grade, landed in-cut 2026-07-17): interactive init stops
   aborting on an unreachable keychain (stores what it can, reports failed
   refs by name, continues); dashboard init reports unstored refs by name

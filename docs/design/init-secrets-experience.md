@@ -1,6 +1,7 @@
 # Secrets at init: choose a store, or none at all
 
-> **Status:** draft for maintainer review (S0)<br/>
+> **Status:** **S0 approved 2026-07-17. S1 landed (commit `be9292f`) — next
+> is S2.**<br/>
 > **Date:** 2026-07-17<br/>
 > **Origin:** maintainer ruling — secrets management must be right before the
 > first public release. Users should choose how their secrets are handled
@@ -10,6 +11,13 @@
 > deferred Phase 0B lane resumes), but S1 is bugfix-grade and in-cut-sized.
 > Companion doc: [`init-access-control.md`](init-access-control.md) — same
 > init flow, different review concerns, deliberately separate.
+
+> **Review note (S0, 2026-07-17).** Approved. The resolution chain,
+> `source_of`, rule-5 fail-closed, and the two-write-path invariant were all
+> verified against source. Both edges §0 describes are **already fixed** by
+> S1 (`be9292f`, witnessed by `store_lifted_reports_failures_by_name_and_keeps_storing`).
+> One nuance for S2: S1 uses attempt-then-catch, not the reachability *probe*
+> §3 assumes, so the probe is net-new S2 work (§7). Decisions are in §8.
 
 ## 0. Motivation
 
@@ -182,16 +190,19 @@ one visible nudge and one command — never a gate:
 - **S0 — approve this design.** Settle: the three-option prompt and its
   default logic, `--secrets` flag shape, `[secrets] default_store`,
   `secret lift`, and the open questions.
-- **S1 — fix the two edges (bugfix-grade, in-cut-sized).** Unreachable
-  keychain stops aborting interactive init (probe → inform → default to
-  refs-only); dashboard init reports unstored refs by name.
-  *Witnesses:* init with lifted secrets and a failing store completes,
-  writes a manifest whose refs are honestly reported as unstored, and
-  stores nothing in plaintext without consent; the dashboard summary names
-  every unstored ref.
+- **S1 — fix the two edges (bugfix-grade, in-cut-sized). ✅ Done 2026-07-17
+  (commit `be9292f`).** Unreachable keychain stops aborting interactive init
+  (`store_lifted` collects failures, the manifest still writes); dashboard
+  init reports unstored refs by name. Implemented as attempt-then-catch (not
+  a pre-probe) — functionally equivalent for the bugfix; the probe §3 needs
+  for the S2 prompt is listed below. Witness:
+  `store_lifted_reports_failures_by_name_and_keeps_storing`.
 - **S2 — the choice.** The three-option prompt at the lifting moment,
   `--secrets`, `.env` write path with managed-gitignore verification,
-  `[secrets] default_store` + remember-prompt.
+  `[secrets] default_store` + remember-prompt. **Includes the store
+  reachability probe** (§3: "store probes as reachable" preselects the
+  default and words the prompt) — net-new here, not inherited from S1's
+  attempt-then-catch.
   *Witnesses:* option 2 never clobbers an existing `.env` key and refuses
   to write an un-gitignorable `.env` (no `.gitignore`, not a git repo →
   proceed with an explicit warning acknowledgment); no path stores values
@@ -202,24 +213,24 @@ one visible nudge and one command — never a gate:
   *Witness:* `lift` moves a value keychain-ward, removes exactly the lifted
   lines, and a subsequent `apply` resolves every ref identically.
 
-## 8. Open questions for S0
+## 8. S0 decisions (settled 2026-07-17)
 
-1. **Prompt inventory at init-time.** Should the prompt also appear when
-   the manifest references `${REF}`s that resolve *nowhere* (not just when
-   lifting plaintext)? (Recommend: no prompt — print the existing
-   unresolved-refs summary with the same three-way advice; prompting on
-   every unresolved ref punishes the try-first flow.)
-2. **`default_store = "dotenv"` scope.** A machine-level default of
-   "plaintext per-project file" is a footgun candidate. Keep it as a legal
-   value (headless machines may genuinely want it), or restrict the
-   remembered default to `keychain`/`none`? (Recommend: legal but never
-   offered by the remember-prompt — reachable only by editing the file.)
-3. **`secret lift` deletion semantics.** Removing lines from a user's
-   `.env` edits a file agentstack doesn't own. Prompt per file, or is the
-   command-level prompt plus `--keep` enough? (Recommend: command-level
-   prompt showing the exact lines to be removed; `.env` may hold non-agent
-   variables and they must survive untouched.)
-4. **Headless-Linux detection.** Should doctor detect "no Secret Service
-   bus" and proactively surface the env/varlock/`.env` guidance, or is the
-   docs page enough? (Recommend: yes in doctor — it is one probe, and it
-   converts the platform gap from a surprise into a labeled state.)
+1. **Prompt on resolve-nowhere refs → no.** Reuse the existing
+   unresolved-refs summary with the same three-way advice; do not prompt.
+   Prompting on every unresolved ref punishes the try-first flow.
+2. **`default_store = "dotenv"` scope → legal, but never offered by the
+   remember-prompt.** Reachable only by hand-editing the machine manifest.
+   Headless machines may genuinely want it; the prompt must not hand out a
+   machine-wide "plaintext by default."
+3. **`secret lift` deletion → command-level prompt showing the exact lines,
+   plus `--keep`**, with one guardrail: lift may remove **only** lines whose
+   key matches a manifest `${REF}` being lifted, never any other line. A
+   user's `.env` may hold non-agent variables; they must survive untouched.
+4. **Headless-Linux detection → yes, in doctor.** One Secret-Service-bus
+   probe converts the platform gap from a surprise into a labeled state
+   pointing at env/varlock/`.env`. Cheap and high-value.
+
+Cross-doc coherence was verified sound: the guard denies the *harness*
+reading `.env` while agentstack resolves `${REF}` from it *in-process* (not
+through a hooked file-tool call), so the two features do not conflict — §6's
+one-sentence explanation stays.
