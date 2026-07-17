@@ -330,7 +330,7 @@ ledger entry D6 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
   pinning via the strict `integrity_root_digest`, retain/prune rules,
   distinct trust-preview labelling. Witness: a one-byte extension source edit
   fails locked verification and re-gates review.
-  - **Landed + reviewed, commit 90fb111:** the manifest kind
+  - **Landed + reviewed, commit 3b293c1:** the manifest kind
     (path sources only; git rejected at validation until E3), strict pinning
     + pruning in `agentstack lock`, trust preview blocks unpinned/drifted/
     retargeted extensions, `run --locked` verifies them via
@@ -344,7 +344,7 @@ ledger entry D6 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
   locked flow, `--plan`/report/posture surfaces. Witnesses: an untrusted
   bundle renders no extension bytes; pruning never touches unmanaged files or
   `agentstack-guard.*`.
-  - **Landed + reviewed, commit 90fb111:** copy-render (never
+  - **Landed + reviewed, commit 3b293c1:** copy-render (never
     symlink) via the strict walk exposed as `integrity_root_files`;
     per-directory ownership ledger keyed by project (multi-project-safe
     global dirs); prune limited to this project's ledger artifacts with the
@@ -357,7 +357,7 @@ ledger entry D6 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
 - [x] E3: library `kind: extension` (resolver, `lib` verbs, search, doctor),
   docs + enforcement-matrix row with honest provenance-only runtime cells;
   close the adjacent library `hooks` gap noted in `crates/cli/src/library.rs`.
-  - **Landed + reviewed, commit 90fb111:** `LibraryExtension` +
+  - **Landed + reviewed, commit 3b293c1:** `LibraryExtension` +
     git sources through the shared store (strict digest at the checkout
     subpath; offline blocks `--locked`, yellow at trust; rev-drift checked),
     inline-first-then-library resolution with origin labels, lock provenance
