@@ -1,10 +1,16 @@
 //! `compile` — collapse (machine ∩ bundle) into the [`CompiledRuleset`].
 //!
-//! Pure, no I/O: the caller loads the two `Policy` values (the CLI's
-//! fail-closed machine-policy provider + the project manifest) and passes the
-//! trusted bundle's server names. The output is canonical (sorted keys,
-//! sorted glob lists, empties dropped) so identical inputs always produce
-//! identical bytes.
+//! Pure and canonical (sorted keys, sorted glob lists, empties dropped) so
+//! identical inputs produce identical bytes — with ONE deliberate ambient
+//! read: [`fs_deny_layer`] expands home-anchored `[policy.filesystem] deny`
+//! globs (`~`, `$HOME`) against this process's `$HOME`. That is intended, not
+//! a determinism hazard: the compiled ruleset is already a machine-specific
+//! enforcement artifact (it bakes in *this* machine's policy), never a pinned
+//! or digested one, and `~` in a deny glob means "this machine's home". The
+//! subject side is expanded the same way in the CLI's guard hook, so the two
+//! must agree — see `cli::guard::normalize`. The caller still supplies the two
+//! `Policy` values (the CLI's fail-closed machine-policy provider + the
+//! project manifest) and the trusted bundle's server names.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -143,12 +149,57 @@ fn fs_layer(globs: &[String]) -> LayerRules {
 /// entry, there are no allow bounds. With denies in both layers unioned at
 /// check time, the effective blocklist is machine ∪ bundle — a bundle can
 /// add denies, never subtract (deny is monotonic, CLAUDE.md rule 2).
+///
+/// Home-anchored globs (`~/.aws/credentials`, `~/.ssh/**`) are expanded to
+/// absolute patterns HERE so the compiled ruleset carries them absolute and
+/// every enforcer (the guard hook, the sandbox) blocks them uniformly. The
+/// matcher (`glob_match`) is `*`-only with no `~` awareness, and the guard
+/// already expands `~` on the *subject* side; leaving `~` verbatim on the
+/// *pattern* side would compare the literal two chars `~/…` against absolute
+/// spellings and match nothing — a deny that reads as protective but grants
+/// zero protection. Expanding both sides against the same `$HOME` closes that.
 fn fs_deny_layer(globs: &[String]) -> LayerRules {
-    let mut sorted = globs.to_vec();
-    sorted.sort();
-    sorted.dedup();
+    // Read $HOME once. `std::env::var_os` (bytes, not UTF-8) mirrors what the
+    // guard's `dirs::home_dir()` resolves to on Unix; `policy` may only depend
+    // on `core`, so the `dirs` crate is off-limits and we expand by hand.
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|h| h.is_absolute());
+    let mut expanded: Vec<String> = globs
+        .iter()
+        .map(|g| expand_home(g, home.as_deref()))
+        .collect();
+    expanded.sort();
+    expanded.dedup();
     LayerRules {
-        deny: sorted,
+        deny: expanded,
         allow_all_of: Vec::new(),
+    }
+}
+
+/// Expand a leading `~` / `$HOME` / `${HOME}` in a deny glob against `home`,
+/// mirroring `cli::guard::normalize` on the subject side so pattern and
+/// subject meet at the same absolute path. Only the anchor is rewritten; the
+/// remaining `*` glob syntax is left untouched for `glob_match`. When `$HOME`
+/// is absent or non-absolute the glob is returned verbatim — no worse than the
+/// pre-expansion behavior for that one degenerate case, and the common case
+/// (HOME set) is fixed.
+fn expand_home(glob: &str, home: Option<&std::path::Path>) -> String {
+    let Some(home) = home else {
+        return glob.to_string();
+    };
+    let rest = if glob == "~" || glob == "$HOME" || glob == "${HOME}" {
+        Some("")
+    } else {
+        glob.strip_prefix("~/")
+            .or_else(|| glob.strip_prefix("$HOME/"))
+            .or_else(|| glob.strip_prefix("${HOME}/"))
+    };
+    match rest {
+        // `home` came from the OS as bytes; `to_string_lossy` keeps a valid
+        // pattern even for the vanishingly rare non-UTF-8 home path.
+        Some("") => home.to_string_lossy().into_owned(),
+        Some(rest) => home.join(rest).to_string_lossy().into_owned(),
+        None => glob.to_string(),
     }
 }

@@ -647,6 +647,38 @@ mod tests {
         assert!(none.fs_deny_decision(&[".env"]).is_ok());
     }
 
+    /// A home-anchored deny glob is expanded at compile time so it actually
+    /// blocks the file it names. The guard expands `~` on the subject side, so
+    /// a verbatim `~/…` pattern would match nothing (the matcher has no `~`
+    /// awareness) and fail OPEN — the bug this witnesses against. It must block
+    /// that exact file and NOTHING else.
+    #[test]
+    fn home_anchored_deny_blocks_that_exact_file() {
+        // Both the compiler and this test read the same process `$HOME`, so the
+        // expanded pattern and the absolute subject meet at the same path.
+        let home = std::path::PathBuf::from(
+            std::env::var_os("HOME").expect("HOME is set in the test environment"),
+        );
+        assert!(home.is_absolute(), "HOME must be absolute for this witness");
+
+        let rs = compile(&fs_deny(&["~/.aws/credentials"]), &Policy::default(), &[]);
+
+        // The guard hands `fs_deny_decision` the absolute spelling of the
+        // subject (its `~` already expanded). The exact file is blocked...
+        let target = home.join(".aws/credentials");
+        let err = rs
+            .fs_deny_decision(&[&target.to_string_lossy()])
+            .unwrap_err();
+        assert_eq!(err.layer, Layer::Machine, "{err}");
+
+        // ...and nothing else: a sibling under the same dir, and the literal
+        // unexpanded spelling the matcher used to (wrongly) compare against,
+        // both pass.
+        let sibling = home.join(".aws/config");
+        assert!(rs.fs_deny_decision(&[&sibling.to_string_lossy()]).is_ok());
+        assert!(rs.fs_deny_decision(&["~/.aws/credentials"]).is_ok());
+    }
+
     /// A bundle can ADD deny globs (union) but its layer is named — and it
     /// can never remove a machine deny.
     #[test]
