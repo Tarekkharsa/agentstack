@@ -799,6 +799,13 @@ agentstack report &lt;run-id&gt; --json # machine-readable, carries the posture 
     <h2>You've done the loop. Here's the rest.</h2>
     <div class="cards">
       <div class="fcard">
+        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-protected-tier-in-detail-run---locked">The Protected tier — <code>run --locked</code></a></h3>
+        <p>No Docker, still fail-closed: trust, strict lock verification (a
+           one-byte edit to a pinned executable refuses the run), and policy
+           admission gate the launch; the run's MCP surface is frozen and every
+           decision recorded. <code>--plan</code> previews it all.</p>
+      </div>
+      <div class="fcard">
         <h3><a href="index.html#enforced">What's enforced where</a></h3>
         <p>The compact, code-grounded matrix: for host, gateway, sandbox, and
            lockdown, exactly which of tools, egress, secrets, filesystem, and

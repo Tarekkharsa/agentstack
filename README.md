@@ -178,6 +178,16 @@ Two things worth knowing before you climb further:
   [step 4](#step-4--keep-strangers-repos-inert-until-review) — one gateway
   registration serves every repo live.
 
+Servers and skills are two of six capability kinds the manifest declares.
+`[instructions.*]` fragments compile into a managed region of each harness's
+`CLAUDE.md` / `AGENTS.md` (`agentstack instructions --write`; hand-written
+prose around the region is preserved), `[settings.*]` renders native per-CLI
+settings, `[hooks.*]` compiles declarative lifecycle hooks into each
+harness's own hooks config, and `[extensions.*]` delivers native harness
+add-ons under the strictest pinning agentstack has
+([step 4](#step-4--keep-strangers-repos-inert-until-review) explains why).
+The [feature reference](docs/reference.md) documents every kind.
+
 ## Step 2 — Two habits that keep it healthy
 
 That's the whole everyday loop already. Two habits keep it that way:
@@ -197,12 +207,20 @@ Everything else you'll reach for day to day:
 | `agentstack diff` | What would change, read-only |
 | `agentstack secret set NAME` | Store a secret in the OS keychain |
 | `agentstack use --write` | Activate skills + servers (a named profile, or everything when none declared) |
-| `agentstack run <cli> --profile <p>` | Launch a harness with a profile for its lifetime |
+| `agentstack run <cli> --profile <p>` | Launch a harness as a tracked run, with a profile for its lifetime |
+| `agentstack report` | Every "what happened" view: live runs, a run's flight recorder, call activity |
 | `agentstack guard install` | Wire the destructive-command guard into your CLIs' hooks |
 | `agentstack lock` | Pin profile refs in the lockfile without rendering anything |
+| `agentstack restore --last --write` | Undo any write from its recorded history — servers, settings, hooks, instructions |
+| `agentstack adopt --write` | Keep a hand-edit: pull drifted native config back into the manifest |
 | `agentstack dashboard` | The same lifecycle in a local web UI |
 
-The [feature reference](docs/reference.md) has the complete command list.
+When `doctor` flags drift, the rule is directional: the hand-edit on disk is
+right → `adopt` pulls it into the manifest; the manifest is right →
+`apply --write` re-renders over it. Never edit rendered files to "fix" drift.
+And before acting on any capability, `agentstack explain <name>` shows its
+provenance, secrets, and policy footprint. The
+[feature reference](docs/reference.md) has the complete command list.
 
 ## Step 3 — Block the accidents (one command)
 
@@ -277,11 +295,47 @@ agent → demo.secret_read  ✗ denied    # blocked by [policy.tools]
 every call → ~/.agentstack/audit/calls.jsonl   (tool · outcome · latency)
 ```
 
+Starter machine policies to copy from live in
+[`examples/policies/`](examples/policies/).
+
 No generated config files in the repo, and no untrusted repo-declared server is
 auto-started by the gateway. This does not sandbox arbitrary repo code; use
 `run --sandbox --lockdown` when the agent process itself needs confinement.
 The whole thing is a runnable 60-second demo:
 [`docs/trust-gate-demo.sh`](docs/trust-gate-demo.sh).
+
+### Launch through the gate: `run <cli> --locked`
+
+The same consent machinery can gate a whole launch — no Docker required.
+`agentstack run <cli> --locked` refuses to start the harness unless every
+gate passes, fail-closed and recorded: explicit trust at the current digest,
+strict lock verification — including pinned local server executables, where a
+**one-byte edit refuses the run** — and policy admission under your machine
+ceiling. What passed is then **frozen**: the run's bridge serves exactly the
+ruleset and server set the gates admitted, refuses mid-run mutations (no
+lease swaps, no secret-resolving session starts), and never re-derives
+authority from disk. `--plan` prints every gate decision and the grant digest
+without launching anything.
+
+Honest scope: this is pre-launch gating plus a frozen capability surface, not
+kernel isolation — the harness still runs as you on the host. Confinement is
+[step 6](#step-6--maximum-assurance-sandbox--lockdown-docker). The full gate
+sequence: [feature reference → the Protected tier](docs/reference.md#the-protected-tier-in-detail-run---locked);
+runnable, asserted example: [`examples/projects/locked-run/`](examples/projects/locked-run/).
+
+### Native extensions: pinned bytes, honestly labelled
+
+`[extensions.*]` manages a harness's native executable add-ons — pi's
+TypeScript extensions, OpenCode's JS plugins — the way `[skills.*]` manages
+skill dirs. It is the **highest-risk** kind agentstack delivers: the code runs
+inside the harness process at full user permission, outside every policy
+ceiling. So the governance is all pre-delivery, and labelled that way: the
+source is content-pinned in `agentstack.lock`, an untrusted or drifted project
+renders **zero** extension bytes, delivery copies (never symlinks) the
+reviewed bytes, and `run --locked` re-verifies each delivered copy before
+launch. What you get is provenance — which bytes, from where, re-gated on any
+change — not runtime enforcement:
+[enforcement matrix → native extensions](docs/ENFORCEMENT.md#native-extensions).
 
 ## Step 5 — Scale it up: profiles, library, plugins, teams
 
@@ -307,7 +361,8 @@ agentstack lib list                        # what's installed, with provenance
 ```
 
 Every add is content-scanned (hidden-unicode / prompt-injection) before it
-lands. agentstack ships a starter catalog — `run-codex`, `sync-library`,
+lands — and `agentstack audit` re-scans a project's skills and instructions
+any time. agentstack ships a starter catalog — `run-codex`, `sync-library`,
 `analyze-usage`, `mine-skills` (distill reusable skills from your past agent
 sessions), `adversarial-review` and `orchestrate-workflow` (governed
 multi-agent generate-review-fix loops), `route-by-cost`, `using-agentstack`,
@@ -365,6 +420,12 @@ steps:
   - uses: Tarekkharsa/agentstack@v0.11.0  # pin a release tag, not @main
 ```
 
+A maintainer can also `agentstack sign` the lockfile (detached ed25519) so CI
+or a recipient runs `verify` against the exact pinned bytes — the recipient
+still makes their own local trust decision. Moving machines rather than
+sharing with people? `agentstack export` / `import` carry the manifest, lock,
+and optionally secrets as one age-encrypted, passphrase-protected bundle.
+
 ### Where rendered files live — pick a mode
 
 You always commit the *intent* (`agentstack.toml` + `.lock`). The rendered
@@ -385,6 +446,9 @@ artifacts (`.mcp.json`, `.claude/skills/`, and the compiled `CLAUDE.md` /
   included. `agentstack_lease_open(profile)` selects a process-local profile
   fence for servers and progressively loaded skills without creating native
   files or `sessions.json`; close it or end the MCP process to drop it.
+  Proxied tools collapse behind `tools_search` (search → inspect → call) so
+  a dozen servers don't bloat every turn's context, and `tools_bindings`
+  exposes the same surface as typed code-mode bindings.
   Untrusted repos are inert until you review and `agentstack trust .`
 
 Inside the connected agent session, the zero-file lifecycle is:
@@ -444,7 +508,10 @@ token estimates only — never prompt bodies or secrets.
   the runtime audit log) and flags library capabilities you installed but never
   use, so pruning is data-driven. `--transcripts` adds cross-harness reach from
   local Claude Code / Codex session logs — sessions, token totals, top tools;
-  aggregates only, never prompt content. Read-only and local.
+  aggregates only, never prompt content. Read-only and local. When you're
+  ready to act, `agentstack optimize` turns those signals into concrete
+  recommendations — inert servers to remove, `[policy.tools]` allowlists to
+  narrow — each carrying its evidence and the exact command or TOML.
 - **[The no-terminal path](docs/dashboard.md)** — the dashboard's capability
   lifecycle, from discovery through undo.
 - **[Examples](https://tarekkharsa.github.io/agentstack/examples.html)** — every
