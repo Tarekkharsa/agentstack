@@ -181,3 +181,49 @@ before the week starts), `guard status` (enabled, hooks in 9 CLIs),
   stayed placeholder-only in every project, asserted every run.
 - Instruction managed regions preserve surrounding hand-written prose
   byte-exactly (per-cli-instructions asserts the byte-prefix).
+
+---
+
+# Device-onboarding round — 2026-07-18
+
+Date: 2026-07-18 · Binary: `agentstack 0.11.0` (post-A1 build from `f270ca7`)
+· Method: a new asserted example ([device-onboarding](device-onboarding/))
+sweeping the onboarding matrix on fake devices — CLI presence (0/1/3 across
+JSON + TOML formats), pre-existing configs (inline secrets, conflicts,
+hand-written files), and environment quirks (spaced/unicode paths, legacy
+layout, non-git, spaced machine home). 42 assertions, all green after
+triage; four genuine gaps found and filed as tracked tasks.
+
+**Bottom line: the core onboarding promises hold on hostile-shaped devices.**
+Secrets never land in the manifest as plaintext (and blocked applies now exit
+nonzero); hand-written configs and prose survive apply, restore, and prune;
+conflicts are surfaced; every quirk environment passes — including
+`lock → trust → run --locked --plan` inside a path with spaces.
+
+## Gaps found and filed (tracked tasks, not GitHub issues yet)
+
+| Finding | Severity | Detail |
+|---|---|---|
+| Manifest discovery doesn't walk up from a subdirectory | **UX / footgun** | From `src/deep`, bare `agentstack` says "Manifest: none in this directory" and suggests `setup` (which would nest a second manifest); `doctor`/`lock`/`apply` error with "no manifest here — run `agentstack init`". The guard's `anchor_workspace` already walks to the nearest `.git`/`.agentstack` ancestor — the CLI disagrees with its own guard about what the project is. |
+| `adopt` ignores hand-*edited* values of manifest-known servers | doc/behavior mismatch | The documented drift rule ("hand-edit should stay → `adopt`") only covers hand-*added* servers. An edited URL on an existing server reports "Nothing to adopt", and the next `apply --write` erases the user's edit. |
+| Project-scope pending removals warn nowhere | safety messaging | Drop a managed server from a project manifest: `doctor` shows no "would REMOVE" (the finding exists but appears global-scope-only) and `apply` dry-run says just "1 target(s) would change" before the write deletes the entry. |
+| Bare `apply` writes global scope; the quickstart reads as project | decision needed | `--scope` defaults to global (documented in `--help`), so the README quickstart (`init → apply` inside a repo) writes the repo's servers into machine-global configs, and the "Where rendered files live" story (repo artifacts + managed gitignore) doesn't materialize. Either default to project-when-a-project-manifest-exists, or teach `--scope project` in the quickstart. |
+
+## Positive findings (things that just worked)
+
+- Zero-CLI devices get an honest "No supported CLIs detected" + a starter
+  manifest; `apply`/`doctor` stay green rather than erroring.
+- Cross-format import: Claude JSON + Codex TOML + Cursor JSON in one `init`,
+  with the imported server fanning out to every other CLI on the next apply.
+- The v0.11.0 blocked-write fix shows up here: an unresolved lifted `${REF}`
+  makes `apply --write` exit nonzero until the ref resolves (env var was
+  enough — the chain's env-first link works as documented).
+- Conflicting same-name definitions across two CLIs are surfaced at import.
+- `restore` is surgical: removes exactly the managed region/entries it wrote,
+  byte-preserving hand prose around it.
+- Locked-run gating is path-robust: spaces and unicode in the project path,
+  and the legacy root-manifest layout, all reach "live launch would proceed"
+  — and the `--plan` blocker for a missing harness names it plainly
+  (`[harness] 'claude' is not on your PATH`).
+- A1's seeding works through a spaced `AGENTSTACK_HOME`, and the guard denies
+  `.env` through it.

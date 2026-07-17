@@ -62,7 +62,8 @@ jobs:
             examples/projects/policy-intersection/assert.sh \
             examples/projects/restricted-folders/assert.sh \
             examples/projects/skills-workout/assert.sh \
-            examples/projects/locked-run/assert.sh
+            examples/projects/locked-run/assert.sh \
+            examples/projects/device-onboarding/assert.sh
           do
             echo "::group::$script"
             bash "$script"
