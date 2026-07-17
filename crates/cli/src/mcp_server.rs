@@ -383,7 +383,11 @@ fn lease_profile(store: &LeaseStore) -> Option<String> {
 /// `from_frozen` re-checks trust itself; the consent-equality check here is
 /// the artifact-binding on top (rule 4: any pinned byte changed → stale).
 fn grant_gateway(path: &Path) -> Result<(crate::gateway::Gateway, PathBuf)> {
-    let handoff = crate::grant::load_handoff(path)?;
+    // The commitment key authenticates the artifact: a missing/unreadable key
+    // fails closed exactly like a forged artifact (no key, no trust).
+    let key = crate::grant::load_commitment_key()
+        .context("loading the machine commitment key to authenticate the run grant")?;
+    let handoff = crate::grant::load_handoff(path, &key)?;
     let base = PathBuf::from(&handoff.project_root);
     crate::grant::verify_handoff_for(&handoff, &base)?;
     let frozen = crate::grant::frozen_from_handoff(&handoff)?;

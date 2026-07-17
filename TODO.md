@@ -120,12 +120,32 @@ unwired machinery.
     search` covers the central library (name + frontmatter description);
     `agentstack_list_loadable` takes a `query`; `lib list` shows
     descriptions.
-  - **Remaining before this checks off (supervised session, per ruling):**
-    the run-grant artifact handoff so the `agentstack mcp` bridge process
-    consumes the frozen ruleset + server set verbatim (today it re-gates
-    trust + pins over the same lock bytes — equivalent authority by content
-    identity, not yet object handoff), user/global-scope shadowing (today a
-    standalone honest ⚠), and `--locked --profile` rendering from the grant.
+  - **Also landed (2026-07-17, needs line-by-line review — the three
+    remainders):** (a) the run-grant artifact handoff: `live()` writes a
+    reviewed `GrantHandoff` projection (ruleset + `${REF}`-only frozen
+    servers + project/consent identity; never argv or secret values) into
+    the run's private dir, and the launch-scoped bridge entry becomes
+    `agentstack mcp --grant <path>` — the bridge consumes it verbatim via
+    `Gateway::from_frozen`, fail-closed on schema/ruleset-version skew,
+    wrong project, consent staleness (a post-freeze manifest edit refuses),
+    and lost trust, never falling back to disk re-derivation; lease
+    transitions under a frozen grant are refused honestly (leases-consume-
+    the-grant stays with the deferred D2 unification). (b) `--locked
+    --profile` as a fence: one-time resolution, gates, grant, artifact, and
+    bridge all see the profile's subset (`ProfileEffect::Fenced`, additive
+    digest tag, KAT unchanged); no native session state is applied — skills
+    render under a locked profile stays with the D2 render unification.
+    (c) the user/global-scope warning is now content-derived: it names the
+    harness's actual ambient global MCP entries (including Claude Code's
+    nested `projects[<dir>].mcpServers`) or reports the scope clean.
+    Witnesses: the three `handoff_*` tests in `grant.rs`; verified live
+    end-to-end including the staleness refusal.
+  - **Remaining (honest limits, not blockers):** actual NEUTRALIZATION of
+    ambient global-scope entries on the host tier stays out deliberately —
+    the global config is one shared file harness apps rewrite mid-run, so
+    park/swap races clobber user state; the sound routes are `--lockdown`
+    (kernel fence, shipped) or per-CLI isolation flags in adapter
+    descriptors (evidence-driven, not yet designed).
   - The wiring must assert a `GrantedServer`'s definition digest was honestly
     derived from its stored `Server` bytes (carried 3b-ii review note).
     (Done: `GrantedServer::from_resolved` is the only wiring constructor.)
@@ -402,9 +422,11 @@ ledger entries D8 and D9 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger
 - [ ] S0: review and approve the design doc (settle the three-option prompt,
   `--secrets` flag, `[secrets] default_store`, `secret lift`, and the open
   questions).
-- [ ] S1 (bugfix-grade, may land in-cut): interactive init stops aborting on
-  an unreachable keychain (probe → inform → default to refs-only); dashboard
-  init reports unstored refs by name instead of dropping silently.
+- [x] S1 (bugfix-grade, landed in-cut 2026-07-17): interactive init stops
+  aborting on an unreachable keychain (stores what it can, reports failed
+  refs by name, continues); dashboard init reports unstored refs by name
+  instead of dropping silently. Witness:
+  `store_lifted_reports_failures_by_name_and_keeps_storing`.
 - [ ] S2: the store-choice prompt at the lifting moment, `--secrets`,
   `.env` write path with managed-gitignore verification,
   `[secrets] default_store`.

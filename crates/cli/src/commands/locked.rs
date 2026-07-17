@@ -818,7 +818,10 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         "▶".green(),
         args.harness.bold()
     );
-    print_posture_and_limits(Some(desc), &ctx.dir);
+    // Pass the PROJECT ROOT (base), not the manifest dir: the harness is
+    // spawned at base, and Claude Code keys its per-project global MCP state
+    // by that launch dir — the ambient audit must match on it.
+    print_posture_and_limits(Some(desc), base);
     if let Some(p) = args.profile.as_deref() {
         println!(
             "  {} profile fence: '{}' — the gates, grant, and bridge see only this profile's \
@@ -996,8 +999,12 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     // while the launch claims the locked contract, so no artifact, no launch.
     let handoff_path = run_dir.join(crate::grant::HANDOFF_FILE);
     let handoff = grant.handoff(&envelope);
-    let write = serde_json::to_string_pretty(&handoff)
-        .map_err(anyhow::Error::from)
+    // Machine-authenticate the artifact under the SAME commitment key: only a
+    // grant agentstack itself froze on this machine is honored by the bridge,
+    // so a same-user agent cannot forge a grant.json (its fields are otherwise
+    // derivable from readable project files) and load it via --grant.
+    let write = crate::grant::seal_handoff(handoff, &key)
+        .and_then(|signed| serde_json::to_string_pretty(&signed).map_err(anyhow::Error::from))
         .and_then(|text| crate::util::atomic::write(&handoff_path, &text));
     if let Err(e) = write {
         return Err(ev.refuse("grant-handoff", e));
@@ -1102,7 +1109,7 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     let mut blockers: Vec<(String, String)> = Vec::new();
 
     let desc = ctx.registry.get(&args.harness);
-    print_posture_and_limits(desc, &ctx.dir);
+    print_posture_and_limits(desc, base);
     if let Some(p) = args.profile.as_deref() {
         println!(
             "  {} profile fence: '{}' — evaluation runs against this profile's server subset",
