@@ -36,7 +36,7 @@ jobs:
       - name: Test
         run: cargo test --all
       - name: Conformance classifier self-test
-        run: bash agentstack-test/conformance-smoke.sh --self-test
+        run: bash examples/sandbox/conformance-smoke.sh --self-test
       - name: Malicious-repo demo (asserting)
         env:
           AGENTSTACK_BIN: ${{ github.workspace }}/target/release/agentstack
@@ -61,7 +61,8 @@ jobs:
             examples/projects/per-cli-instructions/assert.sh \
             examples/projects/policy-intersection/assert.sh \
             examples/projects/restricted-folders/assert.sh \
-            examples/projects/skills-workout/assert.sh
+            examples/projects/skills-workout/assert.sh \
+            examples/projects/locked-run/assert.sh
           do
             echo "::group::$script"
             bash "$script"

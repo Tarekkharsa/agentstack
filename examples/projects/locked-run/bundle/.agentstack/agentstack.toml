@@ -1,0 +1,17 @@
+version = 1
+
+# Two stdio servers, both with executables pinned by `agentstack lock` (D3).
+# The `ci` profile is a FENCE under `--locked --profile ci`: the gates, the
+# frozen grant, and the bridge all see only this subset — no native session
+# state is applied.
+
+[servers.opsbox]
+type = "stdio"
+command = "./opsbox.sh"
+
+[servers.scratchpad]
+type = "stdio"
+command = "./scratchpad.sh"
+
+[profiles.ci]
+servers = ["opsbox"]
