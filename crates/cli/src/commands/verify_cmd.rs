@@ -20,7 +20,7 @@ use crate::cli::{SignArgs, VerifyArgs};
 const SIG_FILE: &str = "agentstack.lock.sig";
 
 pub fn sign(args: &SignArgs, dir: Option<&Path>) -> Result<()> {
-    let base = dir.map(Path::to_path_buf).unwrap_or_else(|| ".".into());
+    let base = crate::commands::project_base(dir)?;
     let mdir = crate::manifest::resolve_manifest_dir(&base);
 
     // A fresh signing seed per invocation. The seed (the private key) is NOT
@@ -57,7 +57,7 @@ pub fn sign(args: &SignArgs, dir: Option<&Path>) -> Result<()> {
 }
 
 pub fn verify(args: &VerifyArgs, dir: Option<&Path>) -> Result<()> {
-    let base = dir.map(Path::to_path_buf).unwrap_or_else(|| ".".into());
+    let base = crate::commands::project_base(dir)?;
     let mdir = crate::manifest::resolve_manifest_dir(&base);
 
     let pubkey = agentstack_trust::sign::PublicKey::from_hex(&args.pubkey)

@@ -1646,10 +1646,7 @@ fn add_from(args: &Value, dir: Option<&Path>) -> Result<String> {
     let candidate = crate::provider::resolve(id)
         .with_context(|| format!("no capability '{id}' in the catalog or registry"))?;
 
-    let base = match dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    let base = crate::commands::project_base(dir)?;
     let mdir = crate::manifest::resolve_manifest_dir(&base);
     let manifest_path = mdir.join(MANIFEST_FILE);
     let original = std::fs::read_to_string(&manifest_path).with_context(|| {
@@ -1725,10 +1722,7 @@ fn add_server(args: &Value, dir: Option<&Path>) -> Result<String> {
         _ => {}
     }
 
-    let base = match dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    let base = crate::commands::project_base(dir)?;
     let mdir = crate::manifest::resolve_manifest_dir(&base);
     let manifest_path = mdir.join(MANIFEST_FILE);
     let original = std::fs::read_to_string(&manifest_path).with_context(|| {
@@ -1851,12 +1845,8 @@ fn builtin_manual_md() -> Result<String> {
 /// one — distinguishes "no manifest anywhere" from "manifest exists but failed
 /// to load" (parse error, bad schema, unreadable overlay).
 fn manifest_file_exists(dir: Option<&Path>) -> bool {
-    let base = match dir {
-        Some(d) => d.to_path_buf(),
-        None => match std::env::current_dir() {
-            Ok(d) => d,
-            Err(_) => return false,
-        },
+    let Ok(base) = crate::commands::project_base(dir) else {
+        return false;
     };
     crate::manifest::resolve_manifest_dir(&base)
         .join(MANIFEST_FILE)

@@ -21,7 +21,11 @@ use crate::secret::keychain;
 pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
     let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
+        None => {
+            let cwd = std::env::current_dir()?;
+            refuse_nested_init(&cwd)?;
+            cwd
+        }
     };
     // Create new manifests in `.agentstack/`; keep updating a legacy root one.
     let dir = crate::manifest::new_manifest_dir(&base);
@@ -344,10 +348,40 @@ pub(crate) fn run_for_setup(args: &InitArgs, manifest_dir: Option<&Path>) -> Res
     run_impl(args, manifest_dir, false)
 }
 
+/// Refuse a bare `init` from inside an already-initialized project: every
+/// other command walks up to that root's manifest (`commands::project_base`),
+/// so silently creating a NESTED one here would fork the project into two
+/// manifests that fight over the same tree. Nesting stays possible, but only
+/// deliberately — `--force` or an explicit `--manifest-dir`.
+fn refuse_nested_init(cwd: &Path) -> Result<()> {
+    if let Some(root) = crate::manifest::discover_project_base(cwd) {
+        if root != cwd {
+            anyhow::bail!(
+                "this project is already initialized at {} — commands run from here \
+                 find that manifest; pass --force (or --manifest-dir {}) to nest a \
+                 separate project in this directory",
+                crate::manifest::resolve_manifest_dir(&root)
+                    .join(MANIFEST_FILE)
+                    .display(),
+                cwd.display()
+            );
+        }
+    }
+    Ok(())
+}
+
 fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Result<()> {
     let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
+        None => {
+            let cwd = std::env::current_dir()?;
+            // Same escape hatches as the "already exists" check below:
+            // --force nests deliberately, --dry-run only previews.
+            if !args.force && !args.dry_run {
+                refuse_nested_init(&cwd)?;
+            }
+            cwd
+        }
     };
     // Create new manifests in `.agentstack/`; keep updating a legacy root one.
     let dir = crate::manifest::new_manifest_dir(&base);

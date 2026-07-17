@@ -299,10 +299,7 @@ fn route(
             let v = parse(body);
             let id = field(&v, "id")?;
             let profile = v.get("profile").and_then(Value::as_str);
-            let mdir = match dir {
-                Some(d) => d.to_path_buf(),
-                None => std::env::current_dir()?,
-            };
+            let mdir = crate::commands::project_base(dir)?;
             crate::commands::add::write_from_provider(&mdir, &id, profile).map(|_| ())
         }),
         (Method::Post, "/api/secret") => mutation(authed, read_only, || {

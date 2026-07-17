@@ -296,10 +296,9 @@ pub fn start(
 /// End the active session for `dir`: restore server files, remove the skills it
 /// added, uninstall its plugin.
 pub fn end(manifest_dir: Option<&Path>) -> Result<()> {
-    let dir = match manifest_dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    // Walk up like `start` does (via commands::load), or a session started at
+    // the project root could never be ended from a subdirectory.
+    let dir = crate::commands::project_base(manifest_dir)?;
     let key = dir_key(&dir);
     let mut map = load_all();
     let sess = map

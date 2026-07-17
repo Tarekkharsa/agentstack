@@ -91,13 +91,30 @@ impl LibraryCtx {
     }
 }
 
-/// Resolve the manifest directory (explicit `--manifest-dir` or cwd) and load
-/// everything a command needs.
+/// Resolve the project BASE dir a command should act on: an explicit
+/// `--manifest-dir` is taken verbatim; otherwise walk up from the cwd to the
+/// nearest ancestor carrying a manifest — so `doctor`/`apply`/`lock` agree
+/// with the guard's workspace anchor about what "the project" is when run
+/// from `src/deep`. Falls back to the cwd itself when nothing is found, so
+/// "no manifest" errors keep pointing here. The walk stops at `$HOME` and
+/// never surfaces the machine layer (see [`manifest::discover_project_base`]).
+pub fn project_base(manifest_dir: Option<&Path>) -> Result<PathBuf> {
+    match manifest_dir {
+        Some(d) => Ok(d.to_path_buf()),
+        None => Ok(project_base_from(&std::env::current_dir()?)),
+    }
+}
+
+/// The cwd-independent core of [`project_base`], split out so tests can drive
+/// it with an explicit start dir instead of chdir'ing the whole process.
+pub fn project_base_from(cwd: &Path) -> PathBuf {
+    manifest::discover_project_base(cwd).unwrap_or_else(|| cwd.to_path_buf())
+}
+
+/// Resolve the manifest directory (explicit `--manifest-dir` or the nearest
+/// ancestor project) and load everything a command needs.
 pub fn load(manifest_dir: Option<&Path>) -> Result<Context> {
-    let base = match manifest_dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    let base = project_base(manifest_dir)?;
     // Prefer the `.agentstack/` layout, falling back to a legacy root manifest.
     let dir = manifest::resolve_manifest_dir(&base);
     let mut loaded = manifest::load_from_dir(&dir)?;

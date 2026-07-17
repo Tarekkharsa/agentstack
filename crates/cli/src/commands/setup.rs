@@ -25,11 +25,10 @@ use crate::store::{dir_digest, local_source_dir, Store};
 pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     println!("{}", "AgentStack setup".bold());
 
-    // 1. Ensure a manifest exists — import the machine's existing config if not.
-    let base = match manifest_dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    // 1. Ensure a manifest exists — import the machine's existing config if
+    //    not. The base walks up to the nearest ancestor project, so `setup`
+    //    from a subdirectory continues the ROOT project instead of nesting.
+    let base = super::project_base(manifest_dir)?;
     let interactive = crate::util::confirm::is_interactive();
     let mut manifest_path = crate::manifest::resolve_manifest_dir(&base).join(MANIFEST_FILE);
     if !manifest_path.exists() {

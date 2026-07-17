@@ -34,10 +34,9 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
         );
     }
 
-    let base = match manifest_dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    // Walk up to the project root so `agentstack` from `src/deep` describes
+    // the ROOT manifest instead of steering toward a nested `init`.
+    let base = super::project_base(manifest_dir)?;
     let dir = crate::manifest::resolve_manifest_dir(&base);
     let manifest_path = dir.join(MANIFEST_FILE);
 

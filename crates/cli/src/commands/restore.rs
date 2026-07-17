@@ -18,10 +18,7 @@ use crate::scope::Scope;
 use crate::util::{atomic, diff};
 
 pub fn run(args: &RestoreArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    let dir = match manifest_dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    let dir = super::project_base(manifest_dir)?;
     let registry = Registry::load()?;
 
     if args.last {

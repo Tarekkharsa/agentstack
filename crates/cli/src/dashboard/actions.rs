@@ -245,10 +245,7 @@ pub fn add_hook(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
         }
     }
 
-    let base = match manifest_dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    let base = crate::commands::project_base(manifest_dir)?;
     let dir = crate::manifest::resolve_manifest_dir(&base);
     let manifest_path = dir.join(crate::manifest::load::MANIFEST_FILE);
     let original = std::fs::read_to_string(&manifest_path)
@@ -295,10 +292,7 @@ pub fn add_profile(manifest_dir: Option<&Path>, args: &Value) -> Result<String> 
         anyhow::bail!("pick at least one skill or server for the profile");
     }
 
-    let base = match manifest_dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    let base = crate::commands::project_base(manifest_dir)?;
     let dir = crate::manifest::resolve_manifest_dir(&base);
     let manifest_path = dir.join(crate::manifest::load::MANIFEST_FILE);
     let original = std::fs::read_to_string(&manifest_path)
@@ -550,10 +544,7 @@ pub fn add_skill(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
         _ => {}
     }
 
-    let base = match manifest_dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    let base = crate::commands::project_base(manifest_dir)?;
     let dir = crate::manifest::resolve_manifest_dir(&base);
     let manifest_path = dir.join(crate::manifest::load::MANIFEST_FILE);
     let original = std::fs::read_to_string(&manifest_path)
@@ -636,10 +627,7 @@ pub fn add_server(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
         _ => {}
     }
 
-    let base = match manifest_dir {
-        Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    let base = crate::commands::project_base(manifest_dir)?;
     let dir = crate::manifest::resolve_manifest_dir(&base);
     let manifest_path = dir.join(crate::manifest::load::MANIFEST_FILE);
     let original = std::fs::read_to_string(&manifest_path)
