@@ -323,14 +323,14 @@ process, outside the policy ceiling).
 **Details:** [`docs/design/extensions-capability.md`](docs/design/extensions-capability.md) ·
 ledger entry D6 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
 
-- [ ] E0: review and approve the design doc (settle `target` singular,
+- [x] E0: review and approve the design doc (settle `target` singular,
   copy-render, strict root digest, guard-name reservation, pi + OpenCode
   first, the three open questions).
-- [ ] E1 (supervised): `[extensions.*]` manifest kind, `[[extension]]` lock
+- [x] E1 (supervised): `[extensions.*]` manifest kind, `[[extension]]` lock
   pinning via the strict `integrity_root_digest`, retain/prune rules,
   distinct trust-preview labelling. Witness: a one-byte extension source edit
   fails locked verification and re-gates review.
-  - **Landed 2026-07-16 (needs line-by-line review):** the manifest kind
+  - **Landed + reviewed, commit 90fb111:** the manifest kind
     (path sources only; git rejected at validation until E3), strict pinning
     + pruning in `agentstack lock`, trust preview blocks unpinned/drifted/
     retargeted extensions, `run --locked` verifies them via
@@ -339,12 +339,12 @@ ledger entry D6 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
     `one_byte_extension_edit_refuses_locked_and_relock_regates`,
     `extension_verdicts_fail_closed_and_locked_gate_names_them`, plus the
     validation and lock round-trip tests.
-- [ ] E2 (supervised): render for pi + OpenCode — `ExtensionsSpec` gains a
+- [x] E2 (supervised): render for pi + OpenCode — `ExtensionsSpec` gains a
   write path, ownership ledger, prune path, rendered-copy verification in the
   locked flow, `--plan`/report/posture surfaces. Witnesses: an untrusted
   bundle renders no extension bytes; pruning never touches unmanaged files or
   `agentstack-guard.*`.
-  - **Landed 2026-07-16 (needs line-by-line review):** copy-render (never
+  - **Landed + reviewed, commit 90fb111:** copy-render (never
     symlink) via the strict walk exposed as `integrity_root_files`;
     per-directory ownership ledger keyed by project (multi-project-safe
     global dirs); prune limited to this project's ledger artifacts with the
@@ -354,10 +354,10 @@ ledger entry D6 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
     vulns (forged ledger keys; extension names as paths) — both now have
     witnesses, plus name validation (`InvalidExtensionName`). All four
     E2 witnesses green.
-- [ ] E3: library `kind: extension` (resolver, `lib` verbs, search, doctor),
+- [x] E3: library `kind: extension` (resolver, `lib` verbs, search, doctor),
   docs + enforcement-matrix row with honest provenance-only runtime cells;
   close the adjacent library `hooks` gap noted in `crates/cli/src/library.rs`.
-  - **Landed 2026-07-16 (needs line-by-line review):** `LibraryExtension` +
+  - **Landed + reviewed, commit 90fb111:** `LibraryExtension` +
     git sources through the shared store (strict digest at the checkout
     subpath; offline blocks `--locked`, yellow at trust; rev-drift checked),
     inline-first-then-library resolution with origin labels, lock provenance
