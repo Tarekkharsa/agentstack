@@ -63,7 +63,10 @@ pub fn record(scope: &str, targets: Vec<String>, files: Vec<FileChange>) -> Resu
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    let id = format!("{:032x}", now.as_nanos());
+    // 16 hex digits, zero-padded so ids stay fixed-width (lexicographic order
+    // == time order). Not 32: nanoseconds-since-epoch only fills ~16 digits,
+    // and the extra leading zeros made every displayed 8-char prefix "00000000".
+    let id = format!("{:016x}", now.as_nanos());
     let summary = format!(
         "{} file{} · {}",
         files.len(),

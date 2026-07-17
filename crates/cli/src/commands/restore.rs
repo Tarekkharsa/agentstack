@@ -25,11 +25,12 @@ pub fn run(args: &RestoreArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let registry = Registry::load()?;
 
     if args.last {
-        let entry = history::list()
-            .into_iter()
+        let entries = history::list();
+        let entry = entries
+            .iter()
             .find(|e| !e.undone)
             .context("nothing to undo — no recorded write that isn't already undone")?;
-        return undo_entry(&entry, args.write);
+        return undo_entry(entry, &entries, args.write);
     }
 
     match &args.adapter {
@@ -45,9 +46,9 @@ pub fn run(args: &RestoreArgs, manifest_dir: Option<&Path>) -> Result<()> {
         ),
         Some(id) => {
             let entries = history::list();
-            let matches: Vec<_> = entries.iter().filter(|e| e.id.starts_with(id)).collect();
+            let matches: Vec<_> = entries.iter().filter(|e| id_matches(&e.id, id)).collect();
             match matches.as_slice() {
-                [one] => undo_entry(one, args.write),
+                [one] => undo_entry(one, &entries, args.write),
                 [] => anyhow::bail!(
                     "'{id}' is neither an adapter id nor a recorded change — `agentstack restore` lists both"
                 ),
@@ -58,6 +59,34 @@ pub fn run(args: &RestoreArgs, manifest_dir: Option<&Path>) -> Result<()> {
             }
         }
     }
+}
+
+/// Does user input `input` select entry `entry_id`? A plain prefix works; so
+/// does a prefix of the id with leading zeros stripped, which keeps short ids
+/// working for entries recorded by older builds that zero-padded ids to 32
+/// hex digits.
+fn id_matches(entry_id: &str, input: &str) -> bool {
+    entry_id.starts_with(input) || entry_id.trim_start_matches('0').starts_with(input)
+}
+
+/// The short id shown in the listing: the shortest prefix of `id` (leading
+/// zeros stripped, minimum 8 chars) that selects no other recorded entry — so
+/// what's printed always works verbatim as `restore <id>`.
+///
+/// Rust note: the `'a` lifetime says the returned `&str` borrows from `id`
+/// (it's a slice of it), not from `entries` — like returning a view into the
+/// argument instead of allocating a new string.
+fn short_id<'a>(id: &'a str, entries: &[history::Entry]) -> &'a str {
+    let trimmed = id.trim_start_matches('0');
+    let mut len = trimmed.len().min(8);
+    while len < trimmed.len()
+        && entries
+            .iter()
+            .any(|e| e.id != id && id_matches(&e.id, &trimmed[..len]))
+    {
+        len += 1;
+    }
+    &trimmed[..len]
 }
 
 fn fmt_age(time_unix: u64) -> String {
@@ -88,7 +117,7 @@ fn list(registry: &Registry, dir: &Path) -> Result<()> {
             };
             println!(
                 "  {}  {:<8} {:<8} {} {mark}",
-                (&e.id[..8]).bold(),
+                format!("{:<8}", short_id(&e.id, &entries)).bold(),
                 fmt_age(e.time_unix),
                 e.scope,
                 e.summary
@@ -130,11 +159,11 @@ fn list(registry: &Registry, dir: &Path) -> Result<()> {
 
 /// Preview (or perform) a recorded event's undo: every captured file goes back
 /// to its pre-write bytes; files that didn't exist before are deleted.
-fn undo_entry(entry: &history::Entry, write: bool) -> Result<()> {
+fn undo_entry(entry: &history::Entry, entries: &[history::Entry], write: bool) -> Result<()> {
     println!(
         "{} undo {} ({}, {}): {}",
         "↩".cyan(),
-        &entry.id[..8],
+        short_id(&entry.id, entries),
         entry.scope,
         fmt_age(entry.time_unix),
         entry.summary
@@ -211,4 +240,43 @@ fn restore_one(registry: &Registry, dir: &Path, id: &str, scope: Scope, write: b
         println!("\nDry run. Re-run with {} to restore.", "--write".bold());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::TEST_ENV_LOCK;
+
+    /// Two back-to-back recorded changes (nanosecond timestamps sharing most
+    /// of their high digits) must still list distinct short ids, and each
+    /// short id must select exactly its own entry.
+    #[test]
+    fn two_recorded_changes_list_distinct_short_ids() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let work = assert_fs::TempDir::new().unwrap();
+        let file = work.path().join("c.json");
+
+        for content in ["one", "two"] {
+            let cap = history::capture(&file, "Test · servers");
+            std::fs::write(&file, content).unwrap();
+            history::record("global", vec!["Test".into()], vec![cap]).unwrap();
+        }
+
+        let entries = history::list();
+        assert_eq!(entries.len(), 2);
+        let a = short_id(&entries[0].id, &entries);
+        let b = short_id(&entries[1].id, &entries);
+        assert_ne!(a, b, "listed short ids must be unique");
+        for (short, entry) in [(a, &entries[0]), (b, &entries[1])] {
+            let hits: Vec<_> = entries
+                .iter()
+                .filter(|e| id_matches(&e.id, short))
+                .collect();
+            assert_eq!(hits.len(), 1, "short id {short} must be unambiguous");
+            assert_eq!(hits[0].id, entry.id);
+        }
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
 }
