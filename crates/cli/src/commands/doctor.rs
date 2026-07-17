@@ -14,7 +14,9 @@ use owo_colors::OwoColorize;
 
 use crate::cli::DoctorArgs;
 use crate::manifest::{validate_with_context, Manifest, Server, ServerType};
-use crate::render::{declared_host, plan_target_with_servers, resolve_targets, ruleset_for};
+use crate::render::{
+    declared_host, plan_hooks, plan_target_with_servers, resolve_targets, ruleset_for,
+};
 use crate::scope::Scope;
 use crate::secret::Resolver;
 use crate::state::{self, target_key, State};
@@ -735,6 +737,76 @@ fn run_checks(
     }
     for q in quirks {
         report.line(Level::Warn, q);
+    }
+
+    // Lifecycle hooks: the same staleness contract as instructions — the
+    // rendered hooks key of each hook-capable target must match what the
+    // manifest would compile (global scope, mirroring drift/fix).
+    report.section("Hooks");
+    if manifest.hooks.is_empty() {
+        report.line(Level::Ok, "no lifecycle hooks defined");
+        report.mark_irrelevant();
+    } else {
+        let machine_hooks = crate::commands::guard::machine_hooks_for_apply();
+        let mut hook_issues = 0;
+        let mut hook_capable = 0;
+        for id in &target_ids {
+            let Some(desc) = ctx.registry.get(id) else {
+                continue;
+            };
+            if desc.hooks.is_none() {
+                continue;
+            }
+            hook_capable += 1;
+            let prev = !state
+                .managed_hooks(&target_key(id, Scope::Global, &ctx.dir))
+                .is_empty();
+            match plan_hooks(
+                manifest,
+                desc,
+                &ctx.resolver,
+                prev,
+                Scope::Global,
+                &ctx.dir,
+                &machine_hooks,
+            ) {
+                Ok(Some(hp)) if hp.changed() => {
+                    hook_issues += 1;
+                    report.line(
+                        Level::Warn,
+                        format!(
+                            "{:<14} hooks stale ↳ agentstack apply --write",
+                            desc.display
+                        ),
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    hook_issues += 1;
+                    report.line(
+                        Level::Error,
+                        format!("{}: hooks plan failed — {e:#}", desc.display),
+                    );
+                }
+            }
+        }
+        if hook_capable == 0 {
+            report.line(
+                Level::Warn,
+                format!(
+                    "{} hook(s) defined but no selected target supports hooks",
+                    manifest.hooks.len()
+                ),
+            );
+        } else if hook_issues == 0 {
+            report.line(
+                Level::Ok,
+                format!(
+                    "{} hook(s) in sync across {hook_capable} hook-capable target(s)",
+                    manifest.hooks.len()
+                ),
+            );
+        }
     }
 
     report.section("Skills");

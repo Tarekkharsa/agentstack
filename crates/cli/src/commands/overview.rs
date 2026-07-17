@@ -65,10 +65,43 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
                     parts.join(" · "),
                     m.targets.default.len()
                 );
-                (
-                    "agentstack setup",
-                    "preview and apply your setup across every CLI",
-                )
+
+                // Where this project actually stands, from cheap signals:
+                // lockfile (was it ever activated/pinned?) and trust state.
+                let base = crate::manifest::project_root_of(&ctx.dir);
+                let trust = crate::trust::check(&base);
+                let locked = crate::lock::Lock::path(&ctx.dir).exists();
+                println!(
+                    "  {}  {}{}",
+                    "Status  ".bold(),
+                    if locked {
+                        "locked"
+                    } else {
+                        "not locked (never activated)"
+                    },
+                    match trust {
+                        crate::trust::TrustState::Trusted => " · trusted",
+                        crate::trust::TrustState::Changed => " · trust stale (content changed)",
+                        crate::trust::TrustState::Untrusted => " · untrusted",
+                    }
+                );
+
+                if !locked && (!m.skills.is_empty() || !m.servers.is_empty()) {
+                    (
+                        "agentstack setup",
+                        "finish the first run — preview, apply, activate",
+                    )
+                } else if trust == crate::trust::TrustState::Changed {
+                    (
+                        "agentstack trust .",
+                        "the manifest or lock changed — review and re-trust",
+                    )
+                } else {
+                    (
+                        "agentstack doctor",
+                        "verify the wiring — every warning names its fix",
+                    )
+                }
             }
             Err(err) => {
                 println!(
