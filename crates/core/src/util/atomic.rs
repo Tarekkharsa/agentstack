@@ -7,6 +7,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 
@@ -67,9 +68,18 @@ pub fn backup_path(path: &Path) -> PathBuf {
     paths::backups_dir().join(sanitize(&path.to_string_lossy()))
 }
 
+/// Monotonic per-process counter so concurrent writes get distinct temp names.
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
 fn tmp_path(path: &Path) -> PathBuf {
+    // The temp name must be unique per writer, not just per target: two
+    // processes (or threads) replacing the same file at once — e.g. a dashboard
+    // `kill` and the foreground run wrapper both updating runs.json — would
+    // otherwise share one temp path, and the loser's rename fails with ENOENT
+    // after the winner renames it away.
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
     let mut s = path.as_os_str().to_os_string();
-    s.push(".agentstack-tmp");
+    s.push(format!(".agentstack-tmp.{}.{seq}", std::process::id()));
     PathBuf::from(s)
 }
 
@@ -110,7 +120,41 @@ mod tests {
         // Overwrite — content fully replaced, no temp file left behind.
         write(f.path(), "{\"a\":2}").unwrap();
         assert_eq!(fs::read_to_string(f.path()).unwrap(), "{\"a\":2}");
-        assert!(!tmp.child("config.json.agentstack-tmp").path().exists());
+        let leftovers: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".agentstack-tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "stray temp files: {leftovers:?}");
+    }
+
+    /// Concurrent replaces of the SAME target must all succeed. With a shared
+    /// temp name the loser's rename hit ENOENT after the winner renamed the
+    /// temp file away — the race behind the flaky `runs.json` writes when a
+    /// kill and the run wrapper's cleanup fired together.
+    #[test]
+    fn concurrent_writes_to_one_target_all_succeed() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        // Keep the best-effort backups inside the tempdir, not the real home.
+        std::env::set_var("AGENTSTACK_HOME", tmp.path());
+        let target = tmp.child("shared.json").path().to_path_buf();
+        std::thread::scope(|s| {
+            for i in 0..8 {
+                let target = target.clone();
+                s.spawn(move || {
+                    for j in 0..25 {
+                        write(&target, &format!("writer-{i}-{j}")).unwrap();
+                    }
+                });
+            }
+        });
+        // Whoever renamed last wins, but the file is intact and complete.
+        let last = fs::read_to_string(&target).unwrap();
+        assert!(last.starts_with("writer-"), "unexpected content: {last}");
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     #[test]

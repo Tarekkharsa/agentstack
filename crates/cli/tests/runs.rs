@@ -21,6 +21,13 @@ use agentstack::scope::Scope;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+/// Serialize the tests, and recover a poisoned lock: under plain `cargo test`
+/// (one process, threaded) a panic in one test must not cascade into
+/// `PoisonError` failures in the others.
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Point HOME + AGENTSTACK_HOME at a fresh temp tree, install a `sleep`-backed
 /// adapter, and write `manifest` into a project dir. Returns (tempdir, proj).
 fn setup(manifest: &str) -> (assert_fs::TempDir, PathBuf) {
@@ -61,7 +68,7 @@ fn wait_until<F: Fn() -> bool>(f: F, max: Duration) -> bool {
 /// and the foreground wrapper returns.
 #[test]
 fn launch_lists_then_kill_removes_the_run() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = env_lock();
     let (_tmp, proj) = setup("version = 1\n[meta]\nname = \"t\"\n");
 
     let proj2 = proj.clone();
@@ -105,7 +112,7 @@ fn launch_lists_then_kill_removes_the_run() {
 /// A run that exits on its own cleans up its own registry entry.
 #[test]
 fn run_cleans_up_its_record_on_normal_exit() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = env_lock();
     let (_tmp, proj) = setup("version = 1\n[meta]\nname = \"t\"\n");
 
     // Blocks ~1s, then launch() removes the record before returning.
@@ -131,7 +138,7 @@ fn run_cleans_up_its_record_on_normal_exit() {
 /// by the other tests here) masks the distinction.
 #[test]
 fn run_launches_the_harness_at_the_project_root() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = env_lock();
     let (tmp, proj) = setup("version = 1\n[meta]\nname = \"t\"\n");
     // Re-home the manifest into the preferred layout.
     fs::create_dir_all(proj.join(".agentstack")).unwrap();
@@ -175,7 +182,7 @@ fn run_launches_the_harness_at_the_project_root() {
 /// reverts it when the run ends (here: when killed).
 #[test]
 fn profile_run_applies_then_reverts_on_exit() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = env_lock();
     let (_tmp, proj) = setup(
         "version = 1\n[meta]\nname = \"t\"\n\
          [targets]\ndefault = [\"claude-code\"]\n\
@@ -227,7 +234,7 @@ fn profile_run_applies_then_reverts_on_exit() {
 /// SIGKILL after the grace period.
 #[test]
 fn kill_escalates_to_sigkill_when_sigterm_is_ignored() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = env_lock();
     let (_tmp, proj) = setup("version = 1\n[meta]\nname = \"t\"\n");
     // An adapter whose binary (sh) we make ignore SIGTERM and keep running.
     let as_home = std::env::var("AGENTSTACK_HOME").unwrap();
