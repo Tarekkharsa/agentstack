@@ -10,7 +10,7 @@ use owo_colors::OwoColorize;
 
 use crate::adapter::{extract_servers, extract_settings, Registry};
 use crate::cli::InitArgs;
-use crate::discover::{lift_secrets, merge_servers};
+use crate::discover::{lift_secrets, merge_servers, Lifted};
 use crate::manifest::load::MANIFEST_FILE;
 use crate::manifest::model::{Manifest, Meta, Server, Targets};
 use crate::secret::keychain;
@@ -54,9 +54,7 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
     }
 
     let lifted = lift_secrets(&mut servers);
-    for l in &lifted {
-        let _ = keychain::set(&l.reference, &l.value); // best effort
-    }
+    let unstored = store_lifted(&lifted, keychain::set);
 
     let settings_count = settings.len();
     let manifest = Manifest {
@@ -80,13 +78,41 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
     let toml_text = toml::to_string_pretty(&manifest).context("serializing manifest")?;
     crate::util::atomic::write(&manifest_path, &toml_text)?;
 
-    Ok(format!(
+    let mut summary = format!(
         "Imported {} server(s) from {} CLI(s) ({} with settings); lifted {} secret(s).",
         manifest.servers.len(),
         detected.len(),
         settings_count,
         lifted.len()
-    ))
+    );
+    if !unstored.is_empty() {
+        summary.push_str(&format!(
+            " {} value(s) could NOT be stored in the OS credential store: {} — the manifest keeps ${{REF}}s; provide values via env, varlock, a project .env, or `agentstack secret set` once the store is reachable.",
+            unstored.len(),
+            unstored
+                .iter()
+                .map(|r| format!("${{{r}}}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    Ok(summary)
+}
+
+/// Store lifted secret values, collecting the references whose store write
+/// failed instead of aborting init or silently dropping them. The manifest
+/// holds `${REF}`s either way; an unstored value simply stays unresolved and
+/// every use site fails closed on it by name (rule 5) — so the honest behavior
+/// is to finish init and report the gap, never abort halfway (the old
+/// interactive path) or pretend it stored (the old dashboard path).
+fn store_lifted(lifted: &[Lifted], mut store: impl FnMut(&str, &str) -> Result<()>) -> Vec<String> {
+    let mut unstored = Vec::new();
+    for l in lifted {
+        if store(&l.reference, &l.value).is_err() {
+            unstored.push(l.reference.clone());
+        }
+    }
+    unstored
 }
 
 pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
@@ -435,11 +461,30 @@ version = 1
         return Ok(());
     }
 
-    // Store lifted secrets (unless opted out).
+    // Store lifted secrets (unless opted out). An unreachable credential
+    // store (headless Linux: no Secret Service bus) must not abort init —
+    // inform and continue; the refs stay honestly unresolved and fail closed
+    // at use time.
     if !args.no_keychain {
-        for l in &lifted {
-            keychain::set(&l.reference, &l.value)
-                .with_context(|| format!("storing '{}' in keychain", l.reference))?;
+        let unstored = store_lifted(&lifted, keychain::set);
+        if !unstored.is_empty() {
+            println!(
+                "{}  {}",
+                "⚠".yellow(),
+                format!(
+                    "The OS credential store is unreachable — {} value(s) not stored:",
+                    unstored.len()
+                )
+                .yellow()
+                .bold()
+            );
+            for r in &unstored {
+                println!("      {}", format!("${{{r}}}").yellow());
+            }
+            println!(
+                "      {}",
+                "The manifest keeps ${REF}s. Provide values via env, varlock, or a project .env; apply/run block on unresolved refs by name.".dimmed()
+            );
         }
     }
 
@@ -459,4 +504,38 @@ version = 1
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// S1 witness (init-secrets design §7): a failing credential store must
+    /// not abort init or silently drop values — failed refs are reported by
+    /// name while the values that CAN store still do.
+    #[test]
+    fn store_lifted_reports_failures_by_name_and_keeps_storing() {
+        let lifted = vec![
+            Lifted {
+                reference: "BROKEN".into(),
+                value: "v1".into(),
+                origin: "server 'a'".into(),
+            },
+            Lifted {
+                reference: "OK".into(),
+                value: "v2".into(),
+                origin: "server 'b'".into(),
+            },
+        ];
+        let mut stored = Vec::new();
+        let unstored = store_lifted(&lifted, |name, _value| {
+            if name == "BROKEN" {
+                anyhow::bail!("no secret-service bus");
+            }
+            stored.push(name.to_string());
+            Ok(())
+        });
+        assert_eq!(unstored, vec!["BROKEN".to_string()]);
+        assert_eq!(stored, vec!["OK".to_string()]);
+    }
 }
