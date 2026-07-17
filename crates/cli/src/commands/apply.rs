@@ -198,6 +198,9 @@ fn render(
     let mut changed_count = 0;
     let mut error_count = 0;
     let mut write_blockers = 0;
+    // Server entries a write would delete, across all targets — deletions get
+    // called out in the dry-run summary, not folded into "would change".
+    let mut removed_count = 0;
     // Pre-write snapshots of every file we touch, grouped into one undoable
     // history entry for this apply.
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
@@ -274,8 +277,19 @@ fn render(
         if plan.managed.is_empty() && plan.removed.is_empty() && plan.skipped.is_empty() {
             println!("  no servers selected");
         }
+        removed_count += plan.removed.len();
         for r in &plan.removed {
-            println!("  {} pruning '{r}' (no longer in manifest)", "−".yellow());
+            if will_write {
+                println!("  {} pruning '{r}' (no longer in manifest)", "−".yellow());
+            } else {
+                // A deletion deserves louder wording than a diff line: name
+                // the entry and the file it would vanish from.
+                println!(
+                    "  {} would REMOVE '{r}' from {} (no longer in manifest)",
+                    "−".red(),
+                    plan.config_path.display()
+                );
+            }
         }
         if !foreign.is_empty() {
             println!(
@@ -742,12 +756,16 @@ fn render(
         }
     } else if rerun_hint {
         println!(
-            "{changed_count} target(s) would change. Re-run with {} to write.",
+            "{changed_count} target(s) would change{}. Re-run with {} to write.",
+            removal_note(removed_count),
             "--write".bold()
         );
     } else {
         // A confirm prompt is about to follow — don't tell the user to re-run.
-        println!("{changed_count} target(s) would change.");
+        println!(
+            "{changed_count} target(s) would change{}.",
+            removal_note(removed_count)
+        );
     }
     if error_count > 0 && !quiet {
         println!("{error_count} issue(s) — resolve before writing.");
@@ -801,6 +819,25 @@ fn print_validation(
 
 fn indent(s: &str) -> String {
     s.lines().map(|l| format!("  {l}\n")).collect::<String>()
+}
+
+/// Dry-run summary suffix when a write would delete server entries — the
+/// per-target "would REMOVE" lines name them; this keeps the count visible
+/// next to the "would change" total (and the confirm prompt that follows it).
+fn removal_note(removed: usize) -> String {
+    if removed > 0 {
+        format!(", REMOVING {removed} server entr{}", plural_y(removed))
+    } else {
+        String::new()
+    }
+}
+
+fn plural_y(n: usize) -> &'static str {
+    if n == 1 {
+        "y"
+    } else {
+        "ies"
+    }
 }
 
 /// Owned-server entries to rewrite, grouped by manifest layer file.

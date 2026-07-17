@@ -14,7 +14,8 @@ use std::fs;
 use std::sync::Mutex;
 
 use agentstack::commands::doctor;
-use agentstack::state::{manifest_identity, State};
+use agentstack::scope::Scope;
+use agentstack::state::{manifest_identity, target_key, State};
 
 // doctor mutates the process-global HOME; serialize these tests.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -95,6 +96,61 @@ fn pending_prune_names_victims_and_offers_adopt() {
     assert!(
         drift.contains("prune them: agentstack apply --write"),
         "prune path must stay available, got: {drift}"
+    );
+}
+
+/// PROJECT-scope managed entries drift too: a project-scope apply records its
+/// bookkeeping under `<id>@project:<root>`, and doctor used to check only the
+/// global key — so removing the server from the manifest produced no warning
+/// and the next `apply --scope project --write` deleted the `.mcp.json` entry
+/// silently. The warning must fire for the project key, labeled with the
+/// scope, and its hint must reach the project config.
+#[test]
+fn project_scope_pending_prune_names_victims() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup(&home);
+
+    // A live project-scope Claude Code config carrying one server…
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    let content = "{\n  \"mcpServers\": {\n    \"docs\": { \"type\": \"http\", \"url\": \"https://docs/mcp\" }\n  }\n}\n";
+    fs::write(proj.join(".mcp.json"), content).unwrap();
+
+    // …that the current manifest no longer selects…
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
+    )
+    .unwrap();
+
+    // …recorded as managed by a previous `apply --scope project` of this same
+    // manifest (hash matches disk, so only the prune warning fires).
+    let mut state = State::default();
+    state.record(
+        &target_key("claude-code", Scope::Project, &proj),
+        vec!["docs".into()],
+        content,
+        &manifest_identity(&proj),
+    );
+    state.save().unwrap();
+
+    let report = doctor::collect(Some(&proj)).unwrap();
+    let drift = section_msgs(&report, "Drift").join("\n");
+    // The core fix: doctor checks the PROJECT-scope key (only project state was
+    // recorded), so the pending prune is named rather than silently deleted on
+    // the next apply. Under the default-scope model this project is a repo, so
+    // project IS the default write scope — the bare `agentstack apply --write`
+    // reaches the project config, and the hint carries no scope flag precisely
+    // because none is needed (a stray `--scope global` here would be the bug).
+    assert!(
+        drift.contains("would REMOVE docs"),
+        "project-scope prune victim must be named, got: {drift}"
+    );
+    assert!(
+        drift.contains("prune them: agentstack apply --write") && !drift.contains("--scope global"),
+        "the prune hint must reach the project config via the default-scope apply, got: {drift}"
     );
 }
 

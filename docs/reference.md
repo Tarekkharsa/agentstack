@@ -671,7 +671,9 @@ by which side holds the truth:
 - **"would REMOVE \<names\>"** — the manifest no longer selects entries we
   manage, so the next `apply --write` deletes them from the live config.
   `agentstack adopt` first if any of them should survive; apply only when
-  the removal is intended.
+  the removal is intended. Both scopes are checked: entries a
+  `--scope project` apply recorded (e.g. in `.mcp.json`) get their own line,
+  labeled `(project)` and hinting `apply --scope project --write`.
 - Entries recorded by a **different manifest** are never pruned implicitly
   (global scope is shared by every manifest on the machine): `apply` keeps
   them and says so, and `diff`/`doctor` keep surfacing them as kept — not as
