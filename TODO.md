@@ -140,12 +140,28 @@ unwired machinery.
     nested `projects[<dir>].mcpServers`) or reports the scope clean.
     Witnesses: the three `handoff_*` tests in `grant.rs`; verified live
     end-to-end including the staleness refusal.
-  - **Remaining (honest limits, not blockers):** actual NEUTRALIZATION of
-    ambient global-scope entries on the host tier stays out deliberately —
+  - **Adversarial review pass (2026-07-17, 4-lens × 2-refuter workflow):**
+    three confirmed findings fixed the same session (commit after the
+    keystone): (1) HIGH rule-2 hole — the bridge served the frozen ruleset
+    without re-checking the CURRENT machine ceiling, so a post-freeze machine
+    tightening was silently defeated; now `verify_handoff_for` re-derives
+    machine∩project and refuses on any difference. (2) forge/replay — the
+    artifact's authority fields were bound to nothing machine-authenticated;
+    now sealed with an HMAC under the machine commitment key
+    (`SignedHandoff`), verified before any field is trusted. (3) the ambient
+    audit matched the manifest dir not the project root (false "clean").
+    Witnesses added; all verified live (forged + stale-ceiling both refuse).
+  - **Remaining (honest limits, not blockers):** (i) actual NEUTRALIZATION
+    of ambient global-scope entries on the host tier stays out deliberately —
     the global config is one shared file harness apps rewrite mid-run, so
     park/swap races clobber user state; the sound routes are `--lockdown`
-    (kernel fence, shipped) or per-CLI isolation flags in adapter
-    descriptors (evidence-driven, not yet designed).
+    (kernel fence, shipped) or per-CLI isolation flags (evidence-driven, not
+    yet designed). (ii) a valid same-machine/same-project artifact from a
+    BROADER `--profile` run is still replayable by an agent with run-dir
+    write access — but its servers are all from the same trusted manifest and
+    the ruleset is capped at the current machine ceiling, so effective
+    authority is ≤ what `agentstack mcp --auto-project` already grants that
+    trusted project. Per-run artifact identity is follow-up.
   - The wiring must assert a `GrantedServer`'s definition digest was honestly
     derived from its stored `Server` bytes (carried 3b-ii review note).
     (Done: `GrantedServer::from_resolved` is the only wiring constructor.)
