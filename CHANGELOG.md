@@ -45,7 +45,8 @@ removed outright, and a parse test pins the retired names as rejected.
   roots for the host guard ("sessions under `~/x` may also write `~/y`"),
   grantable only from the machine manifest so a project can never widen its
   own scope.
-- `agentstack add --target` scopes a newly added server to named CLIs.
+- `agentstack add server --target <cli>` scopes a newly added server to named
+  CLIs (repeatable; unknown adapter ids are an error).
 - Adoption-ladder documentation: README and the getting-started page now
   teach one six-step path (unify → verify → guard → trust → scale →
   confine), and the shipped `using-agentstack` skill detects a project's
