@@ -43,6 +43,12 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub hooks: IndexMap<String, Hook>,
 
+    /// Native harness extensions (executable add-on code, e.g. pi's `.ts`
+    /// extensions), keyed by name. Each targets exactly ONE adapter and is
+    /// pinned strictly in the lock (D6; docs/design/extensions-capability.md).
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub extensions: IndexMap<String, Extension>,
+
     /// Shareable plugin recipes compiled into native Claude Code / Codex plugin
     /// packages and repo marketplaces.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
@@ -882,6 +888,39 @@ impl Skill {
             anyhow::bail!("skill has neither `path` nor `git` source")
         }
     }
+}
+
+/// A native harness extension: executable add-on code (pi's `.ts` extensions,
+/// OpenCode's `.js` plugins) rendered into one harness's native extension
+/// directory. The highest-risk capability kind agentstack manages: the code
+/// executes INSIDE the harness process with full user permissions, outside
+/// the policy ceiling — agentstack pins and delivers the bytes, it never runs
+/// or governs them at runtime (D6; docs/design/extensions-capability.md).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct Extension {
+    /// Local path source, relative to the manifest dir (same anchoring as
+    /// skills and instructions — a `.agentstack/` layout keeps extension
+    /// sources under `.agentstack/`). Pinned by the strict integrity-root
+    /// digest, which rejects traversal and symlinks outright.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Git source URL, fetched through the shared store. A git extension is
+    /// always digested at its `subpath` anchored at the checkout root (a
+    /// clone's `.git` can never be part of a reproducible pin), so validation
+    /// requires `subpath` alongside `git`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subpath: Option<String>,
+    /// The ONE adapter id this extension's code is written against (`pi`,
+    /// `opencode`, …). Deliberately singular, unlike `targets` lists
+    /// elsewhere: extension code is harness-specific by nature, so there is
+    /// no `"*"` and no fan-out.
+    pub target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// A profile selects a subset of servers and skills.

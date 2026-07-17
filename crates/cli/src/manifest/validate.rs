@@ -64,6 +64,24 @@ pub enum IssueKind {
     /// form or invalid `:port` suffix). At run time such a pattern fails the
     /// decision CLOSED, so this is caught here first — at authoring time.
     MalformedEgressPattern,
+    /// An `[extensions.X] target` names no registered adapter (or the
+    /// wildcard) — extension code is harness-specific, so it must name
+    /// exactly one real adapter id.
+    UnknownExtensionTarget,
+    /// An `[extensions.X]` source that can't be pinned: a git source without
+    /// the required `subpath`, or no source at all (and not resolvable from
+    /// the central library). Blocked here so an unpinnable extension can
+    /// never exist half-declared.
+    InvalidExtensionSource,
+    /// An extension name colliding with the host guard's reserved artifact
+    /// names (`agentstack-guard*`) — the guard's files must never be
+    /// squattable by repo content.
+    ReservedExtensionName,
+    /// An extension name that is not a plain path component (contains `/`, `\`,
+    /// `..`, or is empty/absolute). The name becomes the rendered artifact's
+    /// basename, so a name carrying a separator would escape the extension
+    /// directory agentstack owns — rejected before it can ever be rendered.
+    InvalidExtensionName,
 }
 
 impl IssueKind {
@@ -87,8 +105,27 @@ impl IssueKind {
                 | IssueKind::UnknownInstructionTarget
                 | IssueKind::InvalidPluginName
                 | IssueKind::MalformedEgressPattern
+                | IssueKind::UnknownExtensionTarget
+                | IssueKind::InvalidExtensionSource
+                | IssueKind::ReservedExtensionName
+                | IssueKind::InvalidExtensionName
         )
     }
+}
+
+/// An extension name is rendered verbatim as an artifact basename, so it must
+/// be a single plain path component — no separator, no `..`, not empty or
+/// absolute. Mirrors the render sink's `is_safe_artifact_key` so validation and
+/// the renderer agree on exactly which names are containable.
+fn is_safe_extension_name(name: &str) -> bool {
+    if name.is_empty() || name.contains('/') || name.contains('\\') {
+        return false;
+    }
+    let mut comps = Path::new(name).components();
+    matches!(
+        (comps.next(), comps.next()),
+        (Some(std::path::Component::Normal(c)), None) if c == std::ffi::OsStr::new(name)
+    )
 }
 
 impl Issue {
@@ -291,6 +328,70 @@ fn run<'a>(
                     issues.push(Issue::new(IssueKind::UnknownInstructionTarget, msg));
                 }
             }
+        }
+    }
+
+    // Native extensions (D6/E3): every declaration must be pinnable and
+    // deliverable exactly as reviewed — no wildcard target, no source the
+    // strict digest can't cover, no squatting on the guard's artifact names.
+    // Sources: an inline `path`, an inline `git` (which must name a `subpath`,
+    // since a checkout's `.git` can't be reproducibly pinned), or a sourceless
+    // entry that resolves from the central library (inline-first, like skills).
+    for (name, ext) in &manifest.extensions {
+        // The name becomes the rendered artifact's on-disk basename, so it must
+        // be a single plain path component: no separator or `..` may smuggle the
+        // copy outside the extension directory agentstack owns.
+        if !is_safe_extension_name(name) {
+            issues.push(Issue::new(
+                IssueKind::InvalidExtensionName,
+                format!("extension '{name}' is not a valid name — an extension name must be a plain path component (no `/`, `\\`, or `..`)"),
+            ));
+        }
+        if name.starts_with("agentstack-guard") {
+            issues.push(Issue::new(
+                IssueKind::ReservedExtensionName,
+                format!("extension '{name}' uses a reserved name — `agentstack-guard*` belongs to the host guard"),
+            ));
+        }
+        if ext.git.is_some() {
+            // Git sources are supported (E3), but a git extension is always
+            // digested at a subpath — the checkout's `.git` cannot be part of a
+            // reproducible pin, so an in-repo directory must be named.
+            let has_subpath = ext.subpath.as_deref().is_some_and(|s| !s.trim().is_empty());
+            if !has_subpath {
+                issues.push(Issue::new(
+                    IssueKind::InvalidExtensionSource,
+                    format!("extension '{name}' has a `git` source but no `subpath` — point `subpath` at the extension's directory within the repo"),
+                ));
+            }
+        } else if ext.path.is_none() {
+            // Sourceless: valid only as a central-library reference (and only
+            // when the library is available to consult). Without a library
+            // context, this is the inline-only view — treat it as unpinnable,
+            // exactly like a profile skill ref that resolves nowhere offline.
+            let in_library = ctx
+                .map(|cx| cx.library.get_extension(name).is_some())
+                .unwrap_or(false);
+            if !in_library {
+                issues.push(Issue::new(
+                    IssueKind::InvalidExtensionSource,
+                    format!("extension '{name}' has no `path` or `git` source and is not in the central library"),
+                ));
+            }
+        }
+        if ext.target == "*" {
+            issues.push(Issue::new(
+                IssueKind::UnknownExtensionTarget,
+                format!("extension '{name}' must target exactly one adapter — extension code is harness-specific, `\"*\"` cannot apply"),
+            ));
+        } else if !targets.is_empty() && !targets.contains(&ext.target) {
+            issues.push(Issue::new(
+                IssueKind::UnknownExtensionTarget,
+                format!(
+                    "extension '{name}' references unknown target '{}'",
+                    ext.target
+                ),
+            ));
         }
     }
 
@@ -1022,5 +1123,120 @@ mod tests {
         assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx)
             .iter()
             .any(|i| i.kind == IssueKind::UnknownServerRef));
+    }
+
+    #[test]
+    fn extension_declarations_validate_source_target_and_reserved_names() {
+        let m = parse(
+            r#"
+            version = 1
+            [extensions.ok]
+            path = "./extensions/ok"
+            target = "pi"
+            [extensions.from-git]
+            git = "https://example.com/x.git"
+            target = "pi"
+            [extensions.sourceless]
+            target = "pi"
+            [extensions.everywhere]
+            path = "./extensions/everywhere"
+            target = "*"
+            [extensions.typo]
+            path = "./extensions/typo"
+            target = "poi"
+            [extensions.agentstack-guard-evil]
+            path = "./extensions/evil"
+            target = "pi"
+            "#,
+        );
+        let issues = validate_with_targets(&m, ["pi", "opencode"]);
+        let count = |kind: IssueKind| issues.iter().filter(|i| i.kind == kind).count();
+        // git and missing sources both block; the valid entry raises nothing.
+        assert_eq!(count(IssueKind::InvalidExtensionSource), 2);
+        // "*" and a typo'd id both fail the one-real-adapter rule.
+        assert_eq!(count(IssueKind::UnknownExtensionTarget), 2);
+        assert_eq!(count(IssueKind::ReservedExtensionName), 1);
+        assert!(!issues.iter().any(|i| i.message.contains("'ok'")));
+
+        // Registry-independent mode still catches the wildcard: it is wrong by
+        // definition, not by registry lookup.
+        let wild = parse("version = 1\n[extensions.e]\npath = \"./x\"\ntarget = \"*\"\n");
+        assert!(validate(&wild)
+            .iter()
+            .any(|i| i.kind == IssueKind::UnknownExtensionTarget));
+    }
+
+    #[test]
+    fn extension_name_with_path_separators_is_rejected() {
+        // The name becomes the rendered artifact's basename; a traversal name
+        // would escape the extension directory agentstack owns. Rejected at
+        // validation, before it can ever reach the renderer.
+        let m = parse("version = 1\n[extensions.\"../evil\"]\npath = \"./x\"\ntarget = \"pi\"\n");
+        assert!(validate_with_targets(&m, ["pi"])
+            .iter()
+            .any(|i| i.kind == IssueKind::InvalidExtensionName));
+
+        // A plain, containable name raises no name issue.
+        let ok = parse("version = 1\n[extensions.checkpoint]\npath = \"./x\"\ntarget = \"pi\"\n");
+        assert!(!validate_with_targets(&ok, ["pi"])
+            .iter()
+            .any(|i| i.kind == IssueKind::InvalidExtensionName));
+    }
+
+    #[test]
+    fn git_extension_needs_a_subpath_but_is_otherwise_valid() {
+        // A git source with a subpath is supported (E3) and validates clean.
+        let ok = parse(
+            "version = 1\n[extensions.e]\ngit = \"https://x/repo.git\"\nsubpath = \"ext\"\ntarget = \"pi\"\n",
+        );
+        assert!(validate_with_targets(&ok, ["pi"]).is_empty());
+
+        // A git source WITHOUT a subpath is unpinnable (the checkout's `.git`
+        // can't be part of a reproducible pin) → InvalidExtensionSource.
+        let no_sub =
+            parse("version = 1\n[extensions.e]\ngit = \"https://x/repo.git\"\ntarget = \"pi\"\n");
+        assert!(validate_with_targets(&no_sub, ["pi"])
+            .iter()
+            .any(|i| i.kind == IssueKind::InvalidExtensionSource));
+    }
+
+    #[test]
+    fn sourceless_extension_is_valid_only_as_a_library_ref() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let mut library = Library::default();
+        library.upsert_extension(crate::library::LibraryExtension {
+            name: "checkpoint".into(),
+            source: "path".into(),
+            target: "pi".into(),
+            path: Some("checkpoint".into()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: None,
+            description: None,
+            version: None,
+            provenance: None,
+        });
+        let ctx = ValidateCtx {
+            manifest_dir: proj.path(),
+            library: &library,
+            lib_home: lib_home.path(),
+            store: &store,
+        };
+        let m = parse("version = 1\n[extensions.checkpoint]\ntarget = \"pi\"\n");
+
+        // Without context (inline-only view), a sourceless entry is unpinnable.
+        assert!(validate(&m)
+            .iter()
+            .any(|i| i.kind == IssueKind::InvalidExtensionSource));
+        // With the library available, it resolves as a library ref → clean.
+        assert!(validate_with_context(&m, ["pi"], &ctx).is_empty());
+        // A sourceless entry NOT in the library still fails, even with context.
+        let missing = parse("version = 1\n[extensions.ghost]\ntarget = \"pi\"\n");
+        assert!(validate_with_context(&missing, ["pi"], &ctx)
+            .iter()
+            .any(|i| i.kind == IssueKind::InvalidExtensionSource));
     }
 }

@@ -116,6 +116,7 @@ Portability creates adoption. Trust and policy create differentiation. Coordinat
 - Official MCP registries and vendor catalogs.
 - Existing runtimes and sandbox technologies where they improve enforcement.
 - Native workflow formats where they can be imported, wrapped, and governed without weakening the AgentStack policy ceiling.
+- Native harness extension and plugin surfaces (pi extensions, OpenCode plugins, Claude Code/Codex plugins) as governed distribution targets — AgentStack pins and delivers the code; only the harness executes it.
 - Secret stores and identity providers.
 - CI providers, source hosts, and security information systems.
 - Agent clients rather than attempting to replace them.
@@ -144,6 +145,7 @@ bundle it with documentation, catalog transport, or unrelated guard changes.
 | D3 — local executable integrity | **Phase 0A gate** | Allow manifests to declare integrity inputs for stdio scripts and other local executables; pin them in the lock, show them in trust review, and warn when executable local code is intentionally unpinned. If the first locked-run release excludes this coverage, label that limit explicitly rather than implying it is locked. | A one-byte executable edit fails verification and re-gates review; an unpinned executable is visibly labelled. |
 | D4 — one MCP route in lockdown | **Done** | The same frozen, pin-verified server set drives gateway dispatch and the `gateway_only_hosts` egress fence. Declared HTTP MCP hosts are direct-denied on all ports; stdio stays host-side; literal-IP/non-TLS tunnels are refused; unsafe fallback or partial resolution fails closed. | Docker witness: direct declared upstream fails while the same call succeeds and is recorded through the relay; precedence, transport, classification, and ruleset-version tests. |
 | D5 — sandbox name matches posture | **Phase 1 decision** | After D4 and compatibility evidence, decide whether ordinary `--sandbox` should mean confined networking by default and expose bridge/proxy-only mode under an explicitly weaker name. | Compatibility evidence plus tests and documentation showing the default name cannot overstate the topology. |
+| D6 — extensions are pinned executable content | **Proposed, post-cut lane** ([design](docs/design/extensions-capability.md)) | Govern native harness extensions/plugins (pi, OpenCode first) as a first-class capability kind: strict content pinning via the D3 integrity-root digest, untrusted-means-never-rendered, copy-based render with an ownership ledger, and an honest provenance-only runtime label — the code executes inside the harness process, outside the policy ceiling, and AgentStack never executes it itself. No cross-CLI translation; the portable layer remains declarative hooks. | Witnesses: an untrusted bundle renders no extension bytes; a one-byte source edit fails locked verification and re-gates review; pruning never touches unmanaged files or the guard's artifacts. |
 
 ## Ecosystem and GitHub organization plan
 
@@ -555,6 +557,7 @@ The exit gate is repeatable enterprise sales driven by the same product, not a c
 | P1 | Sequence-anomaly report flag | Adds useful metadata evidence without claiming DLP |
 | P1 | Provenance UX, registry imports, migration guides | Reduces adoption friction without creating a marketplace |
 | P1 | Reports and policy examples | Makes trust decisions useful to developers and reviewers |
+| P1 post-cut | D6 governed native extensions kind (pi, OpenCode first) | Closes the last unmanaged capability surface; the D3 digest machinery and the guard's write path already cover the hard parts |
 | P2 | Paid rollout playbook, evidence export, and one-shot Cloudflare runner | Tests remote execution without prematurely building a control plane |
 | P2 after runner evidence | Saved governed workflows with role-specific grants | Makes proven tasks reusable without widening authority |
 | P3 | Shared policy, workflows, identity, inventory, approvals, audit search | Monetizable coordination layer |
@@ -666,6 +669,7 @@ changes; update `TODO.md` as work starts and finishes.
 | Cloudflare is the first hosted backend, not the product identity | Its Worker, durable coordination, Sandbox, and Workflow primitives fit the first vertical slice, while AgentStack must remain portable | A second backend or private-deployment requirement earns an adapter |
 | Saved workflows follow one-shot local/cloud parity | Persistence and orchestration multiply security and cost risk; they should wrap a stable frozen plan | A repeated user task proves the need and both backends consume the same plan |
 | Strategy is public; commercial details are private | Transparency supports trust, but pricing and prospect data create no equivalent public benefit | Publication causes measurable strategic harm or the audience changes |
+| Native extensions ride the existing executable-integrity machinery, post-cut (2026-07-16) | pi-style harness extensions are the last unmanaged capability surface and the highest-risk one; D3's strict digests, trust re-gating, and the guard's proven write path into pi/OpenCode make a new manifest kind cheaper and safer than a parallel mechanism. Provenance-only at runtime, labelled honestly | E1/E2 witnesses land, a second CLI pair shares an extension format (revisits singular `target`), or evidence earns the E4 unification |
 | Minimum version first; Phase 0B and post-cut work deferred (2026-07-16) | Solo-maintainer time and token budget are the binding constraints; the configuration problem is solved and the staged trust machinery must become an enforced claim before anything new is worth building. Deferral is explicit so resuming is a decision, not drift | The minimum version ships, or a concrete external pull (user, design partner, deadline) justifies reopening a deferred lane |
 
 ## External reference points

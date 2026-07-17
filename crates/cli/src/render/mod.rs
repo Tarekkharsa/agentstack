@@ -2,6 +2,7 @@
 //! orchestration that produces a read-only plan.
 
 pub mod apply;
+pub mod extensions;
 pub mod gitignore;
 pub mod hooks;
 pub mod instructions;

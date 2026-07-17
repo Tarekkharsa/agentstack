@@ -62,7 +62,14 @@ my-agent/
     agentstack.lock        # resolved, content-pinned inputs
     instructions/         # instruction files
     skills/               # skill directories (untrusted input)
+    extensions/           # native harness add-on code (executable; untrusted input)
 ```
+
+Capability kinds a manifest declares: **servers** (MCP), **skills** (inert
+text), **instructions** (compiled into `CLAUDE.md`/`AGENTS.md`), **settings**
+(native per-CLI config), **hooks** (declarative, compiled per-CLI), and
+**extensions** (native executable add-ons). Extensions are the highest-risk
+kind and the one agentstack governs *only before delivery* — see Layer 4.
 
 Minimal `agentstack.toml` sketch:
 
@@ -241,6 +248,22 @@ alone. One trust note, stated plainly: user drop-in adapter descriptors
 alter how configs render and are trusted *because the user placed them*,
 unlike bundle content, which is hostile. Inside a container that dir is
 simply absent, which is expected and correct.
+
+**Native extensions** are the one capability agentstack delivers but does not
+govern at runtime: `[extensions.*]` code (pi `.ts`, OpenCode `.js`) executes
+inside the harness process at full user permission, outside every ceiling
+below. The design draws the honest line at *delivery*. The source is pinned in
+`agentstack.lock` with the strict integrity-root digest, so a byte change
+re-gates trust; `apply` renders fail-closed (an untrusted or drifted project
+writes nothing) by **copying** — never symlinking — the pinned bytes into the
+target harness's extension directory, so the harness loads exactly the reviewed
+bytes rather than whatever a later source edit leaves behind. A per-directory
+ownership ledger scopes pruning to what agentstack placed, and a hard deny-list
+keeps the renderer from ever authoring, overwriting, or pruning the host
+guard's reserved `agentstack-guard*` artifacts. `run --locked` re-verifies each
+delivered copy against its pin before launch. What this buys is provenance and
+content binding, not runtime enforcement; the trade-offs and staging are in
+[`docs/design/extensions-capability.md`](design/extensions-capability.md).
 
 The four runtime modes (host, gateway, sandbox, lockdown) enforce different
 dimensions to different depths; [`ENFORCEMENT.md`](ENFORCEMENT.md) is the

@@ -15,11 +15,12 @@ use anyhow::{bail, Context, Result};
 use owo_colors::OwoColorize;
 
 use crate::cli::{
-    LibAddArgs, LibAddServerArgs, LibArgs, LibKind, LibMigrateArgs, LibRemoveArgs,
-    LibRemoveServerArgs, LibSyncArgs,
+    LibAddArgs, LibAddExtensionArgs, LibAddHookArgs, LibAddServerArgs, LibArgs, LibKind,
+    LibMigrateArgs, LibRemoveArgs, LibRemoveExtensionArgs, LibRemoveHookArgs, LibRemoveServerArgs,
+    LibSyncArgs,
 };
-use crate::library::{Library, LibraryServer, LibrarySkill};
-use crate::manifest::{Server, Skill};
+use crate::library::{Library, LibraryExtension, LibraryHook, LibraryServer, LibrarySkill};
+use crate::manifest::{Hook, Server, Skill};
 use crate::scan::Severity;
 use crate::store::{dir_digest, dir_size, Store};
 use crate::util::paths;
@@ -32,9 +33,13 @@ pub fn run(args: &LibArgs, manifest_dir: Option<&Path>) -> Result<()> {
     match &args.kind {
         LibKind::Add(a) => add(a),
         LibKind::AddServer(a) => add_server_cli(a, manifest_dir),
+        LibKind::AddExtension(a) => add_extension_cli(a),
+        LibKind::AddHook(a) => add_hook_cli(a, manifest_dir),
         LibKind::List => list(),
         LibKind::Remove(a) => remove(a),
         LibKind::RemoveServer(a) => remove_server_cli(a),
+        LibKind::RemoveExtension(a) => remove_extension_cli(a),
+        LibKind::RemoveHook(a) => remove_hook_cli(a),
         LibKind::Migrate(a) => migrate(a),
         LibKind::Sync(a) => sync(a),
     }
@@ -733,6 +738,627 @@ fn remove_server_cli(args: &LibRemoveServerArgs) -> Result<()> {
     Ok(())
 }
 
+// ---------- hooks (E3d) ----------
+//
+// A declarative `[hooks.*]` definition is a flat table (event/command/args/…),
+// so — like a server, and unlike a skill's directory body — its reusable form is
+// a single file at `<lib_home>/hooks/<name>.toml`. These functions mirror the
+// server ones exactly; the only place a hook diverges is at install time, where
+// `agentstack add <name>` copies the definition into the project's inline
+// `[hooks.<name>]` table (hooks always render from the manifest — see
+// `render/hooks.rs` — so the library is a source to copy from, not a runtime
+// indirection).
+
+/// The result of a hook insertion (or a dry-run preview of one).
+#[derive(Debug)]
+pub struct HookAddOutcome {
+    pub name: String,
+    /// SHA-256 of the normalized hook definition.
+    pub checksum: String,
+    /// The `lib/hooks/<name>.toml` file written (or that would be written).
+    pub dest: PathBuf,
+    pub written: bool,
+    pub replaced: bool,
+    pub warnings: Vec<String>,
+}
+
+/// Add a hook definition to the library from a `.toml` file. Parses it as a
+/// `manifest::Hook`, then delegates to [`add_hook_def`]. A same-named entry is a
+/// hard error unless `replace`; `write=false` mutates nothing.
+pub fn add_hook(
+    lib_home: &Path,
+    name: &str,
+    file: &Path,
+    replace: bool,
+    write: bool,
+) -> Result<HookAddOutcome> {
+    let raw =
+        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let hook: Hook = toml::from_str(&raw)
+        .with_context(|| format!("{} is not a valid hook definition", file.display()))?;
+    let src = absolutize(file)?;
+    let provenance = format!("file:{}", src.display());
+    let mut outcome = add_hook_def(lib_home, name, &hook, provenance, replace, write)?;
+    // Same honesty as `lib add-server --file`: a temp-dir source leaves a
+    // provenance path that lib list/explain will show after it is cleaned up.
+    if is_temp_path(&src) {
+        outcome.warnings.push(format!(
+            "source {} is a temporary location — the recorded provenance will \
+             dangle once it is cleaned up (the library definition is unaffected)",
+            src.display()
+        ));
+    }
+    Ok(outcome)
+}
+
+/// Add an in-memory hook definition to the library (the core of [`add_hook`];
+/// also used by `--from-manifest`). The digest is the SHA-256 of the normalized
+/// definition — exactly the server contract.
+pub fn add_hook_def(
+    lib_home: &Path,
+    name: &str,
+    hook: &Hook,
+    provenance: String,
+    replace: bool,
+    write: bool,
+) -> Result<HookAddOutcome> {
+    if !valid_lib_name(name) {
+        bail!(
+            "invalid library hook name '{name}' — must be non-empty and contain no path separators"
+        );
+    }
+
+    let mut library = Library::load(lib_home)?;
+    let replacing = library.get_hook(name).is_some();
+    if replacing && !replace {
+        bail!("'{name}' is already a hook in the central library — pass --replace to overwrite");
+    }
+
+    let warnings = hook_suspicious_secrets(hook);
+    // Normalize: re-serialize so exactly a Hook table is stored (drops junk).
+    let normalized = toml::to_string_pretty(hook).context("serializing hook definition")?;
+    let checksum = crate::resolve::sha256_hex(normalized.as_bytes());
+    let hooks_dir = lib_home.join("hooks");
+    let dest = hooks_dir.join(format!("{name}.toml"));
+
+    if write {
+        std::fs::create_dir_all(&hooks_dir)
+            .with_context(|| format!("creating {}", hooks_dir.display()))?;
+        std::fs::write(&dest, &normalized)
+            .with_context(|| format!("writing {}", dest.display()))?;
+        library.upsert_hook(LibraryHook {
+            name: name.to_string(),
+            checksum: Some(checksum.clone()),
+            version: None,
+            provenance: Some(provenance),
+        });
+        library.save(lib_home)?;
+    }
+
+    Ok(HookAddOutcome {
+        name: name.to_string(),
+        checksum,
+        dest,
+        written: write,
+        replaced: replacing,
+        warnings,
+    })
+}
+
+/// Literal-secret findings in a hook definition. A hook has no headers/env/url —
+/// its only credential-bearing surface is the command and its args — so this
+/// reuses [`arg_secrets`] over `command` followed by `args`.
+fn hook_suspicious_secrets(hook: &Hook) -> Vec<String> {
+    let mut all = Vec::with_capacity(hook.args.len() + 1);
+    all.push(hook.command.clone());
+    all.extend(hook.args.iter().cloned());
+    arg_secrets(&all)
+}
+
+fn add_hook_cli(args: &LibAddHookArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let lib_home = paths::lib_home();
+    let outcome = if args.from_manifest {
+        let ctx = super::load(manifest_dir)?;
+        let Some(hook) = ctx.loaded.manifest.hooks.get(&args.name) else {
+            let available: Vec<&str> = ctx
+                .loaded
+                .manifest
+                .hooks
+                .keys()
+                .map(String::as_str)
+                .collect();
+            bail!(
+                "no [hooks.{}] in the manifest — available: {}",
+                args.name,
+                if available.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    available.join(", ")
+                }
+            );
+        };
+        add_hook_def(
+            &lib_home,
+            &args.name,
+            hook,
+            format!("manifest:{}", ctx.dir.display()),
+            args.replace,
+            args.write,
+        )?
+    } else {
+        let Some(file) = args.file.as_deref() else {
+            bail!("pass --file <definition.toml> or --from-manifest");
+        };
+        add_hook(
+            &lib_home,
+            &args.name,
+            Path::new(file),
+            args.replace,
+            args.write,
+        )?
+    };
+
+    for w in &outcome.warnings {
+        println!("  {} {w}", "⚠".yellow());
+    }
+    let verb = if outcome.replaced { "replace" } else { "add" };
+    let past = if outcome.replaced {
+        "replaced"
+    } else {
+        "added"
+    };
+    if outcome.written {
+        println!(
+            "{} {past} hook '{}' in the central library",
+            "✓".green(),
+            outcome.name
+        );
+        println!("  files → {}", outcome.dest.display());
+        println!("  checksum {}", short(&outcome.checksum));
+    } else {
+        println!(
+            "Would {verb} hook '{}' into the central library:",
+            outcome.name.bold()
+        );
+        println!("  {} files → {}", "→".cyan(), outcome.dest.display());
+        println!("  {} checksum {}", "→".cyan(), short(&outcome.checksum));
+        println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+    }
+    Ok(())
+}
+
+/// The result of a hook removal (or a dry-run preview of one).
+#[derive(Debug)]
+pub struct HookRemoveOutcome {
+    pub name: String,
+    /// The `lib/hooks/<name>.toml` file that would be / was deleted (`None` if
+    /// the name is unsafe — then only the index entry is dropped).
+    pub removed_file: Option<PathBuf>,
+    pub written: bool,
+}
+
+/// Remove a hook from the central library: drop the `library.toml` entry and
+/// delete its `lib/hooks/<name>.toml` definition. The file path derives solely
+/// from the (validated) name, so it can never escape `lib/hooks`. A missing name
+/// is a hard error; `write=false` mutates nothing.
+pub fn remove_hook(lib_home: &Path, name: &str, write: bool) -> Result<HookRemoveOutcome> {
+    let mut library = Library::load(lib_home)?;
+    if library.get_hook(name).is_none() {
+        bail!("'{name}' is not a hook in the central library");
+    }
+    let removed_file =
+        valid_lib_name(name).then(|| lib_home.join("hooks").join(format!("{name}.toml")));
+
+    if write {
+        if let Some(f) = &removed_file {
+            if f.exists() {
+                std::fs::remove_file(f).with_context(|| format!("removing {}", f.display()))?;
+            }
+        }
+        library.remove_hook(name);
+        library.save(lib_home)?;
+    }
+
+    Ok(HookRemoveOutcome {
+        name: name.to_string(),
+        removed_file,
+        written: write,
+    })
+}
+
+fn remove_hook_cli(args: &LibRemoveHookArgs) -> Result<()> {
+    let lib_home = paths::lib_home();
+    let outcome = remove_hook(&lib_home, &args.name, args.write)?;
+    if outcome.written {
+        println!(
+            "{} removed hook '{}' from the central library",
+            "✓".green(),
+            outcome.name
+        );
+        if let Some(f) = &outcome.removed_file {
+            println!("  deleted {}", f.display());
+        }
+    } else {
+        println!(
+            "Would remove hook '{}' from the central library:",
+            outcome.name.bold()
+        );
+        match &outcome.removed_file {
+            Some(f) => println!("  {} delete {}", "−".yellow(), f.display()),
+            None => println!("  {} index entry only", "−".yellow()),
+        }
+        println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+    }
+    Ok(())
+}
+
+/// The result of an extension insertion (or a dry-run preview of one).
+#[derive(Debug)]
+pub struct ExtensionAddOutcome {
+    pub name: String,
+    /// `"path"` or `"git"`.
+    pub source_kind: &'static str,
+    pub target: String,
+    /// The strict integrity-root digest of the resolved content.
+    pub checksum: String,
+    /// The `lib/extensions/<name>` destination for path sources; `None` for git.
+    pub dest: Option<PathBuf>,
+    pub source_path: Option<PathBuf>,
+    pub written: bool,
+    pub replaced: bool,
+    pub warnings: Vec<String>,
+}
+
+/// Insert a native extension into the central library at `lib_home` — the
+/// executable-code sibling of [`add_skill`]. Path sources are copied into
+/// `lib/extensions/<name>` and digested with the STRICT integrity-root digest
+/// (never the lenient skill digest — extensions are code); git sources are
+/// resolved through the shared store and digested at their `subpath`.
+///
+/// A same-named entry is a hard error unless `replace`. When `write` is false,
+/// nothing is mutated and the returned outcome is a preview.
+// Mirrors `add_skill_inner`'s parameter cluster plus the extension `target`.
+#[allow(clippy::too_many_arguments)]
+pub fn add_extension(
+    lib_home: &Path,
+    name: &str,
+    target: &str,
+    source: LibSource,
+    description: Option<&str>,
+    replace: bool,
+    write: bool,
+    allow_flagged: bool,
+) -> Result<ExtensionAddOutcome> {
+    if !valid_lib_name(name) {
+        bail!("invalid library extension name '{name}' — must be non-empty and contain no path separators");
+    }
+    if target.is_empty() || target == "*" {
+        bail!("extension target must be exactly one adapter id — extension code is harness-specific, `\"*\"` cannot apply");
+    }
+
+    let mut library = Library::load(lib_home)?;
+    let replacing = library.get_extension(name).is_some();
+    if replacing && !replace {
+        bail!(
+            "'{name}' is already an extension in the central library — pass --replace to overwrite"
+        );
+    }
+
+    let mut warnings = Vec::new();
+    let (entry, dest, checksum, source_kind, source_path) = match source {
+        LibSource::Path(src) => {
+            let src = absolutize(src)?;
+            // Supply-chain gate: scan the executable source before any of it
+            // becomes the canonical library copy (plan §3).
+            scan_gate(name, &src, allow_flagged, &mut warnings)?;
+            let dest = lib_home.join("extensions").join(name);
+            if same_dir(&src, &dest) {
+                bail!(
+                    "source {} is already the library location — nothing to add",
+                    src.display()
+                );
+            }
+            // Digest the SOURCE first with the strict integrity-root digest:
+            // this both validates it (symlinks/traversal are hard errors) and,
+            // on a dry run, is the previewed checksum.
+            let src_checksum = integrity_root_digest_at(&src)?;
+            if is_temp_path(&src) {
+                warnings.push(format!(
+                    "source {} is a temporary location — the recorded provenance will \
+                     dangle once it is cleaned up (the library copy is unaffected)",
+                    src.display()
+                ));
+            }
+            let checksum = if write {
+                copy_extension_source(&src, &dest)?;
+                integrity_root_digest_at(&dest)?
+            } else {
+                src_checksum
+            };
+            let entry = LibraryExtension {
+                name: name.to_string(),
+                source: "path".into(),
+                target: target.to_string(),
+                path: Some(name.to_string()),
+                git: None,
+                rev: None,
+                subpath: None,
+                checksum: Some(checksum.clone()),
+                description: description.map(str::to_string),
+                version: None,
+                provenance: Some(format!("path:{}", src.display())),
+            };
+            (entry, Some(dest), checksum, "path", Some(src))
+        }
+        LibSource::Git { url, rev, subpath } => {
+            let Some(sub) = subpath.map(str::trim).filter(|s| !s.is_empty()) else {
+                bail!("a git extension needs --subpath pointing at the extension's directory — a checkout's `.git` cannot be part of a reproducible pin");
+            };
+            // Fetching into the store touches the network even on a dry run —
+            // it is how we learn the resolved rev and the content digest.
+            let store = Store::default_store();
+            let (clone, head) = crate::store::checkout(&store, url, rev)
+                .with_context(|| format!("resolving git source {url}"))?;
+            let checksum = agentstack_core::digest::integrity_root_digest(&clone, sub)
+                .with_context(|| format!("digesting git extension subpath '{sub}'"))?;
+            scan_gate(name, &clone.join(sub), allow_flagged, &mut warnings)?;
+            let entry = LibraryExtension {
+                name: name.to_string(),
+                source: "git".into(),
+                target: target.to_string(),
+                path: None,
+                git: Some(url.to_string()),
+                rev: Some(head.clone()),
+                subpath: Some(sub.to_string()),
+                checksum: Some(checksum.clone()),
+                description: description.map(str::to_string),
+                version: None,
+                provenance: Some(format!("git:{url}@{head}#{sub}")),
+            };
+            (entry, None, checksum, "git", None)
+        }
+    };
+
+    if write {
+        library.upsert_extension(entry);
+        library.save(lib_home)?;
+    }
+
+    Ok(ExtensionAddOutcome {
+        name: name.to_string(),
+        source_kind,
+        target: target.to_string(),
+        checksum,
+        dest,
+        source_path,
+        written: write,
+        replaced: replacing,
+        warnings,
+    })
+}
+
+/// Strict integrity-root digest of a file or directory, anchored at its parent
+/// so the last path component is what gets walked (a directory tree or a single
+/// file). Rejects symlinks and traversal exactly as the digest already does.
+fn integrity_root_digest_at(path: &Path) -> Result<String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("cannot digest {} — it has no parent", path.display()))?;
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| anyhow::anyhow!("cannot digest {} — non-UTF-8 basename", path.display()))?;
+    agentstack_core::digest::integrity_root_digest(parent, name)
+        .with_context(|| format!("digesting {}", path.display()))
+}
+
+/// Copy a path extension source (directory tree or single file) into `dest`,
+/// replacing any existing library copy. The source has already passed the
+/// strict integrity-root digest (no symlinks), so a plain recursive copy is safe.
+fn copy_extension_source(src: &Path, dest: &Path) -> Result<()> {
+    if dest.exists() {
+        remove_path(dest)?;
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    if src.is_dir() {
+        crate::consolidate::copy_dir(src, dest)?;
+    } else {
+        std::fs::copy(src, dest)
+            .with_context(|| format!("copying {} → {}", src.display(), dest.display()))?;
+    }
+    Ok(())
+}
+
+fn remove_path(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => {
+            std::fs::remove_dir_all(path).with_context(|| format!("removing {}", path.display()))
+        }
+        Ok(_) => std::fs::remove_file(path).with_context(|| format!("removing {}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+fn add_extension_cli(args: &LibAddExtensionArgs) -> Result<()> {
+    let lib_home = paths::lib_home();
+    let (git_url, url_frag) = match &args.git {
+        Some(g) => match g.split_once('#') {
+            Some((u, frag)) => (Some(u.to_string()), Some(frag.to_string())),
+            None => (Some(g.clone()), None),
+        },
+        None => (None, None),
+    };
+    let subpath = match (&args.subpath, &url_frag) {
+        (Some(a), Some(b)) if a != b => {
+            bail!("subpath given twice and they differ: --subpath '{a}' vs '#{b}' in --git")
+        }
+        (Some(s), _) | (_, Some(s)) => Some(s.clone()),
+        (None, None) => None,
+    };
+    let source = match (&args.path, &git_url) {
+        (Some(p), None) => LibSource::Path(Path::new(p)),
+        (None, Some(url)) => LibSource::Git {
+            url,
+            rev: args.rev.as_deref(),
+            subpath: subpath.as_deref(),
+        },
+        (None, None) => bail!("specify a source: --path <dir/file> or --git <url> --subpath <dir>"),
+        (Some(_), Some(_)) => bail!("--path and --git are mutually exclusive"),
+    };
+
+    let outcome = add_extension(
+        &lib_home,
+        &args.name,
+        &args.target,
+        source,
+        args.description.as_deref(),
+        args.replace,
+        args.write,
+        args.allow_flagged,
+    )?;
+
+    for w in &outcome.warnings {
+        println!("  {} {w}", "⚠".yellow());
+    }
+    let past = if outcome.replaced {
+        "replaced"
+    } else {
+        "added"
+    };
+    let verb = if outcome.replaced { "replace" } else { "add" };
+    if outcome.written {
+        println!(
+            "{} {past} extension '{}' ({}) → {} in the central library",
+            "✓".green(),
+            outcome.name,
+            outcome.source_kind,
+            outcome.target
+        );
+        if let (Some(dest), Some(src)) = (&outcome.dest, &outcome.source_path) {
+            println!("  copied {} → {}", src.display(), dest.display());
+            println!("  the library copy is now canonical — edits to the source have no effect");
+        }
+        println!("  checksum {}", short(&outcome.checksum));
+    } else {
+        println!(
+            "Would {verb} extension '{}' ({}) → {} into the central library:",
+            outcome.name.bold(),
+            outcome.source_kind,
+            outcome.target
+        );
+        if let (Some(dest), Some(src)) = (&outcome.dest, &outcome.source_path) {
+            println!(
+                "  {} copy {} → {} (the library copy becomes canonical)",
+                "→".cyan(),
+                src.display(),
+                dest.display()
+            );
+        }
+        println!("  {} checksum {}", "→".cyan(), short(&outcome.checksum));
+        println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+    }
+    Ok(())
+}
+
+/// The result of an extension removal (or a dry-run preview of one).
+#[derive(Debug)]
+pub struct ExtensionRemoveOutcome {
+    pub name: String,
+    pub source_kind: String,
+    /// The contained `lib/extensions/<name>` that would be / was deleted (path
+    /// sources only; `None` for git-backed or uncontained entries).
+    pub removed_dir: Option<PathBuf>,
+    pub written: bool,
+}
+
+/// Remove an extension from the central library at `lib_home` — the inverse of
+/// [`add_extension`]. A path entry's `lib/extensions/<name>` copy is deleted;
+/// git-backed entries leave the shared store cache untouched.
+pub fn remove_extension(
+    lib_home: &Path,
+    name: &str,
+    write: bool,
+) -> Result<ExtensionRemoveOutcome> {
+    let mut library = Library::load(lib_home)?;
+    let Some(entry) = library.get_extension(name).cloned() else {
+        bail!("'{name}' is not an extension in the central library");
+    };
+    let removed_dir = if entry.source == "path" {
+        entry
+            .path
+            .as_deref()
+            .and_then(|p| contained_lib_extension_dir(lib_home, p))
+    } else {
+        None
+    };
+    if write {
+        if let Some(dir) = &removed_dir {
+            remove_path(dir)?;
+        }
+        library.remove_extension(name);
+        library.save(lib_home)?;
+    }
+    Ok(ExtensionRemoveOutcome {
+        name: name.to_string(),
+        source_kind: entry.source,
+        removed_dir,
+        written: write,
+    })
+}
+
+fn remove_extension_cli(args: &LibRemoveExtensionArgs) -> Result<()> {
+    let lib_home = paths::lib_home();
+    let outcome = remove_extension(&lib_home, &args.name, args.write)?;
+    if outcome.written {
+        println!(
+            "{} removed extension '{}' ({}) from the central library",
+            "✓".green(),
+            outcome.name,
+            outcome.source_kind
+        );
+        if let Some(dir) = &outcome.removed_dir {
+            println!("  deleted {}", dir.display());
+        }
+    } else {
+        println!(
+            "Would remove extension '{}' ({}) from the central library:",
+            outcome.name.bold(),
+            outcome.source_kind
+        );
+        match &outcome.removed_dir {
+            Some(dir) => println!("  {} delete {}", "−".yellow(), dir.display()),
+            None if outcome.source_kind == "git" => println!(
+                "  {} index entry only (store cache left in place)",
+                "−".yellow()
+            ),
+            None => println!("  {} index entry only", "−".yellow()),
+        }
+        println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+    }
+    Ok(())
+}
+
+/// The `lib/extensions/<name>` dir/file safe to delete — same containment rule
+/// as [`contained_lib_skill_dir`], anchored at `lib/extensions`.
+fn contained_lib_extension_dir(lib_home: &Path, path: &str) -> Option<PathBuf> {
+    let rel = Path::new(path.trim_start_matches("./"));
+    let mut comps = 0;
+    for c in rel.components() {
+        if !matches!(c, std::path::Component::Normal(_)) {
+            return None;
+        }
+        comps += 1;
+    }
+    if comps == 0 {
+        return None;
+    }
+    Some(lib_home.join("extensions").join(rel))
+}
+
 /// `lib list` — a plain read of the index. No resolver, no store, no filesystem
 /// validation: it reports what `library.toml` records, nothing more.
 fn list() -> Result<()> {
@@ -747,13 +1373,22 @@ fn list() -> Result<()> {
 /// `lib_home` is the library root, used to read each skill's one-line
 /// `SKILL.md` description for display.
 fn render_list(library: &Library, lib_home: &Path) -> String {
-    if library.skills.is_empty() && library.servers.is_empty() {
-        return "No skills or servers installed in the central library.\n".to_string();
+    if library.skills.is_empty()
+        && library.servers.is_empty()
+        && library.extensions.is_empty()
+        && library.hooks.is_empty()
+    {
+        return "No skills, servers, extensions, or hooks installed in the central library.\n"
+            .to_string();
     }
     let mut skills = library.skills.clone();
     skills.sort_by(|a, b| a.name.cmp(&b.name));
     let mut servers = library.servers.clone();
     servers.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut extensions = library.extensions.clone();
+    extensions.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut hooks = library.hooks.clone();
+    hooks.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut o = String::new();
     o.push_str("Skills\n");
@@ -790,7 +1425,58 @@ fn render_list(library: &Library, lib_home: &Path) -> String {
             s.provenance.as_deref().unwrap_or("-")
         ));
     }
+
+    o.push_str("\nExtensions\n");
+    if extensions.is_empty() {
+        o.push_str("  (none)\n");
+    }
+    for e in &extensions {
+        // Description straight from the index (extensions carry no SKILL.md);
+        // the row shape mirrors skills, with the target adapter in place of the
+        // source-kind column's second slot.
+        let desc = e
+            .description(lib_home)
+            .map(|d| truncate(&d, 60))
+            .unwrap_or_else(|| "-".to_string());
+        o.push_str(&format!(
+            "  {:<20} {} {:<6} {:<10} {:<16} {}\n",
+            e.name,
+            format!("{desc:<60}").dimmed(),
+            e.source,
+            format!("→{}", e.target),
+            extension_locator(e),
+            e.provenance.as_deref().unwrap_or("-")
+        ));
+    }
+
+    o.push_str("\nHooks\n");
+    if hooks.is_empty() {
+        o.push_str("  (none)\n");
+    }
+    for h in &hooks {
+        // Hook rows mirror servers: name / short checksum / provenance (the
+        // definition carries no description).
+        let sum = h.checksum.as_deref().map(short).unwrap_or("-");
+        o.push_str(&format!(
+            "  {:<20} {:<16} {}\n",
+            h.name,
+            sum,
+            h.provenance.as_deref().unwrap_or("-")
+        ));
+    }
     o
+}
+
+/// A short, glanceable locator for an extension row: the git rev if present,
+/// else the content checksum, both truncated (mirrors [`locator`]).
+fn extension_locator(e: &LibraryExtension) -> String {
+    if let Some(rev) = &e.rev {
+        return format!("rev {}", short(rev));
+    }
+    match &e.checksum {
+        Some(c) => short(c).to_string(),
+        None => "-".to_string(),
+    }
 }
 
 /// A short, glanceable locator for a row: the git rev if present, else the
@@ -2011,7 +2697,7 @@ mod tests {
     #[test]
     fn list_empty_says_none() {
         let out = render_list(&Library::default(), Path::new("/no-such-lib-home"));
-        assert!(out.contains("No skills or servers installed"));
+        assert!(out.contains("No skills, servers, extensions, or hooks installed"));
     }
 
     #[test]
@@ -2518,6 +3204,72 @@ mod tests {
             .is_none());
     }
 
+    /// `lib add-extension --path` copies the body into `lib/extensions/<name>`,
+    /// pins it with the STRICT integrity-root digest (not the lenient skill
+    /// digest), and indexes it with its target + description; `remove-extension`
+    /// deletes the copy and the index entry.
+    #[test]
+    fn add_extension_copies_digests_strictly_and_removes() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        work.child("checkpoint/index.ts")
+            .write_str("export default (pi) => {}\n")
+            .unwrap();
+        let src = work.child("checkpoint");
+
+        let out = add_extension(
+            lib.path(),
+            "checkpoint",
+            "pi",
+            LibSource::Path(src.path()),
+            Some("Checkpoint the session"),
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(out.written);
+        assert_eq!(out.source_kind, "path");
+        assert_eq!(out.target, "pi");
+        assert_eq!(out.checksum.len(), 64);
+
+        // The body was copied into the library.
+        let dest = lib.child("extensions/checkpoint/index.ts");
+        assert!(dest.path().exists());
+
+        // The recorded checksum is the STRICT integrity-root digest of the copy,
+        // never the lenient skill dir_digest (executable content).
+        let strict = agentstack_core::digest::integrity_root_digest(
+            &lib.path().join("extensions"),
+            "checkpoint",
+        )
+        .unwrap();
+        let lenient = dir_digest(&lib.path().join("extensions/checkpoint")).unwrap();
+        assert_eq!(out.checksum, strict);
+        assert_ne!(
+            out.checksum, lenient,
+            "must not use the lenient skill digest"
+        );
+
+        // Indexed with target, description, and the strict checksum.
+        let library = Library::load(lib.path()).unwrap();
+        let entry = library.get_extension("checkpoint").unwrap();
+        assert_eq!(entry.source, "path");
+        assert_eq!(entry.target, "pi");
+        assert_eq!(entry.path.as_deref(), Some("checkpoint"));
+        assert_eq!(entry.checksum.as_deref(), Some(out.checksum.as_str()));
+        assert_eq!(entry.description.as_deref(), Some("Checkpoint the session"));
+
+        // Remove deletes the copy and the index entry.
+        let rm = remove_extension(lib.path(), "checkpoint", true).unwrap();
+        assert!(rm.written);
+        assert!(!lib.child("extensions/checkpoint").path().exists());
+        assert!(Library::load(lib.path())
+            .unwrap()
+            .get_extension("checkpoint")
+            .is_none());
+    }
+
     #[test]
     fn add_server_collision_and_replace() {
         let lib = assert_fs::TempDir::new().unwrap();
@@ -2593,6 +3345,78 @@ mod tests {
         let digest = Sha256Hex::of(b"abcdef0123456789");
         let want = &digest.hex()[..12];
         assert!(out.contains(want), "short checksum shown");
+    }
+
+    // ---------- hooks (E3d) ----------
+
+    /// The E3d round-trip: a hook definition enters the library via `lib
+    /// add-hook`, `agentstack add <name>` copies it into the manifest's inline
+    /// `[hooks.<name>]` table (the exact `build_manifest_with` call
+    /// `add_from_hook` makes), and the existing hook render path compiles it —
+    /// proving the library is a source to copy from and hooks still render FROM
+    /// THE MANIFEST, with no runtime library indirection.
+    #[test]
+    fn library_hook_roundtrips_through_add_and_render() {
+        use crate::manifest::Manifest;
+
+        let lib = assert_fs::TempDir::new().unwrap();
+
+        // 1. lib add-hook (from a .toml file).
+        let work = assert_fs::TempDir::new().unwrap();
+        let def = work.child("notify.toml");
+        def.write_str(
+            "event = \"PostToolUse\"\nmatcher = \"Bash\"\n\
+             command = \"/usr/bin/notify\"\nargs = [\"--tool\", \"bash\"]\n",
+        )
+        .unwrap();
+        let added = add_hook(lib.path(), "notify", def.path(), false, true).unwrap();
+        assert!(added.written);
+        assert!(lib.child("hooks/notify.toml").path().exists());
+        assert!(Library::load(lib.path())
+            .unwrap()
+            .get_hook("notify")
+            .is_some());
+
+        // 2. Manifest install: read the library definition and merge it into
+        //    `[hooks.notify]` exactly as `add_from_hook` does.
+        let hook_toml = std::fs::read_to_string(lib.child("hooks/notify.toml").path()).unwrap();
+        let hook: Hook = toml::from_str(&hook_toml).unwrap();
+        let body = serde_json::to_value(&hook).unwrap();
+        let manifest_text = crate::commands::add::build_manifest_with(
+            "version = 1\n",
+            "hooks",
+            "notify",
+            &body,
+            None,
+        )
+        .unwrap();
+        let manifest: Manifest = toml::from_str(&manifest_text).unwrap();
+        let installed = manifest
+            .hooks
+            .get("notify")
+            .expect("hook is inline in the manifest after install");
+        assert_eq!(installed.event, "PostToolUse");
+        assert_eq!(installed.command, "/usr/bin/notify");
+
+        // 3. Render through the existing hook path — hooks compile FROM THE
+        //    MANIFEST (no `${REF}` here, so the resolver is never consulted).
+        let selected: Vec<(&String, &Hook)> = manifest.hooks.iter().collect();
+        let mut unresolved = Vec::new();
+        let mut secrets = Vec::new();
+        let rendered = crate::render::hooks::build_claude_hooks(
+            &selected,
+            &crate::secret::EnvResolver,
+            &mut unresolved,
+            &mut secrets,
+        );
+        assert!(
+            rendered.get("PostToolUse").is_some(),
+            "the event key is rendered"
+        );
+        assert!(
+            rendered.to_string().contains("/usr/bin/notify"),
+            "the command is rendered"
+        );
     }
 
     #[test]

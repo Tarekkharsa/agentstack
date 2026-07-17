@@ -314,7 +314,12 @@ keeps the rest of the surface up.
 
 Name refs are pinned by digest in `agentstack.lock` — servers pin the
 **definition** digest only; secret values stay `${REF}` and resolve at
-render/gateway time, never in the library or the lock. `doctor`/`explain`
+render/gateway time, never in the library or the lock. Native extensions pin
+differently: a `[[extension]]` entry records the extension's `name`, its
+`target` adapter, and a `checksum` computed with the **strict** integrity-root
+digest over the whole source tree — so retargeting a byte-identical extension
+is drift, and a one-byte source edit re-gates trust (see
+[Native extensions](#native-extensions)). `doctor`/`explain`
 flag drift and show each item's origin and provenance. Profile resolution is
 offline by default (dry-run `use`, `doctor`, `explain` never fetch);
 `use --write` fetches git-backed skills when activation needs them.
@@ -447,6 +452,63 @@ Declare `[hooks.*]` once (event + optional matcher + command) and `apply`
 compiles them into each harness's native hooks config (Claude Code
 `settings.json`, Codex `config.toml`), resolving secrets and pruning hooks
 that leave the manifest. Add/list from the dashboard Hooks pane.
+
+### Native extensions
+
+`[extensions.<name>]` manages a harness's native executable add-ons — pi's
+TypeScript extensions, OpenCode's JS plugins — the way `[skills.*]` manages
+skill dirs. It is the **highest-risk** capability agentstack delivers: the code
+runs *inside the harness process at full user permission*, outside every policy
+ceiling. agentstack pins and delivers the bytes; it never executes or governs
+them at runtime. What it provides is provenance and content binding — which
+bytes, from where, reviewed by whom, re-gated on any change.
+
+```toml
+[extensions.checkpoint]
+description = "Git checkpoint on every agent turn"
+path = "./extensions/checkpoint"   # or: git = "…", rev = "…", subpath = "…"
+target = "pi"                      # exactly one adapter id
+```
+
+- **Source.** A local `path` (a `.ts`/`.js` file or a directory), anchored at
+  the manifest dir exactly like skills and instructions; a `git` source (which
+  requires a `subpath` pointing at the extension's directory in the repo, plus
+  an optional `rev`); or a bare name resolved from the central library. A
+  declaration with none of these is a validation error, so an unpinnable
+  extension can never exist half-declared.
+- **`target` is singular.** Extension code is written against one CLI's API, so
+  it names exactly one adapter id — there is no `targets` list and no `"*"`
+  fan-out. An unknown target, or `"*"`, is a validation error.
+- **Reserved names.** Any name beginning with `agentstack-guard` is rejected —
+  those artifacts belong to the host guard and the renderer never authors,
+  overwrites, or prunes them.
+- **Strict pinning.** Each extension gets a `[[extension]]` lock entry
+  (`name` / `target` / `checksum`) pinned with the strict integrity-root
+  digest — a symlink anywhere in the source tree is a hard error and `.git` is
+  included, unlike the lenient skill digest. Executable content is never
+  first-pinned at render time: an unpinned extension blocks. Run
+  `agentstack lock` to pin or accept a change.
+
+`apply` renders each extension by **copying** (never symlinking) the lock-pinned
+source into its target harness's extension directory, so the harness loads the
+exact bytes that were pinned — a post-render source edit changes nothing on the
+harness surface until a re-render that must pass trust + lock again. Rendered
+artifacts are tracked in a per-directory ownership ledger, so a re-render prunes
+exactly what agentstack placed and never touches hand-installed files or the
+guard's reserved artifacts. An untrusted or drifted project renders **zero**
+extension bytes.
+
+Two adapters render extensions today: **pi** (`~/.pi/agent/extensions`, or
+`.pi/extensions` at project scope) and **OpenCode** (`~/.config/opencode/plugins`
+— global only; a project-scope render falls back to the user dir). Targeting any
+other adapter validates but **warns and does not render** — the harness exposes
+no extension directory agentstack can deliver into.
+
+Under `agentstack run --locked`, a dedicated `rendered-verify` gate re-checks
+that each delivered *copy* still matches its lock pin before launch (a copy
+tampered after render, with its source left untouched, would otherwise reach the
+harness unreviewed); a harness with nothing rendered has nothing to verify and
+is reported absent, never refused.
 
 ### Search across providers
 

@@ -550,6 +550,335 @@ pub fn instruction_lock_status(
     }
 }
 
+/// Where a resolved native extension came from — mirrors [`SkillOrigin`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtensionOrigin {
+    /// The manifest `[extensions.<name>]` entry declares its own source
+    /// (`path` or `git`).
+    Inline,
+    /// The manifest entry is sourceless and the body resolves from the central
+    /// library (`[[extension]]` in `library.toml`).
+    Library,
+}
+
+/// A native extension resolved to a concrete source plus the strict
+/// integrity-root digest of its content — the E3 analogue of [`ResolvedSkill`].
+#[derive(Debug, Clone)]
+pub struct ResolvedExtension {
+    pub name: String,
+    pub origin: ExtensionOrigin,
+    /// The one adapter this extension targets (the manifest entry's `target`).
+    pub target: String,
+    /// `"path"` or `"git"`.
+    pub source_kind: &'static str,
+    /// The declared path a `path` source pinned (lock provenance).
+    pub path: Option<String>,
+    /// The git URL a `git` source pinned (lock provenance).
+    pub git: Option<String>,
+    /// Resolved git commit (git sources only).
+    pub rev: Option<String>,
+    /// Strict integrity-root digest of the content (never the lenient skill
+    /// digest — extensions are executable code).
+    pub checksum: String,
+    /// Library provenance, when the extension resolved from the central library.
+    pub provenance: Option<String>,
+    /// The exact `(root, declared)` pair the digest pinned — a copy-render
+    /// must deliver from this same anchor (manifest dir, git checkout root, or
+    /// the library body dir) so the copied bytes are the pinned bytes.
+    pub anchor: std::path::PathBuf,
+    /// The declared path under `anchor` the digest walked.
+    pub declared: String,
+}
+
+/// A structured extension-resolution failure — mirrors [`ResolveError`].
+#[derive(Debug, thiserror::Error)]
+pub enum ExtensionResolveError {
+    #[error("extension '{name}' resolves to no source (no inline `path`/`git`, and not in the central library)")]
+    Unresolved { name: String },
+    #[error("extension '{name}' (git {url}) is not available offline — run `agentstack install`")]
+    NotAvailableOffline { name: String, url: String },
+    #[error(transparent)]
+    Source(#[from] anyhow::Error),
+}
+
+/// Resolve one extension entry to its source location + strict content digest,
+/// inline-first then central library (the same order as skills/servers):
+///
+/// 1. the manifest entry's own `path` (Inline, anchored at `manifest_dir`);
+/// 2. the manifest entry's own `git` (Inline, fetched/cached through the store);
+/// 3. a sourceless entry falls to the central library's `[[extension]]` body
+///    (Library — a `path` under `<lib_home>/extensions/`, or a git source).
+///
+/// Git sources are digested at their `subpath` anchored at the **checkout
+/// root** with the strict [`agentstack_core::digest::integrity_root_digest`] —
+/// the checkout lives outside the manifest dir, and a checkout's `.git` can
+/// never be part of a reproducible pin, so a git extension MUST declare a
+/// `subpath` pointing at its own directory. Symlinks are rejected exactly as
+/// the digest already rejects them; the digest is never weakened to the skill
+/// digest.
+pub fn resolve_extension_entry(
+    name: &str,
+    ext: &crate::manifest::Extension,
+    manifest_dir: &Path,
+    library: &Library,
+    lib_home: &Path,
+    store: &Store,
+    mode: ResolveMode,
+) -> Result<ResolvedExtension, ExtensionResolveError> {
+    // 1. Inline path source.
+    if let Some(path) = ext.path.as_deref() {
+        let checksum = agentstack_core::digest::integrity_root_digest(manifest_dir, path)
+            .map_err(ExtensionResolveError::Source)?;
+        return Ok(ResolvedExtension {
+            name: name.to_string(),
+            origin: ExtensionOrigin::Inline,
+            target: ext.target.clone(),
+            source_kind: "path",
+            path: Some(path.to_string()),
+            git: None,
+            rev: None,
+            checksum,
+            provenance: None,
+            anchor: manifest_dir.to_path_buf(),
+            declared: path.to_string(),
+        });
+    }
+    // 2. Inline git source.
+    if let Some(url) = ext.git.as_deref() {
+        let (checksum, rev, anchor, declared) = resolve_git_extension(
+            store,
+            name,
+            url,
+            ext.rev.as_deref(),
+            ext.subpath.as_deref(),
+            mode,
+        )?;
+        return Ok(ResolvedExtension {
+            name: name.to_string(),
+            origin: ExtensionOrigin::Inline,
+            target: ext.target.clone(),
+            source_kind: "git",
+            path: None,
+            git: Some(url.to_string()),
+            rev,
+            checksum,
+            provenance: None,
+            anchor,
+            declared,
+        });
+    }
+    // 3. Central library (sourceless manifest entry).
+    let Some(entry) = library.get_extension(name) else {
+        return Err(ExtensionResolveError::Unresolved {
+            name: name.to_string(),
+        });
+    };
+    if let Some(path) = entry.path.as_deref() {
+        let anchor = lib_home.join("extensions");
+        let checksum = agentstack_core::digest::integrity_root_digest(&anchor, path)
+            .map_err(ExtensionResolveError::Source)?;
+        return Ok(ResolvedExtension {
+            name: name.to_string(),
+            origin: ExtensionOrigin::Library,
+            target: ext.target.clone(),
+            source_kind: "path",
+            path: Some(path.to_string()),
+            git: None,
+            rev: None,
+            checksum,
+            provenance: entry.provenance.clone(),
+            anchor,
+            declared: path.to_string(),
+        });
+    }
+    if let Some(url) = entry.git.as_deref() {
+        let (checksum, rev, anchor, declared) = resolve_git_extension(
+            store,
+            name,
+            url,
+            entry.rev.as_deref(),
+            entry.subpath.as_deref(),
+            mode,
+        )?;
+        return Ok(ResolvedExtension {
+            name: name.to_string(),
+            origin: ExtensionOrigin::Library,
+            target: ext.target.clone(),
+            source_kind: "git",
+            path: None,
+            git: Some(url.to_string()),
+            rev,
+            checksum,
+            provenance: entry.provenance.clone(),
+            anchor,
+            declared,
+        });
+    }
+    Err(ExtensionResolveError::Source(anyhow::anyhow!(
+        "library extension '{name}' has neither a `path` nor a `git` source"
+    )))
+}
+
+/// Fetch (or locate offline) a git extension source and digest its `subpath`
+/// directory at the checkout root with the strict integrity-root digest.
+/// Returns `(checksum, resolved_rev, checkout_root, subpath)` — the last two
+/// are the digest's exact anchor pair, so a copy-render delivers the pinned
+/// bytes.
+fn resolve_git_extension(
+    store: &Store,
+    name: &str,
+    url: &str,
+    rev: Option<&str>,
+    subpath: Option<&str>,
+    mode: ResolveMode,
+) -> Result<(String, Option<String>, std::path::PathBuf, String), ExtensionResolveError> {
+    // A git extension is always digested at a subpath: anchoring at the checkout
+    // root and declaring the subpath keeps the clone's own `.git` (a sibling of
+    // the subpath, not under it) out of the pin, so it stays reproducible.
+    let Some(sub) = subpath.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Err(ExtensionResolveError::Source(anyhow::anyhow!(
+            "git-source extension '{name}' requires a `subpath` pointing at the extension's \
+             directory — a checkout's `.git` cannot be part of a reproducible extension pin"
+        )));
+    };
+    let (clone_root, resolved_rev) = match mode {
+        ResolveMode::Fetch => {
+            let (root, head) =
+                crate::store::checkout(store, url, rev).map_err(ExtensionResolveError::Source)?;
+            (root, Some(head))
+        }
+        // NoFetch and PathOnly never touch the network; an un-cached clone is
+        // reported offline. (PathOnly still digests here — an extension pin is
+        // only meaningful with its content digest, unlike a skill listing.)
+        ResolveMode::NoFetch | ResolveMode::PathOnly => match store.local_git_clone(url) {
+            Some((root, head)) => (root, head),
+            None => {
+                return Err(ExtensionResolveError::NotAvailableOffline {
+                    name: name.to_string(),
+                    url: url.to_string(),
+                })
+            }
+        },
+    };
+    let checksum = agentstack_core::digest::integrity_root_digest(&clone_root, sub)
+        .map_err(ExtensionResolveError::Source)?;
+    Ok((checksum, resolved_rev, clone_root, sub.to_string()))
+}
+
+/// How a native extension's current source bytes compare to its
+/// `agentstack.lock` pin (D6). Mirrors [`SkillLockStatus`] (git rev-drift +
+/// offline) plus a target-drift case: the pin records which adapter the
+/// reviewed code was destined for, so a retargeted extension must re-lock even
+/// when its bytes are unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExtensionLockStatus {
+    /// Current digest, target, and rev all match the locked pin.
+    Matches,
+    /// The extension has no entry in the lockfile yet.
+    MissingLockEntry,
+    /// Current source digest differs from the locked checksum.
+    ChecksumDrift { locked: String, current: String },
+    /// The manifest's `target` differs from the one the pin was reviewed for.
+    TargetDrift { locked: String, current: String },
+    /// Git rev differs from the locked rev (both sides carry one).
+    RevDrift { locked: String, current: String },
+    /// A git-backed source that is not cached locally, checked under `NoFetch`
+    /// (offline) — reproducibility just can't be verified offline. Not a failure.
+    NotAvailableOffline { source: String },
+    /// The source could not be digested (missing, symlink, traversal, broken
+    /// library ref — anything the strict digest or the resolver refuses). Never
+    /// proceed.
+    ResolveFailed { error: String },
+}
+
+/// A neutral, render-agnostic lock/drift status for one extension — mirrors
+/// [`SkillLockReport`]. `origin` is `None` only when resolution failed.
+#[derive(Debug, Clone)]
+pub struct ExtensionLockReport {
+    pub name: String,
+    pub origin: Option<ExtensionOrigin>,
+    pub provenance: Option<String>,
+    pub status: ExtensionLockStatus,
+}
+
+/// Resolve one extension (inline-first, then central library) and compare its
+/// strict content digest + target + rev to the lockfile pin. `mode` controls
+/// whether git sources may be fetched; read commands pass `NoFetch` so an
+/// un-cached git source surfaces as [`ExtensionLockStatus::NotAvailableOffline`]
+/// rather than a failure — the same offline handling as skills.
+// Mirrors `skill_lock_status`'s parameter cluster.
+#[allow(clippy::too_many_arguments)]
+pub fn extension_lock_status(
+    name: &str,
+    ext: &crate::manifest::Extension,
+    manifest_dir: &Path,
+    library: &Library,
+    lib_home: &Path,
+    store: &Store,
+    lock: &Lock,
+    mode: ResolveMode,
+) -> ExtensionLockReport {
+    match resolve_extension_entry(name, ext, manifest_dir, library, lib_home, store, mode) {
+        Err(ExtensionResolveError::NotAvailableOffline { url, .. }) => ExtensionLockReport {
+            name: name.to_string(),
+            origin: None,
+            provenance: None,
+            status: ExtensionLockStatus::NotAvailableOffline { source: url },
+        },
+        Err(e) => ExtensionLockReport {
+            name: name.to_string(),
+            origin: None,
+            provenance: None,
+            status: ExtensionLockStatus::ResolveFailed {
+                error: format!("{e:#}"),
+            },
+        },
+        Ok(resolved) => ExtensionLockReport {
+            name: name.to_string(),
+            origin: Some(resolved.origin),
+            provenance: resolved.provenance.clone(),
+            status: classify_extension(
+                name,
+                &resolved.checksum,
+                &resolved.target,
+                resolved.rev.as_deref(),
+                lock,
+            ),
+        },
+    }
+}
+
+/// Compare an **already-resolved** extension (content checksum + target +
+/// optional git rev) to its lockfile pin. Pure — no filesystem, no
+/// re-resolution. Checksum drift takes precedence over target drift, which
+/// takes precedence over rev drift.
+pub fn classify_extension(
+    name: &str,
+    current_checksum: &str,
+    current_target: &str,
+    current_rev: Option<&str>,
+    lock: &Lock,
+) -> ExtensionLockStatus {
+    match lock.get_extension(name) {
+        None => ExtensionLockStatus::MissingLockEntry,
+        Some(entry) if entry.checksum != current_checksum => ExtensionLockStatus::ChecksumDrift {
+            locked: entry.checksum.clone(),
+            current: current_checksum.to_string(),
+        },
+        Some(entry) if entry.target != current_target => ExtensionLockStatus::TargetDrift {
+            locked: entry.target.clone(),
+            current: current_target.to_string(),
+        },
+        Some(entry) => match (entry.rev.as_deref(), current_rev) {
+            (Some(l), Some(c)) if l != c => ExtensionLockStatus::RevDrift {
+                locked: l.to_string(),
+                current: c.to_string(),
+            },
+            _ => ExtensionLockStatus::Matches,
+        },
+    }
+}
+
 /// Compare an **already-resolved** server definition digest to its lockfile
 /// pin. Pure — no filesystem, no re-resolution — so use-time gates can verify
 /// the exact resolved set they are about to act on (no re-resolve between
@@ -1667,5 +1996,258 @@ mod tests {
         );
         assert_eq!(r.origin, Some(ServerOrigin::Inline));
         assert_eq!(r.provenance, None, "inline has no library provenance");
+    }
+
+    // ---------- native extensions: library origin + git sources (E3) ----------
+
+    use crate::library::LibraryExtension;
+
+    fn lock_ext(entry: agentstack_core::lock::LockedExtension) -> Lock {
+        let mut lock = Lock::default();
+        lock.upsert_extension(entry);
+        lock
+    }
+
+    /// A sourceless manifest `[extensions.<name>]` (target only) resolves its
+    /// body from the central library, reports Library origin + provenance, and
+    /// pins with the strict integrity-root digest.
+    #[test]
+    fn library_extension_resolves_pins_and_reports_origin() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        lib_home
+            .child("extensions/checkpoint/index.ts")
+            .write_str("export default (pi) => {}\n")
+            .unwrap();
+        let mut library = Library::default();
+        library.upsert_extension(LibraryExtension {
+            name: "checkpoint".into(),
+            source: "path".into(),
+            target: "pi".into(),
+            path: Some("checkpoint".into()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: None,
+            description: Some("Checkpoint the session".into()),
+            version: None,
+            provenance: Some("path:/src".into()),
+        });
+        // Sourceless manifest entry — the library supplies the body.
+        let manifest: Manifest =
+            toml::from_str("version = 1\n[extensions.checkpoint]\ntarget = \"pi\"\n").unwrap();
+        let ext = &manifest.extensions["checkpoint"];
+
+        let resolved = resolve_extension_entry(
+            "checkpoint",
+            ext,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            ResolveMode::NoFetch,
+        )
+        .unwrap();
+        assert_eq!(resolved.origin, ExtensionOrigin::Library);
+        assert_eq!(resolved.source_kind, "path");
+        assert_eq!(resolved.checksum.len(), 64);
+        assert_eq!(resolved.provenance.as_deref(), Some("path:/src"));
+
+        // Pin it and confirm the status is Matches with Library origin (the
+        // trust-preview `[library, pinned]` label reads off exactly this).
+        let lock = lock_ext(agentstack_core::lock::LockedExtension {
+            name: "checkpoint".into(),
+            target: "pi".into(),
+            source: "library".into(),
+            path: Some("checkpoint".into()),
+            git: None,
+            rev: None,
+            checksum: resolved.checksum.clone(),
+        });
+        let report = extension_lock_status(
+            "checkpoint",
+            ext,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            &lock,
+            ResolveMode::NoFetch,
+        );
+        assert_eq!(report.status, ExtensionLockStatus::Matches);
+        assert_eq!(report.origin, Some(ExtensionOrigin::Library));
+
+        // An inline `path` on the SAME name wins over the library (origin flips).
+        proj.child("extensions/checkpoint/index.ts")
+            .write_str("export default (pi) => {} // inline\n")
+            .unwrap();
+        let inline: Manifest = toml::from_str(
+            "version = 1\n[extensions.checkpoint]\npath = \"./extensions/checkpoint\"\ntarget = \"pi\"\n",
+        )
+        .unwrap();
+        let inline_resolved = resolve_extension_entry(
+            "checkpoint",
+            &inline.extensions["checkpoint"],
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            ResolveMode::NoFetch,
+        )
+        .unwrap();
+        assert_eq!(inline_resolved.origin, ExtensionOrigin::Inline);
+    }
+
+    /// A git-source extension pins from a local `file://` repo (fetched through
+    /// the store, digested strictly at its subpath) and rev-drifts when the
+    /// locked rev differs while the content still matches — mirrors the skill
+    /// git rev-drift witness.
+    #[test]
+    fn git_extension_pins_and_rev_drifts() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let repo = proj.child("repo");
+        repo.create_dir_all().unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(repo.path())
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@e.st"]);
+        git(&["config", "user.name", "t"]);
+        repo.child("ext/index.ts")
+            .write_str("export default (pi) => {}\n")
+            .unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "init"]);
+
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let url = format!("file://{}", repo.path().display());
+        let manifest: Manifest = toml::from_str(&format!(
+            "version = 1\n[extensions.gitext]\ngit = \"{url}\"\nsubpath = \"ext\"\ntarget = \"pi\"\n"
+        ))
+        .unwrap();
+        let ext = &manifest.extensions["gitext"];
+
+        // Fetch resolves the checksum + HEAD rev.
+        let resolved = resolve_extension_entry(
+            "gitext",
+            ext,
+            proj.path(),
+            &Library::default(),
+            lib_home.path(),
+            &store,
+            ResolveMode::Fetch,
+        )
+        .unwrap();
+        assert_eq!(resolved.source_kind, "git");
+        assert_eq!(resolved.checksum.len(), 64);
+        let head = resolved.rev.clone().expect("git rev resolved");
+
+        // Locked at the same checksum + rev → Matches.
+        let lock = lock_ext(agentstack_core::lock::LockedExtension {
+            name: "gitext".into(),
+            target: "pi".into(),
+            source: "git".into(),
+            path: None,
+            git: Some(url.clone()),
+            rev: Some(head.clone()),
+            checksum: resolved.checksum.clone(),
+        });
+        assert_eq!(
+            extension_lock_status(
+                "gitext",
+                ext,
+                proj.path(),
+                &Library::default(),
+                lib_home.path(),
+                &store,
+                &lock,
+                ResolveMode::NoFetch,
+            )
+            .status,
+            ExtensionLockStatus::Matches
+        );
+
+        // Same checksum, different locked rev → rev drift.
+        let stale = lock_ext(agentstack_core::lock::LockedExtension {
+            name: "gitext".into(),
+            target: "pi".into(),
+            source: "git".into(),
+            path: None,
+            git: Some(url.clone()),
+            rev: Some("0000000000000000000000000000000000000000".into()),
+            checksum: resolved.checksum.clone(),
+        });
+        assert!(matches!(
+            extension_lock_status(
+                "gitext",
+                ext,
+                proj.path(),
+                &Library::default(),
+                lib_home.path(),
+                &store,
+                &stale,
+                ResolveMode::NoFetch,
+            )
+            .status,
+            ExtensionLockStatus::RevDrift { .. }
+        ));
+    }
+
+    /// An un-cached git extension checked offline surfaces as
+    /// NotAvailableOffline (not a failure), and a git source without a subpath
+    /// is a hard resolve error — a checkout's `.git` can't be reproducibly
+    /// pinned.
+    #[test]
+    fn git_extension_offline_and_subpath_rules() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+
+        let uncached: Manifest = toml::from_str(
+            "version = 1\n[extensions.g]\ngit = \"https://example.com/x.git\"\nsubpath = \"ext\"\ntarget = \"pi\"\n",
+        )
+        .unwrap();
+        let report = extension_lock_status(
+            "g",
+            &uncached.extensions["g"],
+            proj.path(),
+            &Library::default(),
+            lib_home.path(),
+            &store,
+            &Lock::default(),
+            ResolveMode::NoFetch,
+        );
+        assert!(matches!(
+            report.status,
+            ExtensionLockStatus::NotAvailableOffline { .. }
+        ));
+
+        // No subpath → resolve fails closed (surfaces as ResolveFailed).
+        let no_sub: Manifest = toml::from_str(
+            "version = 1\n[extensions.g]\ngit = \"https://example.com/x.git\"\ntarget = \"pi\"\n",
+        )
+        .unwrap();
+        let report = extension_lock_status(
+            "g",
+            &no_sub.extensions["g"],
+            proj.path(),
+            &Library::default(),
+            lib_home.path(),
+            &store,
+            &Lock::default(),
+            ResolveMode::NoFetch,
+        );
+        assert!(matches!(
+            report.status,
+            ExtensionLockStatus::ResolveFailed { .. }
+        ));
     }
 }

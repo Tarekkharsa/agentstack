@@ -8,9 +8,13 @@
 //! on top of this in a later step.
 //!
 //! Skills ship in Phase 1; servers are modeled here for Phase 1b (the resolver
-//! wiring lands in a later step); `hooks` remain future work. The file is an
-//! index, not a scan target: entries carry provenance and an integrity digest so
-//! `lib list`, `explain`, and drift checks have metadata to work with.
+//! wiring lands in a later step); declarative `[hooks.*]` land in E3d — a hook's
+//! reusable definition lives at `<lib_home>/hooks/<name>.toml`, exactly like a
+//! server, and `agentstack add <name>` copies it into a project's `[hooks.<name>]`
+//! table (hooks always render from the manifest, so the library is a source to
+//! copy from, never a runtime indirection). The file is an index, not a scan
+//! target: entries carry provenance and an integrity digest so `lib list`,
+//! `explain`, and drift checks have metadata to work with.
 
 use agentstack_core::digest::Sha256Hex;
 use std::fs;
@@ -101,6 +105,17 @@ pub struct Library {
     /// (Phase 1b). The definition lives at `<lib_home>/servers/<name>.toml`.
     #[serde(default, rename = "server")]
     pub servers: Vec<LibraryServer>,
+    /// Native harness extensions available in the central library (E3), keyed
+    /// by unique `name`. A `path` source body lives under
+    /// `<lib_home>/extensions/<name>/`; a `git` source is referenced (resolved
+    /// through the shared store, like a git skill).
+    #[serde(default, rename = "extension")]
+    pub extensions: Vec<LibraryExtension>,
+    /// Declarative lifecycle hooks available in the central library (E3d), keyed
+    /// by unique `name`. The definition — a serialized `manifest::Hook` — lives at
+    /// `<lib_home>/hooks/<name>.toml`, mirroring servers exactly.
+    #[serde(default, rename = "hook")]
+    pub hooks: Vec<LibraryHook>,
 }
 
 impl Default for Library {
@@ -109,6 +124,8 @@ impl Default for Library {
             version: 1,
             skills: Vec::new(),
             servers: Vec::new(),
+            extensions: Vec::new(),
+            hooks: Vec::new(),
         }
     }
 }
@@ -210,6 +227,87 @@ pub struct LibraryServer {
     pub provenance: Option<String>,
 }
 
+/// One declarative lifecycle hook installed in the central library (E3d). The
+/// reusable definition — a serialized `manifest::Hook` with `${REF}` secrets
+/// only, never plaintext — lives at `<lib_home>/hooks/<name>.toml`; this index
+/// entry records its identity, integrity digest, and provenance. Identical in
+/// shape to [`LibraryServer`]: a hook is a flat definition file, not a directory
+/// body, so there is no `source`/`path`/`git` — the body is always the one file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LibraryHook {
+    /// The name a project references this hook by. Unique within the library.
+    pub name: String,
+    /// SHA-256 of the hook definition file (`hooks/<name>.toml`). Optional until
+    /// the entry has been written and hashed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
+    /// Optional declared version for the entry (informational).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Where the entry came from (e.g. `"file:<path>"`, `"manifest:<dir>"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
+}
+
+/// One native harness extension installed in the central library (E3). Mirrors
+/// [`LibrarySkill`]'s `source`/`path`/`git`/`rev`/`subpath`/`checksum` shape so
+/// the resolver can pin a library-origin extension exactly like a skill, plus
+/// the one adapter it `target`s (extension code is harness-specific, so a
+/// library extension carries its target the way `[extensions.*]` entries do).
+///
+/// A `path` source body is copied into `<lib_home>/extensions/<name>/`; a `git`
+/// source stays in the shared store, referenced by this entry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LibraryExtension {
+    /// The name a project references this extension by. Unique within the library.
+    pub name: String,
+    /// `path` or `git`.
+    pub source: String,
+    /// The one adapter id this extension's code is written against (`pi`,
+    /// `opencode`, …). Singular, never `"*"` — extension code is harness-specific.
+    pub target: String,
+    /// For `source = "path"`: location of the body, relative to
+    /// `<lib_home>/extensions/` (or absolute).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// For `source = "git"`: the source URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<String>,
+    /// Pinned git revision (git sources only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
+    /// For `source = "git"`: the extension's directory within the repo. Git
+    /// extension bodies are always digested at a subpath (a checkout's `.git`
+    /// can never be part of a reproducible pin), so this is effectively required.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subpath: Option<String>,
+    /// SHA-256 of the extension content (the strict integrity-root digest, not
+    /// the lenient skill digest). Optional until the entry has been resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
+    /// One-line human description. Extensions carry no `SKILL.md`, so — unlike
+    /// skills, whose description is read from the body at display time — this is
+    /// stored in the index directly (from `lib add-extension --description`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Optional declared version for the entry (informational).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Where the entry came from (e.g. `"path:<src>"`, `"git:<url>"`,
+    /// `"manual"`). Informational; surfaced by `lib list`/`explain`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
+}
+
+impl LibraryExtension {
+    /// One-line description for display, straight from the stored index field.
+    /// Signature mirrors [`LibrarySkill::description`] (which reads the body) so
+    /// `lib list` can render both kinds through the same row shape.
+    pub fn description(&self, _lib_home: &Path) -> Option<String> {
+        self.description.clone()
+    }
+}
+
 impl Library {
     /// The index path for a given library home directory.
     pub fn path(lib_home: &Path) -> PathBuf {
@@ -307,6 +405,50 @@ impl Library {
         let before = self.servers.len();
         self.servers.retain(|s| s.name != name);
         self.servers.len() != before
+    }
+
+    /// Look up a library extension by the name a project references it by.
+    pub fn get_extension(&self, name: &str) -> Option<&LibraryExtension> {
+        self.extensions.iter().find(|e| e.name == name)
+    }
+
+    /// Insert or replace an extension entry, keeping entries sorted by name.
+    pub fn upsert_extension(&mut self, entry: LibraryExtension) {
+        if let Some(existing) = self.extensions.iter_mut().find(|e| e.name == entry.name) {
+            *existing = entry;
+        } else {
+            self.extensions.push(entry);
+        }
+        self.extensions.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    /// Remove an extension entry by name. Returns whether anything was removed.
+    pub fn remove_extension(&mut self, name: &str) -> bool {
+        let before = self.extensions.len();
+        self.extensions.retain(|e| e.name != name);
+        self.extensions.len() != before
+    }
+
+    /// Look up a library hook by the name a project references it by.
+    pub fn get_hook(&self, name: &str) -> Option<&LibraryHook> {
+        self.hooks.iter().find(|h| h.name == name)
+    }
+
+    /// Insert or replace a hook entry, keeping entries sorted by name.
+    pub fn upsert_hook(&mut self, entry: LibraryHook) {
+        if let Some(existing) = self.hooks.iter_mut().find(|h| h.name == entry.name) {
+            *existing = entry;
+        } else {
+            self.hooks.push(entry);
+        }
+        self.hooks.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    /// Remove a hook entry by name. Returns whether anything was removed.
+    pub fn remove_hook(&mut self, name: &str) -> bool {
+        let before = self.hooks.len();
+        self.hooks.retain(|h| h.name != name);
+        self.hooks.len() != before
     }
 }
 
@@ -495,6 +637,56 @@ mod tests {
         lib.upsert_server(server("kibana"));
         assert!(lib.remove_server("kibana"));
         assert!(!lib.remove_server("kibana"));
+    }
+
+    // ---------- extensions (E3) ----------
+
+    #[test]
+    fn extension_upsert_sorts_replaces_and_roundtrips() {
+        let dir = assert_fs::TempDir::new().unwrap();
+        let mut lib = Library::default();
+        lib.upsert_extension(LibraryExtension {
+            name: "checkpoint".into(),
+            source: "path".into(),
+            target: "pi".into(),
+            path: Some("checkpoint".into()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: Some("cafe".into()),
+            description: Some("Checkpoint".into()),
+            version: None,
+            provenance: Some("path:/src".into()),
+        });
+        lib.upsert_extension(LibraryExtension {
+            name: "audit".into(),
+            source: "git".into(),
+            target: "opencode".into(),
+            path: None,
+            git: Some("https://example.com/x.git".into()),
+            rev: Some("abc".into()),
+            subpath: Some("ext".into()),
+            checksum: Some("beef".into()),
+            description: None,
+            version: None,
+            provenance: Some("git:https://example.com/x.git".into()),
+        });
+        // Sorted by name.
+        assert_eq!(lib.extensions[0].name, "audit");
+        // Replace, not duplicate.
+        let mut updated = lib.get_extension("checkpoint").unwrap().clone();
+        updated.version = Some("0.2.0".into());
+        lib.upsert_extension(updated);
+        assert_eq!(lib.extensions.len(), 2);
+
+        lib.save(dir.path()).unwrap();
+        let text = fs::read_to_string(Library::path(dir.path())).unwrap();
+        assert!(text.contains("[[extension]]"));
+        let parsed = Library::load(dir.path()).unwrap();
+        assert_eq!(parsed, lib);
+
+        assert!(lib.remove_extension("audit"));
+        assert!(!lib.remove_extension("audit"));
     }
 
     #[test]

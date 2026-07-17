@@ -36,6 +36,7 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     let library = Library::load_default()?;
     let lib_home = crate::util::paths::lib_home();
+    let store = crate::store::Store::default_store();
 
     // The D3 executable surface is manifest-global too: it derives from the
     // EFFECTIVE runtime server set (inline `[servers.*]` fan-out included),
@@ -44,6 +45,12 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // must be able to pin them or a profile-less project could never be
     // trusted at all.
     let executables = record_executable_pins(&ctx.dir, manifest, &library, &lib_home)?;
+
+    // Native extensions (D6) are manifest-global like instructions: pin them
+    // regardless of the profile selection. Strict — an undigestable or
+    // unresolvable source is an error, stale pins for undeclared names are
+    // pruned. Resolution is library-aware and fetches git sources.
+    let extensions = record_extension_pins(&ctx.dir, manifest, &library, &lib_home, &store)?;
 
     let profiles: Vec<String> = match &args.profile {
         Some(p) => {
@@ -56,9 +63,9 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         None => manifest.profiles.keys().cloned().collect(),
     };
     if profiles.is_empty() {
-        if instructions > 0 || executables > 0 {
+        if instructions > 0 || executables > 0 || extensions > 0 {
             println!(
-                "{} pinned {instructions} instruction(s) + {executables} executable pin(s) in {}",
+                "{} pinned {instructions} instruction(s) + {executables} executable pin(s) + {extensions} extension(s) in {}",
                 "✓".green(),
                 Lock::path(&ctx.dir).display()
             );
@@ -69,20 +76,19 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
-    let store = crate::store::Store::default_store();
-
     let (skills, servers) =
         resolve_profiles(manifest, &ctx.dir, &library, &lib_home, &store, &profiles)?;
     record_lock(&ctx.dir, &skills, &servers, manifest, &library)?;
 
     println!(
-        "{} pinned {} skill(s) + {} server(s) from {} profile(s) + {} instruction(s) + {} executable pin(s) in {}",
+        "{} pinned {} skill(s) + {} server(s) from {} profile(s) + {} instruction(s) + {} executable pin(s) + {} extension(s) in {}",
         "✓".green(),
         skills.len(),
         servers.len(),
         profiles.len(),
         instructions,
         executables,
+        extensions,
         Lock::path(&ctx.dir).display()
     );
     println!(
@@ -182,6 +188,59 @@ pub(crate) fn record_executable_pins(
     if all_resolved {
         lock.retain_executables(&keep);
     }
+    // Don't churn the lockfile (or the trust digest) for byte-identical pins.
+    if lock != before {
+        lock.save(dir)?;
+    }
+    Ok(pinned)
+}
+
+/// Pin every declared native extension (D6) by the STRICT integrity-root
+/// digest — the executable-content family (symlink anywhere = hard error,
+/// `.git` included), never the lenient skill digest. Resolution is inline-first
+/// then central library, and git sources are fetched through the shared store
+/// (`ResolveMode::Fetch`), exactly like `agentstack lock` resolves skills.
+///
+/// Always strict, like the lock command's other manifest-global pins: an
+/// undigestable or unresolvable source errors, and pins for undeclared names
+/// are pruned. Records the full source provenance (`source`/`path`/`git`/`rev`)
+/// so the pin is self-describing and a git rev-drift is detectable. Returns how
+/// many pinned.
+pub(crate) fn record_extension_pins(
+    dir: &Path,
+    manifest: &Manifest,
+    library: &Library,
+    lib_home: &Path,
+    store: &crate::store::Store,
+) -> Result<usize> {
+    let mut lock = Lock::load(dir)?;
+    let before = lock.clone();
+    let mut declared: Vec<String> = Vec::new();
+    let mut pinned = 0usize;
+    for (name, ext) in &manifest.extensions {
+        declared.push(name.clone());
+        let resolved = crate::resolve::resolve_extension_entry(
+            name,
+            ext,
+            dir,
+            library,
+            lib_home,
+            store,
+            ResolveMode::Fetch,
+        )
+        .with_context(|| format!("pinning extension '{name}'"))?;
+        lock.upsert_extension(agentstack_core::lock::LockedExtension {
+            name: name.clone(),
+            target: resolved.target.clone(),
+            source: resolved.source_kind.to_string(),
+            path: resolved.path.clone(),
+            git: resolved.git.clone(),
+            rev: resolved.rev.clone(),
+            checksum: resolved.checksum,
+        });
+        pinned += 1;
+    }
+    lock.retain_extension_names(&declared);
     // Don't churn the lockfile (or the trust digest) for byte-identical pins.
     if lock != before {
         lock.save(dir)?;
@@ -414,6 +473,115 @@ mod tests {
         let empty: Manifest = toml::from_str("version = 1\n").unwrap();
         record_executable_pins(proj.path(), &empty, &library, lib_home.path()).unwrap();
         assert!(Lock::load(proj.path()).unwrap().executables.is_empty());
+    }
+
+    // E1 witness (D6): a one-byte edit to an extension's source fails strict
+    // locked verification before launch, and re-locking rewrites the pin —
+    // new checksum → new lock bytes → the trust digest flips via the existing
+    // chain, forcing re-review.
+    #[test]
+    fn one_byte_extension_edit_refuses_locked_and_relock_regates() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child("extensions/checkpoint/index.ts")
+            .write_str("export default function (pi) {} // v1")
+            .unwrap();
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [extensions.checkpoint]
+            path = "./extensions/checkpoint"
+            target = "pi"
+            "#,
+        )
+        .unwrap();
+
+        let library = Library::default();
+        let lib_home = proj.child("lib").path().to_path_buf();
+        let store = crate::store::Store::with_root(proj.child("store").path().to_path_buf());
+
+        record_extension_pins(proj.path(), &manifest, &library, &lib_home, &store).unwrap();
+        let lock = Lock::load(proj.path()).unwrap();
+        let pinned = lock.get_extension("checkpoint").expect("pinned").clone();
+        assert_eq!(pinned.checksum.len(), 64);
+        assert_eq!(pinned.target, "pi");
+        assert_eq!(pinned.source, "path");
+        assert_eq!(pinned.path.as_deref(), Some("./extensions/checkpoint"));
+
+        let ext = &manifest.extensions["checkpoint"];
+        let status = |lock: &Lock| {
+            crate::resolve::extension_lock_status(
+                "checkpoint",
+                ext,
+                proj.path(),
+                &library,
+                &lib_home,
+                &store,
+                lock,
+                crate::resolve::ResolveMode::NoFetch,
+            )
+            .status
+        };
+        assert_eq!(status(&lock), crate::resolve::ExtensionLockStatus::Matches);
+        let clean = vec![("checkpoint".to_string(), status(&lock))];
+        assert!(crate::verify::ensure_locked_inputs("pi", &[], &[], &[], &[], &clean).is_ok());
+
+        // One byte changes → strict verification refuses, naming the extension.
+        proj.child("extensions/checkpoint/index.ts")
+            .write_str("export default function (pi) {} // v2")
+            .unwrap();
+        let drifted = vec![("checkpoint".to_string(), status(&lock))];
+        assert!(matches!(
+            drifted[0].1,
+            crate::resolve::ExtensionLockStatus::ChecksumDrift { .. }
+        ));
+        let err = crate::verify::ensure_locked_inputs("pi", &[], &[], &[], &[], &drifted)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("extension 'checkpoint'"), "{err}");
+
+        // Re-locking accepts the edit by rewriting the pin: the lock bytes
+        // change, which is exactly what flips the trust digest.
+        let before = std::fs::read(Lock::path(proj.path())).unwrap();
+        record_extension_pins(proj.path(), &manifest, &library, &lib_home, &store).unwrap();
+        let after = std::fs::read(Lock::path(proj.path())).unwrap();
+        assert_ne!(before, after, "accepting drift must change the lock bytes");
+
+        // Retargeting without re-locking blocks too — the pin bound the code
+        // to one harness.
+        let retargeted: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [extensions.checkpoint]
+            path = "./extensions/checkpoint"
+            target = "opencode"
+            "#,
+        )
+        .unwrap();
+        let lock = Lock::load(proj.path()).unwrap();
+        let status = crate::resolve::extension_lock_status(
+            "checkpoint",
+            &retargeted.extensions["checkpoint"],
+            proj.path(),
+            &library,
+            &lib_home,
+            &store,
+            &lock,
+            crate::resolve::ResolveMode::NoFetch,
+        )
+        .status;
+        assert!(matches!(
+            status,
+            crate::resolve::ExtensionLockStatus::TargetDrift { .. }
+        ));
+
+        // Removing the declaration prunes its pin (stale-pin rule).
+        let empty: Manifest = toml::from_str("version = 1\n").unwrap();
+        record_extension_pins(proj.path(), &empty, &library, &lib_home, &store).unwrap();
+        assert!(Lock::load(proj.path())
+            .unwrap()
+            .get_extension("checkpoint")
+            .is_none());
     }
 
     #[test]

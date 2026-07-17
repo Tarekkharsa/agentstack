@@ -258,7 +258,17 @@ pub fn contained_file_digest(project_root: &Path, declared: &str) -> Result<Stri
 /// that is a single file frames the empty relative path (a directory entry can
 /// never have an empty name, so file roots and directory roots cannot
 /// collide).
-pub fn integrity_root_digest(project_root: &Path, declared: &str) -> Result<String> {
+/// The resolved root and its sorted, symlink-rejecting file list — the SAME
+/// strict walk [`integrity_root_digest`] pins, exposed so a copy-render can
+/// deliver exactly the pinned byte set. Returns the resolved absolute root plus
+/// each contained file's path relative to it; a single-file root yields one
+/// empty relative path (read `root` directly). Rejecting symlinks here — not
+/// following them — means a link that appeared after the digest check can never
+/// smuggle foreign bytes into a rendered extension.
+pub fn integrity_root_files(
+    project_root: &Path,
+    declared: &str,
+) -> Result<(PathBuf, Vec<PathBuf>)> {
     let root = resolve_contained(project_root, declared)?;
     let meta =
         fs::symlink_metadata(&root).with_context(|| format!("reading {}", root.display()))?;
@@ -272,6 +282,11 @@ pub fn integrity_root_digest(project_root: &Path, declared: &str) -> Result<Stri
         anyhow::bail!("integrity root '{declared}' is neither a regular file nor a directory");
     }
     files.sort();
+    Ok((root, files))
+}
+
+pub fn integrity_root_digest(project_root: &Path, declared: &str) -> Result<String> {
+    let (root, files) = integrity_root_files(project_root, declared)?;
 
     let mut hasher = Sha256::new();
     hasher.update(INTEGRITY_ROOT_DOMAIN);

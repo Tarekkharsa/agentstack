@@ -974,12 +974,22 @@ pub enum LibKind {
     Add(LibAddArgs),
     /// Add an MCP server definition to the central library from a `.toml` file.
     AddServer(LibAddServerArgs),
-    /// List the skills and servers installed in the central library.
+    /// Add a native harness extension to the central library from a local path
+    /// or git source.
+    AddExtension(LibAddExtensionArgs),
+    /// Add a declarative lifecycle hook definition to the central library from a
+    /// `.toml` file or by lifting it out of the current manifest.
+    AddHook(LibAddHookArgs),
+    /// List the skills, servers, extensions, and hooks in the central library.
     List,
     /// Remove a skill from the central library.
     Remove(LibRemoveArgs),
     /// Remove a server from the central library.
     RemoveServer(LibRemoveServerArgs),
+    /// Remove an extension from the central library.
+    RemoveExtension(LibRemoveExtensionArgs),
+    /// Remove a hook from the central library.
+    RemoveHook(LibRemoveHookArgs),
     /// Migrate skills from the legacy `~/.agentstack/skills/` home into the
     /// central library. Copy-first and reversible: originals are left in place.
     Migrate(LibMigrateArgs),
@@ -1032,6 +1042,79 @@ pub struct LibAddServerArgs {
 #[derive(Args, Debug)]
 pub struct LibRemoveServerArgs {
     /// The library server name to remove.
+    pub name: String,
+    /// Write the change (else dry-run/preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibAddHookArgs {
+    /// The name projects will reference this hook by.
+    pub name: String,
+    /// Path to a hook definition `.toml` (a `manifest::Hook` table with
+    /// `event`/`command`/…, `${REF}` secrets only — never plaintext).
+    #[arg(long, conflicts_with = "from_manifest")]
+    pub file: Option<String>,
+    /// Lift the `[hooks.<name>]` definition from the current manifest into the
+    /// library instead of reading a file.
+    #[arg(long)]
+    pub from_manifest: bool,
+    /// Overwrite an existing library hook of the same name.
+    #[arg(long)]
+    pub replace: bool,
+    /// Write the change (else dry-run/preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibRemoveHookArgs {
+    /// The library hook name to remove.
+    pub name: String,
+    /// Write the change (else dry-run/preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibAddExtensionArgs {
+    /// The name projects will reference this extension by.
+    pub name: String,
+    /// The one adapter id this extension's code is written against (e.g. `pi`,
+    /// `opencode`). Extension code is harness-specific — never `"*"`.
+    #[arg(long)]
+    pub target: String,
+    /// Add from a local extension directory or single source file.
+    #[arg(long, conflicts_with = "git")]
+    pub path: Option<String>,
+    /// Add from a git source URL. Requires --subpath (a checkout's `.git`
+    /// cannot be part of a reproducible pin).
+    #[arg(long, conflicts_with = "path")]
+    pub git: Option<String>,
+    /// Pin a git revision (branch, tag, or commit). Git sources only.
+    #[arg(long, requires = "git")]
+    pub rev: Option<String>,
+    /// Directory within the git repo holding the extension. Git sources only.
+    #[arg(long, requires = "git")]
+    pub subpath: Option<String>,
+    /// One-line description shown by `lib list`.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Overwrite an existing library extension of the same name.
+    #[arg(long)]
+    pub replace: bool,
+    /// Add even if the content scan finds high-severity items (hidden Unicode).
+    #[arg(long)]
+    pub allow_flagged: bool,
+    /// Write the change (else dry-run/preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibRemoveExtensionArgs {
+    /// The library extension name to remove.
     pub name: String,
     /// Write the change (else dry-run/preview).
     #[arg(long)]

@@ -78,6 +78,7 @@ Modes are columns; policy dimensions are rows. Legend:
 | **Filesystem — write** | cooperative¶ | cooperative¶ | coarse | coarse |
 | **Filesystem — read** | cooperative¶ | cooperative¶ | coarse | coarse |
 | **Audit / recording** | unsupported | **enforced** | **enforced**§ | **enforced** |
+| **Native extensions** | unsupported‖ | unsupported‖ | unsupported‖ | unsupported‖ |
 
 \* **for proxied traffic only.** Plain `--sandbox` points `HTTPS_PROXY` at the
 proxy but the container keeps an ordinary bridge network — a process that
@@ -110,6 +111,19 @@ bearer token — resolved secret *values* never enter the container. A prior
 `SecretAccess` per resolved ref (name only), alongside the lifecycle + egress
 events it already held. Trust-store mutations and cost/tokens remain unrecorded.
 See the Audit / recording section.
+
+‖ **runtime is unsupported in every mode — this is a pre-delivery capability, not
+a runtime one.** A native extension's code runs *inside the harness process at
+full user permission*; no policy ceiling, gateway, egress fence, container, or
+guard hook observes or constrains it once the harness loads it, so there is no
+runtime cell to earn a stronger label. What agentstack governs happens entirely
+*before* delivery: the source is content-pinned in `agentstack.lock`, an
+untrusted or drifted project renders zero bytes, `apply` copies (never symlinks)
+the pinned bytes into the harness's extension directory, and `run --locked`
+re-verifies each delivered copy against its pin before launch. That pipeline is
+provenance and content binding — which bytes, from where, reviewed by whom — not
+runtime enforcement, and it is deliberately labelled as such. See the Native
+extensions section.
 
 Two of the four columns are execution modes for a *rendered* config: **host** is
 `agentstack apply` + `agentstack run` (adapters write native config, the harness
@@ -298,6 +312,30 @@ Docker container behind the egress proxy.
   an untrusted or serverless run has no MCP calls and records lifecycle plus
   egress. Trust-store mutations and cost/tokens remain the documented recorder
   gaps. (`crates/cli/src/gateway.rs`, `crates/cli/src/commands/sandbox.rs`)
+
+### Native extensions
+
+- **host / gateway / sandbox / lockdown — unsupported (runtime).** A native
+  extension (pi `.ts`, OpenCode `.js`) is executable code the harness loads and
+  runs *in its own process at full user permission*. No runtime mode consults
+  policy for it: the gateway never sees it, the egress fence and the sandbox
+  container never contain it, and the host guard's pre-tool-use hook never
+  intercepts it — it is not a tool call. Every runtime cell is `unsupported`,
+  and honestly so. (`crates/cli/src/render/extensions.rs`)
+- **pre-delivery — content-pinned, trust-gated, copy-rendered, then re-verified
+  under `--locked`.** This is the entire governed surface, and it runs before
+  the harness ever loads a byte. The source is pinned in `agentstack.lock` with
+  the strict integrity-root digest (symlinks rejected, `.git` included), so any
+  change re-gates trust review. `apply` renders fail-closed: an untrusted or
+  drifted project writes zero extension bytes, and only lock-matching sources
+  are **copied** (never symlinked) into the harness's extension directory, so
+  the delivered bytes are the reviewed bytes. An ownership ledger scopes pruning
+  to what agentstack placed and hard-excludes the guard's `agentstack-guard*`
+  artifacts. Under `run --locked`, the `rendered-verify` gate re-digests each
+  delivered copy against its pin before launch, refusing on drift and naming the
+  extension. All of this is provenance and content binding — not runtime
+  enforcement. (`crates/cli/src/render/extensions.rs` `render` / `verify_rendered`,
+  `crates/cli/src/commands/locked.rs`, `agentstack_core::digest::integrity_root_digest`)
 
 ### Not yet wired: trust-store mutation logging
 

@@ -38,6 +38,14 @@ pub struct Lock {
     /// silent unpinning cannot pass any gate downstream.
     #[serde(default, rename = "executable")]
     pub executables: Vec<LockedExecutable>,
+    /// Native-extension pins (D6). Additive `#[serde(default)]` at version 2,
+    /// on the same justification as the executable pins above: an older binary
+    /// that rewrites these pins away changes the lock bytes, which flips the
+    /// trust digest and forces re-review — and both the trust gate and strict
+    /// locked verification block unpinned extensions, so silent unpinning
+    /// cannot pass any gate downstream.
+    #[serde(default, rename = "extension")]
+    pub extensions: Vec<LockedExtension>,
 }
 
 impl Default for Lock {
@@ -48,6 +56,7 @@ impl Default for Lock {
             servers: Vec::new(),
             instructions: Vec::new(),
             executables: Vec::new(),
+            extensions: Vec::new(),
         }
     }
 }
@@ -72,6 +81,44 @@ pub enum ServerSource {
 pub enum SkillLockSource {
     Path,
     Git,
+}
+
+/// A pinned native harness extension (D6): its source tree's strict
+/// integrity-root digest (symlink anywhere = hard error, `.git` included —
+/// the executable-content digest family, never the lenient skill digest) plus
+/// the one adapter it targets, so a review diff is self-describing.
+///
+/// The source-provenance fields (`source`/`path`/`git`/`rev`) mirror
+/// [`LockedSkill`]: an inline project-local `path`, an inline or library `git`
+/// checkout (with the resolved `rev`), or a `library` path body. They are
+/// additive over the E1-era shape (name/target/checksum only) — `source`
+/// carries a serde default so a pre-E3 lock entry still parses, and every
+/// extension pinned before E3 was a project-local `path`, so `"path"` is the
+/// honest default.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedExtension {
+    pub name: String,
+    pub target: String,
+    /// `"path"` (project-local), `"git"` (a fetched checkout), or `"library"`
+    /// (a central-library path body). Defaults to `"path"` for E1-era entries.
+    #[serde(default = "locked_extension_source_default")]
+    pub source: String,
+    /// The declared path a `path`/`library` source pinned (provenance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// The git URL a `git` source pinned (provenance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<String>,
+    /// The resolved git commit a `git` source was pinned at (rev-drift check).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
+    pub checksum: String,
+}
+
+/// E1-era `[[extension]]` entries carry no `source` key; every extension pinned
+/// before E3 was a project-local `path`, so that is the honest default.
+fn locked_extension_source_default() -> String {
+    "path".to_string()
 }
 
 /// A pinned MCP server: the SHA-256 of its **definition** (a `${REF}`-only
@@ -250,6 +297,26 @@ impl Lock {
     pub fn retain_executables(&mut self, keep: &[(String, ExecutableKind)]) {
         self.executables
             .retain(|e| keep.iter().any(|(p, k)| *p == e.path && *k == e.kind));
+    }
+
+    pub fn get_extension(&self, name: &str) -> Option<&LockedExtension> {
+        self.extensions.iter().find(|e| e.name == name)
+    }
+
+    /// Insert or replace an extension pin, keeping entries sorted by name.
+    pub fn upsert_extension(&mut self, entry: LockedExtension) {
+        if let Some(existing) = self.extensions.iter_mut().find(|e| e.name == entry.name) {
+            *existing = entry;
+        } else {
+            self.extensions.push(entry);
+        }
+        self.extensions.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    /// Drop extension pins whose name is no longer declared — the same
+    /// stale-pin pruning rule as instructions (`retain_instruction_names`).
+    pub fn retain_extension_names(&mut self, keep: &[String]) {
+        self.extensions.retain(|e| keep.contains(&e.name));
     }
 
     /// Insert or replace a server entry, keeping entries sorted by name.
@@ -493,6 +560,75 @@ mod tests {
         let parsed: Lock =
             toml::from_str(&format!("version = {SUPPORTED_LOCK_VERSION}\n")).unwrap();
         assert!(parsed.executables.is_empty());
+    }
+
+    #[test]
+    fn extension_upsert_sorts_roundtrips_and_retains() {
+        let mut lock = Lock::default();
+        lock.upsert_extension(LockedExtension {
+            name: "checkpoint".into(),
+            target: "pi".into(),
+            source: "path".into(),
+            path: Some("./extensions/checkpoint".into()),
+            git: None,
+            rev: None,
+            checksum: "cafe".into(),
+        });
+        lock.upsert_extension(LockedExtension {
+            name: "audit-log".into(),
+            target: "opencode".into(),
+            source: "git".into(),
+            path: None,
+            git: Some("https://example.com/x.git".into()),
+            rev: Some("abc123".into()),
+            checksum: "beef".into(),
+        });
+        assert_eq!(lock.extensions[0].name, "audit-log", "sorted by name");
+
+        // Upsert replaces in place (a re-lock after an edit updates the pin).
+        lock.upsert_extension(LockedExtension {
+            name: "checkpoint".into(),
+            target: "pi".into(),
+            source: "path".into(),
+            path: Some("./extensions/checkpoint".into()),
+            git: None,
+            rev: None,
+            checksum: "f00d".into(),
+        });
+        assert_eq!(lock.get_extension("checkpoint").unwrap().checksum, "f00d");
+
+        let text = toml::to_string_pretty(&lock).unwrap();
+        assert!(text.contains("[[extension]]"));
+        let parsed: Lock = toml::from_str(&text).unwrap();
+        assert_eq!(parsed.extensions, lock.extensions);
+
+        // Prune to the declared set; a v2 lock without [[extension]] parses
+        // to an empty pin set (additive field, same rule as executables).
+        lock.retain_extension_names(&["audit-log".to_string()]);
+        assert!(lock.get_extension("checkpoint").is_none());
+        assert!(lock.get_extension("audit-log").is_some());
+        let parsed: Lock =
+            toml::from_str(&format!("version = {SUPPORTED_LOCK_VERSION}\n")).unwrap();
+        assert!(parsed.extensions.is_empty());
+    }
+
+    /// An E1-era `[[extension]]` entry — name/target/checksum only, no source
+    /// provenance fields — must still parse: `source` defaults to `"path"`
+    /// (every pre-E3 extension was a project-local path) and the optional
+    /// path/git/rev stay absent.
+    #[test]
+    fn e1_era_extension_entry_without_source_fields_parses() {
+        let parsed: Lock = toml::from_str(&format!(
+            "version = {SUPPORTED_LOCK_VERSION}\n\
+             [[extension]]\nname = \"checkpoint\"\ntarget = \"pi\"\nchecksum = \"cafe\"\n"
+        ))
+        .unwrap();
+        let ext = parsed.get_extension("checkpoint").expect("pinned");
+        assert_eq!(ext.source, "path", "absent source defaults to path");
+        assert_eq!(ext.path, None);
+        assert_eq!(ext.git, None);
+        assert_eq!(ext.rev, None);
+        assert_eq!(ext.checksum, "cafe");
     }
 
     #[test]

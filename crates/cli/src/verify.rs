@@ -11,7 +11,9 @@
 //! used that doesn't match the lock the human trusted.
 
 use crate::executable::ExecutableLockStatus;
-use crate::resolve::{FrozenServer, InstructionLockStatus, ServerLockStatus, SkillLockStatus};
+use crate::resolve::{
+    ExtensionLockStatus, FrozenServer, InstructionLockStatus, ServerLockStatus, SkillLockStatus,
+};
 
 /// The verdict for one capability vs its lock pin.
 ///
@@ -105,6 +107,33 @@ pub fn executable_verdict(status: &ExecutableLockStatus) -> Verdict {
     }
 }
 
+/// Verdict for a native extension's lock status (D6). Same fail-closed rule;
+/// a retargeted extension blocks like drifted bytes — the reviewed pin bound
+/// the code to one harness, and pointing it elsewhere needs a re-review.
+pub fn extension_verdict(status: &ExtensionLockStatus) -> Verdict {
+    match status {
+        ExtensionLockStatus::Matches => Verdict::Ok,
+        ExtensionLockStatus::MissingLockEntry => Verdict::Unpinned,
+        ExtensionLockStatus::ChecksumDrift { locked, current } => Verdict::Block(format!(
+            "extension content drifted from agentstack.lock (locked {}, current {})",
+            short(locked),
+            short(current)
+        )),
+        ExtensionLockStatus::TargetDrift { locked, current } => Verdict::Block(format!(
+            "extension target changed since it was locked (locked '{locked}', now '{current}') — re-run `agentstack lock`"
+        )),
+        ExtensionLockStatus::RevDrift { locked, current } => Verdict::Block(format!(
+            "extension git rev drifted from agentstack.lock (locked {}, current {})",
+            short(locked),
+            short(current)
+        )),
+        ExtensionLockStatus::NotAvailableOffline { source } => Verdict::Block(format!(
+            "git source {source} is not cached locally, so its pin can't be verified — run `agentstack install`"
+        )),
+        ExtensionLockStatus::ResolveFailed { error } => Verdict::Block(error.clone()),
+    }
+}
+
 /// The activation gate (`use --write`, session start, dashboard): block when
 /// anything in the resolved set drifted or broke, naming every offender.
 /// `Unpinned` passes — first activation records the pin, which itself flips
@@ -153,7 +182,8 @@ pub fn ensure_instructions_compilable(
 /// pinned and matching; every frozen server must resolve and pass its required
 /// integrity check. A missing pin, drift, or broken ref all block, and every
 /// offender is named together, kind-qualified (`skill 'x'`, `instruction 'x'`,
-/// `server 'x'`) so colliding names across capability kinds stay distinct.
+/// `server 'x'`, `extension 'x'`) so colliding names across capability kinds
+/// stay distinct.
 ///
 /// The frozen server set is **borrowed**: this verifier proves the exact set
 /// acceptable without mutating or re-resolving it, so the grant builder can then
@@ -167,6 +197,7 @@ pub fn ensure_locked_inputs(
     instructions: &[(String, InstructionLockStatus)],
     frozen_servers: &[FrozenServer],
     executables: &[(String, ExecutableLockStatus)],
+    extensions: &[(String, ExtensionLockStatus)],
 ) -> anyhow::Result<()> {
     let mut blocked: Vec<(String, String)> = Vec::new();
     for (name, status) in skills {
@@ -177,6 +208,11 @@ pub fn ensure_locked_inputs(
     for (name, status) in instructions {
         if let Some(why) = locked_offender(instruction_verdict(status)) {
             blocked.push((format!("instruction '{name}'"), why));
+        }
+    }
+    for (name, status) in extensions {
+        if let Some(why) = locked_offender(extension_verdict(status)) {
+            blocked.push((format!("extension '{name}'"), why));
         }
     }
     for (name, resolved) in frozen_servers {
@@ -442,7 +478,7 @@ mod tests {
             "srv",
             "library server is not pinned in agentstack.lock — pin it with `agentstack lock`",
         )];
-        let err = ensure_locked_inputs("claude-code", &skills, &instructions, &servers, &[])
+        let err = ensure_locked_inputs("claude-code", &skills, &instructions, &servers, &[], &[])
             .unwrap_err()
             .to_string();
         assert!(err.contains("3 input(s)"), "{err}");
@@ -473,7 +509,7 @@ mod tests {
                 ExecutableLockStatus::Matches,
             ),
         ];
-        let err = ensure_locked_inputs("claude-code", &[], &[], &[], &executables)
+        let err = ensure_locked_inputs("claude-code", &[], &[], &[], &executables, &[])
             .unwrap_err()
             .to_string();
         assert!(err.contains("2 input(s)"), "{err}");
@@ -486,6 +522,50 @@ mod tests {
             "{err}"
         );
         assert!(!err.contains("ok.sh"), "matching pins stay out: {err}");
+        assert!(err.contains("`agentstack lock`"), "{err}");
+    }
+
+    #[test]
+    fn extension_verdicts_fail_closed_and_locked_gate_names_them() {
+        // The verdict family rule: match passes, missing pin is Unpinned, and
+        // every drift flavor — bytes, target, undigestable source — blocks.
+        assert_eq!(
+            extension_verdict(&ExtensionLockStatus::Matches),
+            Verdict::Ok
+        );
+        assert_eq!(
+            extension_verdict(&ExtensionLockStatus::MissingLockEntry),
+            Verdict::Unpinned
+        );
+        for status in [
+            ExtensionLockStatus::ChecksumDrift {
+                locked: "a".into(),
+                current: "b".into(),
+            },
+            ExtensionLockStatus::TargetDrift {
+                locked: "pi".into(),
+                current: "opencode".into(),
+            },
+            ExtensionLockStatus::ResolveFailed {
+                error: "nope".into(),
+            },
+        ] {
+            assert!(
+                matches!(extension_verdict(&status), Verdict::Block(_)),
+                "{status:?} must block"
+            );
+        }
+
+        // The strict gate treats extensions like every other kind: missing
+        // pins block too, kind-qualified in the report.
+        let extensions = vec![(
+            "checkpoint".to_string(),
+            ExtensionLockStatus::MissingLockEntry,
+        )];
+        let err = ensure_locked_inputs("pi", &[], &[], &[], &[], &extensions)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("extension 'checkpoint'"), "{err}");
         assert!(err.contains("`agentstack lock`"), "{err}");
     }
 
@@ -510,7 +590,7 @@ mod tests {
             ),
             failed_server("b", "library server is not pinned in agentstack.lock"),
         ];
-        let err = ensure_locked_inputs("x", &[], &[], &servers, &[])
+        let err = ensure_locked_inputs("x", &[], &[], &servers, &[], &[])
             .unwrap_err()
             .to_string();
         assert!(err.contains("2 input(s)"), "{err}");
@@ -521,14 +601,14 @@ mod tests {
     #[test]
     fn ensure_locked_inputs_passes_clean_sets_and_leaves_them_usable() {
         // Empty everything is trivially acceptable.
-        assert!(ensure_locked_inputs("x", &[], &[], &[], &[]).is_ok());
+        assert!(ensure_locked_inputs("x", &[], &[], &[], &[], &[]).is_ok());
 
         // A valid non-empty set: matching skill + instruction + an Ok frozen
         // server all pass.
         let skills = vec![("s".to_string(), SkillLockStatus::Matches)];
         let instructions = vec![("i".to_string(), InstructionLockStatus::Matches)];
         let servers = vec![ok_server("srv")];
-        assert!(ensure_locked_inputs("x", &skills, &instructions, &servers, &[]).is_ok());
+        assert!(ensure_locked_inputs("x", &skills, &instructions, &servers, &[], &[]).is_ok());
 
         // Borrowed, not consumed: the exact frozen set is still usable after.
         assert_eq!(servers.len(), 1);

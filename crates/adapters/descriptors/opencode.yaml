@@ -40,3 +40,9 @@ mcp:
 instructions:
   global: ~/.config/opencode/AGENTS.md
   project: AGENTS.md
+# OpenCode plugins: JS add-ons loaded from ~/.config/opencode/plugins — the same
+# directory the host guard authors agentstack-guard.js into (see
+# commands/guard.rs). OpenCode exposes no project-scoped plugin directory, so
+# only the global dir is declared; a project-scope render falls back to it.
+extensions:
+  dir: ~/.config/opencode/plugins

@@ -136,6 +136,7 @@ struct LockedInputs {
     lib_home: PathBuf,
     skill_statuses: Vec<(String, SkillLockStatus)>,
     instruction_statuses: Vec<(String, InstructionLockStatus)>,
+    extension_statuses: Vec<(String, crate::resolve::ExtensionLockStatus)>,
     frozen: Vec<FrozenServer>,
     executable_statuses: Vec<(String, ExecutableLockStatus)>,
     /// The derived executable pins, keyed by owning server — the EXACT content
@@ -182,6 +183,31 @@ fn resolve_inputs(ctx: &Context) -> Result<LockedInputs> {
         })
         .collect();
 
+    // Native extensions (D6): their pins are part of the locked surface — a
+    // drifted, unpinned, or offline extension must refuse the run like every
+    // other kind. Resolution is library-aware and NoFetch (offline), matching
+    // the skill statuses above.
+    let extension_statuses: Vec<(String, crate::resolve::ExtensionLockStatus)> = m
+        .extensions
+        .iter()
+        .map(|(name, ext)| {
+            (
+                name.clone(),
+                crate::resolve::extension_lock_status(
+                    name,
+                    ext,
+                    &ctx.dir,
+                    &library,
+                    &lib_home,
+                    &store,
+                    &lock,
+                    crate::resolve::ResolveMode::NoFetch,
+                )
+                .status,
+            )
+        })
+        .collect();
+
     let frozen = crate::resolve::frozen_runtime_servers(m, &library, &lib_home, &ctx.dir, None)?;
 
     let exec_servers: Vec<(String, crate::manifest::Server)> = frozen
@@ -197,6 +223,7 @@ fn resolve_inputs(ctx: &Context) -> Result<LockedInputs> {
         lib_home,
         skill_statuses,
         instruction_statuses,
+        extension_statuses,
         frozen,
         executable_statuses,
         executable_pins,
@@ -740,17 +767,44 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         &inputs.instruction_statuses,
         &inputs.frozen,
         &inputs.executable_statuses,
+        &inputs.extension_statuses,
     ) {
         return Err(ev.refuse("locked-verify", e));
     }
     ev.passed("locked-verify", None)?;
     println!(
-        "  {} locked inputs: {} skill(s), {} instruction(s), {} server(s), {} executable pin(s) verified",
+        "  {} locked inputs: {} skill(s), {} instruction(s), {} server(s), {} executable pin(s), {} extension(s) verified",
         "✓".green(),
         inputs.skill_statuses.len(),
         inputs.instruction_statuses.len(),
         inputs.frozen.len(),
         inputs.executable_statuses.len(),
+        inputs.extension_statuses.len(),
+    );
+
+    // §3 step 4b: rendered-copy verification (E2b). locked-verify proved the
+    // extension SOURCE bytes still match the pin; this proves the COPY already
+    // delivered into this harness's extension directory does too — a rendered
+    // extension tampered after render (source untouched) would otherwise reach
+    // the harness unreviewed. Nothing rendered for this harness = nothing to
+    // verify, never a refusal.
+    let rendered = match crate::render::extensions::verify_rendered(
+        m,
+        &ctx.registry,
+        &args.harness,
+        args.scope,
+        &ctx.dir,
+        &inputs.lock,
+    ) {
+        Ok(r) => r,
+        Err(e) => return Err(ev.refuse("rendered-verify", e)),
+    };
+    ev.passed("rendered-verify", None)?;
+    println!(
+        "  {} rendered extensions: {} verified, {} not rendered",
+        "✓".green(),
+        rendered.verified.len(),
+        rendered.absent.len(),
     );
 
     // §3 step 5: compile once, then check the enumerable admission surface.
@@ -957,6 +1011,7 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 &inputs.instruction_statuses,
                 &inputs.frozen,
                 &inputs.executable_statuses,
+                &inputs.extension_statuses,
             ) {
                 blockers.push(("locked-verify".into(), format!("{e:#}")));
             }
@@ -967,6 +1022,25 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             None
         }
     };
+
+    // Rendered-copy verification (E2b), aggregated like every other blocker.
+    // Non-mutating: it only reads the delivered artifacts and their ledger.
+    let rendered = inputs.as_ref().and_then(|inputs| {
+        match crate::render::extensions::verify_rendered(
+            m,
+            &ctx.registry,
+            &args.harness,
+            args.scope,
+            &ctx.dir,
+            &inputs.lock,
+        ) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                blockers.push(("rendered-verify".into(), format!("{e:#}")));
+                None
+            }
+        }
+    });
 
     let mut ruleset_and_machine = None;
     match crate::machine_policy::load() {
@@ -1026,11 +1100,19 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             }
         );
         println!(
-            "    inputs: {} skill(s), {} instruction(s), {} executable pin(s)",
+            "    inputs: {} skill(s), {} instruction(s), {} executable pin(s), {} extension(s)",
             inputs.skill_statuses.len(),
             inputs.instruction_statuses.len(),
-            inputs.executable_statuses.len()
+            inputs.executable_statuses.len(),
+            inputs.extension_statuses.len()
         );
+        if let Some(rendered) = &rendered {
+            println!(
+                "    rendered extensions: {} verified, {} not rendered",
+                rendered.verified.len(),
+                rendered.absent.len()
+            );
+        }
     }
 
     if blockers.is_empty() {
@@ -1161,6 +1243,106 @@ mod tests {
         assert_eq!(entries.len(), 1, "exactly one recorded run expected");
         let id = entries.remove(0).file_name().to_string_lossy().into_owned();
         crate::calllog::RunLog::read(&id)
+    }
+
+    /// E2b witness (design doc §6): a one-byte edit to a RENDERED extension
+    /// copy — the SOURCE left untouched, so trust and source locked-verify both
+    /// still pass — refuses the locked run before launch, names the extension
+    /// (kind-qualified), and records the `rendered-verify` gate refusal with no
+    /// grant frozen. NEVER delete or weaken this test.
+    #[cfg(unix)]
+    #[test]
+    fn tampered_rendered_extension_refuses_before_launch() {
+        locked_fixture(|home, proj| {
+            use std::os::unix::fs::PermissionsExt;
+            // A fake `pi` harness on PATH — the extension's target adapter.
+            let pi = home.path().join("fakebin/pi");
+            std::fs::write(&pi, "#!/bin/sh\nexit 0\n").unwrap();
+            std::fs::set_permissions(&pi, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            // A pi project declaring one directory-source extension.
+            proj.child("extensions/checkpoint/index.ts")
+                .write_str("export default (pi) => {} // v1\n")
+                .unwrap();
+            proj.child("agentstack.toml")
+                .write_str(
+                    "version = 1\n\n[extensions.checkpoint]\npath = \"./extensions/checkpoint\"\ntarget = \"pi\"\n",
+                )
+                .unwrap();
+            let manifest: crate::manifest::Manifest = toml::from_str(
+                &std::fs::read_to_string(proj.child("agentstack.toml").path()).unwrap(),
+            )
+            .unwrap();
+
+            // Pin the source, trust, then render the copy into .pi/extensions.
+            crate::commands::lock::record_extension_pins(
+                proj.path(),
+                &manifest,
+                &crate::library::Library::default(),
+                &crate::util::paths::lib_home(),
+                &crate::store::Store::default_store(),
+            )
+            .unwrap();
+            trust::trust(proj.path()).unwrap();
+            let registry = crate::adapter::registry::Registry::load().unwrap();
+            crate::render::extensions::render(
+                &manifest,
+                &registry,
+                agentstack_core::scope::Scope::Project,
+                proj.path(),
+                true,
+            )
+            .unwrap();
+            let copy = proj.child(".pi/extensions/checkpoint/index.ts");
+            assert!(copy.path().exists(), "render must deliver the copy");
+
+            // Tamper ONLY the rendered copy: the source (and thus the lock and
+            // the trust digest) is untouched, so trust + source locked-verify
+            // pass and only the rendered-copy check can catch this.
+            copy.write_str("export default (pi) => {} // TAMPERED\n")
+                .unwrap();
+
+            let args = RunArgs {
+                harness: "pi".to_string(),
+                locked: true,
+                profile: None,
+                scope: agentstack_core::scope::Scope::Project,
+                keep: false,
+                sandbox: false,
+                lockdown: false,
+                plan: false,
+                args: Vec::new(),
+            };
+            let err = run_locked(Some(proj.path()), &args).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("extension 'checkpoint'"),
+                "offender named: {msg}"
+            );
+            assert!(msg.contains("rendered copy"), "kind-qualified: {msg}");
+
+            let events = recorded_events(home);
+            // Source locked-verify passed; the rendered-verify gate refused.
+            assert!(
+                events.iter().any(|e| matches!(
+                    e,
+                    RunEvent::GateDecision { gate, passed: true, .. } if gate == "locked-verify"
+                )),
+                "{events:?}"
+            );
+            assert!(
+                events.iter().any(|e| matches!(
+                    e,
+                    RunEvent::GateDecision { gate, passed: false, detail: Some(d), .. }
+                        if gate == "rendered-verify" && d.contains("checkpoint")
+                )),
+                "{events:?}"
+            );
+            // The grant never froze — the refusal happened before launch.
+            assert!(!events
+                .iter()
+                .any(|e| matches!(e, RunEvent::GrantFrozen { .. })));
+        });
     }
 
     /// Demo 3 (contract §10): a one-byte edit to a pinned repository-local

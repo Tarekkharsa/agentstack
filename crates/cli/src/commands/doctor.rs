@@ -832,6 +832,8 @@ fn run_checks(
     check_server_reproducibility(manifest, &ctx.dir, report);
     check_instruction_reproducibility(manifest, &ctx.dir, report);
     check_executable_integrity(manifest, &ctx.dir, report);
+    check_extension_reproducibility(manifest, &ctx.dir, report);
+    check_rendered_extensions(&ctx.dir, &ctx.registry, report);
 
     report.section("Plugin recipes");
     let recipe_statuses = crate::plugin_recipes::statuses(manifest, &ctx.registry, &ctx.dir);
@@ -1216,6 +1218,153 @@ fn check_server_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Re
                         );
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Check that each declared native extension (D6/E3) resolves to the content
+/// its `agentstack.lock` pins. Manifest-global (no profile refs), NoFetch
+/// (offline), library-aware — mirrors `check_server_reproducibility`. Drift,
+/// retarget, rev-drift, and broken refs are errors (so `doctor --ci` gates
+/// reproducibility); an un-cached git source is a warning (can't verify
+/// offline); a declared-but-unlocked extension is a warning too.
+fn check_extension_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Report) {
+    use crate::resolve::ExtensionLockStatus;
+    if manifest.extensions.is_empty() {
+        return;
+    }
+    let lock = crate::lock::Lock::load(dir).unwrap_or_default();
+    let library = crate::library::Library::load_default().unwrap_or_default();
+    let lib_home = paths::lib_home();
+    let store = crate::store::Store::default_store();
+    for (name, ext) in &manifest.extensions {
+        let report_ext = crate::resolve::extension_lock_status(
+            name,
+            ext,
+            dir,
+            &library,
+            &lib_home,
+            &store,
+            &lock,
+            crate::resolve::ResolveMode::NoFetch,
+        );
+        match report_ext.status {
+            ExtensionLockStatus::ResolveFailed { error } => {
+                report.line(Level::Error, format!("{name:<20} broken extension ref — {error}"));
+            }
+            ExtensionLockStatus::ChecksumDrift { .. } | ExtensionLockStatus::RevDrift { .. } => {
+                report.line(
+                    Level::Error,
+                    format!("{name:<20} extension drifted from lock ↳ agentstack lock"),
+                );
+            }
+            ExtensionLockStatus::TargetDrift { .. } => report.line(
+                Level::Error,
+                format!("{name:<20} extension retargeted since locked ↳ agentstack lock"),
+            ),
+            ExtensionLockStatus::MissingLockEntry => report.line(
+                Level::Warn,
+                format!("{name:<20} extension not locked ↳ agentstack lock"),
+            ),
+            ExtensionLockStatus::NotAvailableOffline { .. } => report.line(
+                Level::Warn,
+                format!("{name:<20} git extension not cached — can't verify offline ↳ agentstack install"),
+            ),
+            ExtensionLockStatus::Matches => {
+                report.line(Level::Ok, format!("{name:<20} extension · matches lock"));
+            }
+        }
+    }
+}
+
+/// Verify the rendered extension *copies* — the bytes a harness actually loads
+/// — still match the pin they were rendered from (E3b, design doc §6). Distinct
+/// from `check_extension_reproducibility`, which verifies the *source*: a
+/// delivered copy can be tampered after render while its source stays clean, so
+/// only checking the source would let doctored bytes reach the harness
+/// unreviewed. Walks every governed extensions directory (each adapter with an
+/// `extensions` surface, both scopes) using the ownership ledger:
+///
+/// - a ledger-owned artifact whose current digest no longer matches the pin it
+///   was rendered from (or that has vanished) is an **error** naming the
+///   extension — re-render with `agentstack apply`;
+/// - a file agentstack's ledger does not own is a hand-installed extension: an
+///   informational note only (never an error, never touched).
+///
+/// Read-only throughout; the digest is the same strict integrity-root walk the
+/// pin used, so a copy and its source can never disagree spuriously.
+fn check_rendered_extensions(dir: &Path, registry: &crate::adapter::Registry, report: &mut Report) {
+    use crate::render::extensions::{managed_artifacts, GUARD_PREFIX};
+    // Dedupe resolved dirs: an adapter's two scopes may resolve to the same
+    // path, and we must audit each directory exactly once.
+    let mut seen_dirs = std::collections::BTreeSet::new();
+    for desc in registry.iter() {
+        if desc.extensions.is_none() {
+            continue;
+        }
+        for scope in [Scope::Global, Scope::Project] {
+            let Some(ext_dir) = desc.extensions_dir_for(scope, dir) else {
+                continue;
+            };
+            if !seen_dirs.insert(ext_dir.clone()) {
+                continue;
+            }
+            let managed = match managed_artifacts(&ext_dir) {
+                Ok(m) => m,
+                Err(e) => {
+                    report.line(
+                        Level::Error,
+                        format!("{:<20} unreadable extension ledger — {e:#}", desc.id),
+                    );
+                    continue;
+                }
+            };
+            let owned: std::collections::BTreeSet<&str> =
+                managed.iter().map(|m| m.filename.as_str()).collect();
+            // Ledger-owned copies: bytes must still match the pin they were
+            // rendered from. Compare to the ledger's recorded checksum (what
+            // this exact copy was rendered from), so a shared global dir's
+            // other-project artifacts verify without a project-scoped lock.
+            for m in &managed {
+                if m.checksum.is_empty() {
+                    continue; // pre-checksum ledger entry: nothing to verify against
+                }
+                match agentstack_core::digest::integrity_root_digest(&ext_dir, &m.filename) {
+                    Ok(current) if current == m.checksum => report.line(
+                        Level::Ok,
+                        format!("{:<20} rendered copy matches pin ({})", m.name, desc.id),
+                    ),
+                    Ok(_) => report.line(
+                        Level::Error,
+                        format!(
+                            "{:<20} rendered extension copy drifted from its pin ↳ agentstack apply",
+                            m.name
+                        ),
+                    ),
+                    Err(_) => report.line(
+                        Level::Error,
+                        format!(
+                            "{:<20} rendered extension copy missing or unreadable ↳ agentstack apply",
+                            m.name
+                        ),
+                    ),
+                }
+            }
+            // Non-ledger files: hand-installed extensions. Surfaced, never
+            // touched. Guard artifacts are agentstack-managed elsewhere, so they
+            // are not strangers.
+            for disc in desc.discover_extensions(scope, dir) {
+                if disc.name.starts_with(GUARD_PREFIX) || owned.contains(disc.name.as_str()) {
+                    continue;
+                }
+                report.line(
+                    Level::Ok,
+                    format!(
+                        "{:<20} unmanaged extension in {} — not placed by agentstack, left untouched",
+                        disc.name, desc.id
+                    ),
+                );
             }
         }
     }
@@ -1826,6 +1975,86 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
             .collect()
+    }
+
+    /// The rendered-artifact audit: a delivered copy whose bytes drifted from
+    /// the pin (source left clean) is an error naming the extension, while a
+    /// hand-installed file is an informational note only — never an error, never
+    /// touched. HOME + AGENTSTACK_HOME are redirected to temps so the global
+    /// scope resolves into empty temp dirs, keeping the check off the real
+    /// machine's extension directories.
+    #[test]
+    fn rendered_extension_drift_is_error_and_stranger_is_a_note() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let orig_home = std::env::var_os("HOME");
+        let home = assert_fs::TempDir::new().unwrap();
+        let ast_home = assert_fs::TempDir::new().unwrap();
+        let proj = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("AGENTSTACK_HOME", ast_home.path());
+
+        const TOML: &str = "version = 1\n[extensions.checkpoint]\npath = \"./extensions/checkpoint\"\ntarget = \"pi\"\n";
+        proj.child("extensions/checkpoint/index.ts")
+            .write_str("export default (pi) => {}\n")
+            .unwrap();
+        proj.child("agentstack.toml").write_str(TOML).unwrap();
+        let manifest: Manifest = toml::from_str(TOML).unwrap();
+        let registry = crate::adapter::Registry::load().unwrap();
+
+        // Pin + trust + render, so a ledger and a rendered copy exist.
+        crate::commands::lock::record_extension_pins(
+            proj.path(),
+            &manifest,
+            &crate::library::Library::default(),
+            &crate::util::paths::lib_home(),
+            &crate::store::Store::default_store(),
+        )
+        .unwrap();
+        crate::trust::trust(proj.path()).unwrap();
+        crate::render::extensions::render(&manifest, &registry, Scope::Project, proj.path(), true)
+            .unwrap();
+        let ext_dir = proj.path().join(".pi/extensions");
+        assert!(ext_dir.join("checkpoint/index.ts").exists());
+
+        // Clean: the rendered copy matches its pin — no error.
+        let mut clean = Report::quiet();
+        check_rendered_extensions(proj.path(), &registry, &mut clean);
+        assert_eq!(clean.errors, 0, "a matching rendered copy is not an error");
+
+        // Tamper the delivered COPY (its source stays clean) and plant a
+        // hand-installed stranger file.
+        std::fs::write(
+            ext_dir.join("checkpoint/index.ts"),
+            b"export default (pi) => { evil() }\n",
+        )
+        .unwrap();
+        std::fs::write(ext_dir.join("stranger.js"), b"// hand-installed\n").unwrap();
+
+        let mut report = Report::quiet();
+        check_rendered_extensions(proj.path(), &registry, &mut report);
+        let text = report.to_json().to_string();
+
+        match orig_home {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
+        std::env::remove_var("AGENTSTACK_HOME");
+
+        assert!(report.errors >= 1, "drifted rendered copy must be an error");
+        assert!(
+            text.contains("checkpoint") && text.contains("drifted"),
+            "drift error must name the extension: {text}"
+        );
+        assert!(
+            text.contains("stranger.js") && text.contains("unmanaged"),
+            "stranger file must be surfaced as a note: {text}"
+        );
+        assert!(
+            ext_dir.join("stranger.js").exists(),
+            "the stranger file is never touched"
+        );
     }
 
     #[test]

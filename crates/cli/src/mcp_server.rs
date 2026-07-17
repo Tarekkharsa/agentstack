@@ -2258,6 +2258,48 @@ mod tests {
         assert!(transparent.iter().any(|n| n == "tools_search"));
     }
 
+    /// The zero-files loadable index is skill-only: a library extension is a
+    /// rendered artifact for a harness, not agent-loadable context, so it must
+    /// never surface through `agentstack_list_loadable` / `agentstack_load`
+    /// (design doc §8). `loadable_skill_names` reads only skills, so this holds
+    /// structurally — the test is the witness that keeps it that way.
+    #[test]
+    fn library_extensions_are_not_loadable() {
+        use crate::library::{Library, LibraryExtension, LibrarySkill};
+        let mut library = Library::default();
+        library.upsert(LibrarySkill {
+            name: "sql-review".into(),
+            source: "path".into(),
+            path: Some("sql-review".into()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: None,
+            version: None,
+            provenance: None,
+        });
+        library.upsert_extension(LibraryExtension {
+            name: "checkpoint".into(),
+            source: "path".into(),
+            target: "pi".into(),
+            path: Some("checkpoint".into()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: None,
+            description: Some("Git checkpoint each turn".into()),
+            version: None,
+            provenance: None,
+        });
+        let manifest: crate::manifest::Manifest = toml::from_str("version = 1").unwrap();
+        let names = loadable_skill_names(&manifest, &library, None);
+        assert!(names.iter().any(|n| n == "sql-review"), "skill is loadable");
+        assert!(
+            !names.iter().any(|n| n == "checkpoint"),
+            "an extension must never enter the loadable index"
+        );
+    }
+
     /// listChanged is declared so transparent auto-mode can announce the
     /// lazily built gateway's tools; clients that never see the notification
     /// lose nothing.

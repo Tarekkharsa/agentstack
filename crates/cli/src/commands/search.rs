@@ -53,6 +53,8 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
         match &c.kind {
             CandidateKind::Pack(_) => badge.push_str(&format!(" {}", "[pack]".magenta())),
             CandidateKind::Skill(_) => badge.push_str(&format!(" {}", "[skill]".cyan())),
+            CandidateKind::Extension(_) => badge.push_str(&format!(" {}", "[extension]".red())),
+            CandidateKind::Hook(_) => badge.push_str(&format!(" {}", "[hook]".blue())),
             CandidateKind::Server(_) => {}
         }
         if added {
@@ -93,23 +95,56 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
                     .unwrap_or_else(|| "—".into());
                 println!("  {} {source}", "source:".dimmed());
             }
+            CandidateKind::Extension(ext) => {
+                println!("  {} {} extension", "target:".dimmed(), ext.target);
+            }
+            CandidateKind::Hook(h) => {
+                let matcher = h
+                    .hook
+                    .matcher
+                    .as_deref()
+                    .map(|m| format!(" · matcher {m}"))
+                    .unwrap_or_default();
+                println!("  {} {}{matcher}", "event:".dimmed(), h.hook.event);
+            }
             CandidateKind::Server(_) => {}
         }
-        let t = c.trust();
-        let mut signals = Vec::new();
-        if t.namespaced {
-            signals.push("✓ verified namespace".green().to_string());
+        // Extensions carry the strongest, honest warning of any kind — their
+        // code runs in-process, ungoverned at runtime (design doc §7) — rather
+        // than the generic "runs code (npx)" line, which is stdio-shaped.
+        if let CandidateKind::Extension(_) = &c.kind {
+            println!(
+                "  {} {}",
+                "trust:".to_string().dimmed(),
+                "⚠ executable, in-process, ungoverned at runtime (agentstack pins provenance only)"
+                    .red()
+            );
+        } else {
+            let t = c.trust();
+            let mut signals = Vec::new();
+            if t.namespaced {
+                signals.push("✓ verified namespace".green().to_string());
+            }
+            if t.runs_code {
+                signals.push("⚠ runs code (npx)".yellow().to_string());
+            }
+            if t.needs_secret {
+                signals.push("needs secret".dimmed().to_string());
+            }
+            if !signals.is_empty() {
+                println!("  trust: {}", signals.join(" · "));
+            }
         }
-        if t.runs_code {
-            signals.push("⚠ runs code (npx)".yellow().to_string());
-        }
-        if t.needs_secret {
-            signals.push("needs secret".dimmed().to_string());
-        }
-        if !signals.is_empty() {
-            println!("  trust: {}", signals.join(" · "));
-        }
-        if !added {
+        if let CandidateKind::Extension(ext) = &c.kind {
+            // Extensions aren't installed via `add from`; they are referenced by
+            // name in the manifest, which re-gates trust + lock on the code.
+            println!(
+                "  {} reference it in [extensions.{}] with target = \"{}\", then `agentstack lock`",
+                "↳".cyan(),
+                c.name,
+                ext.target
+            );
+        } else if !added {
             let cmd = match c.source {
                 "catalog" => format!("agentstack add from {}", c.name),
                 _ => format!("agentstack add from {}", c.id),

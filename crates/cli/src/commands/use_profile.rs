@@ -388,6 +388,14 @@ pub fn activate(
         }
     }
 
+    // Native extensions (D6): copy declared `[extensions.*]` sources into their
+    // target harness's extension directory — fail-closed on trust + lock,
+    // pruned via an ownership ledger. Independent of the per-target server
+    // fan-out; project-scope artifacts join the managed .gitignore block.
+    let ext_ignore =
+        crate::render::extensions::render(manifest, &ctx.registry, scope, &ctx.dir, args.write)?;
+    ignore_entries.extend(ext_ignore);
+
     if args.write
         && scope == Scope::Project
         && !args.no_gitignore

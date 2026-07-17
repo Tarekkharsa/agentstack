@@ -572,6 +572,16 @@ fn render(
         }
     }
 
+    // Native extensions (D6): copy declared `[extensions.*]` sources into their
+    // target harness's extension directory — fail-closed on trust + lock,
+    // pruned via an ownership ledger. Rendered here (not in the per-target loop)
+    // because an extension names its own target adapter, independent of the MCP
+    // fan-out selection. Its project-scope artifacts join the managed
+    // .gitignore block below.
+    let ext_ignore =
+        crate::render::extensions::render(manifest, &ctx.registry, scope, &ctx.dir, will_write)?;
+    ignore_entries.extend(ext_ignore);
+
     // Owned-server manifest refresh: rewrite the stale `[servers.X]` tables in
     // whichever manifest layer declares them, so the manifest catches up with
     // the owning app instead of fighting it. Never the other way around — the

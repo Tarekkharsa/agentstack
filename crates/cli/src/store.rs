@@ -174,6 +174,20 @@ impl Store {
     fn git_dir(&self, url: &str) -> PathBuf {
         self.root.join("git").join(sanitize(url))
     }
+
+    /// The cached clone **root** for `url` with no network access, plus its
+    /// current HEAD — `None` when the clone does not exist yet (report it as
+    /// unavailable offline). Unlike [`Store::resolve_local`], this returns the
+    /// clone root (where `.git` lives), not the subpath content dir: git
+    /// extensions digest the checkout root anchored at a `subpath` with the
+    /// strict integrity-root digest, so they need the root, not the body dir.
+    pub fn local_git_clone(&self, url: &str) -> Option<(PathBuf, Option<String>)> {
+        let clone = self.git_dir(url);
+        if !clone.exists() {
+            return None;
+        }
+        Some((clone.clone(), git_head(&clone).ok()))
+    }
 }
 
 /// Resolve a skill's local source dir for materialization, *without* fetching
@@ -391,6 +405,7 @@ mod tests {
             let pin = dir_digest(&skill_dir).unwrap();
             let lock = crate::lock::Lock {
                 version: crate::lock::SUPPORTED_LOCK_VERSION,
+                extensions: Vec::new(),
                 skills: vec![crate::lock::LockedSkill {
                     name: "x".into(),
                     source: crate::lock::SkillLockSource::Path,

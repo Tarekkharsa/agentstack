@@ -310,6 +310,69 @@ experimental status.**
   findings, cleanup is demonstrated, supply-chain evidence is published, and
   `ENFORCEMENT.md` matches every fail-closed behavior and residual limit.
 
+## Native extensions capability lane (added 2026-07-16, post-cut)
+
+**Maintainer scope addition (2026-07-16): govern native harness extensions
+(pi extensions, OpenCode plugins) as a first-class capability kind.** Queued
+behind the minimum-version keystone — it does not displace the active Phase 0A
+item; starting it earlier is a deliberate scope decision. Extensions are
+pinned executable content: the strictest kind agentstack manages, and honest
+about being provenance-only at runtime (the code runs inside the harness
+process, outside the policy ceiling).
+
+**Details:** [`docs/design/extensions-capability.md`](docs/design/extensions-capability.md) ·
+ledger entry D6 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
+
+- [ ] E0: review and approve the design doc (settle `target` singular,
+  copy-render, strict root digest, guard-name reservation, pi + OpenCode
+  first, the three open questions).
+- [ ] E1 (supervised): `[extensions.*]` manifest kind, `[[extension]]` lock
+  pinning via the strict `integrity_root_digest`, retain/prune rules,
+  distinct trust-preview labelling. Witness: a one-byte extension source edit
+  fails locked verification and re-gates review.
+  - **Landed 2026-07-16 (needs line-by-line review):** the manifest kind
+    (path sources only; git rejected at validation until E3), strict pinning
+    + pruning in `agentstack lock`, trust preview blocks unpinned/drifted/
+    retargeted extensions, `run --locked` verifies them via
+    `ensure_locked_inputs`, and the pin records its `target` so retargeting
+    re-gates like drift. Witnesses:
+    `one_byte_extension_edit_refuses_locked_and_relock_regates`,
+    `extension_verdicts_fail_closed_and_locked_gate_names_them`, plus the
+    validation and lock round-trip tests.
+- [ ] E2 (supervised): render for pi + OpenCode — `ExtensionsSpec` gains a
+  write path, ownership ledger, prune path, rendered-copy verification in the
+  locked flow, `--plan`/report/posture surfaces. Witnesses: an untrusted
+  bundle renders no extension bytes; pruning never touches unmanaged files or
+  `agentstack-guard.*`.
+  - **Landed 2026-07-16 (needs line-by-line review):** copy-render (never
+    symlink) via the strict walk exposed as `integrity_root_files`;
+    per-directory ownership ledger keyed by project (multi-project-safe
+    global dirs); prune limited to this project's ledger artifacts with the
+    guard deny-list enforced at render AND prune; a `rendered-verify` gate in
+    `run --locked` (+ `--plan`) that refuses a tampered rendered copy against
+    the lock pin. Adversarial review found and fixed two path-traversal
+    vulns (forged ledger keys; extension names as paths) — both now have
+    witnesses, plus name validation (`InvalidExtensionName`). All four
+    E2 witnesses green.
+- [ ] E3: library `kind: extension` (resolver, `lib` verbs, search, doctor),
+  docs + enforcement-matrix row with honest provenance-only runtime cells;
+  close the adjacent library `hooks` gap noted in `crates/cli/src/library.rs`.
+  - **Landed 2026-07-16 (needs line-by-line review):** `LibraryExtension` +
+    git sources through the shared store (strict digest at the checkout
+    subpath; offline blocks `--locked`, yellow at trust; rev-drift checked),
+    inline-first-then-library resolution with origin labels, lock provenance
+    fields (E1-era entries still parse), doctor source+rendered audits,
+    search coverage, zero-files exclusion witness, dashboard managed labels,
+    docs (reference/ENFORCEMENT/ARCHITECTURE) with provenance-only runtime
+    cells, and the library hooks gap closed via the server pattern
+    (`lib/hooks/<name>.toml`, `lib add-hook`, `agentstack add <hook>`).
+    Renderer delivers all three source kinds from the digest's own anchor
+    (`ResolvedExtension::{anchor,declared}`) — witness:
+    `library_origin_extension_renders_and_verifies`.
+- [ ] E4 (deferred until evidence): unify Claude Code/Codex plugin recipes
+  and the guard payloads under the same render engine; Gemini extensions;
+  static analysis or capability declarations for extension code.
+
 ## Phase 2 — paid design partners, Cloudflare runner, saved workflows
 
 **Start only after Phase 1. Execute the experiments in this order.**

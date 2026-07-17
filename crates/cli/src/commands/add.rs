@@ -59,6 +59,15 @@ fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
             spec,
             &PackOrigin::catalog(&candidate.id),
         ),
+        CandidateKind::Hook(_) => add_from_hook(a, &ctx, &candidate),
+        CandidateKind::Extension(ext) => anyhow::bail!(
+            "'{}' is a native extension — executable in-process code that `add from` does not \
+             install. Reference it in [extensions.{}] with target = \"{}\", then run \
+             `agentstack lock` so the code is pinned and re-gates trust.",
+            candidate.name,
+            candidate.name,
+            ext.target
+        ),
     }
 }
 
@@ -126,6 +135,32 @@ fn add_from_server(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate)
     if a.write {
         println!(
             "{} review secrets with `agentstack secret list`, then `agentstack apply`.",
+            "↳".cyan()
+        );
+    }
+    Ok(())
+}
+
+/// Install a library hook by copying its definition into the project's inline
+/// `[hooks.<name>]` table. Hooks always render from the manifest (see
+/// `render/hooks.rs`), so this is a plain copy — no runtime library indirection —
+/// and the definition becomes part of the manifest bytes the trust digest covers.
+/// Hooks are global (not profile-scoped), so `--profile` does not apply.
+fn add_from_hook(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate) -> Result<()> {
+    if ctx.loaded.manifest.hooks.contains_key(&candidate.name) {
+        anyhow::bail!("hook '{}' already exists in the manifest", candidate.name);
+    }
+    write_manifest(
+        ctx,
+        "hooks",
+        &serde_json::to_value(candidate.to_hook())?,
+        None,
+        &candidate.name,
+        a.write,
+    )?;
+    if a.write {
+        println!(
+            "{} run `agentstack apply` to compile the hook into each harness.",
             "↳".cyan()
         );
     }
@@ -781,6 +816,7 @@ pub struct AddedMembers {
     pub servers: Vec<String>,
     pub skills: Vec<String>,
     pub instructions: Vec<String>,
+    pub hooks: Vec<String>,
 }
 
 /// Resolve a provider id and write it into the manifest at `dir` (no dry-run).
@@ -817,6 +853,7 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
                 .map(|s| s.name.clone())
                 .collect(),
             instructions: Vec::new(),
+            hooks: Vec::new(),
         });
     }
 
@@ -886,8 +923,33 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
                 servers: spec.server.iter().map(|_| candidate.name.clone()).collect(),
                 skills: spec.skills.iter().map(|s| s.name.clone()).collect(),
                 instructions: Vec::new(),
+                hooks: Vec::new(),
             })
         }
+        CandidateKind::Hook(_) => {
+            let manifest = &ctx.loaded.manifest;
+            if manifest.hooks.contains_key(&candidate.name) {
+                anyhow::bail!("hook '{}' already exists", candidate.name);
+            }
+            let original = fs::read_to_string(&ctx.loaded.manifest_path)?;
+            // Hooks are global (not profile-scoped); ignore any passed profile.
+            let body = serde_json::to_value(candidate.to_hook())?;
+            let new_text = build_manifest_with(&original, "hooks", &candidate.name, &body, None)?;
+            crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
+                .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
+            Ok(AddedMembers {
+                hooks: vec![candidate.name.clone()],
+                ..Default::default()
+            })
+        }
+        CandidateKind::Extension(ext) => anyhow::bail!(
+            "'{}' is a native extension — executable in-process code that `add from` does not \
+             install. Reference it in [extensions.{}] with target = \"{}\", then run \
+             `agentstack lock`.",
+            candidate.name,
+            candidate.name,
+            ext.target
+        ),
     }
 }
 

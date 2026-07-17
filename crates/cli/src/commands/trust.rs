@@ -159,6 +159,88 @@ fn grant(base: &Path) -> Result<()> {
         );
     }
 
+    // Native extensions (D6): executable add-on code delivered into a
+    // harness's own extension directory. It runs INSIDE the harness process,
+    // outside the policy ceiling — the pin is the only governance there is,
+    // so unpinned AND drifted both block, like the D3 executable surface.
+    if !m.extensions.is_empty() {
+        println!(
+            "  native extensions (EXECUTABLE — run inside the harness process; agentstack pins the bytes but cannot govern them at runtime):"
+        );
+        let store = crate::store::Store::default_store();
+        for (name, ext) in &m.extensions {
+            use crate::resolve::{ExtensionLockStatus, ExtensionOrigin};
+            let dest = format!("→ {}", ext.target);
+            // Read-only review: never fetch a git source here. An un-cached git
+            // extension surfaces as offline, exactly like a skill.
+            let report = crate::resolve::extension_lock_status(
+                name,
+                ext,
+                &dir,
+                &library,
+                &lib_home,
+                &store,
+                &lock,
+                crate::resolve::ResolveMode::NoFetch,
+            );
+            let origin_word = match report.origin {
+                Some(ExtensionOrigin::Inline) => "inline",
+                Some(ExtensionOrigin::Library) => "library",
+                None => "?",
+            };
+            match report.status {
+                ExtensionLockStatus::Matches => {
+                    println!("  {} {name} {dest}   [{origin_word}, pinned]", "▶".yellow());
+                }
+                ExtensionLockStatus::MissingLockEntry => {
+                    println!(
+                        "  {} {name} {dest}   [{origin_word}, {}]",
+                        "✗".red(),
+                        "unpinned".red()
+                    );
+                    blockers.push((
+                        name.clone(),
+                        "extension unpinned — run `agentstack lock`".to_string(),
+                    ));
+                }
+                ExtensionLockStatus::ChecksumDrift { .. }
+                | ExtensionLockStatus::RevDrift { .. } => {
+                    println!(
+                        "  {} {name} {dest}   [{origin_word}, {}]",
+                        "✗".red(),
+                        "DRIFTED from lock".red()
+                    );
+                    blockers.push((
+                        name.clone(),
+                        "extension content drifted from lock".to_string(),
+                    ));
+                }
+                ExtensionLockStatus::TargetDrift { locked, .. } => {
+                    println!(
+                        "  {} {name} {dest}   [{origin_word}, {}]",
+                        "✗".red(),
+                        format!("RETARGETED since locked (was '{locked}')").red()
+                    );
+                    blockers.push((
+                        name.clone(),
+                        "extension target changed since locked — run `agentstack lock`".to_string(),
+                    ));
+                }
+                // Reproducibility can't be checked offline; not a blocker —
+                // same posture as skills' un-cached git sources.
+                ExtensionLockStatus::NotAvailableOffline { .. } => println!(
+                    "  {} {name} {dest}   [{origin_word}, {}]",
+                    "▶".yellow(),
+                    "offline — pin unverified".yellow()
+                ),
+                ExtensionLockStatus::ResolveFailed { error } => {
+                    println!("  {} {name} {dest}: {}", "✗".red(), error.red());
+                    blockers.push((name.clone(), error));
+                }
+            }
+        }
+    }
+
     // Skills, reviewed like servers: name + origin + pin status. Their bodies
     // are exactly the bytes the trust digest does NOT cover, so the pin is
     // the only thing binding what the human reviews to what gets served.

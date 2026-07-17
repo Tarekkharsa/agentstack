@@ -10,7 +10,7 @@ pub mod registry;
 use indexmap::IndexMap;
 
 use crate::catalog;
-use crate::manifest::{Server, ServerType};
+use crate::manifest::{Hook, Server, ServerType};
 
 /// How to install a discovered capability.
 #[derive(Debug, Clone)]
@@ -58,6 +58,26 @@ pub struct PackSpec {
     pub targets: Vec<String>,
 }
 
+/// A native-extension reference inside a candidate. Extensions are harness-
+/// specific executable add-ons; a library extension carries the one adapter it
+/// `target`s. Discovery-only today — surfaced by `search`, not installed by
+/// `add` (extensions are referenced by name in `[extensions.*]`).
+#[derive(Debug, Clone)]
+pub struct ExtensionRef {
+    pub name: String,
+    /// The one adapter id the extension's code is written against.
+    pub target: String,
+}
+
+/// A declarative-hook reference inside a candidate. A hook is a flat definition
+/// (event/command/args/…), so — unlike a server's `Install` shape — the candidate
+/// carries the whole `Hook`, which `add` copies straight into `[hooks.<name>]`.
+#[derive(Debug, Clone)]
+pub struct HookRef {
+    pub name: String,
+    pub hook: Hook,
+}
+
 /// What kind of capability a candidate installs.
 #[derive(Debug, Clone)]
 pub enum CandidateKind {
@@ -67,6 +87,13 @@ pub enum CandidateKind {
     Skill(SkillRef),
     /// A vendor pack (server + skills + instructions installed as one unit).
     Pack(PackSpec),
+    /// A native harness extension in the central library — executable in-process
+    /// code, discovery-only (referenced by name in `[extensions.*]`, not added
+    /// through `add from`).
+    Extension(ExtensionRef),
+    /// A declarative lifecycle hook in the central library. `add from` copies the
+    /// definition into the project's inline `[hooks.<name>]` table.
+    Hook(HookRef),
 }
 
 /// A normalized search result from any provider.
@@ -132,6 +159,22 @@ impl Candidate {
                 runs_code: false,
                 needs_secret: false,
             },
+            // Extensions are the strongest "runs code" signal of any kind: their
+            // bytes execute in-process at full user permission, ungoverned at
+            // runtime (design doc §7).
+            CandidateKind::Extension(_) => Trust {
+                namespaced,
+                runs_code: true,
+                needs_secret: false,
+            },
+            // A hook runs a command on a harness lifecycle event — always code.
+            // It needs a secret when the command or an arg carries a `${REF}`.
+            CandidateKind::Hook(h) => Trust {
+                namespaced,
+                runs_code: true,
+                needs_secret: h.hook.command.contains("${")
+                    || h.hook.args.iter().any(|a| a.contains("${")),
+            },
             CandidateKind::Pack(spec) => {
                 let server = spec.server.as_ref().map(|i| i.trust(namespaced));
                 Trust {
@@ -153,8 +196,19 @@ impl Candidate {
                 .as_ref()
                 .expect("to_server called on a pack with no server"),
             CandidateKind::Skill(_) => panic!("to_server called on a skill candidate"),
+            CandidateKind::Extension(_) => panic!("to_server called on an extension candidate"),
+            CandidateKind::Hook(_) => panic!("to_server called on a hook candidate"),
         };
         install.to_server_named(&self.name)
+    }
+
+    /// The manifest [`Hook`] this candidate installs. Only valid for hook
+    /// candidates — `add from` writes it verbatim into `[hooks.<name>]`.
+    pub fn to_hook(&self) -> Hook {
+        match &self.kind {
+            CandidateKind::Hook(h) => h.hook.clone(),
+            _ => panic!("to_hook called on a non-hook candidate"),
+        }
     }
 }
 
@@ -364,11 +418,60 @@ impl Provider for LibraryProvider {
                 }
             }
         }
+        // Extensions: match name OR the stored one-line description (extensions
+        // carry no `SKILL.md`, so the index field is the description), exactly
+        // like skills.
+        for entry in &self.library.extensions {
+            let desc = entry.description.clone();
+            let name_hit = entry.name.to_ascii_lowercase().contains(&q);
+            let desc_hit = desc
+                .as_deref()
+                .is_some_and(|d| d.to_ascii_lowercase().contains(&q));
+            if q.is_empty() || name_hit || desc_hit {
+                out.push(Candidate {
+                    id: entry.name.clone(),
+                    name: entry.name.clone(),
+                    description: desc.unwrap_or_default(),
+                    source: "library",
+                    kind: CandidateKind::Extension(ExtensionRef {
+                        name: entry.name.clone(),
+                        target: entry.target.clone(),
+                    }),
+                });
+            }
+        }
+        // Hooks: match the reference name (the index carries no description, like
+        // servers). A definition that won't load is skipped rather than failing
+        // the whole search.
+        for entry in &self.library.hooks {
+            if q.is_empty() || entry.name.to_ascii_lowercase().contains(&q) {
+                if let Some(hook) = self.load_hook_def(&entry.name) {
+                    out.push(Candidate {
+                        id: entry.name.clone(),
+                        name: entry.name.clone(),
+                        description: String::new(),
+                        source: "library",
+                        kind: CandidateKind::Hook(HookRef {
+                            name: entry.name.clone(),
+                            hook,
+                        }),
+                    });
+                }
+            }
+        }
         out
     }
 }
 
 impl LibraryProvider {
+    /// Load a central-library hook definition (`<lib_home>/hooks/<name>.toml`).
+    /// Best-effort: an unreadable or invalid definition yields `None`.
+    fn load_hook_def(&self, name: &str) -> Option<Hook> {
+        let path = self.lib_home.join("hooks").join(format!("{name}.toml"));
+        let text = std::fs::read_to_string(path).ok()?;
+        toml::from_str(&text).ok()
+    }
+
     /// Load a central-library server definition (`<lib_home>/servers/<name>.toml`)
     /// and map it to an [`Install`] for display. Best-effort: an unreadable or
     /// invalid definition yields `None`, so the server is omitted rather than
@@ -568,6 +671,46 @@ mod tests {
         assert_eq!(by_desc[0].source, "library");
 
         // No spurious hits.
+        assert!(provider.search("no-such-token", 10).is_empty());
+    }
+
+    #[test]
+    fn library_provider_surfaces_extensions_by_name_and_description() {
+        use crate::library::{Library, LibraryExtension};
+
+        let mut library = Library::default();
+        library.upsert_extension(LibraryExtension {
+            name: "checkpoint".into(),
+            source: "path".into(),
+            target: "pi".into(),
+            path: Some("checkpoint".into()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: None,
+            // A unique word only in the stored description.
+            description: Some("Guards against zzquokkaword drift each turn.".into()),
+            version: None,
+            provenance: Some("manual".into()),
+        });
+        let provider = LibraryProvider {
+            library,
+            lib_home: std::path::PathBuf::from("/does/not/matter"),
+        };
+
+        // By name, as an Extension candidate carrying its target.
+        let by_name = provider.search("checkpoint", 10);
+        assert_eq!(by_name.len(), 1);
+        assert_eq!(by_name[0].source, "library");
+        match &by_name[0].kind {
+            CandidateKind::Extension(ext) => assert_eq!(ext.target, "pi"),
+            other => panic!("expected an extension candidate, got {other:?}"),
+        }
+        // Extensions run code: the trust signal must say so.
+        assert!(by_name[0].trust().runs_code);
+
+        // By a unique word in the stored description, and no spurious hits.
+        assert_eq!(provider.search("zzquokkaword", 10).len(), 1);
         assert!(provider.search("no-such-token", 10).is_empty());
     }
 

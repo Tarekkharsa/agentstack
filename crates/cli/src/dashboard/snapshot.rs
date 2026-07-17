@@ -410,6 +410,17 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 Scope::Global => "global",
                 Scope::Project => "project",
             };
+            // The ownership-ledger artifacts in this dir, so a discovered entry
+            // agentstack rendered can be labelled managed-by-agentstack (label
+            // only — read-only contract, no write path from the dashboard). A
+            // missing/unreadable ledger just yields no managed names.
+            let managed: std::collections::BTreeSet<String> = d
+                .extensions_dir_for(scope, &ctx.dir)
+                .and_then(|dir| crate::render::extensions::managed_artifacts(&dir).ok())
+                .into_iter()
+                .flatten()
+                .map(|m| m.filename)
+                .collect();
             for e in d.discover_extensions(scope, &ctx.dir) {
                 extensions.push(json!({
                     "harness": d.id,
@@ -418,6 +429,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                     "isSymlink": e.is_symlink,
                     "broken": e.broken,
                     "scope": label,
+                    "managedByAgentstack": managed.contains(&e.name),
                 }));
             }
         }
