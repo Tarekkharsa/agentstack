@@ -108,7 +108,8 @@ pub enum Command {
     #[command(hide = true)]
     Lib(LibArgs),
 
-    /// Pull hand-added servers from a target config back into the manifest.
+    /// Pull hand-added servers and hand-edited fields from target configs
+    /// back into the manifest.
     #[command(hide = true)]
     Adopt(AdoptArgs),
 

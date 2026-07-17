@@ -56,8 +56,13 @@ pub fn merge_with_removals(
         section.remove(name);
     }
     for (name, body) in entries {
-        let table = value_to_table(body, nested_as_subtable)
+        let mut table = value_to_table(body, nested_as_subtable)
             .with_context(|| format!("rendering server '{name}' to TOML"))?;
+        // Replacing an existing table would drop the comments sitting above
+        // its `[header]` (they live in the table's decor) — carry them over.
+        if let Some(old) = section.get(name).and_then(Item::as_table) {
+            *table.decor_mut() = old.decor().clone();
+        }
         section.insert(name, Item::Table(table));
     }
 
