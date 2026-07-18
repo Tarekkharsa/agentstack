@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in agentstack isn't behaving as it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect instead?
+      description: Include what you expected to happen alongside what actually did.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands you ran, in order.
+      render: sh
+    validations:
+      required: true
+  - type: textarea
+    id: version
+    attributes:
+      label: agentstack --version output
+      render: sh
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. macOS 15.1, Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: manifest
+    attributes:
+      label: Relevant manifest snippet
+      description: >-
+        **Redact secrets and tokens before pasting.** `${REF}` placeholders
+        are safe to include — resolved secret values are not. Trim to the
+        section that shows the problem.
+      render: toml
+    validations:
+      required: false

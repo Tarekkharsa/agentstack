@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose something agentstack should do that it doesn't yet
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you running into?
+      description: The situation today, before any proposed change.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What you'd want agentstack to do instead, concretely.
+    validations:
+      required: true
+  - type: dropdown
+    id: pr
+    attributes:
+      label: Would you be willing to open a PR for this?
+      options:
+        - "Yes"
+        - "Maybe, with some guidance"
+        - "No"
+    validations:
+      required: true
