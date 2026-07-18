@@ -210,6 +210,14 @@
   .fcard h3 a:hover { color: var(--accent); }
   .fcard p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.55; }
 
+  /* ---- category filter chips (JS-injected; no-JS users see the full page) ---- */
+  .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 1.3rem 0 0; }
+  .chips .chip-label { font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); margin-right: 0.15rem; }
+  .chip { font: 600 0.78rem var(--mono); color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0.3rem 0.85rem; cursor: pointer; transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease; }
+  .chip:hover { color: var(--accent); border-color: var(--accent-line); }
+  .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .chip[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+
   /* ---- animated example viz (scroll-triggered) ---- */
   .viz { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 1.4rem 1.3rem 1.5rem; margin: 1.2rem 0 0.4rem; box-shadow: var(--shadow-sm); }
   .viz-cap { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); margin: 0 0 1.15rem; display: flex; align-items: center; gap: 0.5rem; }
@@ -301,10 +309,10 @@
           <li><a href="#e2"><span class="n">2</span>Fan out to several CLIs</a></li>
           <li><a href="#e3"><span class="n">3</span>Secrets out of the file</a></li>
           <li><a href="#e4"><span class="n">4</span>HTTP server with auth</a></li>
-          <li><a href="#e5"><span class="n">5</span>Native passthrough</a></li>
+          <li><a href="#e5"><span class="n">5</span>A native key for one CLI</a></li>
           <li><a href="#e6"><span class="n">6</span>Add skills</a></li>
           <li><a href="#e7"><span class="n">7</span>Task-specific profiles</a></li>
-          <li><a href="#e8"><span class="n">8</span>Instruction files</a></li>
+          <li><a href="#e8"><span class="n">8</span>Share house rules across CLIs</a></li>
           <li><a href="#e9"><span class="n">9</span>The everyday loop</a></li>
           <li><a href="#e14"><span class="n">14</span>The central library</a></li>
           <li><a href="#e15"><span class="n">15</span>Sync across machines</a></li>
@@ -432,20 +440,20 @@
     <div class="toc" aria-label="Contents">
       <h2>Contents</h2>
       <div class="toc-groups">
-        <div class="g"><span>Configure</span>
+        <div class="g" data-cat="configure"><span>Configure</span>
           <span class="gl">Basics</span>
           <ol>
             <li value="1"><a href="#e1">The smallest manifest</a></li>
             <li value="2"><a href="#e2">Fan out to several CLIs</a></li>
             <li value="3"><a href="#e3">Keep secrets out of the file</a></li>
             <li value="4"><a href="#e4">An HTTP server with auth</a></li>
-            <li value="5"><a href="#e5">Per-CLI native passthrough</a></li>
+            <li value="5"><a href="#e5">A native key for one CLI</a></li>
           </ol>
           <span class="gl">Structure</span>
           <ol>
             <li value="6"><a href="#e6">Add skills</a></li>
             <li value="7"><a href="#e7">Task-specific profiles</a></li>
-            <li value="8"><a href="#e8">Instruction files</a></li>
+            <li value="8"><a href="#e8">Share house rules across CLIs</a></li>
             <li value="26"><a href="#e26">Native extensions</a></li>
             <li value="9"><a href="#e9">The everyday loop</a></li>
           </ol>
@@ -461,7 +469,7 @@
             <li value="25"><a href="#e25">Personal layer &amp; owned servers</a></li>
           </ol>
         </div>
-        <div class="g"><span>Protect</span>
+        <div class="g" data-cat="protect"><span>Protect</span>
           <span class="gl">Security</span>
           <ol>
             <li value="10"><a href="#e10">The MCP tool firewall</a></li>
@@ -472,14 +480,14 @@
             <li value="23"><a href="#e23">The CI trust gate</a></li>
           </ol>
         </div>
-        <div class="g"><span>Run confined</span>
+        <div class="g" data-cat="run-confined"><span>Run confined</span>
           <span class="gl">Runtime</span>
           <ol>
             <li value="18"><a href="#e18">Sandboxed runs + egress</a></li>
             <li value="22"><a href="#e22">Governed TypeScript</a></li>
           </ol>
         </div>
-        <div class="g"><span>Observe</span>
+        <div class="g" data-cat="observe"><span>Observe</span>
           <span class="gl">Observe</span>
           <ol>
             <li value="20"><a href="#e20">Audit, analyze, report</a></li>
@@ -516,13 +524,13 @@
   </section>
 
   <!-- ============ CATEGORY 1 · CONFIGURE ============ -->
-  <div class="cathead">
+  <div class="cathead" data-cat="configure">
     <p class="catname">Configure</p>
     <p class="cmdline"><b>$</b> agentstack apply</p>
   </div>
 
   <!-- ============ BASICS ============ -->
-  <section class="grp" id="basics">
+  <section class="grp" id="basics" data-cat="configure">
     <p class="eyebrow">Basics</p>
     <h2>Get a server into your tools</h2>
 
@@ -615,8 +623,9 @@ headers = { Authorization = "Bearer ${KIBANA_TOKEN}" }</code></pre>
       <pre><code>agentstack doctor --live               <span class="cm"># real MCP handshake: name + tool count, or the exact error</span></code></pre>
       <button class="copybtn" data-copy="agentstack doctor --live">copy</button>
     </div>
+    <p class="muted small">Run it before an agent depends on the server: a stale token or wrong path surfaces now — with the exact transport error — instead of mid-session.</p>
 
-    <h3 class="ex" id="e5"><span class="num">5</span> Per-CLI native passthrough</h3>
+    <h3 class="ex" id="e5"><span class="num">5</span> A native key for one CLI</h3>
     <p class="intent">When one CLI needs a native key another doesn't, pass it through verbatim under <code>extra.&lt;cli&gt;</code>.</p>
     <pre><code>[servers.filesystem]
 type = "stdio"
@@ -625,10 +634,11 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "./"]
 
 [servers.filesystem.extra.codex]
 startup_timeout_sec = 20               <span class="cm"># Codex sees this; the others don't</span></code></pre>
+    <p class="muted small">Only Codex's generated config carries <code>startup_timeout_sec</code>; every other CLI's stays untouched. Keys under <code>extra.&lt;cli&gt;</code> are copied through verbatim, never interpreted.</p>
   </section>
 
   <!-- ============ STRUCTURE ============ -->
-  <section class="grp" id="structure">
+  <section class="grp" id="structure" data-cat="configure">
     <p class="eyebrow">Structure</p>
     <h2>Organize capabilities by task</h2>
 
@@ -665,11 +675,12 @@ skills  = ["writing-style"]</code></pre>
     <p class="result">Result</p>
     <p class="muted small">Load only what the task needs — fewer tools on the wire means fewer tokens billed every turn (see <a href="#e21">§21</a>).</p>
 
-    <h3 class="ex" id="e8"><span class="num">8</span> Instruction files (house rules)</h3>
+    <h3 class="ex" id="e8"><span class="num">8</span> Share house rules across CLIs</h3>
     <p class="intent">Compile shared instructions into each CLI's native file (<code>CLAUDE.md</code>, <code>AGENTS.md</code>…) from one source.</p>
     <pre><code>[instructions.house_rules]
 path = "./house-rules.md"
 <span class="cm"># targets = ["*"]   # optional: which CLIs get it (default: all)</span></code></pre>
+    <p class="muted small">One source becomes every CLI's native instruction file. Edit it, re-run <code>agentstack instructions --write</code>, and all targets update together — no per-tool copy-paste.</p>
 
     <h3 class="ex" id="e26"><span class="num">26</span> Native extensions</h3>
     <p class="intent">Manage a harness's native executable add-ons — pi's TypeScript extensions, OpenCode's JS plugins — the way <code>[skills.*]</code> manages skill dirs. The <strong>highest-risk</strong> capability agentstack delivers: the code runs inside the harness at full user permission, outside every policy ceiling. agentstack pins and delivers the bytes; it never executes or governs them at runtime.</p>
@@ -709,7 +720,7 @@ agentstack doctor       <span class="cm"># verify wiring; every warning names it
   </section>
 
   <!-- ============ SCALE ============ -->
-  <section class="grp" id="scale">
+  <section class="grp" id="scale" data-cat="configure">
     <p class="eyebrow">Scale</p>
     <h2>Reuse capabilities everywhere</h2>
 
@@ -728,7 +739,7 @@ agentstack doctor       <span class="cm"># verify wiring; every warning names it
   </section>
 
   <!-- ============ EXTEND ============ -->
-  <section class="grp" id="operate">
+  <section class="grp" id="operate" data-cat="configure">
     <p class="eyebrow">Extend</p>
     <h2>Extend it</h2>
 
@@ -757,13 +768,13 @@ owner = "codex"                                 <span class="cm"># codex owns th
   </section>
 
   <!-- ============ CATEGORY 2 · PROTECT ============ -->
-  <div class="cathead">
+  <div class="cathead" data-cat="protect">
     <p class="catname">Protect</p>
     <p class="cmdline"><b>$</b> agentstack trust . &nbsp;·&nbsp; <b>$</b> agentstack guard install</p>
   </div>
 
   <!-- ============ SECURITY ============ -->
-  <section class="grp" id="security">
+  <section class="grp" id="security" data-cat="protect">
     <p class="eyebrow">Security</p>
     <h2>Constrain what agents may do</h2>
 
@@ -910,13 +921,13 @@ agentstack doctor --ci                         <span class="cm"># fail on errors
   </section>
 
   <!-- ============ CATEGORY 3 · RUN CONFINED ============ -->
-  <div class="cathead">
+  <div class="cathead" data-cat="run-confined">
     <p class="catname">Run confined</p>
     <p class="cmdline"><b>$</b> agentstack run --sandbox [--lockdown]</p>
   </div>
 
   <!-- ============ RUNTIME ============ -->
-  <section class="grp" id="runtime">
+  <section class="grp" id="runtime" data-cat="run-confined">
     <p class="eyebrow">Runtime</p>
     <h2>Confine the run</h2>
 
@@ -973,13 +984,13 @@ max_output_bytes = 131072</code></pre>
   </section>
 
   <!-- ============ CATEGORY 4 · OBSERVE ============ -->
-  <div class="cathead">
+  <div class="cathead" data-cat="observe">
     <p class="catname">Observe</p>
     <p class="cmdline"><b>$</b> agentstack report calls &nbsp;·&nbsp; <b>$</b> agentstack doctor --deep</p>
   </div>
 
   <!-- ============ OBSERVE ============ -->
-  <section class="grp" id="observe">
+  <section class="grp" id="observe" data-cat="observe">
     <p class="eyebrow">Observe</p>
     <h2>See what happened</h2>
 
@@ -1122,6 +1133,57 @@ agentstack proxy report                       <span class="cm"># ranks tokens/tu
     for (const e of entries) e.target.classList.toggle("in", e.isIntersecting);
   }, { threshold: 0.4 });
   for (const v of document.querySelectorAll("[data-viz]")) vizObserver.observe(v);
+
+  // Category filter chips. JS-injected on purpose: no-JS users never see the
+  // chips and get the full page unchanged. A chip toggles the `hidden`
+  // attribute on each category's heading, example sections, and Contents
+  // group — display text and anchors are untouched, so every #eN link still
+  // resolves. `data-filter` (not `data-cat`) tags the chips, so they can never
+  // match the tagged-content selector and hide themselves.
+  (function () {
+    const cats = [
+      ["all", "All"],
+      ["configure", "Configure"],
+      ["protect", "Protect"],
+      ["run-confined", "Run confined"],
+      ["observe", "Observe"],
+    ];
+    const toc = document.querySelector(".toc");
+    const tagged = document.querySelectorAll(
+      ".cathead[data-cat], main section[data-cat], .toc-groups .g[data-cat]"
+    );
+    if (!toc || !tagged.length) return;
+
+    const bar = document.createElement("div");
+    bar.className = "chips";
+    bar.setAttribute("role", "group");
+    bar.setAttribute("aria-label", "Filter examples by category");
+    const label = document.createElement("span");
+    label.className = "chip-label";
+    label.textContent = "Filter";
+    bar.appendChild(label);
+
+    const chips = cats.map(([cat, text]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.textContent = text;
+      b.dataset.filter = cat;
+      b.setAttribute("aria-pressed", cat === "all" ? "true" : "false");
+      bar.appendChild(b);
+      return b;
+    });
+    toc.after(bar);
+
+    const apply = (cat) => {
+      for (const el of tagged) el.hidden = !(cat === "all" || el.dataset.cat === cat);
+      for (const c of chips) c.setAttribute("aria-pressed", String(c.dataset.filter === cat));
+    };
+    bar.addEventListener("click", (e) => {
+      const chip = e.target.closest(".chip");
+      if (chip) apply(chip.dataset.filter);
+    });
+  })();
 </script>
 
 </body>

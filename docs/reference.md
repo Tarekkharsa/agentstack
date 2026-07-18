@@ -3,17 +3,77 @@
 The complete, implemented-and-tested feature inventory. The
 [README](../README.md) is the tour; this is the map.
 
-**Contents:** [Core engine](#core-engine) ·
-[Where rendered files live](#where-rendered-files-live-three-modes) ·
-[Governance, trust, and secrets](#secrets-and-trust) ·
-[The central library](#the-central-library) ·
-[Capabilities](#capabilities) ·
-[Drift](#drift-adopt-or-apply) · [Dashboard](#dashboard) ·
-[Live runs](#live-runs-agentstack-run) ·
-[Agent-operable](#agent-operable-agentstack-mcp) ·
-[Optimize](#optimize-agentstack-optimize) · [All commands](#all-commands)
+**Contents**
+
+- [Core engine](#core-engine)
+  - [The manifest](#the-manifest)
+  - [Data-driven adapters](#data-driven-adapters)
+  - [Rendering and merging](#rendering-and-merging)
+  - [Owned servers (`owner = "codex"`)](#owned-servers-owner--codex)
+  - [State tracking](#state-tracking)
+  - [Scopes](#scopes)
+- [Where rendered files live (three modes)](#where-rendered-files-live-three-modes)
+- [Secrets and trust](#secrets-and-trust)
+  - [Secret resolution](#secret-resolution)
+  - [Where lifted secrets go (`init`)](#where-lifted-secrets-go-init)
+  - [Unresolved secrets block writes](#unresolved-secrets-block-writes)
+  - [Governance (`[policy]`)](#governance-policy)
+  - [MCP firewall (`[policy.tools]`)](#mcp-firewall-policytools)
+  - [Egress rules (`[policy.egress]`)](#egress-rules-policyegress)
+  - [Secret access (`[policy.secrets]`)](#secret-access-policysecrets)
+  - [Filesystem scopes (`[policy.filesystem]`)](#filesystem-scopes-policyfilesystem)
+  - [Call log](#call-log)
+  - [Content scanning](#content-scanning)
+  - [`doctor --live`](#doctor---live)
+  - [One undo verb: `restore`](#one-undo-verb-restore)
+  - [`doctor` shows what you use](#doctor-shows-what-you-use)
+- [The central library](#the-central-library)
+  - [Layout and name resolution](#layout-and-name-resolution)
+  - [Pinning and provenance](#pinning-and-provenance)
+  - [Adding capabilities](#adding-capabilities)
+  - [Syncing across machines (`lib sync`)](#syncing-across-machines-lib-sync)
+- [Capabilities](#capabilities)
+  - [Package manager](#package-manager)
+  - [Selective skills via profiles](#selective-skills-via-profiles)
+  - [Instruction files](#instruction-files)
+  - [The machine layer](#the-machine-layer)
+  - [Native settings](#native-settings)
+  - [Lifecycle hooks](#lifecycle-hooks)
+  - [Native extensions](#native-extensions)
+  - [Search across providers](#search-across-providers)
+  - [Git-hosted versioned packs](#git-hosted-versioned-packs)
+  - [`adopt` and `add`](#adopt-and-add)
+  - [`report usage` (usage analytics)](#report-usage-usage-analytics)
+  - [Wire proxy (`proxy`)](#wire-proxy-proxy)
+  - [`export` / `import`](#export--import)
+- [Drift: adopt or apply?](#drift-adopt-or-apply)
+- [Ephemeral sessions (`agentstack session`)](#ephemeral-sessions-agentstack-session)
+- [Live runs (`agentstack run`)](#live-runs-agentstack-run)
+  - [Execution posture](#execution-posture)
+  - [The Protected tier in detail (`run --locked`)](#the-protected-tier-in-detail-run---locked)
+- [Agent-operable (`agentstack mcp`)](#agent-operable-agentstack-mcp)
+  - [Transparent mode (`--transparent`)](#transparent-mode---transparent)
+  - [The zero-file bridge (`--auto-project` + `trust`)](#the-zero-file-bridge---auto-project--trust)
+  - [MCP profile leases](#mcp-profile-leases-one-connection-one-capability-fence)
+  - [Compact proxied surface + code mode](#compact-proxied-surface--code-mode)
+  - [Experimental `tools_execute`](#experimental-tools_execute)
+- [Dashboard](#dashboard)
+- [Optimize (`agentstack optimize`)](#optimize-agentstack-optimize)
+- [Field notes and addenda](#field-notes-and-addenda)
+  - [Launch timing and switching](#launch-timing-and-switching)
+  - [Session and run recovery](#session-and-run-recovery)
+  - [Lease survival across a mid-connection change](#lease-survival-across-a-mid-connection-change)
+  - [Central library: server definitions and bundled catalog](#central-library-server-definitions-and-bundled-catalog)
+  - [`tools_execute` cancellation](#tools_execute-cancellation)
+- [All commands](#all-commands)
+- [Everything shipped so far](#everything-shipped-so-far)
 
 ## Core engine
+
+The machinery every other section builds on: how one manifest is loaded,
+validated, and rendered into native config for thirteen agent CLIs — and how a
+later hand-edit is caught. Skip it unless you want the internals of how intent
+becomes config.
 
 ### The manifest
 
@@ -213,6 +273,11 @@ from the same records, so alternating them never churns a committed
 
 ## Secrets and trust
 
+The enforcement core: how a secret resolves, where a policy narrows what a
+server may do, and what every brokered call records. Read it if you run
+untrusted repos, resolve credentials on this machine, or want a machine ceiling
+no project can loosen.
+
 ### Secret resolution
 
 The chain: process env → **varlock** → **OS keychain** → project `.env`.
@@ -397,10 +462,11 @@ or classifies the error (auth / http / connect).
 
 Every write agentstack makes (servers, settings, hooks, instructions — even
 the owned-server manifest refresh) is captured in the history engine before it
-lands. `agentstack restore` lists the recorded changes; `restore <id> --write`
-(unique prefix) or `restore --last --write` reverts one — the applies the
-dashboard's Activity tab lists. `restore <adapter>` keeps the original single-slot
-config restore as a fallback. Reverted files simply show up as pending again.
+lands. `agentstack restore` lists the recorded changes — the same applies the
+dashboard's Activity tab shows. `restore <id> --write` (unique prefix) or
+`restore --last --write` reverts one. `restore <adapter>` keeps the original
+single-slot config restore as a fallback. Reverted files simply show up as
+pending again.
 
 ### `doctor` shows what you use
 
@@ -493,6 +559,10 @@ skills it changed, so long-accepted content isn't re-flagged on every sync.
 
 ## Capabilities
 
+The kinds of thing a profile can carry — skills, servers, instructions,
+settings, hooks, extensions, packs — and the commands that add, search, and
+account for them. It is a menu; jump to the capability you need.
+
 ### Package manager
 
 Skills declare a source (`path` or `git`); `install` fetches them into
@@ -504,9 +574,9 @@ inline `[skills.*]` entry) keep their lock pins through the reconcile pass —
 pin or refresh those with `agentstack lock`.
 
 Skill and library content digests always hash current bytes; there is no digest
-cache on the verification path. (Older versions kept a stat-fingerprint cache and
+cache on the verification path. Older versions kept a stat-fingerprint cache and
 may leave a harmless orphaned `~/.agentstack/digest-cache.json`; it is unused and
-safe to delete.)
+safe to delete.
 
 ### Selective skills via profiles
 
@@ -766,21 +836,6 @@ by which side holds the truth:
   pending deletions — until you decide. Prune them with an explicit
   `apply --prune-foreign` (it still works after the guarded write recorded
   its own set), or `adopt` them into the current manifest.
-
-## Dashboard
-
-An embedded localhost server + a self-contained UI (shadcn aesthetic,
-hand-written CSS — no Node, no framework, still one `cargo build`):
-`agentstack dashboard` opens a **read-only** cross-harness view with secrets,
-skills, settings, profiles, runs, and usage panels. It shows state, previews
-diffs, and **runs doctor** (full check-up rendered in the Health tab), but it
-never writes: the server exposes read (GET) routes only, so a POST to any path
-404s — the read-only property is a property of the router, not the UI, and a
-route-matrix test pins it. Every change happens through the CLI; where a
-control would live, the dashboard shows the command to copy (e.g. `agentstack
-apply --write`, `agentstack secret set <REF>`, `agentstack use <profile>
---write`). Bound to 127.0.0.1, token-gated, it never exposes secret values. The
-tabs and views are walked through in [dashboard.md](dashboard.md).
 
 ## Ephemeral sessions (`agentstack session`)
 
@@ -1102,9 +1157,9 @@ runnable stdio lifecycle with assertions that no native artifacts are created.
 
 ### Compact proxied surface + code mode
 
-`agentstack mcp` also **proxies** the project's MCP servers — HTTP and stdio
-(stdio children spawn lazily in their own process group, get `${REF}`s resolved
-into their env per session, and are tree-killed when the session ends). Instead of
+`agentstack mcp` also **proxies** the project's MCP servers — HTTP and stdio.
+Stdio children spawn lazily in their own process group, get `${REF}`s resolved
+into their env per session, and are tree-killed when the session ends. Instead of
 dumping every upstream tool into `tools/list` (context bloat that grows with each
 server you add), the proxied surface collapses behind two stable tools:
 
@@ -1194,6 +1249,25 @@ hardening pass completed on 2026-07-13. This surface remains experimental while
 image provenance/SBOM publication and longer-running soak evidence remain
 outstanding.
 
+## Dashboard
+
+The one place to *see* everything the sections above manage, across every
+harness, without running a write. Open it when you want to look, not change —
+every action still happens through the CLI.
+
+An embedded localhost server + a self-contained UI (shadcn aesthetic,
+hand-written CSS — no Node, no framework, still one `cargo build`):
+`agentstack dashboard` opens a **read-only** cross-harness view with secrets,
+skills, settings, profiles, runs, and usage panels. It shows state, previews
+diffs, and **runs doctor** (full check-up rendered in the Health tab), but it
+never writes: the server exposes read (GET) routes only, so a POST to any path
+404s — the read-only property is a property of the router, not the UI, and a
+route-matrix test pins it. Every change happens through the CLI; where a
+control would live, the dashboard shows the command to copy (e.g. `agentstack
+apply --write`, `agentstack secret set <REF>`, `agentstack use <profile>
+--write`). Bound to 127.0.0.1, token-gated, it never exposes secret values. The
+tabs and views are walked through in [dashboard.md](dashboard.md).
+
 ## Optimize (`agentstack optimize`)
 
 Turns the signals agentstack already collects — activation counts, the gateway
@@ -1280,6 +1354,10 @@ cancelled or timed-out run leaves no orphaned guest processes.
 
 ## All commands
 
+The full command surface in one place, kept honest by a test against the CLI's
+own command tree. Reach for it when you need the exact verb, flag, or
+subcommand.
+
 `setup`, `init` (`--global`, `--secrets env|keychain|skip`), `add`, `search`,
 `install` (`--locked`, `--allow-flagged`),
 `lock` (`--profile`; `--update [NAME]` re-resolves git skills, `--upgrade
@@ -1311,6 +1389,9 @@ This inventory is checked by a test against the CLI's own command list
 here.
 
 ## Everything shipped so far
+
+A single-glance census of every capability that exists today — the fastest way
+to confirm a feature is real before you go hunting for its section above.
 
 13 adapters · `init`/`add`/`apply`/`diff`/`use`/`instructions`/`adopt` ·
 package manager (`install`/`lock --update`/`remove` + lockfile) · central capability

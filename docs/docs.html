@@ -105,6 +105,19 @@
   .entries small { display: block; color: var(--muted); font-size: 0.78rem; line-height: 1.45; }
   .gh::after { content: " ↗"; color: var(--muted); font-size: 0.75em; }
 
+  /* "I want to…" task index — a quick, scannable two-column list of real
+     jobs, each linking straight to its answer. Lighter than the .entries
+     directory below it, so the two never read as the same thing. */
+  .jobs { display: grid; grid-template-columns: 1fr 1fr; gap: 0 2.2rem; margin: 0.7rem 0 0; padding: 0; list-style: none; }
+  @media (max-width: 640px) { .jobs { grid-template-columns: 1fr; } }
+  .jobs li { border-top: 1px solid var(--line-soft); }
+  .jobs li:nth-child(-n+2) { border-top: 0; } /* top row of the 2-col grid needs no divider */
+  @media (max-width: 640px) { .jobs li:nth-child(2) { border-top: 1px solid var(--line-soft); } }
+  .jobs a { display: flex; gap: 0.55rem; align-items: baseline; padding: 0.5rem 0.15rem; color: var(--ink); font-size: 0.9rem; line-height: 1.42; }
+  .jobs a::before { content: "›"; color: var(--accent); font-family: var(--mono); font-weight: 700; flex: none; }
+  .jobs a:hover { color: var(--accent); text-decoration: none; }
+  .jobs a code { font-size: 0.86em; }
+
   footer { border-top: 1px solid var(--line); margin-top: 3rem; }
   footer .bar { font-size: 0.85rem; color: var(--muted); }
 </style>
@@ -220,6 +233,26 @@
       the command that delivers it; entries marked ↗ open the source-of-truth
       Markdown on GitHub.
     </p>
+
+    <section class="sec" id="d-tasks">
+      <p class="kick">By task</p>
+      <h2>I want to…</h2>
+      <p class="cmdline">Jump straight to the answer. The full directory is below.</p>
+      <ul class="jobs">
+        <li><a href="start.html">set up every CLI I use in one pass</a></li>
+        <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#secrets-and-trust" class="gh">keep my tokens out of config files</a></li>
+        <li><a href="index.html#trust">try a repo I just cloned without trusting it</a></li>
+        <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo" class="gh">stop an agent from running <code>rm -rf</code></a></li>
+        <li><a href="index.html#modes">work across many repos with no files on disk</a></li>
+        <li><a href="index.html#sandbox">confine a run so it can't reach the network</a></li>
+        <li><a href="examples.html#e10">know what a server can do before I enable it</a></li>
+        <li><a href="examples.html#e20">see what an agent actually did</a></li>
+        <li><a href="index.html#manifest">pin and reproduce my exact setup</a></li>
+        <li><a href="index.html#team">share one reviewed setup with my team or CI</a></li>
+        <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library" class="gh">add a skill from a git repo</a></li>
+        <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#one-undo-verb-restore" class="gh">undo what agentstack wrote to my configs</a></li>
+      </ul>
+    </section>
 
     <section class="sec" id="d-start">
       <p class="kick">Start</p>
