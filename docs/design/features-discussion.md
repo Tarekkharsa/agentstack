@@ -161,11 +161,77 @@ This is principle 3 made concrete: the user should never wonder what a
 also persisted (e.g. `doctor --last-setup` or a pointer to the history log
 that `restore` already reads).
 
+## Doctor + drift (feature 2)
+
+### Investigated facts
+
+- The content scan runs at capability entry (`lib add`, `add from`,
+  `install` — flagged content blocks unless `--allow-flagged`) and on demand
+  (`doctor --deep`); `doctor --ci` always includes it. `init` does not scan —
+  correctly, since init imports server definitions, not skill bodies.
+- `--deep` is discoverable only via help text; nothing suggests it at the
+  natural moment (right after the first third-party skill lands).
+- `doctor --ci` is the team/CI surface (what the GitHub Action runs); solo
+  users have little direct use for it. Fine — but onboarding shouldn't
+  advertise it to them.
+
+### P8 — Teach `--deep` at the right moment
+
+Three moments, covering discovery without ever offering a do-nothing step:
+
+1. **Setup's closing doctor step asks** (maintainer proposal, 2026-07-18):
+   when the project has skills, the wizard offers the deep scan as an
+   explicit yes/no with help text underneath ("reads every skill and
+   instruction body for hidden Unicode and prompt-injection tricks; slow on
+   big libraries; re-run anytime with `agentstack doctor --deep`"). When
+   there are zero skills, setup does not ask — no empty questions. Init
+   itself stays promptless (it's the scriptable primitive; at init time
+   there is no content to scan yet).
+2. **Capability entry announces**: after an add/install brings in
+   third-party skill content, print one line — "content scanned — re-scan
+   anytime with `agentstack doctor --deep`".
+3. **Doctor's summary** can note when the last deep scan ran, so "never
+   scanned" is visible instead of silent.
+
+**Decided:** 1 and 2 yes. **Open:** whether doctor tracks last-deep-scan
+time (3) or stays stateless.
+
+### P9 — Lock-drift must explain itself
+
+Rule to surface: **lock drift is an error until you re-lock, and re-locking
+re-gates trust** (new pins = new consent). Users must meet this rule stated
+plainly, not discover it as a mysterious red X:
+
+- The doctor error for lock drift explains in one line why it's an error and
+  what re-locking implies for trust.
+- The modes/setup material (P4) mentions it wherever the lockfile is
+  introduced: "the lock is the consent anchor — editing it is a re-decision."
+
+**Decided:** yes. **Open:** whether `agentstack lock` itself should print
+"this will require re-trusting" *before* writing when the project is
+currently trusted (lean: yes — consent-affecting actions announce themselves).
+
+### P10 — Doctor's drift check must agree with diff (found live, 2026-07-18)
+
+Observed on the maintainer's machine: `agentstack diff --scope global` reports
+all targets in sync while `doctor` still warns "edited on disk since last
+apply" for Claude Code and Codex. Cause: those native configs double as live
+state stores (`~/.claude.json` is rewritten continuously by running
+sessions), and doctor's edited-on-disk signal compares the whole file against
+the last-apply record, while diff compares only the managed content. Result:
+a permanently flapping warning on any machine where the CLI is actually in
+use — which trains users to ignore doctor.
+
+Fix direction: doctor should use the same managed-content comparison diff
+uses (or auto-clear the warning when diff reports in-sync), and reserve
+edited-on-disk for changes inside the managed region.
+
+**Decided:** bug, fix it. **Open:** none — the comparison logic exists in
+diff already.
+
 ## Next features to discuss
 
 Walkthrough continues; discussion sections land here as we go:
-
-- `doctor` + drift (feature 2) — includes P5 above
 - guard (feature 3) — includes P3 above
 - trust gate + gateway (feature 4)
 - profiles / library / packs (feature 5)
