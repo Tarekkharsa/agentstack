@@ -51,9 +51,35 @@ pub fn dispatch(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     run(args, manifest_dir)
 }
 
+/// P9 heads-up: the lockfile is part of a project's consent surface (its bytes
+/// feed the trust digest), so re-locking a *currently trusted* project whose
+/// pins actually change invalidates that trust — new pins are new consent, and
+/// trust must be re-granted. Returns the one-line notice when that's the case,
+/// or `None` (untrusted project, or a byte-identical re-lock that changes
+/// nothing). Kept pure so the decision is unit-testable without a live project.
+pub(crate) fn relock_trust_notice(was_trusted: bool, pins_changed: bool) -> Option<&'static str> {
+    if was_trusted && pins_changed {
+        Some(
+            "this project is trusted — new pins are new consent, so its trust is now stale; \
+             re-review and re-grant with `agentstack trust .`",
+        )
+    } else {
+        None
+    }
+}
+
 pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
+
+    // P9: snapshot the consent state *before* pinning. If this project is
+    // currently trusted, changing its pins re-gates it — we surface that the
+    // moment the change is written, so the user is never silently left with
+    // stale trust. `check` recomputes the digest against the trust store; the
+    // lockfile bytes are what we compare afterward to know pins actually moved.
+    let trust_base = crate::manifest::project_root_of(&ctx.dir);
+    let was_trusted = crate::trust::check(&trust_base) == crate::trust::TrustState::Trusted;
+    let lock_before = std::fs::read(Lock::path(&ctx.dir)).ok();
 
     // Instructions are manifest-global, not profile-scoped: pin them
     // regardless of the profile selection (and even with zero profiles). The
@@ -101,6 +127,15 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         None => resolve_implicit_default(manifest, &ctx.dir, &library, &lib_home, &store)?,
     };
     record_lock(&ctx.dir, &skills, &servers, manifest, &library)?;
+
+    // P9: did the pins actually move? Compare the lockfile bytes to the
+    // pre-pin snapshot (the record_* helpers only rewrite the lock when
+    // something changed, so this is an exact "pins changed" signal). When they
+    // did and the project was trusted, warn that trust is now stale.
+    let lock_after = std::fs::read(Lock::path(&ctx.dir)).ok();
+    if let Some(notice) = relock_trust_notice(was_trusted, lock_before != lock_after) {
+        println!("{} {notice}", "⚠".yellow());
+    }
 
     let from = match &profiles {
         Some(p) => format!("{} profile(s)", p.len()),
@@ -629,6 +664,18 @@ mod tests {
             .unwrap()
             .get_extension("checkpoint")
             .is_none());
+    }
+
+    // P9 witness: the re-lock trust notice fires only when a currently-trusted
+    // project's pins actually change — never for an untrusted project, and never
+    // for a byte-identical re-lock (which rewrites nothing and leaves trust
+    // valid).
+    #[test]
+    fn relock_notice_only_when_trusted_and_pins_change() {
+        assert!(relock_trust_notice(true, true).is_some());
+        assert!(relock_trust_notice(true, false).is_none());
+        assert!(relock_trust_notice(false, true).is_none());
+        assert!(relock_trust_notice(false, false).is_none());
     }
 
     #[test]

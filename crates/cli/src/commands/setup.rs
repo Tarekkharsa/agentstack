@@ -30,6 +30,15 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     //    from a subdirectory continues the ROOT project instead of nesting.
     let base = super::project_base(manifest_dir)?;
     let interactive = crate::util::confirm::is_interactive();
+
+    // P1: open with the plan, so the user knows the shape of the whole run
+    // before anything happens — and, crucially, that nothing is written until
+    // they confirm. The plan lives here in `setup`, not in plain `init` (which
+    // is the scriptable primitive).
+    if interactive {
+        print_plan();
+    }
+
     let mut manifest_path = crate::manifest::resolve_manifest_dir(&base).join(MANIFEST_FILE);
     if !manifest_path.exists() {
         if !interactive {
@@ -49,6 +58,9 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 global: false,
                 force: false,
                 dry_run: false,
+                // None → init prompts for secret storage when it lifts tokens
+                // and the shell is interactive (P2); setup is interactive.
+                secrets: None,
                 no_keychain: false,
             },
             manifest_dir,
@@ -125,6 +137,12 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
+    // P7: remember which apply-history entries already existed, so the closing
+    // summary can show exactly the files *this run* wrote — reusing the same
+    // write ledger `restore` reads, not inventing new tracking.
+    let history_before: std::collections::HashSet<String> =
+        crate::history::list().into_iter().map(|e| e.id).collect();
+
     println!("\n{}", "Install".bold());
     super::install::run(
         &InstallArgs {
@@ -173,12 +191,17 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     println!("\n{}", "Doctor".bold());
+    // P8: offer the deep content scan at the one moment it's relevant — right
+    // after skills landed. Only when there ARE skills (no empty questions), and
+    // only interactively (a non-interactive setup never reaches this write path
+    // at all, so its preview-only contract is untouched).
+    let deep = offer_deep_scan(&ctx)?;
     super::doctor::run(
         &DoctorArgs {
             ci: false,
             live: false,
             fix: false,
-            deep: false,
+            deep,
             all: false,
             json: false,
         },
@@ -188,24 +211,57 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // 7. Machine layer: offer the agentstack house rules once. They live in
     //    the personal manifest (~/.agentstack), not this project, so every
     //    repo's agents get them via the global CLAUDE.md / AGENTS.md.
-    offer_house_rules(&ctx, &target_ids)?;
+    let seeded_house_rules = offer_house_rules(&ctx, &target_ids)?;
 
-    // 8. Done — point at the obvious next steps. Harnesses read their config
-    //    at startup, so an already-open session won't see what was written.
-    println!("\n{} Setup complete.", "✓".green());
-    println!("\n{}", "Next".bold());
-    println!("  Restart or reopen your agent CLI(s) so they pick up the new config.");
-    match ctx.loaded.manifest.profiles.keys().next() {
-        Some(profile) => println!(
-            "  Launch an agent with it: {}",
-            format!("agentstack run <cli> --profile {profile}").bold()
-        ),
-        None => println!(
-            "  See everything in one place: {}",
-            "agentstack dashboard".bold()
-        ),
-    }
+    // 7b. P4: the modes are a visible choice, presented now that the user has
+    //     seen the setup actually work. v1 prints the command each non-default
+    //     mode maps to rather than switching in place — the wizard stays
+    //     reversible, and the user runs the switch when they mean to.
+    offer_mode_choice(&ctx, &target_ids)?;
+
+    // 8. P7: the transparency close — what this run did to the machine, where
+    //    secrets went, what was seeded, and the one-liners to undo or re-inspect.
+    print_change_summary(&ctx, &history_before, seeded_house_rules);
     Ok(())
+}
+
+/// P1: the opening plan. Four numbered steps and the promise that nothing is
+/// written until the user confirms — so a "machine setup" tool never surprises
+/// them. Printed only in an interactive `setup`.
+fn print_plan() {
+    println!("\n{}", "Setup will:".bold());
+    println!("  1. detect the agent CLIs on this machine");
+    println!("  2. import their existing configs");
+    println!(
+        "  3. lift any inline tokens to {} placeholders",
+        "${REF}".bold()
+    );
+    println!("  4. write one agentstack manifest");
+    println!(
+        "\n{} Nothing is written until you confirm. Your CLIs are not touched yet.",
+        "·".dimmed()
+    );
+}
+
+/// P8: ask whether to run the deep content scan, with the help line the
+/// maintainer decided. Returns `false` (no deep scan) when the project has no
+/// skills — there's nothing to scan, so we don't ask — or in a non-interactive
+/// shell. The scan reads every skill/instruction body for hidden Unicode and
+/// prompt-injection tricks; it's slow on big libraries, hence a choice.
+fn offer_deep_scan(ctx: &super::Context) -> Result<bool> {
+    if ctx.loaded.manifest.skills.is_empty() || !crate::util::confirm::is_interactive() {
+        return Ok(false);
+    }
+    println!(
+        "  {} reads every skill and instruction body for hidden Unicode and\n\
+         \x20   prompt-injection tricks; slow on big libraries; re-run anytime\n\
+         \x20   with {}.",
+        "·".dimmed(),
+        "agentstack doctor --deep".bold()
+    );
+    Ok(crate::util::confirm::confirm(
+        "  Run a deep content scan now?",
+    )?)
 }
 
 /// Pick the profile setup should activate: an explicit `--profile` wins, a
@@ -288,19 +344,24 @@ fn apply_args(args: &SetupArgs, scope: Scope, write: bool) -> ApplyArgs {
 /// silent no-op when the fragment is already declared, and never fails setup:
 /// the setup itself succeeded either way, so any error here is logged and
 /// swallowed.
-fn offer_house_rules(ctx: &super::Context, target_ids: &[String]) -> Result<()> {
-    if let Err(err) = offer_house_rules_inner(ctx, target_ids) {
-        println!(
-            "  {} house-rules offer failed ({err:#}) — setup itself succeeded; retry with `agentstack init --global`.",
-            "⚠".yellow()
-        );
+/// Returns whether the house-rules fragment was seeded this run, so the P7
+/// close can list it under "what got seeded".
+fn offer_house_rules(ctx: &super::Context, target_ids: &[String]) -> Result<bool> {
+    match offer_house_rules_inner(ctx, target_ids) {
+        Ok(seeded) => Ok(seeded),
+        Err(err) => {
+            println!(
+                "  {} house-rules offer failed ({err:#}) — setup itself succeeded; retry with `agentstack init --global`.",
+                "⚠".yellow()
+            );
+            Ok(false)
+        }
     }
-    Ok(())
 }
 
-fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Result<()> {
+fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Result<bool> {
     if !crate::util::confirm::is_interactive() {
-        return Ok(());
+        return Ok(false);
     }
     let home = crate::util::paths::agentstack_home();
     if let Ok(loaded) = crate::manifest::load_from_dir(&home) {
@@ -309,7 +370,7 @@ fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Resul
             .instructions
             .contains_key(super::init::HOUSE_RULES_NAME)
         {
-            return Ok(());
+            return Ok(false);
         }
     }
 
@@ -325,7 +386,7 @@ fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Resul
             "  {} skipped — install later with `agentstack init --global`.",
             "·".dimmed()
         );
-        return Ok(());
+        return Ok(false);
     }
 
     super::init::ensure_global_manifest()?;
@@ -358,7 +419,190 @@ fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Resul
             println!("  {} {} — up to date", "✓".green(), desc.display);
         }
     }
+    Ok(true)
+}
+
+/// P4: the commands a non-default mode maps to (v1 prints, never executes), plus
+/// one sentence on what running them does. Static returns the maintenance
+/// command; the other two return the switch sequence. Pure so the mapping is
+/// unit-testable. `profile` fills the `session start` argument (falling back to
+/// a placeholder when the manifest declares none).
+fn mode_switch_plan(
+    mode: super::overview::Mode,
+    profile: Option<&str>,
+) -> (Vec<String>, &'static str) {
+    use super::overview::Mode;
+    let p = profile.unwrap_or("<profile>");
+    match mode {
+        Mode::Static => (
+            vec!["agentstack apply --write".into()],
+            "Keep rendering configs to disk; re-run after any manifest change.",
+        ),
+        Mode::CleanAtRest => (
+            vec![
+                format!("agentstack session start {p}"),
+                "agentstack session end".into(),
+            ],
+            "Materialize your profile for a session, then revert it so the repo stays clean.",
+        ),
+        Mode::ZeroFiles => (
+            vec![
+                "agentstack gateway connect --all".into(),
+                "agentstack trust .".into(),
+            ],
+            "Register the gateway once per harness, then trust this repo so it serves capabilities live.",
+        ),
+    }
+}
+
+/// P4: present the three delivery modes as an explicit choice, help text and
+/// all, once the user has seen the setup work. The current mode is preselected
+/// (bare Enter keeps it). Choosing another mode PRINTS the command(s) it maps to
+/// — v1 never switches in place, keeping the wizard reversible. Interactive
+/// only; a no-op otherwise.
+fn offer_mode_choice(ctx: &super::Context, target_ids: &[String]) -> Result<()> {
+    if !crate::util::confirm::is_interactive() {
+        return Ok(());
+    }
+    use super::overview::Mode;
+    let current = super::overview::detect_mode(ctx, target_ids);
+    let modes = [Mode::Static, Mode::CleanAtRest, Mode::ZeroFiles];
+
+    println!("\n{}", "Delivery mode".bold());
+    for (i, m) in modes.iter().enumerate() {
+        let marker = if *m == current { " (current)" } else { "" };
+        println!("  {}. {}{}", i + 1, m.label().bold(), marker.dimmed());
+        println!("     {}", m.help().dimmed());
+    }
+
+    let choice = prompt_choice("  Pick a mode", modes.len(), &current, &modes)?;
+    if choice == current {
+        println!("  {} staying on {}.", "·".dimmed(), current.label());
+        return Ok(());
+    }
+
+    let profile = ctx
+        .loaded
+        .manifest
+        .profiles
+        .keys()
+        .next()
+        .map(String::as_str);
+    let (cmds, what) = mode_switch_plan(choice, profile);
+    println!("\n  To move to {} — run:", choice.label().bold());
+    for c in &cmds {
+        println!("    {}", c.bold());
+    }
+    println!("  {} {what}", "·".dimmed());
     Ok(())
+}
+
+/// Read a 1-based menu choice, defaulting to `current` on empty/invalid input.
+/// Its own tiny stdin read (the shared `confirm` helper is yes/no only); reached
+/// only interactively, so `cargo test` never blocks here.
+fn prompt_choice(
+    prompt: &str,
+    n: usize,
+    current: &super::overview::Mode,
+    modes: &[super::overview::Mode],
+) -> Result<super::overview::Mode> {
+    use std::io::Write;
+    print!("{prompt} [1-{n}, Enter = current] ");
+    std::io::stdout().flush()?;
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line)?;
+    match line.trim().parse::<usize>() {
+        Ok(i) if i >= 1 && i <= n => Ok(modes[i - 1]),
+        _ => Ok(*current),
+    }
+}
+
+/// P7: the transparency close. Gathers what THIS run changed — every file
+/// written (from the apply-history entries new since `history_before`), where
+/// each referenced secret resolves now, and what was seeded — then prints it
+/// with the undo + inspect one-liners.
+fn print_change_summary(
+    ctx: &super::Context,
+    history_before: &std::collections::HashSet<String>,
+    seeded_house_rules: bool,
+) {
+    // Files: new history entries hold the pre-write snapshot of each touched
+    // file; we only want the paths + labels, deduped by path (an apply and a
+    // profile activation can touch the same file).
+    let mut files: Vec<(String, String)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for entry in crate::history::list() {
+        if history_before.contains(&entry.id) {
+            continue;
+        }
+        for f in entry.files {
+            if seen.insert(f.path.clone()) {
+                files.push((f.path, f.label));
+            }
+        }
+    }
+
+    // Secrets: re-derive where each referenced ref resolves now (the resolver is
+    // the source of truth; we never stored a value to echo).
+    let sources = SecretSources::detect(&ctx.dir);
+    let secrets: Vec<(String, String)> = ctx
+        .loaded
+        .manifest
+        .referenced_secrets()
+        .into_iter()
+        .filter_map(|name| sources.source_of(&name).map(|s| (name, s.to_string())))
+        .collect();
+
+    let mut seeded: Vec<String> = Vec::new();
+    if seeded_house_rules {
+        let path = crate::util::paths::agentstack_home().join(MANIFEST_FILE);
+        seeded.push(format!(
+            "agentstack house rules → {} (edit under [instructions])",
+            path.display()
+        ));
+    }
+
+    println!("\n{} Setup complete.", "✓".green());
+    println!("\n{}", "What changed on this machine".bold());
+    print!("{}", render_change_summary(&files, &secrets, &seeded));
+
+    // Harnesses read config at startup, so an open session won't see the writes.
+    println!("\n  Restart your agent CLI(s) so they pick up the new config.");
+}
+
+/// Pure formatter for the P7 close body (files / secrets / seeded / one-liners),
+/// so the transparency block is unit-testable without a live setup run. Sections
+/// with nothing to show are omitted, except the always-present undo/inspect
+/// one-liners.
+fn render_change_summary(
+    files: &[(String, String)],
+    secrets: &[(String, String)],
+    seeded: &[String],
+) -> String {
+    let mut out = String::new();
+    if files.is_empty() {
+        out.push_str("  No files were written.\n");
+    } else {
+        out.push_str(&format!("  Files written ({}):\n", files.len()));
+        for (path, label) in files {
+            out.push_str(&format!("    {path}  ({label})\n"));
+        }
+    }
+    if !secrets.is_empty() {
+        out.push_str("  Secrets:\n");
+        for (name, source) in secrets {
+            out.push_str(&format!("    {name}  resolved from {source}\n"));
+        }
+    }
+    if !seeded.is_empty() {
+        out.push_str("  Seeded:\n");
+        for s in seeded {
+            out.push_str(&format!("    {s}\n"));
+        }
+    }
+    out.push_str("  Undo everything this run wrote:  agentstack restore --last --write\n");
+    out.push_str("  Inspect any time:  agentstack doctor  ·  agentstack\n");
+    out
 }
 
 /// The read-only preflight summary the wizard starts from.
@@ -531,4 +775,62 @@ fn resolve_missing_secrets(ctx: &super::Context, missing: Vec<String>) -> Result
         .into_iter()
         .filter(|name| sources.source_of(name).is_none())
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::overview::Mode;
+    use super::{mode_switch_plan, render_change_summary};
+
+    // P4: choosing a non-default mode prints a command sequence, never runs it.
+    // The clean-at-rest plan threads the profile name into `session start`.
+    #[test]
+    fn mode_switch_plan_maps_each_mode_to_its_commands() {
+        let (cmds, _) = mode_switch_plan(Mode::Static, Some("dev"));
+        assert_eq!(cmds, vec!["agentstack apply --write".to_string()]);
+
+        let (cmds, _) = mode_switch_plan(Mode::CleanAtRest, Some("dev"));
+        assert_eq!(cmds[0], "agentstack session start dev");
+        assert_eq!(cmds[1], "agentstack session end");
+
+        // No profile declared → a visible placeholder, not a panic.
+        let (cmds, _) = mode_switch_plan(Mode::CleanAtRest, None);
+        assert_eq!(cmds[0], "agentstack session start <profile>");
+
+        let (cmds, _) = mode_switch_plan(Mode::ZeroFiles, None);
+        assert_eq!(cmds[0], "agentstack gateway connect --all");
+        assert_eq!(cmds[1], "agentstack trust .");
+    }
+
+    // P7: the transparency close lists every written file, names each secret's
+    // source, shows what was seeded, and always offers the undo + inspect
+    // one-liners.
+    #[test]
+    fn change_summary_reports_files_secrets_seeded_and_undo() {
+        let files = vec![
+            (
+                "~/.claude.json".to_string(),
+                "Claude Code · servers".to_string(),
+            ),
+            ("~/.claude/skills/helper".to_string(), "skills".to_string()),
+        ];
+        let secrets = vec![("API_TOKEN".to_string(), "keychain".to_string())];
+        let seeded = vec!["agentstack house rules → ~/.agentstack/agentstack.toml".to_string()];
+        let out = render_change_summary(&files, &secrets, &seeded);
+
+        assert!(out.contains("Files written (2)"));
+        assert!(out.contains("~/.claude.json  (Claude Code · servers)"));
+        assert!(out.contains("API_TOKEN  resolved from keychain"));
+        assert!(out.contains("house rules"));
+        assert!(out.contains("agentstack restore --last --write"));
+        assert!(out.contains("agentstack doctor"));
+    }
+
+    // With nothing written, the summary says so but still offers the one-liners.
+    #[test]
+    fn change_summary_with_no_writes_still_offers_undo() {
+        let out = render_change_summary(&[], &[], &[]);
+        assert!(out.contains("No files were written"));
+        assert!(out.contains("agentstack restore --last --write"));
+    }
 }

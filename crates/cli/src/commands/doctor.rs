@@ -1122,6 +1122,21 @@ fn run_checks(
     check_extension_reproducibility(manifest, &ctx.dir, report);
     check_rendered_extensions(&ctx.dir, &ctx.registry, report);
 
+    // P9: when any pin drifted above, state the rule once — drift is an error
+    // until you re-lock, and re-locking re-gates trust (new pins are new
+    // consent). All the sub-checks append to this same section, so a scan of its
+    // lines for the shared "drifted from lock" phrase tells us drift occurred.
+    let drifted = report
+        .sections
+        .last()
+        .is_some_and(|s| s.lines.iter().any(|(_, m)| m.contains("drifted from lock")));
+    if drifted {
+        report.line(
+            Level::Warn,
+            "lock drift is an error until you re-lock; `agentstack lock` re-pins and re-gates trust (new pins = new consent → re-run `agentstack trust .`)",
+        );
+    }
+
     // Project policy is optional; the machine layer applies either way, so the
     // "Policy" section shows whenever EITHER has something to report.
     let machine_policy = crate::machine_policy::inspect();
