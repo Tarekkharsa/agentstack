@@ -377,7 +377,7 @@ version = 1
     }
 
     println!(
-        "{}  Detected {} CLI(s): {}",
+        "{}  {} CLI binaries on PATH: {}",
         "🔍".dimmed(),
         detected.len(),
         display_names.join(" · ")

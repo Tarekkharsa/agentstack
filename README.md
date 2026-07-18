@@ -183,8 +183,10 @@ footprint. Complete command list: the [feature reference](docs/reference.md).
 
 `agentstack guard install` wires a **cooperative** pre-tool-use hook into 9
 agent CLIs (Claude Code, Codex, Gemini, Cursor, Windsurf, Copilot CLI,
-Antigravity, OpenCode, Pi; VS Code reads the Claude-format hooks). It stops
-the commands an agent runs by mistake before they touch your machine:
+Antigravity, OpenCode, Pi; VS Code reads the Claude-format hooks). (VS Code's
+hook support is in Preview and may be disabled by an organization — coverage
+there is best-effort.) It stops the commands an agent runs by mistake before
+they touch your machine:
 
 ```text
 agent → rm -rf ~/other-project   ✗ blocked   # destructive, outside the workspace

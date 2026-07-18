@@ -263,7 +263,9 @@ Docker container behind the egress proxy.
   `agentstack guard install` wires `agentstack guard check` into each
   detected CLI's own pre-tool-use hook (Claude Code, Codex, Gemini, Cursor,
   Windsurf, Copilot CLI, Antigravity, OpenCode, Pi; VS Code agent mode reads
-  the Claude-format user hooks). Per tool call it blocks: destructive
+  the Claude-format user hooks). (VS Code's hook support is in Preview and
+  may be disabled by an organization — coverage there is best-effort.) Per
+  tool call it blocks: destructive
   commands (`rm -rf` outside the workspace, `git reset --hard`, `git clean
   -f`, disk writes, …), any access to `[policy.filesystem] deny` globs
   (machine ∪ project — a repo can only add), and file-tool writes outside
