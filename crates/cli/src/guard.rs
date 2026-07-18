@@ -142,10 +142,37 @@ fn write_scope_check(ctx: &GuardContext, path: &str) -> Decision {
     {
         return Decision::Allow;
     }
+    // Teach the exact fix inline (P3), the way the deny-glob denial names its
+    // source: the precise TOML line to add, keyed on the denied path's PARENT
+    // directory, and the file it goes in.
+    let dir = abs.parent().unwrap_or(&abs);
     Decision::deny(format!(
-        "write outside the workspace: {} (allowed: the workspace, [guard] allow_roots, temp dirs)",
-        abs.display()
+        "write outside the workspace: {} (allowed: the workspace, [guard] allow_roots, temp dirs)\n  \
+         to allow writes here, add to {} →\n    [guard]\n    allow_roots = [\"{}\"]",
+        abs.display(),
+        machine_manifest(ctx).display(),
+        dir.display(),
     ))
+}
+
+/// The machine manifest whose `[guard]` / `[policy.filesystem]` tables drive
+/// this check — named in denials so the user knows where the rule (and its
+/// fix) lives.
+fn machine_manifest(ctx: &GuardContext) -> PathBuf {
+    ctx.agentstack_home.join("agentstack.toml")
+}
+
+/// Append the source citation to a built-in destructive-command denial (P11):
+/// these patterns are hard-coded, but the deny/allow lists that govern the
+/// rest live in the machine manifest — name it so the block is not a mystery.
+fn cite_builtin(ctx: &GuardContext, decision: Decision) -> Decision {
+    match decision {
+        Decision::Deny { reason } => Decision::deny(format!(
+            "{reason} (built-in rule; deny/allow lists: {})",
+            machine_manifest(ctx).display()
+        )),
+        allow => allow,
+    }
 }
 
 /// Every operation that can modify or delete a path must pass both the
@@ -290,11 +317,14 @@ fn check_bash(ctx: &GuardContext, command: &str) -> Decision {
         let Some(program) = program else { continue };
         let d = match program.as_str() {
             "rm" => check_rm(ctx, &rest, via_xargs),
-            "git" => check_git(&rest),
+            "git" => cite_builtin(ctx, check_git(&rest)),
             "find" => check_find(ctx, &rest),
-            "shred" => Decision::deny("shred irrecoverably destroys file contents"),
-            "dd" => check_dd(&rest),
-            "diskutil" => check_diskutil(&rest),
+            "shred" => cite_builtin(
+                ctx,
+                Decision::deny("shred irrecoverably destroys file contents"),
+            ),
+            "dd" => cite_builtin(ctx, check_dd(&rest)),
+            "diskutil" => cite_builtin(ctx, check_diskutil(&rest)),
             "chmod" | "chown" => check_chmod_chown(ctx, program.as_str(), &rest),
             // tee's non-flag operands are all write targets; truncate's too.
             "truncate" | "tee" => check_write_targets(ctx, program.as_str(), &rest),
@@ -308,9 +338,12 @@ fn check_bash(ctx: &GuardContext, command: &str) -> Decision {
                     check_mv_cp(ctx, program.as_str(), &rest)
                 }
             }
-            p if p.starts_with("mkfs") => Decision::deny(format!(
-                "{p} formats a filesystem — never allowed via a hook"
-            )),
+            p if p.starts_with("mkfs") => cite_builtin(
+                ctx,
+                Decision::deny(format!(
+                    "{p} formats a filesystem — never allowed via a hook"
+                )),
+            ),
             _ => Decision::Allow,
         };
         if d.is_deny() {
@@ -482,17 +515,23 @@ fn check_rm(ctx: &GuardContext, args: &[String], via_xargs: bool) -> Decision {
     let recursive =
         flags.contains('r') || flags.contains('R') || args.iter().any(|a| a == "--recursive");
     if recursive && via_xargs {
-        return Decision::deny(
-            "recursive rm via xargs — targets come from stdin and cannot be checked",
+        return cite_builtin(
+            ctx,
+            Decision::deny(
+                "recursive rm via xargs — targets come from stdin and cannot be checked",
+            ),
         );
     }
     for t in targets_of(args) {
         let abs = normalize(&t, &ctx.workspace, &ctx.home);
         if abs == Path::new("/") || abs == ctx.home || abs == ctx.workspace {
-            return Decision::deny(format!(
-                "rm of {} — refusing to delete a root",
-                abs.display()
-            ));
+            return cite_builtin(
+                ctx,
+                Decision::deny(format!(
+                    "rm of {} — refusing to delete a root",
+                    abs.display()
+                )),
+            );
         }
         // Deletion is a write: confined to the workspace + allow_roots + tmp.
         if let d @ Decision::Deny { .. } = shell_write_check(ctx, &t) {
@@ -561,7 +600,10 @@ fn check_find(ctx: &GuardContext, args: &[String]) -> Decision {
         }
         let abs = normalize(r, &ctx.workspace, &ctx.home);
         if abs == Path::new("/") || abs == ctx.home {
-            return Decision::deny(format!("find {} -delete — refusing a root", abs.display()));
+            return cite_builtin(
+                ctx,
+                Decision::deny(format!("find {} -delete — refusing a root", abs.display())),
+            );
         }
     }
     Decision::Allow
@@ -596,7 +638,10 @@ fn check_chmod_chown(ctx: &GuardContext, program: &str, args: &[String]) -> Deci
         // skip(1): the mode/owner argument
         let abs = normalize(t, &ctx.workspace, &ctx.home);
         if abs == Path::new("/") || abs == ctx.home {
-            return Decision::deny(format!("{program} -R on {}", abs.display()));
+            return cite_builtin(
+                ctx,
+                Decision::deny(format!("{program} -R on {}", abs.display())),
+            );
         }
         if let d @ Decision::Deny { .. } = shell_write_check(ctx, t) {
             return d;
@@ -824,9 +869,18 @@ impl Protocol {
                 Some((classify_tool(&tool, &input), cwd))
             }
             Protocol::Cursor => {
-                let command = str_at(payload, "command")?;
                 let cwd = str_at(payload, "cwd");
-                Some((GuardEvent::Bash { command }, cwd))
+                // `beforeShellExecution` carries `command`; `beforeReadFile`
+                // carries a file path. Route each to its event; anything else
+                // is `Other` (allowed). `beforeMCPExecution` has no file/shell
+                // surface to judge, so it lands here as `Other` too.
+                if let Some(command) = str_at(payload, "command") {
+                    Some((GuardEvent::Bash { command }, cwd))
+                } else if let Some(path) = path_from_input(payload) {
+                    Some((GuardEvent::FileRead { path }, cwd))
+                } else {
+                    Some((GuardEvent::Other, cwd))
+                }
             }
             Protocol::Antigravity => {
                 let call = payload.get("toolCall")?;
@@ -878,7 +932,10 @@ impl Protocol {
             Decision::Deny { reason } => Some(format!("agentstack guard blocked this: {reason}")),
         };
         match self {
-            Protocol::Claude => match reason {
+            // Codex documents the SAME `hookSpecificOutput` decision envelope
+            // Claude uses (stdout JSON, exit 0) as the preferred deny form, so
+            // the two share this arm.
+            Protocol::Claude | Protocol::Codex => match reason {
                 None => (None, None, 0),
                 Some(r) => (
                     Some(
@@ -893,9 +950,9 @@ impl Protocol {
                     0,
                 ),
             },
-            // Codex rejects unknown JSON fields on stdout — deny is exit 2
-            // + stderr, the one form its parser can't misread.
-            Protocol::Codex | Protocol::Windsurf => match reason {
+            // Windsurf has no stdout decision channel — deny is exit 2 + stderr,
+            // the one form its hook runner reads as a block.
+            Protocol::Windsurf => match reason {
                 None => (None, None, 0),
                 Some(r) => (None, Some(r), 2),
             },
@@ -908,16 +965,13 @@ impl Protocol {
                 ),
             },
             Protocol::Cursor => match reason {
-                None => (
-                    Some(json!({"permission": "allow", "continue": true}).to_string()),
-                    None,
-                    0,
-                ),
+                None => (Some(json!({"permission": "allow"}).to_string()), None, 0),
+                // Cursor documents snake_case `user_message`/`agent_message`
+                // only — no camelCase duplicates, no `continue` field.
                 Some(r) => (
                     Some(
                         json!({
-                            "permission": "deny", "continue": false,
-                            "userMessage": r, "agentMessage": r,
+                            "permission": "deny",
                             "user_message": r, "agent_message": r,
                         })
                         .to_string(),
@@ -932,12 +986,14 @@ impl Protocol {
                     None,
                     0,
                 ),
+                // Copilot documents only `permissionDecision` +
+                // `permissionDecisionReason`; `continue`/`stopReason` are
+                // off-schema.
                 Some(r) => (
                     Some(
                         json!({
                             "permissionDecision": "deny",
                             "permissionDecisionReason": r,
-                            "continue": false, "stopReason": r,
                         })
                         .to_string(),
                     ),
@@ -984,6 +1040,12 @@ fn classify_tool(tool: &str, input: &Value) -> GuardEvent {
         "fs_write",
         "create_file",
         "str_replace_editor",
+        // VS Code agent mode's in-place edit tools — without these the edits
+        // classify as reads, so workspace confinement never runs for them (the
+        // deny globs still fire, but out-of-workspace writes would slip through).
+        "replace_string_in_file",
+        "multi_replace_string_in_file",
+        "apply_patch",
     ];
     if WRITERS.iter().any(|w| tool.eq_ignore_ascii_case(w)) {
         GuardEvent::FileWrite { path }
@@ -1165,6 +1227,39 @@ mod tests {
             ),
             Decision::Allow
         );
+    }
+
+    /// P13.1: VS Code agent-mode's in-place edit tools must classify as
+    /// WRITES, so workspace confinement runs for them — an edit outside the
+    /// workspace is denied, not silently treated as a read.
+    #[test]
+    fn vscode_edit_tools_are_writes_and_confined_to_the_workspace() {
+        let c = ctx();
+        for tool in [
+            "replace_string_in_file",
+            "multi_replace_string_in_file",
+            "apply_patch",
+        ] {
+            let outside = classify_tool(tool, &json!({"file_path": "/Users/me/.zshrc"}));
+            assert_eq!(
+                outside,
+                GuardEvent::FileWrite {
+                    path: "/Users/me/.zshrc".into()
+                },
+                "{tool} must classify as a write"
+            );
+            assert!(
+                denied(check_event(&c, &outside)),
+                "{tool} outside the workspace should be denied"
+            );
+            // Inside the workspace the same edit is allowed.
+            let inside = classify_tool(tool, &json!({"file_path": "src/main.rs"}));
+            assert_eq!(
+                check_event(&c, &inside),
+                Decision::Allow,
+                "{tool} in-workspace"
+            );
+        }
     }
 
     // ── bash: rm ────────────────────────────────────────────────────────
@@ -1454,17 +1549,17 @@ mod tests {
     #[test]
     fn responses_match_each_harness_block_contract() {
         let deny = Decision::deny("nope");
-        // Claude: stdout JSON envelope, exit 0.
-        let (out, err, code) = Protocol::Claude.respond(&deny);
-        assert!(out.unwrap().contains("\"permissionDecision\":\"deny\""));
-        assert_eq!((err, code), (None, 0));
-        // Codex/Windsurf: stderr + exit 2, stdout EMPTY (strict parser).
-        for p in [Protocol::Codex, Protocol::Windsurf] {
+        // Claude AND Codex: stdout `hookSpecificOutput` deny envelope, exit 0.
+        for p in [Protocol::Claude, Protocol::Codex] {
             let (out, err, code) = p.respond(&deny);
-            assert_eq!(out, None);
-            assert!(err.unwrap().contains("nope"));
-            assert_eq!(code, 2);
+            assert!(out.unwrap().contains("\"permissionDecision\":\"deny\""));
+            assert_eq!((err, code), (None, 0));
         }
+        // Windsurf: stderr + exit 2, stdout EMPTY (no stdout decision channel).
+        let (out, err, code) = Protocol::Windsurf.respond(&deny);
+        assert_eq!(out, None);
+        assert!(err.unwrap().contains("nope"));
+        assert_eq!(code, 2);
         // Gemini: flat decision JSON.
         let (out, _, code) = Protocol::Gemini.respond(&deny);
         assert!(out.unwrap().contains("\"decision\":\"deny\""));

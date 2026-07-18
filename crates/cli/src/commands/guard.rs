@@ -395,7 +395,11 @@ fn targets() -> Vec<Target> {
             detect: "~/.cursor",
             kind: Kind::SharedJson {
                 path: "~/.cursor/hooks.json",
-                events: &["beforeShellExecution"],
+                // beforeShellExecution gates commands; beforeReadFile routes to
+                // the deny-glob judgment (a clean read mapping). beforeMCPExecution
+                // is deliberately NOT registered — MCP calls have no file/shell
+                // surface the guard can judge without inventing new policy.
+                events: &["beforeShellExecution", "beforeReadFile"],
                 entry: cursor_entry,
                 top_level: &[("version", 1)],
             },
@@ -405,7 +409,15 @@ fn targets() -> Vec<Target> {
             detect: "~/.codeium/windsurf",
             kind: Kind::SharedJson {
                 path: "~/.codeium/windsurf/hooks.json",
-                events: &["pre_run_command", "pre_write_code", "pre_read_code"],
+                // pre_mcp_tool_use rides the same exit-2 mechanism and flows
+                // through the existing tool_info parsing (command/path → judged,
+                // otherwise allowed) — no new policy semantics.
+                events: &[
+                    "pre_run_command",
+                    "pre_write_code",
+                    "pre_read_code",
+                    "pre_mcp_tool_use",
+                ],
                 entry: windsurf_entry,
                 top_level: &[],
             },
@@ -625,9 +637,22 @@ pub(crate) fn install() -> Result<()> {
          This is cooperative (accident) protection — for hostile code use `agentstack run --sandbox`.",
         "✓".green().bold()
     );
+    let manifest_path = paths::agentstack_home().join("agentstack.toml");
+    // Disclose the deny list this install activates and where it lives (P11):
+    // the effective list if the policy loads, else the defaults just seeded.
+    let deny: Vec<String> = crate::machine_policy::inspect()
+        .policy
+        .map(|p| p.filesystem.deny)
+        .unwrap_or_else(|| DEFAULT_DENY.iter().map(|s| s.to_string()).collect());
+    println!("  deny list ({}): {}", deny.len(), deny.join(", "));
+    println!(
+        "  rules are TOML in {}; a project's .agentstack/agentstack.toml can ADD deny entries, \
+         never remove.",
+        manifest_path.display()
+    );
     println!(
         "  config: {} ([guard] + [policy.filesystem] deny)",
-        paths::agentstack_home().join("agentstack.toml").display()
+        manifest_path.display()
     );
     Ok(())
 }
@@ -701,18 +726,27 @@ fn status() -> Result<()> {
             );
         }
     }
+    // Label each rule layer with the file it comes from (P11), so the layering
+    // is visible rather than implicit. These are the machine layer; a project's
+    // own `.agentstack/agentstack.toml` may ADD deny globs on top.
+    let manifest_path = paths::agentstack_home().join("agentstack.toml");
+    println!("  rule source (machine): {}", manifest_path.display());
     if let Some(policy) = &inspected.policy {
         println!(
-            "  deny globs ({}): {}",
+            "  deny globs ({}) [machine manifest; projects may ADD]: {}",
             policy.filesystem.deny.len(),
             policy.filesystem.deny.join(", ")
         );
     }
     if let Some(cfg) = &cfg {
-        println!("  allow_roots: {}", cfg.allow_roots.join(", "));
+        println!(
+            "  allow_roots [machine manifest]: {}",
+            cfg.allow_roots.join(", ")
+        );
     } else {
         println!("  allow_roots: unavailable");
     }
+    println!("  destructive-command rules: built-in");
     for t in targets() {
         let detected = paths::expand_tilde(t.detect).exists();
         let installed = detected && target_installed(&t);

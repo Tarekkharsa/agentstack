@@ -85,6 +85,15 @@ pub fn plan_hooks(
             selected.push((name, hook));
         }
     }
+    // Codex loads hooks from BOTH `config.toml [hooks]` (this renderer) AND
+    // `~/.codex/hooks.json` (written by `guard guard install`). The guard hook
+    // lives in hooks.json — a file `apply` never owns, so it survives without a
+    // manifest — and Codex would fire it a second time if we also rendered it
+    // here. Defer any guard hook to the hooks.json seam for Codex so it is
+    // registered exactly once. (Every other CLI has a single hook destination.)
+    if desc.id == "codex" {
+        selected.retain(|(_, h)| !is_guard_hook(&h.command));
+    }
     if selected.is_empty() && !previously_managed {
         return Ok(None);
     }
@@ -126,6 +135,14 @@ pub fn plan_hooks(
         unresolved,
         secrets,
     }))
+}
+
+/// Does this hook command invoke `agentstack guard check`? Recognizes the
+/// guard by its subcommand so the Codex renderer can defer it to the
+/// `hooks.json` seam (see `plan_hooks`). Matches the marker the guard
+/// installer's own `value_mentions_guard` uses.
+fn is_guard_hook(command: &str) -> bool {
+    command.contains("guard check --protocol")
 }
 
 /// Claude form: `{ Event: [ { matcher?, hooks: [ {type:"command", command, …} ] } ] }`.

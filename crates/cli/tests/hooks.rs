@@ -193,6 +193,78 @@ fn machine_hooks_ride_along_and_survive_the_manifest() {
     assert!(v["hooks"].get("PreToolUse").is_some());
 }
 
+/// P13.2: Codex loads hooks from BOTH `~/.codex/hooks.json` (written by
+/// `guard install`) AND `config.toml [hooks]` (this renderer). The guard must
+/// end up registered exactly ONCE. With guard install's hooks.json in place and
+/// a manifest `[hooks.*]` entry that is itself a guard-check hook, the renderer
+/// must DROP the guard from config.toml (deferring to hooks.json) while keeping
+/// the manifest's non-guard hooks.
+#[test]
+fn codex_guard_is_registered_exactly_once_across_both_hook_files() {
+    let _guard = env_lock();
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join(".codex")).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    // Simulate `guard install`: the guard hook lives in ~/.codex/hooks.json.
+    let hooks_json = home.join(".codex/hooks.json");
+    fs::write(
+        &hooks_json,
+        r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"/bin/agentstack guard check --protocol codex","timeout":10}]}]}}"#,
+    )
+    .unwrap();
+
+    let reg = Registry::load().unwrap();
+    // No secrets in these commands; an empty resolver suffices.
+    let resolver = MapResolver::from([] as [(&str, &str); 0]);
+    let proj = tmp.path();
+
+    // A manifest [hooks.*] with BOTH a normal hook and a guard-check hook,
+    // both targeting codex.
+    let manifest: Manifest = toml::from_str(
+        r#"
+        version = 1
+        [hooks.fmt]
+        event = "PostToolUse"
+        command = "prettier --write"
+        targets = ["codex"]
+        [hooks.guard]
+        event = "PreToolUse"
+        command = "/bin/agentstack guard check --protocol codex"
+        targets = ["codex"]
+        "#,
+    )
+    .unwrap();
+
+    let plan = plan_hooks(
+        &manifest,
+        codex(&reg),
+        &resolver,
+        false,
+        Scope::Global,
+        proj,
+        &[],
+    )
+    .unwrap()
+    .unwrap();
+    plan.write().unwrap();
+
+    let config = fs::read_to_string(home.join(".codex/config.toml")).unwrap();
+    // The non-guard hook survives; the guard hook is deferred to hooks.json.
+    assert!(config.contains("prettier --write"), "manifest hook kept");
+    assert!(
+        !config.contains("guard check --protocol"),
+        "guard must NOT be re-rendered into config.toml: {config}"
+    );
+
+    // Across BOTH files Codex loads, the guard appears exactly once.
+    let both = fs::read_to_string(&hooks_json).unwrap() + &config;
+    let count = both.matches("guard check --protocol").count();
+    assert_eq!(count, 1, "exactly one guard registration for Codex");
+}
+
 #[test]
 fn codex_hooks_render_to_config_toml_and_preserve_mcp() {
     let _guard = env_lock();
