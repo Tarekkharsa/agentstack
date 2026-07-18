@@ -4,6 +4,65 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## v0.13.0 — 2026-07-19
+
+**One command sets up everything.** Bare interactive `agentstack init` is now
+the guided wizard: a plan of what will happen, import, a real choice of where
+secrets live, guard seeding that explains itself, an optional deep scan, a
+visible delivery-mode choice, and a closing "what changed on this machine"
+summary with the undo command. Scripts keep the promptless primitive under
+the same verb (any explicit flag opts in); `setup` still works as a hidden
+alias but is no longer advertised. The Get Started walkthrough, README, and
+the animated replay show the wizard's real captured output — shipped in the
+same commits as the behavior.
+
+### Added
+
+- **Secret storage is a chosen destination.** A new `.env` writer (values
+  land beside the manifest, auto-gitignored with a durable entry) joins the
+  OS keychain: interactive init presents both plus skip, each option with
+  plain-words help text; non-interactive runs use `--secrets
+  env|keychain|skip` (default remains keychain — scripts never start writing
+  plaintext by surprise). `agentstack secret set --env-file` writes there
+  too. `--no-keychain` is a deprecated alias that now names every unstored
+  ref and its store one-liner — the silent value-drop is gone.
+- **The wizard steps**: opening plan; deep-scan offer (only when skills
+  exist); machine-change summary built from the write ledger. Bare
+  `agentstack` now shows the project's current mode.
+- **The delivery-mode choice is a real fork** — asked before anything is
+  written, as an arrow-key selection where every option carries its
+  consequence, and it changes what the wizard does next: static renders into
+  every CLI; clean-at-rest skips rendering, locks the pins, and teaches the
+  session rhythm; zero-files offers the gateway registration and points at
+  `trust .` (never run for you — trust stays a human decision). Interactive
+  menus use `dialoguer` (new dependency, cli crate only, minimal features).
+- **Guard teaches**: out-of-workspace denials print the exact
+  `[guard] allow_roots` TOML line and the file to edit; `guard install`
+  prints the seeded deny list and the machine/project layering; `guard
+  status` labels every rule layer's source file. Cursor gains the
+  `beforeReadFile` blocking hook; Windsurf gains `pre_mcp_tool_use`.
+- `agentstack lock` warns before writing when new pins will re-gate trust,
+  and doctor's lock-drift error explains why it is an error.
+
+### Fixed
+
+- **Sandbox confinement mounts the project root.** Under the recommended
+  nested `.agentstack/` layout, `run --sandbox`/`--lockdown` mounted the
+  manifest folder as `/workspace`, hiding the project's code from the
+  confined agent. The mount, the banner, and both lockdown shadow checks now
+  derive from the project root in lockstep.
+- **Doctor and diff can no longer disagree about drift.** The
+  edited-on-disk warning is gated on the same managed-content comparison
+  `diff` uses, so configs that double as live state stores (Claude Code's
+  `~/.claude.json`) no longer flap forever.
+- **VS Code write-gate gap closed**: agent-mode's `replace_string_in_file` /
+  `apply_patch` edits now classify as writes, so workspace confinement
+  applies. Codex hooks register exactly once (the manifest renderer defers
+  to `hooks.json`) and deny via the documented stdout decision envelope.
+- Honest init wording ("N CLI binaries on PATH", correctly pluralized), VS
+  Code hook support labelled Preview, and every doc/example that captured
+  the old outputs updated and asserted.
+
 ## v0.12.0 — 2026-07-18
 
 **Breaking: the off-strategy surface is gone.** A full project review cut

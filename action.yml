@@ -1,6 +1,6 @@
 # agentstack trust gate — use in any repo that commits .agentstack/:
 #
-#   - uses: Tarekkharsa/agentstack@v0.12.0
+#   - uses: Tarekkharsa/agentstack@v0.13.0
 #
 # Proves the checked-in agent setup is reproducible (skill sources still
 # resolve to the pinned lockfile digests) and policy-clean (no forbidden
