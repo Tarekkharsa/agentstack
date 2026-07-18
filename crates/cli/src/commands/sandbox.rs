@@ -66,17 +66,28 @@ fn egress_image() -> String {
 /// the proxy enforces. The `HTTPS_PROXY` env is added later, once the proxy's
 /// port is known.
 ///
+/// `manifest_dir` is the dir holding `agentstack.toml`; what mounts at
+/// `/workspace` is the PROJECT root it belongs to (`project_root_of`): the
+/// parent for the nested `.agentstack/` layout, the dir itself for a legacy
+/// root manifest. Mounting the manifest dir under the nested layout would
+/// confine the agent to `.agentstack/` and hide the project's actual code —
+/// and it must match the anchor `agentstack trust .` keys on. The lockdown
+/// shadow existence checks in `shadow_native_config`/`wire_sandbox_gateway`
+/// are rooted at the same project root and must stay in lockstep with this
+/// mount.
+///
 /// The workspace mounts read-only unless the effective `[policy.filesystem]`
 /// write scope covers it — sandbox writes are deny-by-default (the semantics
 /// live in `CompiledRuleset::workspace_write_decision`; this function just
 /// asks). The backend turns `read_only` into a `:ro` bind, so the kernel
 /// enforces it, not the harness.
 pub fn build_sandbox_spec(
-    workspace_host: &Path,
+    manifest_dir: &Path,
     command: Vec<String>,
     ruleset: CompiledRuleset,
     run_id: &str,
 ) -> SandboxSpec {
+    let workspace_host = crate::manifest::project_root_of(manifest_dir);
     let read_only = ruleset.workspace_write_decision().is_err();
     SandboxSpec {
         image: sandbox_image(),
@@ -399,8 +410,10 @@ impl ExecutionPlan {
 /// Entry point for `agentstack run --sandbox`.
 pub fn run_sandboxed(dir: Option<&Path>, args: &RunArgs) -> Result<()> {
     let ctx = crate::commands::load(dir)?;
-    let workspace_host = ctx.dir.clone();
     let plan = ExecutionPlan::build(&ctx, args)?;
+    // The banner shows the host dir actually mounted (the project root the
+    // spec resolved), read back off the spec so the two can never diverge.
+    let workspace_host = PathBuf::from(plan.spec.workspace());
 
     // `--plan`: show exactly what would run (trust, policy, mode, command) and
     // stop — no Docker, no feature needed. "Display the plan" instead of run it.
@@ -750,14 +763,15 @@ fn shadow_native_config(
     // Empty project config shadows a workspace-scope native entry, but only when
     // one exists (mounting over a nonexistent read-only path fails the run).
     if let (Some(project_container), Some(proj)) = (cfg.project_container, desc.project.as_ref()) {
-        // COUPLING NOTE: this roots the project-config existence check at
-        // `manifest_dir`, which aligns with the current `/workspace` mount
-        // (`ctx.dir`). If that mount is ever corrected to the true project root,
-        // BOTH shadow existence checks here must move to
-        // `project_root_of(manifest_dir).join(&proj.config)` in lockstep — else a
+        // COUPLING NOTE: this existence check must be rooted at the same host
+        // dir `build_sandbox_spec` mounts at `/workspace` — the PROJECT root
+        // (`project_root_of`), not the manifest dir. If the two ever diverge, a
         // root-scope native MCP config would go un-shadowed under lockdown (a
-        // direct-route shadow bypass). Keep the two checks identical.
-        if manifest_dir.join(&proj.config).exists() {
+        // direct-route shadow bypass). Keep BOTH shadow checks identical.
+        if crate::manifest::project_root_of(manifest_dir)
+            .join(&proj.config)
+            .exists()
+        {
             let empty_host = gw.tempdir.join("project-shadow");
             std::fs::write(&empty_host, &cfg.empty_body)
                 .context("writing the project shadow config")?;
@@ -1027,14 +1041,15 @@ fn wire_sandbox_gateway(
     // fails the run (Docker can't create the mountpoint). When it does exist,
     // the mountpoint exists too, so the read-only overlay works.
     if let (Some(project_container), Some(proj)) = (cfg.project_container, desc.project.as_ref()) {
-        // COUPLING NOTE: this roots the project-config existence check at
-        // `manifest_dir`, which aligns with the current `/workspace` mount
-        // (`ctx.dir`). If that mount is ever corrected to the true project root,
-        // BOTH shadow existence checks here must move to
-        // `project_root_of(manifest_dir).join(&proj.config)` in lockstep — else a
+        // COUPLING NOTE: this existence check must be rooted at the same host
+        // dir `build_sandbox_spec` mounts at `/workspace` — the PROJECT root
+        // (`project_root_of`), not the manifest dir. If the two ever diverge, a
         // root-scope native MCP config would go un-shadowed under lockdown (a
-        // direct-route shadow bypass). Keep the two checks identical.
-        if manifest_dir.join(&proj.config).exists() {
+        // direct-route shadow bypass). Keep BOTH shadow checks identical.
+        if crate::manifest::project_root_of(manifest_dir)
+            .join(&proj.config)
+            .exists()
+        {
             let empty_host = gw.tempdir.join("project-shadow");
             std::fs::write(&empty_host, &cfg.empty_body)
                 .context("writing the project shadow config")?;
@@ -1389,6 +1404,34 @@ mod tests {
             .env
             .iter()
             .any(|(k, v)| k == agentstack_recorder::RUN_ID_ENV && v == "r-abc"));
+        assert_eq!(spec.workspace(), "/home/me/proj");
+    }
+
+    /// The `/workspace` mount is the PROJECT root, not the manifest dir: under
+    /// the nested `.agentstack/` layout the mount is the manifest dir's parent.
+    /// Mounting `.agentstack/` itself would confine the sandboxed agent to the
+    /// manifest folder and hide the project's code (the 2026-07-18 bug).
+    #[test]
+    fn nested_layout_mounts_the_project_root_not_the_manifest_dir() {
+        let spec = build_sandbox_spec(
+            Path::new("/home/me/proj/.agentstack"),
+            vec!["claude".into()],
+            CompiledRuleset::default(),
+            "r-nested",
+        );
+        assert_eq!(spec.workspace(), "/home/me/proj");
+        assert_eq!(spec.workdir, WORKSPACE);
+    }
+
+    /// A legacy root `agentstack.toml` keeps mounting the project dir itself.
+    #[test]
+    fn legacy_root_manifest_mounts_the_project_dir_unchanged() {
+        let spec = build_sandbox_spec(
+            Path::new("/home/me/proj"),
+            vec!["claude".into()],
+            CompiledRuleset::default(),
+            "r-root",
+        );
         assert_eq!(spec.workspace(), "/home/me/proj");
     }
 
