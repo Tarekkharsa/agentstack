@@ -174,7 +174,7 @@ rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled `CLAUDE.md`
   `agentstack lock` pins name refs without rendering, so `git status` stays
   silent.
 - **Zero files / MCP** — no persistent per-project provider artifacts. `agentstack
-  connect` registers the gateway once per harness (one write to each
+  gateway connect` registers the gateway once per harness (one write to each
   harness's global config) and every **trusted** repo serves its own stack
   live. `agentstack_lease_open(profile)` can fence one MCP connection to a
   profile without rendering native files; `agentstack_lease_status` shows its

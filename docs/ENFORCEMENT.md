@@ -5,6 +5,10 @@ execution mode, what does AgentStack actually enforce, and by what mechanism?**
 When any other document and this one disagree, this one is right — it is checked
 against the source, not against intent.
 
+AgentStack intercepts an agent CLI on four independent lanes — one observes, three enforce:
+
+![Four interception lanes: your agent CLI flows through the observe-only proxy to the Anthropic API, and through the enforcing gateway+mcp, guard, and egress interceptors to MCP servers, your filesystem, and the internet](interception-map.svg)
+
 ## Claim discipline
 
 AgentStack **restricts destinations and records decisions; it cannot guarantee

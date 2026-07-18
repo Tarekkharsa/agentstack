@@ -12,7 +12,7 @@ governed execution is constrained and recorded.**
 
 ## Where this starts
 
-The current v0.10.1 implementation is a nine-crate Rust workspace. It ships the
+The current v0.11.0 implementation is a nine-crate Rust workspace. It ships the
 manifest and lock resolver, 13 CLI adapters, a central capability library,
 content-bound trust, machine-first policy, a single-dispatch MCP gateway,
 Docker sandbox and lockdown runtimes, egress enforcement, per-run recording,

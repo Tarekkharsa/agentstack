@@ -8,12 +8,6 @@
 **[Website](https://tarekkharsa.github.io/agentstack/)** ·
 [Docs](https://tarekkharsa.github.io/agentstack/docs.html) ·
 [Examples](https://tarekkharsa.github.io/agentstack/examples.html) ·
-[Strategy](STRATEGY.md) ·
-[Current work](TODO.md) ·
-[Feature reference](docs/reference.md) ·
-[Enforcement matrix](docs/ENFORCEMENT.md) ·
-[Central library](https://tarekkharsa.github.io/agentstack/library.html) ·
-[Dashboard](docs/dashboard.md) ·
 [Releases](https://github.com/Tarekkharsa/agentstack/releases)
 
 Define your stack once in `.agentstack/agentstack.toml`. AgentStack resolves
@@ -493,7 +487,7 @@ agentstack proxy report       # after some real usage
 `report` ranks per-capability tokens/turn against how often each tool was
 actually called — so a server that's expensive but never used is flagged
 `drop / lazy`. Because those are the same servers and profiles agentstack
-manages, that on-wire evidence closes the loop with the static `stats` /
+manages, that on-wire evidence closes the loop with the static `report usage` /
 `doctor` lenses. Telemetry is privacy-preserving: counts, capability names, and
 token estimates only — never prompt bodies or secrets.
 

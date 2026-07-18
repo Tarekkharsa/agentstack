@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="764" height="326" viewBox="0 0 764 326" role="img" aria-label="Four interception lanes: your agent CLI flows through proxy (observe-only) to the Anthropic API, and through gateway+mcp, guard, and egress (enforcing) to MCP servers, your filesystem, and the internet"><style>text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px;white-space:pre}</style><defs><marker id="ah-e" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#7CC08B"/></marker><marker id="ah-o" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#97A1AD"/></marker></defs><rect x="0.5" y="0.5" width="763" height="325" rx="12" fill="#0E1114" stroke="rgba(255,255,255,0.09)"/><rect x="0.5" y="0.5" width="763" height="38" rx="12" fill="rgba(255,255,255,0.02)"/><rect x="0.5" y="28" width="763" height="10" fill="#0E1114"/><line x1="0.5" y1="38" x2="763.5" y2="38" stroke="rgba(255,255,255,0.07)"/><circle cx="22" cy="19" r="5.5" fill="#E5786B"/><circle cx="40" cy="19" r="5.5" fill="#E0B04A"/><circle cx="58" cy="19" r="5.5" fill="#7CC08B"/><text x="744" y="23" text-anchor="end" fill="#97A1AD" style="font-size:12px;font-weight:700">four lanes · one observes, three enforce</text>
+
+<!-- agent CLI -->
+<rect x="16" y="58" width="140" height="212" rx="10" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.12)"/>
+<text x="86" y="126" text-anchor="middle" fill="#D7DEE4" style="font-size:13px;font-weight:700">Your agent CLI</text>
+<line x1="34" y1="138" x2="138" y2="138" stroke="rgba(255,255,255,0.10)"/>
+<text x="86" y="164" text-anchor="middle" fill="#97A1AD" style="font-size:12px">Claude Code</text>
+<text x="86" y="188" text-anchor="middle" fill="#97A1AD" style="font-size:12px">Cursor</text>
+<text x="86" y="212" text-anchor="middle" fill="#97A1AD" style="font-size:12px">Codex</text>
+<text x="86" y="236" text-anchor="middle" fill="#97A1AD" style="font-size:12px">…</text>
+
+<!-- lane 1: proxy — observe-only (dashed, gray) -->
+<line x1="156" y1="80" x2="186" y2="80" stroke="#97A1AD" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ah-o)"/>
+<rect x="190" y="58" width="372" height="44" rx="8" fill="rgba(255,255,255,0.02)" stroke="rgba(151,161,173,0.30)"/>
+<rect x="194" y="66" width="3" height="28" rx="1.5" fill="#97A1AD"/>
+<text x="208" y="77" fill="#97A1AD" style="font-size:14px;font-weight:700">agentstack proxy</text>
+<text x="208" y="93" fill="#97A1AD" style="font-size:12px">per-turn token cost of the tools block</text>
+<line x1="562" y1="80" x2="592" y2="80" stroke="#97A1AD" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ah-o)"/>
+<rect x="596" y="58" width="150" height="44" rx="8" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.09)"/>
+<text x="671" y="86" text-anchor="middle" fill="#D7DEE4" style="font-size:14px">Anthropic API</text>
+
+<!-- lane 2: gateway + mcp — enforcing (solid, green) -->
+<line x1="156" y1="136" x2="186" y2="136" stroke="#7CC08B" stroke-width="1.6" marker-end="url(#ah-e)"/>
+<rect x="190" y="114" width="372" height="44" rx="8" fill="rgba(255,255,255,0.02)" stroke="rgba(124,192,139,0.35)"/>
+<rect x="194" y="122" width="3" height="28" rx="1.5" fill="#7CC08B"/>
+<text x="208" y="133" fill="#7CC08B" style="font-size:14px;font-weight:700">gateway + mcp</text>
+<text x="208" y="149" fill="#97A1AD" style="font-size:12px">trust-gated broker · gates untrusted repos</text>
+<line x1="562" y1="136" x2="592" y2="136" stroke="#7CC08B" stroke-width="1.6" marker-end="url(#ah-e)"/>
+<rect x="596" y="114" width="150" height="44" rx="8" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.09)"/>
+<text x="671" y="142" text-anchor="middle" fill="#D7DEE4" style="font-size:14px">MCP servers</text>
+
+<!-- lane 3: guard — enforcing (solid, green) -->
+<line x1="156" y1="192" x2="186" y2="192" stroke="#7CC08B" stroke-width="1.6" marker-end="url(#ah-e)"/>
+<rect x="190" y="170" width="372" height="44" rx="8" fill="rgba(255,255,255,0.02)" stroke="rgba(124,192,139,0.35)"/>
+<rect x="194" y="178" width="3" height="28" rx="1.5" fill="#7CC08B"/>
+<text x="208" y="189" fill="#7CC08B" style="font-size:14px;font-weight:700">guard</text>
+<text x="208" y="205" fill="#97A1AD" style="font-size:12px">hook per CLI · destructive cmds + deny paths</text>
+<line x1="562" y1="192" x2="592" y2="192" stroke="#7CC08B" stroke-width="1.6" marker-end="url(#ah-e)"/>
+<rect x="596" y="170" width="150" height="44" rx="8" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.09)"/>
+<text x="671" y="198" text-anchor="middle" fill="#D7DEE4" style="font-size:14px">your filesystem</text>
+
+<!-- lane 4: egress — enforcing (solid, green) -->
+<line x1="156" y1="248" x2="186" y2="248" stroke="#7CC08B" stroke-width="1.6" marker-end="url(#ah-e)"/>
+<rect x="190" y="226" width="372" height="44" rx="8" fill="rgba(255,255,255,0.02)" stroke="rgba(124,192,139,0.35)"/>
+<rect x="194" y="234" width="3" height="28" rx="1.5" fill="#7CC08B"/>
+<text x="208" y="245" fill="#7CC08B" style="font-size:14px;font-weight:700">egress</text>
+<text x="208" y="261" fill="#97A1AD" style="font-size:12px">sandbox network firewall · SNI + anti-SSRF</text>
+<line x1="562" y1="248" x2="592" y2="248" stroke="#7CC08B" stroke-width="1.6" marker-end="url(#ah-e)"/>
+<rect x="596" y="226" width="150" height="44" rx="8" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.09)"/>
+<text x="671" y="254" text-anchor="middle" fill="#D7DEE4" style="font-size:14px">the internet</text>
+
+<!-- legend -->
+<line x1="24" y1="300" x2="52" y2="300" stroke="#7CC08B" stroke-width="1.6" marker-end="url(#ah-e)"/>
+<text x="62" y="304" fill="#97A1AD" style="font-size:12px">enforces — blocks at runtime</text>
+<line x1="304" y1="300" x2="332" y2="300" stroke="#97A1AD" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ah-o)"/>
+<text x="342" y="304" fill="#97A1AD" style="font-size:12px">observe-only — never blocks</text>
+</svg>
