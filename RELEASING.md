@@ -11,6 +11,10 @@ Releases are published from tags (v0.2.0 onward). Per release:
   shipping — a version bump left untagged means the installer hands users a
   binary that no longer matches the docs.
 - Update `CHANGELOG.md` with the release entry.
+- Sweep doc version pins to the new tag — they lag silently otherwise:
+  `rg -n "@v0\.|agentstack 0\." README.md docs/*.html docs/start.html action.yml`
+  (the Action `uses:` examples and start.html's `--version` capture are the
+  known offenders).
 
 ## 1. Release binaries (GitHub Releases)
 
