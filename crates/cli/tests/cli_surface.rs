@@ -33,11 +33,9 @@ fn consolidated_verbs_parse() {
         vec!["agentstack", "report", "run", "r-1234", "--json"],
         vec!["agentstack", "report", "runs", "--json"],
         vec!["agentstack", "report", "usage", "--live"],
-        vec!["agentstack", "report", "calls", "--transcripts"],
         vec!["agentstack", "gateway", "connect", "--all"],
         vec!["agentstack", "gateway", "disconnect", "--all"],
         vec!["agentstack", "lib", "pack-init", "my-pack"],
-        vec!["agentstack", "lib", "consolidate", "--list"],
         vec!["agentstack", "report", "calls", "--since", "7"],
         // The machine-invoked entrypoint written into harness configs must
         // keep parsing exactly as `connect` renders it.
@@ -63,6 +61,7 @@ fn retired_top_level_verbs_are_gone() {
         vec!["agentstack", "hook", "zsh"],
         vec!["agentstack", "codemode"],
         vec!["agentstack", "consolidate"],
+        vec!["agentstack", "lib", "consolidate"],
         vec!["agentstack", "lib", "migrate"],
         // `audit` was folded into `doctor --deep`; the top-level verb is gone.
         vec!["agentstack", "audit"],

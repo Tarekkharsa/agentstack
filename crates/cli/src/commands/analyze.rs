@@ -24,18 +24,12 @@ pub fn run(args: &AnalyzeArgs) -> Result<()> {
         let cutoff = calllog::now_epoch().saturating_sub(days * 86_400);
         calls.retain(|e| e.ts >= cutoff);
     }
-    let mut report = collect_with(&calls);
-    if args.transcripts {
-        report["transcripts"] = transcripts_summary(&crate::transcripts::read_default());
-    }
+    let report = collect_with(&calls);
     if args.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         print_human(&report);
         print_tool_table(&calls);
-        if args.transcripts {
-            print_transcripts(&report["transcripts"]);
-        }
     }
     Ok(())
 }
@@ -196,77 +190,6 @@ fn dead_weight(lib: &Library, usage: &Usage, fp: &Footprints, calls: &[CallRecor
     json!({ "skills": skills, "servers": servers })
 }
 
-/// Aggregate per-session transcript summaries into a per-harness report.
-/// Coverage is uneven by nature (rich for Claude Code, thinner for Codex), so
-/// each harness block names how much it could actually see.
-fn transcripts_summary(sessions: &[crate::transcripts::SessionSummary]) -> Value {
-    /// sessions, input tokens, output tokens, tool -> calls.
-    type HarnessAgg = (u64, u64, u64, BTreeMap<String, u64>);
-    let mut by_harness: BTreeMap<&str, HarnessAgg> = BTreeMap::new();
-    for s in sessions {
-        let e = by_harness.entry(s.harness.as_str()).or_default();
-        e.0 += 1;
-        e.1 += s.input_tokens;
-        e.2 += s.output_tokens;
-        for (tool, n) in &s.tools {
-            *e.3.entry(tool.clone()).or_insert(0) += n;
-        }
-    }
-    let harnesses: Vec<Value> = by_harness
-        .into_iter()
-        .map(|(harness, (count, input, output, tools))| {
-            let mut top: Vec<_> = tools.into_iter().collect();
-            top.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-            let top_tools: Vec<Value> = top
-                .iter()
-                .take(8)
-                .map(|(t, n)| json!({ "tool": t, "calls": n }))
-                .collect();
-            json!({
-                "harness": harness,
-                "sessions": count,
-                "input_tokens": input,
-                "output_tokens": output,
-                "top_tools": top_tools,
-            })
-        })
-        .collect();
-    json!({ "harnesses": harnesses })
-}
-
-fn print_transcripts(t: &Value) {
-    println!("\n{}", "Transcripts".bold());
-    let Some(harnesses) = t["harnesses"].as_array().filter(|a| !a.is_empty()) else {
-        println!(
-            "  {}",
-            "No local session transcripts found (~/.claude/projects, ~/.codex/sessions).".dimmed()
-        );
-        return;
-    };
-    for h in harnesses {
-        println!(
-            "  {:<12} {} session(s) · {} in (uncached) / {} out",
-            h["harness"].as_str().unwrap_or("?"),
-            h["sessions"].as_u64().unwrap_or(0),
-            fmt_tokens(h["input_tokens"].as_u64().unwrap_or(0)),
-            fmt_tokens(h["output_tokens"].as_u64().unwrap_or(0)),
-        );
-        if let Some(tools) = h["top_tools"].as_array().filter(|a| !a.is_empty()) {
-            for t in tools.iter().take(5) {
-                println!(
-                    "    {:<24} {:>6}",
-                    t["tool"].as_str().unwrap_or("?"),
-                    t["calls"].as_u64().unwrap_or(0),
-                );
-            }
-        }
-    }
-    println!(
-        "\n  {}",
-        "Aggregates only — transcript content is never read into the report.".dimmed()
-    );
-}
-
 fn print_human(report: &Value) {
     let calls = &report["calls"];
     let total = calls["total"].as_u64().unwrap_or(0);
@@ -398,44 +321,6 @@ mod tests {
         assert_eq!(s["by_server"][0]["server"], "figma");
         assert_eq!(s["by_server"][0]["calls"], 2);
         assert_eq!(s["by_server"][0]["errors"], 1);
-    }
-
-    #[test]
-    fn transcripts_summary_groups_by_harness_and_ranks_tools() {
-        use crate::transcripts::SessionSummary;
-        let mut a = SessionSummary {
-            harness: "claude-code".into(),
-            input_tokens: 100,
-            output_tokens: 10,
-            ..Default::default()
-        };
-        a.tools.insert("Bash".into(), 3);
-        a.tools.insert("Read".into(), 1);
-        let mut b = SessionSummary {
-            harness: "claude-code".into(),
-            input_tokens: 50,
-            output_tokens: 5,
-            ..Default::default()
-        };
-        b.tools.insert("Bash".into(), 2);
-        let c = SessionSummary {
-            harness: "codex".into(),
-            input_tokens: 2500,
-            output_tokens: 90,
-            ..Default::default()
-        };
-
-        let t = transcripts_summary(&[a, b, c]);
-        let hs = t["harnesses"].as_array().unwrap();
-        assert_eq!(hs.len(), 2);
-        // BTreeMap order: claude-code before codex.
-        assert_eq!(hs[0]["harness"], "claude-code");
-        assert_eq!(hs[0]["sessions"], 2);
-        assert_eq!(hs[0]["input_tokens"], 150);
-        assert_eq!(hs[0]["top_tools"][0]["tool"], "Bash");
-        assert_eq!(hs[0]["top_tools"][0]["calls"], 5);
-        assert_eq!(hs[1]["harness"], "codex");
-        assert_eq!(hs[1]["output_tokens"], 90);
     }
 
     #[test]

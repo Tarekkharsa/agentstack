@@ -20,7 +20,6 @@ pub mod catalog;
 pub mod cli;
 pub mod codemode;
 pub mod commands;
-pub mod consolidate;
 pub mod dashboard;
 pub mod discover;
 pub mod executable;
@@ -52,7 +51,6 @@ pub mod state;
 pub mod store;
 #[allow(unsafe_code)]
 pub(crate) mod sys;
-pub mod transcripts;
 // TODO(phase-1): shim — migrate callers to agentstack_trust:: and drop.
 pub use agentstack_trust as trust;
 pub mod usage;

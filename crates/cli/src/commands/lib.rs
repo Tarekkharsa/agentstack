@@ -4,9 +4,7 @@
 //!
 //! This module owns the **library write contract**: [`add_skill`] is the single
 //! insertion path — how an item enters `library.toml`, how its files land under
-//! `lib/skills/`, and how its checksum + provenance are recorded. Future
-//! surface (`lib consolidate` emitting name refs) reuses it rather
-//! than inventing its own file/index logic.
+//! `lib/skills/`, and how its checksum + provenance are recorded.
 
 use agentstack_core::digest::Sha256Hex;
 use std::path::{Path, PathBuf};
@@ -40,7 +38,6 @@ pub fn run(args: &LibArgs, manifest_dir: Option<&Path>) -> Result<()> {
         LibKind::RemoveExtension(a) => remove_extension_cli(a),
         LibKind::RemoveHook(a) => remove_hook_cli(a),
         LibKind::Sync(a) => sync(a),
-        LibKind::Consolidate(a) => super::consolidate::run(a, manifest_dir),
         LibKind::PackInit(a) => super::pack::init(a.name.as_deref()),
     }
 }
@@ -83,7 +80,7 @@ pub struct AddOutcome {
 }
 
 /// Insert a skill into the central library at `lib_home`. The single library
-/// write path, reused by the CLI and `lib consolidate`.
+/// write path, reused by the CLI.
 ///
 /// - `Path`: validated to contain `SKILL.md`, copied into `lib/skills/<name>`,
 ///   digested there, recorded as `path = "<name>"`.
@@ -156,7 +153,7 @@ fn add_skill_inner(
                     std::fs::remove_dir_all(&dest)
                         .with_context(|| format!("removing {}", dest.display()))?;
                 }
-                crate::consolidate::copy_dir(&src, &dest)?;
+                crate::util::fsx::copy_dir_all_following_symlinks(&src, &dest)?;
                 (dir_digest(&dest)?.hex().to_string(), dir_size(&dest))
             } else {
                 (dir_digest(&src)?.hex().to_string(), dir_size(&src))
@@ -227,8 +224,8 @@ fn add_skill_inner(
     };
 
     // Oversized skills make every full-library pass (doctor, install, use)
-    // expensive for every consumer — surface it on the outcome so the CLI,
-    // MCP, and consolidate callers all warn uniformly.
+    // expensive for every consumer — surface it on the outcome so the CLI and
+    // MCP callers all warn uniformly.
     if total_bytes > LARGE_SKILL_BYTES {
         warnings.push(format!(
             "'{name}' is {} — every full-library pass (doctor, install, use) reads all of it. \
@@ -1143,7 +1140,7 @@ fn copy_extension_source(src: &Path, dest: &Path) -> Result<()> {
             .with_context(|| format!("creating {}", parent.display()))?;
     }
     if src.is_dir() {
-        crate::consolidate::copy_dir(src, dest)?;
+        crate::util::fsx::copy_dir_all_following_symlinks(src, dest)?;
     } else {
         std::fs::copy(src, dest)
             .with_context(|| format!("copying {} → {}", src.display(), dest.display()))?;

@@ -352,7 +352,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
 
     // Skills present on disk in each CLI's skills dir. Every entry is surfaced —
     // including broken links / non-skill dirs — with a status, so nothing is
-    // silently hidden; only `valid` ones can be adopted/consolidated.
+    // silently hidden; only `valid` ones can be adopted or added to the library.
     struct Disc {
         source: String,
         is_symlink: bool,

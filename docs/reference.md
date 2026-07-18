@@ -458,12 +458,6 @@ since blocking a completed pull would strand the tree — and the scan is
 incremental: a no-op pull scans nothing, and a real pull scans only the
 skills it changed, so long-accepted content isn't re-flagged on every sync.
 
-### Sweeping in what you already have
-
-`lib consolidate` moves scattered skills from every CLI's folder into the
-library and symlinks the originals back — preview first. Manage the rest with
-`lib list` / `remove` / `remove-server`.
-
 ## Capabilities
 
 ### Package manager
@@ -1259,13 +1253,13 @@ cancelled or timed-out run leaves no orphaned guest processes.
 [PACK]` + `--all`/`--with-instructions`/`--yes`/`--write` re-resolves vendor
 packs), `remove`, `apply` (`--scope`, `--write`, `--prune-foreign`), `diff`,
 `explain`, `use <profile>`, `session`, `instructions`, `adopt`,
-`lib add|add-server|list|remove|remove-server|sync|consolidate|pack-init`
+`lib add|add-server|list|remove|remove-server|sync|pack-init`
 (`lib add`: `--path`, `--git`/`--subpath`, `--allow-flagged`; `lib sync`:
 `--init`, `--remote`, `--status`, `--allow-secrets`), `restore` (`--last`; a
 recorded-change id or an adapter id),
 `doctor` (`--ci`, `--live`, `--fix`, `--deep`, `--all`, `--json`), `optimize` (`--json`, `--write`, `--since`),
 `report run <id>|runs|usage|calls|wire` (`run`/`runs`/`calls`/`wire`: `--json`;
-`usage`: `--live`; `calls`: `--since`, `--transcripts`), `proxy` (`--port`,
+`usage`: `--live`; `calls`: `--since`), `proxy` (`--port`,
 `--upstream`),
 `secret set|get|rm|list`, `export`/`import`, `adapters` (`list|show|validate`),
 `settings`,
@@ -1288,7 +1282,7 @@ here.
 13 adapters · `init`/`add`/`apply`/`diff`/`use`/`instructions`/`adopt` ·
 package manager (`install`/`lock --update`/`remove` + lockfile) · central capability
 library (`lib` skills + servers referenced by name, digest-pinned in the lock,
-drift in `doctor`/`explain`, `lib consolidate` into `lib/skills`) · secrets (keychain +
+drift in `doctor`/`explain`) · secrets (keychain +
 varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`/`--deep`) ·
 content scanning on install + `audit` · official MCP Registry provider +
 `search`/`add from` · `[policy]` trust gate · native per-CLI settings

@@ -823,7 +823,7 @@ function skills(c) {
     c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
       el("div", { class: "hd", style: "display:flex;align-items:center" }, hd),
       el("div", { class: "bd" }, [
-        el("div", { class: "muted", style: "font-size:12px;margin-bottom:8px" }, ["Register a discovered skill where it is with `agentstack adopt <name>`, or move it into the central library with `agentstack lib consolidate`."]),
+        el("div", { class: "muted", style: "font-size:12px;margin-bottom:8px" }, ["Register a discovered skill where it is with `agentstack adopt <name>`, or move it into the central library with `agentstack lib add <name> --path <dir>`."]),
         ...rows,
       ]),
     ]));

@@ -985,10 +985,10 @@ fn run_checks(
         }
     }
     // Broken skill links on disk: a symlink in a detected CLI's skills dir
-    // whose target is gone loads nothing — and consolidate skips it — so name
-    // it here with the fix instead of leaving the skill silently dead. Every
-    // detected adapter is walked, not just the manifest's targets: the dead
-    // link breaks that CLI regardless of what this project fans out to.
+    // whose target is gone loads nothing, so name it here with the fix
+    // instead of leaving the skill silently dead. Every detected adapter is
+    // walked, not just the manifest's targets: the dead link breaks that CLI
+    // regardless of what this project fans out to.
     for desc in ctx.registry.iter().filter(|d| d.detected()) {
         for scope in [Scope::Global, Scope::Project] {
             let Some(dir) = desc.skills_dir_for(scope, &ctx.dir) else {
@@ -1017,10 +1017,10 @@ fn run_checks(
 
     // The central library is machine-global, so check ALL of it here, not
     // just the skills this project references: `lib add` warns at entry, but
-    // consolidated/pre-existing skills have no other surface that tells the
-    // user they're undiscoverable. A skill without a frontmatter description
-    // only matches search by name and shows as a bare name in every loadable
-    // index — warn with the fix, don't block (it still works by name).
+    // pre-existing skills have no other surface that tells the user they're
+    // undiscoverable. A skill without a frontmatter description only matches
+    // search by name and shows as a bare name in every loadable index — warn
+    // with the fix, don't block (it still works by name).
     let undescribed: Vec<&str> = skills_library
         .skills
         .iter()

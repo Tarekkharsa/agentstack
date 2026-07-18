@@ -940,25 +940,6 @@ pub struct AdoptArgs {
 }
 
 #[derive(Args, Debug)]
-pub struct ConsolidateArgs {
-    /// Specific skill names to consolidate (default: all discovered).
-    #[arg(value_name = "SKILL")]
-    pub names: Vec<String>,
-
-    /// Just list the skills found on disk; don't move anything.
-    #[arg(long)]
-    pub list: bool,
-
-    /// Overwrite a library entry that already exists with different content.
-    #[arg(long)]
-    pub replace: bool,
-
-    /// Write the changes (else dry-run/preview).
-    #[arg(long)]
-    pub write: bool,
-}
-
-#[derive(Args, Debug)]
 pub struct LibArgs {
     #[command(subcommand)]
     pub kind: LibKind,
@@ -989,10 +970,6 @@ pub enum LibKind {
     /// Sync the central library across machines as a git repo (commit local
     /// changes, pull, push). Secrets never travel — server defs are `${REF}`.
     Sync(LibSyncArgs),
-    /// Gather scattered skills from every CLI's skills dir into the central
-    /// library (`~/.agentstack/lib/skills/`), symlinking the originals back.
-    /// Preview first; `--write` moves them.
-    Consolidate(ConsolidateArgs),
     /// Scaffold a publishable pack (pack.toml + example skill) in the current
     /// directory. Publish by pushing the repo and tagging a version (e.g.
     /// v0.1.0); install with `agentstack add from git:<host>/<repo>@<tag>`.
@@ -1227,12 +1204,6 @@ pub struct AnalyzeArgs {
     /// Only count call-log entries from the last N days.
     #[arg(long, value_name = "DAYS")]
     pub since: Option<u64>,
-
-    /// Also read local session transcripts (Claude Code, Codex) for
-    /// cross-harness reach: sessions, token totals, top tools. Read-only;
-    /// only aggregates are reported, never prompt content.
-    #[arg(long)]
-    pub transcripts: bool,
 }
 
 #[derive(Args, Debug)]
