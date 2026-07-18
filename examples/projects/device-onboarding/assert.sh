@@ -21,10 +21,10 @@
 #      → locked --plan), legacy root-manifest layout, non-git projects, an
 #      AGENTSTACK_HOME containing spaces (incl. guard denial through it).
 #
-# Known gaps found by this example's first round live as tracked tasks, not
-# assertions (see FINDINGS.md "Device-onboarding round"): subdir walk-up
-# discovery and adopt on hand-EDITED values. (The default-scope decision
-# landed — docs/design/default-scope.md — and A3 asserts the new behavior.)
+# This example's first round found four gaps; all four are now fixed and
+# asserted here (see FINDINGS.md "Device-onboarding round"): the default-scope
+# decision (A3), project-scope pending-removal warnings (via doctor), and — in
+# section D — subdirectory walk-up discovery and adopt on hand-EDITED values.
 #
 # Requires: `agentstack` on PATH (or AGENTSTACK_BIN=..., or a built
 # target/{release,debug}/agentstack in this repo), git, python3.
@@ -241,6 +241,31 @@ seed_manifest
 "$AS" init --global --force >/dev/null 2>&1
 [ -f "$AGENTSTACK_HOME/agentstack.toml" ] && ok "init --global into a spaced machine home" || bad "no machine manifest"
 "$AS" guard test cat .env >/dev/null 2>&1 && bad "guard allowed .env through a spaced home" || ok "guard denies .env through a spaced home"
+
+# ═══ D. Fixes that closed this example's first-round gaps ════════════════════
+
+hdr "D1) commands walk up to the project root from a subdirectory"
+device "proj"
+echo '{}' > "$H/.claude.json"
+seed_manifest
+git init -q .
+mkdir -p src/deep && cd src/deep
+"$AS" 2>&1 | grep -q "agentstack.toml" && ok "bare agentstack finds the root manifest from src/deep" || bad "overview lost the root manifest from a subdir"
+"$AS" doctor >/dev/null 2>&1 && ok "doctor resolves the root manifest from src/deep" || bad "doctor errored from a subdir"
+"$AS" apply --scope project --write >/dev/null 2>&1
+if [ -f ../../.mcp.json ] && [ ! -f .mcp.json ]; then ok "apply from a subdir renders at the PROJECT ROOT"; else bad "apply from a subdir misplaced the render"; fi
+"$AS" init 2>&1 | grep -qiE "already|initialized|--force" && ok "init from a subdir refuses to silently nest" || bad "init nested a second manifest"
+
+hdr "D2) adopt pulls a hand-EDITED field of a manifest-known server"
+device "proj2"
+echo '{}' > "$H/.claude.json"
+seed_manifest
+"$AS" apply --scope project --write >/dev/null 2>&1
+python3 -c "import json; d=json.load(open('.mcp.json')); d['mcpServers']['docs']['url']='https://docs-eu.example/mcp'; json.dump(d,open('.mcp.json','w'), indent=2)"
+"$AS" adopt --scope project --write >/dev/null 2>&1
+grep -q "docs-eu.example" .agentstack/agentstack.toml && ok "adopt pulled the hand-edited url into the manifest" || bad "adopt ignored the hand-edit"
+"$AS" apply --scope project --write >/dev/null 2>&1
+grep -q "docs-eu.example" .mcp.json && ok "the hand-edit survives the next apply (not reverted)" || bad "next apply reverted the adopted edit"
 
 cd /
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASS" "$FAIL"

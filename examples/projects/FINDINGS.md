@@ -200,14 +200,29 @@ nonzero); hand-written configs and prose survive apply, restore, and prune;
 conflicts are surfaced; every quirk environment passes — including
 `lock → trust → run --locked --plan` inside a path with spaces.
 
-## Gaps found and filed (tracked tasks, not GitHub issues yet)
+## Gaps found — ALL FIXED and asserted (round 2, 2026-07-18)
 
-| Finding | Severity | Detail |
-|---|---|---|
-| Manifest discovery doesn't walk up from a subdirectory | **UX / footgun** | From `src/deep`, bare `agentstack` says "Manifest: none in this directory" and suggests `setup` (which would nest a second manifest); `doctor`/`lock`/`apply` error with "no manifest here — run `agentstack init`". The guard's `anchor_workspace` already walks to the nearest `.git`/`.agentstack` ancestor — the CLI disagrees with its own guard about what the project is. |
-| `adopt` ignores hand-*edited* values of manifest-known servers | doc/behavior mismatch | The documented drift rule ("hand-edit should stay → `adopt`") only covers hand-*added* servers. An edited URL on an existing server reports "Nothing to adopt", and the next `apply --write` erases the user's edit. |
-| Project-scope pending removals warn nowhere | safety messaging (doctor half resolved 2026-07-18) | Drop a managed server from a project manifest: `apply` dry-run says just "1 target(s) would change" before the write deletes the entry. The `doctor` half is fixed by the default-scope change — drift now checks every scope a write recorded state at, so project-scope "would REMOVE" findings surface. |
-| Bare `apply` writes global scope; the quickstart reads as project | **resolved 2026-07-18** | Decided and implemented as option (a) in `docs/design/default-scope.md`: the default scope follows the manifest's home — project for a repo manifest, global for the machine manifest (`~/.agentstack`). The quickstart now produces repo artifacts + the managed gitignore block as written; `doctor` follows the scope your writes recorded. |
+Every gap this round surfaced was fixed, reviewed, merged to `main`, and is
+now covered by an assertion (section D of `device-onboarding/assert.sh` for
+the first two; A3 + `doctor` drift for the scope pair). Verified end-to-end
+on the release binary (Round 5).
+
+| Finding | Fix (commit on `main`) |
+|---|---|
+| Manifest discovery didn't walk up from a subdirectory | **fixed** — `fix(cli)`: shared resolution funnels through `discover_project_base`, so `doctor`/`apply`/overview from `src/deep` act on the root manifest, and `init` refuses to silently nest. Asserted D1. |
+| `adopt` ignored hand-*edited* values of manifest-known servers | **fixed** — `fix(adopt)`: adopt diffs rendered-vs-on-disk per server and pulls changed fields into the manifest (comments preserved, secrets re-lifted), so the next `apply` no longer reverts the edit. Asserted D2. |
+| Project-scope pending removals warned nowhere | **fixed** — `fix(doctor)` + the default-scope change: drift now checks every scope a write recorded state at, so a project-scope "would REMOVE" surfaces before the delete. |
+| Bare `apply` wrote global scope; the quickstart read as project | **fixed** — `feat(scope)`: default scope follows the manifest's home (project for a repo, global for `~/.agentstack`), per `docs/design/default-scope.md`. Asserted A3. |
+
+Plus one gap a spawned session found and fixed independently:
+
+| Finding | Fix |
+|---|---|
+| Phantom drift — a plan managing nothing reformatted an untouched config (`{}` → `{ "mcpServers": {} }`), so `doctor` cried "0 change(s) pending" | **fixed** — `fix(render)`: a no-op plan proposes the existing bytes verbatim. |
+
+And the flaky-CI cause turned out to be a real core bug: `fix(core)` gave
+`atomic::write` unique temp names (concurrent replaces raced on one temp
+file); CI's test step moved to `nextest` for process-per-test isolation.
 
 ## Positive findings (things that just worked)
 
