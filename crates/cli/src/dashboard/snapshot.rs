@@ -860,8 +860,8 @@ fn next_actions(
                 s(missing_skills.len())
             ),
             "skills",
-            "Install skills",
-            json!({ "type": "post", "path": "/api/install", "label": "Install" }),
+            "Review skills",
+            json!({ "type": "section", "section": "skills" }),
         ));
     }
 

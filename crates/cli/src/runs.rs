@@ -1,18 +1,18 @@
 //! Live harness runs: launch an agent CLI as a tracked child process, list the
-//! ones currently alive, and kill them — from the terminal or the dashboard,
-//! without ever opening Activity Monitor.
+//! ones currently alive, and kill them — from the terminal, without ever
+//! opening Activity Monitor.
 //!
 //! A *run* is distinct from a [`crate::session`] (an ephemeral profile load keyed
 //! by directory). A run is a real OS process that agentstack owns: we spawn the
 //! harness binary in its own process group so we can tree-kill it later, and we
 //! record it in `~/.agentstack/runs.json` so a *separate* agentstack process (the
-//! dashboard) can see and stop it. When launched with a profile we reuse the
+//! read-only dashboard) can see it. When launched with a profile we reuse the
 //! session machinery to apply it before launch and revert it on exit.
 //!
 //! Control split: launching is a terminal act (`agentstack run <harness>` runs the
-//! TUI attached to your terminal, with agentstack as its parent); observing and
-//! killing also work from the dashboard, which only holds the PID and so signals
-//! the process group rather than a `Child` handle.
+//! TUI attached to your terminal, with agentstack as its parent); observing is
+//! also possible from the dashboard, while killing is a terminal act
+//! (`agentstack kill <id>`) that signals the recorded process group.
 
 use std::collections::BTreeMap;
 use std::fs;

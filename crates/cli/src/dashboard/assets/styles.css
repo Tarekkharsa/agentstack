@@ -156,16 +156,20 @@ tbody tr.clickable:hover { background: hsl(var(--muted) / 0.5); }
 .btn.primary { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); border-color: transparent; }
 .btn.primary:hover { opacity: 0.9; }
 .btn.icon { width: 32px; padding: 0; display: grid; place-items: center; }
-.btn.danger { color: hsl(0 72% 50%); border-color: hsl(0 72% 50% / 0.4); }
-.btn.danger:hover { background: hsl(0 72% 50% / 0.1); }
 .btn:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring)); }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
 .toolbar.tight { gap: 6px; }
 .inp { height: 30px; padding: 0 10px; font-size: 13px; border-radius: calc(var(--radius) - 2px);
   border: 1px solid hsl(var(--input)); background: hsl(var(--background)); color: hsl(var(--foreground)); width: 150px; }
 .inp:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--ring)); }
-.setter { display: inline-flex; gap: 6px; align-items: center; }
-.setter .btn { height: 30px; }
+
+/* Copyable CLI command — the read-only dashboard points at the terminal for
+   every change. Click to copy. */
+.cmd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  padding: 2px 8px; border-radius: calc(var(--radius) - 2px); border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.5); color: hsl(var(--foreground)); cursor: pointer; white-space: nowrap; }
+.cmd:hover { background: hsl(var(--muted)); border-color: hsl(var(--ring)); }
+.cmd-hint { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; margin-top: 10px; }
 
 /* Health */
 .health-row { display: flex; gap: 10px; align-items: baseline; padding: 9px 0; border-top: 1px solid hsl(var(--border)); font-size: 13px; }
@@ -246,8 +250,6 @@ details.acc[open] > summary { border-bottom: 1px solid hsl(var(--border)); }
 .diff .add { color: hsl(var(--green)); }
 .diff .del { color: hsl(var(--red)); }
 .diff-target { font-weight: 600; font-size: 13px; margin: 8px 0 4px; }
-.op-list { display: grid; gap: 8px; }
-.op-item { padding: 8px 10px; border: 1px solid hsl(var(--border)); border-radius: calc(var(--radius) - 2px); background: hsl(var(--muted) / 0.35); font-size: 12px; white-space: pre-wrap; }
 
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 60;
   display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100vw - 32px));

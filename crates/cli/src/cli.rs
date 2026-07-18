@@ -82,7 +82,8 @@ pub enum Command {
     /// Verify everything is wired up: adapters, secrets, drift, quirks, skills.
     Doctor(DoctorArgs),
 
-    /// Open the local web dashboard.
+    /// Open the local web dashboard — a read-only view of your stack (state,
+    /// diffs, doctor, runs, audited calls). Every change happens through the CLI.
     Dashboard(DashboardArgs),
 
     // ── Capabilities & library (hidden from --help; see the after_help map) ─
@@ -118,7 +119,6 @@ pub enum Command {
     Use(UseArgs),
 
     /// Manage ephemeral sessions: load a profile for now, then revert it.
-    /// A safety hatch for the dashboard's session feature.
     #[command(hide = true)]
     Session(SessionArgs),
 
@@ -1293,12 +1293,6 @@ pub struct DashboardArgs {
     /// Don't open the browser automatically.
     #[arg(long)]
     pub no_open: bool,
-
-    /// Disable all writes: the dashboard can browse state and preview diffs but
-    /// every mutation endpoint (apply, toggle, secrets, settings, install…) is
-    /// refused. Without this flag the dashboard can write to disk.
-    #[arg(long)]
-    pub read_only: bool,
 }
 
 #[derive(Args, Debug)]

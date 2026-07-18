@@ -155,7 +155,7 @@ pub fn freeze(manifest_dir: Option<&Path>, name: Option<&str>) -> Result<String>
         .map(String::from)
         .unwrap_or_else(|| format!("{}-frozen", sess.profile));
 
-    crate::dashboard::actions::add_profile(
+    crate::commands::add::add_profile_json(
         manifest_dir,
         &serde_json::json!({ "name": new_name, "servers": servers, "skills": skills }),
     )

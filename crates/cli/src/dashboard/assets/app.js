@@ -1,18 +1,16 @@
-// agentstack dashboard — vanilla JS, no framework. Sidebar sections over a
-// read-only snapshot (/api/state), with editing actions and diff-before-apply.
+// agentstack dashboard — vanilla JS, no framework. A read-only lens over a
+// snapshot (/api/state): browse your stack, preview diffs, run doctor, watch
+// runs and audited calls. Every change happens through the CLI — where a
+// control would live, the dashboard shows the command to copy instead.
 const token = new URLSearchParams(location.search).get("token") || "";
 let DATA = null;
 let SECTION = location.hash.slice(1) || "overview";
-let READONLY = false;
-let SCOPE = "global"; // active scope for toggles, preview, and the pending bar
+let SCOPE = "global"; // active scope for the matrix views, diff preview, pending bar
 let PENDING = null; // { scope, targets } from /api/diff, drives the pending bar
 let HISTORY = []; // recent apply events from /api/history
 let HISTORY_LOADED = false;
 let OPEN_SERVER = null;
-let ADD_FORM = false;
 let SORT_BY_COST = false; // servers table: manifest order vs context-cost desc
-let SKILL_FORM = false;
-let HOOK_FORM = false;
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -60,33 +58,33 @@ const q = (p) => p + "?token=" + encodeURIComponent(token);
 // "1 server" / "2 servers" — pass an explicit plural for irregulars ("harness", "harnesses").
 const plural = (n, w, p) => `${n} ${n === 1 ? w : p || w + "s"}`;
 
-function post(path, body, label) {
-  return fetch(q(path), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
-    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
-    .then(({ ok, d }) => {
-      if (!ok || d.error) throw new Error(d.error || "request failed");
-      toast((label || "Done") + " ✓", true);
-      return load();
-    })
-    .catch((e) => toast((label || "Action") + ": " + e.message, false));
+// A copyable CLI command. The dashboard reads; the terminal writes. This is the
+// app's mono style plus click-to-copy — the equivalent of any control we removed.
+function cmd(text) {
+  const e = el("code", { class: "cmd", title: "Click to copy" }, [text]);
+  e.addEventListener("click", () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast("Copied: " + text, true), () => {});
+  });
+  return e;
+}
+// A labelled hint row: "To do X, run: <cmd>".
+function cmdHint(prefix, command) {
+  return el("div", { class: "cmd-hint muted" }, [prefix ? prefix + " " : null, cmd(command)]);
 }
 
 function runAction(action, fallbackSection) {
   if (!action) return fallbackSection ? show(fallbackSection) : null;
-  if (action.type === "section") return show(action.section || fallbackSection || "overview");
   if (action.type === "preview") return openPreview(action.scope || "global", !!action.all);
-  if (action.type === "post") {
-    if (READONLY) return toast("Dashboard is read-only", false);
-    return post(action.path, {}, action.label || "Action");
-  }
-  return fallbackSection ? show(fallbackSection) : null;
+  // Everything else (section, or any legacy write action) just navigates.
+  return show(action.section || fallbackSection || "overview");
 }
 
 function actionButton(model, cls) {
   if (!model) return null;
   const action = model.action || model;
-  if (READONLY && action.type === "post") return null;
-  return btn(model.label || "Open", () => runAction(action), cls);
+  // The read-only dashboard has no write actions — a stray post action becomes
+  // a plain navigation to its section rather than a dead button.
+  return btn(model.label || "Open", () => runAction(action, action.section), cls);
 }
 
 /* ---------- shell ---------- */
@@ -130,12 +128,12 @@ function renderScopeSwitch() {
   const host = document.getElementById("scope-switch");
   if (!host) return;
   host.innerHTML = "";
-  if (READONLY || !DATA || DATA.needsInit) return;
+  if (!DATA || DATA.needsInit) return;
   const seg = el("div", { class: "seg", role: "group", "aria-label": "Scope" });
   [["global", "Global"], ["project", "Project"]].forEach(([id, label]) => {
     seg.appendChild(el("button", {
       class: "seg-btn" + (SCOPE === id ? " active" : ""),
-      title: id === "project" ? "Changes for this project directory only" : "Changes for your whole machine",
+      title: id === "project" ? "View this project directory only" : "View your whole machine",
       "aria-pressed": String(SCOPE === id),
       onclick: () => { if (SCOPE !== id) { SCOPE = id; renderScopeSwitch(); show(SECTION); refreshPending(); } },
     }, [label]));
@@ -159,8 +157,12 @@ function diffCounts(text) {
   });
   return { add, del };
 }
+// The command that reconciles the current scope's drift.
+function applyCmd(scope) {
+  return scope === "project" ? "agentstack apply --scope project --write" : "agentstack apply --write";
+}
 function refreshPending() {
-  if (!DATA || DATA.needsInit || READONLY) { PENDING = null; renderPending(); return Promise.resolve(); }
+  if (!DATA || DATA.needsInit) { PENDING = null; renderPending(); return Promise.resolve(); }
   return fetch(q("/api/diff") + "&scope=" + SCOPE)
     .then((r) => r.json())
     .then((d) => { PENDING = d; renderPending(); })
@@ -178,13 +180,13 @@ function renderPending() {
   const host = document.getElementById("pending");
   if (!host) return;
   host.innerHTML = "";
-  if (!DATA || DATA.needsInit || READONLY) return;
-  // An active session takes over the bar — end it to revert.
+  if (!DATA || DATA.needsInit) return;
+  // An active session (started from the CLI) takes over the bar — informational.
   if (DATA.session) {
     const s = DATA.session;
     const loads = s.loads || [];
     const sub = s.scope + " scope" +
-      (loads.length ? " · " + plural(loads.length, "skill") + " pulled" : "") + " · reverts when you end it";
+      (loads.length ? " · " + plural(loads.length, "skill") + " pulled" : "") + " · reverts when it ends";
     host.appendChild(el("div", { class: "pending-bar session" }, [
       el("div", { class: "pleft" }, [
         el("span", { class: "pdot session" }, []),
@@ -195,7 +197,7 @@ function renderPending() {
       ]),
       el("div", { class: "row-actions" }, [
         loads.length ? btn("Activity", () => show("activity")) : null,
-        btn("End session", endSession, "primary"),
+        cmd("agentstack session end"),
       ]),
     ]));
     return;
@@ -222,7 +224,7 @@ function renderPending() {
       ]),
       el("div", { class: "pchips" }, chips),
       el("div", { class: "row-actions" }, [
-        btn("Review & apply →", () => openPreview(SCOPE), "primary"),
+        btn("Review →", () => openPreview(SCOPE)),
       ]),
     ]));
     return;
@@ -238,22 +240,10 @@ function renderPending() {
         ]),
       ]),
       el("div", { class: "row-actions" }, [
-        btn("Undo", () => undoApply(last.id)),
         btn("Activity", () => show("activity")),
       ]),
     ]));
   }
-}
-function undoApply(id) {
-  if (!confirm("Undo this apply? Your tools' config files are restored to before it. Your saved stack is unchanged, so the changes will show as pending again.")) return;
-  return fetch(q("/api/undo"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) })
-    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
-    .then(({ ok, d }) => {
-      if (!ok || d.error) throw new Error(d.error || "undo failed");
-      toast("Reverted ✓", true);
-      return load().then(refreshHistory);
-    })
-    .catch((e) => toast("Undo: " + e.message, false));
 }
 
 /* ---------- command palette (⌘K) ---------- */
@@ -297,9 +287,9 @@ document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); openPalette(); }
 });
 
-/* ---------- activity (apply history + undo) ---------- */
+/* ---------- activity (apply history) ---------- */
 function activity(c) {
-  c.appendChild(pageHead("Activity", "Every apply is backed up here — restore your tools to how they were before any change."));
+  c.appendChild(pageHead("Activity", "Every apply is backed up. Restore your tools to how they were before any change with `agentstack restore`."));
 
   // Live session: the skills the agent pulled on demand, with its reasons.
   if (DATA.session) {
@@ -315,13 +305,13 @@ function activity(c) {
       el("div", { class: "hd", style: "display:flex;align-items:center" }, [
         "Session · " + s.profile,
         el("small", null, [s.scope + " scope · " + plural(loads.length, "skill") + " pulled"]),
-        READONLY ? null : el("span", { style: "margin-left:auto" }, [btn("End session", endSession)]),
+        el("span", { style: "margin-left:auto" }, [cmd("agentstack session end")]),
       ]),
       el("div", { class: "bd" }, rows),
     ]));
   }
   if (!HISTORY.length) {
-    c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, ["No applies yet. When you apply changes they show up here, each with an undo."])])]));
+    c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, ["No applies yet. When you apply changes from the CLI they show up here."])])]));
     if (!HISTORY_LOADED) refreshHistory();
     return;
   }
@@ -336,13 +326,13 @@ function activity(c) {
       ]),
     ]),
     el("span", { class: "row-actions" }, [
-      h.undone ? badge("undone", "") : READONLY ? null : btn("Undo", () => undoApply(h.id)),
+      h.undone ? badge("undone", "") : cmd("agentstack restore"),
     ]),
   ]));
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, rows)]));
 }
 
-/* ---------- discover (browse providers → add) ---------- */
+/* ---------- discover (browse providers) ---------- */
 const DISCOVER = { q: "", results: null, loading: false };
 
 function doDiscoverSearch(query) {
@@ -362,27 +352,6 @@ function doDiscoverSearch(query) {
     });
 }
 
-function addToStack(r) {
-  const targets = DATA.meta.defaultTargets || [];
-  const where = targets.length ? targets.join(", ") : "your default tools";
-  if (!confirm(`Add "${r.name}" to your stack?\n\nIt'll be enabled for: ${where}.\nNothing is written to your tools until you review and apply.`)) return;
-  return addFrom(r.addId);
-}
-function addFrom(id) {
-  return fetch(q("/api/add_from"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id }),
-  })
-    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
-    .then(({ ok, d }) => {
-      if (!ok || d.error) throw new Error(d.error || "add failed");
-      toast("Added ✓ — review it in the pending changes bar, then apply", true);
-      return load().then(() => doDiscoverSearch(DISCOVER.q));
-    })
-    .catch((e) => toast("Add: " + e.message, false));
-}
-
 function trustBadges(t) {
   const out = [];
   if (t.namespaced) out.push(badge("verified namespace", "green"));
@@ -392,7 +361,7 @@ function trustBadges(t) {
 }
 
 function discover(c) {
-  c.appendChild(pageHead("Discover", "Find a capability and add it to your stack in one step. It's enabled for your default tools and shows up as a pending change to review before anything is written."));
+  c.appendChild(pageHead("Discover", "Browse capabilities across the catalog and the official MCP Registry. Add one with `agentstack add <id>` in your terminal, then review the pending change here."));
 
   const input = el("input", { class: "inp", placeholder: "search capabilities…", style: "width:280px", value: DISCOVER.q });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") doDiscoverSearch(input.value.trim()); });
@@ -400,24 +369,6 @@ function discover(c) {
     input,
     btn("Search", () => doDiscoverSearch(input.value.trim()), "primary"),
   ]));
-
-  // Versioned packs from any git host: a repo with a pack.toml, installed at a
-  // tag. Same policy/content-scan gates as the CLI's `add from git:…`.
-  if (!READONLY) {
-    const gitInput = el("input", { class: "inp", placeholder: "git:github.com/acme/agent-pack@v1.0.0", style: "width:340px" });
-    const installGit = () => {
-      const id = gitInput.value.trim();
-      if (!id) return toast("Enter a git:<host>/<repo>@<tag> pack URL", false);
-      if (!id.startsWith("git:")) return toast("Pack URLs start with git: — e.g. git:github.com/acme/pack@v1.0.0", false);
-      post("/api/add_from", { id }, "Installed pack from " + id);
-    };
-    gitInput.addEventListener("keydown", (e) => { if (e.key === "Enter") installGit(); });
-    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:16px" }, [
-      gitInput,
-      btn("Install pack from git", installGit),
-      el("span", { class: "muted", style: "font-size:12px" }, ["any git host · versioned by tags · policy + content-scan gated"]),
-    ]));
-  }
 
   // Left: results. Right: your stack.
   const left = el("div", { class: "card" }, [el("div", { class: "hd" }, ["Results"]), el("div", { class: "bd" }, [resultsBody()])]);
@@ -438,11 +389,7 @@ function resultsBody() {
   DISCOVER.results.forEach((r) => {
     const head = el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" }, [
       el("span", null, [el("span", { class: "name" }, [r.name]), el("span", { class: "k" }, [r.source])]),
-      r.installed
-        ? badge("in stack", "green")
-        : READONLY
-        ? null
-        : btn("Add to stack", () => addToStack(r), "primary"),
+      r.installed ? badge("in stack", "green") : cmd("agentstack add " + r.addId),
     ]);
     const meta = el("div", { class: "muted", style: "font-size:12px;margin:2px 0 6px" }, [r.description || r.id]);
     const trust = el("div", { class: "row-actions", style: "margin-bottom:6px" }, trustBadges(r.trust));
@@ -460,7 +407,7 @@ function statCard(label, value, sub, section) {
   const card = el("div", attrs, [
     el("div", { class: "label" }, [label]),
     el("div", { class: "value" }, [String(value)]),
-    el("div", { class: "sub" }, [sub || " "]),
+    el("div", { class: "sub" }, [sub || " "]),
   ]);
   if (section) card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); show(section); } });
   return card;
@@ -500,16 +447,14 @@ function nextActionsCard() {
   const actions = DATA.nextActions || [];
   const body = [];
   if (!actions.length) {
-    body.push(el("div", { class: "empty compact" }, ["Stack is ready. Preview before applying any manual changes."]));
+    body.push(el("div", { class: "empty compact" }, ["Stack is ready. Review any drift before applying it from the CLI."]));
   } else {
     actions.slice(0, 6).forEach((a) => body.push(nextActionRow(a)));
   }
-  if (!READONLY) {
-    body.push(el("div", { class: "toolbar tight", style: "margin-top:12px" }, [
-      btn("Review & apply →", () => openPreview(SCOPE), "primary"),
-      btn("Review all tools", () => openPreview(SCOPE, true)),
-    ]));
-  }
+  body.push(el("div", { class: "toolbar tight", style: "margin-top:12px" }, [
+    btn("Review changes →", () => openPreview(SCOPE)),
+    btn("Review all tools", () => openPreview(SCOPE, true)),
+  ]));
   return el("div", { class: "card" }, [
     el("div", { class: "hd" }, ["Next actions", el("small", null, [actions.length ? plural(actions.length, "open item") : "No blocking work detected"])]),
     el("div", { class: "bd" }, body),
@@ -542,14 +487,14 @@ function stackSummaryCard(installed) {
       summaryLine("Extensions", plural((DATA.extensions || []).length, "extension")),
       summaryLine("Instructions", plural(DATA.instructions.length, "fragment")),
       summaryLine("Hooks", plural((DATA.hooks || []).length, "hook")),
-      summaryLine("Mode", READONLY ? "read-only" : "read-write"),
+      summaryLine("Mode", "read-only"),
     ]),
   ]);
 }
 
 /* Zero-files bridge: connected harnesses + this project's trust state. A
    read-only mirror of `doctor`'s bridge section — granting trust is a terminal
-   act (`agentstack trust .`), deliberately not a dashboard button. */
+   act (`agentstack trust .`), done from the CLI. */
 function bridgeCard() {
   const b = DATA.bridge || { harnesses: [], trust: "untrusted" };
   const connected = b.harnesses.filter((h) => h.connected);
@@ -593,24 +538,13 @@ function summaryLine(label, value) {
 function profilesCard() {
   const rows = DATA.profiles.map((p) => {
     const meta = el("span", { class: "muted", style: "font-size:12px" }, [`${plural(p.servers.length, "server")} · ${plural(p.skills.length, "skill")}`]);
-    const actions = READONLY
-      ? [meta]
-      : [
-          meta,
-          btn("Start session", () => openSessionModal(p.name)),
-          btn(`Activate (${SCOPE})`, () => post("/api/use", { profile: p.name, scope: SCOPE }, "Activate " + p.name)),
-        ];
-    return el("div", { class: "list-row" }, [el("span", { class: "name" }, [p.name]), el("span", { class: "row-actions" }, actions)]);
+    return el("div", { class: "list-row" }, [
+      el("span", { class: "name" }, [p.name]),
+      el("span", { class: "row-actions" }, [meta, cmd("agentstack use " + p.name + " --write")]),
+    ]);
   });
-  if (!rows.length) rows.push(el("div", { class: "empty" }, ["No profiles yet. Create one to load a set of skills and servers together."]));
-  const hd = ["Profiles"];
-  if (!READONLY) {
-    hd.push(el("span", { style: "margin-left:auto;display:flex;gap:8px" }, [
-      btn("+ New profile", openProfileForm),
-      DATA.profiles.length ? btn("Start session", () => openSessionModal(null), "primary") : null,
-    ]));
-  }
-  return el("div", { class: "card" }, [el("div", { class: "hd", style: "display:flex;align-items:center" }, hd), el("div", { class: "bd" }, rows)]);
+  if (!rows.length) rows.push(el("div", { class: "empty" }, ["No profiles yet. Define one in the manifest to load a set of skills and servers together."]));
+  return el("div", { class: "card" }, [el("div", { class: "hd", style: "display:flex;align-items:center" }, ["Profiles"]), el("div", { class: "bd" }, rows)]);
 }
 
 /* ---------- runs ---------- */
@@ -619,13 +553,6 @@ function fmtUptime(secs) {
   if (secs < 60) return secs + "s";
   if (secs < 3600) return Math.floor(secs / 60) + "m";
   return Math.floor(secs / 3600) + "h" + String(Math.floor((secs % 3600) / 60)).padStart(2, "0") + "m";
-}
-function killRun(id, label, force) {
-  const msg = force
-    ? "Force-kill " + label + "? Sends SIGKILL immediately — the process can't clean up after itself."
-    : "Kill " + label + "? Stops the process (and anything it spawned) and reverts its profile if it had one.";
-  if (!confirm(msg)) return;
-  return post("/api/run_kill", { id, force: !!force }, force ? "Run force-killed" : "Run killed");
 }
 // The trust footprint of a run (or of everything, when runId is null): which
 // tools its agent actually called through the gateway, with denials. Digests
@@ -669,7 +596,7 @@ function callsModal(runId, label) {
 }
 function runs(c) {
   const list = DATA.runs || [];
-  c.appendChild(pageHead("Runs", "Live agent processes agentstack launched. Start one from your terminal with `agentstack run <harness>`; stop any of them here — no Activity Monitor needed."));
+  c.appendChild(pageHead("Runs", "Live agent processes agentstack launched. Start one with `agentstack run <harness>`; stop any of them with `agentstack kill <id>`."));
   c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
     btn("All tool calls", () => callsModal(null, null)),
   ]));
@@ -697,72 +624,15 @@ function runs(c) {
       el("td", null, [profCell]),
       el("td", null, [el("div", { style: "display:flex;flex-wrap:wrap;gap:4px" }, footprint)]),
       el("td", null, [el("span", { class: "mono muted" }, [r.cwd])]),
-      el("td", null, [el("div", { style: "display:flex;gap:6px" }, [
+      el("td", null, [el("div", { style: "display:flex;gap:6px;align-items:center" }, [
         btn("Calls", () => callsModal(r.id, r.display || r.harness)),
-        ...(READONLY ? [] : [
-          btn("Kill", () => killRun(r.id, r.display || r.harness, false), "danger"),
-          btn("Force", () => killRun(r.id, r.display || r.harness, true), "danger"),
-        ]),
+        cmd("agentstack kill " + r.id),
       ])]),
     ]));
   });
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])])])]));
 }
 
-/* ---------- sessions ---------- */
-function endSession() {
-  if (!confirm("End the session? This reverts the loaded skills and servers to how they were when you started it.")) return;
-  return post("/api/session_end", {}, "Session ended");
-}
-function openSessionModal(preselect) {
-  const profiles = DATA.profiles || [];
-  if (!profiles.length) { toast("Create a profile first", false); return openProfileForm(); }
-  const profSel = el("select", { class: "inp", style: "height:32px;width:100%" }, profiles.map((p) => el("option", { value: p.name }, [p.name])));
-  if (preselect) profSel.value = preselect;
-  const scopeSel = el("select", { class: "inp", style: "height:32px;width:100%" }, [
-    el("option", { value: "project" }, ["project — this repo only"]),
-    el("option", { value: "global" }, ["global — everywhere"]),
-  ]);
-  const row = (label, node) => el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:10px" }, [el("label", { class: "muted", style: "width:64px;font-size:12px" }, [label]), node]);
-  const body = el("div", { class: "mbd" }, [
-    el("div", { class: "muted", style: "font-size:12px;margin-bottom:12px" }, ["Loads the profile now. Ending the session reverts everything to how it is right now."]),
-    row("Profile", profSel), row("Scope", scopeSel),
-  ]);
-  const footer = el("div", { class: "mft" }, [
-    btn("Cancel", closeModal),
-    btn("Start session", () => {
-      const b = { profile: profSel.value, scope: scopeSel.value };
-      closeModal();
-      post("/api/session_start", b, "Session started");
-    }, "primary"),
-  ]);
-  const modal = el("div", { class: "modal" }, [el("div", { class: "mhd" }, [el("span", null, ["Start a session"]), btn("✕", closeModal, "icon")]), body, footer]);
-  document.getElementById("modal").appendChild(el("div", { class: "overlay", onclick: (e) => e.target.classList.contains("overlay") && closeModal() }, [modal]));
-}
-function openProfileForm() {
-  const nameInp = el("input", { class: "inp", placeholder: "e.g. review-mode", style: "width:100%" });
-  const skillChecks = checkboxList("pf-skill", DATA.skills || [], "No skills in your stack yet.");
-  const serverChecks = checkboxList("pf-server", DATA.servers || [], "No servers in your stack yet.");
-  const body = el("div", { class: "mbd" }, [
-    el("div", { style: "margin-bottom:6px" }, [el("label", { class: "muted", style: "font-size:12px" }, ["Name"]), nameInp]),
-    el("div", { class: "section-title", style: "margin:14px 0 6px" }, ["Skills"]),
-    el("div", null, skillChecks),
-    el("div", { class: "section-title", style: "margin:14px 0 6px" }, ["Servers"]),
-    el("div", null, serverChecks),
-  ]);
-  const footer = el("div", { class: "mft" }, [
-    btn("Cancel", closeModal),
-    btn("Create profile", () => {
-      const name = nameInp.value.trim();
-      if (!name) return toast("Name is required", false);
-      const checked = (n) => Array.from(document.querySelectorAll(`input[name="${n}"]:checked`)).map((x) => x.value);
-      closeModal();
-      post("/api/add_profile", { name, skills: checked("pf-skill"), servers: checked("pf-server") }, "Profile created");
-    }, "primary"),
-  ]);
-  const modal = el("div", { class: "modal" }, [el("div", { class: "mhd" }, [el("span", null, ["New profile"]), btn("✕", closeModal, "icon")]), body, footer]);
-  document.getElementById("modal").appendChild(el("div", { class: "overlay", onclick: (e) => e.target.classList.contains("overlay") && closeModal() }, [modal]));
-}
 function usageCard() {
   const max = Math.max(1, ...DATA.stats.map((s) => s.activations));
   const rows = DATA.stats.slice(0, 6).map((s) =>
@@ -777,59 +647,6 @@ function usageCard() {
 }
 
 /* ---------- servers (matrix + detail) ---------- */
-function toggleCell(serverName, target, currentlyOn) {
-  return post("/api/toggle", { server: serverName, target, scope: SCOPE, enable: !currentlyOn },
-    (currentlyOn ? "Disabled " : "Enabled ") + serverName);
-}
-
-function saveServer() {
-  const g = (id) => (document.getElementById(id) || {}).value || "";
-  const transport = g("f-transport");
-  const body = { name: g("f-name").trim(), transport };
-  if (!body.name) return toast("Name is required", false);
-  if (transport === "http") body.url = g("f-url").trim();
-  else { body.command = g("f-command").trim(); body.args = g("f-args").trim().split(/\s+/).filter(Boolean); const cwd = g("f-cwd").trim(); if (cwd) body.cwd = cwd; }
-  const hdr = g("f-header").trim();
-  if (hdr.includes("=")) { const [k, ...v] = hdr.split("="); body.headers = { [k.trim()]: v.join("=") }; }
-  const env = g("f-env").trim();
-  if (env.includes("=")) { const [k, ...v] = env.split("="); body.env = { [k.trim()]: v.join("=") }; }
-  fetch(q("/api/add_server"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
-    .then(({ ok, d }) => {
-      if (!ok || d.error) throw new Error(d.error || "failed");
-      ADD_FORM = false;
-      toast("Server added — enable it per CLI below", true);
-      load();
-    })
-    .catch((e) => toast("Add server: " + e.message, false));
-}
-
-function addServerCard() {
-  const row = (label, node) => el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:8px" }, [
-    el("label", { class: "muted", style: "width:90px;font-size:12px" }, [label]), node,
-  ]);
-  const transport = el("select", { id: "f-transport", style: "height:32px", onchange: () => {
-    document.getElementById("row-url").style.display = transport.value === "http" ? "" : "none";
-    document.getElementById("row-cmd").style.display = transport.value === "stdio" ? "" : "none";
-    document.getElementById("row-args").style.display = transport.value === "stdio" ? "" : "none";
-    document.getElementById("row-cwd").style.display = transport.value === "stdio" ? "" : "none";
-  } }, [el("option", { value: "http" }, ["http"]), el("option", { value: "stdio" }, ["stdio"])]);
-  return el("div", { class: "card", style: "margin-bottom:16px" }, [
-    el("div", { class: "hd" }, ["Add MCP server", el("small", null, ["added to the manifest; enable it per CLI in the matrix"])]),
-    el("div", { class: "bd" }, [
-      row("name", el("input", { id: "f-name", class: "inp", placeholder: "e.g. kibana", style: "width:220px" })),
-      row("transport", transport),
-      el("div", { id: "row-url" }, [row("url", el("input", { id: "f-url", class: "inp", placeholder: "https://…/mcp", style: "width:300px" }))]),
-      el("div", { id: "row-cmd", style: "display:none" }, [row("command", el("input", { id: "f-command", class: "inp", placeholder: "npx", style: "width:300px" }))]),
-      el("div", { id: "row-args", style: "display:none" }, [row("args", el("input", { id: "f-args", class: "inp", placeholder: "-y @scope/server", style: "width:300px" }))]),
-      el("div", { id: "row-cwd", style: "display:none" }, [row("cwd", el("input", { id: "f-cwd", class: "inp", placeholder: "/path/to/server (optional)", style: "width:300px" }))]),
-      row("header", el("input", { id: "f-header", class: "inp", placeholder: "Authorization=Bearer ${TOKEN}", style: "width:300px" })),
-      row("env", el("input", { id: "f-env", class: "inp", placeholder: "API_KEY=${API_KEY}", style: "width:300px" })),
-      el("div", { class: "toolbar", style: "margin-top:6px" }, [btn("Save", saveServer, "primary"), btn("Cancel", () => { ADD_FORM = false; show("servers"); })]),
-    ]),
-  ]);
-}
-
 // A key for the matrix scope tags + the global/project mental model.
 function scopeLegend() {
   const item = (tag, desc) => el("span", { class: "legend-item" }, [
@@ -855,13 +672,13 @@ function scopeLegend() {
   return el("div", { class: "scope-legend" }, legend);
 }
 
-// One matrix cell shared by the servers & skills tables. When `onToggle` is
-// given it's a real keyboard-operable toggle (role=button, aria-pressed);
-// otherwise it carries an aria-label so the ✓/– glyph isn't the only signal.
+// One matrix cell shared by the servers & skills tables. Read-only: it shows
+// where a capability is on (this scope, the other, or inherited) and carries an
+// aria-label so the ✓/– glyph isn't the only signal.
 function statusCell(cell, opts) {
-  // The visible state follows the ACTIVE scope, so flipping the switch actually
-  // changes the matrix. In project view, a server that's only on globally shows
-  // a faded ✓ ("inherited") — it's active here, just not set at the project level.
+  // The visible state follows the ACTIVE scope. In project view, a server that's
+  // only on globally shows a faded ✓ ("inherited") — active here, not set at the
+  // project level.
   const here = SCOPE === "project" ? !!cell.project : !!cell.global;
   const other = SCOPE === "project" ? !!cell.global : !!cell.project;
   const inherited = SCOPE === "project" && !here && other;
@@ -876,21 +693,8 @@ function statusCell(cell, opts) {
 
   const inner = [el("div", { class: markClass }, [mark]), tag ? el("div", { class: "sc sc-" + tag }, [tag]) : null];
   const td = el("td", { class: "cell" }, inner);
-  if (opts.onToggle) {
-    const verb = here ? "Disable " : "Enable ";
-    td.setAttribute("role", "button");
-    td.tabIndex = 0;
-    td.setAttribute("aria-pressed", String(here));
-    td.setAttribute("aria-label", verb + opts.label + " (" + SCOPE + " scope)");
-    td.style.cursor = "pointer";
-    td.title = (inherited ? "on here via global · " : "") + verb.toLowerCase() + opts.label + " (" + SCOPE + ")";
-    const fire = (e) => { e.stopPropagation(); e.preventDefault(); opts.onToggle(); };
-    td.addEventListener("click", fire);
-    td.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") fire(e); });
-  } else {
-    td.setAttribute("aria-label", opts.label + ": " + stateText);
-    if (opts.disabledTitle) td.title = opts.disabledTitle;
-  }
+  td.setAttribute("aria-label", opts.label + ": " + stateText);
+  if (opts.disabledTitle) td.title = opts.disabledTitle;
   return td;
 }
 
@@ -898,13 +702,7 @@ function servers(c) {
   const d = DATA;
   // Only CLIs that actually support MCP get a column (Pi, etc. have none).
   const cols = d.adapters.filter((a) => a.mcp !== false);
-  c.appendChild(pageHead("Servers", "Turn a server on or off for each tool. Click a name to see its config. Changes apply to the scope selected up top."));
-  if (!READONLY) {
-    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
-      btn(ADD_FORM ? "Close" : "+ Add MCP server", () => { ADD_FORM = !ADD_FORM; show("servers"); }, "primary"),
-    ]));
-    if (ADD_FORM) c.appendChild(addServerCard());
-  }
+  c.appendChild(pageHead("Servers", "Where each server is enabled, per tool and scope. Click a name to see its config. Change the wiring from the CLI — `agentstack use <profile> --write` or edit the manifest, then `agentstack apply --write`."));
 
   const head = el("tr", null, [el("th", null, ["capability"])]);
   cols.forEach((a) => head.appendChild(el("th", { class: "cell" }, [a.display])));
@@ -916,7 +714,7 @@ function servers(c) {
   }, ["context" + (SORT_BY_COST ? " ↓" : "")]));
 
   const body = el("tbody");
-  if (!d.servers.length) body.appendChild(el("tr", null, [el("td", { colspan: cols.length + 3 }, [el("span", { class: "empty" }, ["No servers yet. Use “+ Add MCP server” or the Discover tab."])])]));
+  if (!d.servers.length) body.appendChild(el("tr", null, [el("td", { colspan: cols.length + 3 }, [el("span", { class: "empty" }, ["No servers yet. Add one with `agentstack add <id>` or from the Discover tab."])])]));
   const rows = SORT_BY_COST
     ? [...d.servers].sort((a, b) => ((b.footprint || {}).estTokens || 0) - ((a.footprint || {}).estTokens || 0))
     : d.servers;
@@ -927,10 +725,7 @@ function servers(c) {
     ]);
     cols.forEach((a) => {
       const cell = s.cells.find((x) => x.adapter === a.id) || {};
-      tr.appendChild(statusCell(cell, {
-        label: `${s.name} for ${a.display}`,
-        onToggle: READONLY ? null : () => toggleCell(s.name, a.id, SCOPE === "project" ? !!cell.project : !!cell.global),
-      }));
+      tr.appendChild(statusCell(cell, { label: `${s.name} for ${a.display}` }));
     });
     tr.appendChild(el("td", null, [badge(s.type, "solid")]));
     tr.appendChild(el("td", null, [s.footprint
@@ -958,74 +753,17 @@ function serverDetail(s, span) {
   (s.env || []).forEach((e) => add("env." + e.key, e.value));
   return el("tr", { class: "detail" }, [el("td", { colspan: span }, [el("div", { class: "bd" }, [
     el("div", { class: "kv" }, kv),
-    el("div", { class: "toolbar", style: "margin-top:10px" }, [
+    el("div", { class: "toolbar", style: "margin-top:10px;align-items:center" }, [
       btn("Explain trust ⓘ", () => explainModal(s.name)),
-      READONLY ? null : btn("Remove from stack…", () => {
-        if (!confirm(`Remove "${s.name}" from your stack?\n\nIt leaves the manifest now; the next Apply removes it from your tools' configs.`)) return;
-        post("/api/remove", { name: s.name }, "Removed " + s.name + " — review pending changes, then Apply");
-      }, "danger"),
+      cmd("agentstack remove " + s.name),
     ]),
   ])])]);
 }
 
 /* ---------- skills ---------- */
-function toggleSkillCell(skillName, target, currentlyOn) {
-  return post("/api/toggle_skill", { skill: skillName, target, scope: SCOPE, enable: !currentlyOn },
-    (currentlyOn ? "Disabled " : "Enabled ") + skillName);
-}
-
-function saveSkill() {
-  const g = (id) => (document.getElementById(id) || {}).value || "";
-  const source = g("sk-source");
-  const body = { name: g("sk-name").trim(), source };
-  if (!body.name) return toast("Name is required", false);
-  if (source === "git") { body.git = g("sk-git").trim(); body.rev = g("sk-rev").trim(); }
-  else body.path = g("sk-path").trim();
-  fetch(q("/api/add_skill"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
-    .then(({ ok, d }) => {
-      if (!ok || d.error) throw new Error(d.error || "failed");
-      SKILL_FORM = false;
-      toast("Skill added — click Install, then enable it per CLI", true);
-      load();
-    })
-    .catch((e) => toast("Add skill: " + e.message, false));
-}
-
-function addSkillCard() {
-  const row = (label, node, id) => el("div", { id, style: "display:flex;align-items:center;gap:10px;margin-bottom:8px" }, [
-    el("label", { class: "muted", style: "width:90px;font-size:12px" }, [label]), node,
-  ]);
-  const source = el("select", { id: "sk-source", style: "height:32px", onchange: () => {
-    document.getElementById("row-git").style.display = source.value === "git" ? "" : "none";
-    document.getElementById("row-rev").style.display = source.value === "git" ? "" : "none";
-    document.getElementById("row-path").style.display = source.value === "path" ? "" : "none";
-  } }, [el("option", { value: "git" }, ["git"]), el("option", { value: "path" }, ["path"])]);
-  return el("div", { class: "card", style: "margin-bottom:16px" }, [
-    el("div", { class: "hd" }, ["Add skill", el("small", null, ["added to the manifest; then Install + enable per CLI"])]),
-    el("div", { class: "bd" }, [
-      row("name", el("input", { id: "sk-name", class: "inp", placeholder: "e.g. code-review", style: "width:220px" })),
-      row("source", source),
-      row("git URL", el("input", { id: "sk-git", class: "inp", placeholder: "https://github.com/acme/skills.git", style: "width:340px" }), "row-git"),
-      row("rev", el("input", { id: "sk-rev", class: "inp", placeholder: "(optional) tag / branch / sha", style: "width:340px" }), "row-rev"),
-      row("path", el("input", { id: "sk-path", class: "inp", placeholder: "./skills/code-review", style: "width:340px" }), "row-path"),
-      el("div", { class: "toolbar", style: "margin-top:6px" }, [btn("Save", saveSkill, "primary"), btn("Cancel", () => { SKILL_FORM = false; show("skills"); })]),
-    ]),
-  ]);
-}
-
 function skills(c) {
-  c.appendChild(pageHead("Skills", "Turn a skill on or off for each tool. A skill must be installed before you can enable it."));
+  c.appendChild(pageHead("Skills", "Where each skill is enabled, per tool. Install and wiring happen from the CLI — `agentstack install`, then `agentstack use <profile> --write`."));
   const adapters = DATA.skillAdapters || [];
-
-  if (!READONLY) {
-    const tools = [btn(SKILL_FORM ? "Close" : "+ Add skill", () => { SKILL_FORM = !SKILL_FORM; show("skills"); }, "primary")];
-    if (DATA.skills.some((s) => !s.installed)) tools.push(btn("Install missing", () => post("/api/install", {}, "Install")));
-    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, tools));
-    if (SKILL_FORM) c.appendChild(addSkillCard());
-    // path source is hidden by default (git is the first option)
-    if (SKILL_FORM) setTimeout(() => { const p = document.getElementById("row-path"); if (p) p.style.display = "none"; }, 0);
-  }
 
   const head = el("tr", null, [el("th", null, ["skill"])]);
   adapters.forEach((a) => head.appendChild(el("th", { class: "cell" }, [a.display])));
@@ -1044,8 +782,7 @@ function skills(c) {
       const cell = (s.cells || []).find((x) => x.adapter === a.id) || {};
       tr.appendChild(statusCell(cell, {
         label: `${s.name} for ${a.display}`,
-        onToggle: !READONLY && s.installed ? () => toggleSkillCell(s.name, a.id, SCOPE === "project" ? !!cell.project : !!cell.global) : null,
-        disabledTitle: !READONLY && !s.installed ? "install the skill first to enable it" : null,
+        disabledTitle: !s.installed ? "not installed — run `agentstack install`" : null,
       }));
     });
     tr.appendChild(el("td", null, [el("span", { class: "row-actions" }, [
@@ -1057,18 +794,16 @@ function skills(c) {
   c.appendChild(scopeLegend());
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])])])]));
 
+  if (DATA.skills.some((s) => !s.installed)) {
+    c.appendChild(cmdHint("Some skill sources aren't installed —", "agentstack install"));
+  }
+
   // Skills present on disk in your CLIs but not yet in the manifest. Every entry
   // is shown — valid ones are adoptable; broken/non-skill ones show a status.
   const found = (DATA.discoveredSkills || []).filter((d) => !d.inManifest);
   if (found.length) {
     const adoptable = found.filter((d) => d.valid !== false);
     const hd = ["Detected on disk", el("small", null, [`${found.length} found · ${adoptable.length} manageable`])];
-    if (!READONLY && adoptable.length) hd.push(el("span", { style: "margin-left:auto;display:flex;gap:8px" }, [
-      btn("Move all into agentstack", () => {
-        if (confirm("Move " + plural(adoptable.length, "skill folder") + " into the central library (~/.agentstack/lib/skills/) and replace the originals with symlinks? Your agents keep working in place; a backup is kept.")) post("/api/consolidate_skills", {}, "Consolidate skills");
-      }, "primary"),
-      btn("Adopt all in place", () => post("/api/adopt_all_skills", {}, "Adopt skills")),
-    ]));
     const rows = found.map((d) => {
       const where = (d.presentIn || []).map((t) => badge(t, "solid"));
       const ok = d.valid !== false;
@@ -1081,15 +816,14 @@ function skills(c) {
         el("span", { class: "row-actions" }, [
           ...where,
           statusBadge,
-          READONLY || !ok ? null : btn("Move", () => post("/api/consolidate_skills", { names: [d.name] }, "Consolidate " + d.name)),
-          READONLY || !ok ? null : btn("Adopt", () => post("/api/adopt_skill", { name: d.name }, "Adopt " + d.name)),
+          ok ? cmd("agentstack adopt " + d.name) : null,
         ]),
       ]);
     });
     c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
       el("div", { class: "hd", style: "display:flex;align-items:center" }, hd),
       el("div", { class: "bd" }, [
-        el("div", { class: "muted", style: "font-size:12px;margin-bottom:8px" }, ["“Move into agentstack” relocates the skill files to the central library (~/.agentstack/lib/skills/) and symlinks the originals back — agents keep working, you control them from here. “Adopt in place” just registers them where they are."]),
+        el("div", { class: "muted", style: "font-size:12px;margin-bottom:8px" }, ["Register a discovered skill where it is with `agentstack adopt <name>`, or move it into the central library with `agentstack lib consolidate`."]),
         ...rows,
       ]),
     ]));
@@ -1097,49 +831,12 @@ function skills(c) {
 }
 
 /* ---------- settings ---------- */
-// Working copies of each CLI's settings object, keyed by adapter id. Typed
-// controls mutate these; Save sends the whole object (so keys we don't have a
-// control for are preserved).
-let SETTINGS_DRAFT = {};
-
 function getPath(obj, dotted) {
   return dotted.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
 }
-function setPath(obj, dotted, val) {
-  const ks = dotted.split(".");
-  let o = obj;
-  for (let i = 0; i < ks.length - 1; i++) {
-    if (typeof o[ks[i]] !== "object" || o[ks[i]] == null || Array.isArray(o[ks[i]])) o[ks[i]] = {};
-    o = o[ks[i]];
-  }
-  o[ks[ks.length - 1]] = val;
-}
-function delPath(obj, dotted) {
-  const ks = dotted.split(".");
-  const stack = [obj];
-  let o = obj;
-  for (let i = 0; i < ks.length - 1; i++) {
-    if (o[ks[i]] == null) return;
-    o = o[ks[i]];
-    stack.push(o);
-  }
-  delete o[ks[ks.length - 1]];
-  // Prune now-empty ancestor objects (e.g. permissions: {}).
-  for (let i = ks.length - 2; i >= 0; i--) {
-    const parent = stack[i];
-    if (parent[ks[i]] && typeof parent[ks[i]] === "object" && Object.keys(parent[ks[i]]).length === 0) delete parent[ks[i]];
-  }
-}
-function initialFor(f) {
-  if (f.default !== undefined && f.default !== null) return f.default;
-  if (f.type === "bool") return true;
-  if (f.type === "enum") return f.options[0];
-  if (f.type === "number") return 0;
-  return "";
-}
 
 function settings(c) {
-  c.appendChild(pageHead("Settings", "Shows each tool's current settings, read from its real config file. Adjust what you want, then Save to let agentstack manage it — Apply writes it back to your tools. Keys you don't manage are left untouched."));
+  c.appendChild(pageHead("Settings", "Each tool's current settings, read from its real config file, and which keys agentstack manages. Edit `[settings.<tool>]` in the manifest, then `agentstack apply --write`."));
   const adapters = DATA.settingsAdapters || [];
   if (!adapters.length) {
     c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, ["No CLIs with a managed settings file yet."])])]));
@@ -1149,56 +846,39 @@ function settings(c) {
 }
 
 function settingsCard(a, open) {
-  // Default to the CLI's live settings file, with manifest-managed keys
-  // overriding (top-level ownership) — so the panel reflects reality without a
-  // manual import. Save persists the draft to the manifest.
-  const draft = JSON.parse(JSON.stringify(a.live || {}));
-  Object.entries(a.current || {}).forEach(([k, v]) => { draft[k] = JSON.parse(JSON.stringify(v)); });
-  SETTINGS_DRAFT[a.id] = draft;
+  // Show the CLI's live settings file with manifest-managed keys overriding
+  // (top-level ownership) — the effective view without any editing.
+  const effective = JSON.parse(JSON.stringify(a.live || {}));
+  Object.entries(a.current || {}).forEach(([k, v]) => { effective[k] = JSON.parse(JSON.stringify(v)); });
   const fields = a.fields || [];
-  const previewId = "settings-prev-" + a.id;
-  const refreshPreview = () => {
-    const p = document.getElementById(previewId);
-    if (p) p.textContent = Object.keys(draft).length ? JSON.stringify(draft, null, 2) : "(nothing set)";
-  };
-
-  // Group fields by their `group`.
-  const groups = {};
-  fields.forEach((f) => { (groups[f.group || "Other"] = groups[f.group || "Other"] || []).push(f); });
+  const managedKeys = new Set(Object.keys(a.current || {}));
 
   const body = [el("div", { class: "muted mono", style: "font-size:12px;margin-bottom:10px" }, [a.path])];
 
+  // Group fields by their `group`, rendering each as a read-only value row.
+  const groups = {};
+  fields.forEach((f) => { (groups[f.group || "Other"] = groups[f.group || "Other"] || []).push(f); });
   Object.keys(groups).forEach((g) => {
     body.push(el("div", { class: "section-title", style: "margin:14px 0 6px" }, [g]));
-    groups[g].forEach((f) => body.push(settingRow(a.id, f, draft, refreshPreview)));
+    groups[g].forEach((f) => body.push(settingRow(f, effective, managedKeys)));
   });
 
-  // Keys present in the file but not in our catalog — preserved, shown read-only.
+  // Keys present in the file but not in our catalog.
   const known = new Set(fields.map((f) => f.key.split(".")[0]));
-  const extras = Object.keys(draft).filter((k) => !known.has(k));
+  const extras = Object.keys(effective).filter((k) => !known.has(k));
   if (extras.length) {
     body.push(el("div", { class: "muted", style: "margin-top:12px;font-size:12px" }, [
-      "Preserved (no control yet): " + extras.join(", "),
+      "Other keys in the file (no control): " + extras.join(", "),
     ]));
   }
 
-  body.push(el("div", { class: "section-title", style: "margin:14px 0 6px" }, ["Resulting settings"]));
-  const pre = el("pre", { id: previewId, class: "mono", style: "background:hsl(var(--muted));padding:10px;border-radius:8px;font-size:12px;overflow:auto;max-height:220px" });
-  pre.textContent = Object.keys(draft).length ? JSON.stringify(draft, null, 2) : "(nothing set)";
+  body.push(el("div", { class: "section-title", style: "margin:14px 0 6px" }, ["Effective settings"]));
+  const pre = el("pre", { class: "mono", style: "background:hsl(var(--muted));padding:10px;border-radius:8px;font-size:12px;overflow:auto;max-height:220px" });
+  pre.textContent = Object.keys(effective).length ? JSON.stringify(effective, null, 2) : "(nothing set)";
   body.push(pre);
+  body.push(cmdHint("Manage these keys by editing [settings." + a.id + "] in the manifest, then", "agentstack apply --write"));
 
-  if (!READONLY) {
-    const managed = Object.keys(a.current || {}).length > 0;
-    body.push(el("div", { class: "toolbar", style: "margin-top:10px" }, [
-      btn("Save", () => post("/api/set_settings", { target: a.id, settings: draft }, a.display + " settings"), "primary"),
-      btn("Reset", () => show("settings")),
-      el("span", { class: "muted", style: "font-size:12px" }, [
-        managed ? "Showing live values with your managed keys applied · Save then Apply to write" : "Showing this CLI's current settings · Save to start managing them",
-      ]),
-    ]));
-  }
-
-  const managedCount = Object.keys(a.current || {}).length;
+  const managedCount = managedKeys.size;
   const attrs = { class: "card acc", style: "margin-bottom:12px" };
   if (open) attrs.open = "";
   return el("details", attrs, [
@@ -1210,100 +890,26 @@ function settingsCard(a, open) {
   ]);
 }
 
-function settingRow(adapterId, f, draft, refresh) {
-  const managed = getPath(draft, f.key) !== undefined;
+function settingRow(f, effective, managedKeys) {
   const label = f.label || f.key;
-
-  // The value control for this field type.
-  let control;
-  const sync = () => refresh();
-  if (f.type === "bool") {
-    control = el("input", { type: "checkbox" });
-    control.checked = managed ? !!getPath(draft, f.key) : (f.default === true);
-    control.addEventListener("change", () => { if (getPath(draft, f.key) !== undefined) { setPath(draft, f.key, control.checked); sync(); } });
-  } else if (f.type === "enum") {
-    control = el("select", { style: "height:30px" }, f.options.map((o) => el("option", { value: o }, [o])));
-    control.value = managed ? String(getPath(draft, f.key)) : f.options[0];
-    control.addEventListener("change", () => { if (getPath(draft, f.key) !== undefined) { setPath(draft, f.key, control.value); sync(); } });
-  } else {
-    control = el("input", { class: "inp", type: f.type === "number" ? "number" : "text", style: "width:240px;height:30px" });
-    if (managed) control.value = getPath(draft, f.key);
-    if (f.default != null) control.placeholder = "default: " + f.default;
-    control.addEventListener("input", () => {
-      if (getPath(draft, f.key) === undefined) return;
-      setPath(draft, f.key, f.type === "number" ? Number(control.value) : control.value);
-      sync();
-    });
-  }
-  control.disabled = !managed || READONLY;
-
-  // The "manage this setting" toggle.
-  const manage = el("input", { type: "checkbox" });
-  manage.checked = managed;
-  manage.disabled = READONLY;
-  manage.addEventListener("change", () => {
-    if (manage.checked) {
-      const init = f.type === "bool" ? (control.checked) :
-        f.type === "enum" ? control.value :
-        (control.value !== "" ? (f.type === "number" ? Number(control.value) : control.value) : initialFor(f));
-      setPath(draft, f.key, init);
-      control.disabled = READONLY;
-    } else {
-      delPath(draft, f.key);
-      control.disabled = true;
-    }
-    refresh();
-  });
-
+  const managed = managedKeys.has(f.key.split(".")[0]);
+  const raw = getPath(effective, f.key);
+  const value = raw === undefined ? "—" : typeof raw === "object" ? JSON.stringify(raw) : String(raw);
   return el("div", { style: "display:flex;align-items:center;gap:12px;padding:5px 0;border-bottom:1px solid hsl(var(--border))" }, [
-    el("label", { style: "display:flex;align-items:center;gap:7px;width:300px;cursor:pointer" }, [
-      manage,
-      el("span", null, [el("span", { class: "name" }, [label]), el("div", { class: "muted mono", style: "font-size:11px" }, [f.key])]),
+    el("div", { style: "width:300px" }, [
+      el("span", { class: "name" }, [label]),
+      el("div", { class: "muted mono", style: "font-size:11px" }, [f.key]),
     ]),
-    control,
+    el("span", { class: "mono", style: "min-width:120px" }, [value]),
+    managed ? badge("managed", "solid") : el("span", { class: "muted", style: "font-size:11px" }, ["from tool"]),
     f.help ? el("span", { class: "muted", style: "font-size:11px;flex:1" }, [f.help]) : null,
   ]);
 }
 
 /* ---------- hooks ---------- */
-const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "UserPromptSubmit", "SessionStart", "SessionEnd", "Stop", "SubagentStop", "PreCompact", "Notification"];
-function saveHook() {
-  const g = (id) => (document.getElementById(id) || {}).value || "";
-  const body = { name: g("hk-name").trim(), event: g("hk-event"), command: g("hk-command").trim() };
-  const m = g("hk-matcher").trim();
-  if (m) body.matcher = m;
-  if (!body.name) return toast("Name is required", false);
-  if (!body.command) return toast("Command is required", false);
-  fetch(q("/api/add_hook"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
-    .then(({ ok, d }) => { if (!ok || d.error) throw new Error(d.error || "failed"); HOOK_FORM = false; toast("Hook added — Apply to write it", true); load(); })
-    .catch((e) => toast("Add hook: " + e.message, false));
-}
-function addHookCard() {
-  const row = (label, node) => el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:8px" }, [
-    el("label", { class: "muted", style: "width:90px;font-size:12px" }, [label]), node,
-  ]);
-  const ev = el("select", { id: "hk-event", style: "height:32px" }, HOOK_EVENTS.map((e) => el("option", { value: e }, [e])));
-  return el("div", { class: "card", style: "margin-bottom:16px" }, [
-    el("div", { class: "hd" }, ["Add hook", el("small", null, ["compiled into each harness's native hooks config on Apply"])]),
-    el("div", { class: "bd" }, [
-      row("name", el("input", { id: "hk-name", class: "inp", placeholder: "e.g. format-on-edit", style: "width:240px" })),
-      row("event", ev),
-      row("matcher", el("input", { id: "hk-matcher", class: "inp", placeholder: "(optional) e.g. Edit|Write", style: "width:240px" })),
-      row("command", el("input", { id: "hk-command", class: "inp", placeholder: "prettier --write", style: "width:340px" })),
-      el("div", { class: "toolbar", style: "margin-top:6px" }, [btn("Save", saveHook, "primary"), btn("Cancel", () => { HOOK_FORM = false; show("hooks"); })]),
-    ]),
-  ]);
-}
 function hooks(c) {
-  c.appendChild(pageHead("Hooks", "Run commands at lifecycle events (PreToolUse, SessionStart, …). Declared once here; compiled into each harness's native hooks config on Apply."));
+  c.appendChild(pageHead("Hooks", "Commands run at lifecycle events (PreToolUse, SessionStart, …), declared in the manifest and compiled into each harness's native hooks config on apply."));
   const list = DATA.hooks || [];
-  if (!READONLY) {
-    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
-      btn(HOOK_FORM ? "Close" : "+ Add hook", () => { HOOK_FORM = !HOOK_FORM; show("hooks"); }, "primary"),
-    ]));
-    if (HOOK_FORM) c.appendChild(addHookCard());
-  }
   const rows = list.map((h) => el("div", { class: "list-row" }, [
     el("span", null, [
       el("span", { class: "name" }, [h.name]),
@@ -1311,23 +917,14 @@ function hooks(c) {
     ]),
     el("span", { class: "row-actions" }, (h.targets || ["*"]).map((t) => badge(t, "solid"))),
   ]));
-  if (!rows.length) rows.push(el("div", { class: "empty" }, ["No hooks yet. Add one, or [hooks.*] in the manifest."]));
+  if (!rows.length) rows.push(el("div", { class: "empty" }, ["No hooks yet. Add [hooks.*] in the manifest, then `agentstack apply --write`."]));
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, rows)]));
-}
-
-function checkboxList(name, items, empty) {
-  if (!items.length) return [el("div", { class: "empty", style: "padding:8px 0" }, [empty])];
-  return items.map((item) => el("label", { style: "display:flex;align-items:center;gap:7px;padding:4px 0" }, [
-    el("input", { type: "checkbox", name, value: item.name || item.id }),
-    el("span", null, [item.display || item.name || item.id]),
-  ]));
 }
 
 /* ---------- extensions ---------- */
 function extensions(c) {
   c.appendChild(pageHead("Extensions", "Native harness add-on code (e.g. Pi TypeScript extensions, OpenCode JS plugins) agentstack pins and delivers. Read-only."));
 
-  // Native extensions/add-ons (e.g. Pi extensions) — read-only.
   const exts = DATA.extensions || [];
   const erows = exts.map((e) => el("div", { class: "list-row" }, [
     el("span", null, [
@@ -1341,7 +938,6 @@ function extensions(c) {
     el("summary", { class: "hd acc-sum" }, ["Extensions", el("small", { style: "display:inline" }, [`${exts.length} · Pi TypeScript add-ons`])]),
     el("div", { class: "bd" }, erows),
   ]));
-
 }
 
 /* ---------- instructions ---------- */
@@ -1362,15 +958,11 @@ function instructions(c) {
 
 /* ---------- secrets ---------- */
 function secrets(c) {
-  c.appendChild(pageHead("Secrets", "Referenced ${REF}s and where they resolve on this machine. Values are never shown."));
+  c.appendChild(pageHead("Secrets", "Referenced ${REF}s and where they resolve on this machine. Values are never shown. Set a missing one with `agentstack secret set <REF>`."));
   const rows = DATA.secrets.map((s) => {
-    let right;
-    if (s.resolved) right = badge("resolved · " + (s.source || "?"), "green");
-    else if (READONLY) right = badge("missing", "red");
-    else {
-      const input = el("input", { type: "password", placeholder: "value", class: "inp" });
-      right = el("span", { class: "setter" }, [input, btn("Set", () => input.value && post("/api/secret", { name: s.name, value: input.value }, "Set " + s.name))]);
-    }
+    const right = s.resolved
+      ? badge("resolved · " + (s.source || "?"), "green")
+      : el("span", { class: "row-actions" }, [badge("missing", "red"), cmd("agentstack secret set " + s.name)]);
     return el("div", { class: "list-row" }, [el("span", { class: "mono" }, [s.name]), right]);
   });
   if (!rows.length) rows.push(el("div", { class: "empty" }, ["The manifest references no secrets."]));
@@ -1384,7 +976,7 @@ function healthRow(h) {
   const row = el("div", { class: "health-row" }, [
     el("span", { class: cls }, [mark]),
     el("span", null, [h.message]),
-    h.action ? el("span", { class: "health-action" }, [btn(h.action.type === "preview" ? "Preview" : "Open", () => runAction(h.action))]) : null,
+    h.action ? el("span", { class: "health-action" }, [btn(h.action.type === "preview" ? "Preview" : "Open", () => runAction(h.action, h.action.section))]) : null,
   ]);
   return row;
 }
@@ -1400,11 +992,9 @@ function health(c) {
     ]),
     el("div", { id: "doctor-out" }),
   ])]));
-  if (!READONLY) {
-    c.appendChild(el("div", { style: "margin-top:16px" }, [
-      btn("Preview & apply → global", () => openPreview("global"), "primary"),
-    ]));
-  }
+  c.appendChild(el("div", { style: "margin-top:16px" }, [
+    btn("Review changes → global", () => openPreview("global")),
+  ]));
 }
 function runDoctor() {
   const out = document.getElementById("doctor-out");
@@ -1631,7 +1221,7 @@ function statsCard() {
   ])]);
 }
 
-/* ---------- diff preview modal ---------- */
+/* ---------- diff preview modal (read-only) ---------- */
 function colorizeDiff(text) {
   const wrap = el("div", { class: "diff" });
   text.split("\n").forEach((line) => {
@@ -1657,21 +1247,8 @@ function explainModal(name) {
     })
     .catch((e) => toast("Explain: " + e.message, false));
 }
-function openOperationConfirm(plan) {
-  const body = el("div", { class: "mbd" }, [
-    el("div", { class: "muted", style: "font-size:13px;margin-bottom:10px" }, [plan.detail || ""]),
-    el("div", { class: "op-list" }, (plan.items || []).map((item) => el("div", { class: "op-item mono" }, [item]))),
-  ]);
-  const footer = el("div", { class: "mft" }, [
-    btn("Cancel", closeModal),
-    btn(plan.confirm || "Continue", () => { closeModal(); plan.run && plan.run(); }, "primary"),
-  ]);
-  const modal = el("div", { class: "modal" }, [
-    el("div", { class: "mhd" }, [el("span", null, [plan.title || "Confirm operation"]), btn("✕", closeModal, "icon")]),
-    body, footer,
-  ]);
-  document.getElementById("modal").appendChild(el("div", { class: "overlay", onclick: (e) => e.target.classList.contains("overlay") && closeModal() }, [modal]));
-}
+// Read-only diff preview: shows exactly what an apply would change, with the
+// command to run it. No apply happens from here.
 function openPreview(scope, all) {
   fetch(q("/api/diff") + "&scope=" + scope + (all ? "&all=1" : ""))
     .then((r) => r.json())
@@ -1684,13 +1261,9 @@ function openPreview(scope, all) {
         body.appendChild(el("div", { class: "diff-target" }, [`${t.display} · ${t.path}`, tag]));
         body.appendChild(colorizeDiff(t.diff));
       });
-      // In "all" mode, apply exactly the drifted targets (incl. non-default);
-      // otherwise apply the manifest's default set for this scope.
-      const applyBody = all ? { scope, targets: changed.map((t) => t.id) } : { scope };
-      const label = all ? "Apply all (" + changed.length + ")" : "Apply " + scope;
       const footer = el("div", { class: "mft" }, [
-        btn("Cancel", closeModal),
-        changed.length ? btn(label, () => { closeModal(); post("/api/apply", applyBody, label); }, "primary") : null,
+        changed.length ? el("span", { class: "muted", style: "margin-right:auto;display:flex;align-items:center;gap:8px" }, ["Apply from the CLI:", cmd(applyCmd(scope))]) : null,
+        btn("Close", closeModal, "primary"),
       ]);
       const title = all ? `Preview · all installed targets · ${scope}` : `Preview · ${scope} scope`;
       const modal = el("div", { class: "modal" }, [
@@ -1711,7 +1284,6 @@ function load() {
       try { data = JSON.parse(t); } catch (_) { throw new Error(t || "HTTP " + status); }
       if (data.error) throw new Error(data.error);
       DATA = data;
-      READONLY = !!data.readOnly;
       document.getElementById("dir").textContent = data.meta.dir;
       if (data.needsInit) {
         document.getElementById("mode").textContent = "setup";
@@ -1721,7 +1293,7 @@ function load() {
         renderWelcome(data);
         return;
       }
-      document.getElementById("mode").textContent = READONLY ? "read-only" : "read-write";
+      document.getElementById("mode").textContent = "read-only";
       renderNav();
       renderScopeSwitch();
       show(SECTION);
@@ -1751,7 +1323,7 @@ function renderWelcome(data) {
     ])
   );
   c.appendChild(el("div", { class: "card" }, [
-    el("div", { class: "hd" }, ["Detected agent CLIs", el("small", null, ["Initialize imports their MCP servers into one manifest and lifts secrets to your keychain."])]),
+    el("div", { class: "hd" }, ["Detected agent CLIs", el("small", null, ["`agentstack init` imports their MCP servers into one manifest and lifts secrets to your keychain."])]),
     el("div", { class: "bd" }, rows),
   ]));
 
@@ -1789,17 +1361,12 @@ function renderWelcome(data) {
     ]));
   }
 
-  if (READONLY) {
-    c.appendChild(el("div", { class: "muted", style: "margin-top:14px" }, ["Dashboard is read-only — run `agentstack init` in your terminal, or relaunch without --read-only."]));
-    return;
-  }
   if (!detected.length) {
     c.appendChild(el("div", { class: "muted", style: "margin-top:14px" }, ["No supported CLIs detected on this machine."]));
     return;
   }
   c.appendChild(el("div", { style: "margin-top:16px" }, [
-    btn("Scan my CLIs & initialize ›", () =>
-      post("/api/init", {}, "Initialized — review your servers, then Apply"), "primary"),
+    cmdHint("Scan your CLIs and create a manifest with", "agentstack init"),
   ]));
 }
 

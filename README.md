@@ -169,7 +169,7 @@ Everything else you'll reach for day to day:
 | `agentstack lock` | Pin profile refs in the lockfile without rendering anything |
 | `agentstack restore --last --write` | Undo any write from its recorded history |
 | `agentstack adopt --write` | Keep a hand-edit: pull drifted native config back into the manifest |
-| `agentstack dashboard` | The same lifecycle in a local web UI |
+| `agentstack dashboard` | A read-only view of your stack in a local web UI |
 
 When `doctor` flags drift, the rule is directional: the hand-edit on disk is
 right → `adopt` pulls it into the manifest; the manifest is right →
@@ -302,7 +302,7 @@ project; app-managed servers (`owner = "codex"` makes the owning app's config
 canonical); usage insight (`report calls`, and `agentstack optimize` to turn
 the audit log into concrete pruning recommendations); an observe-only wire
 proxy (`agentstack proxy`) that measures what each tool actually costs in
-tokens per turn; and [the no-terminal dashboard](docs/dashboard.md).
+tokens per turn; and [the read-only dashboard](docs/dashboard.md).
 
 The closed loop in under a minute — install a versioned pack, spread it to
 every CLI, firewall a tool, watch the refusal in the audit log, upgrade:

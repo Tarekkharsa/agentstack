@@ -1008,6 +1008,109 @@ pub fn add_to_profile(text: &str, profile: &str, field: &str, name: &str) -> Res
     Ok(doc.to_string())
 }
 
+/// Create a profile (a named bundle of servers + skills) in the manifest from a
+/// JSON args object. Used by the MCP `create_profile` tool and the session
+/// helper — a manifest-only write, no configs rendered.
+pub fn add_profile_json(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
+    let name = args
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("profile name is required")?;
+    let names = |key: &str| -> Vec<String> {
+        args.get(key)
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let servers = names("servers");
+    let skills = names("skills");
+    if servers.is_empty() && skills.is_empty() {
+        anyhow::bail!("pick at least one skill or server for the profile");
+    }
+
+    let base = crate::commands::project_base(manifest_dir)?;
+    let dir = crate::manifest::resolve_manifest_dir(&base);
+    let manifest_path = dir.join(crate::manifest::load::MANIFEST_FILE);
+    let original = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let parsed: Manifest = toml::from_str(&original).context("parsing manifest")?;
+    if parsed.profiles.contains_key(name) {
+        anyhow::bail!("profile '{name}' already exists");
+    }
+
+    // Build the profile table by appending each member; the first append
+    // creates [profiles.<name>] and its arrays.
+    let mut text = original;
+    for s in &servers {
+        text = add_to_profile(&text, name, "servers", s)?;
+    }
+    for s in &skills {
+        text = add_to_profile(&text, name, "skills", s)?;
+    }
+    toml::from_str::<Manifest>(&text).context("resulting manifest would be invalid")?;
+    crate::util::atomic::write(&manifest_path, &text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    Ok(name.to_string())
+}
+
+/// Add a skill to the manifest from a JSON args object (git URL or local path).
+/// Manifest-only — the caller then installs it and wires it into a CLI. Used by
+/// the MCP `add_skill` tool.
+pub fn add_skill_json(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
+    let name = args
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("skill name is required")?;
+    let str_field = |key: &str| -> Option<String> {
+        args.get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    };
+    let source = args.get("source").and_then(Value::as_str).unwrap_or("git");
+    let skill = if source == "path" {
+        Skill {
+            path: str_field("path"),
+            git: None,
+            rev: None,
+            subpath: None,
+        }
+    } else {
+        Skill {
+            path: None,
+            git: str_field("git"),
+            rev: str_field("rev"),
+            subpath: str_field("subpath"),
+        }
+    };
+    match source {
+        "path" if skill.path.is_none() => anyhow::bail!("a path-sourced skill needs a path"),
+        "git" if skill.git.is_none() => anyhow::bail!("a git-sourced skill needs a git URL"),
+        _ => {}
+    }
+
+    let base = crate::commands::project_base(manifest_dir)?;
+    let dir = crate::manifest::resolve_manifest_dir(&base);
+    let manifest_path = dir.join(crate::manifest::load::MANIFEST_FILE);
+    let original = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let parsed: Manifest = toml::from_str(&original).context("parsing manifest")?;
+    if parsed.skills.contains_key(name) {
+        anyhow::bail!("skill '{name}' already exists");
+    }
+    let body = serde_json::to_value(&skill)?;
+    let new_text = build_manifest_with(&original, "skills", name, &body, None)?;
+    crate::util::atomic::write(&manifest_path, &new_text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    Ok(name.to_string())
+}
+
 /// Parse `Key=Value` strings into an ordered map.
 fn parse_kv(pairs: &[String]) -> Result<IndexMap<String, String>> {
     let mut map = IndexMap::new();

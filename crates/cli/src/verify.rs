@@ -1,6 +1,6 @@
 //! Fail-closed content verification: does resolved content still match its
 //! `agentstack.lock` pin? One decision seam so every use path — activation
-//! (`use --write` / sessions / dashboard), the MCP skill loader, the gateway —
+//! (`use --write` / sessions), the MCP skill loader, the gateway —
 //! gates identically instead of hand-rolling four slightly different checks.
 //!
 //! The re-gate chain this module completes: content drifts → the use path

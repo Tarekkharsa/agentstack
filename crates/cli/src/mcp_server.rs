@@ -1312,7 +1312,7 @@ fn lease_freeze(args: &Value, dir: Option<&Path>, store: &LeaseStore) -> Result<
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| format!("{}-frozen", lease.profile));
-    let created = crate::dashboard::actions::add_profile(
+    let created = crate::commands::add::add_profile_json(
         dir,
         &json!({ "name": name, "servers": profile.servers, "skills": skills }),
     )?;
@@ -1371,13 +1371,13 @@ fn run_tool_with_lease(
         }
         "agentstack_diff" => diff_summary(args, dir),
         "agentstack_add_skill" => {
-            let name = crate::dashboard::actions::add_skill(dir, args)?;
+            let name = crate::commands::add::add_skill_json(dir, args)?;
             Ok(format!(
                 "Added skill '{name}' to the manifest (not installed or applied). A human runs `agentstack install` then `agentstack apply`."
             ))
         }
         "agentstack_create_profile" => {
-            let name = crate::dashboard::actions::add_profile(dir, args)?;
+            let name = crate::commands::add::add_profile_json(dir, args)?;
             Ok(format!(
                 "Created profile '{name}'. Load it for a session with agentstack_session_start."
             ))

@@ -226,8 +226,8 @@ missing.
 
 ### Unresolved secrets block writes
 
-If a `${REF}` doesn't resolve on this machine, `apply`/`use`/dashboard writes
-are refused for that target — never a `${TOKEN}` placeholder in live config.
+If a `${REF}` doesn't resolve on this machine, `apply`/`use` writes are
+refused for that target — never a `${TOKEN}` placeholder in live config.
 Override with `--allow-unresolved`. Structural manifest validation errors
 block `--write` too.
 
@@ -367,8 +367,8 @@ or classifies the error (auth / http / connect).
 Every write agentstack makes (servers, settings, hooks, instructions — even
 the owned-server manifest refresh) is captured in the history engine before it
 lands. `agentstack restore` lists the recorded changes; `restore <id> --write`
-(unique prefix) or `restore --last --write` reverts one — the same undo the
-dashboard button drives. `restore <adapter>` keeps the original single-slot
+(unique prefix) or `restore --last --write` reverts one — the applies the
+dashboard's Activity tab lists. `restore <adapter>` keeps the original single-slot
 config restore as a fallback. Reverted files simply show up as pending again.
 
 ### `doctor` shows what you use
@@ -543,14 +543,14 @@ Manage each CLI's own settings file (Claude Code `~/.claude/settings.json`
 permissions/feature flags, Codex `config.toml`) from one `[settings.<cli>]`
 block. `apply` merges only the keys you declare into the real file (top-level
 ownership), resolves `${REF}`s, preserves hand-set keys, and prunes keys that
-leave the manifest. Editable from the dashboard.
+leave the manifest. Viewable in the dashboard's Settings tab.
 
 ### Lifecycle hooks
 
 Declare `[hooks.*]` once (event + optional matcher + command) and `apply`
 compiles them into each harness's native hooks config (Claude Code
 `settings.json`, Codex `config.toml`), resolving secrets and pruning hooks
-that leave the manifest. Add/list from the dashboard Hooks pane.
+that leave the manifest. Listed in the dashboard's Hooks tab.
 
 ### Native extensions
 
@@ -630,8 +630,9 @@ reproduces. `upgrade <pack>` lists remote tags, resolves the newest (never
 downgrades), previews the member diff, and re-pins on `--write`.
 `[policy] allowed_sources` is enforced **before** any fetch, and the clone's
 content passes the install scan gate. `agentstack lib pack-init` scaffolds a
-publishable pack; the dashboard's Discover pane installs from a git URL with
-the same gates. (Semver ranges and transitive pack dependencies are
+publishable pack; the dashboard's Discover tab browses candidates and shows the
+`add from git:…` command to install one with the same gates. (Semver ranges and
+transitive pack dependencies are
 deliberately not in v1.)
 
 ### `adopt` and `add`
@@ -742,17 +743,16 @@ by which side holds the truth:
 
 An embedded localhost server + a self-contained UI (shadcn aesthetic,
 hand-written CSS — no Node, no framework, still one `cargo build`):
-`agentstack dashboard` opens a cross-harness matrix with secrets, skills,
-settings, profiles, and usage panels. By default it **can write to disk** — set
-secrets, apply to live configs, toggle servers/skills per CLI, edit settings,
-consolidate skills, install, **run doctor** (full check-up rendered in the
-Health tab), and **remove** a capability from the manifest. Pass
-**`--read-only`** to refuse every mutation (browse + preview diffs only) —
-enforced centrally for all POST routes and pinned by a route-matrix test.
-Bound to 127.0.0.1, token-gated, it never exposes secret values, and the same
-unresolved-secret blocking applies to its writes. The complete UI-only
-lifecycle — discover → add → secrets → enable → apply → verify → remove →
-undo — is walked through in [dashboard.md](dashboard.md).
+`agentstack dashboard` opens a **read-only** cross-harness view with secrets,
+skills, settings, profiles, runs, and usage panels. It shows state, previews
+diffs, and **runs doctor** (full check-up rendered in the Health tab), but it
+never writes: the server exposes read (GET) routes only, so a POST to any path
+404s — the read-only property is a property of the router, not the UI, and a
+route-matrix test pins it. Every change happens through the CLI; where a
+control would live, the dashboard shows the command to copy (e.g. `agentstack
+apply --write`, `agentstack secret set <REF>`, `agentstack use <profile>
+--write`). Bound to 127.0.0.1, token-gated, it never exposes secret values. The
+tabs and views are walked through in [dashboard.md](dashboard.md).
 
 ## Ephemeral sessions (`agentstack session`)
 
@@ -773,8 +773,9 @@ hooks, records the write, and reverts it on `end` (or `end --all` to clean up
 everywhere). `freeze` captures the session's resolved set — the profile's
 servers plus the skills actually loaded — into a new profile
 (default `<profile>-frozen`) so CI can replay it deterministically; review the
-manifest edit, then `agentstack lock`. The same start/end lifecycle drives the
-dashboard's session feature and the MCP `agentstack_session_*` tools.
+manifest edit, then `agentstack lock`. The same start/end lifecycle backs the
+MCP `agentstack_session_*` tools; the dashboard shows an active session
+read-only.
 
 ## Live runs (`agentstack run`)
 
@@ -782,7 +783,7 @@ Launch an agent CLI as a **tracked run** and control it without leaving
 agentstack. A run is a real OS process agentstack owns: it's spawned in its own
 process group (so a kill takes down the whole tree), recorded in
 `~/.agentstack/runs.json`, and visible to any other agentstack process — so the
-dashboard can see and stop runs it didn't start.
+dashboard can see runs it didn't start.
 
 ```bash
 # Launch a harness, attached to your terminal, with a profile applied for the
@@ -791,14 +792,14 @@ agentstack run claude-code --profile design
 agentstack run codex --profile backend --scope project
 agentstack run claude-code --keep        # leave the profile applied after exit
 
-# See and stop runs (from here or the dashboard's Runs panel).
+# See runs (also in the dashboard's Runs panel) and stop them here.
 agentstack report runs         # table; add --json for scripting
 agentstack kill <id>           # SIGTERM, then SIGKILL if it won't go
 agentstack kill <id> --force   # SIGKILL immediately
 ```
 
 Launching is a terminal act (the harnesses are interactive TUIs); the dashboard's
-**Runs** panel is for observing and killing tracked runs. The registry is
+**Runs** panel is for observing tracked runs (it shows the `kill` command). The registry is
 self-healing: a run whose wrapper died is pruned on the next `report runs`. A
 profile-bound run uses the session engine, so one is allowed per directory at a
 time. Unix only for now. Showing the full per-run trust footprint in the

@@ -1,6 +1,12 @@
 //! Embedded localhost dashboard server (PLAN §9f). Binds 127.0.0.1 only, gates
 //! the JSON API behind a one-time token, and serves a self-contained UI baked
 //! into the binary. No Node, no external assets — still one auditable binary.
+//!
+//! The dashboard is a **read-only lens**: it only ever answers GET requests
+//! (snapshot, diffs, doctor, runs, audited calls, search). Every mutation lives
+//! in the CLI, so the server exposes no write route at all — a POST to any path
+//! simply falls through to 404. The read-only property is a property of the
+//! router here, not of the UI.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,59 +31,33 @@ pub fn serve(args: &DashboardArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let token = gen_token();
     let url = format!("http://127.0.0.1:{port}/?token={token}");
 
-    let mode = if args.read_only {
-        "read-only"
-    } else {
-        "read-write"
-    };
     println!("{} dashboard at {}", "✓".green(), url.bold());
-    println!("  (localhost only · token-gated · {mode} · Ctrl-C to stop)");
+    println!("  (localhost only · token-gated · read-only · Ctrl-C to stop)");
     if !args.no_open {
         let _ = open_browser(&url);
     }
 
     for request in server.incoming_requests() {
-        handle(request, &token, args.read_only, dir.as_deref());
+        handle(request, &token, dir.as_deref());
     }
     Ok(())
 }
 
-fn handle(mut request: Request, token: &str, read_only: bool, dir: Option<&Path>) {
+fn handle(request: Request, token: &str, dir: Option<&Path>) {
     let method = request.method().clone();
     let url = request.url().to_string();
     let (path, query) = split_url(&url);
     let authed = token_ok(query, &request, token);
 
-    // Read the body up front for POSTs (mutations).
-    let body = if method == Method::Post {
-        let mut s = String::new();
-        let _ = request.as_reader().read_to_string(&mut s);
-        s
-    } else {
-        String::new()
-    };
-
-    let response = route(&method, path, query, authed, read_only, &body, dir);
+    let response = route(&method, path, query, authed, dir);
     let _ = request.respond(response);
 }
 
-#[allow(clippy::too_many_arguments)]
-fn route(
-    method: &Method,
-    path: &str,
-    query: &str,
-    authed: bool,
-    read_only: bool,
-    body: &str,
-    dir: Option<&Path>,
-) -> Resp {
-    // Structural read-only gate: every POST is a mutation, so refuse them all
-    // here (individual handlers also gate via `mutation()` — belt and braces).
-    // A future endpoint that forgets `mutation()` still can't write in
-    // `--read-only` mode.
-    if *method == Method::Post && read_only {
-        return forbidden();
-    }
+/// The router only knows read (GET) routes. Anything else — including every
+/// former write endpoint (`/api/apply`, `/api/toggle`, `/api/secret`, …) — has
+/// no arm and falls through to 404. The dashboard cannot mutate disk: there is
+/// no code path from an HTTP request to a write.
+fn route(method: &Method, path: &str, query: &str, authed: bool, dir: Option<&Path>) -> Resp {
     match (method, path) {
         (Method::Get, "/") => html(INDEX_HTML),
         (Method::Get, "/app.js") => asset(APP_JS, "application/javascript"),
@@ -87,18 +67,10 @@ fn route(
                 return unauthorized();
             }
             match crate::dashboard::snapshot::state(dir) {
-                Ok(mut v) => {
-                    if let Some(o) = v.as_object_mut() {
-                        o.insert("readOnly".into(), Value::Bool(read_only));
-                    }
-                    json(&serde_json::to_string(&v).unwrap_or_default())
-                }
+                Ok(v) => json(&serde_json::to_string(&v).unwrap_or_default()),
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
         }
-        (Method::Post, "/api/init") => mutation(authed, read_only, || {
-            crate::commands::init::dashboard_init(dir).map(|_| ())
-        }),
         (Method::Get, "/api/diff") => {
             if !authed {
                 return unauthorized();
@@ -155,9 +127,6 @@ fn route(
                 .collect();
             json(&serde_json::to_string(&serde_json::json!({ "entries": arr })).unwrap_or_default())
         }
-        (Method::Post, "/api/undo") => mutation(authed, read_only, || {
-            crate::history::undo(&field(&parse(body), "id")?)
-        }),
         (Method::Get, "/api/runs") => {
             if !authed {
                 return unauthorized();
@@ -210,11 +179,6 @@ fn route(
                     .unwrap_or_default(),
             )
         }
-        (Method::Post, "/api/run_kill") => mutation(authed, read_only, || {
-            let v = parse(body);
-            let force = v.get("force").and_then(Value::as_bool).unwrap_or(false);
-            crate::runs::kill(&field(&v, "id")?, force)
-        }),
         (Method::Get, "/api/search") => {
             if !authed {
                 return unauthorized();
@@ -225,163 +189,7 @@ fn route(
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
         }
-        (Method::Post, "/api/toggle") => mutation(authed, read_only, || {
-            let v = parse(body);
-            let server = field(&v, "server")?;
-            let target = field(&v, "target")?;
-            let enable = v.get("enable").and_then(Value::as_bool).unwrap_or(true);
-            crate::dashboard::actions::toggle(dir, &server, &target, scope_of(body), enable)
-        }),
-        (Method::Post, "/api/toggle_skill") => mutation(authed, read_only, || {
-            let v = parse(body);
-            let skill = field(&v, "skill")?;
-            let target = field(&v, "target")?;
-            let enable = v.get("enable").and_then(Value::as_bool).unwrap_or(true);
-            crate::dashboard::actions::toggle_skill(dir, &skill, &target, scope_of(body), enable)
-        }),
-        (Method::Post, "/api/add_server") => mutation(authed, read_only, || {
-            crate::dashboard::actions::add_server(dir, &parse(body)).map(|_| ())
-        }),
-        (Method::Post, "/api/remove") => mutation(authed, read_only, || {
-            crate::dashboard::actions::remove_capability(dir, &parse(body)).map(|_| ())
-        }),
-        (Method::Post, "/api/add_skill") => mutation(authed, read_only, || {
-            crate::dashboard::actions::add_skill(dir, &parse(body)).map(|_| ())
-        }),
-        (Method::Post, "/api/adopt_skill") => mutation(authed, read_only, || {
-            crate::dashboard::actions::adopt_skill(dir, &field(&parse(body), "name")?)
-        }),
-        (Method::Post, "/api/adopt_all_skills") => mutation(authed, read_only, || {
-            crate::dashboard::actions::adopt_all_skills(dir).map(|_| ())
-        }),
-        (Method::Post, "/api/consolidate_skills") => mutation(authed, read_only, || {
-            let v = parse(body);
-            let names: Vec<String> = v
-                .get("names")
-                .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            crate::dashboard::actions::consolidate_skills(dir, &names).map(|_| ())
-        }),
-        (Method::Post, "/api/set_settings") => mutation(authed, read_only, || {
-            crate::dashboard::actions::set_settings(dir, &parse(body))
-        }),
-        (Method::Post, "/api/add_hook") => mutation(authed, read_only, || {
-            crate::dashboard::actions::add_hook(dir, &parse(body)).map(|_| ())
-        }),
-        (Method::Post, "/api/add_profile") => mutation(authed, read_only, || {
-            crate::dashboard::actions::add_profile(dir, &parse(body)).map(|_| ())
-        }),
-        (Method::Post, "/api/session_start") => mutation(authed, read_only, || {
-            let v = parse(body);
-            let profile = field(&v, "profile")?;
-            crate::session::start(dir, &profile, scope_of(body))
-        }),
-        (Method::Post, "/api/session_end") => {
-            mutation(authed, read_only, || crate::session::end(dir))
-        }
-        (Method::Post, "/api/import_settings") => mutation(authed, read_only, || {
-            let target = field(&parse(body), "target")?;
-            crate::dashboard::actions::import_settings(dir, &target).map(|_| ())
-        }),
-        (Method::Post, "/api/add_from") => mutation(authed, read_only, || {
-            let v = parse(body);
-            let id = field(&v, "id")?;
-            let profile = v.get("profile").and_then(Value::as_str);
-            let mdir = crate::commands::project_base(dir)?;
-            crate::commands::add::write_from_provider(&mdir, &id, profile).map(|_| ())
-        }),
-        (Method::Post, "/api/secret") => mutation(authed, read_only, || {
-            let v = parse(body);
-            let name = field(&v, "name")?;
-            let value = field(&v, "value")?;
-            crate::secret::keychain::set(&name, &value)
-        }),
-        (Method::Post, "/api/apply") => mutation(authed, read_only, || {
-            // Optional explicit target list (e.g. "preview all" reconciling
-            // installed non-default CLIs); empty = the manifest's defaults.
-            let targets: Vec<String> = parse(body)
-                .get("targets")
-                .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let args = crate::cli::ApplyArgs {
-                targets,
-                profile: None,
-                dry_run: false,
-                write: true,
-                scope: Some(scope_of(body)),
-                allow_unresolved: false,
-                prune_foreign: false,
-                no_gitignore: false,
-            };
-            crate::commands::apply::run(&args, dir)
-        }),
-        (Method::Post, "/api/install") => mutation(authed, read_only, || {
-            crate::commands::install::run(
-                &crate::cli::InstallArgs {
-                    locked: false,
-                    allow_flagged: false,
-                },
-                dir,
-            )
-        }),
-        (Method::Post, "/api/use") => mutation(authed, read_only, || {
-            let v = parse(body);
-            let profile = field(&v, "profile")?;
-            let args = crate::cli::UseArgs {
-                profile: Some(profile),
-                targets: vec![],
-                scope: Some(scope_of(body)),
-                write: true,
-                allow_unresolved: false,
-                prune_foreign: false,
-                no_gitignore: false,
-            };
-            crate::commands::use_profile::run(&args, dir)
-        }),
         _ => Response::from_string("not found").with_status_code(404),
-    }
-}
-
-/// Run a write action, enforcing auth + read-only, returning a JSON result.
-fn mutation<F: FnOnce() -> Result<()>>(authed: bool, read_only: bool, f: F) -> Resp {
-    if !authed {
-        return unauthorized();
-    }
-    if read_only {
-        return json("{\"error\":\"dashboard is read-only\"}").with_status_code(403);
-    }
-    match f() {
-        Ok(()) => json("{\"ok\":true}"),
-        Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())).with_status_code(500),
-    }
-}
-
-fn parse(body: &str) -> Value {
-    serde_json::from_str(body).unwrap_or(Value::Null)
-}
-
-fn field(v: &Value, key: &str) -> Result<String> {
-    v.get(key)
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("missing field '{key}'"))
-}
-
-fn scope_of(body: &str) -> Scope {
-    match parse(body).get("scope").and_then(Value::as_str) {
-        Some("project") => Scope::Project,
-        _ => Scope::Global,
     }
 }
 
@@ -427,10 +235,6 @@ fn scope_of_query(query: &str) -> Scope {
         Some("project") => Scope::Project,
         _ => Scope::Global,
     }
-}
-
-fn forbidden() -> Resp {
-    json("{\"error\":\"dashboard is read-only\"}").with_status_code(403)
 }
 
 fn unauthorized() -> Resp {
@@ -530,11 +334,10 @@ fn user_assets_dir() -> PathBuf {
 mod tests {
     use super::*;
 
-    /// Every mutating dashboard endpoint. Keep in sync with the POST arms in
-    /// `route` — the test below proves each refuses in `--read-only`, and the
-    /// unknown-path case proves the refusal is the *central* gate, so a future
-    /// endpoint that forgets `mutation()` still can't write.
-    const POST_ROUTES: &[&str] = &[
+    /// Every route that used to mutate disk. The dashboard is read-only now, so
+    /// none of these exist in the router — each must fall through to 404. This
+    /// is the witness that the write surface is gone: not gated, *absent*.
+    const FORMER_WRITE_ROUTES: &[&str] = &[
         "/api/add_from",
         "/api/add_hook",
         "/api/add_profile",
@@ -560,45 +363,36 @@ mod tests {
     ];
 
     #[test]
-    fn read_only_refuses_every_mutation() {
-        for path in POST_ROUTES {
-            let resp = route(&Method::Post, path, "", true, true, "{}", None);
+    fn former_write_routes_are_gone() {
+        for path in FORMER_WRITE_ROUTES {
+            // Authed POST — the only thing standing between this and a write
+            // used to be the read-only gate. Now there's simply no route.
+            let resp = route(&Method::Post, path, "", true, None);
             assert_eq!(
                 resp.status_code(),
-                tiny_http::StatusCode(403),
-                "{path} must refuse in --read-only"
+                tiny_http::StatusCode(404),
+                "{path} must be absent (404), not routed"
             );
         }
-        // Unknown POST path: still 403 — the central gate, not per-route luck.
-        let resp = route(
-            &Method::Post,
-            "/api/added_next_year",
-            "",
-            true,
-            true,
-            "{}",
-            None,
-        );
-        assert_eq!(resp.status_code(), tiny_http::StatusCode(403));
     }
 
     #[test]
-    fn reads_stay_available_in_read_only() {
-        // Read endpoints answer in --read-only (any non-403 shape is fine;
-        // these run against whatever HOME the test machine has).
+    fn reads_stay_available() {
+        // Read endpoints answer (any non-404/401 shape is fine; these run
+        // against whatever HOME the test machine has).
         for path in ["/api/state", "/api/doctor", "/api/history", "/api/runs"] {
-            let resp = route(&Method::Get, path, "", true, true, "", None);
+            let resp = route(&Method::Get, path, "", true, None);
             assert_ne!(
                 resp.status_code(),
-                tiny_http::StatusCode(403),
-                "{path} must stay readable in --read-only"
+                tiny_http::StatusCode(404),
+                "{path} must stay a real read route"
             );
         }
     }
 
     #[test]
-    fn unauthed_is_refused_before_read_only() {
-        let resp = route(&Method::Post, "/api/apply", "", false, false, "{}", None);
+    fn unauthed_read_is_refused() {
+        let resp = route(&Method::Get, "/api/state", "", false, None);
         assert_eq!(resp.status_code(), tiny_http::StatusCode(401));
     }
 }
