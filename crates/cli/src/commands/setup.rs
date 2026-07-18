@@ -1,4 +1,4 @@
-//! `agentstack setup` — the one-command newcomer path.
+//! `agentstack setup` (hidden alias) + interactive `agentstack init` — the one-command newcomer path (P27).
 //!
 //! Pure orchestration over the everyday commands: `init` (only if there's no
 //! manifest yet), a read-only preflight, inline secret prompts, an `apply`
@@ -43,7 +43,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     if !manifest_path.exists() {
         if !interactive {
             println!(
-                "\n{} `agentstack setup` is an interactive wizard and will not write in this shell.",
+                "\n{} `agentstack init` is an interactive wizard and will not write in this shell.",
                 "→".cyan()
             );
             println!("  For scripts/CI, use:");
@@ -72,7 +72,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
         println!(
             "\n{} Nothing to set up yet. Add a capability, then re-run {}:",
             "→".cyan(),
-            "agentstack setup".bold()
+            "agentstack init".bold()
         );
         println!("    agentstack search <term>        find a server or skill");
         println!("    agentstack add server <name> …  add one you already know");
@@ -96,7 +96,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
         println!(
             "\n{} Fix the manifest validation error(s) above, then re-run {}.",
             "→".cyan(),
-            "agentstack setup".bold()
+            "agentstack init".bold()
         );
         return Ok(());
     }
@@ -105,7 +105,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             "\n{} Still missing {}. Set them, then re-run {}:",
             "→".cyan(),
             missing.join(", "),
-            "agentstack setup".bold()
+            "agentstack init".bold()
         );
         for name in &missing {
             println!("    agentstack secret set {name}");
@@ -121,7 +121,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
         println!(
             "\n{} Resolve the issue(s) above, then re-run {}.",
             "→".cyan(),
-            "agentstack setup".bold()
+            "agentstack init".bold()
         );
         return Ok(());
     }

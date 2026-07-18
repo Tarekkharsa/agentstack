@@ -93,7 +93,7 @@ agents get the same map via the shipped
 
 ## Step 1 — One manifest, every CLI (5 minutes)
 
-`agentstack setup` is the guided path — it imports, previews, applies, and
+Interactive `agentstack init` is the guided path — it imports, previews, applies, and
 activates interactively. It opens with a plan (nothing written until you
 confirm), and when it lifts inline tokens it asks where the values should
 live — a gitignored project `.env` by default, the OS keychain, or skip and

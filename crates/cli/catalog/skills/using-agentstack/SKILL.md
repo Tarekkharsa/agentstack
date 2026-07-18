@@ -34,8 +34,8 @@ directory's state and next step, `agentstack doctor` names what's unwired,
 `tools_search` / `agentstack_doctor`. Then propose the **next** step, not the
 whole ladder:
 
-1. **Unify** — no manifest? Propose `agentstack init` (or interactive
-   `agentstack setup` for the human) and `apply` to render every CLI.
+1. **Unify** — no manifest? Propose `agentstack init` — interactive runs get
+   the guided wizard; scripts get the promptless import (then `apply`).
 2. **Verify** — manifest exists but `doctor` complains? Surface its exact fix
    commands.
 3. **Guard** — CLIs unwired in `guard status`? Suggest

@@ -22,8 +22,8 @@ use crate::scope::Scope;
     after_help = "\
 Start here:
   agentstack                     orientation + the one next step for this directory
-  agentstack setup               guided one-command setup: import, preview, apply, activate
-  init → apply → use                             the same steps, run individually
+  agentstack init                one command sets up everything: import, choose, apply, verify
+  init --secrets … / apply / use             the same steps for scripts, no prompts
 
 The list above is the everyday surface. Everything else is grouped below —
 run `agentstack <command> --help` for any of them:
@@ -56,12 +56,14 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     // ── Everyday: the core loop most projects ever need (shown in --help) ─
-    /// Guided one-command setup: import if needed, configure, preview, confirm,
-    /// apply, then verify — the everyday loop behind a single command.
+    /// Hidden alias of interactive `init` (P27: one front-door verb). Kept so
+    /// muscle memory and old links keep working; never advertised.
+    #[command(hide = true)]
     Setup(SetupArgs),
 
-    /// Discover installed CLIs and reverse-engineer a manifest from their
-    /// existing MCP configs, lifting inline secrets into `${REF}`s.
+    /// Set up everything in one command: detect CLIs, import their configs,
+    /// choose where secrets live, preview, confirm, apply, verify. Interactive
+    /// runs are guided; scripts get the promptless primitive via flags.
     Init(InitArgs),
 
     /// Add a server or skill to the manifest.

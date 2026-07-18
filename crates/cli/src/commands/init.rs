@@ -155,6 +155,19 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
     if args.global {
         return run_global(args);
     }
+    // P27 — one verb: a bare interactive `init` IS the guided wizard (the
+    // former `setup`). Any explicit flag opts back into the scriptable
+    // primitive, and non-interactive shells never route (their contract is
+    // unchanged: import, write, no prompts beyond what flags allow).
+    let bare = !args.force && !args.dry_run && args.secrets.is_none() && !args.no_keychain;
+    if bare && crate::util::confirm::is_interactive() {
+        let wizard = crate::cli::SetupArgs {
+            targets: Vec::new(),
+            profile: None,
+            scope: None,
+        };
+        return super::setup::run(&wizard, manifest_dir);
+    }
     run_impl(args, manifest_dir, true)
 }
 
@@ -280,7 +293,7 @@ fn run_global(args: &InitArgs) -> Result<()> {
         }
     } else {
         println!(
-            "  {} skipped — `agentstack setup` will offer them again.",
+            "  {} skipped — `agentstack init` will offer them again.",
             "·".dimmed()
         );
     }
@@ -640,7 +653,7 @@ version = 1
     println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());
     if show_next {
         println!(
-            "\nNext: review the manifest, then `agentstack setup` for the guided path (or `agentstack apply` to preview changes)."
+            "\nNext: review the manifest, then `agentstack init` for the guided path (or `agentstack apply` to preview changes)."
         );
     }
     Ok(())

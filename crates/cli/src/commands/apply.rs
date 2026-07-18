@@ -720,7 +720,7 @@ fn render(
         let n = manifest.skills.len();
         match manifest.profiles.keys().next() {
             Some(first) => println!(
-                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them through a profile: `agentstack use {first} --write` (or `agentstack setup`, which does this for you)",
+                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them through a profile: `agentstack use {first} --write` (or `agentstack init`, which does this for you)",
                 "ℹ".cyan()
             ),
             None => println!(

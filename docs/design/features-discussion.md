@@ -184,8 +184,12 @@ today; this re-pointing lands as the follow-up commit on top — dispatch
 `init` (interactive) into the wizard path, hide `setup`, sweep the docs'
 verb usage.
 
-**Decided:** yes — one command to set up everything easily is the product's
-promise; the verb users guess must be the verb that delivers it.
+**SHIPPED (2026-07-19):** interactive bare `init` routes into the wizard
+(explicit flags opt back into the promptless primitive; non-interactive
+unchanged); `setup` hidden as an alias; every help/doc/skill string says
+`init`. Landed with the wizard batch (P1/P2/P4/P7/P8/P9 — all SHIPPED same
+day: .env writer + storage choice, plan block, scan offer, modes choice,
+machine summary, lock re-trust warning).
 
 ## Doctor + drift (feature 2)
 

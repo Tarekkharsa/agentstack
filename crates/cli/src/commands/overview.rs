@@ -169,7 +169,7 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
     let next = if !manifest_path.exists() {
         println!("  {}  none in this directory", "Manifest".bold());
         (
-            "agentstack setup",
+            "agentstack init",
             "guided one-command setup — import, preview, apply",
         )
     } else {
@@ -224,7 +224,7 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
 
                 if !locked && (!m.skills.is_empty() || !m.servers.is_empty()) {
                     (
-                        "agentstack setup",
+                        "agentstack init",
                         "finish the first run — preview, apply, activate",
                     )
                 } else if trust == crate::trust::TrustState::Changed {
