@@ -113,7 +113,7 @@ fn installs_git_pack_at_tag_and_upgrades_to_newer() {
         "secret lifted to a ref: {manifest}"
     );
     assert!(manifest.contains("[skills.sql-review]"), "{manifest}");
-    assert!(manifest.contains("[plugins.acme]"), "{manifest}");
+    assert!(manifest.contains("[packs.acme]"), "{manifest}");
     assert!(
         manifest.contains(&format!("source = \"git:{url}@v0.1.0\"")),
         "{manifest}"

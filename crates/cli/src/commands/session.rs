@@ -11,20 +11,12 @@ use crate::cli::{SessionArgs, SessionCmd};
 
 pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
     match &args.cmd {
-        SessionCmd::Start {
-            profile,
-            scope,
-            plugin,
-        } => {
-            crate::session::start(dir, profile, *scope, plugin.as_deref())?;
+        SessionCmd::Start { profile, scope } => {
+            crate::session::start(dir, profile, *scope)?;
             println!(
-                "{} session '{}' started ({scope}){}",
+                "{} session '{}' started ({scope})",
                 "✓".green(),
                 profile.bold(),
-                plugin
-                    .as_ref()
-                    .map(|p| format!(" with plugin {p}"))
-                    .unwrap_or_default()
             );
         }
         SessionCmd::End { all } => {
@@ -54,17 +46,7 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
                 println!("No active sessions.");
             } else {
                 for s in list {
-                    let plugin = s
-                        .plugin
-                        .map(|p| format!(" · plugin {p}"))
-                        .unwrap_or_default();
-                    println!(
-                        "{}  profile={} scope={}{}",
-                        s.dir.bold(),
-                        s.profile,
-                        s.scope,
-                        plugin
-                    );
+                    println!("{}  profile={} scope={}", s.dir.bold(), s.profile, s.scope,);
                 }
             }
         }

@@ -1,11 +1,11 @@
-//! Ephemeral sessions: load a profile (and an optional plugin) *for now*, then
-//! revert everything when you're done. agent CLIs read their config at launch,
-//! so "for this session" means: write the config before you start the agent and
-//! restore it after. Start snapshots the affected server files (via the same
-//! history engine `apply` uses) and the skills directories, activates the
-//! profile, and remembers what it added. End restores the server files, removes
-//! the skills it added, and uninstalls the plugin — leaving things exactly as
-//! they were. Sessions default to project scope so they stay contained to a repo.
+//! Ephemeral sessions: load a profile *for now*, then revert everything when
+//! you're done. agent CLIs read their config at launch, so "for this session"
+//! means: write the config before you start the agent and restore it after.
+//! Start snapshots the affected server files (via the same history engine
+//! `apply` uses) and the skills directories, activates the profile, and
+//! remembers what it added. End restores the server files and removes the
+//! skills it added — leaving things exactly as they were. Sessions default to
+//! project scope so they stay contained to a repo.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -54,7 +54,6 @@ pub struct Session {
     /// History entry id holding the pre-session server-file snapshots.
     pub history_id: Option<String>,
     pub skill_adds: Vec<SkillAdd>,
-    pub plugin: Option<String>,
     /// On-demand loads the agent made within this session (progressive
     /// disclosure). Sticky within the session, gone at exit.
     #[serde(default)]
@@ -182,14 +181,9 @@ fn dir_entries(dir: &Path) -> BTreeSet<String> {
         .collect()
 }
 
-/// Start a session: snapshot, activate `profile` (+ optional `plugin`) in
-/// `scope`, and remember what to revert.
-pub fn start(
-    manifest_dir: Option<&Path>,
-    profile: &str,
-    scope: Scope,
-    plugin: Option<&str>,
-) -> Result<()> {
+/// Start a session: snapshot, activate `profile` in `scope`, and remember what
+/// to revert.
+pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result<()> {
     let ctx = crate::commands::load(manifest_dir)?;
     let key_dir = dir_key(&ctx.dir);
     if load_all().contains_key(&key_dir) {
@@ -270,12 +264,6 @@ pub fn start(
         }
     }
 
-    // Optional plugin for the session.
-    if let Some(pl) = plugin {
-        crate::commands::plugins::install_recipe_native(manifest_dir, pl, &[], true)
-            .with_context(|| format!("installing plugin '{pl}' for the session"))?;
-    }
-
     let mut map = load_all();
     map.insert(
         key_dir.clone(),
@@ -286,15 +274,14 @@ pub fn start(
             started_unix: now_secs(),
             history_id,
             skill_adds,
-            plugin: plugin.map(String::from),
             loads: Vec::new(),
         },
     );
     save_all(&map)
 }
 
-/// End the active session for `dir`: restore server files, remove the skills it
-/// added, uninstall its plugin.
+/// End the active session for `dir`: restore server files and remove the skills
+/// it added.
 pub fn end(manifest_dir: Option<&Path>) -> Result<()> {
     // Walk up like `start` does (via commands::load), or a session started at
     // the project root could never be ended from a subdirectory.
@@ -322,11 +309,6 @@ pub fn end(manifest_dir: Option<&Path>) -> Result<()> {
             let _ = fs::remove_dir(Path::new(&sa.dir));
         }
     }
-    // 3. Uninstall the session plugin.
-    if let Some(pl) = &sess.plugin {
-        let _ = crate::commands::plugins::remove_recipe_native(manifest_dir, pl, &[], true);
-    }
-
     map.remove(&key);
     save_all(&map)
 }

@@ -273,20 +273,13 @@ fn route(
         (Method::Post, "/api/add_hook") => mutation(authed, read_only, || {
             crate::dashboard::actions::add_hook(dir, &parse(body)).map(|_| ())
         }),
-        (Method::Post, "/api/add_plugin_recipe") => mutation(authed, read_only, || {
-            crate::dashboard::actions::add_plugin_recipe(dir, &parse(body)).map(|_| ())
-        }),
         (Method::Post, "/api/add_profile") => mutation(authed, read_only, || {
             crate::dashboard::actions::add_profile(dir, &parse(body)).map(|_| ())
         }),
         (Method::Post, "/api/session_start") => mutation(authed, read_only, || {
             let v = parse(body);
             let profile = field(&v, "profile")?;
-            let plugin = v
-                .get("plugin")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty());
-            crate::session::start(dir, &profile, scope_of(body), plugin)
+            crate::session::start(dir, &profile, scope_of(body))
         }),
         (Method::Post, "/api/session_end") => {
             mutation(authed, read_only, || crate::session::end(dir))
@@ -341,47 +334,6 @@ fn route(
                 dir,
             )
         }),
-        (Method::Post, "/api/plugins_sync") => mutation(authed, read_only, || {
-            let v = parse(body);
-            let targets: Vec<String> = v
-                .get("targets")
-                .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let ctx = crate::commands::load(dir)?;
-            let valid_targets: Vec<&str> = ctx.registry.ids().collect();
-            let issues =
-                crate::manifest::validate_with_targets(&ctx.loaded.manifest, valid_targets);
-            if let Some(issue) = issues.into_iter().find(|i| i.kind.is_error()) {
-                anyhow::bail!(issue.message);
-            }
-            let report = crate::plugin_recipes::sync(
-                &ctx.loaded.manifest,
-                &ctx.registry,
-                &ctx.dir,
-                &crate::plugin_recipes::SyncOptions {
-                    targets,
-                    write: true,
-                },
-            )?;
-            crate::plugin_recipes::ensure_no_sync_errors(&report)
-        }),
-        (Method::Post, "/api/plugins_install") => mutation(authed, read_only, || {
-            let v = parse(body);
-            let name = field(&v, "name")?;
-            let targets = string_array(&v, "targets");
-            crate::commands::plugins::install_recipe_native(dir, &name, &targets, true)
-        }),
-        (Method::Post, "/api/plugins_remove") => mutation(authed, read_only, || {
-            let v = parse(body);
-            let name = field(&v, "name")?;
-            let targets = string_array(&v, "targets");
-            crate::commands::plugins::remove_recipe_native(dir, &name, &targets, true)
-        }),
         (Method::Post, "/api/use") => mutation(authed, read_only, || {
             let v = parse(body);
             let profile = field(&v, "profile")?;
@@ -424,17 +376,6 @@ fn field(v: &Value, key: &str) -> Result<String> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .ok_or_else(|| anyhow!("missing field '{key}'"))
-}
-
-fn string_array(v: &Value, key: &str) -> Vec<String> {
-    v.get(key)
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn scope_of(body: &str) -> Scope {
@@ -596,7 +537,6 @@ mod tests {
     const POST_ROUTES: &[&str] = &[
         "/api/add_from",
         "/api/add_hook",
-        "/api/add_plugin_recipe",
         "/api/add_profile",
         "/api/add_server",
         "/api/add_skill",
@@ -607,9 +547,6 @@ mod tests {
         "/api/import_settings",
         "/api/init",
         "/api/install",
-        "/api/plugins_install",
-        "/api/plugins_remove",
-        "/api/plugins_sync",
         "/api/remove",
         "/api/run_kill",
         "/api/secret",

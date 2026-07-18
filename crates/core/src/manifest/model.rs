@@ -49,10 +49,12 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub extensions: IndexMap<String, Extension>,
 
-    /// Shareable plugin recipes compiled into native Claude Code / Codex plugin
-    /// packages and repo marketplaces.
+    /// Vendor-pack install ledgers, keyed by pack name. Each records the members
+    /// a `add from <source>` install added (server, skills, house rules) so
+    /// `remove`/`lock --upgrade` can undo or re-resolve the pack. Members ride
+    /// the normal manifest sections; this table is only the bookkeeping.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub plugins: IndexMap<String, PluginRecipe>,
+    pub packs: IndexMap<String, PackInstall>,
 
     /// Where `apply` writes by default and which adapters are in play.
     #[serde(default)]
@@ -676,55 +678,40 @@ pub struct Hook {
     pub targets: Vec<String>,
 }
 
-/// One AgentStack-managed plugin recipe. This is the portable source of truth;
-/// `agentstack plugins sync` renders it into each harness's native plugin
-/// package/marketplace shape.
+/// A vendor-pack install ledger: the record `agentstack add from <source>`
+/// writes so a pack install can be undone (`remove`) or re-resolved
+/// (`lock --upgrade`). It is pure bookkeeping — the pack's real members (server,
+/// skills, house-rule instructions) live in the normal manifest sections; this
+/// struct only lists which of them the pack owns plus the provenance needed to
+/// re-fetch. (The former plugin-recipe/marketplace lane that also used this
+/// table was removed; the extensions kind supersedes it.)
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct PluginRecipe {
+pub struct PackInstall {
     pub version: String,
     pub description: String,
-    /// Recipe role. `Some("pack")` marks an *install ledger* written by
-    /// `agentstack add <pack>`: it records every member so `remove` can undo the
-    /// install, but it is NOT a publishable plugin and is skipped by
-    /// `plugins sync`/`doctor`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-    /// Adapter ids this recipe should render for; `["*"]` = every supported
-    /// plugin-capable adapter.
-    #[serde(default = "all_targets")]
-    pub targets: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_enabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub servers: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skills: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub hooks: Vec<String>,
-    /// Instruction-fragment member names (used by pack ledgers).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub instructions: Vec<String>,
-    /// Where this recipe was resolved from (`catalog:<id>` or
-    /// `git:<url>@<tag>[#subdir]`); recorded by pack ledgers, parsed by
-    /// `upgrade` to re-resolve.
+    /// Where this pack was resolved from (`catalog:<id>` or
+    /// `git:<url>@<tag>[#subdir]`); parsed by `upgrade` to re-resolve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// The commit a git pack's tag resolved to at install time (provenance;
     /// content digests live in the lock via each extracted skill).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub homepage: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repository: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub license: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub author: Option<String>,
+    /// Adapter ids the pack's members target; `["*"]` = every adapter.
+    #[serde(default = "all_targets")]
+    pub targets: Vec<String>,
+    /// Server member names this pack added to `[servers]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub servers: Vec<String>,
+    /// Skill member names this pack added to `[skills]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
+    /// Hook member names this pack added to `[hooks]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hooks: Vec<String>,
+    /// Instruction-fragment member names this pack added to `[instructions]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub instructions: Vec<String>,
 }
 
 impl Instruction {
@@ -803,10 +790,8 @@ pub struct Server {
     pub integrity_roots: Vec<String>,
     /// Adapter ids `apply` renders this server to; `["*"]` (the default) = all
     /// targets. An explicit empty list opts the server out of the direct
-    /// `[servers]` fan-out entirely — how adopted plugin servers are stored:
-    /// the native plugin already provides the server on its own harness and
-    /// the generated plugin package carries it anywhere else it's installed,
-    /// so a direct render would configure the same server twice.
+    /// `[servers]` fan-out entirely — for a server some other harness already
+    /// provides on its own, where a direct render would configure it twice.
     #[serde(default = "all_targets", skip_serializing_if = "is_all_targets")]
     pub targets: Vec<String>,
     /// Adapter id whose live config is the source of truth for this server
@@ -1247,8 +1232,7 @@ mod tests {
             [skills.linear_breakdown]
             path = "./skills/linear/breakdown"
 
-            [plugins.linear-pack]
-            kind = "pack"
+            [packs.linear-pack]
             version = "0.1.0"
             description = "Linear pack"
             servers = ["linear-pack"]
@@ -1291,7 +1275,7 @@ mod tests {
         // Explicit list scopes the fan-out.
         assert!(m.servers["scoped"].applies_to("codex"));
         assert!(!m.servers["scoped"].applies_to("claude-code"));
-        // Empty list = direct fan-out nowhere (adopted plugin servers).
+        // Empty list = direct fan-out nowhere.
         assert!(!m.servers["recipe-owned"].applies_to("codex"));
 
         let out = toml::to_string(&m).unwrap();

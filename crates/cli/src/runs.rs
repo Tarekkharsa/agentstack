@@ -158,7 +158,7 @@ pub fn launch(
                 "a session is already active here — end it (`agentstack session end`) or run without --profile"
             );
         }
-        crate::session::start(manifest_dir, p, scope, None)
+        crate::session::start(manifest_dir, p, scope)
             .with_context(|| format!("applying profile '{p}' for this run"))?;
         started_session = true;
     }

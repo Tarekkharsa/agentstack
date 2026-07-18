@@ -42,7 +42,6 @@ fn run() -> Result<()> {
         Command::Proxy(cmd) => commands::proxy::run(cmd, dir),
         Command::Optimize(args) => commands::optimize::run(args, dir),
         Command::Adapters(args) => commands::adapters::run(args),
-        Command::Plugins(args) => commands::plugins::run(args, dir),
         Command::Secret(args) => commands::secret::run(args, dir),
         Command::Settings(args) => commands::settings::run(args, dir),
         Command::Export(args) => commands::bundle::run_export(args, dir),

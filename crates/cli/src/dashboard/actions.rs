@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use crate::manifest::{PluginRecipe, Server, ServerType, Skill};
+use crate::manifest::{Server, ServerType, Skill};
 use crate::render::{plan_target, skills, Selection};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
@@ -319,66 +319,6 @@ pub fn add_profile(manifest_dir: Option<&Path>, args: &Value) -> Result<String> 
     Ok(name.to_string())
 }
 
-/// Add a managed plugin recipe to the manifest from dashboard form fields.
-pub fn add_plugin_recipe(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
-    let ctx = crate::commands::load(manifest_dir)?;
-    let name = args
-        .get("name")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .context("plugin recipe name is required")?;
-    let description = args
-        .get("description")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .context("description is required")?;
-    if ctx.loaded.manifest.plugins.contains_key(name) {
-        anyhow::bail!("plugin recipe '{name}' already exists");
-    }
-
-    let recipe = PluginRecipe {
-        kind: None,
-        rev: None,
-        source: None,
-        instructions: Vec::new(),
-        version: str_field(args, "version").unwrap_or_else(|| "0.1.0".into()),
-        description: description.to_string(),
-        display: str_field(args, "display"),
-        category: str_field(args, "category"),
-        targets: string_array(args, "targets", vec!["*".into()]),
-        default_enabled: args
-            .get("defaultEnabled")
-            .and_then(Value::as_bool)
-            .and_then(|v| v.then_some(true)),
-        servers: string_array(args, "servers", Vec::new()),
-        skills: string_array(args, "skills", Vec::new()),
-        hooks: string_array(args, "hooks", Vec::new()),
-        homepage: None,
-        repository: None,
-        license: None,
-        author: None,
-    };
-
-    let body = serde_json::to_value(&recipe)?;
-    let manifest_path = ctx.loaded.manifest_path.clone();
-    let original = std::fs::read_to_string(&manifest_path)
-        .with_context(|| format!("reading {}", manifest_path.display()))?;
-    let new_text =
-        crate::commands::add::build_manifest_with(&original, "plugins", name, &body, None)?;
-    let parsed: crate::manifest::Manifest =
-        toml::from_str(&new_text).context("resulting manifest would be invalid")?;
-    let targets: Vec<&str> = ctx.registry.ids().collect();
-    if let Some(issue) = crate::manifest::validate_with_targets(&parsed, targets)
-        .into_iter()
-        .find(|i| i.kind.is_error())
-    {
-        anyhow::bail!(issue.message);
-    }
-    crate::util::atomic::write(&manifest_path, &new_text)
-        .with_context(|| format!("writing {}", manifest_path.display()))?;
-    Ok(name.to_string())
-}
-
 /// Set (replace) the `[settings.<target>]` block in the manifest from a JSON
 /// object supplied by the dashboard. Comments + other settings blocks survive.
 pub fn set_settings(manifest_dir: Option<&Path>, args: &Value) -> Result<()> {
@@ -650,18 +590,6 @@ fn str_field(v: &Value, key: &str) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(String::from)
-}
-
-fn string_array(v: &Value, key: &str, default: Vec<String>) -> Vec<String> {
-    v.get(key)
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str().filter(|s| !s.is_empty()).map(String::from))
-                .collect()
-        })
-        .filter(|a: &Vec<String>| !a.is_empty())
-        .unwrap_or(default)
 }
 
 fn obj_to_map(v: Option<&Value>) -> IndexMap<String, String> {

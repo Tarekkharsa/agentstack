@@ -30,7 +30,7 @@ run `agentstack <command> --help` for any of them:
   Activate & run           session · kill
   Zero-files bridge        gateway · mcp
   Inspect & tune           diff · explain · audit · optimize · proxy · restore · settings · sign · verify
-  Share & extend           export · import · plugins · adapters · self"
+  Share & extend           export · import · adapters · self"
 )]
 pub struct Cli {
     /// Project or manifest directory (prefers .agentstack/agentstack.toml).
@@ -117,8 +117,8 @@ pub enum Command {
     /// Activate a profile: render its servers + materialize its skills.
     Use(UseArgs),
 
-    /// Manage ephemeral sessions: load a profile (+ optional plugin) for now,
-    /// then revert it. A safety hatch for the dashboard's session feature.
+    /// Manage ephemeral sessions: load a profile for now, then revert it.
+    /// A safety hatch for the dashboard's session feature.
     #[command(hide = true)]
     Session(SessionArgs),
 
@@ -226,10 +226,6 @@ pub enum Command {
     /// Import an encrypted bundle on a new machine.
     #[command(hide = true)]
     Import(ImportArgs),
-
-    /// Manage AgentStack plugin recipes and generated native marketplaces.
-    #[command(hide = true)]
-    Plugins(PluginsArgs),
 
     /// Inspect the available CLI adapters.
     #[command(hide = true)]
@@ -599,7 +595,7 @@ pub struct RemoveArgs {
 
 #[derive(Args, Debug)]
 pub struct UpgradeArgs {
-    /// Vendor pack name (the `[plugins.<vendor>]` ledger key). Optional with
+    /// Vendor pack name (the `[packs.<vendor>]` ledger key). Optional with
     /// `--all`.
     pub name: Option<String>,
     /// Re-resolve every installed pack instead of one.
@@ -884,15 +880,12 @@ pub struct SessionArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCmd {
-    /// Start a session: load a profile (+ optional plugin) for now.
+    /// Start a session: load a profile for now.
     Start {
         /// Profile to load.
         profile: String,
         #[arg(long, value_enum, default_value_t = Scope::Project)]
         scope: Scope,
-        /// Also install this plugin recipe for the session.
-        #[arg(long)]
-        plugin: Option<String>,
     },
     /// End the active session here (or everywhere with --all), reverting it.
     End {
@@ -1368,119 +1361,6 @@ pub enum AdaptersCommand {
         /// Path to a `.yaml` adapter descriptor.
         file: String,
     },
-}
-
-#[derive(Args, Debug)]
-pub struct PluginsArgs {
-    #[command(subcommand)]
-    pub command: PluginsCommand,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum PluginsCommand {
-    /// List AgentStack-managed plugin recipes in the manifest.
-    List,
-    /// Show generated/native install status and next actions for recipes.
-    Status(PluginsStatusArgs),
-    /// Create a plugin recipe from existing manifest servers, skills, and hooks.
-    Create(Box<PluginsCreateArgs>),
-    /// Adopt an installed native Claude Code or Codex plugin into the manifest.
-    Adopt(PluginsAdoptArgs),
-    /// Generate repo-local native plugin packages and marketplaces.
-    Sync(PluginsSyncArgs),
-    /// Add this repo marketplace to native harnesses and install a recipe.
-    Install(PluginsNativeArgs),
-    /// Remove a recipe from native harness plugin installs.
-    Remove(PluginsNativeArgs),
-}
-
-#[derive(Args, Debug)]
-pub struct PluginsCreateArgs {
-    /// Recipe/native plugin id, e.g. `play`.
-    pub name: String,
-    /// Plugin version.
-    #[arg(long, default_value = "0.1.0")]
-    pub version: String,
-    /// Human description shown in native plugin UIs.
-    #[arg(long)]
-    pub description: String,
-    #[arg(long)]
-    pub display: Option<String>,
-    #[arg(long)]
-    pub category: Option<String>,
-    #[arg(long = "target", value_name = "ID")]
-    pub targets: Vec<String>,
-    #[arg(long = "server", value_name = "NAME")]
-    pub servers: Vec<String>,
-    #[arg(long = "skill", value_name = "NAME")]
-    pub skills: Vec<String>,
-    #[arg(long = "hook", value_name = "NAME")]
-    pub hooks: Vec<String>,
-    #[arg(long)]
-    pub homepage: Option<String>,
-    #[arg(long)]
-    pub repository: Option<String>,
-    #[arg(long)]
-    pub license: Option<String>,
-    #[arg(long)]
-    pub author: Option<String>,
-    /// Set plugin defaultEnabled=true in generated native manifests.
-    #[arg(long)]
-    pub default_enabled: bool,
-    /// Actually update agentstack.toml (else dry-run).
-    #[arg(long)]
-    pub write: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct PluginsStatusArgs {
-    /// Optional recipe name to inspect.
-    pub name: Option<String>,
-}
-
-#[derive(Args, Debug)]
-pub struct PluginsAdoptArgs {
-    /// Native plugin name to adopt.
-    pub name: String,
-    /// Restrict adoption to one native harness.
-    #[arg(long)]
-    pub harness: Option<String>,
-    /// Restrict adoption to one marketplace.
-    #[arg(long)]
-    pub marketplace: Option<String>,
-    /// Override the AgentStack recipe name.
-    #[arg(long)]
-    pub as_name: Option<String>,
-    /// Copy skills into the central library even if the content scan finds
-    /// high-severity items (hidden Unicode). Findings still print as warnings.
-    #[arg(long)]
-    pub allow_flagged: bool,
-    /// Actually update agentstack.toml (else dry-run).
-    #[arg(long)]
-    pub write: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct PluginsSyncArgs {
-    /// Only sync these target ids (repeatable). Defaults to Codex + Claude Code
-    /// when their adapters exist.
-    #[arg(long = "target", value_name = "ID")]
-    pub targets: Vec<String>,
-    /// Actually write generated files (else dry-run).
-    #[arg(long)]
-    pub write: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct PluginsNativeArgs {
-    /// Plugin recipe name.
-    pub name: String,
-    /// Only act on these target ids (repeatable). Defaults to the recipe's targets.
-    #[arg(long = "target", value_name = "ID")]
-    pub targets: Vec<String>,
-    /// Actually run native harness commands (else dry-run).
-    #[arg(long)]
-    pub write: bool,
 }
 
 #[derive(Args, Debug)]

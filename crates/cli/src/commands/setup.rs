@@ -385,8 +385,8 @@ pub(crate) fn preflight(ctx: &super::Context, target_ids: &[String]) -> Result<P
 
 fn print_validation(ctx: &super::Context) -> bool {
     let manifest = &ctx.loaded.manifest;
-    // Library-aware, mirroring `doctor`/`apply`: a profile or plugin-recipe ref
-    // to a central-library skill/server resolves here too, so it is not flagged
+    // Library-aware, mirroring `doctor`/`apply`: a profile ref to a
+    // central-library skill/server resolves here too, so it is not flagged
     // as unknown the way an inline-only view would flag it.
     let libctx = ctx.library_ctx();
     let vctx = libctx.validate_ctx(&ctx.dir);

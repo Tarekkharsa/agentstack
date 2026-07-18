@@ -44,7 +44,6 @@ pub enum IssueKind {
     UnknownHookRef,
     MissingTransportFields,
     UnknownTargetServer,
-    UnknownPluginTarget,
     /// A `[servers.X] targets` entry names an adapter id that isn't registered
     /// — the server would silently render nowhere the author expected.
     UnknownServerTarget,
@@ -59,7 +58,6 @@ pub enum IssueKind {
     /// registered — the fragment would silently compile into no harness the
     /// author expected (the instruction analogue of `UnknownServerTarget`).
     UnknownInstructionTarget,
-    InvalidPluginName,
     /// A `[policy.egress]` pattern the grammar cannot interpret (bad bracket
     /// form or invalid `:port` suffix). At run time such a pattern fails the
     /// decision CLOSED, so this is caught here first — at authoring time.
@@ -98,12 +96,10 @@ impl IssueKind {
                 | IssueKind::UnknownHookRef
                 | IssueKind::MissingTransportFields
                 | IssueKind::UnknownTargetServer
-                | IssueKind::UnknownPluginTarget
                 | IssueKind::UnknownServerTarget
                 | IssueKind::UnknownExtraTarget
                 | IssueKind::UnknownServerOwner
                 | IssueKind::UnknownInstructionTarget
-                | IssueKind::InvalidPluginName
                 | IssueKind::MalformedEgressPattern
                 | IssueKind::UnknownExtensionTarget
                 | IssueKind::InvalidExtensionSource
@@ -312,7 +308,7 @@ fn run<'a>(
 
     // Instruction fragment targets: a typo'd adapter id in `[instructions.X]
     // targets` would silently compile the fragment into no harness — the same
-    // check `[servers]`/plugin recipes get. Machine-layer fragments merge in
+    // check `[servers]` gets. Machine-layer fragments merge in
     // (from_user_layer): their ids come from the same registry, so validate
     // them too, but say so in the wording — a bad id there is the machine
     // manifest's, not this project's. (`"*"` and no target set stay valid.)
@@ -395,89 +391,7 @@ fn run<'a>(
         }
     }
 
-    for (plugin_name, plugin) in &manifest.plugins {
-        if !is_native_plugin_id(plugin_name) {
-            issues.push(Issue::new(
-                IssueKind::InvalidPluginName,
-                format!("plugin recipe '{plugin_name}' must use kebab-case native id characters"),
-            ));
-        }
-        for sref in &plugin.servers {
-            if !manifest.servers.contains_key(sref) {
-                issues.push(Issue::new(
-                    IssueKind::UnknownServerRef,
-                    format!("plugin recipe '{plugin_name}' references unknown server '{sref}'"),
-                ));
-            }
-        }
-        for kref in &plugin.skills {
-            // Same contract as profile skill refs: inline definitions validate
-            // directly; non-inline names may resolve from the central library
-            // when ctx is given (how `plugins adopt` references lifted skills).
-            if manifest.skills.contains_key(kref) {
-                continue;
-            }
-            match ctx {
-                Some(cx) => match resolve_skill(
-                    manifest,
-                    cx.manifest_dir,
-                    cx.library,
-                    cx.lib_home,
-                    cx.store,
-                    kref,
-                    ResolveMode::NoFetch,
-                ) {
-                    Ok(_) | Err(ResolveError::NotAvailableOffline { .. }) => {}
-                    Err(ResolveError::Unresolved { .. }) => issues.push(Issue::new(
-                        IssueKind::UnknownSkillRef,
-                        format!("plugin recipe '{plugin_name}' references unknown skill '{kref}'"),
-                    )),
-                    Err(ResolveError::Source(e)) => issues.push(Issue::new(
-                        IssueKind::UnresolvableSkillRef,
-                        format!(
-                            "plugin recipe '{plugin_name}' skill '{kref}' failed to resolve: {e}"
-                        ),
-                    )),
-                },
-                None => issues.push(Issue::new(
-                    IssueKind::UnknownSkillRef,
-                    format!("plugin recipe '{plugin_name}' references unknown skill '{kref}'"),
-                )),
-            }
-        }
-        for href in &plugin.hooks {
-            if !manifest.hooks.contains_key(href) {
-                issues.push(Issue::new(
-                    IssueKind::UnknownHookRef,
-                    format!("plugin recipe '{plugin_name}' references unknown hook '{href}'"),
-                ));
-            }
-        }
-        if !targets.is_empty() {
-            for target in &plugin.targets {
-                if target != "*" && !targets.contains(target) {
-                    issues.push(Issue::new(
-                        IssueKind::UnknownPluginTarget,
-                        format!(
-                            "plugin recipe '{plugin_name}' references unknown target '{target}'"
-                        ),
-                    ));
-                }
-            }
-        }
-    }
-
     issues
-}
-
-fn is_native_plugin_id(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        && !name.starts_with('-')
-        && !name.ends_with('-')
-        && !name.contains("--")
 }
 
 #[cfg(test)]
@@ -737,57 +651,6 @@ mod tests {
         assert!(validate(&m).is_empty());
     }
 
-    #[test]
-    fn parses_and_validates_plugin_recipe() {
-        let m = parse(
-            r#"
-            version = 1
-            [servers.play]
-            type = "stdio"
-            command = "play"
-            [skills.play]
-            path = "./skills/play"
-            [hooks.notify]
-            event = "Stop"
-            command = "say done"
-            [plugins.play]
-            version = "1.0.0"
-            description = "Play workflow"
-            targets = ["codex", "claude-code"]
-            servers = ["play"]
-            skills = ["play"]
-            hooks = ["notify"]
-            "#,
-        );
-        assert!(validate_with_targets(&m, ["codex", "claude-code"]).is_empty());
-    }
-
-    #[test]
-    fn flags_invalid_plugin_recipe_refs_and_targets() {
-        let m = parse(
-            r#"
-            version = 1
-            [plugins.Bad_Name]
-            version = "1.0.0"
-            description = "Bad"
-            targets = ["ghost"]
-            servers = ["missing-server"]
-            skills = ["missing-skill"]
-            hooks = ["missing-hook"]
-            "#,
-        );
-        let issues = validate_with_targets(&m, ["codex"]);
-        assert!(issues
-            .iter()
-            .any(|i| i.kind == IssueKind::InvalidPluginName));
-        assert!(issues.iter().any(|i| i.kind == IssueKind::UnknownServerRef));
-        assert!(issues.iter().any(|i| i.kind == IssueKind::UnknownSkillRef));
-        assert!(issues.iter().any(|i| i.kind == IssueKind::UnknownHookRef));
-        assert!(issues
-            .iter()
-            .any(|i| i.kind == IssueKind::UnknownPluginTarget));
-    }
-
     // A profile that references a skill only present in the central library.
     const PROFILE_REFS_LIBRARY: &str = r#"
         version = 1
@@ -815,56 +678,6 @@ mod tests {
             .any(|i| i.kind == IssueKind::UnknownSkillRef));
         // With context, it resolves and validation is clean.
         assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx).is_empty());
-    }
-
-    // A plugin recipe that references a skill only present in the central
-    // library — how `plugins adopt` records lifted skills.
-    const RECIPE_REFS_LIBRARY: &str = r#"
-        version = 1
-        [plugins.cloudflare]
-        version = "1.0.0"
-        description = "Adopted plugin"
-        skills = ["cloudflare-wrangler"]
-    "#;
-
-    #[test]
-    fn plugin_recipe_library_skill_ref_validates_with_context() {
-        let proj = assert_fs::TempDir::new().unwrap();
-        let lib_home = assert_fs::TempDir::new().unwrap();
-        let store = Store::with_root(proj.child("store").path().to_path_buf());
-        let library = library_with_skill(&lib_home, "cloudflare-wrangler");
-        let ctx = ValidateCtx {
-            manifest_dir: proj.path(),
-            library: &library,
-            lib_home: lib_home.path(),
-            store: &store,
-        };
-
-        let m = parse(RECIPE_REFS_LIBRARY);
-        // Without context, the library-only ref is unknown (inline-only view).
-        assert!(validate(&m)
-            .iter()
-            .any(|i| i.kind == IssueKind::UnknownSkillRef));
-        // With context, it resolves and validation is clean.
-        assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx).is_empty());
-    }
-
-    #[test]
-    fn plugin_recipe_unknown_skill_ref_still_fails_with_context() {
-        let proj = assert_fs::TempDir::new().unwrap();
-        let lib_home = assert_fs::TempDir::new().unwrap();
-        let store = Store::with_root(proj.child("store").path().to_path_buf());
-        let library = Library::default(); // empty — the ref resolves nowhere
-        let ctx = ValidateCtx {
-            manifest_dir: proj.path(),
-            library: &library,
-            lib_home: lib_home.path(),
-            store: &store,
-        };
-
-        let m = parse(RECIPE_REFS_LIBRARY);
-        let issues = validate_with_context(&m, std::iter::empty::<&str>(), &ctx);
-        assert!(issues.iter().any(|i| i.kind == IssueKind::UnknownSkillRef));
     }
 
     #[test]
@@ -1093,36 +906,6 @@ mod tests {
             .expect("expected an UnresolvableServerRef issue");
         assert!(issue.message.contains("kibana"));
         assert!(issue.message.contains("failed to resolve"));
-    }
-
-    #[test]
-    fn plugin_recipe_server_refs_remain_inline_only() {
-        let proj = assert_fs::TempDir::new().unwrap();
-        let lib_home = assert_fs::TempDir::new().unwrap();
-        let store = Store::with_root(proj.child("store").path().to_path_buf());
-        // The server exists in the library, but plugin recipes do not consult it.
-        let library = library_with_server(&lib_home, "kibana");
-        let ctx = ValidateCtx {
-            manifest_dir: proj.path(),
-            library: &library,
-            lib_home: lib_home.path(),
-            store: &store,
-        };
-
-        let m = parse(
-            r#"
-            version = 1
-            [plugins.play]
-            version = "1.0.0"
-            description = "Play"
-            targets = ["codex"]
-            servers = ["kibana"]
-            "#,
-        );
-        // Even with the library available, the plugin ref stays inline-only.
-        assert!(validate_with_context(&m, std::iter::empty::<&str>(), &ctx)
-            .iter()
-            .any(|i| i.kind == IssueKind::UnknownServerRef));
     }
 
     #[test]

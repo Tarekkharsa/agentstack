@@ -12,7 +12,7 @@ use serde_json::Value;
 use toml_edit::{Array, DocumentMut};
 
 use crate::cli::{AddArgs, AddFromArgs, AddKind, AddServerArgs, AddSkillArgs};
-use crate::manifest::{Manifest, PluginRecipe, Server, ServerType, Skill};
+use crate::manifest::{Manifest, PackInstall, Server, ServerType, Skill};
 use crate::provider::{self, Candidate, CandidateKind, InstrRef, PackSpec, SkillRef};
 use crate::render::merge_toml;
 use crate::util::diff;
@@ -318,7 +318,7 @@ impl AssetSource {
 
 /// Install a vendor pack: server + skill(s) + (opt-in) house-rule instructions,
 /// composed into the manifest as one atomic write. Each member lands in its
-/// normal section; a `[plugins.<name>]` ledger records them so `remove` can undo
+/// normal section; a `[packs.<name>]` ledger records them so `remove` can undo
 /// the install. NOT a runtime concept (PLAN: packs ride existing rails).
 fn add_pack(
     a: &AddFromArgs,
@@ -361,8 +361,8 @@ fn add_pack(
             }
         }
     }
-    if manifest.plugins.contains_key(pack) {
-        anyhow::bail!("a plugin recipe '{pack}' already exists in the manifest");
+    if manifest.packs.contains_key(pack) {
+        anyhow::bail!("a pack '{pack}' is already installed in the manifest");
     }
 
     // On-disk collision: an extraction must never overwrite files a user already
@@ -398,24 +398,16 @@ fn add_pack(
         .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
     let mut text = original.clone();
     let mut extractions: Vec<Extraction> = Vec::new();
-    let mut ledger = PluginRecipe {
-        kind: Some("pack".into()),
+    let mut ledger = PackInstall {
         source: Some(origin.source.clone()),
         rev: origin.rev.clone(),
         version: origin.version.clone(),
         description: candidate.description.clone(),
-        display: None,
-        category: None,
         targets: spec.targets.clone(),
-        default_enabled: None,
         servers: Vec::new(),
         skills: Vec::new(),
         hooks: Vec::new(),
         instructions: Vec::new(),
-        homepage: None,
-        repository: None,
-        license: None,
-        author: None,
     };
 
     // 2. Server.
@@ -484,14 +476,8 @@ fn add_pack(
         }
     }
 
-    // 5. Ledger (kind = "pack").
-    text = build_manifest_with(
-        &text,
-        "plugins",
-        pack,
-        &serde_json::to_value(&ledger)?,
-        None,
-    )?;
+    // 5. Pack install ledger.
+    text = build_manifest_with(&text, "packs", pack, &serde_json::to_value(&ledger)?, None)?;
 
     // Show the plan.
     println!(
@@ -653,7 +639,7 @@ pub(crate) fn stamped_instruction_from(
     ))
 }
 
-fn print_pack_members(spec: &PackSpec, ledger: &PluginRecipe, with_instructions: bool) {
+fn print_pack_members(spec: &PackSpec, ledger: &PackInstall, with_instructions: bool) {
     let servers = ledger.servers.len();
     let skills = ledger.skills.len();
     let instrs = if with_instructions {

@@ -22,7 +22,7 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let results = provider::search_all(&query, 25);
 
     // A capability is "installed" if its server is in the manifest, or — for a
-    // pack — if its `[plugins.<name>]` install ledger exists.
+    // pack — if its `[packs.<name>]` install ledger exists.
     let installed = super::load(manifest_dir)
         .ok()
         .map(|ctx| {
@@ -30,12 +30,7 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
             m.servers
                 .keys()
                 .chain(m.skills.keys())
-                .chain(
-                    m.plugins
-                        .iter()
-                        .filter(|(_, r)| r.kind.as_deref() == Some("pack"))
-                        .map(|(name, _)| name),
-                )
+                .chain(m.packs.keys())
                 .cloned()
                 .collect::<Vec<_>>()
         })

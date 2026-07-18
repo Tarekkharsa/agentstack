@@ -103,30 +103,6 @@ pub fn add_skill(
     add_skill_inner(lib_home, name, source, replace, write, allow_flagged, None)
 }
 
-/// [`add_skill`] with an explicit provenance string, for callers whose true
-/// origin is richer than the copied path — e.g. `plugins adopt` lifting skill
-/// bodies out of a native plugin cache records the marketplace, plugin, and
-/// version instead of a cache path that dies on the next plugin update.
-pub fn add_skill_with_provenance(
-    lib_home: &Path,
-    name: &str,
-    source: LibSource,
-    replace: bool,
-    write: bool,
-    allow_flagged: bool,
-    provenance: &str,
-) -> Result<AddOutcome> {
-    add_skill_inner(
-        lib_home,
-        name,
-        source,
-        replace,
-        write,
-        allow_flagged,
-        Some(provenance),
-    )
-}
-
 #[allow(clippy::too_many_arguments)]
 fn add_skill_inner(
     lib_home: &Path,

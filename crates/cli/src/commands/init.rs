@@ -71,7 +71,7 @@ pub fn dashboard_init(manifest_dir: Option<&Path>) -> Result<String> {
         settings,
         hooks: IndexMap::new(),
         extensions: IndexMap::new(),
-        plugins: IndexMap::new(),
+        packs: IndexMap::new(),
         targets: Targets {
             default: detected.clone(),
         },
@@ -523,7 +523,7 @@ version = 1
         settings,
         hooks: IndexMap::new(),
         extensions: IndexMap::new(),
-        plugins: IndexMap::new(),
+        packs: IndexMap::new(),
         targets: Targets {
             default: detected.clone(),
         },

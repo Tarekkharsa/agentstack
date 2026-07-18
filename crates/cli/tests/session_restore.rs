@@ -54,7 +54,7 @@ fn end_keeps_a_preexisting_empty_skills_dir() {
     let skills_dir = proj.join(".claude/skills");
     fs::create_dir_all(&skills_dir).unwrap();
 
-    session::start(Some(&proj), "p", Scope::Project, None).unwrap();
+    session::start(Some(&proj), "p", Scope::Project).unwrap();
     assert!(
         skills_dir.join("local-notes").exists(),
         "session materialized the skill"
@@ -83,7 +83,7 @@ fn end_removes_the_skills_dir_it_created() {
     let skills_dir = proj.join(".claude/skills");
     assert!(!skills_dir.exists(), "precondition: no skills dir at rest");
 
-    session::start(Some(&proj), "p", Scope::Project, None).unwrap();
+    session::start(Some(&proj), "p", Scope::Project).unwrap();
     assert!(skills_dir.join("local-notes").exists());
     session::end(Some(&proj)).unwrap();
 

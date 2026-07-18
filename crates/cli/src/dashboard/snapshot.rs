@@ -432,78 +432,6 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         }
     }
 
-    // Native harness plugins already installed on this machine (read-only view).
-    let (plugin_list, marketplace_list) = crate::plugins::all_plugins();
-    let plugins: Vec<Value> = plugin_list
-        .iter()
-        .map(|p| {
-            json!({
-                "harness": p.harness,
-                "name": p.name,
-                "marketplace": p.marketplace,
-                "scope": p.scope,
-                "projects": p.projects,
-                "version": p.version,
-                "enabled": p.enabled,
-                "status": p.status,
-                "source": p.source,
-            })
-        })
-        .collect();
-    let marketplaces: Vec<Value> = marketplace_list
-        .iter()
-        .map(|m| json!({ "harness": m.harness, "name": m.name, "source": m.source }))
-        .collect();
-    let plugin_recipes: Vec<Value> =
-        crate::plugin_recipes::statuses(manifest, &ctx.registry, &ctx.dir)
-            .iter()
-            .map(|r| {
-                json!({
-                        "name": r.name,
-                        "display": r.display,
-                        "version": r.version,
-                        "description": r.description,
-                        "category": r.category,
-                        "targets": r.targets,
-                        "servers": r.servers,
-                        "skills": r.skills,
-                        "hooks": r.hooks,
-                    "packagePath": r.package_path.display().to_string(),
-                    "generated": r.generated,
-                    "stale": r.stale,
-                    "conflict": r.conflict,
-                    "missingSkills": r.missing_skills,
-                    "marketplaces": r.marketplaces.iter().map(|m| json!({
-                        "target": m.target,
-                        "path": m.path.display().to_string(),
-                        "present": m.present,
-                        "stale": m.stale,
-                        "nativeVisible": m.native_visible,
-                        "nativeSource": m.native_source,
-                    })).collect::<Vec<_>>(),
-                    "installs": r.installs.iter().map(|i| json!({
-                        "target": i.target,
-                        "installed": i.installed,
-                        "enabled": i.enabled,
-                        "status": i.status,
-                        "native": i.native.as_ref().map(|n| json!({
-                            "plugin": n.plugin,
-                            "marketplace": n.marketplace,
-                            "version": n.version,
-                            "rev": n.rev,
-                            "enabled": n.enabled,
-                            "drift": n.drift,
-                        })),
-                    })).collect::<Vec<_>>(),
-                    "guidance": r.guidance.iter().map(|g| json!({
-                        "target": g.target,
-                        "nextAction": g.next_action,
-                    })).collect::<Vec<_>>(),
-                    "requiredSecrets": r.required_secrets,
-                })
-            })
-            .collect();
-
     let global_drift =
         render_drift_targets(&ctx, manifest, &state, Scope::Global, DriftSet::Selected)?;
     let global_non_selected_drift = render_drift_targets(
@@ -514,7 +442,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         DriftSet::InstalledNonSelected,
     )?;
     let health = health_checks(&ctx, manifest, &global_drift, &global_non_selected_drift);
-    let next_actions = next_actions(&secrets, &skills, &plugin_recipes, &global_drift, &health);
+    let next_actions = next_actions(&secrets, &skills, &global_drift, &health);
 
     // Live tracked harness runs (separate agentstack processes the dashboard can
     // observe and kill). For a profile-bound run, surface its trust footprint —
@@ -610,9 +538,6 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "settingsAdapters": settings_adapters,
         "hooks": hooks,
         "hookAdapters": hook_adapters,
-        "pluginRecipes": plugin_recipes,
-        "plugins": plugins,
-        "marketplaces": marketplaces,
         "extensions": extensions,
         "instructions": instructions,
         "secrets": secrets,
@@ -629,7 +554,6 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
             "profile": s.profile,
             "scope": s.scope,
             "startedUnix": s.started_unix,
-            "plugin": s.plugin,
             "loads": s.loads.iter().map(|l| json!({
                 "name": l.name, "reason": l.reason, "ts": l.ts,
             })).collect::<Vec<_>>(),
@@ -881,7 +805,6 @@ fn push_drift_health(
 fn next_actions(
     secrets: &[Value],
     skills: &[Value],
-    recipes: &[Value],
     selected_global_drift: &[DriftTarget],
     health: &[Value],
 ) -> Vec<Value> {
@@ -940,146 +863,6 @@ fn next_actions(
             "Install skills",
             json!({ "type": "post", "path": "/api/install", "label": "Install" }),
         ));
-    }
-
-    for recipe in recipes {
-        let Some(name) = recipe.get("name").and_then(Value::as_str) else {
-            continue;
-        };
-        let conflict = recipe.get("conflict").and_then(Value::as_str);
-        let missing = recipe
-            .get("missingSkills")
-            .and_then(Value::as_array)
-            .map(|a| a.len())
-            .unwrap_or(0);
-        let generated = recipe
-            .get("generated")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let stale = recipe
-            .get("stale")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        // Targets satisfied by the adopted-from native plugin need no
-        // agentstack marketplace/package/install — exclude them from every
-        // nag below (installing there would duplicate the plugin).
-        let installs = recipe
-            .get("installs")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let native_targets: Vec<&str> = installs
-            .iter()
-            .filter(|i| i.get("native").map(|n| !n.is_null()).unwrap_or(false))
-            .filter_map(|i| i.get("target").and_then(Value::as_str))
-            .collect();
-        let targets = recipe
-            .get("targets")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let all_native = !targets.is_empty()
-            && targets
-                .iter()
-                .filter_map(Value::as_str)
-                .all(|t| native_targets.contains(&t));
-        let native_drift = installs.iter().any(|i| {
-            i.get("native")
-                .and_then(|n| n.get("drift"))
-                .and_then(Value::as_str)
-                .is_some()
-        });
-        let non_native_marketplaces = || {
-            recipe
-                .get("marketplaces")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter(|m| {
-                    m.get("target")
-                        .and_then(Value::as_str)
-                        .map(|t| !native_targets.contains(&t))
-                        .unwrap_or(true)
-                })
-        };
-        let marketplace_needs_sync = non_native_marketplaces().any(|m| {
-            !m.get("present").and_then(Value::as_bool).unwrap_or(false)
-                || m.get("stale").and_then(Value::as_bool).unwrap_or(false)
-        });
-        let marketplace_hidden = non_native_marketplaces().any(|m| {
-            !m.get("nativeVisible")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        });
-        let install_missing = installs.iter().any(|i| {
-            !i.get("installed").and_then(Value::as_bool).unwrap_or(false)
-                && i.get("native").map(Value::is_null).unwrap_or(true)
-        });
-
-        if let Some(conflict) = conflict {
-            out.push(command_action(
-                format!("plugin:{name}:conflict"),
-                "error",
-                format!("{name} plugin package is blocked"),
-                format!("Resolve package conflict: {conflict}"),
-                "plugins",
-                "Open Plugins",
-                json!({ "type": "section", "section": "plugins" }),
-            ));
-        } else if missing > 0 {
-            out.push(command_action(
-                format!("plugin:{name}:missing-skills"),
-                "warn",
-                format!("{name} recipe needs skill sources"),
-                format!(
-                    "{missing} skill source{} must be installed before sync.",
-                    s(missing)
-                ),
-                "plugins",
-                "Install skills",
-                json!({ "type": "post", "path": "/api/install", "label": "Install" }),
-            ));
-        } else if native_drift {
-            out.push(command_action(
-                format!("plugin:{name}:native-drift"),
-                "warn",
-                format!("{name} native plugin moved since adoption"),
-                "The native plugin was updated; re-adopt to refresh the recipe.".to_string(),
-                "plugins",
-                "Open Plugins",
-                json!({ "type": "section", "section": "plugins" }),
-            ));
-        } else if (!all_native && (!generated || stale)) || marketplace_needs_sync {
-            out.push(command_action(
-                format!("plugin:{name}:sync"),
-                "warn",
-                format!("{name} recipe needs sync"),
-                "Generated package or marketplace entry is missing or stale.",
-                "plugins",
-                "Sync recipes",
-                json!({ "type": "post", "path": "/api/plugins_sync", "label": "Plugin recipe sync" }),
-            ));
-        } else if marketplace_hidden {
-            out.push(command_action(
-                format!("plugin:{name}:marketplace"),
-                "warn",
-                format!("{name} marketplace is not visible natively"),
-                "The repo marketplace exists but the native harness has not picked it up.",
-                "plugins",
-                "Open Plugins",
-                json!({ "type": "section", "section": "plugins" }),
-            ));
-        } else if install_missing {
-            out.push(command_action(
-                format!("plugin:{name}:install"),
-                "warn",
-                format!("{name} is not installed natively"),
-                "Install the recipe from the native harness marketplace.",
-                "plugins",
-                "Open Plugins",
-                json!({ "type": "section", "section": "plugins" }),
-            ));
-        }
     }
 
     for row in health {
@@ -1227,11 +1010,10 @@ mod tests {
     fn next_actions_include_missing_secret_and_selected_drift() {
         let secrets = vec![json!({ "name": "KIBANA_TOKEN", "resolved": false })];
         let skills = Vec::new();
-        let recipes = Vec::new();
         let selected = vec![drift("codex", true, true)];
         let health = Vec::new();
 
-        let actions = next_actions(&secrets, &skills, &recipes, &selected, &health);
+        let actions = next_actions(&secrets, &skills, &selected, &health);
         let ids: Vec<&str> = actions
             .iter()
             .filter_map(|a| a.get("id").and_then(Value::as_str))

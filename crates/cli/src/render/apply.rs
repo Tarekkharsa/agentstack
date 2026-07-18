@@ -789,10 +789,9 @@ mod tests {
 
     #[test]
     fn server_targets_scope_the_fanout_and_prune_stale_entries() {
-        // The adopted-plugin duplication bug: recipe-owned servers (adopted
-        // from a native plugin, `targets = []`) fanned out to every target,
-        // configuring the same server twice on the harness whose plugin
-        // already provides it. The `targets` field scopes the fan-out inside
+        // A server with an explicit `targets = []` opts out of the direct
+        // fan-out entirely, and `targets = ["<id>"]` scopes it to named
+        // adapters. The `targets` field is honored inside
         // plan_target_with_servers, so apply/diff/doctor/use all agree.
         let manifest: Manifest = toml::from_str(
             r#"

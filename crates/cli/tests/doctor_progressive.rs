@@ -35,7 +35,7 @@ fn unused_feature_sections_are_tagged_irrelevant_but_still_reported() {
     std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
 
     // A near-empty project: one target, nothing else — no servers, skills,
-    // profiles, instructions, plugins, or bridge registration.
+    // profiles, instructions, packs, or bridge registration.
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
     fs::write(
@@ -57,7 +57,6 @@ fn unused_feature_sections_are_tagged_irrelevant_but_still_reported() {
         "Skills",
         "Content scan",
         "Reproducibility",
-        "Plugin recipes",
     ] {
         assert!(
             !relevant(&report, title),

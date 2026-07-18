@@ -10,7 +10,7 @@ use toml_edit::DocumentMut;
 
 use crate::cli::RemoveArgs;
 use crate::lock::Lock;
-use crate::manifest::{Instruction, Manifest, PluginRecipe};
+use crate::manifest::{Instruction, Manifest, PackInstall};
 use crate::util::diff;
 
 pub fn run(args: &RemoveArgs, manifest_dir: Option<&Path>) -> Result<()> {
@@ -70,19 +70,16 @@ pub fn run(args: &RemoveArgs, manifest_dir: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-/// The `[plugins.<name>]` recipe iff it is a pack install ledger.
-pub(crate) fn pack_ledger<'a>(manifest: &'a Manifest, name: &str) -> Option<&'a PluginRecipe> {
-    manifest
-        .plugins
-        .get(name)
-        .filter(|r| r.kind.as_deref() == Some("pack"))
+/// The `[packs.<name>]` install ledger, if one exists.
+pub(crate) fn pack_ledger<'a>(manifest: &'a Manifest, name: &str) -> Option<&'a PackInstall> {
+    manifest.packs.get(name)
 }
 
 /// Tear down a vendor pack: remove every member listed in the ledger from the
 /// manifest + profiles, delete pack-written instruction files (only ours — they
 /// carry the `agentstack:vendor` header), drop the ledger, and clean lockfile
 /// entries for removed skills.
-fn remove_pack(ctx: &super::Context, name: &str, recipe: &PluginRecipe, write: bool) -> Result<()> {
+fn remove_pack(ctx: &super::Context, name: &str, recipe: &PackInstall, write: bool) -> Result<()> {
     let original = fs::read_to_string(&ctx.loaded.manifest_path)
         .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
 
@@ -99,7 +96,7 @@ fn remove_pack(ctx: &super::Context, name: &str, recipe: &PluginRecipe, write: b
     for hook in &recipe.hooks {
         new_text = remove_entry(&new_text, "hooks", hook)?;
     }
-    new_text = remove_entry(&new_text, "plugins", name)?;
+    new_text = remove_entry(&new_text, "packs", name)?;
 
     // Instruction files we wrote and may delete (carry the vendor marker).
     let safe_instr_files = safe_instruction_files(&ctx.loaded.manifest, ctx, recipe, name);
@@ -164,7 +161,7 @@ fn remove_pack(ctx: &super::Context, name: &str, recipe: &PluginRecipe, write: b
 pub(crate) fn safe_skill_dirs(
     manifest: &Manifest,
     ctx: &super::Context,
-    recipe: &PluginRecipe,
+    recipe: &PackInstall,
 ) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for name in &recipe.skills {
@@ -232,7 +229,7 @@ pub(crate) fn remove_skill_dir(dir: &Path, root: &Path) {
 pub(crate) fn safe_instruction_files(
     manifest: &Manifest,
     ctx: &super::Context,
-    recipe: &PluginRecipe,
+    recipe: &PackInstall,
     pack: &str,
 ) -> Vec<PathBuf> {
     let marker = format!("agentstack:vendor {pack}");
@@ -288,22 +285,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pack_ledger_detected_only_when_kind_is_pack() {
+    fn pack_ledger_found_by_name() {
         let m: Manifest = toml::from_str(
             r#"
             version = 1
-            [plugins.linear-pack]
-            kind = "pack"
+            [packs.linear-pack]
             version = "0.1.0"
             description = "Linear pack"
-            [plugins.play]
-            version = "1.0.0"
-            description = "Play"
             "#,
         )
         .unwrap();
         assert!(pack_ledger(&m, "linear-pack").is_some());
-        assert!(pack_ledger(&m, "play").is_none());
         assert!(pack_ledger(&m, "missing").is_none());
     }
 
@@ -343,9 +335,9 @@ mod tests {
 
     #[test]
     fn removes_pack_ledger_table() {
-        let text = "version = 1\n\n[plugins.linear-pack]\nkind = \"pack\"\nversion = \"0.1.0\"\ndescription = \"x\"\n";
-        let out = remove_entry(text, "plugins", "linear-pack").unwrap();
-        assert!(!out.contains("[plugins.linear-pack]"));
+        let text = "version = 1\n\n[packs.linear-pack]\nversion = \"0.1.0\"\ndescription = \"x\"\n";
+        let out = remove_entry(text, "packs", "linear-pack").unwrap();
+        assert!(!out.contains("[packs.linear-pack]"));
     }
 
     #[test]

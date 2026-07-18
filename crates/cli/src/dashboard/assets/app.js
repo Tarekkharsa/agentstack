@@ -13,7 +13,6 @@ let ADD_FORM = false;
 let SORT_BY_COST = false; // servers table: manifest order vs context-cost desc
 let SKILL_FORM = false;
 let HOOK_FORM = false;
-let PLUGIN_FORM = false;
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -23,7 +22,7 @@ const SECTIONS = [
   { id: "skills", label: "Skills", count: (d) => d.skills.length },
   { id: "settings", label: "Settings", count: (d) => (d.settingsAdapters || []).length },
   { id: "hooks", label: "Hooks", count: (d) => (d.hooks || []).length },
-  { id: "plugins", label: "Plugins", count: (d) => (d.pluginRecipes || []).length + (d.plugins || []).length },
+  { id: "extensions", label: "Extensions", count: (d) => (d.extensions || []).length },
   { id: "instructions", label: "Instructions", count: (d) => d.instructions.length },
   { id: "secrets", label: "Secrets", count: (d) => d.secrets.length },
   { id: "activity", label: "Activity" },
@@ -104,7 +103,7 @@ function renderNav() {
     );
   });
 }
-const VIEWS = { overview, runs, discover, servers, skills, settings, hooks, plugins, instructions, secrets, activity, proxy: proxyPanel, insights, health };
+const VIEWS = { overview, runs, discover, servers, skills, settings, hooks, extensions, instructions, secrets, activity, proxy: proxyPanel, insights, health };
 function show(id) {
   if (!VIEWS[id]) id = "overview";
   SECTION = id;
@@ -184,7 +183,7 @@ function renderPending() {
   if (DATA.session) {
     const s = DATA.session;
     const loads = s.loads || [];
-    const sub = s.scope + " scope" + (s.plugin ? " · plugin " + s.plugin : "") +
+    const sub = s.scope + " scope" +
       (loads.length ? " · " + plural(loads.length, "skill") + " pulled" : "") + " · reverts when you end it";
     host.appendChild(el("div", { class: "pending-bar session" }, [
       el("div", { class: "pleft" }, [
@@ -536,13 +535,11 @@ function nextActionRow(a) {
 
 function stackSummaryCard(installed) {
   const targets = (DATA.meta.defaultTargets || []).length ? DATA.meta.defaultTargets.join(", ") : "all registered";
-  const plugins = DATA.pluginRecipes || [];
-  const readyPlugins = plugins.filter((r) => recipeReady(r)).length;
   return el("div", { class: "card" }, [
     el("div", { class: "hd" }, ["Stack summary", el("small", null, [plural(installed, "detected harness", "detected harnesses")])]),
     el("div", { class: "bd" }, [
       summaryLine("Default targets", targets),
-      summaryLine("Plugin recipes", `${readyPlugins}/${plugins.length} ready`),
+      summaryLine("Extensions", plural((DATA.extensions || []).length, "extension")),
       summaryLine("Instructions", plural(DATA.instructions.length, "fragment")),
       summaryLine("Hooks", plural((DATA.hooks || []).length, "hook")),
       summaryLine("Mode", READONLY ? "read-only" : "read-write"),
@@ -714,7 +711,7 @@ function runs(c) {
 
 /* ---------- sessions ---------- */
 function endSession() {
-  if (!confirm("End the session? This reverts the loaded skills, servers, and plugin to how they were when you started it.")) return;
+  if (!confirm("End the session? This reverts the loaded skills and servers to how they were when you started it.")) return;
   return post("/api/session_end", {}, "Session ended");
 }
 function openSessionModal(preselect) {
@@ -726,21 +723,15 @@ function openSessionModal(preselect) {
     el("option", { value: "project" }, ["project — this repo only"]),
     el("option", { value: "global" }, ["global — everywhere"]),
   ]);
-  const recipes = DATA.pluginRecipes || [];
-  const plugSel = el("select", { class: "inp", style: "height:32px;width:100%" }, [
-    el("option", { value: "" }, ["(no plugin)"]),
-    ...recipes.map((r) => el("option", { value: r.name }, [r.display || r.name])),
-  ]);
   const row = (label, node) => el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:10px" }, [el("label", { class: "muted", style: "width:64px;font-size:12px" }, [label]), node]);
   const body = el("div", { class: "mbd" }, [
-    el("div", { class: "muted", style: "font-size:12px;margin-bottom:12px" }, ["Loads the profile (and an optional plugin) now. Ending the session reverts everything to how it is right now."]),
-    row("Profile", profSel), row("Scope", scopeSel), row("Plugin", plugSel),
+    el("div", { class: "muted", style: "font-size:12px;margin-bottom:12px" }, ["Loads the profile now. Ending the session reverts everything to how it is right now."]),
+    row("Profile", profSel), row("Scope", scopeSel),
   ]);
   const footer = el("div", { class: "mft" }, [
     btn("Cancel", closeModal),
     btn("Start session", () => {
       const b = { profile: profSel.value, scope: scopeSel.value };
-      if (plugSel.value) b.plugin = plugSel.value;
       closeModal();
       post("/api/session_start", b, "Session started");
     }, "primary"),
@@ -1324,35 +1315,6 @@ function hooks(c) {
   c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, rows)]));
 }
 
-/* ---------- plugins ---------- */
-function savePluginRecipe() {
-  const g = (id) => (document.getElementById(id) || {}).value || "";
-  const checked = (name) => Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map((x) => x.value);
-  const body = {
-    name: g("pl-name").trim(),
-    version: g("pl-version").trim() || "0.1.0",
-    description: g("pl-description").trim(),
-    display: g("pl-display").trim(),
-    category: g("pl-category").trim(),
-    targets: checked("pl-target"),
-    servers: checked("pl-server"),
-    skills: checked("pl-skill"),
-    hooks: checked("pl-hook"),
-    defaultEnabled: !!(document.getElementById("pl-default-enabled") || {}).checked,
-  };
-  if (!body.name) return toast("Name is required", false);
-  if (!body.description) return toast("Description is required", false);
-  fetch(q("/api/add_plugin_recipe"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
-    .then(({ ok, d }) => {
-      if (!ok || d.error) throw new Error(d.error || "failed");
-      PLUGIN_FORM = false;
-      toast("Plugin recipe added", true);
-      load();
-    })
-    .catch((e) => toast("Add plugin recipe: " + e.message, false));
-}
-
 function checkboxList(name, items, empty) {
   if (!items.length) return [el("div", { class: "empty", style: "padding:8px 0" }, [empty])];
   return items.map((item) => el("label", { style: "display:flex;align-items:center;gap:7px;padding:4px 0" }, [
@@ -1361,208 +1323,9 @@ function checkboxList(name, items, empty) {
   ]));
 }
 
-function addPluginRecipeCard() {
-  const row = (label, node) => el("div", { style: "display:flex;align-items:flex-start;gap:10px;margin-bottom:8px" }, [
-    el("label", { class: "muted", style: "width:92px;font-size:12px;padding-top:7px" }, [label]), node,
-  ]);
-  const pluginTargets = (DATA.adapters || []).filter((a) => ["codex", "claude-code"].includes(a.id));
-  const targetChecks = checkboxList("pl-target", pluginTargets, "No plugin-capable targets detected.");
-  targetChecks.forEach((node) => {
-    const input = node.querySelector && node.querySelector("input");
-    if (input) input.checked = true;
-  });
-  return el("div", { class: "card", style: "margin-bottom:16px" }, [
-    el("div", { class: "hd" }, ["Create managed recipe", el("small", null, ["compose one shareable plugin from existing capabilities"])]),
-    el("div", { class: "bd" }, [
-      row("name", el("input", { id: "pl-name", class: "inp", placeholder: "e.g. play", style: "width:220px" })),
-      row("version", el("input", { id: "pl-version", class: "inp", value: "0.1.0", style: "width:120px" })),
-      row("display", el("input", { id: "pl-display", class: "inp", placeholder: "(optional) Play", style: "width:260px" })),
-      row("category", el("input", { id: "pl-category", class: "inp", placeholder: "Developer Tools", style: "width:220px" })),
-      row("description", el("textarea", { id: "pl-description", class: "inp", placeholder: "What this plugin helps developers do", style: "width:420px;min-height:62px" })),
-      row("targets", el("div", null, targetChecks)),
-      row("servers", el("div", null, checkboxList("pl-server", DATA.servers || [], "No servers in the manifest."))),
-      row("skills", el("div", null, checkboxList("pl-skill", DATA.skills || [], "No skills in the manifest."))),
-      row("hooks", el("div", null, checkboxList("pl-hook", DATA.hooks || [], "No hooks in the manifest."))),
-      row("", el("label", { style: "display:flex;align-items:center;gap:7px" }, [
-        el("input", { id: "pl-default-enabled", type: "checkbox" }),
-        el("span", null, ["default enabled in generated manifests"]),
-      ])),
-      el("div", { class: "toolbar", style: "margin-top:6px" }, [
-        btn("Save recipe", savePluginRecipe, "primary"),
-        btn("Cancel", () => { PLUGIN_FORM = false; show("plugins"); }),
-      ]),
-    ]),
-  ]);
-}
-
-function recipeStateBadge(r) {
-  if (r.conflict) return badge("conflict", "red");
-  if ((r.missingSkills || []).length) return badge("skill missing", "amber");
-  if (!r.generated) return badge("not generated", "amber");
-  if (r.stale) return badge("stale", "amber");
-  return badge("generated", "green");
-}
-
-function recipeInstallBadges(r) {
-  const out = [];
-  (r.marketplaces || []).forEach((m) => {
-    out.push(badge(m.target + (m.present ? (m.stale ? " marketplace stale" : " marketplace") : " marketplace missing"), m.present && !m.stale ? "green" : "amber"));
-    out.push(badge(m.target + (m.nativeVisible ? " native visible" : " native hidden"), m.nativeVisible ? "green" : "amber"));
-  });
-  (r.installs || []).forEach((i) => {
-    const label = i.installed
-      ? i.target + " " + (i.enabled === false ? "disabled" : "installed")
-      : i.target + " not installed";
-    out.push(badge(label, i.installed && i.enabled !== false ? "green" : "amber"));
-  });
-  return out;
-}
-
-function recipeGuidance(r) {
-  return (r.guidance || []).map((g) =>
-    el("div", { class: "muted", style: "font-size:12px;margin-top:3px" }, [
-      el("span", { class: "mono" }, [g.target + " next: "]),
-      g.nextAction || "Check native plugin UI/CLI.",
-    ])
-  );
-}
-
-function recipeHasInstalled(r) {
-  return (r.installs || []).some((i) => i.installed);
-}
-function recipeHasInstallableTarget(r) {
-  return (r.installs || []).some((i) => !i.installed);
-}
-function recipeReady(r) {
-  if (r.conflict || (r.missingSkills || []).length || !r.generated || r.stale) return false;
-  if ((r.marketplaces || []).some((m) => !m.present || m.stale || !m.nativeVisible)) return false;
-  return (r.installs || []).length > 0 && (r.installs || []).every((i) => i.installed && i.enabled !== false);
-}
-function recipeCard(r) {
-  const targets = r.targets || [];
-  const alerts = [];
-  if (r.conflict) alerts.push(el("div", { class: "callout red" }, [r.conflict]));
-  if ((r.missingSkills || []).length) alerts.push(el("div", { class: "callout amber" }, ["Missing skills: " + r.missingSkills.join(", ")]));
-  const actions = [
-    ...(!READONLY && recipeHasInstallableTarget(r) ? [btn("Install", () => recipeNativeAction(r, "install"), "primary")] : []),
-    ...(!READONLY && recipeHasInstalled(r) ? [btn("Remove", () => recipeNativeAction(r, "remove"))] : []),
-  ];
-  return el("div", { class: "recipe-card" }, [
-    el("div", { class: "recipe-head" }, [
-      el("div", null, [
-        el("div", null, [el("span", { class: "name" }, [r.display || r.name]), el("span", { class: "k" }, [r.name + " @ " + r.version])]),
-        el("div", { class: "muted", style: "font-size:12px" }, [r.description || ""]),
-      ]),
-      el("div", { class: "row-actions" }, [
-        ...actions,
-        recipeReady(r) ? badge("ready", "green") : recipeStateBadge(r),
-      ]),
-    ]),
-    el("div", { class: "recipe-meta" }, [
-      badge("servers " + ((r.servers || []).length), "solid"),
-      badge("skills " + ((r.skills || []).length), "solid"),
-      badge("hooks " + ((r.hooks || []).length), "solid"),
-      ...(targets.length ? targets.map((t) => badge(t, "")) : [badge("no targets", "amber")]),
-    ]),
-    ...alerts,
-    el("div", { class: "target-steppers" }, targets.map((target) => targetStepper(r, target))),
-    el("details", { class: "recipe-details" }, [
-      el("summary", null, ["Paths and native guidance"]),
-      el("div", { class: "muted mono", style: "font-size:11px;margin-top:8px" }, [r.packagePath || ""]),
-      ...recipeGuidance(r),
-    ]),
-  ]);
-}
-function targetStepper(r, target) {
-  const m = (r.marketplaces || []).find((x) => x.target === target) || {};
-  const i = (r.installs || []).find((x) => x.target === target) || {};
-  const steps = [
-    stepModel("Recipe", r.conflict ? "blocked" : (r.missingSkills || []).length ? "warn" : "done", r.conflict ? "conflict" : (r.missingSkills || []).length ? "skills missing" : "valid"),
-    stepModel("Package", !r.generated ? "pending" : r.stale ? "warn" : "done", !r.generated ? "missing" : r.stale ? "stale" : "generated"),
-    stepModel("Entry", !m.present ? "pending" : m.stale ? "warn" : "done", !m.present ? "missing" : m.stale ? "stale" : "written"),
-    stepModel("Native", m.nativeVisible ? "done" : "pending", m.nativeVisible ? "visible" : "hidden"),
-    stepModel("Install", i.installed ? (i.enabled === false ? "warn" : "done") : "pending", i.installed ? (i.enabled === false ? "disabled" : "installed") : "not installed"),
-  ];
-  return el("div", { class: "target-stepper" }, [
-    el("div", { class: "target-label" }, [target]),
-    el("div", { class: "steps" }, steps.map((s) => el("div", { class: "step " + s.state, title: s.detail }, [
-      el("span", { class: "step-dot" }, []),
-      el("span", null, [s.label]),
-    ]))),
-  ]);
-}
-function stepModel(label, state, detail) {
-  return { label, state, detail };
-}
-function recipeNativePlan(r, action) {
-  const lines = (r.guidance || []).map((g) => g.target + ": " + (g.nextAction || "Check native plugin UI/CLI."));
-  return lines.length ? lines : ["AgentStack will run the native harness command plan for selected recipe targets."];
-}
-function recipeNativeAction(r, action) {
-  const path = action === "install" ? "/api/plugins_install" : "/api/plugins_remove";
-  const title = (action === "install" ? "Install" : "Remove") + " native plugin";
-  openOperationConfirm({
-    title,
-    detail: r.name + " @ " + r.version,
-    items: recipeNativePlan(r, action),
-    confirm: action === "install" ? "Install" : "Remove",
-    run: () => post(path, { name: r.name }, "Plugin " + action),
-  });
-}
-
-function plugins(c) {
-  c.appendChild(pageHead("Plugins", "AgentStack recipes generate repo-local Claude Code and Codex plugin packages. Native installed plugins remain visible below."));
-  const recipes = DATA.pluginRecipes || [];
-  const list = DATA.plugins || [];
-  const markets = DATA.marketplaces || [];
-
-  if (!READONLY) {
-    c.appendChild(el("div", { class: "toolbar", style: "margin-bottom:14px" }, [
-      btn(PLUGIN_FORM ? "Close" : "+ Create recipe", () => { PLUGIN_FORM = !PLUGIN_FORM; show("plugins"); }, "primary"),
-      btn("Sync recipes", () => post("/api/plugins_sync", {}, "Plugin recipe sync"), "primary"),
-    ]));
-    if (PLUGIN_FORM) c.appendChild(addPluginRecipeCard());
-  }
-
-  const rrows = recipes.map(recipeCard);
-  if (!rrows.length) rrows.push(el("div", { class: "empty" }, ["No managed recipes. Add [plugins.*] to agentstack.toml."]));
-  c.appendChild(el("div", { class: "card" }, [
-    el("div", { class: "hd" }, ["Managed recipes", el("small", null, [plural(recipes.length, "recipe")])]),
-    el("div", { class: "bd" }, rrows),
-  ]));
-  c.appendChild(el("div", { class: "muted", style: "font-size:12px;margin:10px 0 4px" }, [
-    "Sync writes repo-local marketplaces and plugin packages. Install/trust still happens inside Codex or Claude Code, so the badges show both generated and native install state.",
-  ]));
-
-  const prows = list.map((p) => el("div", { class: "list-row" }, [
-    el("span", null, [
-      el("span", { class: "name" }, [p.name]),
-      el("div", { class: "muted mono", style: "font-size:12px" }, [
-        (p.harness || "unknown") + " · " + p.marketplace + (p.version ? " @ " + p.version : ""),
-      ]),
-      ...(p.source ? [el("div", { class: "muted mono", style: "font-size:11px" }, [p.source])] : []),
-    ]),
-    el("span", { class: "row-actions" }, [
-      ...(p.projects || []).map((pr) => badge(pr, "solid")),
-      badge(p.status || (p.enabled === false ? "disabled" : "installed"), p.enabled === false ? "" : "solid"),
-      badge(p.scope || "local", ""),
-    ]),
-  ]));
-  if (!prows.length) prows.push(el("div", { class: "empty" }, ["No native plugins found."]));
-  c.appendChild(el("details", { class: "card acc", style: "margin-top:16px" }, [
-    el("summary", { class: "hd acc-sum" }, ["Installed", el("small", { style: "display:inline" }, [plural(list.length, "plugin")])]),
-    el("div", { class: "bd" }, prows),
-  ]));
-
-  const mrows = markets.map((m) => el("div", { class: "list-row" }, [
-    el("span", { class: "name" }, [(m.harness || "unknown") + " · " + m.name]),
-    el("span", { class: "muted mono", style: "font-size:12px" }, [m.source]),
-  ]));
-  if (!mrows.length) mrows.push(el("div", { class: "empty" }, ["No marketplaces."]));
-  c.appendChild(el("details", { class: "card acc", style: "margin-top:16px" }, [
-    el("summary", { class: "hd acc-sum" }, ["Marketplaces", el("small", { style: "display:inline" }, [`${markets.length}`])]),
-    el("div", { class: "bd" }, mrows),
-  ]));
+/* ---------- extensions ---------- */
+function extensions(c) {
+  c.appendChild(pageHead("Extensions", "Native harness add-on code (e.g. Pi TypeScript extensions, OpenCode JS plugins) agentstack pins and delivers. Read-only."));
 
   // Native extensions/add-ons (e.g. Pi extensions) — read-only.
   const exts = DATA.extensions || [];

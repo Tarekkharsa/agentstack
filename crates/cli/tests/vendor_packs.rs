@@ -18,7 +18,6 @@ use std::path::Path;
 use agentstack::adapter::Registry;
 use agentstack::cli::{AddArgs, AddFromArgs, AddKind, RemoveArgs, UpgradeArgs};
 use agentstack::manifest::Manifest;
-use agentstack::plugin_recipes::{self, SyncOptions};
 use agentstack::provider::{self, CandidateKind};
 use agentstack::render::instructions::plan_instructions;
 use agentstack::scope::Scope;
@@ -87,9 +86,8 @@ fn add_pack_writes_all_four_sections_with_instructions() {
     let instr_body = fs::read_to_string(dir.join("instructions/linear_rules.md")).unwrap();
     assert!(instr_body.starts_with("<!-- agentstack:vendor linear-pack (unofficial) -->"));
 
-    // 4. Ledger with kind = "pack" recording every member.
-    let ledger = m.plugins.get("linear-pack").expect("ledger written");
-    assert_eq!(ledger.kind.as_deref(), Some("pack"));
+    // 4. Ledger recording every member.
+    let ledger = m.packs.get("linear-pack").expect("ledger written");
     assert_eq!(ledger.source.as_deref(), Some("catalog:linear-pack"));
     assert_eq!(ledger.servers, vec!["linear-pack".to_string()]);
     assert_eq!(ledger.skills, vec!["linear_breakdown".to_string()]);
@@ -118,7 +116,7 @@ fn instructions_are_only_written_with_the_opt_in_flag() {
     assert!(!dir.join("instructions/linear_rules.md").exists());
 
     // The ledger records no instruction either.
-    let ledger = m.plugins.get("linear-pack").unwrap();
+    let ledger = m.packs.get("linear-pack").unwrap();
     assert!(ledger.instructions.is_empty());
 }
 
@@ -147,7 +145,7 @@ fn pack_install_is_refused_atomically_on_policy_violation() {
     let m = load(dir);
     assert!(m.servers.is_empty());
     assert!(m.skills.is_empty());
-    assert!(m.plugins.is_empty());
+    assert!(m.packs.is_empty());
     assert!(!dir.join("skills/linear/breakdown").exists());
     assert!(!dir.join("instructions/linear_rules.md").exists());
 }
@@ -243,7 +241,7 @@ fn remove_pack_fully_reverses_install_and_spares_user_files() {
     assert!(m.servers.is_empty(), "server removed");
     assert!(m.skills.is_empty(), "skill removed");
     assert!(m.instructions.is_empty(), "instruction removed");
-    assert!(m.plugins.is_empty(), "ledger dropped");
+    assert!(m.packs.is_empty(), "ledger dropped");
 
     // The pack-written instruction file is deleted; the user's is spared.
     assert!(!pack_instr.exists(), "pack instruction file deleted");
@@ -275,8 +273,7 @@ fn remove_pack_never_deletes_root_or_the_shared_skills_tree() {
             [skills.evil]
             path = "{evil_path}"
 
-            [plugins.linear-pack]
-            kind = "pack"
+            [packs.linear-pack]
             version = "0.1.0"
             description = "Linear pack"
             skills = ["evil"]
@@ -325,8 +322,7 @@ fn remove_pack_spares_skill_dirs_pointed_above_the_manifest_dir() {
         [skills.evil]
         path = "../{sibling_name}"
 
-        [plugins.linear-pack]
-        kind = "pack"
+        [packs.linear-pack]
         version = "0.1.0"
         description = "Linear pack"
         skills = ["evil"]
@@ -387,8 +383,7 @@ fn remove_pack_spares_skill_dirs_pointed_outside_the_manifest_dir() {
         [skills.evil]
         path = "{}"
 
-        [plugins.linear-pack]
-        kind = "pack"
+        [packs.linear-pack]
         version = "0.1.0"
         description = "Linear pack"
         skills = ["evil"]
@@ -406,69 +401,6 @@ fn remove_pack_spares_skill_dirs_pointed_outside_the_manifest_dir() {
     assert!(
         victim.join("keep.txt").exists(),
         "absolute out-of-tree skill path must never be deleted"
-    );
-}
-
-#[test]
-fn pack_ledger_is_invisible_to_plugins_sync() {
-    // A pack ledger is an install record, not a publishable plugin: `sync` must
-    // not render it as a native plugin package nor report it as a recipe.
-    let (tmp, _path) = seed(
-        r#"
-        version = 1
-
-        [servers.linear-pack]
-        type = "http"
-        url = "https://mcp.linear.app/mcp"
-        headers = { Authorization = "Bearer ${LINEAR_PACK_TOKEN}" }
-
-        [skills.linear_breakdown]
-        path = "./skills/linear/breakdown"
-
-        [plugins.linear-pack]
-        kind = "pack"
-        version = "0.1.0"
-        description = "Linear pack"
-        servers = ["linear-pack"]
-        skills = ["linear_breakdown"]
-        "#,
-    );
-    let dir = tmp.path();
-    let m = load(dir);
-    let reg = Registry::load().unwrap();
-
-    // statuses() (what `plugins list/status` build on) omits the pack ledger.
-    let statuses = plugin_recipes::statuses(&m, &reg, dir);
-    assert!(
-        statuses.iter().all(|s| s.name != "linear-pack"),
-        "pack ledger must not appear as a recipe status"
-    );
-
-    // sync() renders nothing for it and reports no recipes / no package dir.
-    let report = plugin_recipes::sync(
-        &m,
-        &reg,
-        dir,
-        &SyncOptions {
-            targets: vec![],
-            write: true,
-        },
-    )
-    .unwrap();
-    assert!(report.recipes.is_empty(), "no recipe rendered for the pack");
-    // No native plugin package directory is rendered for the pack ledger (sync may
-    // still touch empty marketplace manifests, but never a per-pack package).
-    assert!(
-        report
-            .changed
-            .iter()
-            .all(|p| !p.ends_with("plugins/agentstack/linear-pack")),
-        "pack ledger must not render a package: {:?}",
-        report.changed
-    );
-    assert!(
-        !dir.join("plugins/agentstack/linear-pack").exists(),
-        "no native package dir created for a pack ledger"
     );
 }
 
@@ -580,8 +512,7 @@ fn upgrade_never_deletes_skill_dirs_outside_the_manifest_dir() {
         [skills.linear_breakdown]
         path = "{}"
 
-        [plugins.linear-pack]
-        kind = "pack"
+        [packs.linear-pack]
         version = "0.1.0"
         source = "catalog:linear-pack"
         description = "Linear pack"
@@ -615,8 +546,7 @@ fn upgrade_never_deletes_broad_or_escaping_skill_dirs() {
             [skills.linear_breakdown]
             path = "{evil_path}"
 
-            [plugins.linear-pack]
-            kind = "pack"
+            [packs.linear-pack]
             version = "0.1.0"
             source = "catalog:linear-pack"
             description = "Linear pack"
@@ -661,8 +591,7 @@ fn upgrade_never_deletes_broad_or_escaping_skill_dirs() {
             [skills.linear_breakdown]
             path = "../{sibling_name}"
 
-            [plugins.linear-pack]
-            kind = "pack"
+            [packs.linear-pack]
             version = "0.1.0"
             source = "catalog:linear-pack"
             description = "Linear pack"
@@ -684,22 +613,10 @@ fn upgrade_never_deletes_broad_or_escaping_skill_dirs() {
 }
 
 #[test]
-fn upgrade_rejects_non_pack_and_missing_ledger() {
-    // A plain server recipe (not kind = "pack") and an unknown name both bail.
-    let (tmp, _path) = seed(
-        r#"
-        version = 1
-        [plugins.play]
-        version = "1"
-        description = "not a pack"
-        "#,
-    );
+fn upgrade_rejects_missing_ledger() {
+    // Upgrading a name with no `[packs.<name>]` ledger bails.
+    let (tmp, _path) = seed("version = 1\n");
     let dir = tmp.path();
-
-    let err =
-        agentstack::commands::upgrade::run(&upgrade_args("play", false, false, true), Some(dir))
-            .unwrap_err();
-    assert!(err.to_string().contains("not an installed vendor pack"));
 
     let err =
         agentstack::commands::upgrade::run(&upgrade_args("ghost", false, false, true), Some(dir))
@@ -791,7 +708,7 @@ fn new_vendor_packs_install_and_remove_cleanly() {
     };
     agentstack::commands::remove::run(&remove, Some(dir)).unwrap();
     let m = load(dir);
-    assert!(m.servers.is_empty() && m.skills.is_empty() && m.plugins.is_empty());
+    assert!(m.servers.is_empty() && m.skills.is_empty() && m.packs.is_empty());
     assert!(!dir.join("instructions/cloudflare_rules.md").exists());
 }
 

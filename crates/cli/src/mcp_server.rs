@@ -41,7 +41,7 @@ pub fn serve(
     let mut dir = manifest_dir.map(Path::to_path_buf);
     let stdin = std::io::stdin();
     // On stdio, stdout must carry only JSON-RPC. Library code (apply, profiles,
-    // plugins…) prints human progress to stdout, which would corrupt the stream,
+    // packs…) prints human progress to stdout, which would corrupt the stream,
     // so reserve the real stdout for responses and redirect fd 1 to stderr.
     let out = protocol_writer();
 
@@ -1130,20 +1130,19 @@ fn tool_defs() -> Value {
         },
         {
             "name": "agentstack_session_start",
-            "description": "Start an ephemeral session: load a profile (and an optional plugin) for now. Reversible — end the session to revert it. Defaults to project scope (contained to this repo).",
+            "description": "Start an ephemeral session: load a profile for now. Reversible — end the session to revert it. Defaults to project scope (contained to this repo).",
             "inputSchema": {
                 "type": "object",
                 "required": ["profile"],
                 "properties": {
                     "profile": { "type": "string" },
-                    "scope": { "type": "string", "enum": ["global", "project"], "default": "project" },
-                    "plugin": { "type": "string", "description": "optional plugin recipe to install for the session" }
+                    "scope": { "type": "string", "enum": ["global", "project"], "default": "project" }
                 }
             }
         },
         {
             "name": "agentstack_session_end",
-            "description": "End the active session in this directory, reverting everything it loaded (servers, skills, plugin) to how it was before.",
+            "description": "End the active session in this directory, reverting everything it loaded (servers, skills) to how it was before.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
@@ -1404,11 +1403,7 @@ fn run_tool_with_lease(
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
                 .context("`profile` is required")?;
-            let plugin = args
-                .get("plugin")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty());
-            crate::session::start(dir, profile, scope_arg(args), plugin)?;
+            crate::session::start(dir, profile, scope_arg(args))?;
             Ok(format!(
                 "Session started on profile '{profile}' ({} scope). End it with agentstack_session_end to revert.",
                 scope_arg(args)
@@ -1424,7 +1419,6 @@ fn run_tool_with_lease(
                 .map(|s| {
                     serde_json::json!({
                         "dir": s.dir, "profile": s.profile, "scope": s.scope,
-                        "plugin": s.plugin,
                         "loaded": s.loads.iter().map(|l| l.name.clone()).collect::<Vec<_>>(),
                     })
                 })

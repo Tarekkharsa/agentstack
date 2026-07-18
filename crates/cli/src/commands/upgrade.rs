@@ -24,7 +24,7 @@ use owo_colors::OwoColorize;
 use crate::cli::UpgradeArgs;
 use crate::commands::{add, install, remove};
 use crate::lock::Lock;
-use crate::manifest::{Instruction, PluginRecipe, Skill};
+use crate::manifest::{Instruction, PackInstall, Skill};
 use crate::provider::{self, Candidate, CandidateKind, PackSpec};
 use crate::store::{self, Store};
 use crate::util::{atomic, diff};
@@ -34,12 +34,7 @@ pub fn run(args: &UpgradeArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
 
     let targets: Vec<String> = if args.all {
-        manifest
-            .plugins
-            .iter()
-            .filter(|(_, r)| r.kind.as_deref() == Some("pack"))
-            .map(|(n, _)| n.clone())
-            .collect()
+        manifest.packs.keys().cloned().collect()
     } else {
         let name = args
             .name
@@ -60,7 +55,7 @@ pub fn run(args: &UpgradeArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 continue;
             }
             anyhow::bail!(
-                "'{name}' is not an installed vendor pack (no [plugins.{name}] pack ledger). \
+                "'{name}' is not an installed vendor pack (no [packs.{name}] ledger). \
                  Use `agentstack remove` for single capabilities."
             );
         };
@@ -84,7 +79,7 @@ fn upgrade_one(
     ctx: &super::Context,
     manifest_dir: Option<&Path>,
     pack: &str,
-    recipe: &PluginRecipe,
+    recipe: &PackInstall,
     args: &UpgradeArgs,
 ) -> Result<()> {
     let source = recipe
@@ -206,7 +201,7 @@ fn upgrade_pack(
     ctx: &super::Context,
     manifest_dir: Option<&Path>,
     pack: &str,
-    recipe: &PluginRecipe,
+    recipe: &PackInstall,
     candidate: &Candidate,
     spec: &PackSpec,
     args: &UpgradeArgs,
@@ -308,7 +303,7 @@ fn upgrade_pack(
 fn diff_pack(
     ctx: &super::Context,
     pack: &str,
-    recipe: &PluginRecipe,
+    recipe: &PackInstall,
     candidate: &Candidate,
     spec: &PackSpec,
     want_instructions: bool,
@@ -407,7 +402,7 @@ fn skill_content_changed(
 fn build_upgraded_manifest(
     original: &str,
     pack: &str,
-    recipe: &PluginRecipe,
+    recipe: &PackInstall,
     candidate: &Candidate,
     spec: &PackSpec,
     want_instructions: bool,
@@ -425,27 +420,19 @@ fn build_upgraded_manifest(
     for instr in &recipe.instructions {
         text = remove::remove_entry(&text, "instructions", instr)?;
     }
-    text = remove::remove_entry(&text, "plugins", pack)?;
+    text = remove::remove_entry(&text, "packs", pack)?;
 
     // 2. Re-add the desired members, recording a fresh ledger.
-    let mut ledger = PluginRecipe {
-        kind: Some("pack".into()),
+    let mut ledger = PackInstall {
         rev: origin.rev.clone(),
         source: Some(origin.source.clone()),
         version: origin.version.clone(),
         description: candidate.description.clone(),
-        display: recipe.display.clone(),
-        category: None,
         targets: spec.targets.clone(),
-        default_enabled: None,
         servers: Vec::new(),
         skills: Vec::new(),
         hooks: recipe.hooks.clone(),
         instructions: Vec::new(),
-        homepage: recipe.homepage.clone(),
-        repository: None,
-        license: None,
-        author: None,
     };
 
     if spec.server.is_some() {
@@ -499,13 +486,7 @@ fn build_upgraded_manifest(
         }
     }
 
-    text = add::build_manifest_with(
-        &text,
-        "plugins",
-        pack,
-        &serde_json::to_value(&ledger)?,
-        None,
-    )?;
+    text = add::build_manifest_with(&text, "packs", pack, &serde_json::to_value(&ledger)?, None)?;
     Ok(text)
 }
 
@@ -515,7 +496,7 @@ fn build_upgraded_manifest(
 fn apply_upgrade(
     ctx: &super::Context,
     pack: &str,
-    recipe: &PluginRecipe,
+    recipe: &PackInstall,
     spec: &PackSpec,
     want_instructions: bool,
     original: &str,
@@ -648,7 +629,7 @@ fn apply_upgrade(
 fn repin_lock(
     ctx: &super::Context,
     manifest_dir: Option<&Path>,
-    recipe: &PluginRecipe,
+    recipe: &PackInstall,
     spec: &PackSpec,
 ) -> Result<()> {
     let mut lock = Lock::load(&ctx.dir)?;
