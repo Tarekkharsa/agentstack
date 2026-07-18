@@ -191,6 +191,20 @@ unchanged); `setup` hidden as an alias; every help/doc/skill string says
 day: .env writer + storage choice, plan block, scan offer, modes choice,
 machine summary, lock re-trust warning).
 
+### P28 — The wizard is adaptive: the mode choice is a real fork
+
+Maintainer decision (2026-07-19): the delivery-mode choice moves BEFORE the
+write steps and changes what the wizard does next — static → render into
+every CLI (current path); clean-at-rest → no render, lock the pins, teach the
+session rhythm; zero-files → no render, offer `gateway connect`, point at
+trust. No more apply-first-then-print-the-undo. Selection upgrades to
+arrow-key menus (dialoguer — dependency explicitly approved for the cli
+crate only, nowhere near trust/policy) with each option carrying its
+one-line consequence; the P2 secrets menu upgrades to the same selector for
+a consistent feel. Ships inside v0.13.0.
+
+**Status: green-lit, in build.**
+
 ## Doctor + drift (feature 2)
 
 ### Investigated facts
