@@ -5,8 +5,8 @@
 
 //! Code mode (PLAN code-mode Phase 2) end-to-end: the generated client is built
 //! from the *live* proxied surface, and a runtime call round-trips through the
-//! gateway to a real (mock) upstream MCP server. Also proves `codemode --write`
-//! materializes contained, secret-free files.
+//! gateway to a real (mock) upstream MCP server. Also proves the generated
+//! bindings materialize as contained, secret-free files.
 
 use std::sync::Mutex;
 use std::thread;
