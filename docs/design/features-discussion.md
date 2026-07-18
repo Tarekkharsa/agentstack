@@ -249,6 +249,36 @@ without reading source code:
 
 **Decided:** yes. Complements P3 (denials teach the exact allow_roots fix).
 
+### P13 — Hook-conformance fixes (audited vs official docs, 2026-07-18)
+
+Audit of all 9 hook integrations against each CLI's current official docs:
+6 fully correct (Claude Code, Gemini, Copilot CLI, OpenCode, Pi; Codex
+protocol-correct). Fix batch, severity order:
+
+1. **VS Code write-gate gap (security)**: `WRITERS` in guard.rs lacks
+   `replace_string_in_file`, `multi_replace_string_in_file`, `apply_patch` —
+   VS Code in-place edits classify as reads, so workspace confinement never
+   runs for them (deny-globs still fire). Add the three names + a test.
+2. **Codex dual-write**: `guard install` writes `~/.codex/hooks.json` while
+   the manifest hook-renderer writes inline `[hooks]` in config.toml; Codex
+   loads both → guard fires twice. Pick one seam.
+3. Cursor: adopt documented `beforeReadFile` + `beforeMCPExecution` blocking
+   hooks (we currently gate shell only — no read/MCP gating on Cursor).
+4. Windsurf: adopt `pre_mcp_tool_use` (same exit-2 mechanism, mechanical).
+   Note: Windsurf docs moved to docs.devin.ai (Cognition) — track.
+5. Codex deny: switch to the preferred stdout-JSON decision envelope (same
+   shape as Claude's); delete the stale "rejects unknown JSON" comment.
+6. Docs: VS Code hook support is Preview + org-disableable — say so in
+   README/ENFORCEMENT instead of asserting settled coverage.
+7. Cosmetic: trim off-schema fields from Copilot/Cursor deny payloads.
+
+Optional design thread: Claude's `permissionDecision:"ask"` (soften some
+denials to interactive approval) and `updatedInput` — same shape OpenClaw's
+hook offers (P12); if guard's protocol grows richer, grow it once for both.
+
+**Decided:** items 1-2 are bugs — fix before anything else touches guard;
+3-7 batch with them. **Open:** the richer-protocol design thread.
+
 ## New harness coverage (researched 2026-07-18)
 
 ### P12 — OpenClaw adapter (+ Cline as second)
