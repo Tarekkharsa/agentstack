@@ -101,7 +101,7 @@ user must be told exactly what was not stored and why.
   (`~/.agentstack/agentstack.toml`), matching what the `.env` denial already
   does.
 
-**Decided:** yes. **Open:** whether project `init` should mention guard at
+**SHIPPED (01cc624, 2026-07-18):** denials teach the exact fix. **Open:** whether project `init` should mention guard at
 all, or leave it to `setup`/`init --global` (current lean: setup only — a
 project init shouldn't advertise machine-level machinery).
 
@@ -135,14 +135,14 @@ repos → mention zero-files).
 `doctor` reports `resolved from keychain` / `varlock` / `env` / `.env`,
 matching `setup` and `secret list`. One-line parity fix.
 
-**Decided:** yes.
+**SHIPPED (fe81876, 2026-07-18):** doctor names the source.
 
 ### P6 — Truthful detection wording
 
 "6 CLI binaries on PATH · 1 config imported" instead of "Detected 6 CLI(s)".
 The import count is the achievement; the PATH scan is just context.
 
-**Decided:** yes.
+**SHIPPED (7d13ea8, 2026-07-18).**
 
 ### P7 — "What happened to this machine" (the transparency close)
 
@@ -226,8 +226,7 @@ Fix direction: doctor should use the same managed-content comparison diff
 uses (or auto-clear the warning when diff reports in-sync), and reserve
 edited-on-disk for changes inside the managed region.
 
-**Decided:** bug, fix it. **Open:** none — the comparison logic exists in
-diff already.
+**SHIPPED (fe81876, 2026-07-18):** doctor gates the warning on the managed-content comparison; witnessed both directions.
 
 ## Guard (feature 3)
 
@@ -247,7 +246,7 @@ without reading source code:
   destructive-command and workspace denials should too (destructive patterns
   are built-in — say so: "built-in rule; deny/allow lists: <file>").
 
-**Decided:** yes. Complements P3 (denials teach the exact allow_roots fix).
+**SHIPPED (01cc624, 2026-07-18):** install prints the seeded list + layering; status labels each layer's source; denials cite built-in vs file.
 
 ### P13 — Hook-conformance fixes (audited vs official docs, 2026-07-18)
 
@@ -276,8 +275,7 @@ Optional design thread: Claude's `permissionDecision:"ask"` (soften some
 denials to interactive approval) and `updatedInput` — same shape OpenClaw's
 hook offers (P12); if guard's protocol grows richer, grow it once for both.
 
-**Decided (2026-07-18): GREEN-LIT — "fix the guard batch" is the next
-implementation session.** Items 1-7 land together, full gates, and the diff
+**SHIPPED (01cc624 + fe81876 + 7d13ea8, 2026-07-18):** items 1-7 landed (beforeMCPExecution deferred — no clean mapping onto file/shell policy; recorded in the commit). Also shipped same day: the sandbox workspace-mount fix (55f7f83, found during the feature-6 investigation).** Items 1-7 land together, full gates, and the diff
 gets the security-sensitive flag (it touches guard enforcement) for
 line-by-line review. OpenClaw (P12) stays queued behind it. **Open:** the
 richer-protocol design thread (answer once, for Claude `ask`/`updatedInput`
