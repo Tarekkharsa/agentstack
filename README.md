@@ -94,10 +94,17 @@ agents get the same map via the shipped
 ## Step 1 — One manifest, every CLI (5 minutes)
 
 `agentstack setup` is the guided path — it imports, previews, applies, and
-activates interactively. The same flow as individual commands: `init` →
-`apply` → `use --write` (skills activate through `use`, not `apply`; `setup`
-runs it for you). If `apply` or `doctor` reports a missing secret, store it
-once — it goes in your OS keychain, never in the manifest:
+activates interactively. It opens with a plan (nothing written until you
+confirm), and when it lifts inline tokens it asks where the values should
+live — a gitignored project `.env` by default, the OS keychain, or skip and
+decide later, each with a one-line explanation at the moment of choice. It
+closes by letting you pick a delivery mode (static, clean-at-rest, or
+zero-files) and printing a summary of every file it wrote, where each secret
+resolves, and the one-liner to undo it all. The same flow as individual
+commands: `init` → `apply` → `use --write` (skills activate through `use`,
+not `apply`; `setup` runs it for you). If `apply` or `doctor` reports a
+missing secret, store it once — by default it goes in your OS keychain, never
+in the manifest:
 
 ```bash
 agentstack secret set GH_PAT

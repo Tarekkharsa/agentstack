@@ -189,6 +189,13 @@ must read native skill/instruction files. Add `--sandbox --lockdown` when the
 agent process itself needs isolation—a lease is a capability fence, not a
 sandbox. See [the primitives and decision table](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need).
 
+`setup` presents these three as an explicit choice at the end of the guided run
+(each with its help text); choosing a non-default mode **prints** the exact
+command(s) it maps to rather than switching in place, keeping the wizard
+reversible. Bare `agentstack` reports the project's current mode on its `Mode`
+line — derived from what is actually on disk — so "which mode am I in?" is a
+glance, not archaeology.
+
 The managed `.gitignore` block is anchored to **outcomes, not declarations**:
 an entry exists only for a file agentstack actually wrote or still manages
 (tracked in state, or carrying the managed instruction region on disk). A run
@@ -223,6 +230,22 @@ keychain read is retried, and a persistent failure is reported as
 *keychain read failed* — an error distinct from *not found*, so a flaky
 keychain daemon never blocks a write by claiming a stored secret is
 missing.
+
+### Where lifted secrets go (`init`)
+
+When `init` finds inline tokens in an imported config it lifts each to a
+`${REF}` and chooses where the value lands. An interactive run prompts with
+three self-explaining options — a gitignored project `.env` (**the default**),
+the OS keychain (service `agentstack`), or skip and write only the placeholder.
+The non-interactive path takes `--secrets env|keychain|skip`; absent and
+non-interactive it defaults to `keychain`, so CI and scripts never start
+writing plaintext by surprise. `--no-keychain` is the deprecated alias for
+`--secrets skip`, and a skip prints every unstored `${REF}` with the command to
+store it — lifted values are never silently dropped. The `.env` writer places
+values next to the manifest and adds a managed `.gitignore` entry when the
+project is a git repo; `secret set --env-file` targets that same `.env` instead
+of the keychain. The manifest itself only ever holds `${REF}` placeholders
+(rule 5).
 
 ### Unresolved secrets block writes
 
@@ -356,7 +379,9 @@ files), and `doctor --ci` fails on high-severity findings, so a poisoned skill
 can't slide into CI unnoticed. Everyday `doctor` skips this scan (it reads every
 skill body); opt in with `doctor --deep` — `--ci` always includes it, `--json`
 emits the whole report machine-readably, and the dashboard's Doctor pane runs it
-too.
+too. `setup` offers the deep scan as an explicit yes/no at its closing doctor
+step, but only when the project actually has skills — no empty questions on a
+server-only manifest.
 
 ### `doctor --live`
 
@@ -417,7 +442,10 @@ offline by default (dry-run `use`, `doctor`, `explain` never fetch);
 `use --write` fetches git-backed skills when activation needs them.
 `agentstack lock [--profile <name>]` pins every profile's name refs
 **without** rendering configs or materializing skills — the lock-only path for
-clean-at-rest repos.
+clean-at-rest repos. The lockfile is part of a project's consent surface (its
+bytes feed the trust digest), so when a currently-trusted project's pins
+actually change, `lock` warns that its trust is now stale and must be re-granted
+with `agentstack trust .` — new pins are new consent.
 
 ### Adding capabilities
 
@@ -1247,7 +1275,7 @@ cancelled or timed-out run leaves no orphaned guest processes.
 
 ## All commands
 
-`setup`, `init` (`--global`), `add`, `search`,
+`setup`, `init` (`--global`, `--secrets env|keychain|skip`), `add`, `search`,
 `install` (`--locked`, `--allow-flagged`),
 `lock` (`--profile`; `--update [NAME]` re-resolves git skills, `--upgrade
 [PACK]` + `--all`/`--with-instructions`/`--yes`/`--write` re-resolves vendor
@@ -1261,7 +1289,7 @@ recorded-change id or an adapter id),
 `report run <id>|runs|usage|calls|wire` (`run`/`runs`/`calls`/`wire`: `--json`;
 `usage`: `--live`; `calls`: `--since`), `proxy` (`--port`,
 `--upstream`),
-`secret set|get|rm|list`, `export`/`import`, `adapters` (`list|show|validate`),
+`secret set|get|rm|list` (`set --env-file`), `export`/`import`, `adapters` (`list|show|validate`),
 `settings`,
 `dashboard`, `mcp` (`--auto-project`, `--transparent`),
 `gateway connect|disconnect` (`connect`: `--all`, `--transparent`, `--write`),

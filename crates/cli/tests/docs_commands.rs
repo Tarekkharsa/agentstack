@@ -77,6 +77,14 @@ const ALLOWLIST: &[&str] = &[
     // comment inside a fenced MCP-tool-call example labeling the diagram,
     // not a claim that `agentstack control` is a command.
     "control",
+    // docs/start.html — the setup wizard's opening plan prints "write one
+    // agentstack manifest"; "manifest" is a noun in captured output, not an
+    // `agentstack manifest` subcommand.
+    "manifest",
+    // docs/start.html — the P2 secret-storage help prints "agentstack keeps
+    // this file out of git"; "keeps" is a verb in captured output, not a
+    // command.
+    "keeps",
 ];
 
 /// One `agentstack <verb> [<subverb>]` occurrence found in a code context.
