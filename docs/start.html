@@ -762,17 +762,17 @@ agentstack run claude-code --sandbox --lockdown          # launch confined</code
         can't be created; that log captures the container lifecycle, egress
         decisions, brokered tool calls, and secret-reference names, tagged with
         the run's posture. It never stores argument values or secret values.
-        <code>agentstack report &lt;run-id&gt;</code> reads it back.
+        <code>agentstack report run &lt;run-id&gt;</code> reads it back.
       </p>
       <div class="copywrap">
-        <pre><code>agentstack report &lt;run-id&gt;        # that run's decisions
-agentstack report &lt;run-id&gt; --json # machine-readable, carries the posture slug</code></pre>
-        <button class="copybtn" data-copy="agentstack report &lt;run-id&gt;">copy</button>
+        <pre><code>agentstack report run &lt;run-id&gt;        # that run's decisions
+agentstack report run &lt;run-id&gt; --json # machine-readable, carries the posture slug</code></pre>
+        <button class="copybtn" data-copy="agentstack report run &lt;run-id&gt;">copy</button>
       </div>
       <p class="expect">You should see</p>
       <div class="term">
         <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>agentstack report</b></div>
-        <pre><code><span class="p">$</span> agentstack report r-0859dcee73
+        <pre><code><span class="p">$</span> agentstack report run r-0859dcee73
 <span class="c">  run 2026-07-11T…  posture: LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span>
 <span class="c">  ├─ SandboxStarted   image=…  network=internal-only</span>
 <span class="ok">  ├─ egress ✓</span> api.anthropic.com:443   allowed

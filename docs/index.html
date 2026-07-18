@@ -604,7 +604,7 @@
 <span class="row"><span class="p">$</span> <span class="t">agentstack run --lockdown shtest -- -c 'curl https://blocked.invalid/steal'</span></span>
 <span class="row"><span class="no">  ✗ refused at the sidecar</span><span class="c"> — and recorded</span></span>
 <span class="row"> </span>
-<span class="row"><span class="p">$</span> <span class="t">agentstack report r-0859dcee73</span></span>
+<span class="row"><span class="p">$</span> <span class="t">agentstack report run r-0859dcee73</span></span>
 <span class="row"><span class="c">  Posture   </span><span class="am">LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span></span>
 <span class="row"><span class="no">    ✗ shtest → blocked.invalid</span><span class="c">   denied by rule "!blocked.invalid" (machine policy)</span></span></code></pre>
           </div>
@@ -776,7 +776,7 @@
 <span class="row cmd"><span class="p">$</span> <span class="t">agentstack run --lockdown shtest -- -c 'curl https://blocked.invalid/steal'</span></span>
 <span class="row" data-d="700"><span class="no">  ✗ refused at the sidecar</span><span class="c"> — and recorded</span></span>
 <span class="row" data-d="500"> </span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack report r-0859dcee73</span></span>
+<span class="row cmd"><span class="p">$</span> <span class="t">agentstack report run r-0859dcee73</span></span>
 <span class="row"><span class="c">  Posture   </span><span class="am">LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span></span>
 <span class="row"><span class="c">  Egress</span></span>
 <span class="row"><span class="no">    ✗ shtest → blocked.invalid</span><span class="c">  denied by rule "!blocked.invalid" (machine policy)</span></span></code></pre>

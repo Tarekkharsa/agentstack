@@ -939,7 +939,7 @@ agentstack doctor --ci                         <span class="cm"># fail on errors
 github = ["api.github.com:443"]         <span class="cm"># a server named github may reach only this</span></code></pre>
     <div class="copywrap">
       <pre><code>agentstack run claude-code --sandbox --lockdown --profile backend
-agentstack report &lt;run-id&gt;              <span class="cm"># the run's flight recorder: every egress decision</span></code></pre>
+agentstack report run &lt;run-id&gt;              <span class="cm"># the run's flight recorder: every egress decision</span></code></pre>
       <button class="copybtn" data-copy="agentstack run claude-code --sandbox --lockdown --profile backend">copy</button>
     </div>
     <p class="result">Result</p>
@@ -987,10 +987,10 @@ max_output_bytes = 131072</code></pre>
     <p class="intent">Every brokered call is recorded (digests and outcomes, never argument values or secrets). Turn that into insight.</p>
     <div class="copywrap">
       <pre><code>agentstack report calls --since 7             <span class="cm"># recent brokered calls: tool · outcome · latency</span>
-agentstack report &lt;run-id&gt;                    <span class="cm"># per-run tree, incl. sandbox egress decisions</span>
+agentstack report run &lt;run-id&gt;                <span class="cm"># per-run tree, incl. sandbox egress decisions</span>
 agentstack report calls                            <span class="cm"># what you actually call; flags installed-but-unused</span>
 agentstack report calls --transcripts              <span class="cm"># + cross-harness reach from local session logs</span></code></pre>
-      <button class="copybtn" data-copy="agentstack report &lt;run-id&gt;">copy</button>
+      <button class="copybtn" data-copy="agentstack report run &lt;run-id&gt;">copy</button>
     </div>
 
     <h3 class="ex" id="e21"><span class="num">21</span> See what your tools cost</h3>
