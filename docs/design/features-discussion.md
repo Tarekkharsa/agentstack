@@ -205,6 +205,30 @@ a consistent feel. Ships inside v0.13.0.
 
 **Status: green-lit, in build.**
 
+### P29 — Onboarding doorways (drafts, 2026-07-19)
+
+Ideas to connect the product's moments to the docs' answers; each is one
+line of code and zero new surface:
+
+1. **The wizard ends with a doorway.** The machine-change summary's last
+   line: "Learn the rest: <start-page URL> — or run `agentstack` anytime for
+   your next step." The CLI hands the user to the walkthrough exactly when
+   curiosity peaks.
+2. **The first denial teaches once.** The very first guard denial on a
+   machine appends one extra line ("this was agentstack's guard — how it
+   works: <link>"), then never again (a marker file). Teaching at the moment
+   of surprise beats any docs page; repeat-noise would erode it.
+3. **A wizard replay for the front door.** firstrun.svg still shows the
+   promptless init → apply primitive; the strongest onboarding asset would
+   be a replay of the wizard itself — plan, storage choice, mode fork —
+   as the README/landing hero. Needs a new capture with the term-replay
+   tooling; worth doing once the wizard wording settles.
+4. **"Which mode fits me?" micro-chooser on the start page** — two or three
+   questions that end in a recommendation and scroll to that mode's tab.
+   Only if the mode tabs (this initiative) prove insufficient on their own.
+
+**Status: DRAFT — awaiting maintainer review.**
+
 ## Doctor + drift (feature 2)
 
 ### Investigated facts
