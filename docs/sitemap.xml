@@ -2,11 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://tarekkharsa.github.io/agentstack/</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/start.html</loc></url>
-<url><loc>https://tarekkharsa.github.io/agentstack/docs.html</loc></url>
-  <url><loc>https://tarekkharsa.github.io/agentstack/how-it-works.html</loc></url>
-  <url><loc>https://tarekkharsa.github.io/agentstack/primitives.html</loc></url>
+  <url><loc>https://tarekkharsa.github.io/agentstack/docs.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/examples.html</loc></url>
-  <url><loc>https://tarekkharsa.github.io/agentstack/library.html</loc></url>
-  <url><loc>https://tarekkharsa.github.io/agentstack/strategy.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/security-review-2026-07-11.html</loc></url>
 </urlset>

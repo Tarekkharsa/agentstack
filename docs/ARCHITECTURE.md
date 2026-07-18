@@ -50,6 +50,60 @@ CLI's configured HTTP(S) traffic goes through the enforcing proxy; lockdown
 makes the proxy sidecar topologically the only route out. Lifecycle, limit,
 egress, brokered tool-call, and secret-reference events enter the per-run log.
 
+## Operating model — choose the boundary you need
+
+Three orthogonal questions keep the rest of the system easy to reason about. A
+**profile** answers *which capabilities does this task select?* The **delivery
+mode** answers *how does it reach the agent?* The **lifetime** answers *when
+does it go away?* Selection is not delivery, and delivery is not isolation.
+
+Each primitive answers exactly one question and — just as importantly — does not
+answer the others. Mixing them up is the common category error (a lock is not
+trust, trust is not policy, policy is not a sandbox, audit is not enforcement):
+
+| Primitive | The question it answers | What it does not do |
+|---|---|---|
+| Bundle | What intent is declared? `agentstack.toml` names servers, skills, profiles, and requested policy. | Does not certify the referenced code as safe. |
+| Integrity | Which capability bytes were reviewed? `agentstack.lock` pins resolved inputs; signatures can attest to the lock bytes. | Does not grant local consent to execute. |
+| Selection | What does this task need? A profile names the intended server and skill set. | Does not decide how the harness receives it. |
+| Delivery | How does selection reach the harness? Static render, native session, or MCP lease. | Does not confine the agent process. |
+| Consent | May this repo auto-activate here? `agentstack trust` binds local approval to manifest + overlay + lock. | Does not mean "safe to run unsandboxed." |
+| Authority | Which tools, hosts, secrets, and paths are allowed? Machine and project policy intersect, deny wins. | Does not create process isolation by itself. |
+| Isolation | Where may the process run and connect? Sandbox and lockdown provide the runtime boundary. | Allowed destinations can still receive sensitive data. |
+| Evidence | What happened? Call audit, run reports, and analysis record brokered activity. | Recording is not prevention. |
+
+The recommended default and its exceptions:
+
+| Situation | Use | Why |
+|---|---|---|
+| MCP-capable interactive work | Profile lease | Smallest live surface, no project-native cleanup; policy and audit stay on the path. |
+| Native skills or instruction files | `use --write` | The harness reads those files itself; MCP cannot inject native files. |
+| Native, but clean between sessions | `session start`/`end` | Temporary compatibility with an explicit restore contract. |
+| Stable offline launches | Static render | No live gateway dependency; native config is ready at startup. |
+| Unfamiliar repository | Trust gate first | Selection must never grant consent; unreviewed auto-project bundles stay inert. |
+| High-risk code or strict egress | Policy + lockdown | Policy defines authority; lockdown removes direct routes and confines the process. |
+| CI | `install --locked` + `doctor --ci` | Checks reproducibility, policy, drift, and content without interactive trust. |
+
+### Product boundary and non-goals
+
+Keep AgentStack narrow: it should own the **portable security contract** —
+which declared or generated capability may run, with which tools and secrets,
+inside which boundary, and with what evidence afterward — and be the control
+plane *beneath* assistants rather than an assistant itself. Personal memory,
+values, durable assistant state, OAuth onboarding, and user-facing apps are the
+province of assistant products layered on top; AgentStack does not add them.
+Background jobs and schedules are a possible later layer, not part of the
+current control-plane mission. Content-addressed **library packages** are the
+intended forward path for persistence: a successful `tools_execute` run can be
+promoted into a reviewed library entry that re-enters the existing lock, review,
+trust, signing, and distribution lifecycle — turning an ephemeral generated
+capability into a governed, distributable one.
+
+*Design lineage: the capability-layer framing behind `tools_execute` — discovery
+over disclosure, generation-then-determinism, primitives over workflows — draws
+on Adam Jones's "I was wrong about MCPs"; the diagrams and recommendations here
+are original to this repository.*
+
 ## Layer 1 — The bundle (`crates/core`)
 
 A bundle is a directory. It is **declarative and inert**: pure data, nothing executes.

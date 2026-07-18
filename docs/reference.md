@@ -187,7 +187,7 @@ rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled `CLAUDE.md`
 the harness supports MCP; use static or clean-at-rest delivery when the harness
 must read native skill/instruction files. Add `--sandbox --lockdown` when the
 agent process itself needs isolation—a lease is a capability fence, not a
-sandbox. See [the primitives and decision table](https://tarekkharsa.github.io/agentstack/primitives.html).
+sandbox. See [the primitives and decision table](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need).
 
 The managed `.gitignore` block is anchored to **outcomes, not declarations**:
 an entry exists only for a file agentstack actually wrote or still manages
@@ -1191,6 +1191,65 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
                                  # no profile, not rendered anywhere, ≥14d of
                                  # history) and trust grants for deleted dirs
 ```
+
+## Field notes and addenda
+
+Operational details that are easy to trip over, and a few reference facts that
+were previously only on the docs site.
+
+### Launch timing and switching
+
+AgentStack assumes harness-native configuration is established **when the CLI
+launches**. `use` and `session start` write a profile's native MCP config and
+skills to disk, but a harness that is already running may not observe the change
+until it is relaunched. To switch profiles deterministically for a running
+harness — `use profile-B --write` rewrites the files, then relaunch it — rather
+than assuming a live reload. Live, in-process switching is the MCP lease path's
+job, not the native-file path's.
+
+### Session and run recovery
+
+`session end`/`end --all` and `run`'s auto-revert restore the pre-session state.
+Two edge cases:
+
+- **Force-killed parent.** If the parent `agentstack run` process is killed
+  (or the machine stops) before it can revert, cleanup cannot execute; recover
+  with `session end` or `session end --all`.
+- **Skill-restore exactness.** Server files are snapshotted for exact restore.
+  For skills, the current implementation records the names a session *newly
+  added*; replacing an already-managed skill with the same name is an edge case
+  that is not yet snapshotted, so restore of that specific case is not promised
+  to be byte-exact.
+
+### Lease survival across a mid-connection change
+
+If manifest or lock bytes change while an `--auto-project` connection is open,
+AgentStack empties the **live** gateway — no further server spawns, secret
+resolution, or bundle content. The **in-memory lease object itself** can still
+be inspected, and `lease_freeze` can still propose a manifest profile from it,
+precisely because a lease serves no bundle content, resolves no secret, spawns
+no server, and touches no file. Any renewed activity still requires fresh review,
+locking where needed, and trust.
+
+### Central library: server definitions and bundled catalog
+
+- `lib add-server <name> --file <definition.toml>` stores a standalone server
+  definition; `lib add-server <name> --from-manifest` lifts an existing inline
+  `[servers.*]` entry into the library. Both keep `${REF}`s intact and **warn on
+  literal secret-looking values at add time** (surfaced, not scrubbed or
+  blocked) — an earlier checkpoint than `lib sync`'s fail-closed push-time gate.
+- The bundled catalog (`crates/cli/catalog/skills/`) ships ready-made skills
+  including `run-codex`, `sync-library`, `analyze-usage`, `route-by-cost`, and
+  `using-agentstack`, among others; `search` finds them across providers.
+- Every central-library flow is exercised by
+  `examples/sandbox/demo-central-library.sh`, a sandboxed demo that never
+  touches your real provider folders.
+
+### `tools_execute` cancellation
+
+Cancelling an execution kills the **entire process tree**: the executor's
+container and its children are torn down (bounded by the 32-PID limit), so a
+cancelled or timed-out run leaves no orphaned guest processes.
 
 ## All commands
 

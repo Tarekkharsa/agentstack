@@ -305,7 +305,6 @@
           <li><a href="#e6"><span class="n">6</span>Add skills</a></li>
           <li><a href="#e7"><span class="n">7</span>Task-specific profiles</a></li>
           <li><a href="#e8"><span class="n">8</span>Instruction files</a></li>
-          <li><a href="#e26"><span class="n">26</span>Native extensions</a></li>
           <li><a href="#e9"><span class="n">9</span>The everyday loop</a></li>
           <li><a href="#e14"><span class="n">14</span>The central library</a></li>
           <li><a href="#e15"><span class="n">15</span>Sync across machines</a></li>
@@ -327,7 +326,7 @@
           <li><a href="#e21"><span class="n">21</span>What your tools cost</a></li>
         </ul>
       </li>
-      <li><a href="primitives.html">Which primitive?</a>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">Which primitive?</a>
       </li>
     </ul>
   </div>
@@ -335,11 +334,11 @@
     <b>Configure</b>
     <code>$ agentstack apply</code>
     <ul>
-      <li><a href="how-it-works.html">How it works</a>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md">How it works</a>
       </li>
       <li><a href="index.html#manifest">The manifest</a>
       </li>
-      <li><a href="library.html">Central library</a>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library">Central library</a>
       </li>
       <li><a href="index.html#modes">Rendered-file modes</a>
       </li>
@@ -395,7 +394,7 @@
     <ul>
       <li><a href="security-review-2026-07-11.html">Security review</a>
       </li>
-      <li><a href="strategy.html">Strategy</a>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">Strategy</a>
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/HISTORY.md">History</a>
       </li>
@@ -513,7 +512,7 @@
         <p>Use <code>install --locked</code> + <code>doctor --ci</code>. CI verifies pins and policy; it does not need interactive machine trust.</p>
       </div>
     </div>
-    <p class="small muted" style="margin-top:1rem">Full decision table: <a href="primitives.html">AgentStack primitives and recommendations</a>.</p>
+    <p class="small muted" style="margin-top:1rem">Full decision table: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">AgentStack primitives and recommendations</a>.</p>
   </section>
 
   <!-- ============ CATEGORY 1 · CONFIGURE ============ -->
@@ -716,15 +715,15 @@ agentstack doctor       <span class="cm"># verify wiring; every warning names it
 
     <h3 class="ex" id="e14"><span class="num">14</span> The central library</h3>
     <p class="intent">Install a capability <strong>once</strong> into your machine-wide library (<code>~/.agentstack/lib</code>), then reference it <strong>by name</strong> from any project — nothing copied, and every add is content-scanned before it lands.</p>
-    <p class="muted small">See <a href="library.html#quickstart">the central library quick start</a> for the full <code>lib add</code> flow.</p>
+    <p class="muted small">See <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#adding-capabilities">the central library quick start</a> for the full <code>lib add</code> flow.</p>
 
     <h3 class="ex" id="e15"><span class="num">15</span> Sync the library across machines</h3>
     <p class="intent">Version the library as a git repo with <code>agentstack lib sync</code> — a fail-closed gate scans every server field <strong>and the outgoing commits</strong> for secrets before pushing.</p>
-    <p class="muted small">A literal secret, or a definition it can't parse, blocks the sync rather than slipping through. See <a href="library.html#commands">the library command reference</a>.</p>
+    <p class="muted small">A literal secret, or a definition it can't parse, blocks the sync rather than slipping through. See <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#syncing-across-machines-lib-sync">the library command reference</a>.</p>
 
     <h3 class="ex" id="e16"><span class="num">16</span> Versioned vendor packs</h3>
     <p class="intent">Install a pinned bundle of MCP servers, skills, and house rules in one shot — policy-gated and content-scanned first, with the lockfile recording exactly what you got.</p>
-    <p class="muted small">Upgrading is just the next tag. See <a href="library.html#sandbox">the runnable closed-loop demo</a> of a pack installed, applied, firewalled, and upgraded.</p>
+    <p class="muted small">Upgrading is just the next tag. See <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/sandbox/demo-closed-loop.sh">the runnable closed-loop demo</a> of a pack installed, applied, firewalled, and upgraded.</p>
 
   </section>
 
@@ -1019,11 +1018,11 @@ agentstack proxy report                       <span class="cm"># ranks tokens/tu
         <p>The compact, code-grounded matrix: for host, gateway, sandbox, and lockdown, exactly which of tools, egress, secrets, filesystem, and audit are enforced.</p>
       </div>
       <div class="fcard">
-        <h3><a href="library.html">Central library</a></h3>
+        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library">Central library</a></h3>
         <p>Install a skill or server once into your machine-wide library, then reference it by name from any project — every add content-scanned first.</p>
       </div>
       <div class="fcard">
-        <h3><a href="primitives.html">Primitives &amp; recommendations</a></h3>
+        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">Primitives &amp; recommendations</a></h3>
         <p>Choose static, session, lease, trust, policy, or lockdown from the boundary you need—not from one universal mode.</p>
       </div>
       <div class="fcard">
@@ -1092,8 +1091,8 @@ agentstack proxy report                       <span class="cm"># ranks tokens/tu
     <nav aria-label="Footer links">
       <a href="index.html">home</a>
       <a href="start.html">get&nbsp;started</a>
-      <a href="primitives.html">primitives</a>
-      <a href="strategy.html">strategy</a>
+      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">primitives</a>
+      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">strategy</a>
       <a href="https://github.com/Tarekkharsa/agentstack">source</a>
       <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
     </nav>

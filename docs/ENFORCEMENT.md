@@ -55,6 +55,21 @@ to begin. This does not sandbox arbitrary repository code, prevent a user from
 running it manually, or block an explicit static `agentstack apply`; those are
 separate authorization and execution paths.
 
+## Policy is authority, not isolation
+
+Policy decides *which* tools, hosts, secrets, and paths are permitted; it does
+not decide *where* the process runs. **Policy is not a sandbox** — an allowed
+tool can still have side effects, and an allowed host can still receive
+sensitive data. Confinement is the job of `--sandbox` and `--lockdown`, per the
+matrix below; the two compose but are never substitutes.
+
+The shipped presets (`examples/policies/`) map to intent, not to a single
+universal mode: use **developer** for daily work, **compatible** as a migration
+step from an unmanaged setup, **locked-down** when a run needs confinement, and
+**ci** as a runner-only floor. In every case the effective ruleset is the
+machine ∩ project intersection, so a preset can only narrow what the machine
+ceiling already allows.
+
 ## The matrix
 
 Modes are columns; policy dimensions are rows. Legend:

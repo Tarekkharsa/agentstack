@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Generate the unified docs sidebar into every docs-experience page.
 
-One tree, defined once below, spliced into docs.html, start.html,
-examples.html, primitives.html, how-it-works.html, and library.html between
-`<!-- sidebar:begin -->` / `<!-- sidebar:end -->` markers. Each page gets the
+One tree, defined once below, spliced into docs.html, start.html, and
+examples.html between `<!-- sidebar:begin -->` / `<!-- sidebar:end -->`
+markers. (how-it-works, primitives, library, and strategy were folded into the
+Markdown source of truth and are now redirect stubs; the tree links out to that
+Markdown for those entries.) Each page gets the
 IDENTICAL tree; the only per-page differences are (a) the current entry is
 highlighted and (b) the current page's own sections expand inline beneath its
 entry (the nub-docs pattern). Links that point at the page being generated
@@ -25,12 +27,12 @@ TREE = [
         ("Get started", "start.html", "start"),
         ("Install", "index.html#install", "install"),
         ("Examples", "examples.html", "examples"),
-        ("Which primitive?", "primitives.html", "primitives"),
+        ("Which primitive?", f"{GH}/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need", "primitives"),
     ]),
     ("Configure", "$ agentstack apply", [
-        ("How it works", "how-it-works.html", "how-it-works"),
+        ("How it works", f"{GH}/blob/main/docs/ARCHITECTURE.md", "how-it-works"),
         ("The manifest", "index.html#manifest", "manifest"),
-        ("Central library", "library.html", "library"),
+        ("Central library", f"{GH}/blob/main/docs/reference.md#the-central-library", "library"),
         ("Rendered-file modes", "index.html#modes", "modes"),
         ("Dashboard", f"{GH}/blob/main/docs/dashboard.md", "dashboard"),
     ]),
@@ -54,7 +56,7 @@ TREE = [
     ]),
     ("Project", None, [
         ("Security review", "security-review-2026-07-11.html", "secreview"),
-        ("Strategy", "strategy.html", "strategy"),
+        ("Strategy", f"{GH}/blob/main/STRATEGY.md", "strategy"),
         ("History", f"{GH}/blob/main/docs/HISTORY.md", "history"),
     ]),
 ]
@@ -109,14 +111,13 @@ EXPANSIONS = {
     ],
 }
 
-# page file -> current tree key (docs.html is the hub: tree, nothing current)
+# page file -> current tree key (docs.html is the hub: tree, nothing current).
+# Only the retained docs-experience pages are generated; the folded pages
+# (primitives/how-it-works/library/strategy) are now redirect stubs.
 PAGES = {
     "docs.html": None,
     "start.html": "start",
     "examples.html": "examples",
-    "primitives.html": "primitives",
-    "how-it-works.html": "how-it-works",
-    "library.html": "library",
 }
 
 BEGIN, END = "<!-- sidebar:begin (generated — edit tools/make-docs-sidebar.py) -->", "<!-- sidebar:end -->"
