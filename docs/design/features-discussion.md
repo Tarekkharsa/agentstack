@@ -276,8 +276,12 @@ Optional design thread: Claude's `permissionDecision:"ask"` (soften some
 denials to interactive approval) and `updatedInput` — same shape OpenClaw's
 hook offers (P12); if guard's protocol grows richer, grow it once for both.
 
-**Decided:** items 1-2 are bugs — fix before anything else touches guard;
-3-7 batch with them. **Open:** the richer-protocol design thread.
+**Decided (2026-07-18): GREEN-LIT — "fix the guard batch" is the next
+implementation session.** Items 1-7 land together, full gates, and the diff
+gets the security-sensitive flag (it touches guard enforcement) for
+line-by-line review. OpenClaw (P12) stays queued behind it. **Open:** the
+richer-protocol design thread (answer once, for Claude `ask`/`updatedInput`
+and OpenClaw's param-rewriting hook together).
 
 ## New harness coverage (researched 2026-07-18)
 
