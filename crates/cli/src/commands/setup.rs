@@ -180,6 +180,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             fix: false,
             deep: false,
             all: false,
+            json: false,
         },
         manifest_dir,
     )?;

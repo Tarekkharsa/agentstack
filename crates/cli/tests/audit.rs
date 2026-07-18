@@ -5,8 +5,9 @@
 
 //! Supply-chain scanning end-to-end: a fixture skill carrying a zero-width
 //! character (High) and an injection phrase (Warn) must block `install` unless
-//! `--allow-flagged`, show up in `audit --json` with the right severities, and
-//! fail `doctor --ci`.
+//! `--allow-flagged`, show up in `doctor --deep --json` with the right
+//! severities, and fail `doctor --ci`. (The standalone `audit` verb was folded
+//! into `doctor --deep` — this scan has one owner now.)
 //!
 //! These tests drive the compiled binary so exit codes and machine output are
 //! exercised exactly as a CI pipeline would see them (and HOME is overridden
@@ -97,42 +98,45 @@ fn install_allow_flagged_succeeds_but_still_warns() {
 }
 
 #[test]
-fn audit_json_reports_both_findings_and_fails() {
+fn doctor_deep_json_reports_both_findings_and_fails() {
     let tmp = assert_fs::TempDir::new().unwrap();
     let (home, proj) = setup(tmp.path());
 
-    let out = agentstack(&home, &proj, &["audit", "--json"]);
-    assert!(!out.status.success(), "a High finding must fail the audit");
-
-    let v: serde_json::Value =
-        serde_json::from_slice(&out.stdout).expect("audit --json emits valid JSON on stdout");
-    assert_eq!(v["high"], 1, "one hidden-unicode finding: {v}");
-    assert!(v["warn"].as_u64().unwrap() >= 1, "injection warns: {v}");
-
-    let caps = v["capabilities"].as_array().unwrap();
-    let demo = caps
-        .iter()
-        .find(|c| c["name"] == "demo" && c["kind"] == "skill")
-        .expect("report is grouped by capability");
-    let findings = demo["findings"].as_array().unwrap();
-
-    let high: Vec<_> = findings
-        .iter()
-        .filter(|f| f["severity"] == "high")
-        .collect();
-    assert_eq!(high.len(), 1);
-    assert_eq!(high[0]["file"], "SKILL.md");
-    assert_eq!(high[0]["line"], 3);
-    assert!(high[0]["message"].as_str().unwrap().contains("U+200B"));
+    // `--deep` runs the content scan; `--ci` gates on the High finding; `--json`
+    // emits the structured report the retired `audit --json` used to.
+    let out = agentstack(&home, &proj, &["doctor", "--deep", "--ci", "--json"]);
     assert!(
-        high[0]["snippet"].as_str().unwrap().contains("\\u{200B}"),
-        "invisible chars are escaped visibly: {}",
-        high[0]["snippet"]
+        !out.status.success(),
+        "a High finding must fail doctor --ci"
     );
 
+    let v: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("doctor --json emits valid JSON on stdout");
     assert!(
-        findings.iter().any(|f| f["severity"] == "warn"
-            && f["message"].as_str().unwrap().contains("prompt-injection")),
+        v["errors"].as_u64().unwrap() >= 1,
+        "hidden-unicode is an error: {v}"
+    );
+
+    // The content scan lands in its own section, one line per finding
+    // (`<name> file:line:col message — "snippet"`).
+    let sections = v["sections"].as_array().unwrap();
+    let scan = sections
+        .iter()
+        .find(|s| s["title"] == "Content scan")
+        .expect("doctor keeps a Content scan section");
+    let lines = scan["lines"].as_array().unwrap();
+
+    assert!(
+        lines.iter().any(|l| l["level"] == "error"
+            && l["msg"].as_str().unwrap().contains("demo")
+            && l["msg"].as_str().unwrap().contains("U+200B")
+            && l["msg"].as_str().unwrap().contains("SKILL.md")),
+        "the hidden-unicode finding is an error line naming the skill and codepoint: {v}"
+    );
+    assert!(
+        lines.iter().any(
+            |l| l["level"] == "warn" && l["msg"].as_str().unwrap().contains("prompt-injection")
+        ),
         "the injection phrase warns: {v}"
     );
 }

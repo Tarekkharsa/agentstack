@@ -140,7 +140,7 @@ agentstack lib list              # what the central library holds
 agentstack lib sync              # commit/pull/push the library across machines (secret gate enforced)
 agentstack explain <name>        # provenance, secrets, footprint of a capability
 agentstack doctor --ci           # the full trust gate (validation, lock, policy, content scan)
-agentstack audit --json          # re-scan skills/instructions for hidden-unicode/injection
+agentstack doctor --deep         # re-scan skills/instructions for hidden-unicode/injection (--json for machine output)
 agentstack report calls          # summarize the gateway call log (who called what, outcomes)
 agentstack guard status          # which CLIs have the destructive-command hook wired
 agentstack guard test <command>  # judge a shell command against guard policy (nonzero on deny)

@@ -37,7 +37,6 @@ fn run() -> Result<()> {
         Command::Lib(args) => commands::lib::run(args, dir),
         Command::Restore(args) => commands::restore::run(args, dir),
         Command::Doctor(args) => commands::doctor::run(args, dir),
-        Command::Audit(args) => commands::audit::run(args, dir),
         Command::Search(args) => commands::search::run(args, dir),
         Command::Proxy(args) => commands::proxy::run(args, dir),
         Command::Optimize(args) => commands::optimize::run(args, dir),

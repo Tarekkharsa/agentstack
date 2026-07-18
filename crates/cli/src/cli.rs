@@ -31,7 +31,7 @@ run `agentstack <command> --help` for any of them:
   Capabilities & library   remove · install
   Activate & run           session · kill
   Zero-files bridge        gateway · mcp
-  Inspect & tune           diff · audit · optimize · proxy · restore · settings · sign · verify
+  Inspect & tune           diff · optimize · proxy · restore · settings · sign · verify
   Share & extend           export · import · adapters · self"
 )]
 pub struct Cli {
@@ -179,11 +179,6 @@ pub enum Command {
     /// Explain a server or skill: where it came from, what secrets it needs,
     /// which tools get it and what files get written, and its safety signals.
     Explain(ExplainArgs),
-
-    /// Scan skill sources and instruction files for hidden Unicode and
-    /// prompt-injection heuristics. Exits nonzero on high-severity findings.
-    #[command(hide = true)]
-    Audit(AuditArgs),
 
     /// Turn the signals agentstack already collects (usage, call audit log,
     /// context costs, trust ledger) into concrete recommendations: inert
@@ -1201,11 +1196,9 @@ pub struct DoctorArgs {
     /// use (hidden by default; --ci always shows everything).
     #[arg(long)]
     pub all: bool,
-}
 
-#[derive(Args, Debug)]
-pub struct AuditArgs {
-    /// Emit machine-readable JSON instead of the text report.
+    /// Emit the full report as machine-readable JSON instead of the text
+    /// report (the structured surface the retired `audit --json` occupied).
     #[arg(long)]
     pub json: bool,
 }

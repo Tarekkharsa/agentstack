@@ -5,7 +5,6 @@ pub mod add;
 pub mod adopt;
 pub mod analyze;
 pub mod apply;
-pub mod audit;
 pub mod bundle;
 pub mod connect;
 pub mod consolidate;

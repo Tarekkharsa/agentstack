@@ -153,22 +153,30 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let mut report = Report::new();
     let fixed = run_checks(args, manifest_dir, &mut report)?;
 
-    // `--ci` always shows the full report: a team gate should print exactly
-    // what it evaluated, not a per-project selection of it.
-    report.print(args.all || args.ci);
+    if args.json {
+        // Machine-readable: the full structured report (this is the surface the
+        // retired `audit --json` used to occupy — doctor now owns it, as a
+        // superset that carries every section, not just the content scan).
+        // Nothing else goes to stdout so the output stays parseable.
+        println!("{}", serde_json::to_string_pretty(&report.to_json())?);
+    } else {
+        // `--ci` always shows the full report: a team gate should print exactly
+        // what it evaluated, not a per-project selection of it.
+        report.print(args.all || args.ci);
 
-    println!();
-    if fixed > 0 {
-        println!("{} re-applied {fixed} drifted target(s).", "✓".green());
+        println!();
+        if fixed > 0 {
+            println!("{} re-applied {fixed} drifted target(s).", "✓".green());
+        }
+        println!(
+            "{} error(s), {} warning(s).",
+            report.errors, report.warnings
+        );
     }
-    println!(
-        "{} error(s), {} warning(s).",
-        report.errors, report.warnings
-    );
 
     // In CI mode any error fails the trust gate. Return an error rather than
     // exiting inline so `main` owns the single exit point and this path stays
-    // testable.
+    // testable. Gating is independent of the output format above.
     if args.ci && report.errors > 0 {
         anyhow::bail!("doctor found {} error(s) — see report above", report.errors);
     }
@@ -187,11 +195,95 @@ pub fn collect(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
             fix: false,
             deep: true,
             all: true,
+            json: false,
         },
         manifest_dir,
         &mut report,
     )?;
     Ok(report.to_json())
+}
+
+/// One scanned capability (skill or instruction fragment) and its findings —
+/// the unit the content scan reports. Serializable so `doctor --json` can carry
+/// it in the structured report.
+#[derive(serde::Serialize)]
+pub struct Unit {
+    /// `skill` or `instruction`.
+    pub kind: &'static str,
+    pub name: String,
+    /// Set when the source couldn't be scanned (not materialized, read error).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
+    pub findings: Vec<crate::scan::Finding>,
+}
+
+/// Scan every manifest skill materialized locally (path sources and store
+/// clones of the lock references) plus every instruction file. Offline: a git
+/// skill not yet in the store is reported as skipped, never fetched. This is
+/// the content scan `doctor --deep` (and `--ci`) drives — the sole owner now
+/// that the standalone `audit` verb is gone.
+pub fn collect_content_units(
+    manifest: &Manifest,
+    dir: &Path,
+    store: &crate::store::Store,
+) -> Vec<Unit> {
+    use crate::scan;
+    let mut units = Vec::new();
+    for (name, skill) in &manifest.skills {
+        let unit = match crate::store::local_source_dir(store, skill, dir) {
+            None => skipped_unit(
+                "skill",
+                name,
+                "not materialized ↳ agentstack install".into(),
+            ),
+            Some(src) => match scan::scan_tree(&src) {
+                Ok(findings) => Unit {
+                    kind: "skill",
+                    name: name.clone(),
+                    skipped: None,
+                    findings,
+                },
+                Err(e) => skipped_unit("skill", name, format!("scan failed: {e}")),
+            },
+        };
+        units.push(unit);
+    }
+    for (name, instr) in &manifest.instructions {
+        let path = resolve_scan_path(dir, &instr.path);
+        let unit = if !path.exists() {
+            skipped_unit("instruction", name, format!("missing file {}", instr.path))
+        } else {
+            match scan::scan_file(&path, &instr.path) {
+                Ok(findings) => Unit {
+                    kind: "instruction",
+                    name: name.clone(),
+                    skipped: None,
+                    findings,
+                },
+                Err(e) => skipped_unit("instruction", name, format!("scan failed: {e}")),
+            }
+        };
+        units.push(unit);
+    }
+    units
+}
+
+fn skipped_unit(kind: &'static str, name: &str, reason: String) -> Unit {
+    Unit {
+        kind,
+        name: name.to_string(),
+        skipped: Some(reason),
+        findings: Vec::new(),
+    }
+}
+
+fn resolve_scan_path(dir: &Path, p: &str) -> std::path::PathBuf {
+    let pb = std::path::PathBuf::from(p);
+    if pb.is_absolute() {
+        pb
+    } else {
+        dir.join(pb)
+    }
 }
 
 fn run_checks(
@@ -958,10 +1050,11 @@ fn run_checks(
         }
     }
 
-    // Supply-chain content scan (same detectors as `agentstack audit`): hidden
-    // Unicode is an error so `--ci` gates it; injection heuristics only warn.
-    // It reads every skill body, so the everyday run skips it — `--deep` opts
-    // in and `--ci` (the trust gate) always includes it.
+    // Supply-chain content scan: hidden Unicode is an error so `--ci` gates it;
+    // injection heuristics only warn. It reads every skill body, so the everyday
+    // run skips it — `--deep` opts in and `--ci` (the trust gate) always
+    // includes it. This is the only on-demand content re-scan surface (the
+    // standalone `audit` verb was folded in here).
     report.section("Content scan");
     // Nothing with scannable content declared → nothing this could ever find.
     if skill_names.is_empty() && manifest.servers.is_empty() {
@@ -969,7 +1062,7 @@ fn run_checks(
     }
     if args.ci || args.deep {
         let mut flagged = 0usize;
-        for unit in crate::commands::audit::collect(manifest, &ctx.dir, &store) {
+        for unit in collect_content_units(manifest, &ctx.dir, &store) {
             for f in &unit.findings {
                 flagged += 1;
                 let level = match f.severity {
@@ -2396,6 +2489,7 @@ mod tests {
                 fix: false,
                 deep,
                 all: false,
+                json: false,
             },
             Some(proj),
             &mut report,

@@ -64,7 +64,8 @@ fn retired_top_level_verbs_are_gone() {
         vec!["agentstack", "codemode"],
         vec!["agentstack", "consolidate"],
         vec!["agentstack", "lib", "migrate"],
-        vec!["agentstack", "audit", "--calls"],
+        // `audit` was folded into `doctor --deep`; the top-level verb is gone.
+        vec!["agentstack", "audit"],
     ] {
         assert!(
             Cli::try_parse_from(&argv).is_err(),
