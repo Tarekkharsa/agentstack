@@ -314,10 +314,405 @@ audit story should name.
 **Decided:** nothing yet — awaiting the hook-conformance audit of the
 existing 9 before adding a 10th hook surface.
 
+### P12a — Hermes Agent (researched 2026-07-18)
+
+Hermes Agent (Nous Research, github.com/NousResearch/hermes-agent, MIT,
+~216k stars, v0.18.2 Jul 2026, Python local CLI + gateway) is a second
+adapter candidate *alongside* OpenClaw, not a fork of it. Global-only config
+at `~/.hermes/config.yaml` with an `mcp_servers:` YAML key (stdio + HTTP,
+OAuth/mTLS fields); SKILL.md skills in `~/.hermes/skills/` plus an opt-in
+`skills.external_dirs` that can point at the shared `~/.agents/skills`
+convention our Codex adapter already renders; and a genuine blocking
+`pre_tool_call` hook (Python plugin or shell script, JSON stdin/stdout,
+`{"action":"block"}`), plugins default-deny. Ships `hermes claw migrate`
+(OpenClaw migration).
+
+Verdict: merits an adapter now. OpenClaw-first still pays — the engine
+primitives (plugin-file hook pattern, shared-skills-dir wiring) generalize —
+but the descriptor is new work, not copy-paste. Open items: confirm no
+project-scoped config exists (inspect `hermes_cli/mcp_config.py`); no
+AGENTS.md-analog found for instructions delivery; `${VAR}` interpolation in
+mcp env unconfirmed.
+
+**Status: DRAFT — awaiting maintainer review.**
+
+## Trust gate + gateway (feature 4)
+
+### Investigated facts (2026-07-18, v0.12.0)
+
+- `agentstack trust .` has no `--dry-run` — the grant *is* the review, and it
+  is rich. Run against a scratch two-server manifest:
+
+  ```
+  Trusting /private/tmp/…/proj for the zero-files bridge.
+
+  This project declares — review what auto-mode may run/contact:
+    ▶ github: runs `npx -y @modelcontextprotocol/server-github`
+    ▶ filesystem: runs `npx -y @modelcontextprotocol/server-filesystem /tmp`
+    secrets referenced: GITHUB_TOKEN
+
+  ✓ trusted at sha256:e07c838c….
+  Editing the manifest or lockfile invalidates this — re-run `agentstack trust` after reviewing changes.
+  Pinned skill/server content that drifts is blocked at use time until re-locked.
+  Withdraw anytime with `agentstack trust --revoke`.
+  ```
+
+  It distinguishes *runs local code* (`▶ runs …`) from *contacts network*
+  (`→ contacts …`), names every secret ref, flags in-process native
+  extensions with an ALL-CAPS `EXECUTABLE` warning, and — when the project
+  declares `[policy]` — prints "policy requested by this project (can only
+  narrow the machine layer)". The consent moment teaches machine-vs-repo
+  layering, but only for repos that declare policy; a repo with no `[policy]`
+  block never learns the machine ceiling exists at trust time.
+
+- Re-trust after editing the manifest re-lists the **whole** surface with no
+  diff. Adding an `evil` server and re-running `trust` printed:
+
+  ```
+    ▶ github: runs `npx …server-github`
+    ▶ filesystem: runs `npx …server-filesystem /tmp`
+    ▶ evil: runs `python3 ./evil.py`
+    secrets referenced: GITHUB_TOKEN
+  ```
+
+  The newly-added `evil` line is formatted identically to the two already-
+  trusted servers — no `NEW`/changed marker. The user must eyeball the full
+  list to spot what a `git pull` slipped in, which is exactly the case trust
+  exists to catch.
+
+- Untrusted-repo experience splits by audience. The **agent** gets a good
+  note — `tools_search` returns "No proxied tools available. This project
+  (…) is not trusted for auto mode, so none of its MCP servers are proxied
+  (spawned or contacted). Ask a human to review the manifest and run
+  `agentstack trust …`" — and `agentstack_list` exposes `bridge.trust:
+  "untrusted"` (machine-readable). The MCP `tools/list` still serves 21
+  control-plane tools; the declared `github` server is simply absent, inert.
+  The stderr line ("control-plane tools only … Run `agentstack trust`") is
+  honest but most clients don't surface stderr.
+
+- The **human** running bare `agentstack` in an untrusted project sees trust
+  as a one-word status with the wrong next step:
+
+  ```
+    Status    not locked (never activated) · untrusted
+    Next:  agentstack setup   finish the first run — preview, apply, activate
+  ```
+
+  "untrusted" is never defined, and `Next` points at `setup`, not `trust` —
+  nothing tells the human that trusting is what turns the repo's servers on
+  for the bridge.
+
+- `trust --list` flags lapse well: `⚠ … · manifest or lockfile changed since
+  trusted — re-run `agentstack trust` there`.
+
+- `gateway connect <harness>` is dry-run by default and shows the exact JSON
+  diff plus an honest zero-file-limit note. But the teaching that ties the
+  gateway to trust — "Each repo now only needs a trusted manifest:
+  `agentstack trust <dir>` unlocks its servers for the bridge. Untrusted
+  repos get control-plane tools only." — prints **only after `--write`**, not
+  in the dry-run preview the user reads first.
+
+### P14 — Re-trust should diff, not re-list
+
+Facts: re-running `trust` after a manifest edit reprints the entire surface
+with the new `evil` server formatted identically to already-trusted ones — no
+change marker. Proposal: when a project was previously trusted, mark each line
+against the last pinned digest (`+ added`, `~ changed`, `- removed`) for
+servers, secrets, skills, extensions, and policy, so a `git pull`'s new
+executable is visually obvious instead of buried in a flat list. First-trust
+stays the full flat review (nothing to diff against).
+
+**Status: DRAFT — awaiting maintainer review.**
+
+### P15 — Keep the run/contact/secret/policy consent model; extend the policy line
+
+Facts: the trust review already separates `▶ runs` from `→ contacts`, names
+secret refs, ALL-CAPS-flags in-process extensions, and states "policy
+requested … can only narrow the machine layer" — principle 4 done well. Gap:
+that machine-vs-repo layering line appears only when the repo declares
+`[policy]`. Proposal: adopt this surface as the canonical consent template,
+and always print one line naming the machine policy file
+(`~/.agentstack/agentstack.toml`) as the ceiling — so a user consenting to a
+policy-free repo still learns at the consent moment that a machine layer
+exists and where it lives.
+
+**Status: DRAFT — awaiting maintainer review.**
+
+### P16 — Untrusted teaching for the human, not just the agent
+
+Facts: the agent-facing untrusted note is informative; the human's bare
+`agentstack` shows only the word "untrusted" with `Next → setup`. Proposal:
+when a manifest exists and is untrusted (or changed-since-trusted), bare
+orientation says what that means in one line ("its servers are inert — the
+bridge exposes control-plane tools only until you review it") and makes
+`agentstack trust .` the next step, distinct from `setup`.
+
+**Status: DRAFT — awaiting maintainer review.**
+
+### P17 — `gateway connect` teaches the trust-unlock in the dry-run, not after write
+
+Facts: the "every repo now needs a trusted manifest … untrusted repos get
+control-plane only" pointer prints only on the `--write` path; the dry-run
+preview a user reads first omits it. Proposal: include the trust-unlock line
+in the dry-run output (the moment the user is deciding whether to register the
+bridge is when they need to know trust is the per-repo gate), not only after
+the change is committed.
+
+**Status: DRAFT — awaiting maintainer review.**
+
+## Profiles + library + packs (feature 5)
+
+### Investigated facts (2026-07-18, v0.12.0)
+
+- `lib add` is transparent: dry-run by default, records provenance, and warns
+  honestly. Adding a skill from a temp dir:
+
+  ```
+    ⚠ source /private/tmp/…/myskill is a temporary directory — the recorded provenance will dangle once it is cleaned up (the library copy is unaffected)
+  ✓ added 'greet' (path) in the central library
+    copied /private/tmp/…/myskill → …/lib/skills/greet
+    the library copy is now canonical — edits to the source have no effect
+    checksum 5820fb5e5de0
+  ```
+
+- `lib list` carries a provenance column
+  (`path:/Users/…` or `git:host/repo@rev#subpath`), but a dangling temp-dir
+  source is shown as a live `path:/…` forever with no "source gone" marker:
+
+  ```
+  Skills
+    greet   A demo greeting skill…   path   5820fb5e5de0   path:/private/tmp/…/myskill
+  ```
+
+- **The manifest-local vs library-by-name distinction is a live trap.**
+  Declaring `[skills.greet]` (an inline block) with a library skill of the
+  same name in `~/.agentstack/lib` does *not* resolve to the library copy —
+  it is treated as an inline skill missing a source:
+
+  ```
+  error: resolving skill 'greet' for profile 'dev': skill has neither `path` nor `git` source
+  ```
+
+  The library reference works only when the name is listed in the profile's
+  `skills = ["greet"]` with **no** `[skills.greet]` block:
+
+  ```
+  Activating profile 'dev' (scope: project) — 0 server(s), 1 skill(s)
+    → 1 skill(s) to symlink into …/.claude/skills
+  ```
+
+  The error never hints that a library skill named `greet` exists, nor that
+  the inline block is what shadowed it. Inline-wins-over-library precedence is
+  likewise silent — no shadowing warning at activation.
+
+- Profile discovery is fragmented. There is no "list profiles" command. Bare
+  orientation shows a **count** only ("2 profile(s)"), never names. Names
+  surface through `setup`, `explain`, and — most usefully — the
+  disambiguation error itself:
+
+  ```
+  error: several profiles declared — name one: agentstack use <profile> (dev, prod)
+  ```
+
+  A plain "what profiles do I have and what's in each" has no home.
+
+- `add from` surfaces provenance in output ("found {name} ({source}) —
+  {id}"; git packs show tag + commit12), and pack install/upgrade print
+  next-steps and gate house-rule instructions behind opt-in
+  `--with-instructions`. `lib sync` blocks pushing a literal secret. These are
+  the model — nothing to fix.
+
+### P18 — A first-class profile listing
+
+Facts: no command names profiles; bare orientation shows only a count; users
+learn names by triggering the multi-profile error. Proposal: `agentstack use
+--list` (or `agentstack profiles`) that names each declared profile, its
+server + skill counts, and which is currently active — so "which profiles
+exist and what's in them" stops being archaeology through the manifest.
+
+**Status: DRAFT — awaiting maintainer review.**
+
+### P19 — The inline-vs-library resolution error must teach
+
+Facts: `[skills.greet]` with no `path`/`git` errors "skill has neither `path`
+nor `git` source" even when a library skill named `greet` exists, with no
+pointer to the by-name form. Proposal: when an inline skill has no source and
+a library skill of that name exists, say so and show the fix ("`greet` is in
+your central library — drop the `[skills.greet]` block and list it in the
+profile's `skills = […]` to reference the library copy"). Optionally warn at
+activation when an inline skill shadows a same-named library skill.
+
+**Status: DRAFT — awaiting maintainer review.**
+
+### P20 — `lib list` marks dangling provenance
+
+Facts: a temp-dir/path source that no longer exists is shown as a live
+`path:/…` indefinitely; the add-time warning is the only signal it will
+dangle. Proposal: `lib list` checks whether a `path:` source still exists and,
+when gone, renders it "source gone — library copy canonical" instead of a dead
+absolute path, so provenance reads honestly long after the add.
+
+**Status: DRAFT — awaiting maintainer review.**
+
+### P21 — State the two mental models in one place
+
+Facts: "by-name library reference" (resolved fresh, `checksum`/`rev` locator)
+vs "vendored pack copy" (`[packs.<name>]` ledger with source/version/rev) is
+coherent in code and honestly surfaced per-command, but never contrasted in
+one place — and P19's trap grows straight out of that gap. Proposal: a short
+help/doc paragraph (and a line in `explain`) that names the two models and
+when each applies, so a user forms the mental model before hitting the inline
+block.
+
+**Status: DRAFT — awaiting maintainer review.**
+
+## Locked runs + sandbox + lockdown (feature 6)
+
+### Investigated facts (2026-07-18, v0.12.0)
+
+- There is no `sandbox`/`lockdown` subcommand — all three are flags on
+  `run`: `--locked` (host, fail-closed gate; routes to `locked.rs`),
+  `--sandbox`/`--lockdown` (container; `sandbox.rs`), plus `--plan`.
+
+- `run --locked --plan` leads with an honest posture + limits block, then a
+  redacted proposed grant. Green (trusted + locked) tail:
+
+  ```
+  → plan for `run claude-code --locked` (nothing will be mutated)
+    posture: HOST / PROTECTED
+    ℹ protected host run: content trust, strict lock verification, and policy
+       admission are enforced BEFORE launch … Not kernel isolation: the harness
+       runs as you, on the host; the harness/interpreter binary itself is an
+       unpinned $PATH executable; evidence is a cooperative local audit trail.
+    ✓ no ambient user/global-scope MCP entries for this harness …
+    ✓ trust: explicitly trusted
+    ℹ commitment key: will be created on first live run
+    proposed grant:
+      project: …/proj
+      harness: claude-code (0 redacted argument(s))
+      servers: filesystem
+      inputs: 0 skill(s), 0 instruction(s), 0 executable pin(s), 0 extension(s)
+      digest: (bound on first live run, once the commitment key exists)
+  ✓ live launch would proceed
+  ```
+
+  On the green path only *trust* gets a `✓` line — the other gates
+  (locked-inputs verified, policy fits the ceiling, rendered extensions) are
+  not enumerated; those per-gate teaching lines exist only in the **live**
+  run, not in `--plan`, the "one auditable description of what a run would do".
+
+- The refusal path teaches with the fix inline. Untrusted:
+
+  ```
+  error: a live `run claude-code --locked` would be REFUSED — 1 blocker(s):
+    [trust] project is not trusted — run `agentstack trust .` after reviewing
+  ```
+
+  After editing the manifest (drift), the refusal is:
+
+  ```
+    [trust] configuration changed since it was trusted — re-review and re-trust
+  ```
+
+  Note: because trust pins the manifest **and** the lockfile, editing the
+  manifest trips `[trust]` *before* `[locked-verify]` is ever reached. A user
+  who changed a pinned input is told only to "re-trust" — never that the lock
+  is now stale and that re-locking re-gates trust (the P9 rule). The
+  lock-drift-specific messages ("skill content drifted from agentstack.lock…"
+  `→ agentstack lock`) fire only when trust still holds but a pinned input's
+  bytes drift underneath a matching manifest (e.g. a git skill upstream).
+
+- `--sandbox --plan` / `--lockdown --plan` run fine with no Docker and no
+  `sandbox` feature (as designed), and the posture labels are bluntly honest:
+
+  ```
+  ▶ sandboxing claude-code (run r-98e8e91e3b) — bundle trusted
+    posture: SANDBOX / PROXIED · DIRECT ROUTE OPEN
+    🛡 egress is routed through the AgentStack proxy…
+  ```
+  ```
+    posture: LOCKDOWN / ENFORCED · NO DIRECT ROUTE
+    🔒 lockdown: no host route, no internet — the container's only peer is the egress sidecar.
+  ```
+
+- But `run --sandbox` **live** without the feature draws the entire sandbox
+  banner (`▶ sandboxing … trusted`, posture, workspace, egress) and only
+  *then* errors:
+
+  ```
+  ▶ sandboxing claude-code (run r-44a33f7aa0) — bundle trusted
+    posture: SANDBOX / PROXIED · DIRECT ROUTE OPEN
+    workspace: …/proj/.agentstack → /workspace read-only …
+    🛡 egress is routed through the AgentStack proxy…
+  error: sandbox support is not compiled into this build — rebuild with `cargo build --features sandbox` …
+  ```
+
+  The banner implies a container is starting before the prerequisite check
+  reveals none can. (Docker-daemon-down maps to "cannot reach Docker (…) — is
+  the daemon running?" at the same late point.)
+
+- **Severe (reported, not a proposal):** the workspace mount resolves to the
+  **manifest's parent directory**, not the project root. With the recommended
+  nested `.agentstack/agentstack.toml` layout, `--sandbox` mounts
+  `…/proj/.agentstack → /workspace` — the agent sees only the `.agentstack`
+  folder, not the project's code. A legacy root `agentstack.toml` correctly
+  mounts the project root. Confirmed in scratch both ways.
+
+### P22 — `--locked --plan` should enumerate every gate, like the live path
+
+Facts: the green plan shows posture + a single `✓ trust` + the grant + "would
+proceed"; the per-gate `✓` teaching (locked inputs verified, policy fits the
+ceiling, rendered extensions verified) appears only in the live run.
+Proposal: have `--plan` print the same per-gate `✓` lines the live path does,
+so the "one auditable description" actually describes each admission decision
+in user terms on the happy path, not just the refusals.
+
+**Status: DRAFT — awaiting maintainer review.**
+
+### P23 — A manifest edit should point at re-lock *and* re-trust together
+
+Facts: editing the manifest trips `[trust]` first (trust pins manifest +
+lock), so the refusal says only "re-review and re-trust" — the lock is now
+stale but the user is never told to `agentstack lock`, nor that re-locking
+re-gates trust (P9). Proposal: when the refusal is caused by a manifest change
+that also invalidates the lock, name both steps and their order ("the lock is
+stale — `agentstack lock`, review, then `agentstack trust .`; re-locking is
+itself a re-decision"), so the two content-bound anchors aren't taught as one.
+
+**Status: DRAFT — awaiting maintainer review.**
+
+### P24 — Check the sandbox prerequisite before drawing the banner
+
+Facts: `run --sandbox` without the `sandbox` feature (and, at the same late
+point, with Docker down) prints the full sandboxing banner before erroring.
+Proposal: run the feature/daemon prerequisite check first and fail with the
+rebuild/daemon instruction *before* any "▶ sandboxing …" output, so the user
+is never shown a container start that cannot happen. `--plan` keeps working
+without Docker (it explicitly describes, not launches).
+
+**Status: DRAFT — awaiting maintainer review.**
+
+### P25 — Keep the posture labels and limits block as the disclosure template
+
+Facts: `HOST / PROTECTED`, `SANDBOX / PROXIED · DIRECT ROUTE OPEN`,
+`LOCKDOWN / ENFORCED · NO DIRECT ROUTE`, and the "Not kernel isolation …
+cooperative local audit trail" block are principle 4 (explain the why) at its
+best — "ENFORCED" is reserved for lockdown by design. Proposal: adopt this
+run/contact honesty as the template for every posture disclosure across the
+product (trust, guard, gateway), so a user reads the same blunt vocabulary
+about what is and isn't actually enforced everywhere.
+
+**Status: DRAFT — awaiting maintainer review.**
+
 ## Next features to discuss
 
-Walkthrough continues; discussion sections land here as we go:
-- guard (feature 3) — includes P3 above
-- trust gate + gateway (feature 4)
-- profiles / library / packs (feature 5)
-- locked runs / sandbox / lockdown (feature 6)
+Walkthrough continues; discussion sections land here as we go. Covered so far:
+- first-run (feature 1) — P1–P7
+- doctor + drift (feature 2) — P8–P10
+- guard (feature 3) — P11, P13 (+ P3 above); new harness coverage P12/P12a
+- trust gate + gateway (feature 4) — P14–P17 (DRAFT)
+- profiles / library / packs (feature 5) — P18–P21 (DRAFT)
+- locked runs / sandbox / lockdown (feature 6) — P22–P25 (DRAFT)
+
+Still to walk: recorder / reports / audit, secrets lifecycle, adapters +
+`export`/`import`, dashboard + proxy.
