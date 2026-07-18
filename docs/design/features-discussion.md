@@ -168,6 +168,25 @@ This is principle 3 made concrete: the user should never wonder what a
 also persisted (e.g. `doctor --last-setup` or a pointer to the history log
 that `restore` already reads).
 
+### P27 — One verb: `init` IS the wizard
+
+Maintainer decision (2026-07-18, third time the init/setup split confused
+even its own designer): there is ONE front-door command, `agentstack init`.
+Interactive `init` runs the full guided wizard (P1 plan → import → P2 secret
+choice → guard → P8 scan offer → apply/confirm → P4 modes → P7 summary).
+Non-interactive `init` keeps the scriptable primitive contract (flags, no
+prompts, preview-only writes where the wizard would ask). `setup` becomes a
+hidden alias of `init` — kept so muscle memory and old docs don't break, but
+never advertised again. All docs/help say `init`.
+
+Sequencing: the wizard batch (in flight) builds the flow where it lives
+today; this re-pointing lands as the follow-up commit on top — dispatch
+`init` (interactive) into the wizard path, hide `setup`, sweep the docs'
+verb usage.
+
+**Decided:** yes — one command to set up everything easily is the product's
+promise; the verb users guess must be the verb that delivers it.
+
 ## Doctor + drift (feature 2)
 
 ### Investigated facts
