@@ -23,8 +23,8 @@
 #
 # Known gaps found by this example's first round live as tracked tasks, not
 # assertions (see FINDINGS.md "Device-onboarding round"): subdir walk-up
-# discovery, adopt on hand-EDITED values, project-scope removal warnings,
-# and the apply default-scope-vs-quickstart decision.
+# discovery and adopt on hand-EDITED values. (The default-scope decision
+# landed — docs/design/default-scope.md — and A3 asserts the new behavior.)
 #
 # Requires: `agentstack` on PATH (or AGENTSTACK_BIN=..., or a built
 # target/{release,debug}/agentstack in this repo), git, python3.
@@ -120,7 +120,10 @@ grep -q '\${' "$M" && ok "secret lifted to a \${REF}" || bad "no \${REF} in mani
 "$AS" apply --write >/dev/null 2>&1 && bad "apply exited 0 despite unresolved ref" || ok "apply --write blocks the unresolved ref (nonzero exit)"
 REF=$(grep -o '\${[A-Z0-9_]*}' "$M" | head -1 | tr -d '${}')
 env "$REF=fake-value" "$AS" apply --write >/dev/null 2>&1 && ok "apply succeeds once the ref resolves via env" || bad "resolved apply failed"
-grep -q 'linear' "$H/.claude.json" && ok "codex-imported server fanned out to the claude config" || bad "cross-CLI fan-out missing"
+# Default scope is project inside a repo manifest (docs/design/default-scope.md),
+# so the fan-out lands in the repo's .mcp.json — never in ~/.claude.json.
+grep -q 'linear' .mcp.json && ok "codex-imported server fanned out to the project claude config" || bad "cross-CLI fan-out missing"
+grep -q 'linear' "$H/.claude.json" && bad "repo apply leaked into the global claude config" || ok "global claude config untouched by the repo apply"
 
 # ═══ B. Config safety ════════════════════════════════════════════════════════
 
