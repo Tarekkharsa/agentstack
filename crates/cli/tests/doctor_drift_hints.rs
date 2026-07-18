@@ -272,8 +272,11 @@ fn kept_foreign_stays_reported_after_guarded_apply() {
     );
 }
 
-/// A config edited by hand since our last write gets a next step, not just a
-/// bare observation.
+/// A config whose MANAGED region was edited by hand since our last write gets
+/// a next step, not just a bare observation. The edit must actually reach the
+/// region we own — the on-disk server URL differs from what the manifest
+/// renders — so the warning agrees with `agentstack diff` (see
+/// `unmanaged_churn_is_not_edited_on_disk` for the converse).
 #[test]
 fn hand_edit_hints_diff_and_adopt() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -281,12 +284,15 @@ fn hand_edit_hints_diff_and_adopt() {
     let home = tmp.path().join("home");
     setup(&home);
 
+    // On disk the managed server points at a hand-edited URL…
     let cfg = home.join(".claude.json");
     fs::write(
         &cfg,
-        "{\n  \"mcpServers\": {\n    \"kibana_mcp\": { \"type\": \"http\", \"url\": \"https://kibana/mcp\" }\n  }\n}\n",
+        "{\n  \"mcpServers\": {\n    \"kibana_mcp\": { \"type\": \"http\", \"url\": \"https://HAND-EDITED/mcp\" }\n  }\n}\n",
     )
     .unwrap();
+    // …while the manifest still renders the original URL, so the managed region
+    // on disk differs from the render (plan.changed() is true).
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
     fs::write(
@@ -296,7 +302,7 @@ fn hand_edit_hints_diff_and_adopt() {
     )
     .unwrap();
 
-    // Recorded hash differs from what's on disk now → the hand-edit branch.
+    // Recorded hash differs from what's on disk now → the file was touched.
     let mut state = State::default();
     state.record(
         "claude-code",
@@ -310,10 +316,88 @@ fn hand_edit_hints_diff_and_adopt() {
     let drift = section_msgs(&report, "Drift").join("\n");
     assert!(
         drift.contains("edited on disk since last apply"),
-        "hand-edit must be detected, got: {drift}"
+        "hand-edit to the managed region must be detected, got: {drift}"
     );
     assert!(
         drift.contains("review: agentstack diff") && drift.contains("agentstack adopt"),
         "hand-edit warning must carry a next step, got: {drift}"
+    );
+}
+
+/// Regression (P10): a config that doubles as a live state store — Claude
+/// Code's ~/.claude.json is rewritten continuously by running sessions —
+/// changes its UNMANAGED keys constantly. Doctor's "edited on disk" signal used
+/// to compare the whole rendered file against the last-apply record, so any
+/// such churn tripped it: doctor flapped forever while `agentstack diff`, which
+/// compares only the managed content, said "in sync". Now doctor uses the same
+/// managed-content comparison, so unmanaged churn is silent and only a change
+/// to the managed region warns.
+#[test]
+fn unmanaged_churn_is_not_edited_on_disk() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup(&home);
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.kibana_mcp]\ntype = \"http\"\nurl = \"https://kibana/mcp\"\n",
+    )
+    .unwrap();
+
+    // Apply once (global scope) so the on-disk managed region and the recorded
+    // hash both reflect the real render — no exact-match guessing.
+    agentstack::commands::apply::run(
+        &agentstack::cli::ApplyArgs {
+            targets: vec![],
+            profile: None,
+            dry_run: false,
+            write: true,
+            scope: Some(Scope::Global),
+            allow_unresolved: false,
+            prune_foreign: false,
+            no_gitignore: true,
+        },
+        Some(&proj),
+    )
+    .unwrap();
+
+    let cfg = home.join(".claude.json");
+    let applied = fs::read_to_string(&cfg).unwrap();
+
+    // A running session rewrites an UNMANAGED top-level key; the managed
+    // `mcpServers` region is untouched. This is exactly the live-state churn
+    // that used to flap.
+    let churned = applied.replace("\"mcpServers\"", "\"numStartups\": 99,\n  \"mcpServers\"");
+    assert_ne!(churned, applied, "test setup: churn must change the file");
+    fs::write(&cfg, &churned).unwrap();
+
+    let report = doctor::collect(Some(&proj)).unwrap();
+    let drift = section_msgs(&report, "Drift").join("\n");
+    assert!(
+        !drift.contains("edited on disk"),
+        "unmanaged churn must NOT read as an on-disk edit, got: {drift}"
+    );
+    assert!(
+        drift.contains("all targets in sync"),
+        "managed region unchanged → doctor agrees with diff, got: {drift}"
+    );
+
+    // Now hand-edit the MANAGED region (the server URL): that must warn.
+    let managed_edit = churned.replace("https://kibana/mcp", "https://HAND-EDITED/mcp");
+    assert_ne!(
+        managed_edit, churned,
+        "test setup: managed edit must change the file"
+    );
+    fs::write(&cfg, &managed_edit).unwrap();
+
+    let report = doctor::collect(Some(&proj)).unwrap();
+    let drift = section_msgs(&report, "Drift").join("\n");
+    assert!(
+        drift.contains("edited on disk since last apply"),
+        "a change to the managed region must warn, got: {drift}"
     );
 }

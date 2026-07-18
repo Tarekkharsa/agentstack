@@ -424,14 +424,19 @@ fn run_checks(
         report.line(Level::Ok, "no secrets referenced");
         report.mark_irrelevant();
     }
+    // Name the layer each ref resolves from (env / varlock / keychain / .env) —
+    // the same provenance `secret list` and `setup` surface, via one
+    // `SecretSources::detect` over the resolution chain rather than a bare
+    // `resolve()` that only answers yes/no. `source_of` returns `None` exactly
+    // when nothing in the chain resolves, so the not-found arm is unchanged.
+    let sources = crate::secret::SecretSources::detect(&ctx.dir);
     for name in &refs {
-        if ctx.resolver.resolve(name).is_some() {
-            report.line(Level::Ok, format!("{name:<20} resolved"));
-        } else {
-            report.line(
+        match sources.source_of(name) {
+            Some(source) => report.line(Level::Ok, format!("{name:<20} resolved from {source}")),
+            None => report.line(
                 Level::Error,
                 format!("{name:<20} not found ↳ agentstack secret set {name}"),
-            );
+            ),
         }
     }
 
@@ -559,41 +564,55 @@ fn run_checks(
                     ),
                 );
             }
-            // Hand-edit since our last write?
+            // Hand-edit since our last write? `last_hash` covers the WHOLE
+            // file, so on its own it flips on any on-disk change — managed OR
+            // unmanaged. A config that doubles as a live state store (e.g.
+            // ~/.claude.json, which running Claude Code sessions rewrite
+            // constantly) churns its unmanaged keys all the time; comparing the
+            // whole file made doctor flap "edited on disk" forever while
+            // `agentstack diff` reported "in sync". Gate the warning on
+            // `plan.changed()` — the exact managed-content comparison `diff`
+            // uses (TargetPlan::changed → diff::differs over the rendered
+            // region) — so doctor and diff always agree: the warning fires only
+            // when the touch actually reached the region we manage.
             if let Some(ts) = state.targets.get(&key) {
-                if !ts.last_hash.is_empty() {
-                    let on_disk = state::hash(&plan.existing);
-                    if on_disk != ts.last_hash {
-                        // The owner of an owned server rewrites its own config by
-                        // design. When the mismatch is fully explained — this
-                        // target owns a refreshed server and the owner-refreshed
-                        // render proposes no change — it's app churn, not a
-                        // hand-edit to review.
-                        let owner_churn =
-                            !plan.changed() && owned.iter().any(|o| o.stale && o.owner == **id);
-                        if owner_churn {
-                            report.line(
-                                Level::Ok,
-                                format!(
-                                    "{:<14} rewritten by the app itself (owned server) — \
-                                 refresh the manifest: agentstack apply --write{scope_flag}",
-                                    desc.display
-                                ),
-                            );
-                        } else {
-                            any_drift = true;
-                            report.line(
-                                Level::Warn,
-                                format!(
-                                    "{:<14} edited on disk since last apply ↳ review: agentstack \
-                                 diff{scope_flag} · keep the hand-edit: agentstack \
-                                 adopt{scope_flag}",
-                                    desc.display
-                                ),
-                            );
-                        }
-                    }
+                // Did the file change on disk at all since our write? (Cheap
+                // whole-file guard; the managed-region check below decides
+                // whether that change is worth reporting.)
+                let touched =
+                    !ts.last_hash.is_empty() && state::hash(&plan.existing) != ts.last_hash;
+                if touched && plan.changed() {
+                    // The managed region on disk differs from what we'd render —
+                    // a real hand-edit to our keys. (A pure manifest change
+                    // leaves the file untouched, so `touched` is false and this
+                    // stays quiet; the pending-changes branch below reports that
+                    // case instead.)
+                    any_drift = true;
+                    report.line(
+                        Level::Warn,
+                        format!(
+                            "{:<14} edited on disk since last apply ↳ review: agentstack \
+                             diff{scope_flag} · keep the hand-edit: agentstack \
+                             adopt{scope_flag}",
+                            desc.display
+                        ),
+                    );
+                } else if touched && owned.iter().any(|o| o.stale && o.owner == **id) {
+                    // The file changed but our managed region still matches the
+                    // render, and this target owns a server its app rewrites by
+                    // design — name that churn so a whole-file change on an owned
+                    // config isn't left a mystery.
+                    report.line(
+                        Level::Ok,
+                        format!(
+                            "{:<14} rewritten by the app itself (owned server) — \
+                             refresh the manifest: agentstack apply --write{scope_flag}",
+                            desc.display
+                        ),
+                    );
                 }
+                // Otherwise: file untouched, or only unmanaged keys changed
+                // (benign live-state churn) — silent, so doctor agrees with diff.
             }
             // Pending manifest changes?
             if plan.changed() {
