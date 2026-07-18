@@ -229,6 +229,26 @@ edited-on-disk for changes inside the managed region.
 **Decided:** bug, fix it. **Open:** none — the comparison logic exists in
 diff already.
 
+## Guard (feature 3)
+
+### P11 — Disclose the defaults and their source files
+
+Users must be able to answer "what is blocked, and where is that written?"
+without reading source code:
+
+- **Install/seed moment**: `guard install` (and setup's guard step) prints
+  the default deny list it is activating and names the file it lives in —
+  "these rules are TOML in `~/.agentstack/agentstack.toml`; each project's
+  `.agentstack/agentstack.toml` can ADD entries, never remove them."
+- **Status**: `guard status` already lists deny globs and allow_roots — add
+  the source file next to each layer (machine vs project) so the layering is
+  visible.
+- **Denials**: the deny-glob denial already cites its source file; the
+  destructive-command and workspace denials should too (destructive patterns
+  are built-in — say so: "built-in rule; deny/allow lists: <file>").
+
+**Decided:** yes. Complements P3 (denials teach the exact allow_roots fix).
+
 ## Next features to discuss
 
 Walkthrough continues; discussion sections land here as we go:
