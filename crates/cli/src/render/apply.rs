@@ -343,12 +343,14 @@ pub fn plan_target_with_servers(
         )?,
     };
 
-    // First-run trust rule: selecting no servers for a target that has no config
-    // yet must be a true no-op. Otherwise JSON adapters create empty scaffolds
-    // like `{ "mcpServers": {} }`, which looks like a write blast radius even
-    // though no capability was configured. Prunes still render so previously
-    // managed entries can be removed.
-    if managed.is_empty() && removed.is_empty() && existing.trim().is_empty() {
+    // No-op trust rule: when we manage nothing and prune nothing, we own no
+    // bytes in this file, so the plan must propose the existing content
+    // verbatim. Otherwise the merge normalizes untouched configs — scaffolding
+    // `{ "mcpServers": {} }` into an empty or `{}` file, or reformatting a
+    // hand-written section — and apply/diff/doctor report phantom drift
+    // ("0 change(s) pending"). Prunes still render so previously managed
+    // entries can be removed.
+    if managed.is_empty() && removed.is_empty() {
         proposed = existing.clone();
     }
 
@@ -663,6 +665,44 @@ mod tests {
             !plan2.unresolved.is_empty(),
             "missing ${{REF}} reported as unresolved"
         );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+        std::env::remove_var("HOME");
+    }
+
+    #[test]
+    fn plan_with_nothing_managed_proposes_existing_verbatim() {
+        // Regression: doctor warned "0 change(s) pending" because a plan with
+        // no servers still normalized an existing `{}` config into
+        // `{ "mcpServers": {} }`, making changed() true with nothing to apply.
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("AGENTSTACK_HOME", home.child(".agentstack").path());
+
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("claude-code").unwrap();
+        let proj = assert_fs::TempDir::new().unwrap();
+        let (config_path, _) = desc.config_for(Scope::Global, proj.path()).unwrap();
+        fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        fs::write(&config_path, "{}").unwrap();
+
+        let plan = plan_target_with_servers(
+            desc,
+            &MapResolver::from([]),
+            &Default::default(),
+            &IndexMap::new(),
+            &[],
+            Scope::Global,
+            proj.path(),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(plan.proposed, plan.existing, "no-op plan must not reformat");
+        assert!(!plan.changed());
 
         std::env::remove_var("AGENTSTACK_HOME");
         std::env::remove_var("HOME");
