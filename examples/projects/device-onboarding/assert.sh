@@ -99,7 +99,7 @@ hdr "A2) one CLI, empty config"
 device
 echo '{}' > "$H/.claude.json"
 OUT=$("$AS" init 2>&1)
-grep -q "Detected 1" <<<"$OUT" && ok "detects exactly 1 CLI" || bad "$(grep -i detect <<<"$OUT")"
+grep -q "1 CLI binary on PATH" <<<"$OUT" && ok "detects exactly 1 CLI" || bad "$(grep -i detect <<<"$OUT")"
 grep -q "Imported 0" <<<"$OUT" && ok "imports 0 from an empty config" || bad "$(grep -i import <<<"$OUT")"
 grep -q 'claude-code' .agentstack/agentstack.toml && ok "targets include claude-code" || bad "targets wrong"
 
@@ -112,7 +112,7 @@ mkdir -p "$H/.codex" "$H/.cursor"
 printf '[mcp_servers.linear]\ncommand = "npx"\nargs = ["-y", "@linear/mcp"]\n' > "$H/.codex/config.toml"
 echo '{"mcpServers":{}}' > "$H/.cursor/mcp.json"
 OUT=$("$AS" init --no-keychain 2>&1)
-grep -q "Detected 3" <<<"$OUT" && ok "detects 3 CLIs" || bad "$(grep -i detect <<<"$OUT")"
+grep -q "3 CLI binaries on PATH" <<<"$OUT" && ok "detects 3 CLIs" || bad "$(grep -i detect <<<"$OUT")"
 grep -q "Imported 3" <<<"$OUT" && ok "imports 3 servers across json + toml" || bad "$(grep -i import <<<"$OUT")"
 M=.agentstack/agentstack.toml
 grep -q 'ghp_FAKE' "$M" && bad "PLAINTEXT TOKEN IN THE MANIFEST" || ok "no plaintext token in the manifest"

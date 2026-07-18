@@ -377,9 +377,14 @@ version = 1
     }
 
     println!(
-        "{}  {} CLI binaries on PATH: {}",
+        "{}  {} CLI {} on PATH: {}",
         "🔍".dimmed(),
         detected.len(),
+        if detected.len() == 1 {
+            "binary"
+        } else {
+            "binaries"
+        },
         display_names.join(" · ")
     );
     println!(
