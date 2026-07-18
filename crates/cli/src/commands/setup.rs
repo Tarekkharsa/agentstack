@@ -13,7 +13,7 @@ use std::path::Path;
 use anyhow::Result;
 use owo_colors::OwoColorize;
 
-use crate::cli::{ApplyArgs, DoctorArgs, InitArgs, InstallArgs, SetupArgs};
+use crate::cli::{ApplyArgs, ConnectArgs, DoctorArgs, InitArgs, InstallArgs, LockArgs, SetupArgs};
 use crate::lock::Lock;
 use crate::manifest::load::MANIFEST_FILE;
 use crate::manifest::{validate_with_context, Manifest};
@@ -113,8 +113,59 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
-    // 5. Preview the exact config changes (no "re-run with --write" hint — we
-    //    drive our own confirm next).
+    // 5. P28: the delivery mode is chosen BEFORE any write and forks the rest
+    //    of the run. static renders into every CLI (the original path);
+    //    clean-at-rest pins the lock and teaches the session rhythm without
+    //    rendering; zero-files offers the gateway and points at trust. No more
+    //    apply-first-then-print-the-undo.
+    let current_mode = super::overview::detect_mode(&ctx, &target_ids);
+    let mode = choose_delivery_mode(current_mode)?;
+    if interactive {
+        // A one-line plan of exactly what this fork will do next, straight from
+        // the same pure mapping the test pins.
+        println!("  {} {}", "→".cyan(), fork_plan(mode).join(" · ").dimmed());
+    }
+
+    // P7: snapshot the write ledger now, so the closing summary shows exactly
+    // the files *this run* wrote — reusing the same ledger `restore` reads —
+    // regardless of which fork ran.
+    let history_before: std::collections::HashSet<String> =
+        crate::history::list().into_iter().map(|e| e.id).collect();
+
+    let proceeded = match mode {
+        super::overview::Mode::Static => run_static(args, scope, manifest_dir)?,
+        super::overview::Mode::CleanAtRest => {
+            run_clean_at_rest(&ctx, manifest_dir)?;
+            true
+        }
+        super::overview::Mode::ZeroFiles => {
+            run_zero_files()?;
+            true
+        }
+    };
+    // The static fork returns false only when its write confirm was declined —
+    // nothing was written and the message is already printed, so there is
+    // nothing to seed or summarize.
+    if !proceeded {
+        return Ok(());
+    }
+
+    // Machine layer + the P7 transparency close are common to every mode.
+    // Reload so a static apply's manifest refresh (owned-server tables) is
+    // reflected in the summary; a no-render fork reloads an unchanged manifest.
+    let ctx = super::load(manifest_dir)?;
+    let seeded_house_rules = offer_house_rules(&ctx, &target_ids)?;
+    print_change_summary(&ctx, &history_before, seeded_house_rules);
+    Ok(())
+}
+
+/// The static fork: the original render path — preview, confirm, install,
+/// apply, activate skills, doctor. Returns `false` when the user declines the
+/// write confirm (so the caller skips the machine-change summary), `true`
+/// once the write path has run.
+fn run_static(args: &SetupArgs, scope: Scope, manifest_dir: Option<&Path>) -> Result<bool> {
+    // Preview the exact config changes (no "re-run with --write" hint — we
+    // drive our own confirm next).
     println!("\n{}", "Preview".bold());
     let preview = super::apply::preview(&apply_args(args, scope, false), manifest_dir)?;
     if preview.validation_errors || preview.write_blockers > 0 {
@@ -123,25 +174,19 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             "→".cyan(),
             "agentstack init".bold()
         );
-        return Ok(());
+        return Ok(false);
     }
 
-    // 6. Confirm, then apply for real. `confirm` returns false without blocking
-    //    when there's no terminal, so CI/pipes stop here having written nothing.
+    // `confirm` returns false without blocking when there's no terminal, so
+    // CI/pipes stop here having written nothing.
     if !crate::util::confirm::confirm("\nApply this setup?")? {
         println!(
             "\n{} Nothing written. Re-run in a terminal to apply, or use {}.",
             "·".dimmed(),
             "agentstack apply --write".bold()
         );
-        return Ok(());
+        return Ok(false);
     }
-
-    // P7: remember which apply-history entries already existed, so the closing
-    // summary can show exactly the files *this run* wrote — reusing the same
-    // write ledger `restore` reads, not inventing new tracking.
-    let history_before: std::collections::HashSet<String> =
-        crate::history::list().into_iter().map(|e| e.id).collect();
 
     println!("\n{}", "Install".bold());
     super::install::run(
@@ -157,15 +202,12 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // prints only the per-target write results rather than repeating it.
     super::apply::write_quiet(&apply_args(args, scope, true), manifest_dir)?;
 
-    // 6b. Skills — `apply` renders servers/instructions/hooks/settings but
-    //     never skills; they activate through a profile. Finish the job here
-    //     via the same prepare/activate seam `use` and `session start` share,
-    //     so the first agent session actually has the manifest's skills.
-    //     Reload first: the apply pass above may have refreshed owned-server
-    //     tables in the manifest on disk.
+    // Skills — `apply` renders servers/instructions/hooks/settings but never
+    // skills; they activate through a profile. Finish the job here via the same
+    // prepare/activate seam `use` and `session start` share, so the first agent
+    // session actually has the manifest's skills. Reload first: the apply pass
+    // above may have refreshed owned-server tables in the manifest on disk.
     let ctx = super::load(manifest_dir)?;
-    // What to activate: a selected profile, the implicit default (no profiles
-    // declared, but inline skills exist), or nothing left to do.
     let selection: Option<Option<String>> = match select_profile(&ctx, args)? {
         Some(p) => Some(Some(p)),
         None if !ctx.loaded.manifest.skills.is_empty() => Some(None),
@@ -179,9 +221,9 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
         };
         println!("\n{}", "Skills".bold());
         if let Err(err) = materialize_profile(&ctx, args, scope, profile.as_deref()) {
-            // Configs are already written at this point — surface the
-            // problem and the exact recovery command instead of failing
-            // the whole setup on its last step.
+            // Configs are already written at this point — surface the problem
+            // and the exact recovery command instead of failing the whole setup
+            // on its last step.
             println!(
                 "  {} could not activate profile '{label}' ({err:#})",
                 "⚠".yellow()
@@ -192,9 +234,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     println!("\n{}", "Doctor".bold());
     // P8: offer the deep content scan at the one moment it's relevant — right
-    // after skills landed. Only when there ARE skills (no empty questions), and
-    // only interactively (a non-interactive setup never reaches this write path
-    // at all, so its preview-only contract is untouched).
+    // after skills landed. Only when there ARE skills, and only interactively.
     let deep = offer_deep_scan(&ctx)?;
     super::doctor::run(
         &DoctorArgs {
@@ -204,24 +244,124 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             deep,
             all: false,
             json: false,
+            skip_drift: false,
+        },
+        manifest_dir,
+    )?;
+    Ok(true)
+}
+
+/// The clean-at-rest fork: pin the lock (no render), teach the session rhythm,
+/// then a drift-suppressed doctor. Nothing lands in any CLI config — the repo
+/// stays pristine for git and capabilities exist only inside a session.
+fn run_clean_at_rest(ctx: &super::Context, manifest_dir: Option<&Path>) -> Result<()> {
+    use super::overview::Mode;
+
+    println!("\n{}", "Lock".bold());
+    // Reuse the `lock` command as a library call: it pins every profile's refs
+    // (library-aware) without materializing anything, and prints its own P9
+    // trust re-gate warning if this project was already trusted.
+    super::lock::run(
+        &LockArgs {
+            profile: None,
+            update: None,
+            upgrade: None,
+            all: false,
+            with_instructions: false,
+            yes: false,
+            write: false,
         },
         manifest_dir,
     )?;
 
-    // 7. Machine layer: offer the agentstack house rules once. They live in
-    //    the personal manifest (~/.agentstack), not this project, so every
-    //    repo's agents get them via the global CLAUDE.md / AGENTS.md.
-    let seeded_house_rules = offer_house_rules(&ctx, &target_ids)?;
+    // Teach the two-command rhythm, threading the manifest's first profile into
+    // `session start` (falls back to a placeholder). Reuses the pure
+    // `mode_switch_plan` mapping so the wording has one source of truth.
+    let profile = ctx
+        .loaded
+        .manifest
+        .profiles
+        .keys()
+        .next()
+        .map(String::as_str);
+    let (cmds, what) = mode_switch_plan(Mode::CleanAtRest, profile);
+    println!(
+        "\n  {} capabilities exist only during a session — the repo stays clean for git:",
+        "·".dimmed()
+    );
+    for c in &cmds {
+        println!("    {}", c.bold());
+    }
+    println!("  {} {what}", "·".dimmed());
 
-    // 7b. P4: the modes are a visible choice, presented now that the user has
-    //     seen the setup actually work. v1 prints the command each non-default
-    //     mode maps to rather than switching in place — the wizard stays
-    //     reversible, and the user runs the switch when they mean to.
-    offer_mode_choice(&ctx, &target_ids)?;
+    println!("\n{}", "Doctor".bold());
+    // skip_drift: nothing is rendered here on purpose, so the "N change(s)
+    // pending ↳ apply --write" comparison would be a false alarm pointing back
+    // at the render this mode opts out of.
+    super::doctor::run(
+        &DoctorArgs {
+            ci: false,
+            live: false,
+            fix: false,
+            deep: false,
+            all: false,
+            json: false,
+            skip_drift: true,
+        },
+        manifest_dir,
+    )?;
+    Ok(())
+}
 
-    // 8. P7: the transparency close — what this run did to the machine, where
-    //    secrets went, what was seeded, and the one-liners to undo or re-inspect.
-    print_change_summary(&ctx, &history_before, seeded_house_rules);
+/// The zero-files fork: nothing is rendered. Offer to register the gateway in
+/// every installed harness (one small entry each), then point at `trust` —
+/// which we NEVER run for the user: trust is human consent (principle 3), so
+/// the wizard only ever prints the command.
+fn run_zero_files() -> Result<()> {
+    use super::overview::Mode;
+
+    println!("\n{}", "Zero-files".bold());
+    println!(
+        "  {} nothing is written to disk; the gateway serves servers and skills\n\
+         \x20   live over MCP, trust-gated per repo.",
+        "·".dimmed()
+    );
+
+    // cmds[0] = "agentstack gateway connect --all", cmds[1] = "agentstack trust ."
+    let (cmds, what) = mode_switch_plan(Mode::ZeroFiles, None);
+
+    let register = crate::util::confirm::is_interactive()
+        && crate::util::confirm::confirm(
+            "\n  Register the agentstack gateway in your installed harnesses now?",
+        )?;
+    if register {
+        // Reuse the `gateway connect` code path as a library call. A failure
+        // here (no MCP-capable harness, say) must not sink the whole setup —
+        // surface it with the manual command, like the house-rules offer does.
+        if let Err(err) = super::connect::run_connect(&ConnectArgs {
+            harnesses: Vec::new(),
+            all: true,
+            transparent: false,
+            write: true,
+            command: None,
+        }) {
+            println!(
+                "  {} gateway registration failed ({err:#}) — register it later with:",
+                "⚠".yellow()
+            );
+            println!("    {} --write", cmds[0].bold());
+        }
+    } else {
+        println!("  {} register it later with:", "·".dimmed());
+        println!("    {} --write", cmds[0].bold());
+    }
+
+    println!(
+        "\n  {} then trust this repo so the gateway will serve its capabilities:",
+        "·".dimmed()
+    );
+    println!("    {}", cmds[1].bold());
+    println!("  {} {what}", "·".dimmed());
     Ok(())
 }
 
@@ -455,65 +595,56 @@ fn mode_switch_plan(
     }
 }
 
-/// P4: present the three delivery modes as an explicit choice, help text and
-/// all, once the user has seen the setup work. The current mode is preselected
-/// (bare Enter keeps it). Choosing another mode PRINTS the command(s) it maps to
-/// — v1 never switches in place, keeping the wizard reversible. Interactive
-/// only; a no-op otherwise.
-fn offer_mode_choice(ctx: &super::Context, target_ids: &[String]) -> Result<()> {
-    if !crate::util::confirm::is_interactive() {
-        return Ok(());
-    }
+/// P28: present the three delivery modes as an arrow-key choice (dialoguer),
+/// help text and all, BEFORE any write — the selection forks the rest of the
+/// run. The current mode is preselected. Non-interactive shells never prompt
+/// and keep the current mode, so CI/pipes stay on the render path they had.
+fn choose_delivery_mode(current: super::overview::Mode) -> Result<super::overview::Mode> {
     use super::overview::Mode;
-    let current = super::overview::detect_mode(ctx, target_ids);
     let modes = [Mode::Static, Mode::CleanAtRest, Mode::ZeroFiles];
 
+    if !crate::util::confirm::is_interactive() {
+        return Ok(current);
+    }
+
+    // The full P4 help prints once above the selector; the menu items carry the
+    // terse one-line consequence so the arrow-key list stays scannable.
     println!("\n{}", "Delivery mode".bold());
-    for (i, m) in modes.iter().enumerate() {
-        let marker = if *m == current { " (current)" } else { "" };
-        println!("  {}. {}{}", i + 1, m.label().bold(), marker.dimmed());
-        println!("     {}", m.help().dimmed());
+    println!(
+        "  {} how capabilities reach your CLIs — you can switch later.",
+        "·".dimmed()
+    );
+    for m in &modes {
+        let marker = if *m == current { "  (current)" } else { "" };
+        println!("\n  {}{}", m.label().bold(), marker.dimmed());
+        println!("    {}", m.help().dimmed());
     }
+    println!();
 
-    let choice = prompt_choice("  Pick a mode", modes.len(), &current, &modes)?;
-    if choice == current {
-        println!("  {} staying on {}.", "·".dimmed(), current.label());
-        return Ok(());
-    }
-
-    let profile = ctx
-        .loaded
-        .manifest
-        .profiles
-        .keys()
-        .next()
-        .map(String::as_str);
-    let (cmds, what) = mode_switch_plan(choice, profile);
-    println!("\n  To move to {} — run:", choice.label().bold());
-    for c in &cmds {
-        println!("    {}", c.bold());
-    }
-    println!("  {} {what}", "·".dimmed());
-    Ok(())
+    let default_idx = modes.iter().position(|m| *m == current).unwrap_or(0);
+    let items: Vec<String> = modes
+        .iter()
+        .map(|m| format!("{} — {}", m.label(), m.short()))
+        .collect();
+    // `.interact()` needs a TTY; we only reach it when `is_interactive()`, and
+    // an Esc/Ctrl-C bubbles up as an error that aborts the wizard cleanly.
+    let idx = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Pick a delivery mode")
+        .items(&items)
+        .default(default_idx)
+        .interact()?;
+    Ok(modes[idx])
 }
 
-/// Read a 1-based menu choice, defaulting to `current` on empty/invalid input.
-/// Its own tiny stdin read (the shared `confirm` helper is yes/no only); reached
-/// only interactively, so `cargo test` never blocks here.
-fn prompt_choice(
-    prompt: &str,
-    n: usize,
-    current: &super::overview::Mode,
-    modes: &[super::overview::Mode],
-) -> Result<super::overview::Mode> {
-    use std::io::Write;
-    print!("{prompt} [1-{n}, Enter = current] ");
-    std::io::stdout().flush()?;
-    let mut line = String::new();
-    std::io::stdin().read_line(&mut line)?;
-    match line.trim().parse::<usize>() {
-        Ok(i) if i >= 1 && i <= n => Ok(modes[i - 1]),
-        _ => Ok(*current),
+/// The ordered steps each delivery-mode fork runs, as plain labels. Pure, so
+/// "which steps run per mode" is unit-testable without a live wizard; it also
+/// backs the one-line plan the wizard prints once a mode is chosen.
+fn fork_plan(mode: super::overview::Mode) -> &'static [&'static str] {
+    use super::overview::Mode;
+    match mode {
+        Mode::Static => &["preview", "confirm", "install", "apply", "skills", "doctor"],
+        Mode::CleanAtRest => &["lock", "session-rhythm", "doctor"],
+        Mode::ZeroFiles => &["gateway-offer", "trust-pointer"],
     }
 }
 
@@ -780,7 +911,33 @@ fn resolve_missing_secrets(ctx: &super::Context, missing: Vec<String>) -> Result
 #[cfg(test)]
 mod tests {
     use super::super::overview::Mode;
-    use super::{mode_switch_plan, render_change_summary};
+    use super::{fork_plan, mode_switch_plan, render_change_summary};
+
+    // P28: the delivery-mode choice is a real fork — each mode runs a distinct,
+    // fixed sequence of steps. Only static renders (preview → confirm → apply);
+    // the other two never render, so neither runs an `apply` step.
+    #[test]
+    fn fork_plan_maps_each_mode_to_its_step_sequence() {
+        assert_eq!(
+            fork_plan(Mode::Static),
+            &["preview", "confirm", "install", "apply", "skills", "doctor"]
+        );
+        assert_eq!(
+            fork_plan(Mode::CleanAtRest),
+            &["lock", "session-rhythm", "doctor"]
+        );
+        assert_eq!(
+            fork_plan(Mode::ZeroFiles),
+            &["gateway-offer", "trust-pointer"]
+        );
+
+        // The two no-render forks must never render into a CLI config.
+        assert!(!fork_plan(Mode::CleanAtRest).contains(&"apply"));
+        assert!(!fork_plan(Mode::CleanAtRest).contains(&"install"));
+        assert!(!fork_plan(Mode::ZeroFiles).contains(&"apply"));
+        // zero-files never renders and never locks — it points at trust instead.
+        assert!(fork_plan(Mode::ZeroFiles).contains(&"trust-pointer"));
+    }
 
     // P4: choosing a non-default mode prints a command sequence, never runs it.
     // The clean-at-rest plan threads the profile name into `session start`.

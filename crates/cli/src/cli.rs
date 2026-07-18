@@ -1202,6 +1202,14 @@ pub struct DoctorArgs {
     /// report (the structured surface the retired `audit --json` occupied).
     #[arg(long)]
     pub json: bool,
+
+    /// Internal (not a CLI flag): suppress the server render-drift section.
+    /// The clean-at-rest wizard fork deliberately renders nothing, so the
+    /// usual "N change(s) pending ↳ apply --write" comparison would be a false
+    /// alarm that contradicts the chosen mode. `#[arg(skip)]` keeps it off the
+    /// parsed surface and defaults it to `false` everywhere else.
+    #[arg(skip)]
+    pub skip_drift: bool,
 }
 
 #[derive(Args, Debug)]

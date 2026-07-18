@@ -1,6 +1,6 @@
 [package]
 name = "agentstack"
-version = "0.12.0"
+version = "0.13.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "One portable manifest, every agent CLI. Manage MCP servers + skills across Claude Code, Codex, and more."
@@ -49,6 +49,11 @@ include_dir = "0.7"
 indexmap = { version = "2", features = ["serde"] }
 keyring = "2"
 rpassword = "7"
+# Arrow-key Select prompts for the interactive wizard (mode fork + secret
+# store). cli crate only — nowhere near trust/policy. default-features off:
+# we only use Select + ColorfulTheme, not the editor/password extras. Reuses
+# the `console` crate already in the tree.
+dialoguer = { version = "0.12", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 age = "0.10"
 tiny_http = "0.12"

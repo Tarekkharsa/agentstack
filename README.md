@@ -97,14 +97,18 @@ Interactive `agentstack init` is the guided path — it imports, previews, appli
 activates interactively. It opens with a plan (nothing written until you
 confirm), and when it lifts inline tokens it asks where the values should
 live — a gitignored project `.env` by default, the OS keychain, or skip and
-decide later, each with a one-line explanation at the moment of choice. It
-closes by letting you pick a delivery mode (static, clean-at-rest, or
-zero-files) and printing a summary of every file it wrote, where each secret
-resolves, and the one-liner to undo it all. The same flow as individual
-commands: `init` → `apply` → `use --write` (skills activate through `use`,
-not `apply`; `setup` runs it for you). If `apply` or `doctor` reports a
-missing secret, store it once — by default it goes in your OS keychain, never
-in the manifest:
+decide later, each with a one-line explanation at the moment of choice. Then
+it asks you to pick a **delivery mode** with the arrow keys, *before* it
+writes anything — and that choice forks the rest of the run: **static**
+previews and renders configs into every CLI; **clean-at-rest** pins the
+lockfile and teaches the `session start`/`session end` rhythm without
+rendering; **zero-files** offers to register the gateway and points you at
+`agentstack trust .`. Every path closes with a summary of every file it
+wrote, where each secret resolves, and the one-liner to undo it all. The
+same flow as individual commands: `init` → `apply` → `use --write` (skills
+activate through `use`, not `apply`; `setup` runs it for you). If `apply` or
+`doctor` reports a missing secret, store it once — by default it goes in your
+OS keychain, never in the manifest:
 
 ```bash
 agentstack secret set GH_PAT
@@ -289,7 +293,7 @@ A starter catalog ships in the binary (`run-codex`, `mine-skills`,
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@v0.12.0  # pin a release tag, not @main
+  - uses: Tarekkharsa/agentstack@v0.13.0  # pin a release tag, not @main
 ```
 
 A maintainer can `sign` the lockfile (detached ed25519) for `verify` on the

@@ -53,11 +53,36 @@ fn resolve_secret_store(args: &InitArgs, allow_prompt: bool) -> Result<SecretSto
 /// The P2 storage menu, shown when init lifts tokens interactively. `.env` is
 /// preselected as the maintainer's decided default: it is what users already
 /// know, and the guard deny-list plus the managed gitignore are what make the
-/// plaintext default defensible. Reuses the plain stdin prompt style of
-/// `util::confirm` — there is no select-widget, so a numbered choice with an
-/// Enter default is the idiom.
+/// plaintext default defensible.
+///
+/// The full multi-line help prints once above the selector; on a real terminal
+/// the choice is an arrow-key `dialoguer::Select` (matching the wizard's mode
+/// fork). A non-TTY caller falls back to the numbered stdin prompt so a piped
+/// run never panics inside dialoguer — this function is only reached after the
+/// caller checked `is_interactive()`, so the fallback is belt-and-suspenders.
 fn prompt_secret_store() -> Result<SecretStore> {
-    use std::io::Write;
+    print_secret_store_help();
+    if crate::util::confirm::is_interactive() {
+        // Each item carries the terse consequence; the full help is above.
+        let items = [
+            "Project .env  (default) — plaintext file next to the manifest, gitignored, guard-blocked",
+            "macOS keychain — migrated into the system keychain (service `agentstack`)",
+            "Skip / decide later — write only ${REF} placeholders; nothing runs until provided",
+        ];
+        let idx = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+            .with_prompt("Where should these token values live?")
+            .items(items)
+            .default(0)
+            .interact()?;
+        Ok(secret_store_at(idx))
+    } else {
+        read_numbered_secret_choice()
+    }
+}
+
+/// Print the three storage options' full help text plus the varlock note — the
+/// context that prints once, above whichever selector runs.
+fn print_secret_store_help() {
     println!("\nWhere should these token values live?\n");
     println!(
         "  {}) Project .env  (default) — Your tokens are written to .env next to the",
@@ -85,6 +110,13 @@ fn prompt_secret_store() -> Result<SecretStore> {
         "  {}",
         "project and refs resolve through varlock instead.".dimmed()
     );
+}
+
+/// Non-TTY fallback: the numbered stdin prompt (the shape that predated the
+/// arrow-key selector). Never panics on a pipe — a closed stdin reads empty and
+/// falls through to the `.env` default via `parse_secret_choice`.
+fn read_numbered_secret_choice() -> Result<SecretStore> {
+    use std::io::Write;
     print!("\nChoice [1]: ");
     std::io::stdout().flush().ok();
     let mut line = String::new();
@@ -92,9 +124,19 @@ fn prompt_secret_store() -> Result<SecretStore> {
     Ok(parse_secret_choice(&line))
 }
 
-/// Map the menu input to a store. Bare Enter (empty), `1`, or anything
-/// unrecognized selects the `.env` default — the safe, familiar choice for a
-/// write; only an explicit `2`/`3` picks the alternatives.
+/// The store at a 0-based `Select` index: 0 → `.env` (default), 1 → keychain,
+/// 2 → skip. Pure, so the index mapping is unit-testable without a terminal.
+fn secret_store_at(idx: usize) -> SecretStore {
+    match idx {
+        1 => SecretStore::Keychain,
+        2 => SecretStore::Skip,
+        _ => SecretStore::Env,
+    }
+}
+
+/// Map the numbered-prompt input to a store. Bare Enter (empty), `1`, or
+/// anything unrecognized selects the `.env` default — the safe, familiar choice
+/// for a write; only an explicit `2`/`3` picks the alternatives.
 fn parse_secret_choice(input: &str) -> SecretStore {
     match input.trim() {
         "2" => SecretStore::Keychain,
@@ -703,5 +745,15 @@ mod tests {
         assert_eq!(parse_secret_choice("3"), SecretStore::Skip);
         // Anything unrecognized falls back to the safe familiar default.
         assert_eq!(parse_secret_choice("garbage"), SecretStore::Env);
+    }
+
+    /// P28: the arrow-key selector maps its 0-based index to the same three
+    /// stores, `.env` first (preselected). Item order must stay in lock-step
+    /// with the numbered fallback above.
+    #[test]
+    fn secret_store_at_index_matches_menu_order() {
+        assert_eq!(secret_store_at(0), SecretStore::Env);
+        assert_eq!(secret_store_at(1), SecretStore::Keychain);
+        assert_eq!(secret_store_at(2), SecretStore::Skip);
     }
 }

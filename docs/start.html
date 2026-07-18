@@ -485,7 +485,7 @@
       <div class="term">
         <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>verify version</b></div>
         <pre><code><span class="p">$</span> agentstack --version
-<span class="c">agentstack 0.12.x</span></code></pre>
+<span class="c">agentstack 0.13.x</span></code></pre>
       </div>
     </li>
   </ol>
@@ -507,10 +507,14 @@
         configuration into one portable manifest, and lifts any inline tokens
         into <code>${REF}</code> references. It then asks <em>where</em> those
         token values should live, defaulting to a gitignored project
-        <code>.env</code>. After you confirm, it previews and writes every
-        change, offers a deep content scan, lets you pick a delivery mode, and
-        closes with a summary of exactly what changed on your machine and how
-        to undo it. Prefer the pieces individually? The same flow is
+        <code>.env</code>. Next you pick a <em>delivery mode</em> with the arrow
+        keys — and that choice <em>forks</em> the rest of the run: <b>static</b>
+        previews and renders configs into every CLI; <b>clean-at-rest</b> pins
+        the lockfile and teaches the <code>session start</code>/<code>end</code>
+        rhythm without rendering anything; <b>zero-files</b> offers to register
+        the gateway and points you at <code>agentstack trust .</code>. Every
+        path closes with a summary of exactly what changed on your machine and
+        how to undo it. Prefer the pieces individually? The same flow is
         <code>agentstack init</code>, then <code>agentstack apply</code>, then
         <code>agentstack use &lt;profile&gt; --write</code>.
       </p>
@@ -551,20 +555,31 @@
 <span class="c">     until you provide values (env, varlock, keychain, or .env) —</span>
 <span class="c">     `agentstack doctor` lists what's missing.</span>
 
-<span class="p">Choice [1]:</span> 1
+<span class="p">? Where should these token values live? ›</span>
+<span class="ok">❯ Project .env  (default) — plaintext file next to the manifest, gitignored, guard-blocked</span>
+<span class="c">  macOS keychain — migrated into the system keychain (service `agentstack`)</span>
+<span class="c">  Skip / decide later — write only ${REF} placeholders; nothing runs until provided</span>
 <span class="ok">  🔑 Stored 1 token(s) in .env (gitignored)</span>
 <span class="ok">  ✅ Wrote .agentstack/agentstack.toml</span>
 
-<span class="c">  … manifest validates · preview every write · Apply this setup? · install + apply --write · doctor</span>
+<span class="ok">  ✓ Manifest validates</span>
 
 <span class="c">Delivery mode</span>
-<span class="c">  1. static (current)</span>
-<span class="c">     Rendered configs stay on disk, kept out of git. Works with every CLI, zero moving parts. This is what you have now.</span>
-<span class="c">  2. clean-at-rest</span>
-<span class="c">     Nothing generated exists between sessions; `agentstack session start` materializes your profile and `session end` reverts it. Your repo stays pristine for git.</span>
-<span class="c">  3. zero-files</span>
-<span class="c">     Nothing is ever written; the gateway serves servers and skills live over MCP, trust-gated per repo. Best when you work across many repos.</span>
-<span class="p">  Pick a mode [1-3, Enter = current]</span> 1
+<span class="c">  · how capabilities reach your CLIs — you can switch later.</span>
+<span class="c">  static  (current)</span>
+<span class="c">    Rendered configs stay on disk, kept out of git. Works with every CLI, zero moving parts. This is what you have now.</span>
+<span class="c">  clean-at-rest</span>
+<span class="c">    Nothing generated exists between sessions; `agentstack session start` materializes your profile and `session end` reverts it. Your repo stays pristine for git.</span>
+<span class="c">  zero-files</span>
+<span class="c">    Nothing is ever written; the gateway serves servers and skills live over MCP, trust-gated per repo. Best when you work across many repos.</span>
+<span class="p">? Pick a delivery mode ›</span>
+<span class="ok">❯ static — rendered configs on disk, kept out of git</span>
+<span class="c">  clean-at-rest — materialized only during a session</span>
+<span class="c">  zero-files — served live over the gateway, trust-gated</span>
+<span class="c">  → preview · confirm · install · apply · skills · doctor</span>
+
+<span class="c">Preview</span>
+<span class="c">  … preview every write · Apply this setup? · install + apply --write · skills · doctor</span>
 
 <span class="ok">✓ Setup complete.</span>
 

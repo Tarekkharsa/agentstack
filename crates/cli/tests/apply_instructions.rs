@@ -73,6 +73,7 @@ fn apply_write_compiles_instructions_into_the_global_file() {
             deep: false,
             all: false,
             json: false,
+            skip_drift: false,
         },
         Some(&proj),
     )
@@ -350,6 +351,7 @@ fn doctor_ci_fails_on_a_missing_fragment_source() {
             deep: false,
             all: false,
             json: false,
+            skip_drift: false,
         },
         Some(&proj),
     )

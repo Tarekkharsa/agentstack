@@ -103,6 +103,7 @@ fn doctor_fix_refuses_unresolved_secret() {
         deep: false,
         all: false,
         json: false,
+        skip_drift: false,
     };
     doctor::run(&dargs, Some(&proj)).unwrap();
     assert!(

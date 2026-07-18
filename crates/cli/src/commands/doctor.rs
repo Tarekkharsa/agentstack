@@ -196,6 +196,7 @@ pub fn collect(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
             deep: true,
             all: true,
             json: false,
+            skip_drift: false,
         },
         manifest_dir,
         &mut report,
@@ -441,272 +442,284 @@ fn run_checks(
     }
 
     report.section("Drift");
-    let mut any_drift = false;
-    let identity = state::manifest_identity(&ctx.dir);
-    // Context-default scope: project for a repo manifest, global for the
-    // machine manifest — the scope `apply` writes here when none is passed
-    // (see docs/design/default-scope.md).
-    let default_scope = Scope::default_for(&ctx.dir);
-    // Owner-refreshed servers: the drift check renders with the owning app's
-    // on-disk values, so an owned server that changed on disk is reported as
-    // "refresh the manifest", never as a pending revert of what the app wrote
-    // (see render::owned).
-    let mut server_map: indexmap::IndexMap<String, crate::manifest::Server> =
-        manifest.servers.clone();
-    let owned = crate::render::refresh_owned_servers(
-        &mut server_map,
-        &ctx.registry,
-        default_scope,
-        &ctx.dir,
-    );
-    for o in owned.iter().filter(|o| o.stale) {
-        any_drift = true;
+    if args.skip_drift {
+        // Clean-at-rest deliberately keeps rendered configs off disk, so the
+        // usual "declared servers not on disk → apply --write" comparison would
+        // be a false alarm pointing the user straight back at the render they
+        // opted out of. Suppress the section (hidden unless --all).
         report.line(
-            Level::Warn,
-            format!(
-                "{:<14} changed in {} (owner) ↳ refresh manifest + re-fan out: \
-                 agentstack apply --write",
-                o.name, o.owner_display
-            ),
+            Level::Ok,
+            "not rendering configs — clean-at-rest keeps them off disk",
         );
-    }
-    let ruleset = match crate::render::ruleset_for(manifest) {
-        Ok(ruleset) => Some(ruleset),
-        Err(error) => {
+        report.mark_irrelevant();
+    } else {
+        let mut any_drift = false;
+        let identity = state::manifest_identity(&ctx.dir);
+        // Context-default scope: project for a repo manifest, global for the
+        // machine manifest — the scope `apply` writes here when none is passed
+        // (see docs/design/default-scope.md).
+        let default_scope = Scope::default_for(&ctx.dir);
+        // Owner-refreshed servers: the drift check renders with the owning app's
+        // on-disk values, so an owned server that changed on disk is reported as
+        // "refresh the manifest", never as a pending revert of what the app wrote
+        // (see render::owned).
+        let mut server_map: indexmap::IndexMap<String, crate::manifest::Server> =
+            manifest.servers.clone();
+        let owned = crate::render::refresh_owned_servers(
+            &mut server_map,
+            &ctx.registry,
+            default_scope,
+            &ctx.dir,
+        );
+        for o in owned.iter().filter(|o| o.stale) {
+            any_drift = true;
             report.line(
-                Level::Error,
+                Level::Warn,
                 format!(
-                    "effective machine policy unavailable — drift rendering is BLOCKED ({error:#})"
+                    "{:<14} changed in {} (owner) ↳ refresh manifest + re-fan out: \
+                 agentstack apply --write",
+                    o.name, o.owner_display
                 ),
             );
-            None
         }
-    };
-    for id in &target_ids {
-        let Some(desc) = ctx.registry.get(id) else {
-            continue;
-        };
-        // Which scopes to check for this target: every scope a previous write
-        // recorded state at — a deliberate `--scope` choice keeps being
-        // honored, never second-guessed — falling back to the context default
-        // for fresh setups so quickstart → doctor stays clean.
-        let mut scopes: Vec<Scope> = [Scope::Global, Scope::Project]
-            .into_iter()
-            .filter(|s| state.targets.contains_key(&target_key(id, *s, &ctx.dir)))
-            .collect();
-        if scopes.is_empty() {
-            scopes.push(default_scope);
-        }
-        for scope in scopes {
-            // Fix-command hints must name the scope when it isn't the default the
-            // bare command would pick here.
-            let scope_flag = if scope == default_scope {
-                String::new()
-            } else {
-                format!(" --scope {scope}")
-            };
-            let key = target_key(id, scope, &ctx.dir);
-            // Was this key's managed set recorded by a different manifest? Its
-            // leftover entries are then not ours to prune (see
-            // State::foreign_prunes): `--fix` keeps them, and the report points at
-            // `apply --prune-foreign` instead of `apply --write`.
-            let foreign_key = state
-                .manifest_source(&key)
-                .is_some_and(|src| src != identity);
-            let mut previously = state.managed_servers(&key);
-            let kept = if args.fix {
-                state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
-                    server_map.contains_key(n)
-                })
-            } else {
-                Vec::new()
-            };
-            // Names an earlier guarded write kept on disk (state bookkeeping —
-            // they left `managed_servers` when the writing manifest recorded its
-            // own set, so neither `foreign_key` nor the plan sees them). Keep
-            // reporting the adopt-or-prune choice until one of them happens.
-            let mut kept_report: Vec<String> = state
-                .kept_foreign(&key)
-                .into_iter()
-                .filter(|n| !server_map.contains_key(n))
-                .collect();
-            for k in &kept {
-                if !kept_report.contains(k) {
-                    kept_report.push(k.clone());
-                }
-            }
-            let Some(ruleset) = ruleset.as_ref() else {
-                continue;
-            };
-            let Some(plan) = plan_target_with_servers(
-                desc,
-                &ctx.resolver,
-                ruleset,
-                &server_map,
-                &previously,
-                scope,
-                &ctx.dir,
-            )?
-            else {
-                continue;
-            };
-
-            if !kept_report.is_empty() {
-                any_drift = true;
+        let ruleset = match crate::render::ruleset_for(manifest) {
+            Ok(ruleset) => Some(ruleset),
+            Err(error) => {
                 report.line(
-                    Level::Warn,
+                    Level::Error,
                     format!(
-                        "{:<14} kept {} — applied by another manifest ↳ keep them: \
+                    "effective machine policy unavailable — drift rendering is BLOCKED ({error:#})"
+                ),
+                );
+                None
+            }
+        };
+        for id in &target_ids {
+            let Some(desc) = ctx.registry.get(id) else {
+                continue;
+            };
+            // Which scopes to check for this target: every scope a previous write
+            // recorded state at — a deliberate `--scope` choice keeps being
+            // honored, never second-guessed — falling back to the context default
+            // for fresh setups so quickstart → doctor stays clean.
+            let mut scopes: Vec<Scope> = [Scope::Global, Scope::Project]
+                .into_iter()
+                .filter(|s| state.targets.contains_key(&target_key(id, *s, &ctx.dir)))
+                .collect();
+            if scopes.is_empty() {
+                scopes.push(default_scope);
+            }
+            for scope in scopes {
+                // Fix-command hints must name the scope when it isn't the default the
+                // bare command would pick here.
+                let scope_flag = if scope == default_scope {
+                    String::new()
+                } else {
+                    format!(" --scope {scope}")
+                };
+                let key = target_key(id, scope, &ctx.dir);
+                // Was this key's managed set recorded by a different manifest? Its
+                // leftover entries are then not ours to prune (see
+                // State::foreign_prunes): `--fix` keeps them, and the report points at
+                // `apply --prune-foreign` instead of `apply --write`.
+                let foreign_key = state
+                    .manifest_source(&key)
+                    .is_some_and(|src| src != identity);
+                let mut previously = state.managed_servers(&key);
+                let kept = if args.fix {
+                    state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
+                        server_map.contains_key(n)
+                    })
+                } else {
+                    Vec::new()
+                };
+                // Names an earlier guarded write kept on disk (state bookkeeping —
+                // they left `managed_servers` when the writing manifest recorded its
+                // own set, so neither `foreign_key` nor the plan sees them). Keep
+                // reporting the adopt-or-prune choice until one of them happens.
+                let mut kept_report: Vec<String> = state
+                    .kept_foreign(&key)
+                    .into_iter()
+                    .filter(|n| !server_map.contains_key(n))
+                    .collect();
+                for k in &kept {
+                    if !kept_report.contains(k) {
+                        kept_report.push(k.clone());
+                    }
+                }
+                let Some(ruleset) = ruleset.as_ref() else {
+                    continue;
+                };
+                let Some(plan) = plan_target_with_servers(
+                    desc,
+                    &ctx.resolver,
+                    ruleset,
+                    &server_map,
+                    &previously,
+                    scope,
+                    &ctx.dir,
+                )?
+                else {
+                    continue;
+                };
+
+                if !kept_report.is_empty() {
+                    any_drift = true;
+                    report.line(
+                        Level::Warn,
+                        format!(
+                            "{:<14} kept {} — applied by another manifest ↳ keep them: \
                      agentstack adopt{scope_flag} · prune them: agentstack apply \
                      --prune-foreign{scope_flag}",
-                        desc.display,
-                        kept_report.join(", ")
-                    ),
-                );
-            }
-            // Hand-edit since our last write? `last_hash` covers the WHOLE
-            // file, so on its own it flips on any on-disk change — managed OR
-            // unmanaged. A config that doubles as a live state store (e.g.
-            // ~/.claude.json, which running Claude Code sessions rewrite
-            // constantly) churns its unmanaged keys all the time; comparing the
-            // whole file made doctor flap "edited on disk" forever while
-            // `agentstack diff` reported "in sync". Gate the warning on
-            // `plan.changed()` — the exact managed-content comparison `diff`
-            // uses (TargetPlan::changed → diff::differs over the rendered
-            // region) — so doctor and diff always agree: the warning fires only
-            // when the touch actually reached the region we manage.
-            if let Some(ts) = state.targets.get(&key) {
-                // Did the file change on disk at all since our write? (Cheap
-                // whole-file guard; the managed-region check below decides
-                // whether that change is worth reporting.)
-                let touched =
-                    !ts.last_hash.is_empty() && state::hash(&plan.existing) != ts.last_hash;
-                if touched && plan.changed() {
-                    // The managed region on disk differs from what we'd render —
-                    // a real hand-edit to our keys. (A pure manifest change
-                    // leaves the file untouched, so `touched` is false and this
-                    // stays quiet; the pending-changes branch below reports that
-                    // case instead.)
-                    any_drift = true;
-                    report.line(
-                        Level::Warn,
-                        format!(
-                            "{:<14} edited on disk since last apply ↳ review: agentstack \
-                             diff{scope_flag} · keep the hand-edit: agentstack \
-                             adopt{scope_flag}",
-                            desc.display
-                        ),
-                    );
-                } else if touched && owned.iter().any(|o| o.stale && o.owner == **id) {
-                    // The file changed but our managed region still matches the
-                    // render, and this target owns a server its app rewrites by
-                    // design — name that churn so a whole-file change on an owned
-                    // config isn't left a mystery.
-                    report.line(
-                        Level::Ok,
-                        format!(
-                            "{:<14} rewritten by the app itself (owned server) — \
-                             refresh the manifest: agentstack apply --write{scope_flag}",
-                            desc.display
+                            desc.display,
+                            kept_report.join(", ")
                         ),
                     );
                 }
-                // Otherwise: file untouched, or only unmanaged keys changed
-                // (benign live-state churn) — silent, so doctor agrees with diff.
-            }
-            // Pending manifest changes?
-            if plan.changed() {
-                // An unresolved `${REF}` must never reach a live config — same gate
-                // as `apply`/`toggle`. `doctor --fix` has no override, so we refuse.
-                if args.fix
-                    && (!plan.unresolved.is_empty()
-                        || !plan.failed.is_empty()
-                        || !plan.denied.is_empty())
-                {
-                    any_drift = true;
-                    if !plan.unresolved.is_empty() {
+                // Hand-edit since our last write? `last_hash` covers the WHOLE
+                // file, so on its own it flips on any on-disk change — managed OR
+                // unmanaged. A config that doubles as a live state store (e.g.
+                // ~/.claude.json, which running Claude Code sessions rewrite
+                // constantly) churns its unmanaged keys all the time; comparing the
+                // whole file made doctor flap "edited on disk" forever while
+                // `agentstack diff` reported "in sync". Gate the warning on
+                // `plan.changed()` — the exact managed-content comparison `diff`
+                // uses (TargetPlan::changed → diff::differs over the rendered
+                // region) — so doctor and diff always agree: the warning fires only
+                // when the touch actually reached the region we manage.
+                if let Some(ts) = state.targets.get(&key) {
+                    // Did the file change on disk at all since our write? (Cheap
+                    // whole-file guard; the managed-region check below decides
+                    // whether that change is worth reporting.)
+                    let touched =
+                        !ts.last_hash.is_empty() && state::hash(&plan.existing) != ts.last_hash;
+                    if touched && plan.changed() {
+                        // The managed region on disk differs from what we'd render —
+                        // a real hand-edit to our keys. (A pure manifest change
+                        // leaves the file untouched, so `touched` is false and this
+                        // stays quiet; the pending-changes branch below reports that
+                        // case instead.)
+                        any_drift = true;
                         report.line(
-                            Level::Error,
+                            Level::Warn,
                             format!(
-                                "{:<14} not fixed — unresolved secret(s): {}",
-                                desc.display,
-                                plan.unresolved.join(", ")
+                                "{:<14} edited on disk since last apply ↳ review: agentstack \
+                             diff{scope_flag} · keep the hand-edit: agentstack \
+                             adopt{scope_flag}",
+                                desc.display
+                            ),
+                        );
+                    } else if touched && owned.iter().any(|o| o.stale && o.owner == **id) {
+                        // The file changed but our managed region still matches the
+                        // render, and this target owns a server its app rewrites by
+                        // design — name that churn so a whole-file change on an owned
+                        // config isn't left a mystery.
+                        report.line(
+                            Level::Ok,
+                            format!(
+                                "{:<14} rewritten by the app itself (owned server) — \
+                             refresh the manifest: agentstack apply --write{scope_flag}",
+                                desc.display
                             ),
                         );
                     }
-                    if !plan.failed.is_empty() {
+                    // Otherwise: file untouched, or only unmanaged keys changed
+                    // (benign live-state churn) — silent, so doctor agrees with diff.
+                }
+                // Pending manifest changes?
+                if plan.changed() {
+                    // An unresolved `${REF}` must never reach a live config — same gate
+                    // as `apply`/`toggle`. `doctor --fix` has no override, so we refuse.
+                    if args.fix
+                        && (!plan.unresolved.is_empty()
+                            || !plan.failed.is_empty()
+                            || !plan.denied.is_empty())
+                    {
+                        any_drift = true;
+                        if !plan.unresolved.is_empty() {
+                            report.line(
+                                Level::Error,
+                                format!(
+                                    "{:<14} not fixed — unresolved secret(s): {}",
+                                    desc.display,
+                                    plan.unresolved.join(", ")
+                                ),
+                            );
+                        }
+                        if !plan.failed.is_empty() {
+                            report.line(
+                                Level::Error,
+                                format!(
+                                    "{:<14} not fixed — secret read failure(s): {}",
+                                    desc.display,
+                                    plan.failed.join(", ")
+                                ),
+                            );
+                        }
+                    } else if args.fix {
+                        plan.write()?;
+                        state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                        // A --fix write is a guarded write too: keep the kept-foreign
+                        // names reachable for a later `apply --prune-foreign`.
+                        state.record_kept_foreign(&key, kept_report.clone());
+                        fixed += 1;
                         report.line(
-                            Level::Error,
+                            Level::Ok,
                             format!(
-                                "{:<14} not fixed — secret read failure(s): {}",
+                                "{:<14} re-applied {} change(s)",
                                 desc.display,
-                                plan.failed.join(", ")
+                                plan.managed.len()
                             ),
                         );
-                    }
-                } else if args.fix {
-                    plan.write()?;
-                    state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
-                    // A --fix write is a guarded write too: keep the kept-foreign
-                    // names reachable for a later `apply --prune-foreign`.
-                    state.record_kept_foreign(&key, kept_report.clone());
-                    fixed += 1;
-                    report.line(
-                        Level::Ok,
-                        format!(
-                            "{:<14} re-applied {} change(s)",
-                            desc.display,
-                            plan.managed.len()
-                        ),
-                    );
-                } else if plan.removed.is_empty() {
-                    any_drift = true;
-                    report.line(
-                        Level::Warn,
-                        format!(
+                    } else if plan.removed.is_empty() {
+                        any_drift = true;
+                        report.line(
+                            Level::Warn,
+                            format!(
                             "{:<14} {} change(s) pending ↳ agentstack apply --write{scope_flag}",
                             desc.display,
                             plan.managed.len()
                         ),
-                    );
-                } else {
-                    // A pending prune deletes real entries from a live config —
-                    // name the victims and offer the keep path, never just the
-                    // one-way "apply --write" hint (which would silently remove
-                    // them, e.g. hand-added or foreign-manifest servers).
-                    any_drift = true;
-                    let prune_cmd = if foreign_key {
-                        // apply's guard keeps foreign entries — pruning them
-                        // takes the explicit flag.
-                        "agentstack apply --prune-foreign"
+                        );
                     } else {
-                        "agentstack apply --write"
-                    };
-                    report.line(
-                        Level::Warn,
-                        format!(
+                        // A pending prune deletes real entries from a live config —
+                        // name the victims and offer the keep path, never just the
+                        // one-way "apply --write" hint (which would silently remove
+                        // them, e.g. hand-added or foreign-manifest servers).
+                        any_drift = true;
+                        let prune_cmd = if foreign_key {
+                            // apply's guard keeps foreign entries — pruning them
+                            // takes the explicit flag.
+                            "agentstack apply --prune-foreign"
+                        } else {
+                            "agentstack apply --write"
+                        };
+                        report.line(
+                            Level::Warn,
+                            format!(
                             "{:<14} would REMOVE {} ↳ keep them: agentstack adopt{scope_flag} · \
                          prune them: {prune_cmd}{scope_flag}",
                             desc.display,
                             plan.removed.join(", ")
                         ),
-                    );
+                        );
+                    }
                 }
             }
         }
-    }
-    if fixed > 0 {
-        state.save()?;
-    }
-    if !any_drift {
-        report.line(Level::Ok, "all targets in sync");
-    }
-    // No servers declared and nothing drifting: there is nothing to fall out
-    // of sync (any leftover prune/foreign findings above are warn lines, which
-    // keep the section visible on their own).
-    if manifest.servers.is_empty() && !any_drift {
-        report.mark_irrelevant();
-    }
+        if fixed > 0 {
+            state.save()?;
+        }
+        if !any_drift {
+            report.line(Level::Ok, "all targets in sync");
+        }
+        // No servers declared and nothing drifting: there is nothing to fall out
+        // of sync (any leftover prune/foreign findings above are warn lines, which
+        // keep the section visible on their own).
+        if manifest.servers.is_empty() && !any_drift {
+            report.mark_irrelevant();
+        }
+    } // end else (skip_drift == false)
 
     // Instruction fragments: the managed region of each CLAUDE.md / AGENTS.md
     // must match what the manifest would compile at SOME scope the project
@@ -2524,6 +2537,7 @@ mod tests {
                 deep,
                 all: false,
                 json: false,
+                skip_drift: false,
             },
             Some(proj),
             &mut report,

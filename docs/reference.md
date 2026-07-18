@@ -189,12 +189,17 @@ must read native skill/instruction files. Add `--sandbox --lockdown` when the
 agent process itself needs isolation—a lease is a capability fence, not a
 sandbox. See [the primitives and decision table](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need).
 
-`setup` presents these three as an explicit choice at the end of the guided run
-(each with its help text); choosing a non-default mode **prints** the exact
-command(s) it maps to rather than switching in place, keeping the wizard
-reversible. Bare `agentstack` reports the project's current mode on its `Mode`
-line — derived from what is actually on disk — so "which mode am I in?" is a
-glance, not archaeology.
+Interactive `init` presents these three as an arrow-key choice (each with its
+help text) **before any write** — and the selection **forks** the rest of the
+run. **static** takes the render path (preview → confirm → `apply --write` →
+activate skills → doctor). **clean-at-rest** renders nothing: it pins the
+lockfile (the `lock` flow), teaches the `session start`/`session end` rhythm,
+and runs a drift-suppressed doctor. **zero-files** also renders nothing: it
+offers to register the gateway (`gateway connect --all --write`) and then
+points at `agentstack trust .` — which the wizard never runs for you, since
+trust is human consent. Bare `agentstack` reports the project's current mode
+on its `Mode` line — derived from what is actually on disk — so "which mode am
+I in?" is a glance, not archaeology.
 
 The managed `.gitignore` block is anchored to **outcomes, not declarations**:
 an entry exists only for a file agentstack actually wrote or still manages
