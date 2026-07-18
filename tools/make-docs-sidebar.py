@@ -91,7 +91,6 @@ EXPANSIONS = {
         ("14", "The central library", "#e14"),
         ("15", "Sync across machines", "#e15"),
         ("16", "Versioned vendor packs", "#e16"),
-        ("17", "Adopt a native plugin", "#e17"),
         ("24", "Add a CLI in one file", "#e24"),
         ("25", "The personal layer", "#e25"),
         (None, "Protect", None),

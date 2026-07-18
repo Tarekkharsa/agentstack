@@ -428,7 +428,7 @@
 
     <h3>Which command for which job</h3>
     <div class="layers">
-      <div class="layer"><span class="name">apply --write</span><span class="mech">Render manifest-wide servers, instructions, settings, and hooks. <strong>It never materializes skills</strong>; skills activate through a profile.</span><span class="chip validate">persistent</span></div>
+      <div class="layer"><span class="name">apply --write</span><span class="mech">Render manifest-wide servers, instructions, settings, hooks, and native extensions. <strong>It never materializes skills</strong>; skills activate through a profile.</span><span class="chip validate">persistent</span></div>
       <div class="layer"><span class="name">use &lt;profile&gt; --write</span><span class="mech">Activate one profile's servers + skills, persistently, until you switch again. Global scope by default.</span><span class="chip validate">persistent</span></div>
       <div class="layer"><span class="name">session start &lt;p&gt;</span><span class="mech">Activate a profile <em>and record how to undo it</em>, so <code>session end</code> restores the previous server config and removes skills the session added. Manual bookends.</span><span class="chip cooperative">ephemeral</span></div>
       <div class="layer"><span class="name">run &lt;cli&gt; --profile &lt;p&gt;</span><span class="mech">Apply a profile, launch the CLI as a child, and auto-revert after a normal or managed child exit. Recovery is still available after an interrupted parent process.</span><span class="chip enforced">auto-revert</span></div>

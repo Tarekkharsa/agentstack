@@ -104,6 +104,6 @@ empty state pointing at `agentstack proxy start`.
 ---
 
 Also on the dashboard: skills matrix + consolidate, typed per-CLI settings
-editors, hooks, plugin recipes, profiles/sessions, and live runs (see and
-kill tracked agent processes). The complete inventory is in
-[reference.md](reference.md).
+editors, hooks, a dedicated **Extensions** tab (the content-pinned native
+harness add-ons), profiles/sessions, and live runs (see and kill tracked agent
+processes). The complete inventory is in [reference.md](reference.md).

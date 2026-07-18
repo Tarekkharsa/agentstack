@@ -178,7 +178,10 @@ agentstack restore <target>      # undo a write from its pre-write backup
   its values into the manifest. `apply` then treats the owner's on-disk config
   as the source of truth: it refreshes the manifest and fans the fresh values
   to the other CLIs instead of proposing a downgrade.
-- To reuse one CLI's installed plugin elsewhere, don't copy its files:
-  `agentstack plugins adopt <name> --harness <id> --write` lifts it into the
-  manifest (skills into the library, servers recipe-owned), then
-  `plugins sync --write` + `plugins install <name> --target <other> --write`.
+- To manage a harness's native executable add-on (pi's TypeScript extensions,
+  OpenCode's JS plugins), declare it as `[extensions.<name>]` — a content-pinned
+  source (`path`/`git`) plus exactly one `target` adapter. It is the
+  highest-risk kind: the code runs inside the harness process at full user
+  permission, so an untrusted or drifted project renders zero extension bytes,
+  and `run --locked` re-verifies each delivered copy before launch. Run
+  `agentstack lock` to pin or accept a change.

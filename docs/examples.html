@@ -305,11 +305,11 @@
           <li><a href="#e6"><span class="n">6</span>Add skills</a></li>
           <li><a href="#e7"><span class="n">7</span>Task-specific profiles</a></li>
           <li><a href="#e8"><span class="n">8</span>Instruction files</a></li>
+          <li><a href="#e26"><span class="n">26</span>Native extensions</a></li>
           <li><a href="#e9"><span class="n">9</span>The everyday loop</a></li>
           <li><a href="#e14"><span class="n">14</span>The central library</a></li>
           <li><a href="#e15"><span class="n">15</span>Sync across machines</a></li>
           <li><a href="#e16"><span class="n">16</span>Versioned vendor packs</a></li>
-          <li><a href="#e17"><span class="n">17</span>Adopt a native plugin</a></li>
           <li><a href="#e24"><span class="n">24</span>Add a CLI in one file</a></li>
           <li><a href="#e25"><span class="n">25</span>The personal layer</a></li>
           <li class="subhead">Protect</li>
@@ -447,6 +447,7 @@
             <li value="6"><a href="#e6">Add skills</a></li>
             <li value="7"><a href="#e7">Task-specific profiles</a></li>
             <li value="8"><a href="#e8">Instruction files</a></li>
+            <li value="26"><a href="#e26">Native extensions</a></li>
             <li value="9"><a href="#e9">The everyday loop</a></li>
           </ol>
           <span class="gl">Scale</span>
@@ -454,7 +455,6 @@
             <li value="14"><a href="#e14">The central library</a></li>
             <li value="15"><a href="#e15">Sync across machines</a></li>
             <li value="16"><a href="#e16">Versioned vendor packs</a></li>
-            <li value="17"><a href="#e17">Adopt a native plugin</a></li>
           </ol>
           <span class="gl">Extend</span>
           <ol>
@@ -672,6 +672,14 @@ skills  = ["writing-style"]</code></pre>
 path = "./house-rules.md"
 <span class="cm"># targets = ["*"]   # optional: which CLIs get it (default: all)</span></code></pre>
 
+    <h3 class="ex" id="e26"><span class="num">26</span> Native extensions</h3>
+    <p class="intent">Manage a harness's native executable add-ons — pi's TypeScript extensions, OpenCode's JS plugins — the way <code>[skills.*]</code> manages skill dirs. The <strong>highest-risk</strong> capability agentstack delivers: the code runs inside the harness at full user permission, outside every policy ceiling. agentstack pins and delivers the bytes; it never executes or governs them at runtime.</p>
+    <pre><code>[extensions.checkpoint]
+description = "Git checkpoint on every agent turn"
+path = "./extensions/checkpoint"   <span class="cm"># or: git = "…", rev = "…", subpath = "…"</span>
+target = "pi"                      <span class="cm"># exactly one adapter id — no targets list, no "*"</span></code></pre>
+    <p class="muted small">Strictly pinned — a symlink anywhere in the source is a hard error and unpinned executable content <strong>blocks</strong> until <code>agentstack lock</code> accepts it. <code>apply</code> delivers by <strong>copying</strong> the lock-pinned bytes (never symlinking), so the harness loads exactly what was reviewed. Reserved <code>agentstack-guard*</code> names are refused, and an untrusted or drifted project renders <strong>zero</strong> extension bytes. What it buys you is provenance and content-binding — not runtime governance. Renders today for <strong>pi</strong> and <strong>OpenCode</strong>; other targets validate but warn and render nothing.</p>
+
     <h3 class="ex" id="e9"><span class="num">9</span> The everyday loop</h3>
     <p class="intent">The four commands you'll actually run.</p>
     <div class="viz" data-viz>
@@ -718,9 +726,6 @@ agentstack doctor       <span class="cm"># verify wiring; every warning names it
     <p class="intent">Install a pinned bundle of MCP servers, skills, and house rules in one shot — policy-gated and content-scanned first, with the lockfile recording exactly what you got.</p>
     <p class="muted small">Upgrading is just the next tag. See <a href="library.html#sandbox">the runnable closed-loop demo</a> of a pack installed, applied, firewalled, and upgraded.</p>
 
-    <h3 class="ex" id="e17"><span class="num">17</span> Adopt a native plugin</h3>
-    <p class="intent">Lift a plugin you installed in one CLI into the manifest so it travels everywhere — skills copied to the library with provenance, servers carried as <code>${REF}</code>s.</p>
-    <p class="muted small">The harness you adopted <em>from</em> stays satisfied by its native install — <code>status</code>/<code>doctor</code> report it up to date rather than double-installing. See <a href="library.html#views">how agentstack owns provider views</a>.</p>
   </section>
 
   <!-- ============ EXTEND ============ -->
@@ -1023,7 +1028,7 @@ agentstack proxy report                       <span class="cm"># ranks tokens/tu
       </div>
       <div class="fcard">
         <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Feature reference</a></h3>
-        <p>The complete tested inventory: machine-policy presets, vendor packs, the MCP firewall, plugin recipes, live runs, and every command and flag.</p>
+        <p>The complete tested inventory: machine-policy presets, vendor packs, the MCP firewall, native extensions, live runs, and every command and flag.</p>
       </div>
     </div>
   </section>

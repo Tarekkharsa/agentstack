@@ -1,7 +1,7 @@
 <img alt="agentstack" src="docs/logo.svg" width="380">
 
 > **Build, govern, and run your agent stack from one local control plane.**
-> Define servers, skills, instructions, settings, hooks, plugins, profiles,
+> Define servers, skills, instructions, settings, hooks, extensions, profiles,
 > and secrets once; compile them across agent CLIs; then trust, constrain,
 > run, audit, and optimize the result.
 
@@ -90,7 +90,7 @@ appears only at step 6.
 | [2 — Verify](#step-2--two-habits-that-keep-it-healthy) | `agentstack` · `agentstack doctor` | drift caught early; every warning names its exact fix |
 | [3 — Guard](#step-3--block-the-accidents-one-command) | `agentstack guard install` | `rm -rf`, `git reset --hard`, and `.env` reads blocked before they land |
 | [4 — Trust](#step-4--keep-strangers-repos-inert-until-review) | `gateway connect` · `trust .` | cloned repos stay inert until you review them; brokered calls firewalled and audited |
-| [5 — Scale](#step-5--scale-it-up-profiles-library-plugins-teams) | profiles · `lib` · `plugins` | one governed stack across projects, machines, and teammates |
+| [5 — Scale](#step-5--scale-it-up-profiles-library-teams) | profiles · `lib` · extensions | one governed stack across projects, machines, and teammates |
 | [6 — Confine](#step-6--maximum-assurance-sandbox--lockdown-docker) | `run --sandbox --lockdown` | kernel-enforced confinement — the agent's only route out is the audited proxy |
 
 The same ladder, with expected output at every step, is the
@@ -122,6 +122,11 @@ your OS keychain, never in the manifest:
 ```bash
 agentstack secret set GH_PAT
 ```
+
+Prefer a secrets manager? Drop a `.env.schema` in the project and the same
+`${REF}`s resolve through varlock's providers (1Password, AWS/Azure/GCP,
+Bitwarden, …) instead — OS keychain by default, provider-backed when you opt
+in, and the manifest never changes either way.
 
 What you just wrote looks like this — one file, reviewed like code:
 
@@ -336,7 +341,7 @@ launch. What you get is provenance — which bytes, from where, re-gated on any
 change — not runtime enforcement:
 [enforcement matrix → native extensions](docs/ENFORCEMENT.md#native-extensions).
 
-## Step 5 — Scale it up: profiles, library, plugins, teams
+## Step 5 — Scale it up: profiles, library, teams
 
 Nothing in this step is required — each piece exists for the moment one
 project, one machine, or one person stops being enough.
@@ -376,24 +381,6 @@ definition it can't parse blocks the sync rather than slipping through:
 agentstack lib sync --init --remote git@github.com:you/agent-lib.git
 agentstack lib sync                        # commit local changes, pull, push
 ```
-
-### Take one CLI's plugins everywhere
-
-A plugin you installed in one CLI shouldn't lock its capabilities to that CLI.
-`plugins adopt` lifts an installed native plugin (Claude Code or Codex) into
-the manifest: its skills are **copied into the central library** with
-provenance recorded, and its MCP servers — auth wiring included, as `${REF}`s —
-travel with the recipe:
-
-```bash
-agentstack plugins adopt cloudflare --harness codex --write     # skills → library, recipe → manifest
-agentstack plugins sync --write                                 # generate native packages + marketplaces
-agentstack plugins install cloudflare --target claude-code --write
-```
-
-The harness you adopted *from* stays satisfied by its native install —
-`status`/`doctor` report it as up to date at the adopted version and flag
-drift when the native plugin moves ahead, instead of ever double-installing.
 
 ### Share it with a team
 

@@ -8,8 +8,7 @@ The complete, implemented-and-tested feature inventory. The
 [Governance, trust, and secrets](#secrets-and-trust) ·
 [The central library](#the-central-library) ·
 [Capabilities](#capabilities) ·
-[Drift](#drift-adopt-or-apply) ·
-[Plugin recipes](#managed-plugin-recipes) · [Dashboard](#dashboard) ·
+[Drift](#drift-adopt-or-apply) · [Dashboard](#dashboard) ·
 [Live runs](#live-runs-agentstack-run) ·
 [Agent-operable](#agent-operable-agentstack-mcp) ·
 [Optimize](#optimize-agentstack-optimize) · [All commands](#all-commands)
@@ -101,8 +100,8 @@ root itself — never in whatever directory the client happened to launch
 A server can also scope which targets it renders to at all, mirroring
 instructions and hooks: `[servers.X] targets = ["claude-code"]` fans out to
 that adapter only, the `["*"]` default means every target, and an explicit
-`targets = []` opts out of the direct fan-out entirely (how adopted plugin
-servers are stored — the owning plugin delivers them instead). `apply`,
+`targets = []` opts out of the direct fan-out entirely (a server declared for
+provenance and lock pinning but delivered by some other path). `apply`,
 `diff`, and `doctor` drift all share the one filter, and a typo'd id in
 `targets` is a validation error.
 
@@ -207,6 +206,14 @@ from the same records, so alternating them never churns a committed
 The chain: process env → **varlock** → **OS keychain** → project `.env`.
 Unresolved `${REF}`s are reported, never silently blanked.
 
+The varlock link activates only when the project both opts in (a `.env.schema`
+is present) and has the `varlock` binary on PATH — otherwise the chain silently
+skips it. When active, agentstack shells out to
+`varlock load --format json-full --compact` and delegates the whole
+provider matrix to it: 1Password, AWS/Azure/GCP secret managers, Bitwarden,
+and device-local encrypted stores all back the same `${REF}`s, no manifest
+change. See [varlock.dev](https://varlock.dev).
+
 A ref is a strict `${IDENTIFIER}`. Shell fallback syntax
 (`${VAR:-fallback}` inside a command arg) and prompt-style placeholders
 (`${input:key}`) pass through verbatim and are never counted as manifest
@@ -270,6 +277,56 @@ instead of silently falling back to project-only policy. A genuinely absent
 machine manifest is the separate, benign **UNCONFIGURED** state. `doctor`
 distinguishes all three conditions.
 
+### Egress rules (`[policy.egress]`)
+
+Per-server outbound-host rules, keyed and evaluated exactly like
+`[policy.tools]` (plain globs allow, `!` denies, the `"*"` key is rename-proof,
+machine layer checked first and no repo can loosen it) — the subject is the
+destination host instead of a tool name. A pattern may pin a port with a
+`:port` suffix: `api.example.com:443` scopes to that port, a bare host means
+any port. The write/spawn-time check matches the host and defers the port; the
+sandbox egress proxy enforces the exact CONNECT port at runtime.
+
+```toml
+[policy.egress]
+"*" = ["!169.254.169.254"]            # rename-proof: no server reaches metadata
+kibana = ["*.example.com:443"]        # this server: only TLS to our domain
+```
+
+An unconstrained server is allow-by-default; a constrained server whose
+declared URL host can't be resolved statically (it hides behind a `${REF}`)
+fails closed at write time.
+
+### Secret access (`[policy.secrets]`)
+
+Per-server allowlists over `${REF}` names, same keyed grammar again (globs, `!`
+denies, `"*"` rename-proof). Enforced **fail-closed at both substitution
+sites**: a ref outside a server's effective set never resolves for it — not
+into a rendered config, not into a gateway upstream.
+
+```toml
+[policy.secrets]
+github = ["GH_*"]                     # this server may only read GH_* refs
+"*" = ["!AWS_*"]                      # no server resolves an AWS_* secret
+```
+
+### Filesystem scopes (`[policy.filesystem]`)
+
+Bundle-global path-glob scopes (not per-server) in three lists. `write` is the
+enforced one: in `run --sandbox` the workspace mounts **read-only** unless the
+effective write scope covers its root (deny-by-default; a partial scope like
+`src/**` does not grant it — the mount is all-or-nothing). `read` scopes are
+informational. `deny` is a pure blocklist unioned across the machine and
+bundle layers — a repo can add denies but never drop the machine's — matched
+against the workspace-relative path, the absolute path, **and** the bare file
+name, and enforced by the host-mode `agentstack guard` hook.
+
+```toml
+[policy.filesystem]
+write = ["./**"]                      # sandbox: workspace mounts read-write
+deny  = [".env*", "**/*.pem"]         # no tool call may touch these, ever
+```
+
 ### Call log
 
 Every tool call the gateway brokers (MCP proxy and code-mode alike) appends to
@@ -318,7 +375,7 @@ config restore as a fallback. Reverted files simply show up as pending again.
 
 Every check always runs, but the default report prints only the sections
 relevant to this project — a feature you've never touched (the zero-files
-bridge, plugin recipes, reproducibility pins…) stays out of the way until it
+bridge, native extensions, reproducibility pins…) stays out of the way until it
 either gets used or produces a warning/error, which always shows. A closing
 line counts what was hidden; `doctor --all` prints everything, and `--ci`
 always shows the full report (a team gate prints exactly what it evaluated).
@@ -681,59 +738,6 @@ by which side holds the truth:
   `apply --prune-foreign` (it still works after the guarded write recorded
   its own set), or `adopt` them into the current manifest.
 
-## Managed plugin recipes
-
-Declare `[plugins.*]` once and `agentstack plugins sync --write` generates
-repo-local Claude Code + Codex plugin packages and marketplaces
-(`plugins/agentstack/*`, `.agents/plugins/marketplace.json`,
-`.claude-plugin/marketplace.json`). Native installed plugins remain visible in
-the dashboard as a separate read-only inventory; managed recipes can be
-composed from existing servers, skills, and hooks in the Plugins pane.
-
-Create or adopt recipes without hand-editing TOML:
-
-```bash
-agentstack plugins create play \
-  --description "Shared play workflow" \
-  --target claude-code --target codex \
-  --server github --hook notify \
-  --write
-
-# Lift an installed native plugin into [plugins.*] plus any bundled MCP/skills/hooks.
-# Bundled skills are copied into the central library and referenced by name
-# (with plugin provenance recorded), so the recipe survives native plugin
-# updates/uninstalls instead of path-pointing into a versioned plugin cache.
-# Bundled servers are written with `targets = []` — recipe-owned: the native
-# plugin already provides them on the adopted harness and the generated
-# package carries them elsewhere, so `apply` never configures them a second
-# time. Codex auth wiring (`bearer_token_env_var`, `env_http_headers`) is
-# carried through as `${REF}` headers, so doctor demands the secret and the
-# server authenticates wherever the definition travels.
-agentstack plugins adopt playwright --harness claude-code --write
-
-# Generate repo-local native plugin packages + marketplaces.
-agentstack plugins sync --write
-
-# Check generated/native marketplace state and exact next install handoff.
-agentstack plugins status play
-
-# Run the native handoff only after reviewing the dry-run command plan.
-agentstack plugins install play --target codex
-agentstack plugins install play --target codex --write
-agentstack plugins remove play --target codex --write
-```
-
-The harness a recipe was adopted **from** is satisfied by its still-installed
-native plugin: `plugins status` and `doctor` report *satisfied natively* at
-the installed version + rev, and surface drift when the native plugin moves
-ahead of the adopted recipe (re-adopt to catch up) — they never suggest
-installing the agentstack copy alongside the original.
-
-Generated Claude Code packages never reference `hooks/hooks.json` from
-`plugin.json` — Claude Code auto-loads that path, and naming it again is a
-duplicate-hooks load error that breaks the whole plugin. Hook-less recipes
-ship no hooks file at all; the Codex manifest keeps its explicit reference.
-
 ## Dashboard
 
 An embedded localhost server + a self-contained UI (shadcn aesthetic,
@@ -749,6 +753,28 @@ Bound to 127.0.0.1, token-gated, it never exposes secret values, and the same
 unresolved-secret blocking applies to its writes. The complete UI-only
 lifecycle — discover → add → secrets → enable → apply → verify → remove →
 undo — is walked through in [dashboard.md](dashboard.md).
+
+## Ephemeral sessions (`agentstack session`)
+
+A session loads a profile **for now** and reverts it on exit — the clean-at-rest
+mode's native primitive, so nothing generated persists between sessions.
+
+```bash
+agentstack session start backend          # render backend's profile (project scope)
+agentstack session start backend --scope global
+agentstack session list                   # active sessions on this machine
+agentstack session end                    # revert this directory's session
+agentstack session end --all              # revert every active session
+agentstack session freeze --name backend-ci   # pin the resolved set into a new profile
+```
+
+`start` renders the profile's servers, skills, instructions, settings, and
+hooks, records the write, and reverts it on `end` (or `end --all` to clean up
+everywhere). `freeze` captures the session's resolved set — the profile's
+servers plus the skills actually loaded — into a new profile
+(default `<profile>-frozen`) so CI can replay it deterministically; review the
+manifest edit, then `agentstack lock`. The same start/end lifecycle drives the
+dashboard's session feature and the MCP `agentstack_session_*` tools.
 
 ## Live runs (`agentstack run`)
 
@@ -864,10 +890,26 @@ contract is [`docs/design/locked-run-contract.md`](design/locked-run-contract.md
 ## Agent-operable (`agentstack mcp`)
 
 agentstack can run as an MCP server over stdio, so the agent itself can discover
-and propose capabilities — tools: `agentstack_search`, `agentstack_list`,
-`agentstack_doctor`, `agentstack_add_server`. Writes go to the **manifest only**
-(commit-safe `${REF}`s, nothing executed): the agent proposes, a human reviews
-and runs `apply` (the §9g/D20 trust gate). Register it once per harness:
+and propose capabilities. The control-plane surface it advertises, grouped:
+
+- **Discover & inspect** (read-only): `agentstack_search`, `agentstack_list`,
+  `agentstack_doctor`, `agentstack_explain`, `agentstack_diff`.
+- **Propose manifest edits**: `agentstack_add_from`, `agentstack_add_server`,
+  `agentstack_add_skill`, `agentstack_create_profile`. Writes go to the
+  **manifest only** (commit-safe `${REF}`s, nothing executed) — the agent
+  proposes, a human reviews and runs `apply` (the §9g/D20 trust gate).
+- **Progressive skill loading**: `agentstack_list_loadable`, `agentstack_load`.
+- **MCP profile leases**: `agentstack_lease_open`, `agentstack_lease_status`,
+  `agentstack_lease_close`, `agentstack_lease_freeze` — see
+  [MCP profile leases](#mcp-profile-leases-one-connection-one-capability-fence).
+- **Native sessions**: `agentstack_session_start`, `agentstack_session_end`,
+  `agentstack_session_list`, `agentstack_session_freeze` (these render/revert
+  native config; `start` takes a `profile`, not a plugin).
+- **Proxied tool surface**: `tools_search`, `tools_bindings`, and — on
+  sandbox-enabled builds — the experimental
+  [`tools_execute`](#experimental-tools_execute).
+
+Register it once per harness:
 
 ```bash
 agentstack gateway connect claude-code codex   # dry-run: shows the config diff
@@ -1165,7 +1207,7 @@ recorded-change id or an adapter id),
 `--live`; `calls`: `--since`, `--transcripts`), `proxy start|report` (`start`: `--port`,
 `--upstream`; `report`: `--json`),
 `secret set|get|rm|list`, `export`/`import`, `adapters` (`list|show|validate`),
-`plugins`, `settings`,
+`settings`,
 `dashboard`, `mcp` (`--auto-project`, `--transparent`),
 `gateway connect|disconnect` (`connect`: `--all`, `--transparent`, `--write`),
 `trust` (`--list`, `--revoke` — pins the manifest layers **and lockfile**;
@@ -1189,8 +1231,8 @@ drift in `doctor`/`explain`, `lib consolidate` into `lib/skills`) · secrets (ke
 varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`/`--deep`) ·
 content scanning on install + `audit` · official MCP Registry provider +
 `search`/`add from` · `[policy]` trust gate · native per-CLI settings
-(`[settings.*]` → settings.json) · managed plugin recipes (`[plugins.*]` →
-native Claude Code/Codex packages + marketplaces) · atomic writes + backups ·
+(`[settings.*]` → settings.json) · native extensions (`[extensions.*]` →
+content-pinned harness add-ons, re-verified at `run --locked`) · atomic writes + backups ·
 `export`/`import` · `hook` · agent-operable `mcp` server · local dashboard
 (server/skill matrices, Discover, add-skill, settings editor) · live runs
 (`run`/`report runs`/`kill` + dashboard Runs panel) · GitHub Action trust gate ·
