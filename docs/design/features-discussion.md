@@ -702,6 +702,22 @@ about what is and isn't actually enforced everywhere.
 
 **Status: DRAFT — awaiting maintainer review.**
 
+### P26 — Captured CLI output in docs is an unguarded drift class
+
+Found 2026-07-18, hours after shipping P6: the getting-started page, the
+landing page, and the firstrun.svg replay all still showed the retired
+"Detected 6 CLIs" line. The prose-command lint guards command NAMES in code
+spans; literal output captures (pre blocks, terminal-replay SVGs) have no
+guard at all — they drift the moment output wording changes.
+
+Proposal: extend the docs lint with a small registry of load-bearing output
+literals (the strings docs quote verbatim: init detection line, doctor drift
+warning, guard denial prefixes) asserted against the binary's actual output —
+so changing user-visible wording fails CI until every captured sample is
+updated. Cheaper alternative: a grep-list test pinning known-current strings.
+
+**Status: DRAFT — awaiting maintainer review.**
+
 ## Next features to discuss
 
 Walkthrough continues; discussion sections land here as we go. Covered so far:
