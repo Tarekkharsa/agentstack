@@ -231,24 +231,28 @@ PY
 }
 run "guard check --protocol codex   (Read secrets/api-keys.env)"
 set +e
-CODEX_ERR="$(codex_payload "secrets/api-keys.env" | "$AS" guard check --protocol codex 2>&1 1>/dev/null)"
+CODEX_OUT="$(codex_payload "secrets/api-keys.env" | "$AS" guard check --protocol codex 2>/dev/null)"
 CODEX_CODE=$?
 set -e
-if [ "$CODEX_CODE" -eq 2 ] && grep -q "agentstack guard blocked" <<< "$CODEX_ERR"; then
-  ok "codex dialect denies with exit 2 + a stderr reason"
+# Codex uses the documented stdout decision envelope (same shape as Claude):
+# exit 0 + hookSpecificOutput.permissionDecision = "deny".
+if [ "$CODEX_CODE" -eq 0 ] && grep -q '"permissionDecision": *"deny"' <<< "$CODEX_OUT"; then
+  ok "codex dialect denies via the stdout decision envelope (exit 0)"
   EXPECTED_DENIALS=$((EXPECTED_DENIALS + 1))
 else
-  bad "codex dialect: expected exit 2 + stderr reason, got exit $CODEX_CODE / '$CODEX_ERR'"
+  bad "codex dialect: expected stdout permissionDecision=deny + exit 0, got exit $CODEX_CODE / '$CODEX_OUT'"
 fi
 run "guard check --protocol codex   (Read src/index.ts — allowed)"
 set +e
-codex_payload "src/index.ts" | "$AS" guard check --protocol codex >/dev/null 2>&1
+CODEX_OK_OUT="$(codex_payload "src/index.ts" | "$AS" guard check --protocol codex 2>/dev/null)"
 CODEX_OK_CODE=$?
 set -e
-if [ "$CODEX_OK_CODE" -eq 0 ]; then
-  ok "codex dialect allows an ordinary read (exit 0)"
+# Allow and deny both exit 0 now — the decision lives in stdout, so the
+# allowed case must also assert no deny envelope was emitted.
+if [ "$CODEX_OK_CODE" -eq 0 ] && ! grep -q '"permissionDecision": *"deny"' <<< "$CODEX_OK_OUT"; then
+  ok "codex dialect allows an ordinary read (exit 0, no deny envelope)"
 else
-  bad "codex dialect: allowed read should exit 0, got $CODEX_OK_CODE"
+  bad "codex dialect: allowed read should exit 0 with no deny envelope, got exit $CODEX_OK_CODE / '$CODEX_OK_OUT'"
 fi
 
 # ── 6) the human entrypoint: `guard test` ────────────────────────────────────
