@@ -56,8 +56,15 @@ detect CLIs → import existing configs → lift tokens to `${REF}`s → write t
 manifest — and names what will NOT be touched. In `setup`, nothing is written
 before the confirm step (already true; now it's *said*).
 
-**Decided:** yes in principle. **Open:** exact wording; whether plain
-non-interactive `init` prints a one-line version.
+**Decided:** yes in principle. **Also decided (2026-07-18):** the wizard is
+a single batch (P1+P2+P4+P7+P8+P9), and the batch INCLUDES the docs — the
+Get Started page's step 1, README step 1, and the firstrun.svg replay are
+rewritten to show the new flow in the same commits (P26 discipline: captured
+output ships with the behavior, never before or after). The maintainer's
+approved mock of the full flow lives in the session record; render it as the
+walkthrough's step-1 expected output when building.
+**Open:** exact wording; whether plain non-interactive `init` prints a
+one-line version.
 
 ### P2 — Secret storage is a visible, explained choice
 
