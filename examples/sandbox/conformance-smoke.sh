@@ -44,6 +44,14 @@ if [[ "${1:-}" == "--self-test" ]]; then
   [[ "$(classify_cli_failure "unknown credential field in MCP config")" == fail ]]
   [[ "$(classify_cli_failure "invalid api_key value")" == fail ]]
   [[ "$(classify_cli_failure "browser configuration crashed")" == fail ]]
+  # This harness tests the GLOBAL-scope render path: it checks the fenced
+  # $HOME and probes the live CLI from outside $proj, where project-scope
+  # artifacts are invisible. The default scope is context-derived (project
+  # for a repo manifest, docs/design/default-scope.md), so every write here
+  # must pin --scope global explicitly — assert the pins never get "cleaned
+  # up" as redundant.
+  grep -q 'as apply --scope global --write' "$0"
+  grep -q 'as use default --scope global --write' "$0"
   echo "classify self-test OK"
   exit 0
 fi
@@ -141,7 +149,11 @@ args = ["slash"]
 default = ["$adapter"]
 TOML
 
-apply_out="$(cd "$proj" && as apply --write 2>&1)"
+# --scope global is load-bearing: the checks below read the fenced $HOME and
+# the live probe runs the CLI from outside $proj, so project-scope artifacts
+# (the repo-manifest default since the context-derived scope landed) would be
+# invisible to both.
+apply_out="$(cd "$proj" && as apply --scope global --write 2>&1)"
 printf '%s\n' "$apply_out"
 
 config="$home/$config_rel"
