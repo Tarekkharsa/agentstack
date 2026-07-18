@@ -1,7 +1,9 @@
 //! Command-line surface (clap derive). The visible set is the everyday loop
 //! (setup/init/add/search/apply/use/run/doctor/report/trust/guard/secret/
-//! dashboard/instructions); everything else is hidden-but-functional and
-//! cataloged in the `after_help` map below.
+//! dashboard/instructions) plus the four that carry the product's core
+//! promises — explain (inspect before trusting), lock (reproducible pins),
+//! lib (the central library), adopt (keep a hand-edit); everything else is
+//! hidden-but-functional and cataloged in the `after_help` map below.
 
 use std::path::PathBuf;
 
@@ -26,10 +28,10 @@ Start here:
 The list above is the everyday surface. Everything else is grouped below —
 run `agentstack <command> --help` for any of them:
 
-  Capabilities & library   remove · install · lock · lib · adopt
+  Capabilities & library   remove · install
   Activate & run           session · kill
   Zero-files bridge        gateway · mcp
-  Inspect & tune           diff · explain · audit · optimize · proxy · restore · settings · sign · verify
+  Inspect & tune           diff · audit · optimize · proxy · restore · settings · sign · verify
   Share & extend           export · import · adapters · self"
 )]
 pub struct Cli {
@@ -86,7 +88,7 @@ pub enum Command {
     /// diffs, doctor, runs, audited calls). Every change happens through the CLI.
     Dashboard(DashboardArgs),
 
-    // ── Capabilities & library (hidden from --help; see the after_help map) ─
+    // ── Capabilities & library ───────────────────────────────────────────
     /// Remove a server or skill from the manifest (and lockfile).
     #[command(hide = true)]
     Remove(RemoveArgs),
@@ -101,17 +103,14 @@ pub enum Command {
     /// repos that keep no generated files. `--update` re-resolves git skills
     /// to their latest first; `--upgrade` re-resolves an installed vendor pack
     /// and applies its changes.
-    #[command(hide = true)]
     Lock(LockArgs),
 
     /// Manage the central capability library (`~/.agentstack/lib/`) that projects
     /// reference by name instead of copying files.
-    #[command(hide = true)]
     Lib(LibArgs),
 
     /// Pull hand-added servers and hand-edited fields from target configs
     /// back into the manifest.
-    #[command(hide = true)]
     Adopt(AdoptArgs),
 
     // ── Activate & run ───────────────────────────────────────────────────
@@ -179,7 +178,6 @@ pub enum Command {
 
     /// Explain a server or skill: where it came from, what secrets it needs,
     /// which tools get it and what files get written, and its safety signals.
-    #[command(hide = true)]
     Explain(ExplainArgs),
 
     /// Scan skill sources and instruction files for hidden Unicode and
