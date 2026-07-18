@@ -4,6 +4,76 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## v0.12.0 — 2026-07-18
+
+**Breaking: the off-strategy surface is gone.** A full project review cut
+~10,000 lines that worked against the product's own strategy, with every
+kept feature re-verified against the docs. The plugin-recipe/marketplace
+lane (`plugins` command, `[plugins.*]` recipes, `session start --plugin`)
+is removed — `[extensions.*]` is the governed successor for native harness
+add-ons, and the vendor-pack install ledger it hosted is renamed
+`[plugins.*]` → `[packs.*]` (old ledgers are not recognized; re-run
+`add from` for installed packs). The dashboard is now a **read-only lens**:
+all 22 write endpoints and the `--read-only` flag are gone — the router has
+no write arm, every change happens through the CLI. Verb moves: `audit` →
+`doctor --deep` (with a new `doctor --json`), `proxy start|report` → bare
+`agentstack proxy` (the relay) + `agentstack report wire` (the ranking),
+`report calls --transcripts` and `lib consolidate` removed outright. The
+visible surface grows 14 → 18: `explain`, `lock`, `lib`, and `adopt` are
+promoted — they carry the inspect/reproduce/library/drift promises and
+belong in `--help`.
+
+### Added
+
+- **`report wire`** — the observe-only wire relay's per-capability
+  tokens-per-turn ranking, folded into the one "what happened" verb.
+- **`doctor --json`** — the full structured doctor report (supersedes the
+  removed `audit --json`).
+- **Docs prose lint in CI** — every `agentstack <verb>` inside a code span
+  anywhere in the docs must name a real subcommand, checked against the
+  live clap tree; it caught three live doc bugs on its first run.
+- **Interception map** (`docs/interception-map.svg`) — the four lanes
+  (proxy observes; gateway, guard, egress enforce) at the top of the
+  enforcement matrix.
+- Reference coverage that was missing: `[policy.egress]` /
+  `[policy.secrets]` / `[policy.filesystem]` authoring, the full MCP
+  control-plane tool roster, a dedicated `session` section, and the
+  varlock secrets story (activation via `.env.schema`, 1Password /
+  AWS/Azure/GCP / Bitwarden providers, same fail-closed `${REF}` contract
+  as the OS-keychain default).
+- ARCHITECTURE gains the operating-model chapter (choose the boundary you
+  need) ported from the site; ENFORCEMENT states "policy is authority, not
+  isolation" explicitly.
+- GitHub front door: status badges, issue forms (with a secrets-redaction
+  warning), a PR template carrying the security-review checklist, and the
+  CI trust-gate Action linked from the docs hub.
+
+### Changed
+
+- **README rewritten** (618 → 358 lines): leads with the security story
+  ("Cloning a repo shouldn't hand your agent to a stranger"), a 60-second
+  quickstart above the fold, and steps 4–6 as hooks into the reference —
+  no feature lost its coverage.
+- **One docs source of truth**: the five hand-written site pages that
+  mirrored markdown (how-it-works, primitives, library, strategy,
+  mcp-capability-layer) are redirect stubs; unique content was ported into
+  the markdown first. The site keeps the landing page, walkthrough,
+  examples, and hub.
+
+### Fixed
+
+- Conformance smoke test: the sandbox now strips the `XDG_*` family so
+  HOME-fencing actually fences opencode (an ambient `XDG_CONFIG_HOME` on
+  the runner let it escape and read the empty machine config), and pins
+  `--scope global` explicitly so the context-derived default scope can't
+  silently break the whole matrix.
+- Stale commands in docs: `stats` → `report usage`, bare
+  `connect`/`disconnect` → `gateway connect|disconnect`, the nonexistent
+  `report <run-id>` form → `report run <id>`, and every reference to the
+  removed `agentstack codemode --write` (bindings come from the
+  `tools_bindings` MCP tool response).
+- The GitHub Action's usage example pinned a nine-releases-old tag.
+
 ## v0.11.0 — 2026-07-17
 
 **Breaking: the CLI surface was rewritten.** Two simplification rounds since
