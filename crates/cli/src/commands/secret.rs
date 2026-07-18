@@ -11,14 +11,18 @@ use crate::secret::keychain;
 
 pub fn run(args: &SecretArgs, manifest_dir: Option<&Path>) -> Result<()> {
     match &args.command {
-        SecretCommand::Set { name, value } => set(name, value.as_deref()),
+        SecretCommand::Set {
+            name,
+            value,
+            env_file,
+        } => set(name, value.as_deref(), *env_file, manifest_dir),
         SecretCommand::Get { name } => get(name),
         SecretCommand::Rm { name } => rm(name),
         SecretCommand::List => list(manifest_dir),
     }
 }
 
-fn set(name: &str, value: Option<&str>) -> Result<()> {
+fn set(name: &str, value: Option<&str>, env_file: bool, manifest_dir: Option<&Path>) -> Result<()> {
     let value = match value {
         Some(v) => v.to_string(),
         None => rpassword::prompt_password(format!("Value for {name}: "))
@@ -27,8 +31,26 @@ fn set(name: &str, value: Option<&str>) -> Result<()> {
     if value.is_empty() {
         anyhow::bail!("refusing to store an empty value for '{name}'");
     }
+    if env_file {
+        // Write to the project `.env` next to the manifest (the same file init's
+        // `--secrets env` path targets), and keep it out of git.
+        let dir = crate::manifest::resolve_manifest_dir(&super::project_base(manifest_dir)?);
+        crate::secret::env_file::write(&dir, &[(name.to_string(), value)])?;
+        let project_root = crate::manifest::project_root_of(&dir);
+        let is_git = project_root.join(".git").exists();
+        if is_git {
+            crate::secret::env_file::ensure_gitignored(&project_root, true)?;
+        }
+        println!(
+            "{} stored '{name}' in {}/.env{}",
+            "✓".green(),
+            dir.display(),
+            if is_git { " (gitignored)" } else { "" }
+        );
+        return Ok(());
+    }
     keychain::set(name, &value)?;
-    println!("{} stored '{name}' in keychain", "✓".green());
+    println!("{} stored '{name}' in the OS keychain", "✓".green());
     Ok(())
 }
 

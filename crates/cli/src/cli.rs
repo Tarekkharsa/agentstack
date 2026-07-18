@@ -773,9 +773,31 @@ pub struct InitArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Don't store lifted secrets in the keychain (just reference them).
+    /// Where lifted token values are stored on the non-interactive path:
+    /// `env` (project `.env`, gitignored), `keychain` (OS keychain), or
+    /// `skip` (write only `${REF}` placeholders — you provide values later).
+    /// Interactive runs prompt for this instead; when absent and
+    /// non-interactive, the default is `keychain` (CI/scripts never start
+    /// writing plaintext files by surprise).
+    #[arg(long, value_enum, value_name = "STORE")]
+    pub secrets: Option<SecretStore>,
+
+    /// Deprecated alias for `--secrets skip`. Lifted values are NOT stored;
+    /// the run prints each unstored `${REF}` and how to store it.
     #[arg(long)]
     pub no_keychain: bool,
+}
+
+/// Where `init` (and `secret set`) put lifted token values when the manifest's
+/// `${REF}` placeholders need real values on this machine.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum SecretStore {
+    /// Project `.env` file next to the manifest (plaintext, gitignored).
+    Env,
+    /// The OS keychain (service `agentstack`).
+    Keychain,
+    /// Store nothing — only `${REF}` placeholders are written.
+    Skip,
 }
 
 #[derive(Args, Debug)]
@@ -1327,6 +1349,10 @@ pub enum SecretCommand {
         /// Provide the value inline (otherwise you'll be prompted).
         #[arg(long)]
         value: Option<String>,
+        /// Write the value to the project `.env` (gitignored) instead of the
+        /// OS keychain.
+        #[arg(long)]
+        env_file: bool,
     },
     /// Print a secret's value.
     Get { name: String },

@@ -21,6 +21,7 @@ fn args(force: bool) -> InitArgs {
         global: true,
         force,
         dry_run: false,
+        secrets: None,
         no_keychain: false,
     }
 }

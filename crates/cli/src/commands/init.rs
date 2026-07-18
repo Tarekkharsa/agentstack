@@ -9,11 +9,11 @@ use indexmap::IndexMap;
 use owo_colors::OwoColorize;
 
 use crate::adapter::{extract_servers, extract_settings, Registry};
-use crate::cli::InitArgs;
+use crate::cli::{InitArgs, SecretStore};
 use crate::discover::{lift_secrets, merge_servers, Lifted};
 use crate::manifest::load::MANIFEST_FILE;
 use crate::manifest::model::{Manifest, Meta, Server, Targets};
-use crate::secret::keychain;
+use crate::secret::{env_file, keychain};
 
 /// Store lifted secret values, collecting the references whose store write
 /// failed instead of aborting init or silently dropping them. The manifest
@@ -29,6 +29,126 @@ fn store_lifted(lifted: &[Lifted], mut store: impl FnMut(&str, &str) -> Result<(
         }
     }
     unstored
+}
+
+/// Decide where lifted token values go (P2). Explicit flags always win; an
+/// interactive run with no flag prompts; otherwise the non-interactive default
+/// is the keychain — CI and scripts must never *start* writing plaintext files
+/// just because init grew a new option. `allow_prompt` is false on the dry-run
+/// path (a preview must never block on a prompt).
+fn resolve_secret_store(args: &InitArgs, allow_prompt: bool) -> Result<SecretStore> {
+    if let Some(store) = args.secrets {
+        return Ok(store);
+    }
+    // `--no-keychain` is the deprecated alias for `--secrets skip`.
+    if args.no_keychain {
+        return Ok(SecretStore::Skip);
+    }
+    if allow_prompt && crate::util::confirm::is_interactive() {
+        return prompt_secret_store();
+    }
+    Ok(SecretStore::Keychain)
+}
+
+/// The P2 storage menu, shown when init lifts tokens interactively. `.env` is
+/// preselected as the maintainer's decided default: it is what users already
+/// know, and the guard deny-list plus the managed gitignore are what make the
+/// plaintext default defensible. Reuses the plain stdin prompt style of
+/// `util::confirm` — there is no select-widget, so a numbered choice with an
+/// Enter default is the idiom.
+fn prompt_secret_store() -> Result<SecretStore> {
+    use std::io::Write;
+    println!("\nWhere should these token values live?\n");
+    println!(
+        "  {}) Project .env  (default) — Your tokens are written to .env next to the",
+        "1".bold()
+    );
+    println!("     manifest, in plain text. agentstack keeps this file out of git and its");
+    println!("     guard blocks agents from reading it. Edit it with any editor.");
+    println!(
+        "  {}) macOS keychain — Your tokens are migrated into the system keychain",
+        "2".bold()
+    );
+    println!("     (service `agentstack`). Nothing secret sits in a file. View or change");
+    println!("     them in Keychain Access, or with `agentstack secret set <NAME>`.");
+    println!(
+        "  {}) Skip / decide later — Only ${{REF}} placeholders are written. Nothing runs",
+        "3".bold()
+    );
+    println!("     until you provide values (env, varlock, keychain, or .env) —");
+    println!("     `agentstack doctor` lists what's missing.");
+    println!(
+        "\n  {}",
+        "Already using 1Password or a secrets manager? Drop a .env.schema in the".dimmed()
+    );
+    println!(
+        "  {}",
+        "project and refs resolve through varlock instead.".dimmed()
+    );
+    print!("\nChoice [1]: ");
+    std::io::stdout().flush().ok();
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line).ok();
+    Ok(parse_secret_choice(&line))
+}
+
+/// Map the menu input to a store. Bare Enter (empty), `1`, or anything
+/// unrecognized selects the `.env` default — the safe, familiar choice for a
+/// write; only an explicit `2`/`3` picks the alternatives.
+fn parse_secret_choice(input: &str) -> SecretStore {
+    match input.trim() {
+        "2" => SecretStore::Keychain,
+        "3" => SecretStore::Skip,
+        _ => SecretStore::Env,
+    }
+}
+
+/// Report `${REF}`s the keychain refused to store (unreachable credential
+/// store), each with the exact command to store it later.
+fn report_unstored_keychain(unstored: &[String]) {
+    println!(
+        "{}  {}",
+        "⚠".yellow(),
+        format!(
+            "The OS credential store is unreachable — {} value(s) not stored:",
+            unstored.len()
+        )
+        .yellow()
+        .bold()
+    );
+    for r in unstored {
+        println!(
+            "      {}   agentstack secret set {r}",
+            format!("${{{r}}}").yellow()
+        );
+    }
+    println!(
+        "      {}",
+        "The manifest keeps ${REF}s. Provide values via env, varlock, or a project .env; apply/run block on unresolved refs by name.".dimmed()
+    );
+}
+
+/// Report the values init deliberately did NOT store (skip path), each with the
+/// one-liner to store it. This replaces `--no-keychain`'s old silent value-drop.
+fn report_skipped(lifted: &[Lifted]) {
+    println!(
+        "{}  {}",
+        "·".dimmed(),
+        format!(
+            "{} token(s) not stored — provide each before running:",
+            lifted.len()
+        )
+        .bold()
+    );
+    let width = lifted.iter().map(|l| l.reference.len()).max().unwrap_or(0);
+    for l in lifted {
+        println!(
+            "      {} {}  agentstack secret set {}",
+            format!("${{{}}}", l.reference).yellow(),
+            " ".repeat(width.saturating_sub(l.reference.len())),
+            l.reference
+        );
+    }
 }
 
 pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
@@ -454,35 +574,63 @@ version = 1
         println!("\n{} (preview — nothing written)\n", MANIFEST_FILE.bold());
         println!("{toml_text}");
         if !lifted.is_empty() {
-            println!("Would store {} secret(s) in the keychain.", lifted.len());
+            // A preview never prompts, so resolve the store non-interactively.
+            match resolve_secret_store(args, false)? {
+                SecretStore::Env => println!(
+                    "Would store {} secret(s) in .env (gitignored).",
+                    lifted.len()
+                ),
+                SecretStore::Keychain => {
+                    println!("Would store {} secret(s) in the OS keychain.", lifted.len())
+                }
+                SecretStore::Skip => println!(
+                    "Would write {} ${{REF}} placeholder(s); values not stored (--secrets skip).",
+                    lifted.len()
+                ),
+            }
         }
         return Ok(());
     }
 
-    // Store lifted secrets (unless opted out). An unreachable credential
-    // store (headless Linux: no Secret Service bus) must not abort init —
-    // inform and continue; the refs stay honestly unresolved and fail closed
-    // at use time.
-    if !args.no_keychain {
-        let unstored = store_lifted(&lifted, keychain::set);
-        if !unstored.is_empty() {
-            println!(
-                "{}  {}",
-                "⚠".yellow(),
-                format!(
-                    "The OS credential store is unreachable — {} value(s) not stored:",
-                    unstored.len()
-                )
-                .yellow()
-                .bold()
-            );
-            for r in &unstored {
-                println!("      {}", format!("${{{r}}}").yellow());
+    // Store lifted secret VALUES in the chosen backend (P2). The manifest only
+    // ever holds `${REF}` placeholders (rule 5) — this is where the real values
+    // land. An unreachable keychain (headless Linux: no Secret Service bus) must
+    // not abort init: inform and continue, refs stay honestly unresolved and
+    // fail closed at use time.
+    if !lifted.is_empty() {
+        match resolve_secret_store(args, true)? {
+            SecretStore::Keychain => {
+                let unstored = store_lifted(&lifted, keychain::set);
+                let stored = lifted.len() - unstored.len();
+                if stored > 0 {
+                    println!(
+                        "{}  Stored {stored} token(s) in the OS keychain (service `agentstack`)",
+                        "🔑".dimmed()
+                    );
+                }
+                if !unstored.is_empty() {
+                    report_unstored_keychain(&unstored);
+                }
             }
-            println!(
-                "      {}",
-                "The manifest keeps ${REF}s. Provide values via env, varlock, or a project .env; apply/run block on unresolved refs by name.".dimmed()
-            );
+            SecretStore::Env => {
+                let entries: Vec<(String, String)> = lifted
+                    .iter()
+                    .map(|l| (l.reference.clone(), l.value.clone()))
+                    .collect();
+                env_file::write(&dir, &entries)?;
+                let project_root = crate::manifest::project_root_of(&dir);
+                let is_git = project_root.join(".git").exists();
+                if is_git {
+                    env_file::ensure_gitignored(&project_root, true)?;
+                }
+                println!(
+                    "{}  Stored {} token(s) in .env{}",
+                    "🔑".dimmed(),
+                    entries.len(),
+                    if is_git { " (gitignored)" } else { "" }
+                );
+            }
+            SecretStore::Skip => report_skipped(&lifted),
         }
     }
 
@@ -490,12 +638,6 @@ version = 1
         .with_context(|| format!("writing {}", manifest_path.display()))?;
 
     println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());
-    if !lifted.is_empty() && args.no_keychain {
-        println!(
-            "{} secret(s) referenced but not stored (--no-keychain). Run `agentstack secret set <NAME>`.",
-            lifted.len()
-        );
-    }
     if show_next {
         println!(
             "\nNext: review the manifest, then `agentstack setup` for the guided path (or `agentstack apply` to preview changes)."
@@ -535,5 +677,18 @@ mod tests {
         });
         assert_eq!(unstored, vec!["BROKEN".to_string()]);
         assert_eq!(stored, vec!["OK".to_string()]);
+    }
+
+    /// P2: the interactive menu preselects `.env` — bare Enter and `1` both
+    /// pick it, and only an explicit `2`/`3` selects an alternative.
+    #[test]
+    fn parse_secret_choice_defaults_to_env() {
+        assert_eq!(parse_secret_choice(""), SecretStore::Env);
+        assert_eq!(parse_secret_choice("\n"), SecretStore::Env);
+        assert_eq!(parse_secret_choice("1"), SecretStore::Env);
+        assert_eq!(parse_secret_choice("2"), SecretStore::Keychain);
+        assert_eq!(parse_secret_choice("3"), SecretStore::Skip);
+        // Anything unrecognized falls back to the safe familiar default.
+        assert_eq!(parse_secret_choice("garbage"), SecretStore::Env);
     }
 }

@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
+pub mod env_file;
 pub mod keychain;
 pub mod varlock;
 

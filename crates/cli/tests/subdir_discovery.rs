@@ -68,6 +68,7 @@ fn init_from_a_subdir_refuses_to_silently_nest() {
         global: false,
         force: false,
         dry_run: false,
+        secrets: None,
         no_keychain: false,
     };
     let err = with_cwd(&deep, || commands::init::run(&args, None)).unwrap_err();

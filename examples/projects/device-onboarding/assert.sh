@@ -117,6 +117,10 @@ grep -q "Imported 3" <<<"$OUT" && ok "imports 3 servers across json + toml" || b
 M=.agentstack/agentstack.toml
 grep -q 'ghp_FAKE' "$M" && bad "PLAINTEXT TOKEN IN THE MANIFEST" || ok "no plaintext token in the manifest"
 grep -q '\${' "$M" && ok "secret lifted to a \${REF}" || bad "no \${REF} in manifest"
+# --no-keychain (deprecated alias for --secrets skip) must NOT silently drop the
+# lifted value: it names the unstored ref and the exact command to store it.
+grep -qi "not stored" <<<"$OUT" && ok "--no-keychain names the unstored ref (no silent drop)" || bad "--no-keychain silent drop: $OUT"
+grep -q "agentstack secret set" <<<"$OUT" && ok "--no-keychain prints the store one-liner per ref" || bad "no store one-liner in: $OUT"
 "$AS" apply --write >/dev/null 2>&1 && bad "apply exited 0 despite unresolved ref" || ok "apply --write blocks the unresolved ref (nonzero exit)"
 REF=$(grep -o '\${[A-Z0-9_]*}' "$M" | head -1 | tr -d '${}')
 env "$REF=fake-value" "$AS" apply --write >/dev/null 2>&1 && ok "apply succeeds once the ref resolves via env" || bad "resolved apply failed"
