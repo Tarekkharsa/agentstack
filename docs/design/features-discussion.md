@@ -249,6 +249,37 @@ without reading source code:
 
 **Decided:** yes. Complements P3 (denials teach the exact allow_roots fix).
 
+## New harness coverage (researched 2026-07-18)
+
+### P12 — OpenClaw adapter (+ Cline as second)
+
+Research verdict: **OpenClaw** is the top candidate for adapter #14 —
+massive adoption (~350k+ stars in five months), MCP servers in
+`~/.openclaw/openclaw.json` (`mcp.servers.<name>`, JSON5), skills read from
+`~/.agents/skills` (the same convention our Codex adapter already renders —
+partial support exists today for free), a real blocking `before_tool_call`
+plugin hook (guard coverage via the OpenCode/Pi native-plugin-file pattern),
+and a security posture aligned with ours (tool policy, sandbox-by-default
+for non-main sessions, "third-party skills are untrusted" in its own docs).
+
+Open items before green-light (verify against a real install): (1) JSON5
+read/write — a new adapter-engine format capability, not just a descriptor;
+(2) the configurable workspace root (AGENTS.md/skills paths depend on it);
+(3) whether any project-scoped config exists or it's global-only; (4) its
+hook can *rewrite* params, richer than guard's allow/deny — decide if the
+protocol grows. Churn risk is real (three renames in three months) — budget
+re-verification.
+
+**Second**: Cline (4–5M installs, PreToolUse hooks since v3.36, nested
+VS-Code globalStorage config path). **Not worth building**: Aider (no gate),
+Zed/Warp (category already covered), Roo Code (shut down 2026-05, archived —
+recorded so it isn't proposed again). **Flag if ever adapted**: Amp syncs
+threads to Sourcegraph servers by default — a pre-existing egress path our
+audit story should name.
+
+**Decided:** nothing yet — awaiting the hook-conformance audit of the
+existing 9 before adding a 10th hook surface.
+
 ## Next features to discuss
 
 Walkthrough continues; discussion sections land here as we go:
