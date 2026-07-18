@@ -65,7 +65,16 @@ proj="$sandbox/proj"
 rm -rf "$sandbox"
 mkdir -p "$home" "$proj/.agentstack"
 
-as() { env HOME="$home" AGENTSTACK_HOME="$sandbox/ashome" "$bin" "$@"; }
+# Some CLIs (opencode) resolve their global config via the XDG Base Directory
+# spec (XDG_CONFIG_HOME etc.) rather than deriving it from $HOME. If the
+# ambient environment has one of those set, `env HOME=$home ...` alone does
+# NOT fence such a CLI — it escapes the sandbox and reads/writes the real
+# machine config, which for this fresh sandbox is empty ("No MCP servers
+# configured"), producing a false FAIL. Strip the whole XDG family so HOME
+# fencing is actually complete.
+xdg_unset=(-u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME -u XDG_STATE_HOME -u XDG_RUNTIME_DIR)
+
+as() { env "${xdg_unset[@]}" HOME="$home" AGENTSTACK_HOME="$sandbox/ashome" "$bin" "$@"; }
 
 # ── skills mode (config "-"): the CLI has no MCP support by design (pi) —
 # conformance means skills render where the CLI actually loads them.
@@ -97,7 +106,7 @@ TOML
   fi
   echo "structural: OK — skill renders (and reads back) under ~/.pi/agent/skills"
   if command -v "$cli_bin" >/dev/null; then
-    if env HOME="$home" "$cli_bin" --version >/dev/null 2>&1; then
+    if env "${xdg_unset[@]}" HOME="$home" "$cli_bin" --version >/dev/null 2>&1; then
       echo "live: OK — '$cli_bin --version' runs against the fenced HOME"
     else
       echo "live: SKIPPED — '$cli_bin --version' exited nonzero (recorded, not fatal: pi exposes no config introspection)"
@@ -198,8 +207,8 @@ fi
 # (>= 1.0.x) runs slash-style commands through -i instead.
 probe() {
   case "$adapter" in
-    copilot-cli) env HOME="$home" "$cli_bin" -i "mcp list" 2>&1 ;;
-    *) env HOME="$home" "$cli_bin" mcp list 2>&1 ;;
+    copilot-cli) env "${xdg_unset[@]}" HOME="$home" "$cli_bin" -i "mcp list" 2>&1 ;;
+    *) env "${xdg_unset[@]}" HOME="$home" "$cli_bin" mcp list 2>&1 ;;
   esac
 }
 if out="$(probe)"; then
