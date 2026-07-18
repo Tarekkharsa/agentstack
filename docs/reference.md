@@ -663,19 +663,19 @@ counter, and it's the built-in version of the hand-rolled logging proxy from
 [*How to kill the bloat in Claude Code's system
 prompt*](https://www.aihero.dev/how-to-kill-the-bloat-in-claude-codes-system-prompt).
 
-**Point a harness at it.** `agentstack proxy start` stands up a loopback proxy
+**Point a harness at it.** `agentstack proxy` stands up a loopback proxy
 (default `127.0.0.1:8787`; `--port`, `--upstream` to override) that relays every
 request VERBATIM to the Anthropic API. Set the harness's base URL and use it
 normally:
 
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-agentstack proxy start        # blocks, serving, in one shell
+agentstack proxy             # blocks, serving, in one shell
 # …drive Claude Code (or any Anthropic-API harness) as usual…
-agentstack proxy report       # --json for the raw aggregate
+agentstack report wire       # --json for the raw aggregate
 ```
 
-**What `proxy start` does.** For each `/v1/messages` request it walks the
+**What `proxy` does.** For each `/v1/messages` request it walks the
 `tools` array and buckets every tool into its capability — `mcp__<server>__<tool>`
 → `<server>`, everything else (`Read`, `Bash`, `Task`, …) → `builtin` — summing
 each bucket's estimated per-turn token cost (same `estimate_tokens` heuristic as
@@ -692,7 +692,7 @@ is **content-free by construction**: counts, capability/tool names, token
 estimates, the model id, and best-effort usage numbers — never prompt or message
 bodies, tool arguments, secrets, or header values.
 
-**What `proxy report` shows.** It aggregates the log into a ranked,
+**What `report wire` shows.** It aggregates the log into a ranked,
 per-capability table: `tools` (typical per-turn tool count), `avg tokens/turn`,
 `calls` (how many times any of that capability's tools appeared in a
 `tool_use`), and a loaded-vs-called `hint`. Headline tools/tokens are the max
@@ -1204,9 +1204,9 @@ packs), `remove`, `apply` (`--scope`, `--write`, `--prune-foreign`), `diff`,
 `--init`, `--remote`, `--status`, `--allow-secrets`), `restore` (`--last`; a
 recorded-change id or an adapter id),
 `doctor` (`--ci`, `--live`, `--fix`, `--deep`, `--all`), `audit` (`--json`), `optimize` (`--json`, `--write`, `--since`),
-`report run <id>|runs|usage|calls` (`run`/`runs`/`calls`: `--json`; `usage`:
-`--live`; `calls`: `--since`, `--transcripts`), `proxy start|report` (`start`: `--port`,
-`--upstream`; `report`: `--json`),
+`report run <id>|runs|usage|calls|wire` (`run`/`runs`/`calls`/`wire`: `--json`;
+`usage`: `--live`; `calls`: `--since`, `--transcripts`), `proxy` (`--port`,
+`--upstream`),
 `secret set|get|rm|list`, `export`/`import`, `adapters` (`list|show|validate`),
 `settings`,
 `dashboard`, `mcp` (`--auto-project`, `--transparent`),

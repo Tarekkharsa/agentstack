@@ -301,8 +301,9 @@ bundles); a personal layer (`init --global`) that merges beneath every
 project; app-managed servers (`owner = "codex"` makes the owning app's config
 canonical); usage insight (`report calls`, and `agentstack optimize` to turn
 the audit log into concrete pruning recommendations); an observe-only wire
-proxy (`agentstack proxy`) that measures what each tool actually costs in
-tokens per turn; and [the read-only dashboard](docs/dashboard.md).
+relay (`agentstack proxy`, ranked by `agentstack report wire`) that measures
+what each tool actually costs in tokens per turn; and
+[the read-only dashboard](docs/dashboard.md).
 
 The closed loop in under a minute — install a versioned pack, spread it to
 every CLI, firewall a tool, watch the refusal in the audit log, upgrade:

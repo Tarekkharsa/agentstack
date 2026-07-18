@@ -11,7 +11,9 @@ use owo_colors::OwoColorize;
 
 use agentstack_recorder::{read_all, CallRecord, RunEvent, RunLog};
 
-use crate::cli::ReportArgs;
+use crate::cli::{ReportArgs, WireArgs};
+use crate::footprint::fmt_tokens;
+use crate::proxy::{self, Report};
 
 pub fn run(args: &ReportArgs) -> Result<()> {
     if args.json {
@@ -20,6 +22,79 @@ pub fn run(args: &ReportArgs) -> Result<()> {
         print!("{}", report_text(&args.run));
     }
     Ok(())
+}
+
+/// `agentstack report wire` — the on-wire ground-truth companion to
+/// `report usage`. Aggregates the telemetry the `proxy` relay appended into a
+/// ranked, per-capability view: tokens/turn, calls, and a loaded-vs-called hint.
+pub fn wire(args: &WireArgs) -> Result<()> {
+    let records = proxy::read_all();
+    let report = proxy::aggregate(&records);
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    print_wire(&report);
+    Ok(())
+}
+
+fn print_wire(report: &Report) {
+    if report.requests == 0 {
+        println!("No wire activity observed yet. Start the relay with `agentstack proxy`, point");
+        println!(
+            "your harness at {}, then run `agentstack report wire`.",
+            "ANTHROPIC_BASE_URL=http://127.0.0.1:8787".bold()
+        );
+        return;
+    }
+
+    // Headline: the per-turn weight (max seen in a single request) across all
+    // observed requests.
+    println!(
+        "{} tools, ~{} tokens/turn observed across {} request{}",
+        report.total_tools.to_string().bold(),
+        fmt_tokens(report.total_est_tokens).bold(),
+        report.requests,
+        if report.requests == 1 { "" } else { "s" },
+    );
+    println!();
+
+    println!(
+        "{:<24} {:>6}  {:>18}  {:>7}  {}",
+        "capability".bold(),
+        "tools".bold(),
+        "avg tokens/turn".bold(),
+        "calls".bold(),
+        "hint".bold(),
+    );
+    for cap in &report.capabilities {
+        let hint = match cap.hint.as_str() {
+            "drop / lazy" => cap.hint.yellow().to_string(),
+            "keep" => cap.hint.green().to_string(),
+            _ => cap.hint.dimmed().to_string(),
+        };
+        println!(
+            "{:<24} {:>6}  {:>18}  {:>7}  {}",
+            cap.capability,
+            cap.tools,
+            fmt_tokens(cap.avg_est_tokens),
+            cap.calls,
+            hint,
+        );
+    }
+
+    println!();
+    println!(
+        "{}",
+        "loaded vs called — a capability whose tools cost the most tokens/turn but were never"
+            .dimmed()
+    );
+    println!(
+        "{}",
+        "called this window is the first candidate to drop or make lazy.".dimmed()
+    );
 }
 
 /// The tool calls attributed to this run (audit log filtered by run id).

@@ -196,12 +196,13 @@ pub enum Command {
     #[command(hide = true)]
     Optimize(OptimizeArgs),
 
-    /// Watch — and rank — what every tool, server, and skill costs your agent
-    /// per turn on the wire. A localhost proxy in front of the Anthropic API
-    /// that relays requests verbatim (observe only) and accounts the tools
-    /// block's per-turn token cost, then ties it back to loaded-vs-called.
-    #[command(subcommand, hide = true)]
-    Proxy(ProxyCmd),
+    /// Start the wire relay: a localhost proxy in front of the Anthropic API
+    /// that forwards every request verbatim (observe only) while accounting the
+    /// tools block's per-turn token cost. Point a harness at it with
+    /// `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`, then rank what it observed
+    /// with `agentstack report wire`.
+    #[command(hide = true)]
+    Proxy(ProxyStartArgs),
 
     /// Undo a recorded write: revert an apply/use/session history entry
     /// (servers, settings, hooks, instructions), or restore one adapter's
@@ -390,6 +391,11 @@ pub enum ReportCmd {
     /// Report brokered call activity (from the audit log) and library-wide
     /// dead weight — capabilities installed but never used. Read-only, local.
     Calls(AnalyzeArgs),
+
+    /// Rank what's been observed on the wire by the `proxy` relay: per-capability
+    /// tokens/turn, how many turns each tool was actually called, and a
+    /// loaded-vs-called hint. On-wire ground truth complementing `report usage`.
+    Wire(WireArgs),
 }
 
 /// The zero-files gateway lifecycle: `connect` registers it in a harness's
@@ -1238,18 +1244,6 @@ pub struct AnalyzeArgs {
     pub transcripts: bool,
 }
 
-#[derive(Subcommand, Debug)]
-pub enum ProxyCmd {
-    /// Start the wire proxy on a loopback port and relay to the Anthropic API
-    /// verbatim, accounting each turn's tools-block token cost as it flows.
-    /// Point your harness at it with `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`.
-    Start(ProxyStartArgs),
-
-    /// Rank what's been observed on the wire: per-capability tokens/turn, how
-    /// many turns each tool was actually called, and a loaded-vs-called hint.
-    Report(ProxyReportArgs),
-}
-
 #[derive(Args, Debug)]
 pub struct ProxyStartArgs {
     /// Loopback port to listen on.
@@ -1262,7 +1256,7 @@ pub struct ProxyStartArgs {
 }
 
 #[derive(Args, Debug)]
-pub struct ProxyReportArgs {
+pub struct WireArgs {
     /// Emit the aggregate as JSON instead of the ranked table.
     #[arg(long)]
     pub json: bool,
