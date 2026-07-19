@@ -97,7 +97,11 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
     }
 
     finish(args.write, changed, touched, backups)?;
-    if args.write && changed > 0 {
+    // P17: the trust-unlock teaching prints in the DRY-RUN too, not only after
+    // `--write`. Deciding whether to register the bridge is exactly when the
+    // user needs to know trust is the per-repo gate — so it belongs in the
+    // preview they read first, not the confirmation they see after committing.
+    if changed > 0 {
         println!(
             "\nEach repo now only needs a trusted manifest: `agentstack trust <dir>` unlocks its \
              servers for the bridge. Untrusted repos get control-plane tools only."

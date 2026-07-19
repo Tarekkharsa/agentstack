@@ -72,6 +72,44 @@ pub struct TrustEntry {
     /// time.
     pub digest: String,
     pub trusted_at: u64,
+    /// The reviewed loadable surface at trust time, for re-trust diffing (P14).
+    ///
+    /// Additive and optional: entries written before this field simply
+    /// deserialize to `None` (`serde(default)`), and a `trust()` that records no
+    /// snapshot serializes nothing extra (`skip_serializing_if`), so older
+    /// stores round-trip byte-for-byte. It is *display metadata only* — never
+    /// folded into [`digest_for`], so it cannot change what re-gates a project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface: Option<Vec<SurfaceItem>>,
+}
+
+/// One reviewed item of a project's loadable surface, captured at trust time so
+/// a later re-trust can mark it `+ added` / `~ changed` / `- removed` against
+/// the last consented set instead of re-listing everything flat (P14).
+///
+/// `identity` is exactly what the review shows for the item — a server's
+/// command line, an HTTP url, an extension's target — NOT its pin/lock status:
+/// pin drift is already a hard blocker, so the diff tracks *what the human
+/// agreed to run/contact*, not whether it happens to be locked right now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceItem {
+    pub kind: String,
+    pub name: String,
+    pub identity: String,
+}
+
+/// What a prior `trust` recorded for a project, for re-trust diffing (P14).
+/// The three cases the review must tell apart — independent of digest match,
+/// so a re-trust after a manifest edit still diffs:
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PriorSurface {
+    /// No trust entry at all — first-ever trust: show the flat full review.
+    NeverTrusted,
+    /// An entry exists but predates surface snapshots (an older trust): show
+    /// the flat review plus one line saying there is nothing to diff against.
+    Untracked,
+    /// A prior surface was recorded — diff the current review against it.
+    Recorded(Vec<SurfaceItem>),
 }
 
 /// Where a project stands with the zero-files bridge.
@@ -150,9 +188,35 @@ pub fn check(base: &Path) -> TrustState {
     }
 }
 
-/// Record trust for `base` at its current manifest digest. Errors when there is
-/// no manifest to pin.
+/// Record trust for `base` at its current manifest digest, without a reviewed
+/// surface snapshot. Errors when there is no manifest to pin.
 pub fn trust(base: &Path) -> Result<String> {
+    record_trust(base, None)
+}
+
+/// Like [`trust`], but also persists the reviewed surface so a future re-trust
+/// can diff against it (P14). The caller (the CLI review) builds the surface
+/// as it renders the consent list; this crate only stores it. The snapshot is
+/// display metadata — it does not participate in [`digest_for`].
+pub fn trust_with_snapshot(base: &Path, surface: Vec<SurfaceItem>) -> Result<String> {
+    record_trust(base, Some(surface))
+}
+
+/// The reviewed surface a prior `trust` recorded for `base` — the input to
+/// re-trust diffing (P14). Independent of digest match: a re-trust after a
+/// manifest edit still diffs against the last consented set.
+pub fn prior_surface(base: &Path) -> PriorSurface {
+    let store = TrustStore::load();
+    match store.trusted.get(&key_for(base)) {
+        None => PriorSurface::NeverTrusted,
+        Some(entry) => match &entry.surface {
+            None => PriorSurface::Untracked,
+            Some(items) => PriorSurface::Recorded(items.clone()),
+        },
+    }
+}
+
+fn record_trust(base: &Path, surface: Option<Vec<SurfaceItem>>) -> Result<String> {
     let digest = digest_for(base).ok_or_else(|| TrustError::NoManifest {
         base: base.to_path_buf(),
     })?;
@@ -162,6 +226,7 @@ pub fn trust(base: &Path) -> Result<String> {
         TrustEntry {
             digest: digest.clone(),
             trusted_at: now_secs(),
+            surface,
         },
     );
     store.save()?;
@@ -261,6 +326,55 @@ mod tests {
                 .unwrap();
             assert_eq!(check(proj.path()), TrustState::Changed);
         });
+    }
+
+    // P14: the reviewed surface round-trips through the store, and the three
+    // prior-surface cases are distinguished — while the snapshot stays out of
+    // the digest, so recording one must NOT re-gate the project.
+    #[test]
+    fn surface_snapshot_round_trips_and_stays_out_of_the_digest() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            // First trust with no snapshot (an "older" entry) reads as Untracked.
+            trust(proj.path()).unwrap();
+            assert_eq!(prior_surface(proj.path()), PriorSurface::Untracked);
+            let digest_flat = check_digest(proj.path());
+
+            // Re-trust WITH a surface: it persists and reads back identically…
+            let surface = vec![
+                SurfaceItem {
+                    kind: "server".into(),
+                    name: "evil".into(),
+                    identity: "sh -c pwn".into(),
+                },
+                SurfaceItem {
+                    kind: "skill".into(),
+                    name: "greet".into(),
+                    identity: "library".into(),
+                },
+            ];
+            trust_with_snapshot(proj.path(), surface.clone()).unwrap();
+            assert_eq!(prior_surface(proj.path()), PriorSurface::Recorded(surface));
+            // …and the digest is unchanged — the snapshot is display-only, so
+            // the project stays Trusted rather than re-gating.
+            assert_eq!(check(proj.path()), TrustState::Trusted);
+            assert_eq!(check_digest(proj.path()), digest_flat);
+
+            // A never-trusted project reports NeverTrusted.
+            let untouched = project_with_manifest();
+            assert_eq!(prior_surface(untouched.path()), PriorSurface::NeverTrusted);
+        });
+    }
+
+    /// The digest currently recorded for `base` in the store, for asserting the
+    /// snapshot leaves it untouched.
+    fn check_digest(base: &Path) -> String {
+        TrustStore::load()
+            .trusted
+            .get(&key_for(base))
+            .unwrap()
+            .digest
+            .clone()
     }
 
     #[test]

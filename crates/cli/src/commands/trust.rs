@@ -7,6 +7,7 @@
 //! manifest's content digest, and shown to the human as the list of things the
 //! manifest would actually run.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -14,7 +15,86 @@ use owo_colors::OwoColorize;
 
 use crate::cli::TrustArgs;
 use crate::manifest::ServerType;
-use crate::trust::{self, TrustState, TrustStore};
+use crate::trust::{self, PriorSurface, SurfaceItem, TrustState, TrustStore};
+
+/// Threads the P14 re-trust diff through the consent review. In diff mode it
+/// holds the last consented surface keyed by `(kind, name)`; [`mark`] returns
+/// the two-char marker to print before each item's line — `"+ "` added,
+/// `"~ "` changed, `"  "` unchanged — and remembers which prior items it saw so
+/// [`removed`] can report the rest as `- removed`. In flat mode (`prior` is
+/// `None`: first-ever trust, or an older entry with no snapshot) every marker is
+/// the plain two-space indent, so the review reads exactly as it did before
+/// P14. Either way it accumulates the CURRENT surface, which the caller then
+/// persists so the *next* re-trust has something to diff against.
+///
+/// [`mark`]: ReviewDiff::mark
+/// [`removed`]: ReviewDiff::removed
+struct ReviewDiff {
+    /// `(kind, name) -> identity` from the last consented surface, or `None` in
+    /// flat mode.
+    prior: Option<HashMap<(String, String), String>>,
+    /// The prior surface in its recorded order, for a stable `removed` pass.
+    prior_order: Vec<SurfaceItem>,
+    seen: HashSet<(String, String)>,
+    /// The surface being reviewed now — handed to `trust_with_snapshot`.
+    current: Vec<SurfaceItem>,
+}
+
+impl ReviewDiff {
+    fn new(prior: PriorSurface) -> Self {
+        // Only a recorded prior turns on diff markers; NeverTrusted and
+        // Untracked both render flat.
+        let (map, order) = match prior {
+            PriorSurface::Recorded(items) => {
+                let map = items
+                    .iter()
+                    .map(|it| ((it.kind.clone(), it.name.clone()), it.identity.clone()))
+                    .collect();
+                (Some(map), items)
+            }
+            _ => (None, Vec::new()),
+        };
+        Self {
+            prior: map,
+            prior_order: order,
+            seen: HashSet::new(),
+            current: Vec::new(),
+        }
+    }
+
+    fn diffing(&self) -> bool {
+        self.prior.is_some()
+    }
+
+    /// Record a reviewed item and return its two-char line marker. Called
+    /// exactly once per item, in render order.
+    fn mark(&mut self, kind: &str, name: &str, identity: &str) -> &'static str {
+        self.current.push(SurfaceItem {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            identity: identity.to_string(),
+        });
+        let Some(prior) = &self.prior else {
+            return "  ";
+        };
+        let key = (kind.to_string(), name.to_string());
+        self.seen.insert(key.clone());
+        match prior.get(&key) {
+            None => "+ ",
+            Some(prev) if prev != identity => "~ ",
+            Some(_) => "  ",
+        }
+    }
+
+    /// Prior items no marker was requested for — removed since the last trust.
+    /// Empty in flat mode (`prior_order` is empty there).
+    fn removed(&self) -> Vec<&SurfaceItem> {
+        self.prior_order
+            .iter()
+            .filter(|it| !self.seen.contains(&(it.kind.clone(), it.name.clone())))
+            .collect()
+    }
+}
 
 pub fn run(args: &TrustArgs) -> Result<()> {
     if args.list {
@@ -53,6 +133,27 @@ fn grant(base: &Path) -> Result<()> {
         "Trusting {} for the zero-files bridge.\n",
         base.display().to_string().bold()
     );
+
+    // P14: when this project was trusted before, mark the review against the
+    // surface it last consented to — so a `git pull`'s new `evil` server reads
+    // as `+ added` instead of hiding in a flat re-list. First-ever trust (and
+    // an older entry that recorded no snapshot) stays the flat full review.
+    let prior = trust::prior_surface(base);
+    let untracked = matches!(prior, PriorSurface::Untracked);
+    let mut diff = ReviewDiff::new(prior);
+    if diff.diffing() {
+        println!(
+            "Re-trust — marking what changed since you last trusted this ({} added, {} changed, {} removed):\n",
+            "+".green(),
+            "~".yellow(),
+            "-".red()
+        );
+    } else if untracked {
+        println!(
+            "Re-trust — no reviewed-surface snapshot was recorded last time, so this is a full re-review, not a diff.\n"
+        );
+    }
+
     // Preview the gateway's actual runtime surface, not just the inline
     // `[servers.*]` tables: library name refs resolve here exactly like they
     // will at gateway time, so the human reviews everything auto-mode may run.
@@ -77,7 +178,8 @@ fn grant(base: &Path) -> Result<()> {
         let r = match resolved {
             Ok(r) => r,
             Err(e) => {
-                println!("  {} {name}: unresolvable ({e})", "✗".red());
+                let mk = diff.mark("server", name, "unresolvable");
+                println!("{mk}{} {name}: unresolvable ({e})", "✗".red());
                 blockers.push((name.clone(), format!("broken server ref — {e}")));
                 continue;
             }
@@ -106,23 +208,33 @@ fn grant(base: &Path) -> Result<()> {
         };
         match r.server.server_type {
             // A stdio server is arbitrary local code execution — the thing the
-            // trust gate exists for. Call it out explicitly.
-            ServerType::Stdio => println!(
-                "  {} {name}: runs `{} {}`{origin}",
-                "▶".yellow(),
-                r.server.command.as_deref().unwrap_or("?"),
-                r.server.args.join(" ")
-            ),
-            ServerType::Http => println!(
-                "  {} {name}: contacts {}{origin}",
-                "→".cyan(),
-                r.server.url.as_deref().unwrap_or("?")
-            ),
+            // trust gate exists for. Call it out explicitly. The diff identity
+            // is the command line (what actually runs), not the pin/origin
+            // annotation — pin drift is already a hard blocker below.
+            ServerType::Stdio => {
+                let command = r.server.command.as_deref().unwrap_or("?");
+                let args = r.server.args.join(" ");
+                let mk = diff.mark("server", name, &format!("{command} {args}"));
+                println!(
+                    "{mk}{} {name}: runs `{command} {args}`{origin}",
+                    "▶".yellow()
+                );
+            }
+            ServerType::Http => {
+                let url = r.server.url.as_deref().unwrap_or("?");
+                let mk = diff.mark("server", name, url);
+                println!("{mk}{} {name}: contacts {url}{origin}", "→".cyan());
+            }
         }
     }
     let refs = m.referenced_secrets();
     if !refs.is_empty() {
-        println!("  secrets referenced: {}", refs.join(", "));
+        // Secrets are one aggregate line; its identity is the (sorted, from
+        // `referenced_secrets`) set, so adding or dropping any ref flips the
+        // whole line to `~ changed`.
+        let joined = refs.join(", ");
+        let mk = diff.mark("secrets", "", &joined);
+        println!("{mk}secrets referenced: {joined}");
     }
 
     // D3 (contract §8): the repository-local executable surface, pinned by
@@ -139,17 +251,20 @@ fn grant(base: &Path) -> Result<()> {
     if !exec_statuses.is_empty() {
         println!("  local executable content (pinned by current bytes):");
         for (label, status) in &exec_statuses {
+            // An executable is identified by its path (the label the review
+            // shows); byte drift is caught by the verdict below, not the diff.
+            let mk = diff.mark("executable", label, label);
             match crate::verify::executable_verdict(status) {
-                crate::verify::Verdict::Ok => println!("  · {label}   [pinned]"),
+                crate::verify::Verdict::Ok => println!("{mk}· {label}   [pinned]"),
                 crate::verify::Verdict::Unpinned => {
-                    println!("  {} {label}   [{}]", "✗".red(), "unpinned".red());
+                    println!("{mk}{} {label}   [{}]", "✗".red(), "unpinned".red());
                     blockers.push((
                         label.clone(),
                         "local executable unpinned — run `agentstack lock`".to_string(),
                     ));
                 }
                 crate::verify::Verdict::Block(why) => {
-                    println!("  {} {label}   [{}]", "✗".red(), why.red());
+                    println!("{mk}{} {label}   [{}]", "✗".red(), why.red());
                     blockers.push((label.clone(), why));
                 }
             }
@@ -171,6 +286,9 @@ fn grant(base: &Path) -> Result<()> {
         for (name, ext) in &m.extensions {
             use crate::resolve::{ExtensionLockStatus, ExtensionOrigin};
             let dest = format!("→ {}", ext.target);
+            // The extension's identity for the diff is its target (where it
+            // installs); a retarget shows as `~ changed`.
+            let mk = diff.mark("extension", name, &ext.target);
             // Read-only review: never fetch a git source here. An un-cached git
             // extension surfaces as offline, exactly like a skill.
             let report = crate::resolve::extension_lock_status(
@@ -190,11 +308,14 @@ fn grant(base: &Path) -> Result<()> {
             };
             match report.status {
                 ExtensionLockStatus::Matches => {
-                    println!("  {} {name} {dest}   [{origin_word}, pinned]", "▶".yellow());
+                    println!(
+                        "{mk}{} {name} {dest}   [{origin_word}, pinned]",
+                        "▶".yellow()
+                    );
                 }
                 ExtensionLockStatus::MissingLockEntry => {
                     println!(
-                        "  {} {name} {dest}   [{origin_word}, {}]",
+                        "{mk}{} {name} {dest}   [{origin_word}, {}]",
                         "✗".red(),
                         "unpinned".red()
                     );
@@ -206,7 +327,7 @@ fn grant(base: &Path) -> Result<()> {
                 ExtensionLockStatus::ChecksumDrift { .. }
                 | ExtensionLockStatus::RevDrift { .. } => {
                     println!(
-                        "  {} {name} {dest}   [{origin_word}, {}]",
+                        "{mk}{} {name} {dest}   [{origin_word}, {}]",
                         "✗".red(),
                         "DRIFTED from lock".red()
                     );
@@ -217,7 +338,7 @@ fn grant(base: &Path) -> Result<()> {
                 }
                 ExtensionLockStatus::TargetDrift { locked, .. } => {
                     println!(
-                        "  {} {name} {dest}   [{origin_word}, {}]",
+                        "{mk}{} {name} {dest}   [{origin_word}, {}]",
                         "✗".red(),
                         format!("RETARGETED since locked (was '{locked}')").red()
                     );
@@ -229,12 +350,12 @@ fn grant(base: &Path) -> Result<()> {
                 // Reproducibility can't be checked offline; not a blocker —
                 // same posture as skills' un-cached git sources.
                 ExtensionLockStatus::NotAvailableOffline { .. } => println!(
-                    "  {} {name} {dest}   [{origin_word}, {}]",
+                    "{mk}{} {name} {dest}   [{origin_word}, {}]",
                     "▶".yellow(),
                     "offline — pin unverified".yellow()
                 ),
                 ExtensionLockStatus::ResolveFailed { error } => {
-                    println!("  {} {name} {dest}: {}", "✗".red(), error.red());
+                    println!("{mk}{} {name} {dest}: {}", "✗".red(), error.red());
                     blockers.push((name.clone(), error));
                 }
             }
@@ -265,13 +386,16 @@ fn grant(base: &Path) -> Result<()> {
                 Some(SkillOrigin::Library) => "library",
                 None => "?",
             };
+            // A skill has no command/url; its diff identity is where its body
+            // comes from (inline vs library), so a source flip shows `~ changed`.
+            let mk = diff.mark("skill", name, origin_word);
             match &report.status {
                 SkillLockStatus::Matches => {
-                    println!("  · {name}   [{origin_word}, pinned]");
+                    println!("{mk}· {name}   [{origin_word}, pinned]");
                 }
                 SkillLockStatus::ChecksumDrift { .. } | SkillLockStatus::RevDrift { .. } => {
                     println!(
-                        "  {} {name}   [{origin_word}, {}]",
+                        "{mk}{} {name}   [{origin_word}, {}]",
                         "✗".red(),
                         "DRIFTED from lock".red()
                     );
@@ -281,7 +405,7 @@ fn grant(base: &Path) -> Result<()> {
                     // An inline skill's bytes live in the repo under review —
                     // unpinned means trusting would leave them ungoverned.
                     Some(SkillOrigin::Inline) => {
-                        println!("  {} {name}   [inline, {}]", "✗".red(), "unpinned".red());
+                        println!("{mk}{} {name}   [inline, {}]", "✗".red(), "unpinned".red());
                         blockers.push((
                             name.clone(),
                             "inline skill unpinned — run `agentstack lock`".to_string(),
@@ -290,17 +414,17 @@ fn grant(base: &Path) -> Result<()> {
                     // A library skill's bytes are the user's own curated,
                     // scan-gated content — worth pinning, not worth blocking.
                     _ => println!(
-                        "  · {name}   [{origin_word}, {}]",
+                        "{mk}· {name}   [{origin_word}, {}]",
                         "unpinned — run `agentstack lock`".yellow()
                     ),
                 },
                 // Reproducibility can't be checked offline; not a blocker.
                 SkillLockStatus::NotAvailableOffline { .. } => println!(
-                    "  · {name}   [{origin_word}, {}]",
+                    "{mk}· {name}   [{origin_word}, {}]",
                     "offline — pin unverified".yellow()
                 ),
                 SkillLockStatus::ResolveFailed { error } => {
-                    println!("  {} {name}: broken ref ({error})", "✗".red());
+                    println!("{mk}{} {name}: broken ref ({error})", "✗".red());
                     blockers.push((name.clone(), format!("broken ref — {error}")));
                 }
             }
@@ -321,24 +445,27 @@ fn grant(base: &Path) -> Result<()> {
         println!("  instruction fragments (compile into CLAUDE.md / AGENTS.md):");
         for (name, instr) in instructions {
             use crate::resolve::InstructionLockStatus;
+            // Instructions are keyed by name; there is no finer identity to
+            // show, so they only ever read as added or removed.
+            let mk = diff.mark("instruction", name, "");
             match crate::resolve::instruction_lock_status(name, instr, &dir, &lock) {
-                InstructionLockStatus::Matches => println!("  · {name}   [pinned]"),
+                InstructionLockStatus::Matches => println!("{mk}· {name}   [pinned]"),
                 InstructionLockStatus::ChecksumDrift { .. } => {
-                    println!("  {} {name}   [{}]", "✗".red(), "DRIFTED from lock".red());
+                    println!("{mk}{} {name}   [{}]", "✗".red(), "DRIFTED from lock".red());
                     blockers.push((
                         name.clone(),
                         "instruction content drifted from lock".to_string(),
                     ));
                 }
                 InstructionLockStatus::MissingLockEntry => {
-                    println!("  {} {name}   [{}]", "✗".red(), "unpinned".red());
+                    println!("{mk}{} {name}   [{}]", "✗".red(), "unpinned".red());
                     blockers.push((
                         name.clone(),
                         "instruction unpinned — run `agentstack lock`".to_string(),
                     ));
                 }
                 InstructionLockStatus::ResolveFailed { error } => {
-                    println!("  {} {name}: broken ref ({error})", "✗".red());
+                    println!("{mk}{} {name}: broken ref ({error})", "✗".red());
                     blockers.push((name.clone(), format!("broken ref — {error}")));
                 }
             }
@@ -350,7 +477,30 @@ fn grant(base: &Path) -> Result<()> {
     // narrow — the machine layer caps everything at runtime regardless — so
     // there is nothing here to block on, but the human should see what the
     // repo asks for before blessing it.
-    review_policy(&m.policy);
+    review_policy(&m.policy, &mut diff);
+
+    // P14: anything the last consented surface carried that is gone now. Printed
+    // as part of the review (before the blocker bail) so the human sees the full
+    // diff. A scoped block ends the borrow of `diff` before its `current` moves.
+    {
+        let removed = diff.removed();
+        if !removed.is_empty() {
+            println!("  no longer present (was trusted before):");
+            for it in removed {
+                let label = if it.name.is_empty() {
+                    it.kind.clone()
+                } else {
+                    format!("{} {}", it.kind, it.name)
+                };
+                let detail = if it.identity.is_empty() {
+                    String::new()
+                } else {
+                    format!("  ({})", it.identity)
+                };
+                println!("{} {label}{detail}", "-".red());
+            }
+        }
+    }
 
     if !blockers.is_empty() {
         let width = blockers.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
@@ -366,7 +516,10 @@ fn grant(base: &Path) -> Result<()> {
         );
     }
 
-    let digest = trust::trust(base)?;
+    // Store the reviewed surface alongside the pin so the NEXT re-trust can
+    // diff against it (P14). Display metadata only — it does not enter the
+    // trust digest, so recording it never re-gates the project.
+    let digest = trust::trust_with_snapshot(base, diff.current)?;
     println!(
         "\n{} trusted at {digest}.\nEditing the manifest or lockfile invalidates this — re-run `agentstack trust` after reviewing changes.\nPinned skill/server content that drifts is blocked at use time until re-locked.\nWithdraw anytime with `agentstack trust --revoke`.",
         "✓".green()
@@ -379,15 +532,25 @@ fn grant(base: &Path) -> Result<()> {
 /// labelled honestly: the write scope decides the sandbox workspace mount
 /// (ro unless covered); read scopes are informational, and host mode
 /// enforces neither.
-fn review_policy(p: &crate::manifest::Policy) {
+fn review_policy(p: &crate::manifest::Policy, diff: &mut ReviewDiff) {
     let lines = policy_requested_lines(p);
-    if lines.is_empty() {
-        return;
+    if !lines.is_empty() {
+        // One aggregate item: any change to the requested set flips the header
+        // line to `~ changed`.
+        let mk = diff.mark("policy", "", &lines.join("\n"));
+        println!("{mk}policy requested by this project (can only narrow the machine layer):");
+        for line in &lines {
+            println!("{line}");
+        }
     }
-    println!("  policy requested by this project (can only narrow the machine layer):");
-    for line in lines {
-        println!("{line}");
-    }
+    // P15: ALWAYS name the machine policy ceiling file — even for a policy-free
+    // repo — so a user consenting learns a machine layer exists and where it
+    // lives. Constant machine fact, so no diff marker; honors AGENTSTACK_HOME.
+    let ceiling = crate::util::paths::agentstack_home().join("agentstack.toml");
+    println!(
+        "  machine policy ceiling: {} — the repo can only narrow it, never loosen it",
+        ceiling.display()
+    );
 }
 
 /// The requested-policy lines the trust review prints, as a pure builder —
@@ -482,4 +645,73 @@ fn list() -> Result<()> {
         println!("  {mark} {path} · {} · {note}", entry.digest);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(kind: &str, name: &str, identity: &str) -> SurfaceItem {
+        SurfaceItem {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            identity: identity.to_string(),
+        }
+    }
+
+    // P14: the re-trust diff marks each item against the last consented
+    // surface. This is the machine-checked form of the feature: same item →
+    // plain, new item → added, same key but new identity → changed, and a prior
+    // item never re-marked → removed. It also proves flat mode (no prior) marks
+    // nothing, so first-trust and older-entry reviews look unchanged.
+    #[test]
+    fn mark_classifies_added_changed_unchanged_and_removed() {
+        // The `git pull` scenario: last time we consented to a safe server and
+        // a library skill; now a new `evil` server appears, the safe server's
+        // command changed, the skill is unchanged, and an old server is gone.
+        let prior = vec![
+            item("server", "safe", "node safe.js"),
+            item("server", "gone", "node gone.js"),
+            item("skill", "greet", "library"),
+        ];
+        let mut diff = ReviewDiff::new(PriorSurface::Recorded(prior));
+        assert!(diff.diffing());
+
+        // Same key + same identity → unchanged (plain two-space indent).
+        assert_eq!(diff.mark("skill", "greet", "library"), "  ");
+        // Same key + different identity → changed.
+        assert_eq!(diff.mark("server", "safe", "node safe.js --new"), "~ ");
+        // New key → added — this is the surfaced `evil` server.
+        assert_eq!(diff.mark("server", "evil", "sh -c pwn"), "+ ");
+
+        // "gone" was in the prior surface but never re-marked → removed.
+        let removed = diff.removed();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].name, "gone");
+
+        // The accumulated current surface is exactly what would be persisted,
+        // in render order.
+        assert_eq!(
+            diff.current,
+            vec![
+                item("skill", "greet", "library"),
+                item("server", "safe", "node safe.js --new"),
+                item("server", "evil", "sh -c pwn"),
+            ]
+        );
+    }
+
+    #[test]
+    fn flat_mode_marks_nothing_and_has_no_removals() {
+        // First-ever trust (and an older entry with no snapshot) both render
+        // flat: every marker is the plain indent, nothing reads as removed, yet
+        // the surface is still accumulated for the next re-trust to diff.
+        for prior in [PriorSurface::NeverTrusted, PriorSurface::Untracked] {
+            let mut diff = ReviewDiff::new(prior);
+            assert!(!diff.diffing());
+            assert_eq!(diff.mark("server", "anything", "whatever"), "  ");
+            assert!(diff.removed().is_empty());
+            assert_eq!(diff.current, vec![item("server", "anything", "whatever")]);
+        }
+    }
 }
