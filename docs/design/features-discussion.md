@@ -227,7 +227,15 @@ line of code and zero new surface:
    questions that end in a recommendation and scroll to that mode's tab.
    Only if the mode tabs (this initiative) prove insufficient on their own.
 
-**Status: DRAFT — awaiting maintainer review.**
+**Status (2026-07-19): items 1-3 SHIPPED** — wizard exit doorway (every
+fork's summary ends with the start-page line), first-denial teach-once
+(marker `<AGENTSTACK_HOME>/guard-introduced`, fail-open, audit log keeps the
+original reason), and the wizard-replay hero (new generator scene, README
+step 1; every line real binary output). **Item 4 deferred by its own
+condition** (mode tabs just shipped). Related P26 note: firstrun.svg had a
+hand-edit its generator cannot reproduce (textLength squish from 65c6138) —
+decide later: shorten the scene wording or teach make-term-svgs.py a per-row
+width cap.
 
 ## Doctor + drift (feature 2)
 

@@ -106,7 +106,7 @@ rendering; **zero-files** offers to register the gateway and points you at
 `agentstack trust .`. Every path closes with a summary of every file it
 wrote, where each secret resolves, and the one-liner to undo it all. The
 same flow as individual commands: `init` → `apply` → `use --write` (skills
-activate through `use`, not `apply`; `setup` runs it for you). If `apply` or
+activate through `use`, not `apply`; the wizard runs it for you). If `apply` or
 `doctor` reports a missing secret, store it once — by default it goes in your
 OS keychain, never in the manifest:
 
@@ -143,7 +143,7 @@ default = ["claude-code", "codex"]
 One `agentstack apply` compiles it into the native config of every CLI in
 `[targets]` — each adapter's quirks handled for you:
 
-![agentstack first run: init → apply](docs/firstrun.svg)
+![agentstack init, the guided wizard: it opens with a plan (nothing written until you confirm), detects your CLIs and lifts inline tokens to ${REF}s, asks where the values live (project .env selected), then asks you to pick a delivery mode (static selected) before writing — the fork that decides the rest of the run — applies into every CLI, and closes with a machine-change summary, the undo one-liner, and a link to learn the rest](docs/wizard-replay.svg)
 
 In a repo, writes default to **project** scope (artifacts land repo-local,
 kept out of git by a managed `.gitignore` block that only ever covers files

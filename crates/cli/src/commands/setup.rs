@@ -696,9 +696,6 @@ fn print_change_summary(
     println!("\n{} Setup complete.", "✓".green());
     println!("\n{}", "What changed on this machine".bold());
     print!("{}", render_change_summary(&files, &secrets, &seeded));
-
-    // Harnesses read config at startup, so an open session won't see the writes.
-    println!("\n  Restart your agent CLI(s) so they pick up the new config.");
 }
 
 /// Pure formatter for the P7 close body (files / secrets / seeded / one-liners),
@@ -733,6 +730,18 @@ fn render_change_summary(
     }
     out.push_str("  Undo everything this run wrote:  agentstack restore --last --write\n");
     out.push_str("  Inspect any time:  agentstack doctor  ·  agentstack\n");
+    // Harnesses read config at startup, so an open session won't see the writes.
+    out.push_str("\n  Restart your agent CLI(s) so they pick up the new config.\n");
+    // P29.1: the closing doorway is the summary's FINAL line — it hands the user
+    // to the walkthrough exactly when curiosity peaks, or back to bare
+    // `agentstack` for the next step. Every delivery-mode fork ends through this
+    // one formatter, so all three summaries carry it. (The `\` is a Rust string
+    // line-continuation: it and the following indentation collapse to nothing,
+    // leaving one space before the em dash.)
+    out.push_str(
+        "\n  Learn the rest: https://tarekkharsa.github.io/agentstack/start.html \
+         — or run `agentstack` anytime for your next step.\n",
+    );
     out
 }
 
@@ -989,5 +998,22 @@ mod tests {
         let out = render_change_summary(&[], &[], &[]);
         assert!(out.contains("No files were written"));
         assert!(out.contains("agentstack restore --last --write"));
+    }
+
+    // P29.1: the summary's FINAL line is the start-page doorway, present on
+    // every delivery-mode fork (all three end through this one formatter).
+    #[test]
+    fn change_summary_ends_with_the_start_page_doorway() {
+        let out = render_change_summary(&[], &[], &[]);
+        // The exact URL + single-space em dash pins that the string
+        // line-continuation collapsed to one space, not zero or two.
+        assert!(out.contains(
+            "https://tarekkharsa.github.io/agentstack/start.html — or run `agentstack` anytime"
+        ));
+        assert!(
+            out.trim_end()
+                .ends_with("or run `agentstack` anytime for your next step."),
+            "the doorway must be the summary's final line, got:\n{out}"
+        );
     }
 }

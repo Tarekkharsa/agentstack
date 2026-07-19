@@ -254,6 +254,20 @@ fn finish(
             ms: 0,
         });
     }
+    // P29.2: the very FIRST evaluated rule denial on this machine carries a
+    // one-time teach line appended to its reason. Only a real `audited` denial
+    // gets it — fail-closed *system* errors (audited == None) never do. The
+    // audit above recorded the original reason; the response gets the augmented
+    // one, so the marker's teach text isn't stored in the call log.
+    let mut taught: Option<Decision> = None;
+    if let (Decision::Deny { reason }, Some(_)) = (decision, audited) {
+        if let Some(teach) = first_denial_teach_line() {
+            taught = Some(Decision::Deny {
+                reason: format!("{reason}\n{teach}"),
+            });
+        }
+    }
+    let decision = taught.as_ref().unwrap_or(decision);
     let (stdout, stderr, code) = proto.respond(decision);
     if let Some(s) = stdout {
         println!("{s}");
@@ -262,6 +276,38 @@ fn finish(
         eprintln!("{s}");
     }
     std::process::exit(code);
+}
+
+/// The file in the agentstack home whose existence means the one-time
+/// first-denial teach line (P29.2) has already been shown on this machine.
+const GUARD_INTRODUCED_MARKER: &str = "guard-introduced";
+
+/// The one-time onboarding line appended after the machine's VERY FIRST guard
+/// denial (P29.2). Teaching at the moment of surprise beats any docs page;
+/// repeat-noise would erode it, so a marker file suppresses it ever after.
+///
+/// This runs inside each CLI's pre-tool-use hook hot path, so it must be cheap
+/// and must NEVER break or slow a denial: the check is a single `exists()`, and
+/// every filesystem failure is swallowed (fail-open — we skip the teach line
+/// rather than risk wedging the block). Returns the line to append, or `None`
+/// when it has already been shown, or on any error. The `.ok()?` short-circuits
+/// to `None` on an `Err` — the Rust idiom for "give up quietly".
+fn first_denial_teach_line() -> Option<String> {
+    let marker = paths::agentstack_home().join(GUARD_INTRODUCED_MARKER);
+    // Already taught → stay silent. `exists()` is also false on a stat error,
+    // in which case the writes below fail and we still return None (fail-open).
+    if marker.exists() {
+        return None;
+    }
+    // Record that we've taught BEFORE returning the line, so the next denial is
+    // silent. Any error → skip the line (never show it forever, never block).
+    fs::create_dir_all(paths::agentstack_home()).ok()?;
+    fs::write(&marker, b"agentstack guard first-denial teach shown\n").ok()?;
+    Some(
+        "this was agentstack's guard — how it works: \
+         https://tarekkharsa.github.io/agentstack/start.html#s-guard"
+            .to_string(),
+    )
 }
 
 fn tmp_dirs() -> Vec<PathBuf> {
@@ -308,7 +354,14 @@ fn test(command: &str) -> Result<()> {
             Ok(())
         }
         Decision::Deny { reason } => {
-            println!("{} {command}\n  {reason}", "DENY ".red().bold());
+            print!("{} {command}\n  {reason}", "DENY ".red().bold());
+            // P29.2: `guard test` renders a denial too, so the same first-denial
+            // teach line applies here — indented + dimmed to read as a secondary
+            // hint under the reason.
+            if let Some(teach) = first_denial_teach_line() {
+                print!("\n  {}", teach.dimmed());
+            }
+            println!();
             std::process::exit(1);
         }
     }
@@ -1205,5 +1258,41 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("guard-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// P29.2: the first-denial teach line shows exactly once per machine, then
+    /// a marker file suppresses it forever. Fences AGENTSTACK_HOME to a temp dir
+    /// and serializes against other env-mutating tests in this binary.
+    #[test]
+    fn first_denial_teaches_once_then_marks_the_machine() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = tempdir().join(format!("teach-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home); // start clean if a prior run left one
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("AGENTSTACK_HOME", &home);
+
+        // First denial: the teach line is present and points at the guard step.
+        let first = first_denial_teach_line();
+        assert!(
+            first
+                .as_deref()
+                .is_some_and(|l| l.contains("start.html#s-guard")),
+            "the first denial must carry the teach line, got {first:?}"
+        );
+        // The marker now exists, so the machine is flagged as introduced.
+        assert!(
+            home.join(GUARD_INTRODUCED_MARKER).exists(),
+            "the marker file must exist after the first teach"
+        );
+        // Every subsequent denial is silent.
+        assert!(
+            first_denial_teach_line().is_none(),
+            "the second denial must not repeat the teach line"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

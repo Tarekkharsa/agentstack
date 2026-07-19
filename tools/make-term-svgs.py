@@ -328,6 +328,43 @@ ONE_MANIFEST = (
     ],
 )
 
+# The interactive `init` wizard's whole arc (P29 item 3), condensed from the
+# real prompts/output in crates/cli/src/commands/{setup.rs,init.rs}: the P1 plan
+# → detection/import/lift → the P2 storage choice (.env selected) → the P28 mode
+# fork (static selected, with the actual fork_plan step list it prints) → a
+# couple of apply writes → the P7 machine-change summary, closing on the P29
+# doorway line the wizard now ends with. Every line is real output or real prompt
+# text; the two selectors are shown as their dialoguer prompt renders them
+# (`? … › <selected>`), with the unchosen options named on the next line. The
+# doorway sentence is one printed line, wrapped at its em-dash to fit the card.
+WIZARD_REPLAY = (
+    "the guided init: plan · storage · mode · apply",
+    [
+        cmd("agentstack init"),
+        out(("i", "Setup will:")),
+        out(("i", "  1. detect the agent CLIs on this machine")),
+        out(("i", "  2. import their existing configs")),
+        out(("i", "  3. lift any inline tokens to ${REF} placeholders")),
+        out(("i", "  4. write one agentstack manifest")),
+        out(("c", "· Nothing is written until you confirm. Your CLIs are not touched yet."), d=0.5),
+        gap(),
+        out(("c", "🔍  6 CLI binaries on PATH: Claude Code · Codex · Gemini · OpenCode · Pi")),
+        out(("c", "📥  Imported 1 MCP server(s) from existing configs")),
+        out(("c", "🔐  Found 1 plaintext token in your live CLI configs — lifted to "), ("ok", "${GH_PAT}"), d=0.55),
+        out(("i", "? Where should these token values live? › "), ("ok", "Project .env (default)")),
+        out(("c", "    macOS keychain · Skip / decide later"), d=0.5),
+        out(("i", "? Pick a delivery mode › "), ("ok", "static"), ("c", " — rendered configs on disk, kept out of git")),
+        out(("c", "    clean-at-rest · zero-files")),
+        out(("c", "  → preview · confirm · install · apply · skills · doctor"), d=0.6),
+        gap(),
+        out(("c", "  Claude Code  + .mcp.json     "), ("ok", "✓ wrote 1 server")),
+        out(("c", "  Codex CLI    + config.toml   "), ("ok", "✓ wrote 1 server"), d=0.55),
+        out(("ok", "✓"), ("i", " Setup complete."), ("c", " · undo: agentstack restore --last --write"), d=0.45),
+        out(("i", "Learn the rest: https://tarekkharsa.github.io/agentstack/start.html"), d=0.08),
+        out(("i", "  — or run `agentstack` anytime for your next step.")),
+    ],
+)
+
 if __name__ == "__main__":
     docs = Path(__file__).resolve().parent.parent / "docs"
     for name, (title, rows) in {
@@ -337,5 +374,6 @@ if __name__ == "__main__":
         "closed-loop": CLOSED_LOOP,
         "guard": GUARD,
         "one-manifest": ONE_MANIFEST,
+        "wizard-replay": WIZARD_REPLAY,
     }.items():
         render(title, rows, docs / f"{name}.svg")
