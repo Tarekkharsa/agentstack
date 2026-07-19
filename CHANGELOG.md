@@ -4,7 +4,35 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
-## v0.13.0 — 2026-07-19
+## v0.14.0 — 2026-07-19
+
+**The onboarding loop closes in both directions.** The docs now mirror the
+product, and the product now hands you to the docs at the two moments
+curiosity peaks.
+
+### Added
+
+- **Onboarding doorways.** Every wizard run — whichever delivery mode you
+  choose — closes with a link to the getting-started walkthrough and the
+  reminder that bare `agentstack` always names your next step. And the very
+  first guard denial on a machine explains itself with a one-line pointer to
+  how the guard works, exactly once (a marker file; fail-open, one
+  `exists()` check on the hook hot path, and the audit log always records
+  the original denial reason untouched).
+- **The README hero is the wizard itself** — a generated terminal replay of
+  the real first-run arc (plan → secret-storage choice → delivery-mode fork
+  → machine-change summary), every line quoted from the binary and produced
+  by the same generator as the other demos, so it cannot silently drift.
+
+### Changed
+
+- **The docs quality wave.** The getting-started walkthrough now forks on an
+  accessible static / clean-at-rest / zero-files tab control at exactly the
+  point the wizard asks, and you read only your path; the docs hub opens
+  with a twelve-entry "I want to…" index that routes by job; the examples
+  page gains category filter chips and job-stating titles; the feature
+  reference gains a complete two-level table of contents, a doorway sentence
+  on every section, and a journey-shaped order — with zero content loss.
 
 **One command sets up everything.** Bare interactive `agentstack init` is now
 the guided wizard: a plan of what will happen, import, a real choice of where

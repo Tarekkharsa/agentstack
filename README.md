@@ -293,7 +293,7 @@ A starter catalog ships in the binary (`run-codex`, `mine-skills`,
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@v0.13.0  # pin a release tag, not @main
+  - uses: Tarekkharsa/agentstack@v0.14.0  # pin a release tag, not @main
 ```
 
 A maintainer can `sign` the lockfile (detached ed25519) for `verify` on the
