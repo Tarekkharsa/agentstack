@@ -496,7 +496,7 @@ servers, secrets, skills, extensions, and policy, so a `git pull`'s new
 executable is visually obvious instead of buried in a flat list. First-trust
 stays the full flat review (nothing to diff against).
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (2026-07-19, delegated judgment — maintainer ratifies):** SHIP. The consent moment must teach; a re-trust that formats a new server identically to reviewed ones is the consent-fatigue trap this product exists to avoid. Display-only change; trust granting logic untouched (security-review flag anyway).
 
 ### P15 — Keep the run/contact/secret/policy consent model; extend the policy line
 
@@ -510,7 +510,7 @@ and always print one line naming the machine policy file
 policy-free repo still learns at the consent moment that a machine layer
 exists and where it lives.
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (delegated):** SHIP — always name the machine ceiling file at consent, one line. Pure "explain the why at the moment" (principle 4, P11 sibling).
 
 ### P16 — Untrusted teaching for the human, not just the agent
 
@@ -521,7 +521,7 @@ orientation says what that means in one line ("its servers are inert — the
 bridge exposes control-plane tools only until you review it") and makes
 `agentstack trust .` the next step, distinct from `setup`.
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (delegated):** SHIP — bare orientation explains inert-until-trusted in one line and makes `trust .` the next step. Doorway principle (P29 sibling).
 
 ### P17 — `gateway connect` teaches the trust-unlock in the dry-run, not after write
 
@@ -532,7 +532,7 @@ in the dry-run output (the moment the user is deciding whether to register the
 bridge is when they need to know trust is the per-repo gate), not only after
 the change is committed.
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (delegated):** SHIP — the dry-run is the decision moment; the trust-unlock line moves there. P1 discipline (say it before, not after).
 
 ## Profiles + library + packs (feature 5)
 
@@ -604,7 +604,7 @@ learn names by triggering the multi-profile error. Proposal: `agentstack use
 server + skill counts, and which is currently active — so "which profiles
 exist and what's in them" stops being archaeology through the manifest.
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (delegated):** SHIP as a FOLD, not a new verb (P27 instinct: no new front doors): bare orientation names profiles + marks the active one; the multi-profile disambiguation lists each with server/skill counts. No `agentstack profiles` command.
 
 ### P19 — The inline-vs-library resolution error must teach
 
@@ -616,7 +616,7 @@ your central library — drop the `[skills.greet]` block and list it in the
 profile's `skills = […]` to reference the library copy"). Optionally warn at
 activation when an inline skill shadows a same-named library skill.
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (delegated):** SHIP — the error names the library skill and shows the exact fix; activation warns when an inline block shadows a library name. Teach-at-error is the house signature (P3 sibling).
 
 ### P20 — `lib list` marks dangling provenance
 
@@ -626,7 +626,7 @@ dangle. Proposal: `lib list` checks whether a `path:` source still exists and,
 when gone, renders it "source gone — library copy canonical" instead of a dead
 absolute path, so provenance reads honestly long after the add.
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (delegated):** SHIP — "source gone — library copy canonical" instead of a dead path. Truthful output (P6 sibling).
 
 ### P21 — State the two mental models in one place
 
@@ -638,7 +638,7 @@ help/doc paragraph (and a line in `explain`) that names the two models and
 when each applies, so a user forms the mental model before hitting the inline
 block.
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (delegated):** SHIP — one contrast paragraph in the reference + one line in `explain`. The P19 trap grows from this gap.
 
 ## Locked runs + sandbox + lockdown (feature 6)
 
@@ -741,7 +741,7 @@ Proposal: have `--plan` print the same per-gate `✓` lines the live path does,
 so the "one auditable description" actually describes each admission decision
 in user terms on the happy path, not just the refusals.
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (delegated):** SHIP — `--plan` enumerates every gate exactly as the live run would. The README literally promises "prints every gate decision"; make it true (machine transparency).
 
 ### P23 — A manifest edit should point at re-lock *and* re-trust together
 
@@ -753,7 +753,7 @@ that also invalidates the lock, name both steps and their order ("the lock is
 stale — `agentstack lock`, review, then `agentstack trust .`; re-locking is
 itself a re-decision"), so the two content-bound anchors aren't taught as one.
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (delegated):** SHIP — the trust-drift refusal also teaches the re-lock half when the lock is stale (completes P9; the rule must be taught wherever it bites).
 
 ### P24 — Check the sandbox prerequisite before drawing the banner
 
@@ -764,7 +764,7 @@ rebuild/daemon instruction *before* any "▶ sandboxing …" output, so the user
 is never shown a container start that cannot happen. `--plan` keeps working
 without Docker (it explicitly describes, not launches).
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (delegated):** SHIP — prerequisite check before the banner; never paint a posture you cannot deliver (P6 truthfulness).
 
 ### P25 — Keep the posture labels and limits block as the disclosure template
 
@@ -776,7 +776,7 @@ run/contact honesty as the template for every posture disclosure across the
 product (trust, guard, gateway), so a user reads the same blunt vocabulary
 about what is and isn't actually enforced everywhere.
 
-**Status: DRAFT — awaiting maintainer review.**
+**DECIDED (delegated):** KEEP as-is — affirmed as the disclosure template; no code change.
 
 ### P26 — Captured CLI output in docs is an unguarded drift class
 
