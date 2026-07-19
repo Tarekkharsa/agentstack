@@ -137,6 +137,11 @@ fn explain_skill_reports_resolution_and_lock() {
         out.contains("inline (this project)"),
         "explain names where the skill resolves"
     );
+    // P21: the mental-model line — a hand-authored inline block owned by no pack.
+    assert!(
+        out.contains("inline manifest"),
+        "explain names the inline-manifest model: {out}"
+    );
     assert!(
         out.contains("not locked"),
         "explain shows the skill has no lock pin yet"
@@ -216,11 +221,59 @@ fn explain_library_only_skill() {
     let out = explain_text("central-skill", Some(&proj)).unwrap();
     assert!(out.contains("skill · path"));
     assert!(out.contains("central library"), "names its origin: {out}");
+    // P21: the mental-model line — a by-name library reference, resolved fresh.
+    assert!(
+        out.contains("library reference by name"),
+        "explain names the library-reference model: {out}"
+    );
     assert!(out.contains("A central skill"), "shows the description");
     assert!(out.contains("yes — available locally"), "resolved offline");
 
     // A name in neither manifest nor library still errors helpfully.
     assert!(explain_text("ghost-skill", Some(&proj)).is_err());
+
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
+/// P21: an inline skill a `[packs.*]` ledger owns is named a vendored pack copy —
+/// the distinction "Resolves: inline" alone cannot make (a hand-authored inline
+/// block and a pack member both resolve inline).
+#[test]
+fn explain_names_vendored_pack_model() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("skills/pack-skill")).unwrap();
+    fs::write(
+        proj.join("skills/pack-skill/SKILL.md"),
+        "---\ndescription: A pack member\n---\n# body\n",
+    )
+    .unwrap();
+    // The skill rides the normal `[skills]` section; the `[packs.linear]` ledger
+    // records that it owns it (the vendored-copy bookkeeping).
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n\
+         [skills.pack-skill]\npath = \"./skills/pack-skill\"\n\
+         [packs.linear]\nversion = \"1.2.0\"\ndescription = \"Linear pack\"\nskills = [\"pack-skill\"]\n",
+    )
+    .unwrap();
+
+    let out = explain_text("pack-skill", Some(&proj)).unwrap();
+    assert!(
+        out.contains("vendored pack copy"),
+        "names the vendored-pack model: {out}"
+    );
+    assert!(
+        out.contains("[packs.linear]"),
+        "names the owning pack: {out}"
+    );
 
     std::env::remove_var("AGENTSTACK_HOME");
     std::env::remove_var("HOME");

@@ -797,6 +797,26 @@ fn keys_at(value: &serde_json::Value, dotted: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// P23: the second half a trust-drift refusal must teach. Editing the manifest
+/// trips `[trust]` FIRST (trust pins manifest + lock together), so the drift
+/// refusal — which by itself says only "re-review and re-trust" — has to also
+/// point at the OTHER content-bound anchor: the lock is now likely stale, and
+/// re-locking is itself a re-decision that re-gates trust (P9). Naming both
+/// steps keeps the two anchors from being taught as one.
+///
+/// The wording is CONDITIONAL by design. Definitively deciding "the lock is
+/// stale relative to *this* manifest" cannot be done cheaply read-only: the
+/// lock stores no manifest digest to diff, so it would mean re-resolving and
+/// re-hashing every declared input (and, for git sources, consulting the store)
+/// — i.e. running the resolver, exactly what the P23 ruling says to avoid at a
+/// refusal. So we print the conditional form, which is correct in every
+/// sub-case: it calls for `agentstack lock` precisely for the user who changed
+/// pinned inputs, and reads as a harmless explanation (why re-locking flipped
+/// trust) for the user who only re-locked and forgot to re-trust.
+fn relock_guidance() -> &'static str {
+    "If you changed pinned inputs, run `agentstack lock` first — new pins re-gate trust."
+}
+
 fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     let m = &ctx.loaded.manifest;
     let desc = ctx.registry.get(&args.harness).with_context(|| {
@@ -867,7 +887,8 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 "trust",
                 anyhow::anyhow!(
                     "the agent configuration changed since you trusted it — review the changes \
-                     (`agentstack trust .` shows the surface), then re-trust"
+                     (`agentstack trust .` shows the surface), then re-trust.\n{}",
+                    relock_guidance()
                 ),
             ));
         }
@@ -1143,21 +1164,43 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         },
     };
 
+    // P22: enumerate EVERY gate with its verdict, exactly as the live path
+    // prints them — a ✓ line with the same detail on the happy path, a ✗ line
+    // when the gate would refuse (the full reason still aggregates into the
+    // blocker list below). The README promises the plan "prints every gate
+    // decision"; on the green path only trust used to print, so the other three
+    // admission decisions were invisible. All evaluation here is read-only.
+
+    // §3 step 3: trust, enforced.
     match trust::check(base) {
         TrustState::Trusted => println!("  {} trust: explicitly trusted", "✓".green()),
-        TrustState::Untrusted => blockers.push((
-            "trust".into(),
-            "project is not trusted — run `agentstack trust .` after reviewing".into(),
-        )),
-        TrustState::Changed => blockers.push((
-            "trust".into(),
-            "configuration changed since it was trusted — re-review and re-trust".into(),
-        )),
+        TrustState::Untrusted => {
+            println!("  {} trust: not trusted", "✗".red());
+            blockers.push((
+                "trust".into(),
+                "project is not trusted — run `agentstack trust .` after reviewing".into(),
+            ));
+        }
+        TrustState::Changed => {
+            println!(
+                "  {} trust: configuration changed since it was trusted",
+                "✗".red()
+            );
+            // P23: teach the re-lock half too when trust drifts.
+            blockers.push((
+                "trust".into(),
+                format!(
+                    "configuration changed since it was trusted — re-review and re-trust. {}",
+                    relock_guidance()
+                ),
+            ));
+        }
     }
 
+    // §3 step 4: strict locked-input verification.
     let inputs = match resolve_inputs(ctx, args.profile.as_deref()) {
         Ok(inputs) => {
-            if let Err(e) = crate::verify::ensure_locked_inputs(
+            match crate::verify::ensure_locked_inputs(
                 &args.harness,
                 &inputs.skill_statuses,
                 &inputs.instruction_statuses,
@@ -1165,18 +1208,33 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 &inputs.executable_statuses,
                 &inputs.extension_statuses,
             ) {
-                blockers.push(("locked-verify".into(), format!("{e:#}")));
+                Ok(()) => println!(
+                    "  {} locked inputs: {} skill(s), {} instruction(s), {} server(s), {} executable pin(s), {} extension(s) verified",
+                    "✓".green(),
+                    inputs.skill_statuses.len(),
+                    inputs.instruction_statuses.len(),
+                    inputs.frozen.len(),
+                    inputs.executable_statuses.len(),
+                    inputs.extension_statuses.len(),
+                ),
+                Err(e) => {
+                    println!("  {} locked inputs: verification failed", "✗".red());
+                    blockers.push(("locked-verify".into(), format!("{e:#}")));
+                }
             }
             Some(inputs)
         }
         Err(e) => {
+            println!("  {} locked inputs: could not resolve", "✗".red());
             blockers.push(("locked-verify".into(), format!("{e:#}")));
             None
         }
     };
 
-    // Rendered-copy verification (E2b), aggregated like every other blocker.
-    // Non-mutating: it only reads the delivered artifacts and their ledger.
+    // §3 step 4b: rendered-copy verification (E2b), aggregated like every other
+    // blocker. Non-mutating: it only reads the delivered artifacts and their
+    // ledger. Skipped when inputs couldn't resolve (there's no lock to verify
+    // the copies against) — the same "when applicable" the live path observes.
     let rendered = inputs.as_ref().and_then(|inputs| {
         match crate::render::extensions::verify_rendered(
             m,
@@ -1186,27 +1244,60 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             &ctx.dir,
             &inputs.lock,
         ) {
-            Ok(r) => Some(r),
+            Ok(r) => {
+                println!(
+                    "  {} rendered extensions: {} verified, {} not rendered",
+                    "✓".green(),
+                    r.verified.len(),
+                    r.absent.len(),
+                );
+                Some(r)
+            }
             Err(e) => {
+                println!("  {} rendered extensions: verification failed", "✗".red());
                 blockers.push(("rendered-verify".into(), format!("{e:#}")));
                 None
             }
         }
     });
 
+    // §3 step 5: policy admission under the machine ceiling.
     let mut ruleset_and_machine = None;
     match crate::machine_policy::load() {
         Ok(machine) => {
             let names: Vec<&str> = m.servers.keys().map(String::as_str).collect();
             let ruleset = agentstack_policy::compile(&machine, &m.policy, &names);
+            // The admission gate judges the frozen server set; when inputs
+            // couldn't resolve there is no set to judge, so — like the live path,
+            // which never reaches admission past a verify refusal — no verdict
+            // is claimed here rather than a hollow ✓.
             if let Some(inputs) = &inputs {
-                for (who, why) in admission_refusals(&ruleset, &inputs.frozen) {
-                    blockers.push((format!("policy-admission {who}"), why));
+                let refusals = admission_refusals(&ruleset, &inputs.frozen);
+                if refusals.is_empty() {
+                    println!(
+                        "  {} policy: declared requests fit under the machine ceiling",
+                        "✓".green()
+                    );
+                } else {
+                    println!(
+                        "  {} policy: {} declared request(s) exceed the machine ceiling",
+                        "✗".red(),
+                        refusals.len()
+                    );
+                    for (who, why) in refusals {
+                        blockers.push((format!("policy-admission {who}"), why));
+                    }
                 }
             }
             ruleset_and_machine = Some((ruleset, machine));
         }
-        Err(e) => blockers.push(("policy-admission".into(), format!("{e:#}"))),
+        Err(e) => {
+            println!(
+                "  {} policy: machine ceiling could not be loaded",
+                "✗".red()
+            );
+            blockers.push(("policy-admission".into(), format!("{e:#}")));
+        }
     }
 
     // §4: --plan never provisions. A commitment key that was simply never
@@ -1809,6 +1900,52 @@ mod tests {
             assert!(
                 !home.path().join("runs").exists(),
                 "--plan must not create recorder state"
+            );
+        });
+    }
+
+    /// P23: a trust-drift refusal (a manifest edit after trust) must ALSO teach
+    /// the re-lock half. Trust pins the manifest + lock together, so pointing
+    /// only at re-trust leaves the now-stale lock untaught (the P9 rule bites
+    /// wherever trust drifts). Both the plan aggregation and the live refusal
+    /// carry the guidance, and it explains WHY re-locking matters (new pins
+    /// re-gate trust) so the two content-bound anchors aren't taught as one.
+    #[test]
+    fn trust_drift_refusal_teaches_the_relock_half() {
+        locked_fixture(|_home, proj| {
+            pinned_and_trusted(proj);
+            // Edit the manifest AFTER trust: this flips trust to Changed. The
+            // `tool.sh` pin is untouched, so trust is the only blocker.
+            proj.child("agentstack.toml")
+                .write_str(
+                    "version = 1\n\n[servers.agent]\ntype = \"stdio\"\ncommand = \"./tool.sh\"\n\n# edited after trust\n",
+                )
+                .unwrap();
+
+            // Plan path: the aggregated trust blocker teaches re-lock.
+            let plan_err = run_locked(Some(proj.path()), &run_args(true)).unwrap_err();
+            let plan_msg = format!("{plan_err:#}");
+            assert!(plan_msg.contains("[trust]"), "{plan_msg}");
+            assert!(plan_msg.contains("re-trust"), "{plan_msg}");
+            assert!(
+                plan_msg.contains("`agentstack lock`"),
+                "plan teaches re-lock: {plan_msg}"
+            );
+            assert!(
+                plan_msg.contains("re-gate trust"),
+                "plan explains why re-lock matters: {plan_msg}"
+            );
+
+            // Live path: the trust refusal carries the same guidance.
+            let live_err = run_locked(Some(proj.path()), &run_args(false)).unwrap_err();
+            let live_msg = format!("{live_err:#}");
+            assert!(
+                live_msg.contains("`agentstack lock`"),
+                "live teaches re-lock: {live_msg}"
+            );
+            assert!(
+                live_msg.contains("re-gate trust"),
+                "live explains why re-lock matters: {live_msg}"
             );
         });
     }

@@ -81,6 +81,15 @@ pub enum ResolveError {
     Unresolved { name: String },
     #[error("skill '{name}' (git {url}) is not available offline — run `agentstack install`")]
     NotAvailableOffline { name: String, url: String },
+    /// P19: an inline `[skills.<name>]` block carries no `path`/`git` source, but
+    /// a library skill of the same name exists. Rather than the low-level
+    /// "neither `path` nor `git`" error, teach the exact fix — the block should
+    /// be dropped so the by-name reference resolves the library copy.
+    #[error(
+        "skill '{name}' is in your central library — drop the `[skills.{name}]` block and list it \
+         in the profile's `skills = [...]` to use the library copy"
+    )]
+    InlineNoSourceShadowsLibrary { name: String },
     #[error(transparent)]
     Source(#[from] anyhow::Error),
 }
@@ -105,6 +114,18 @@ pub fn resolve_skill(
     // Locate the source (inline wins over the central library) and the base dir
     // its relative paths resolve against.
     let (skill, base, origin, provenance) = if let Some(skill) = manifest.skills.get(name) {
+        // P19: an inline block with no source, when a library skill of the same
+        // name exists, is almost always someone who meant to reference the
+        // library copy but left an empty `[skills.<name>]` block behind. Teach
+        // the fix here — where both the manifest and the library are in hand —
+        // instead of letting the store surface the low-level source error.
+        // `return` diverges (type `!`), so the `if let` arm still yields the
+        // tuple on the normal path.
+        if skill.path.is_none() && skill.git.is_none() && library.get(name).is_some() {
+            return Err(ResolveError::InlineNoSourceShadowsLibrary {
+                name: name.to_string(),
+            });
+        }
         (
             skill.clone(),
             manifest_dir.to_path_buf(),
@@ -1256,6 +1277,73 @@ mod tests {
         assert_eq!(r.source_kind, "path");
         assert_eq!(r.provenance.as_deref(), Some("consolidated"));
         assert!(r.path.join("SKILL.md").exists());
+    }
+
+    #[test]
+    fn inline_no_source_shadowing_library_teaches_the_fix() {
+        // P19: `[skills.greet]` with no `path`/`git`, and a library skill named
+        // `greet` — the resolver names the library copy and the exact fix rather
+        // than the low-level "neither `path` nor `git`" source error.
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+
+        // An inline block that declares the name but no source.
+        let manifest: Manifest = toml::from_str("version = 1\n[skills.greet]\n").unwrap();
+        let library = library_with_skill(&lib_home, "greet", "# from library\n");
+
+        let err = resolve_skill(
+            &manifest,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            "greet",
+            ResolveMode::Fetch,
+        )
+        .unwrap_err();
+
+        match &err {
+            ResolveError::InlineNoSourceShadowsLibrary { name } => assert_eq!(name, "greet"),
+            other => panic!("expected InlineNoSourceShadowsLibrary, got {other:?}"),
+        }
+        let msg = err.to_string();
+        assert!(msg.contains("central library"), "names the model: {msg}");
+        assert!(
+            msg.contains("drop the `[skills.greet]` block"),
+            "shows the fix: {msg}"
+        );
+        assert!(
+            msg.contains("skills = [...]"),
+            "points at the by-name form: {msg}"
+        );
+    }
+
+    #[test]
+    fn inline_no_source_without_library_still_errors_on_source() {
+        // Same empty inline block, but no library skill of that name: the P19
+        // teaching path must not fire — the plain source error stands.
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+
+        let manifest: Manifest = toml::from_str("version = 1\n[skills.greet]\n").unwrap();
+        let library = Library::default();
+
+        let err = resolve_skill(
+            &manifest,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            "greet",
+            ResolveMode::Fetch,
+        )
+        .unwrap_err();
+        assert!(
+            !matches!(err, ResolveError::InlineNoSourceShadowsLibrary { .. }),
+            "no library shadow → no P19 teaching error, got {err:?}"
+        );
     }
 
     #[test]

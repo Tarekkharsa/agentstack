@@ -136,6 +136,82 @@ pub(crate) fn detect_mode(ctx: &super::Context, target_ids: &[String]) -> Mode {
     )
 }
 
+/// The single next command bare orientation recommends, from cheap signals.
+/// Trust comes first (P16): an untrusted or trust-stale manifest points at
+/// `trust .` before anything else, because until the digest is pinned the
+/// bridge serves control-plane tools only and no server runs — trusting is the
+/// gate, distinct from the `init`/`doctor` next-steps. A *trusted* manifest
+/// that was never activated still has skills/servers to wire → `init`;
+/// otherwise the wiring is in place → `doctor`. Pure over its inputs so the
+/// routing is unit-tested without touching disk.
+pub(crate) fn next_step(
+    trust: crate::trust::TrustState,
+    locked: bool,
+    has_capabilities: bool,
+) -> (&'static str, &'static str) {
+    use crate::trust::TrustState;
+    match trust {
+        TrustState::Untrusted => ("agentstack trust .", "review it to unlock its servers"),
+        TrustState::Changed => (
+            "agentstack trust .",
+            "the manifest or lock changed — review and re-trust",
+        ),
+        TrustState::Trusted => {
+            if !locked && has_capabilities {
+                (
+                    "agentstack init",
+                    "finish the first run — preview, apply, activate",
+                )
+            } else {
+                (
+                    "agentstack doctor",
+                    "verify the wiring — every warning names its fix",
+                )
+            }
+        }
+    }
+}
+
+/// The one-line explanation of an untrusted (or trust-stale) manifest shown
+/// under the Status line (P16). `None` for a trusted manifest — there is
+/// nothing to teach. A `&'static str` because the sentence never varies.
+pub(crate) fn orientation_trust_note(trust: crate::trust::TrustState) -> Option<&'static str> {
+    use crate::trust::TrustState;
+    match trust {
+        TrustState::Untrusted | TrustState::Changed => {
+            Some("its servers are inert — the bridge serves control-plane tools only until you review it")
+        }
+        TrustState::Trusted => None,
+    }
+}
+
+/// The named profile roster for orientation (P18): every name for a small set,
+/// a truncated `N profiles: a, b, c, …` beyond four, with the active profile
+/// (when a live session pins one) marked inline. Declaration order is kept —
+/// the truncation shows the first three, so an active profile past that window
+/// is not marked, which is honest: orientation stays a glance, not a report.
+/// Pure over its inputs so the formatting is unit-tested without a manifest.
+pub(crate) fn profiles_line(names: &[String], active: Option<&str>) -> String {
+    let render = |n: &String| -> String {
+        if Some(n.as_str()) == active {
+            format!("{n} (active)")
+        } else {
+            n.clone()
+        }
+    };
+    if names.len() <= 4 {
+        names.iter().map(render).collect::<Vec<_>>().join(", ")
+    } else {
+        let shown = names
+            .iter()
+            .take(3)
+            .map(render)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{} profiles: {shown}, …", names.len())
+    }
+}
+
 pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
     println!(
         "{} {} — one portable manifest, every agent CLI\n",
@@ -180,9 +256,6 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
                 if !m.skills.is_empty() {
                     parts.push(format!("{} skill(s)", m.skills.len()));
                 }
-                if !m.profiles.is_empty() {
-                    parts.push(format!("{} profile(s)", m.profiles.len()));
-                }
                 println!(
                     "  {}  {} — {} → {} target(s)",
                     "Manifest".bold(),
@@ -190,6 +263,21 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
                     parts.join(" · "),
                     m.targets.default.len()
                 );
+
+                // Profiles get their own line, named rather than counted (P18):
+                // "which profiles do I have" stops being archaeology through the
+                // manifest or a triggered disambiguation error. The active one is
+                // marked only when a live session pins it — the one signal that
+                // *reliably* says which profile is loaded right now.
+                if !m.profiles.is_empty() {
+                    let names: Vec<String> = m.profiles.keys().cloned().collect();
+                    let active = crate::session::active(&ctx.dir).map(|s| s.profile);
+                    println!(
+                        "  {}  {}",
+                        "Profiles".bold(),
+                        profiles_line(&names, active.as_deref())
+                    );
+                }
 
                 // Where this project actually stands, from cheap signals:
                 // lockfile (was it ever activated/pinned?) and trust state.
@@ -211,6 +299,15 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
                     }
                 );
 
+                // Untrusted (or trust-stale) teaches the human what that state
+                // *means*, not just the label (P16): an untrusted manifest's
+                // servers stay inert — the bridge serves control-plane tools
+                // only until the digest is reviewed and pinned. One line,
+                // aligned under the Status content it explains.
+                if let Some(note) = orientation_trust_note(trust) {
+                    println!("            {}", note.dimmed());
+                }
+
                 // Which delivery mode this project is in, derived from what's on
                 // disk (P4) — so "which mode am I in?" is a glance, not a guess.
                 let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
@@ -222,22 +319,8 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
                     format!("— {}", mode.short()).dimmed()
                 );
 
-                if !locked && (!m.skills.is_empty() || !m.servers.is_empty()) {
-                    (
-                        "agentstack init",
-                        "finish the first run — preview, apply, activate",
-                    )
-                } else if trust == crate::trust::TrustState::Changed {
-                    (
-                        "agentstack trust .",
-                        "the manifest or lock changed — review and re-trust",
-                    )
-                } else {
-                    (
-                        "agentstack doctor",
-                        "verify the wiring — every warning names its fix",
-                    )
-                }
+                let has_capabilities = !m.skills.is_empty() || !m.servers.is_empty();
+                next_step(trust, locked, has_capabilities)
             }
             Err(err) => {
                 println!(
@@ -290,5 +373,83 @@ mod tests {
         );
         // bare, never activated → the default (static).
         assert_eq!(mode_from_signals(false, false, false, false), Mode::Static);
+    }
+
+    // P16 witness: an untrusted or trust-stale manifest teaches what that means
+    // in one line and routes to `trust .` — the trust gate comes before the
+    // `init`/`doctor` next-steps, because until the digest is pinned the bridge
+    // serves control-plane tools only and nothing activates.
+    #[test]
+    fn untrusted_orientation_teaches_and_routes_to_trust() {
+        use crate::trust::TrustState;
+
+        // The one-line note appears for untrusted AND trust-stale, and explains
+        // the *consequence* (inert servers), not just the label.
+        for st in [TrustState::Untrusted, TrustState::Changed] {
+            let note = orientation_trust_note(st).expect("untrusted states teach");
+            assert!(note.contains("inert"), "explains the consequence: {note}");
+            assert!(
+                note.contains("control-plane tools only"),
+                "names the reduced surface: {note}"
+            );
+        }
+        // A trusted manifest has nothing to teach here.
+        assert_eq!(orientation_trust_note(TrustState::Trusted), None);
+
+        // Trust routing wins over locked/capability state: untrusted and stale
+        // both send the human to `trust .`, whatever the lock or manifest holds.
+        assert_eq!(
+            next_step(TrustState::Untrusted, false, true).0,
+            "agentstack trust ."
+        );
+        assert_eq!(
+            next_step(TrustState::Untrusted, true, false).0,
+            "agentstack trust ."
+        );
+        assert_eq!(
+            next_step(TrustState::Changed, true, true).0,
+            "agentstack trust ."
+        );
+
+        // Only once trusted do the first-run vs. verify next-steps apply: a
+        // never-activated manifest with capabilities finishes setup via `init`,
+        // an activated (or empty) one verifies via `doctor`.
+        assert_eq!(
+            next_step(TrustState::Trusted, false, true).0,
+            "agentstack init"
+        );
+        assert_eq!(
+            next_step(TrustState::Trusted, true, false).0,
+            "agentstack doctor"
+        );
+        assert_eq!(
+            next_step(TrustState::Trusted, false, false).0,
+            "agentstack doctor"
+        );
+    }
+
+    // P18(a) witness: orientation names profiles rather than counting them, one
+    // line for a small set, truncated beyond four, with the active one marked.
+    #[test]
+    fn profiles_line_names_and_marks_active() {
+        let two = vec!["dev".to_string(), "prod".to_string()];
+        assert_eq!(profiles_line(&two, None), "dev, prod");
+        assert_eq!(profiles_line(&two, Some("dev")), "dev (active), prod");
+
+        // Exactly four still lists every name.
+        let four: Vec<String> = ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(profiles_line(&four, None), "a, b, c, d");
+
+        // Beyond four truncates to the count plus the first three names, and the
+        // active marker still shows when it falls inside that window.
+        let five: Vec<String> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(profiles_line(&five, None), "5 profiles: a, b, c, …");
+        assert_eq!(
+            profiles_line(&five, Some("b")),
+            "5 profiles: a, b (active), c, …"
+        );
     }
 }

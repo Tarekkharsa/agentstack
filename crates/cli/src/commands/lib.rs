@@ -1384,7 +1384,7 @@ fn render_list(library: &Library, lib_home: &Path) -> String {
             format!("{desc:<60}").dimmed(),
             s.source,
             locator(s),
-            s.provenance.as_deref().unwrap_or("-")
+            provenance_display(s.provenance.as_deref())
         ));
     }
 
@@ -1421,7 +1421,7 @@ fn render_list(library: &Library, lib_home: &Path) -> String {
             e.source,
             format!("→{}", e.target),
             extension_locator(e),
-            e.provenance.as_deref().unwrap_or("-")
+            provenance_display(e.provenance.as_deref())
         ));
     }
 
@@ -1441,6 +1441,26 @@ fn render_list(library: &Library, lib_home: &Path) -> String {
         ));
     }
     o
+}
+
+/// Render a library entry's provenance for `lib list`, keeping it truthful long
+/// after the add (P20). A `path:` provenance records the local directory a path
+/// skill or extension was copied from; once that directory is gone — a temp dir
+/// cleaned up, a checkout deleted — the recorded path is a dead pointer, and the
+/// library copy is now the only source of truth. Rather than show a path that no
+/// longer resolves, say so. A `git:` (or any other) provenance names an upstream,
+/// not a local directory, so it is shown verbatim — it never "goes missing" on
+/// this disk.
+fn provenance_display(provenance: Option<&str>) -> String {
+    match provenance {
+        None => "-".to_string(),
+        Some(p) => match p.strip_prefix("path:") {
+            Some(path) if !Path::new(path).exists() => {
+                "source gone — library copy canonical".to_string()
+            }
+            _ => p.to_string(),
+        },
+    }
 }
 
 /// A short, glanceable locator for an extension row: the git rev if present,
@@ -2460,8 +2480,22 @@ mod tests {
 
     #[test]
     fn list_path_row_shows_name_source_checksum_provenance() {
+        // A live provenance path renders verbatim; the dangling case is covered
+        // separately in `list_path_row_marks_dangling_source` (P20).
+        let src = assert_fs::TempDir::new().unwrap();
+        let prov = format!("path:{}", src.path().display());
         let mut library = Library::default();
-        library.upsert(path_entry("sql-review", "abcdef0123456789deadbeef"));
+        library.upsert(LibrarySkill {
+            name: "sql-review".into(),
+            source: "path".into(),
+            path: Some("sql-review".into()),
+            git: None,
+            rev: None,
+            subpath: None,
+            checksum: Some(Sha256Hex::of(b"abcdef0123456789deadbeef")),
+            version: None,
+            provenance: Some(prov.clone()),
+        });
         let out = render_list(&library, Path::new("/no-such-lib-home"));
         assert!(out.contains("sql-review"));
         assert!(out.contains("path"));
@@ -2470,7 +2504,24 @@ mod tests {
             out.contains(&digest.hex()[..12]),
             "short checksum (12 chars)"
         );
-        assert!(out.contains("path:/src/sql-review"), "provenance");
+        assert!(out.contains(&prov), "live provenance path renders verbatim");
+    }
+
+    #[test]
+    fn list_path_row_marks_dangling_source() {
+        // P20: a `path:` provenance whose source directory no longer exists is
+        // shown as "source gone — library copy canonical", not a dead path.
+        let mut library = Library::default();
+        library.upsert(path_entry("sql-review", "abcdef0123456789deadbeef"));
+        let out = render_list(&library, Path::new("/no-such-lib-home"));
+        assert!(
+            out.contains("source gone — library copy canonical"),
+            "dangling `path:` provenance is marked honestly: {out}"
+        );
+        assert!(
+            !out.contains("path:/src/sql-review"),
+            "the dead path is not shown: {out}"
+        );
     }
 
     #[test]

@@ -32,6 +32,7 @@ The complete, implemented-and-tested feature inventory. The
   - [Pinning and provenance](#pinning-and-provenance)
   - [Adding capabilities](#adding-capabilities)
   - [Syncing across machines (`lib sync`)](#syncing-across-machines-lib-sync)
+  - [The two mental models](#the-two-mental-models)
 - [Capabilities](#capabilities)
   - [Package manager](#package-manager)
   - [Selective skills via profiles](#selective-skills-via-profiles)
@@ -557,6 +558,34 @@ since blocking a completed pull would strand the tree — and the scan is
 incremental: a no-op pull scans nothing, and a real pull scans only the
 skills it changed, so long-accepted content isn't re-flagged on every sync.
 
+### The two mental models
+
+Three ways a skill or server reaches a profile, and the manifest syntax alone
+picks which — get the distinction once and the empty-block trap below never
+bites:
+
+- **By-name library reference** — `skills = ["greet"]` / `servers = ["kibana"]`
+  with **no** matching `[skills.greet]` / `[servers.kibana]` table. Resolved
+  fresh from `~/.agentstack/lib` on every lock and pinned there by `checksum`
+  (skills) or definition digest (servers); nothing is copied into the repo and
+  the library copy stays canonical — you edit it in the library, once, for
+  every project that names it. The cross-repo default.
+- **Vendored pack copy** — installed with `add from git:<host>/<repo>`. The
+  pack's members are copied into the project and digest-pinned, and a
+  `[packs.<name>]` ledger records `source`/`version`/`rev` so `upgrade`
+  re-resolves them. A self-contained snapshot that travels with the repo and
+  versions as one unit — see
+  [Git-hosted versioned packs](#git-hosted-versioned-packs).
+- **Inline manifest** — a `[skills.greet]` / `[servers.*]` table authored in
+  the manifest with its own `path`/`git`/`command`. Lives in the repo and
+  **always overrides** a same-named library reference.
+
+The trap: a `[skills.greet]` block with **no** source is read as an inline
+skill *missing* its source — it errors, it does not fall back to a library
+skill of the same name. Drop the block and list `greet` in `skills = […]` to
+reference the library copy; keep the block only when you mean a distinct inline
+skill. `explain` prints each capability's model on its `Model` line.
+
 ## Capabilities
 
 The kinds of thing a profile can carry — skills, servers, instructions,
@@ -961,9 +990,10 @@ capability surface** — every decision recorded, nothing re-derived mid-run:
    sentinel makes overlapping locked runs refuse instead of stacking; a
    crash leaves the more restrictive state.
 
-`run --locked --plan` prints the same fully-aggregated picture — every
-blocker at once, the grant digest a live run would freeze — and mutates
-nothing. Honest limits: this is pre-launch gating and a frozen surface on the
+`run --locked --plan` walks the whole gate sequence read-only and prints
+every decision the live path would — each gate's `✓` on the happy path, every
+blocker at once on a refusal — plus the grant digest a live run would freeze,
+and mutates nothing. Honest limits: this is pre-launch gating and a frozen surface on the
 HOST tier, not isolation (the harness still runs as you — `--lockdown` is the
 kernel fence), and the sealing key is readable by the same user, so the
 artifact MAC defeats cross-machine replay and tampering, not a same-user

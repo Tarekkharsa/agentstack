@@ -633,6 +633,9 @@ fn explain_lock(
     );
     if let Some(origin) = r.origin {
         kv(o, "Resolves", origin_label(origin));
+        // P21: name the mental model this skill came through, right where
+        // provenance shows — the contrast stated in one place in the reference.
+        kv(o, "Model", &skill_model(origin, manifest, name));
     }
     if let Some(p) = &r.provenance {
         kv(o, "Provenance", p);
@@ -655,6 +658,71 @@ fn origin_label(origin: crate::resolve::SkillOrigin) -> &'static str {
         crate::resolve::SkillOrigin::Inline => "inline (this project)",
         crate::resolve::SkillOrigin::Library => "central library",
     }
+}
+
+/// The provisioning model a capability reached this profile through (P21) — the
+/// contrast documented in one place in `docs/reference.md#the-two-mental-models`:
+///
+/// - **library reference by name** — a `skills`/`servers = ["<name>"]` reference
+///   resolved fresh from the central library on every lock (`checksum`/`rev`
+///   locator), nothing copied into the repo;
+/// - **vendored pack copy** — an entry a `[packs.*]` install ledger owns: its
+///   bytes were copied into this manifest and the ledger records the source to
+///   re-resolve;
+/// - **inline manifest** — a `[skills.<name>]`/`[servers.<name>]` block authored
+///   directly in this project, owned by no pack.
+///
+/// `Library` origin is the first model; an `Inline` origin is the second when a
+/// pack ledger claims the name and the third otherwise. `members` selects the
+/// pack section to check (skills vs servers) so one predicate serves both.
+fn model_line(from_library: bool, pack_owner: Option<&str>, library_phrase: &str) -> String {
+    if from_library {
+        format!("library reference by name — {library_phrase}")
+    } else if let Some(pack) = pack_owner {
+        format!("vendored pack copy — a member of `[packs.{pack}]`, copied into this manifest")
+    } else {
+        "inline manifest — defined directly in this project's manifest".to_string()
+    }
+}
+
+/// The pack whose install ledger lists `name` in the section `members` selects
+/// (skills or servers). `Some(pack)` marks the entry as a vendored pack copy.
+fn pack_owner<'a>(
+    manifest: &'a crate::manifest::Manifest,
+    name: &str,
+    members: impl Fn(&crate::manifest::PackInstall) -> &Vec<String>,
+) -> Option<&'a str> {
+    manifest
+        .packs
+        .iter()
+        .find(|(_, install)| members(install).iter().any(|m| m == name))
+        .map(|(pack, _)| pack.as_str())
+}
+
+fn skill_model(
+    origin: crate::resolve::SkillOrigin,
+    manifest: &crate::manifest::Manifest,
+    name: &str,
+) -> String {
+    let from_library = matches!(origin, crate::resolve::SkillOrigin::Library);
+    model_line(
+        from_library,
+        pack_owner(manifest, name, |p| &p.skills),
+        "resolved fresh from the central library on every lock",
+    )
+}
+
+fn server_model(
+    origin: crate::resolve::ServerOrigin,
+    manifest: &crate::manifest::Manifest,
+    name: &str,
+) -> String {
+    let from_library = matches!(origin, crate::resolve::ServerOrigin::Library);
+    model_line(
+        from_library,
+        pack_owner(manifest, name, |p| &p.servers),
+        "resolved fresh from the central library on every lock",
+    )
 }
 
 /// Append where a server resolves from + its lockfile status. Neutral wording;
@@ -680,6 +748,9 @@ fn explain_server_lock(
                 ServerOrigin::Library => "central library",
             },
         );
+        // P21: the same mental-model line skills get — library reference by
+        // name, vendored pack copy, or inline manifest.
+        kv(o, "Model", &server_model(origin, manifest, name));
     }
     if let Some(p) = &r.provenance {
         kv(o, "Provenance", p);

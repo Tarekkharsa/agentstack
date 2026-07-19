@@ -120,18 +120,60 @@ pub(crate) fn selected_profile(
             match (names.next(), names.next()) {
                 (None, _) => Ok(None),
                 (Some(only), None) => Ok(Some(only.clone())),
-                (Some(_), Some(_)) => anyhow::bail!(
-                    "several profiles declared — name one: agentstack use <profile> ({})",
-                    manifest
-                        .profiles
-                        .keys()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
+                // Several declared: the error *is* the profile listing (P18) —
+                // each name with its server + skill counts and the exact
+                // command to pick it, so disambiguating and discovering "what's
+                // in each profile" are the same step.
+                (Some(_), Some(_)) => anyhow::bail!(profile_disambiguation(manifest)),
             }
         }
     }
+}
+
+/// The multi-line disambiguation listing for `agentstack use` with several
+/// profiles and no name given (P18): each profile on its own line with its
+/// server + skill counts and the command to select it. Counts are the profile's
+/// declared servers and its *effective* skills — a `"*"` wildcard expands to
+/// every inline skill, so the number reflects what would actually activate.
+/// Pure over the manifest so the listing is unit-tested directly.
+pub(crate) fn profile_disambiguation(manifest: &Manifest) -> String {
+    // Precompute each row's "N servers · M skills" so the name and counts
+    // columns can be padded to their widest — the select commands then line up
+    // instead of drifting with each row's digit and plural widths. Padding uses
+    // char counts (the middle dot is one char) to stay right in a monospace TTY.
+    let rows: Vec<(&String, String)> = manifest
+        .profiles
+        .iter()
+        .map(|(name, profile)| {
+            let servers = profile.servers.len();
+            let skills = if profile.loads_all_skills() {
+                manifest.skills.len()
+            } else {
+                profile.skills.len()
+            };
+            let counts = format!("{} · {}", count(servers, "server"), count(skills, "skill"));
+            (name, counts)
+        })
+        .collect();
+    let name_w = rows.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+    let counts_w = rows
+        .iter()
+        .map(|(_, c)| c.chars().count())
+        .max()
+        .unwrap_or(0);
+
+    let mut out = String::from("several profiles declared — name one:");
+    for (name, counts) in &rows {
+        out.push_str(&format!(
+            "\n  {name:<name_w$}   {counts:<counts_w$}   agentstack use {name}"
+        ));
+    }
+    out
+}
+
+/// "1 server" / "2 servers" — a count with its correctly pluralized noun.
+fn count(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
 pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
@@ -221,6 +263,21 @@ pub fn activate(
         server_map.len(),
         active_skills.len()
     );
+
+    // P19: shadowing an inline skill over a same-named central-library skill is
+    // legal (an inline definition always wins), but silence is not — one warning
+    // line per shadow so the operator knows the library copy was set aside for
+    // the project's own. The inline skill resolved fine here (it has a source);
+    // the empty-block trap is caught earlier, in the resolver.
+    for r in resolved_skills.iter() {
+        if r.origin == SkillOrigin::Inline && libctx.library.get(&r.name).is_some() {
+            println!(
+                "  {} skill '{}' is defined inline and shadows a same-named central-library skill — the inline copy is used",
+                "⚠".yellow(),
+                r.name
+            );
+        }
+    }
 
     let mut state = State::load()?;
     let identity = crate::state::manifest_identity(&ctx.dir);
@@ -652,6 +709,46 @@ fn locked_from_resolved(
 mod tests {
     use super::*;
     use crate::library::{Library, LibrarySkill};
+
+    // P18(b) witness: the several-profiles error IS the profile listing — each
+    // profile on its own line with server + skill counts (pluralized) and the
+    // exact command to select it. A `"*"` skills wildcard counts the manifest's
+    // inline skills, not the literal `["*"]`.
+    #[test]
+    fn disambiguation_lists_each_profile_with_counts() {
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [servers.s1]
+            type = "stdio"
+            command = "x"
+            [skills.only]
+            path = "./skills/only"
+            [profiles.dev]
+            servers = ["s1"]
+            skills = ["only"]
+            [profiles.prod]
+            servers = []
+            skills = ["*"]
+            "#,
+        )
+        .unwrap();
+
+        let listing = profile_disambiguation(&manifest);
+        // One line per profile, each carrying its select command.
+        assert!(listing.contains("agentstack use dev"), "{listing}");
+        assert!(listing.contains("agentstack use prod"), "{listing}");
+        // dev: one declared server, one declared skill (both singular).
+        assert!(listing.contains("1 server · 1 skill"), "{listing}");
+        // prod: no servers (plural zero) and the wildcard expands to the single
+        // inline skill — not counted as the literal `["*"]` entry.
+        assert!(listing.contains("0 servers · 1 skill"), "{listing}");
+        // The listing IS the error header, so both are one message.
+        assert!(
+            listing.starts_with("several profiles declared"),
+            "{listing}"
+        );
+    }
     use crate::store::Store;
     use assert_fs::prelude::*;
 

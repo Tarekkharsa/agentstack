@@ -407,6 +407,35 @@ impl ExecutionPlan {
     }
 }
 
+/// P24: verify the sandbox prerequisite BEFORE any posture banner is painted, so
+/// a run that cannot happen is never dressed up as one that can (principle 6 —
+/// never paint a posture you can't deliver). Off the `sandbox` feature this is
+/// the rebuild refusal; on it, it confirms the Docker daemon actually answers
+/// (the same `connect()` ping the executors rely on), so a daemon-down run
+/// refuses with the daemon hint here instead of after "▶ sandboxing …".
+///
+/// The feature-on preflight connects and immediately drops the handle; the
+/// executor reconnects when it runs. That's a second cheap ping, not shared
+/// state — the alternative (threading one backend through `execute_plan` →
+/// `execute_proxy`/`execute_lockdown`, which connect only after wiring the
+/// gateway) would move the Docker dependency deep into three signatures just to
+/// save a round-trip. `--plan` never calls this — it describes, it never
+/// launches, so it must keep working with the feature off or Docker down.
+#[cfg(feature = "sandbox")]
+fn preflight_prerequisites() -> Result<()> {
+    agentstack_runtime::docker::DockerSandbox::connect()
+        .map(|_backend| ())
+        .map_err(|e| anyhow::anyhow!("cannot reach Docker ({e}) — is the daemon running?"))
+}
+
+#[cfg(not(feature = "sandbox"))]
+fn preflight_prerequisites() -> Result<()> {
+    anyhow::bail!(
+        "sandbox support is not compiled into this build — rebuild with \
+         `cargo build --features sandbox` (it also needs a running Docker daemon)."
+    )
+}
+
 /// Entry point for `agentstack run --sandbox`.
 pub fn run_sandboxed(dir: Option<&Path>, args: &RunArgs) -> Result<()> {
     let ctx = crate::commands::load(dir)?;
@@ -417,10 +446,17 @@ pub fn run_sandboxed(dir: Option<&Path>, args: &RunArgs) -> Result<()> {
 
     // `--plan`: show exactly what would run (trust, policy, mode, command) and
     // stop — no Docker, no feature needed. "Display the plan" instead of run it.
+    // Deliberately BEFORE the prerequisite preflight below: a dry-run describes,
+    // it never launches, so it must succeed with the feature off / Docker down.
     if args.plan {
         println!("{}", plan.display(&workspace_host, true));
         return Ok(());
     }
+
+    // P24: the prerequisite check happens HERE, before the banner — never show a
+    // container start that can't happen. Its message states the prerequisite
+    // plainly (rebuild the binary, or start the daemon).
+    preflight_prerequisites()?;
 
     println!("{}", plan.display(&workspace_host, false));
     // Surface — but do not block — an unreviewed bundle: the sandbox contains
@@ -1611,5 +1647,54 @@ mod tests {
             "r-abc",
         );
         assert!(!spec.mounts[0].read_only, "./** grants the workspace");
+    }
+
+    /// P24: the sandbox prerequisite is checked BEFORE the posture banner. In a
+    /// build without the `sandbox` feature (the default test build), a live
+    /// `run --sandbox` refuses with the rebuild prerequisite plainly stated —
+    /// and `--plan` still works with the feature off (it describes, never
+    /// launches). Ordering: because `--plan` returns Ok while the live run
+    /// refuses at the same prerequisite, the preflight sits between them —
+    /// moving it above the `--plan` early return would break the plan case this
+    /// asserts, so this test guards that the dry run keeps working with no
+    /// Docker / no feature.
+    #[test]
+    #[cfg(not(feature = "sandbox"))]
+    fn sandbox_prerequisite_refuses_before_launch_but_plan_still_works() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        let proj = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        proj.child("agentstack.toml")
+            .write_str("version = 1\n")
+            .unwrap();
+
+        let args = |plan: bool| RunArgs {
+            harness: "claude-code".to_string(),
+            locked: false,
+            profile: None,
+            scope: agentstack_core::scope::Scope::Project,
+            keep: false,
+            sandbox: true,
+            lockdown: false,
+            plan,
+            args: Vec::new(),
+        };
+
+        // Live run: refuses at the prerequisite, stating it plainly (rebuild).
+        let err = run_sandboxed(Some(proj.path()), &args(false)).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("cargo build --features sandbox"),
+            "prerequisite stated plainly: {msg}"
+        );
+
+        // --plan keeps working without the feature (or a daemon): it describes.
+        run_sandboxed(Some(proj.path()), &args(true)).unwrap();
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 }

@@ -292,6 +292,17 @@ fn run<'a>(
                             IssueKind::UnknownSkillRef,
                             format!("profile '{pname}' references unknown skill '{kref}'"),
                         )),
+                        // Unreachable in practice — an inline `[skills.<name>]`
+                        // block short-circuits above at `contains_key`, so the
+                        // resolver only sees non-inline names here — but the P19
+                        // variant carries a real fix, so surface it rather than
+                        // panic if the path ever changes.
+                        Err(e @ ResolveError::InlineNoSourceShadowsLibrary { .. }) => {
+                            issues.push(Issue::new(
+                                IssueKind::UnresolvableSkillRef,
+                                format!("profile '{pname}' skill '{kref}': {e}"),
+                            ))
+                        }
                         Err(ResolveError::Source(e)) => issues.push(Issue::new(
                             IssueKind::UnresolvableSkillRef,
                             format!("profile '{pname}' skill '{kref}' failed to resolve: {e}"),
