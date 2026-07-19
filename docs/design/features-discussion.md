@@ -237,6 +237,40 @@ hand-edit its generator cannot reproduce (textLength squish from 65c6138) —
 decide later: shorten the scene wording or teach make-term-svgs.py a per-row
 width cap.
 
+### P30-P33 — External review findings (2026-07-19, all verified in source)
+
+An external review confirmed three defects and a systemic docs gap:
+
+- **P30 (highest): setup writes before confirmation.** The wizard's plan
+  promises "Nothing is written until you confirm," but the no-manifest path
+  runs the init importer (manifest write + secret storage) before any
+  confirm, cancel leaves the manifest behind, the closing summary can say
+  "No files were written" when files were written, and `restore` cannot see
+  init's writes. **DECIDED: fix now** — plan first, explicit confirm before
+  the import writes, init's writes (manifest/.env/.gitignore) recorded in
+  the undo ledger, summary derived from actual writes, restart advice only
+  when a CLI config changed. **Open (follow-up):** full in-memory staging of
+  the import as one transaction; pseudo-TTY cancel-at-every-prompt tests.
+- **P31: the Action's binary is not actually pinned** — `version` input
+  defaults to latest, so `uses: …@vX` can install a future binary.
+  **DECIDED: fix now** — default stamps to the release tag; RELEASING
+  checklist gains the stamp step.
+- **P32: lockdown evidence mojibake** — the Docker log reader decodes
+  per-byte (`b as char`), corrupting non-ASCII in enforcement reasons.
+  **DECIDED: fix now** — accumulate bytes, decode whole lines lossily; unit
+  test with multi-byte content.
+- **P33: docs freshness is systemic.** Releases keep outdating captures and
+  claims (STRATEGY's run --locked status, ARCHITECTURE's version, proxy
+  start/report survivors in examples.html/dashboard.md, reference's audit
+  and dashboard-editing leftovers, init --global help understating guard
+  seeding). **DECIDED now:** fix the listed items; add "current as of vX"
+  markers to ARCHITECTURE/STRATEGY; upgrade the docs lint to parse complete
+  snippets through clap (catches `proxy start`, which name-level linting
+  passes). **Open (roadmap, from the review):** generate the reference from
+  clap metadata; template the HTML; extract grant/resolve/gateway/sandbox
+  into reviewable crates; cargo-deny/audit CI; 5-8 unassisted onboarding
+  sessions; keep the command surface frozen until stable.
+
 ## Doctor + drift (feature 2)
 
 ### Investigated facts
