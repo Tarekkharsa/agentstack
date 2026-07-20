@@ -1,6 +1,6 @@
 # `add skill --write` activation — mode-aware, on `use`'s primitives (priority 3)
 
-Status: **proposed, awaiting approval**. Implements priority 3 of
+Status: **implemented 2026-07-20** (`a42cd4e`). Implements priority 3 of
 [`skills-sh-learnings.md`](skills-sh-learnings.md) §10, completing the
 one-preview/one-write transaction that
 [`add-skill-source-grammar.md`](add-skill-source-grammar.md) (implemented)
