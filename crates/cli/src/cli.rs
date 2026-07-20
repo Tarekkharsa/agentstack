@@ -1298,26 +1298,28 @@ pub struct LibRemoveArgs {
 
 #[derive(Args, Debug)]
 pub struct LibAddArgs {
-    /// The name projects will reference this skill by.
-    pub name: String,
-    /// Add from a local skill directory (must contain SKILL.md).
-    #[arg(long, conflicts_with = "git")]
-    pub path: Option<String>,
-    /// Add from a git source URL. A subdir skill may be given inline as
-    /// `<url>#<subpath>` or via --subpath.
-    #[arg(long, conflicts_with = "path")]
-    pub git: Option<String>,
-    /// Pin a git revision (branch, tag, or commit). Git sources only.
-    #[arg(long, requires = "git")]
+    /// owner/repo, a git URL (incl. /tree/<ref>/<subpath>), or a spelled
+    /// local path (./dir, ../dir, /abs, ~/dir).
+    pub source: String,
+    /// Select skills by name (repeatable) when the source holds several.
+    #[arg(long)]
+    pub skill: Vec<String>,
+    /// List the source's skills and exit — adds nothing.
+    #[arg(long)]
+    pub list: bool,
+    /// Library name override (single selection only).
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Branch/tag/commit to resolve (git sources).
+    #[arg(long)]
     pub rev: Option<String>,
-    /// Directory within the git repo holding the skill's SKILL.md — for
-    /// marketplace/monorepo layouts (e.g. skills/improve). Git sources only.
-    #[arg(long, requires = "git")]
+    /// Directory within the repo to scope discovery to (git sources).
+    #[arg(long)]
     pub subpath: Option<String>,
-    /// Overwrite an existing library entry of the same name.
+    /// Overwrite a same-named library entry.
     #[arg(long)]
     pub replace: bool,
-    /// Add even if the content scan finds high-severity items (hidden Unicode).
+    /// Admit content the scan flagged high-severity.
     #[arg(long)]
     pub allow_flagged: bool,
     /// Write the change (else preview).

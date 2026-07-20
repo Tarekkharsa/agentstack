@@ -52,6 +52,15 @@ pub enum LibSource<'a> {
         rev: Option<&'a str>,
         subpath: Option<&'a str>,
     },
+    /// The source-grammar path: the caller already resolved the content (a
+    /// staged clone on preview, the promoted store clone on write), so no
+    /// fetch happens here — previews stay off the persistent store, fixing
+    /// the classic Git branch's "touches the network even on a dry run" wart.
+    ResolvedGit {
+        url: &'a str,
+        resolved: &'a crate::store::Resolved,
+        subpath: Option<&'a str>,
+    },
 }
 
 /// The result of a library insertion (or a dry-run preview of one).
@@ -220,6 +229,47 @@ fn add_skill_inner(
             let total_bytes = dir_size(&resolved.path);
             (entry, None, resolved.checksum, "git", None, total_bytes)
         }
+        LibSource::ResolvedGit {
+            url,
+            resolved,
+            subpath,
+        } => {
+            let subpath = subpath.map(str::trim).filter(|s| !s.is_empty());
+            require_skill_md(&resolved.path)?;
+            warn_missing_description(name, &resolved.path, &mut warnings);
+            scan_gate(name, &resolved.path, allow_flagged, &mut warnings)?;
+            let mut provenance = format!("git:{url}");
+            if let Some(rev) = &resolved.rev {
+                provenance.push_str(&format!("@{rev}"));
+            }
+            if let Some(sub) = subpath {
+                provenance.push_str(&format!("#{sub}"));
+            }
+            let entry = LibrarySkill {
+                name: name.to_string(),
+                source: "git".into(),
+                path: None,
+                git: Some(url.to_string()),
+                rev: resolved.rev.clone(),
+                subpath: subpath.map(str::to_string),
+                checksum: Some(Sha256Hex::parse(&resolved.checksum)?),
+                version: None,
+                provenance: Some(
+                    provenance_override
+                        .map(str::to_string)
+                        .unwrap_or(provenance),
+                ),
+            };
+            let total_bytes = dir_size(&resolved.path);
+            (
+                entry,
+                None,
+                resolved.checksum.clone(),
+                "git",
+                None,
+                total_bytes,
+            )
+        }
     };
 
     // Oversized skills make every full-library pass (doctor, install, use)
@@ -253,46 +303,195 @@ fn add_skill_inner(
 }
 
 fn add(args: &LibAddArgs) -> Result<()> {
+    use crate::provider::source::{parse_source, SkillSource};
     let lib_home = paths::lib_home();
-    // A subdir may be given as `--subpath skills/foo` or folded into the URL as
-    // `--git <url>#skills/foo`. Accept either, but not two conflicting values.
-    let (git_url, url_frag) = match &args.git {
-        Some(g) => match g.split_once('#') {
-            Some((u, frag)) => (Some(u.to_string()), Some(frag.to_string())),
-            None => (Some(g.clone()), None),
-        },
-        None => (None, None),
-    };
-    let subpath = match (&args.subpath, &url_frag) {
-        (Some(a), Some(b)) if a != b => {
-            bail!("subpath given twice and they differ: --subpath '{a}' vs '#{b}' in --git")
+    let parsed = parse_source(&args.source)?;
+    let mut requested = args.skill.clone();
+    if let Some(alias) = &parsed.skill_alias {
+        if requested.is_empty() {
+            requested.push(alias.clone());
+        } else if !requested.contains(alias) {
+            bail!(
+                "skill given twice and they disagree: @{} vs --skill {}",
+                crate::text::sanitize_line(alias),
+                requested.join(", ")
+            );
         }
-        (Some(s), _) | (_, Some(s)) => Some(s.clone()),
-        (None, None) => None,
-    };
-    if subpath.is_some() && git_url.is_none() {
-        bail!("--subpath applies to git sources only — pass it with --git <url>");
     }
-    let source = match (&args.path, &git_url) {
-        (Some(p), None) => LibSource::Path(Path::new(p)),
-        (None, Some(url)) => LibSource::Git {
-            url,
-            rev: args.rev.as_deref(),
-            subpath: subpath.as_deref(),
-        },
-        (None, None) => bail!("specify a source: --path <dir> or --git <url>"),
-        (Some(_), Some(_)) => bail!("--path and --git are mutually exclusive"),
-    };
+    match parsed.source {
+        SkillSource::Local { path } => {
+            if args.rev.is_some() || args.subpath.is_some() {
+                bail!("--rev/--subpath apply to git sources — point the path at the directory");
+            }
+            let abs = absolutize(&path)?;
+            if !abs.is_dir() {
+                bail!("no such directory: {}", abs.display());
+            }
+            let root_name = abs.file_name().map(|n| n.to_string_lossy().into_owned());
+            let discovered =
+                crate::provider::discover::discover_skills(&abs, root_name.as_deref())?;
+            if discovered.is_empty() {
+                bail!("no SKILL.md found under {}", abs.display());
+            }
+            if args.list {
+                return super::add::print_skill_listing(&discovered);
+            }
+            let selected = super::add::select_skills(&discovered, &requested)?;
+            let names = lib_final_names(args, &lib_home, &selected)?;
+            let mut dry = false;
+            for (skill, name) in selected.iter().zip(&names) {
+                let dir = if skill.rel_path.is_empty() {
+                    abs.clone()
+                } else {
+                    abs.join(&skill.rel_path)
+                };
+                let outcome = add_skill(
+                    &lib_home,
+                    name,
+                    LibSource::Path(&dir),
+                    args.replace,
+                    args.write,
+                    args.allow_flagged,
+                )?;
+                dry |= !outcome.written;
+                print_add_outcome(&outcome);
+            }
+            if dry {
+                println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+            }
+            Ok(())
+        }
+        SkillSource::Git { url, ref_, subpath } => {
+            let rev = super::add::merge_source_opt("rev", args.rev.as_ref(), ref_)?;
+            let subpath = super::add::merge_source_opt("subpath", args.subpath.as_ref(), subpath)?;
+            if let Some(s) = &subpath {
+                crate::provider::source::validate_subpath(s)?;
+            }
+            // Transient staging (same discipline as `add skill`): a preview —
+            // including --list — never touches the persistent store, closing
+            // the old --git path's documented dry-run-fetches wart.
+            let stage = crate::store::Stage::create()?;
+            let staging = stage.store();
+            let (clone_root, head) = crate::store::checkout(&staging, &url, rev.as_deref())?;
+            let disc_root = match &subpath {
+                Some(s) => {
+                    let d = clone_root.join(s);
+                    if !d.is_dir() {
+                        bail!(
+                            "subpath '{}' does not exist in {}",
+                            crate::text::sanitize_line(s),
+                            crate::text::sanitize_line(&url)
+                        );
+                    }
+                    d
+                }
+                None => clone_root.clone(),
+            };
+            let repo_name = crate::provider::source::repo_name(&url);
+            let discovered =
+                crate::provider::discover::discover_skills(&disc_root, repo_name.as_deref())?;
+            if discovered.is_empty() {
+                bail!("no SKILL.md found in {}", crate::text::sanitize_line(&url));
+            }
+            if args.list {
+                return super::add::print_skill_listing(&discovered);
+            }
+            let selected = super::add::select_skills(&discovered, &requested)?;
+            let names = lib_final_names(args, &lib_home, &selected)?;
+            // On write, promote the staged clone first (rename-only; taken
+            // slot → commit-pinned re-resolve) so the library's git reference
+            // resolves from the persistent store afterwards.
+            let content_root = if args.write {
+                let real = Store::default_store();
+                match real.adopt_clone(&url, &clone_root)? {
+                    Some(root) => root,
+                    None => {
+                        let (root, head2) = crate::store::checkout(&real, &url, Some(&head))?;
+                        if head2 != head {
+                            bail!("re-resolve landed {head2} but the preview saw {head} — retry");
+                        }
+                        root
+                    }
+                }
+            } else {
+                clone_root.clone()
+            };
+            let mut dry = false;
+            for (skill, name) in selected.iter().zip(&names) {
+                let full_sub = super::add::join_subpath(subpath.as_deref(), &skill.rel_path);
+                let dir = match &full_sub {
+                    Some(s) => content_root.join(s),
+                    None => content_root.clone(),
+                };
+                let resolved = crate::store::Resolved {
+                    checksum: crate::store::dir_digest(&dir)?.hex().to_string(),
+                    path: dir,
+                    rev: Some(head.clone()),
+                    fetched: true,
+                    source_kind: "git",
+                };
+                let outcome = add_skill(
+                    &lib_home,
+                    name,
+                    LibSource::ResolvedGit {
+                        url: &url,
+                        resolved: &resolved,
+                        subpath: full_sub.as_deref(),
+                    },
+                    args.replace,
+                    args.write,
+                    args.allow_flagged,
+                )?;
+                dry |= !outcome.written;
+                print_add_outcome(&outcome);
+            }
+            if dry {
+                println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+            }
+            Ok(())
+        }
+    }
+}
 
-    let outcome = add_skill(
-        &lib_home,
-        &args.name,
-        source,
-        args.replace,
-        args.write,
-        args.allow_flagged,
-    )?;
+/// Library-side name resolution for the grammar path: --name for a single
+/// selection, dir basenames otherwise, the contract enforced, and the
+/// collision check surfaced up front (add_skill re-checks defensively).
+fn lib_final_names(
+    args: &LibAddArgs,
+    lib_home: &Path,
+    selected: &[crate::provider::discover::DiscoveredSkill],
+) -> Result<Vec<String>> {
+    if args.name.is_some() && selected.len() != 1 {
+        bail!(
+            "--name applies to a single selection; {} skills selected",
+            selected.len()
+        );
+    }
+    let library = Library::load(lib_home)?;
+    let mut names = Vec::new();
+    for s in selected {
+        let name = args.name.clone().unwrap_or_else(|| s.name.clone());
+        crate::text::validate_name(&name).with_context(|| {
+            if args.name.is_none() {
+                format!(
+                    "skill directory '{}' — pass --name to choose a conforming library name",
+                    crate::text::sanitize_line(&s.name)
+                )
+            } else {
+                "--name".to_string()
+            }
+        })?;
+        if library.get(&name).is_some() && !args.replace {
+            bail!("'{name}' is already in the central library — pass --replace to overwrite");
+        }
+        names.push(name);
+    }
+    Ok(names)
+}
 
+/// One outcome's report lines (shared by every selected skill; the single
+/// dry-run footer prints once, in the caller).
+fn print_add_outcome(outcome: &AddOutcome) {
     for w in &outcome.warnings {
         println!("  {} {w}", "⚠".yellow());
     }
@@ -335,9 +534,7 @@ fn add(args: &LibAddArgs) -> Result<()> {
             }
         }
         println!("  {} checksum {}", "→".cyan(), short(&outcome.checksum));
-        println!("\nDry run. Re-run with {} to apply.", "--write".bold());
     }
-    Ok(())
 }
 
 /// The result of a server insertion (or a dry-run preview of one).
@@ -1090,6 +1287,9 @@ pub fn add_extension(
                 provenance: Some(format!("git:{url}@{head}#{sub}")),
             };
             (entry, None, checksum, "git", None)
+        }
+        LibSource::ResolvedGit { .. } => {
+            bail!("pre-resolved sources are skills-only — use --path or --git for extensions")
         }
     };
 
@@ -2590,6 +2790,89 @@ mod tests {
         assert_eq!(entry.git.as_deref(), Some(url.as_str()));
         assert!(entry.rev.is_some());
         assert!(entry.provenance.as_deref().unwrap().starts_with("git:"));
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// The source-grammar path (`lib add owner/repo --skill x`): a dry run
+    /// stays entirely off the persistent store (the classic --git path's
+    /// documented wart), and a write promotes the staged clone + records the
+    /// same git/rev/subpath/provenance entry shape as the classic path.
+    #[test]
+    fn grammar_add_stages_previews_and_promotes_on_write() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let work = assert_fs::TempDir::new().unwrap();
+        let repo = work.child("repo");
+        repo.create_dir_all().unwrap();
+        let git = |a: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(repo.path())
+                .args(a)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {a:?} failed");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@e.st"]);
+        git(&["config", "user.name", "t"]);
+        repo.child("skills/improve/SKILL.md")
+            .write_str("---\ndescription: improve things\n---\n# improve\n")
+            .unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "init"]);
+        let url = format!("file://{}", repo.path().display());
+
+        let args = |write: bool| crate::cli::LibAddArgs {
+            source: url.clone(),
+            skill: vec!["improve".into()],
+            list: false,
+            name: None,
+            rev: None,
+            subpath: None,
+            replace: false,
+            allow_flagged: false,
+            write,
+        };
+
+        // Dry run: nothing persistent — no store clone, no library entry,
+        // staging cleaned up.
+        add(&args(false)).unwrap();
+        let store_git = home.path().join("store/git");
+        let clones = std::fs::read_dir(&store_git)
+            .map(|e| e.count())
+            .unwrap_or(0);
+        assert_eq!(clones, 0, "dry run must stay off the persistent store");
+        assert!(Library::load(&home.path().join("lib"))
+            .unwrap()
+            .get("improve")
+            .is_none());
+        let stale = std::fs::read_dir(home.path().join("stage"))
+            .map(|e| e.count())
+            .unwrap_or(0);
+        assert_eq!(stale, 0, "staging must be cleaned up");
+
+        // Write: entry recorded with the classic shape, staged clone promoted.
+        add(&args(true)).unwrap();
+        let library = Library::load(&home.path().join("lib")).unwrap();
+        let entry = library.get("improve").unwrap();
+        assert_eq!(entry.git.as_deref(), Some(url.as_str()));
+        assert_eq!(entry.subpath.as_deref(), Some("skills/improve"));
+        assert!(entry.rev.is_some());
+        let prov = entry.provenance.as_deref().unwrap();
+        assert!(
+            prov.starts_with("git:") && prov.ends_with("#skills/improve"),
+            "{prov}"
+        );
+        let clones = std::fs::read_dir(&store_git)
+            .map(|e| e.count())
+            .unwrap_or(0);
+        assert_eq!(clones, 1, "write must promote the staged clone");
 
         std::env::remove_var("AGENTSTACK_HOME");
     }

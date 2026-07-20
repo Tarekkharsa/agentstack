@@ -1067,7 +1067,7 @@ fn add_skill_from_dir(
 }
 
 /// A canonical flag beats its in-URL alias; disagreement is an error.
-fn merge_source_opt(
+pub(crate) fn merge_source_opt(
     kind: &str,
     flag: Option<&String>,
     from_url: Option<String>,
@@ -1091,7 +1091,7 @@ fn join_rel(root: &Path, rel: &str) -> std::path::PathBuf {
     }
 }
 
-fn join_subpath(user: Option<&str>, rel: &str) -> Option<String> {
+pub(crate) fn join_subpath(user: Option<&str>, rel: &str) -> Option<String> {
     match (user, rel.is_empty()) {
         (Some(u), true) => Some(u.to_string()),
         (Some(u), false) => Some(format!("{}/{rel}", u.trim_end_matches('/'))),
@@ -1100,7 +1100,9 @@ fn join_subpath(user: Option<&str>, rel: &str) -> Option<String> {
     }
 }
 
-fn print_skill_listing(discovered: &[crate::provider::discover::DiscoveredSkill]) -> Result<()> {
+pub(crate) fn print_skill_listing(
+    discovered: &[crate::provider::discover::DiscoveredSkill],
+) -> Result<()> {
     for s in discovered {
         let mut notes = Vec::new();
         if s.via_fallback {
@@ -1131,7 +1133,7 @@ fn print_skill_listing(discovered: &[crate::provider::discover::DiscoveredSkill]
     Ok(())
 }
 
-fn select_skills(
+pub(crate) fn select_skills(
     discovered: &[crate::provider::discover::DiscoveredSkill],
     requested: &[String],
 ) -> Result<Vec<crate::provider::discover::DiscoveredSkill>> {
