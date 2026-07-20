@@ -137,7 +137,7 @@ echo '{"mcpServers":{"api":{"type":"http","url":"https://a.example/mcp"}}}' > "$
 mkdir -p "$H/.cursor"
 echo '{"mcpServers":{"api":{"url":"https://b.example/mcp"}}}' > "$H/.cursor/mcp.json"
 OUT=$("$AS" init --yes 2>&1)
-grep -qiE "conflict|differs|mismatch" <<<"$OUT" && ok "conflict surfaced, not silently picked" || bad "silent pick: $(grep -o '[ab].example' .agentstack/agentstack.toml | tr '\n' ' ')"
+grep -qiE "conflict|differ|mismatch" <<<"$OUT" && ok "conflict surfaced, not silently picked" || bad "silent pick: $(grep -o '[ab].example' .agentstack/agentstack.toml | tr '\n' ' ')"
 
 hdr "B2) re-init never clobbers a hand-edited manifest"
 device

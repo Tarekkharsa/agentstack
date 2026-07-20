@@ -128,8 +128,8 @@ if grep -q 'authority grant frozen' <<< "$OUT"; then
 else
   bad "run: expected 'authority grant frozen'; got: $OUT"
 fi
-if grep -q 'run grant handed to the bridge' <<< "$OUT"; then
-  ok "run: the sealed run-grant artifact was handed to the bridge"
+if grep -q 'run grant handed to the gateway' <<< "$OUT"; then
+  ok "run: the sealed run-grant artifact was handed to the gateway"
 else
   bad "run: expected the grant handoff line; got: $OUT"
 fi
