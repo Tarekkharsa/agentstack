@@ -32,6 +32,15 @@ pub fn run(args: &AddArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 }
 
+/// `agentstack set …` — the idempotent counterpart of `add`: create-or-update
+/// in place, so a validation error's fix command works whether or not the
+/// entry already exists.
+pub fn run_set(args: &crate::cli::SetArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    match &args.kind {
+        crate::cli::SetKind::Server(a) => upsert_server(a, manifest_dir, true),
+    }
+}
+
 fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
 
@@ -139,6 +148,7 @@ fn add_from_server(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate)
         a.profile.as_deref(),
         &candidate.name,
         a.write,
+        "add",
     )?;
     if a.write {
         println!(
@@ -171,6 +181,7 @@ fn add_from_hook(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate) -
         None,
         &candidate.name,
         a.write,
+        "add",
     )?;
     if a.write {
         println!(
@@ -718,12 +729,19 @@ fn sanitize_ref(name: &str) -> String {
 }
 
 fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    upsert_server(a, manifest_dir, false)
+}
+
+/// Shared body of `add server` (refuses an existing name) and `set server`
+/// (updates it in place — `merge_toml` already replaces an existing key, so
+/// updating is the same write with the guard dropped).
+fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: bool) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
-    if ctx.loaded.manifest.servers.contains_key(&a.name) {
+    let exists = ctx.loaded.manifest.servers.contains_key(&a.name);
+    if exists && !allow_update {
         anyhow::bail!(
-            "server '{}' already exists in the manifest — run `agentstack remove {}` first, or rename it",
-            a.name,
-            a.name
+            "server '{name}' already exists in the manifest — update it in place: `agentstack set server {name} …` · or remove it first: `agentstack remove {name}`",
+            name = a.name
         );
     }
 
@@ -756,12 +774,20 @@ fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
         env: parse_kv(&a.env)?,
         extra: Default::default(),
     };
+    // Validation errors carry the complete retry skeleton — the user should
+    // never have to reconstruct the command shape from memory (audit D5).
     match a.transport {
         ServerType::Http if server.url.is_none() => {
-            anyhow::bail!("http server needs --url")
+            anyhow::bail!(
+                "http server needs --url\n  fix: agentstack set server {} --url <URL> --write",
+                a.name
+            )
         }
         ServerType::Stdio if server.command.is_none() => {
-            anyhow::bail!("stdio server needs --command")
+            anyhow::bail!(
+                "stdio server needs --command\n  fix: agentstack set server {} --type stdio --command <CMD> --write",
+                a.name
+            )
         }
         _ => {}
     }
@@ -773,6 +799,7 @@ fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
         a.profile.as_deref(),
         &a.name,
         a.write,
+        if exists { "update" } else { "add" },
     )
 }
 
@@ -798,6 +825,7 @@ fn add_skill(a: &AddSkillArgs, manifest_dir: Option<&Path>) -> Result<()> {
         a.profile.as_deref(),
         &a.name,
         a.write,
+        "add",
     )
 }
 
@@ -808,13 +836,14 @@ fn write_manifest(
     profile: Option<&str>,
     name: &str,
     write: bool,
+    verb: &str,
 ) -> Result<()> {
     let original = fs::read_to_string(&ctx.loaded.manifest_path)
         .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
     let new_text = build_manifest_with(&original, location, name, body, profile)?;
 
     println!(
-        "{} add '{name}' to {}",
+        "{} {verb} '{name}' in {}",
         "→".cyan(),
         ctx.loaded.manifest_path.display()
     );
@@ -829,7 +858,7 @@ fn write_manifest(
     if write {
         crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
-        println!("{} added '{name}'.", "✓".green());
+        println!("{} {verb}d '{name}'.", "✓".green());
     } else {
         println!(
             "\nDry run. Re-run with {} to update the manifest.",
@@ -1206,6 +1235,51 @@ mod tests {
         let text = fs::read_to_string(tmp.path().join("agentstack.toml")).unwrap();
         let m: Manifest = toml::from_str(&text).unwrap();
         assert_eq!(m.servers["tldraw"].targets, vec!["claude-code"]);
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// D5 witness: `set server` is create-or-update — an existing name is
+    /// rewritten in place — while `add server` still refuses it, now pointing
+    /// at `set server` as the update path.
+    #[test]
+    fn set_server_updates_in_place_where_add_refuses() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", tmp.path().join("home"));
+        fs::write(
+            tmp.path().join("agentstack.toml"),
+            "version = 1\n\n[servers.demo]\ntype = \"http\"\nurl = \"https://old.example.com\"\n",
+        )
+        .unwrap();
+
+        let args = crate::cli::AddServerArgs {
+            name: "demo".into(),
+            transport: crate::manifest::ServerType::Http,
+            url: Some("https://new.example.com".into()),
+            headers: vec![],
+            command: None,
+            args: vec![],
+            cwd: None,
+            env: vec![],
+            profile: None,
+            targets: vec![],
+            write: true,
+        };
+
+        let err = add_server(&args, Some(tmp.path())).unwrap_err();
+        assert!(err.to_string().contains("agentstack set server"), "{err:#}");
+
+        upsert_server(&args, Some(tmp.path()), true).unwrap();
+        let m: Manifest =
+            toml::from_str(&fs::read_to_string(tmp.path().join("agentstack.toml")).unwrap())
+                .unwrap();
+        assert_eq!(
+            m.servers["demo"].url.as_deref(),
+            Some("https://new.example.com")
+        );
 
         std::env::remove_var("AGENTSTACK_HOME");
     }

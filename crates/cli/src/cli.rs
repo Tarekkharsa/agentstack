@@ -29,7 +29,7 @@ The list above is the everyday loop. This is the full map, grouped by task —
 every command (listed or not) has its own --help:
 
   Set up      init · status · adapters · settings · self
-  Edit        add · search · remove · install · lib · adopt · export · import
+  Edit        add · set · search · remove · install · lib · adopt · export · import
   Render      apply · use · instructions · lock · session · diff · restore
   Protect     trust · explain · secret · guard · sign · verify
   Run         run · kill · gateway · mcp
@@ -85,6 +85,14 @@ pub enum Command {
 
     /// Add a server or skill to the manifest.
     Add(AddArgs),
+
+    /// Create or update a manifest entry in place (idempotent `add`).
+    ///
+    /// `set server <name> …` writes the definition whether or not the name
+    /// already exists — the safe, copy-pasteable repair path when validation
+    /// flags a bad field. Same flags as `add server`.
+    #[command(hide = true)]
+    Set(SetArgs),
 
     /// Search the capability catalog (and mark what's already added).
     Search(SearchArgs),
@@ -724,6 +732,18 @@ pub enum AddKind {
     Server(AddServerArgs),
     /// Add a skill (a SKILL.md directory).
     Skill(AddSkillArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct SetArgs {
+    #[command(subcommand)]
+    pub kind: SetKind,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SetKind {
+    /// Create or update an MCP server (same flags as `add server`).
+    Server(AddServerArgs),
 }
 
 #[derive(Args, Debug)]

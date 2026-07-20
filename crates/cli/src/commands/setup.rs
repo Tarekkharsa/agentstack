@@ -233,10 +233,10 @@ fn configure(
     // Reload so a static apply's manifest refresh (owned-server tables) is
     // reflected in the summary; a no-render fork reloads an unchanged manifest.
     let ctx = super::load(manifest_dir)?;
-    // Step 3 of the adoption ladder: offer to wire the destructive-command
-    // guard. Sits before house rules — it's the bigger one-keystroke safety win.
-    let guard_wired = offer_guard()?;
-    let seeded_house_rules = offer_house_rules(&ctx, &target_ids)?;
+    // Step 3 of the adoption ladder: ONE optional machine-wide step (guard +
+    // house rules together) after the project itself is done — not two
+    // sequential upsells inside every project init (audit C6).
+    let (guard_wired, seeded_house_rules) = offer_machine_protection(&ctx, &target_ids)?;
     print_change_summary(&ctx, history_before, seeded_house_rules, guard_wired);
     Ok(())
 }
@@ -259,6 +259,15 @@ fn run_static(args: &SetupArgs, scope: Scope, manifest_dir: Option<&Path>) -> Re
         return Ok(false);
     }
 
+    // Nothing to confirm when nothing would change (audit C6: "confirm apply
+    // even when 0 target(s) would change") — say so and carry on to the
+    // skills/machine steps, which may still have work.
+    if preview.changed_count == 0 {
+        println!(
+            "\n{} Configs already match the manifest — nothing to apply.",
+            "·".dimmed()
+        );
+    } else
     // `confirm` returns false without blocking when there's no terminal, so
     // CI/pipes stop here. Note the honest scope: no CLI config was written here,
     // but the wizard's import step may already have (the caller closes with the
@@ -498,57 +507,99 @@ fn should_offer_guard(interactive: bool, guard_wired: bool) -> bool {
     interactive && !guard_wired
 }
 
-/// Step 3 of the adoption ladder: offer to wire the destructive-command guard —
-/// the biggest one-keystroke safety win. Shown only when the shell is
-/// interactive and the guard isn't already wired (reusing guard's own
-/// enablement detection). Accepting runs the same path as `agentstack guard
-/// install`; declining leaves a one-line pointer, teach-once style. Returns
-/// whether the guard was wired this run, so the P7 close folds it into the
-/// summary. Never fails setup: the configs are already written by now, so a
-/// guard-install error is surfaced with its manual command and swallowed —
-/// like the house-rules and gateway offers.
-fn offer_guard() -> Result<bool> {
-    if !should_offer_guard(
-        crate::util::confirm::is_interactive(),
-        super::guard::is_wired(),
-    ) {
-        return Ok(false);
+/// Is the house-rules fragment still missing from the machine manifest? The
+/// gate half of the old standalone offer, split out so the combined
+/// machine-protection step can name only what's actually pending.
+fn house_rules_pending() -> bool {
+    let home = crate::util::paths::agentstack_home();
+    match crate::manifest::load_from_dir(&home) {
+        Ok(loaded) => !loaded
+            .manifest
+            .instructions
+            .contains_key(super::init::HOUSE_RULES_NAME),
+        // No machine manifest yet → nothing installed → pending.
+        Err(_) => true,
+    }
+}
+
+/// Step 3 of the adoption ladder: ONE optional machine-wide protection step
+/// (audit C6). The project's own setup is finished by the time this runs; the
+/// guard and the house rules are machine-global products, so they get exactly
+/// one question, together, naming only what's still missing. Accepting
+/// installs the pending items with no further prompts; declining prints each
+/// one's manual command. Never fails setup — install errors are surfaced with
+/// their retry command and swallowed, as before.
+fn offer_machine_protection(ctx: &super::Context, target_ids: &[String]) -> Result<(bool, bool)> {
+    let interactive = crate::util::confirm::is_interactive();
+    let guard_pending = should_offer_guard(interactive, super::guard::is_wired());
+    let rules_pending = interactive && house_rules_pending();
+    if !guard_pending && !rules_pending {
+        return Ok((false, false));
     }
 
-    let manifest_path = crate::util::paths::agentstack_home().join(MANIFEST_FILE);
-    println!("\n{}", "Guard".bold());
+    println!("\n{}", "Optional: machine-wide protection".bold());
     println!(
-        "  a destructive-command guard, wired into each detected CLI's own\n\
-         \x20 pre-tool-use hook — it blocks rm -rf, git reset --hard, and .env reads\n\
-         \x20 before they land."
+        "  {}",
+        "One question, then this project's setup is done. Both are machine-global\n\
+         \x20 (they cover every project on this machine), and `agentstack restore` undoes them."
+            .dimmed()
     );
-    println!(
-        "  {} writes a hook entry into each detected CLI's config and a [guard] block\n\
-         \x20   in {}.",
-        "·".dimmed(),
-        manifest_path.display()
-    );
-    if !crate::util::confirm::confirm("  Install the guard now?")? {
+    if guard_pending {
         println!(
-            "  {} skipped — install later with {}.",
-            "·".dimmed(),
-            "agentstack guard install".bold()
+            "  · {} — blocks rm -rf, git reset --hard, and .env reads via a\n\
+             \x20   pre-tool-use hook in each detected CLI",
+            "guard".bold()
         );
-        return Ok(false);
+    }
+    if rules_pending {
+        println!(
+            "  · {} — a fragment in each CLI's global CLAUDE.md / AGENTS.md that\n\
+             \x20   teaches agents the manifest-first workflow",
+            "house rules".bold()
+        );
+    }
+    if !crate::util::confirm::confirm("  Set these up now?")? {
+        if guard_pending {
+            println!(
+                "  {} guard skipped — later: {}",
+                "·".dimmed(),
+                "agentstack guard install".bold()
+            );
+        }
+        if rules_pending {
+            println!(
+                "  {} house rules skipped — later: {}",
+                "·".dimmed(),
+                "agentstack init --global".bold()
+            );
+        }
+        return Ok((false, false));
     }
 
-    // `guard install` prints its own per-CLI write lines and config path, so the
-    // summary surfaces those (below) rather than duplicating them here.
-    println!();
-    if let Err(err) = super::guard::install() {
-        println!(
-            "  {} guard install failed ({err:#}) — setup itself succeeded; retry with {}.",
-            "⚠".yellow(),
-            "agentstack guard install".bold()
-        );
-        return Ok(false);
-    }
-    Ok(true)
+    let guard_wired = if guard_pending {
+        // `guard install` prints its own per-CLI write lines, so the summary
+        // surfaces those rather than duplicating them here.
+        println!();
+        match super::guard::install() {
+            Ok(()) => true,
+            Err(err) => {
+                println!(
+                    "  {} guard install failed ({err:#}) — setup itself succeeded; retry with {}.",
+                    "⚠".yellow(),
+                    "agentstack guard install".bold()
+                );
+                false
+            }
+        }
+    } else {
+        false
+    };
+    let seeded_house_rules = if rules_pending {
+        offer_house_rules(ctx, target_ids)?
+    } else {
+        false
+    };
+    Ok((guard_wired, seeded_house_rules))
 }
 
 /// Pick the profile setup should activate: an explicit `--profile` wins, a
@@ -646,36 +697,12 @@ fn offer_house_rules(ctx: &super::Context, target_ids: &[String]) -> Result<bool
     }
 }
 
+/// The write half of the house-rules install. Gate and consent live in
+/// [`offer_machine_protection`] — by the time this runs, the fragment is
+/// pending and the user already said yes to the combined step.
 fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Result<bool> {
-    if !crate::util::confirm::is_interactive() {
-        return Ok(false);
-    }
     let home = crate::util::paths::agentstack_home();
-    if let Ok(loaded) = crate::manifest::load_from_dir(&home) {
-        if loaded
-            .manifest
-            .instructions
-            .contains_key(super::init::HOUSE_RULES_NAME)
-        {
-            return Ok(false);
-        }
-    }
-
     println!("\n{}", "House rules".bold());
-    println!(
-        "  agentstack ships a house-rules fragment that teaches every agent the\n\
-         \x20 manifest-first workflow (never edit rendered configs, drift rules,\n\
-         \x20 clean-at-rest projects). It lives in your machine manifest and compiles\n\
-         \x20 into each CLI's global CLAUDE.md / AGENTS.md."
-    );
-    if !crate::util::confirm::confirm("  Install them?")? {
-        println!(
-            "  {} skipped — install later with `agentstack init --global`.",
-            "·".dimmed()
-        );
-        return Ok(false);
-    }
-
     let manifest_path = home.join(MANIFEST_FILE);
     let fragment_path = home
         .join("instructions")

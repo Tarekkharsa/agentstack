@@ -818,13 +818,22 @@ guidance (B5).
   is labeled interactive with the scripted `init --secrets skip` +
   `apply --write` path directly below it.
 
-## Still open (needs a product decision)
+## Decision round (maintainer approved all three)
 
-- **C6** wizard decision count / machine-global Guard + House-rules upsells —
-  scope change to the init flow.
-- **D5** `set server` idempotent verb — new command surface.
-- **E7** README security headline ("Nothing runs until it's trusted") vs.
-  host-mode reality and the enforcement matrix — product-voice decision.
+- **E7 fixed** — README and index.html headline now makes the precise claim:
+  untrusted declarations are never auto-activated, and governed gateway /
+  contained runs enforce and record exactly what their printed posture names.
+  No more implied host-mode enforcement.
+- **D5 fixed** — `agentstack set server <name> …` (hidden, in the help map's
+  Edit group) is the idempotent create-or-update: same flags as `add server`,
+  rewrites an existing entry in place. `add server` on an existing name now
+  points at it, and the missing-`--url`/`--command` validation errors carry
+  the complete retry skeleton.
+- **C6 fixed** — the wizard's two machine-global upsells (Guard, House rules)
+  collapsed into ONE optional "machine-wide protection" step after the
+  project's own setup finishes, naming only what's still missing; declining
+  prints each manual command. The "Apply this setup?" confirm is skipped when
+  zero targets would change ("Configs already match the manifest").
 
 ## Verification
 

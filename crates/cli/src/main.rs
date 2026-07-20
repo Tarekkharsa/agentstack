@@ -44,6 +44,7 @@ fn run() -> Result<()> {
         Command::Init(args) => commands::init::run(args, dir),
         Command::Status(_) => commands::overview::run_status(dir),
         Command::Add(args) => commands::add::run(args, dir),
+        Command::Set(args) => commands::add::run_set(args, dir),
         Command::Install(args) => commands::install::run(args, dir),
         Command::Lock(args) => commands::lock::dispatch(args, dir),
         Command::Remove(args) => commands::remove::run(args, dir),

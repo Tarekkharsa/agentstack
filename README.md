@@ -3,8 +3,9 @@
 > **Cloning a repo shouldn't hand your agent to a stranger.**
 > AgentStack is a local control plane for AI coding agents: one reviewed
 > manifest defines what every agent CLI may run — then trust-gates,
-> firewalls, and audits it. Nothing runs until it's trusted, and nothing
-> trusted runs unobserved.
+> firewalls, and audits it. An untrusted repo's declarations are never
+> auto-activated, and governed gateway and contained runs enforce and
+> record exactly the controls their printed posture names.
 
 **[Website](https://tarekkharsa.github.io/agentstack/)** ·
 [Docs](https://tarekkharsa.github.io/agentstack/docs.html) ·
