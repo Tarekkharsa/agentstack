@@ -158,13 +158,16 @@ Install a capability once into your machine-wide **central library** (`~/.agents
 reference it by name from any project's profile — no copying files between repos:
 
 ```bash
-agentstack search codex                      # your library + catalog + MCP registry
-agentstack lib add sql-review --path ./skills/sql-review --write
-agentstack lib sync                          # version the library as a git repo
+agentstack search codex                              # your library + catalog + MCP registry
+agentstack add skill anthropics/skills --skill pdf --write   # any skills repo: scanned, pinned, activated
+agentstack lib add ./skills/sql-review --write               # yours, reusable across repos by name
+agentstack lib sync                                  # version the library as a git repo
 ```
 
-Every add is content-scanned (hidden-unicode / prompt-injection) before it lands, and `lib sync`'s
-fail-closed gate keeps secrets from ever traveling. **Share with a team or CI:** commit `.agentstack/`,
+Every add is content-scanned (hidden-unicode / prompt-injection) before it lands — previews stage
+transiently and touch nothing until `--write` — and `lib sync`'s fail-closed gate keeps secrets from
+ever traveling. Curious first? `agentstack try owner/repo --skill pdf | claude` runs a skill once,
+installing nothing. Full flow: [add a skill](docs/howto/add-a-skill.md). **Share with a team or CI:** commit `.agentstack/`,
 then [set up a team](docs/howto/team-setup.md) or [wire it into CI](docs/howto/ci.md). Where rendered
 files live — **static**, **clean-at-rest**, or **zero-files** — is a per-project choice
 ([which mode?](docs/choose.md) · [lifecycle](docs/reference.md#where-rendered-files-live-three-modes)).

@@ -184,6 +184,9 @@ Four things that skim alike but do different jobs:
   that `search` can find and add.
 - **Official MCP Registry** — the public `registry.modelcontextprotocol.io`
   index of MCP servers; `search` queries it and `add from <id>` installs one.
+Skills also come straight from any skills repo — `add skill owner/repo`
+(or a git URL, or a local dir) discovers, scans, and pins them; see
+[add a skill](howto/add-a-skill.md).
 - **Trust store** — the machine-local record (under `~/.agentstack/`) of which
   projects you have trusted, keyed by path and consent digest. It stores no
   capabilities — only your approvals. More:
