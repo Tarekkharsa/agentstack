@@ -151,7 +151,7 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 say "PATH B — zero-files lease via 'agentstack mcp'"
 # ─────────────────────────────────────────────────────────────────────────────
-echo y | "$AS" trust . >/dev/null
+"$AS" trust . --yes >/dev/null
 
 OUT="$SBX/leaseout"
 python3 "$HERE/lease_client.py" "$AS" "$PROJECT" "$OUT"

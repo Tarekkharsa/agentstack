@@ -93,6 +93,10 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // and the shell is interactive (P2); setup is interactive.
                 secrets: None,
                 no_keychain: false,
+                // The wizard already gated the import with its own confirm
+                // above and calls `run_for_setup` (which never re-checks the
+                // TTY gate), so this field is irrelevant here.
+                yes: false,
             },
             manifest_dir,
         )?;

@@ -1,6 +1,7 @@
 //! Command-line surface (clap derive). The visible set is the everyday loop
-//! (setup/init/add/search/apply/use/run/doctor/report/trust/guard/secret/
-//! dashboard/instructions) plus the four that carry the product's core
+//! (init/add/search/apply/use/run/doctor/report/trust/guard/secret/
+//! dashboard/instructions — `setup` survives only as a hidden alias of init)
+//! plus the four that carry the product's core
 //! promises — explain (inspect before trusting), lock (reproducible pins),
 //! lib (the central library), adopt (keep a hand-edit); everything else is
 //! hidden-but-functional and cataloged in the `after_help` map below.
@@ -56,14 +57,17 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     // ── Everyday: the core loop most projects ever need (shown in --help) ─
-    /// Hidden alias of interactive `init` (P27: one front-door verb). Kept so
-    /// muscle memory and old links keep working; never advertised.
+    /// Hidden alias of interactive `init` (P27: one front-door verb).
+    ///
+    /// Kept so muscle memory and old links keep working; never advertised.
     #[command(hide = true)]
     Setup(SetupArgs),
 
-    /// Set up everything in one command: detect CLIs, import their configs,
-    /// choose where secrets live, preview, confirm, apply, verify. Interactive
-    /// runs are guided; scripts get the promptless primitive via flags.
+    /// Set up everything in one command: detect, import, choose, apply, verify.
+    ///
+    /// Detects CLIs, imports their configs, lets you choose where secrets
+    /// live, previews, confirms, applies, and verifies. Interactive runs are
+    /// guided; scripts get the promptless primitive via flags.
     Init(InitArgs),
 
     /// Add a server or skill to the manifest.
@@ -78,16 +82,19 @@ pub enum Command {
     /// to apply directly.
     Apply(ApplyArgs),
 
-    /// Compile [instructions.*] fragments into each harness's CLAUDE.md /
-    /// AGENTS.md (a managed region; hand-written prose is preserved). Dry-run
-    /// by default; `--write` applies.
+    /// Compile [instructions.*] into each harness's CLAUDE.md / AGENTS.md.
+    ///
+    /// Fragments render into a managed region; hand-written prose is
+    /// preserved. Dry-run by default; `--write` applies.
     Instructions(InstructionsArgs),
 
     /// Verify everything is wired up: adapters, secrets, drift, quirks, skills.
     Doctor(DoctorArgs),
 
-    /// Open the local web dashboard — a read-only view of your stack (state,
-    /// diffs, doctor, runs, audited calls). Every change happens through the CLI.
+    /// Open the local web dashboard — a read-only view of your stack.
+    ///
+    /// Shows state, diffs, doctor, runs, and audited calls. Every change
+    /// happens through the CLI.
     Dashboard(DashboardArgs),
 
     // ── Capabilities & library ───────────────────────────────────────────
@@ -99,20 +106,25 @@ pub enum Command {
     #[command(hide = true)]
     Install(InstallArgs),
 
-    /// Resolve each profile's skill + server refs (library-aware) and pin them
-    /// in `agentstack.lock` — no configs rendered, no skills materialized. The
-    /// lock-only counterpart of `use <profile> --write`, for clean-at-rest
-    /// repos that keep no generated files. `--update` re-resolves git skills
-    /// to their latest first; `--upgrade` re-resolves an installed vendor pack
-    /// and applies its changes.
+    /// Resolve each profile's skill + server refs and pin `agentstack.lock`.
+    ///
+    /// Library-aware resolution; no configs rendered, no skills
+    /// materialized — the lock-only counterpart of `use <profile> --write`,
+    /// for clean-at-rest repos that keep no generated files. `--update`
+    /// re-resolves git skills to their latest first; `--upgrade` re-resolves
+    /// an installed vendor pack and applies its changes.
     Lock(LockArgs),
 
-    /// Manage the central capability library (`~/.agentstack/lib/`) that projects
-    /// reference by name instead of copying files.
+    /// Manage the central capability library.
+    ///
+    /// `~/.agentstack/lib/` holds capabilities that projects reference by
+    /// name instead of copying files.
     Lib(LibArgs),
 
-    /// Pull hand-added servers and hand-edited fields from target configs
-    /// back into the manifest.
+    /// Keep a hand-edit: pull drifted native config back into the manifest.
+    ///
+    /// Imports hand-added servers and hand-edited fields from target configs
+    /// so the manifest stays the source of truth.
     Adopt(AdoptArgs),
 
     // ── Activate & run ───────────────────────────────────────────────────
@@ -123,17 +135,20 @@ pub enum Command {
     #[command(hide = true)]
     Session(SessionArgs),
 
-    /// Launch an agent CLI as a tracked run: optionally apply a profile for its
-    /// lifetime, then observe/kill it here or from the dashboard.
+    /// Launch an agent CLI as a tracked run.
+    ///
+    /// Optionally apply a profile for its lifetime, then observe/kill it
+    /// here or from the dashboard.
     Run(RunArgs),
 
     /// Kill a tracked run by id (and revert its profile if it owned one).
     #[command(hide = true)]
     Kill(KillArgs),
 
-    /// Every "what happened" view in one place: a sandboxed run's flight
-    /// recorder, live tracked runs, usage analytics, and brokered-call
-    /// activity.
+    /// Every "what happened" view in one place.
+    ///
+    /// A sandboxed run's flight recorder, live tracked runs, usage
+    /// analytics, and brokered-call activity.
     #[command(subcommand)]
     Report(ReportCmd),
 
@@ -147,12 +162,14 @@ pub enum Command {
     #[command(hide = true)]
     Verify(VerifyArgs),
 
-    /// Machine-level destructive-command guard: wires `agentstack guard
-    /// check` into every detected agent CLI as a pre-tool-use hook. Blocks
-    /// destructive commands (rm -rf, git reset --hard, …), reads/writes of
-    /// `[policy.filesystem] deny` paths (.env and friends), and writes
-    /// outside the workspace + `[guard] allow_roots`. Cooperative accident
-    /// protection — the kernel-enforced story is `run --sandbox`.
+    /// Machine-level destructive-command guard.
+    ///
+    /// Wires `agentstack guard check` into every detected agent CLI as a
+    /// pre-tool-use hook. Blocks destructive commands (rm -rf, git reset
+    /// --hard, …), reads/writes of `[policy.filesystem] deny` paths (.env
+    /// and friends), and writes outside the workspace + `[guard]
+    /// allow_roots`. Cooperative accident protection — the kernel-enforced
+    /// story is `run --sandbox`.
     Guard(GuardArgs),
 
     // ── Zero-files bridge ────────────────────────────────────────────────
@@ -163,10 +180,12 @@ pub enum Command {
     Gateway(GatewayCmd),
 
     /// Trust a project's manifest for the zero-files bridge (direnv-style).
-    /// Until trusted, an auto-discovered project gets control-plane tools only:
-    /// none of its servers are spawned or contacted, no secrets are resolved.
-    /// Trust pins the content digest of the manifest layers AND the lockfile —
-    /// editing either (a `git pull`, an `agentstack lock`) requires re-trusting.
+    ///
+    /// Until trusted, an auto-discovered project gets control-plane tools
+    /// only: none of its servers are spawned or contacted, no secrets are
+    /// resolved. Trust pins the content digest of the manifest layers AND
+    /// the lockfile — editing either (a `git pull`, an `agentstack lock`)
+    /// requires re-trusting.
     Trust(TrustArgs),
 
     /// Run agentstack as an MCP server over stdio (for an agent to call).
@@ -178,24 +197,28 @@ pub enum Command {
     #[command(hide = true)]
     Diff(DiffArgs),
 
-    /// Explain a server or skill: where it came from, what secrets it needs,
-    /// which tools get it and what files get written, and its safety signals.
+    /// Explain a server or skill before you rely on it.
+    ///
+    /// Shows where it came from, what secrets it needs, which tools get it and
+    /// what files get written, and its safety signals.
     Explain(ExplainArgs),
 
-    /// Turn the signals agentstack already collects (usage, call audit log,
-    /// context costs, trust ledger) into concrete recommendations: inert
-    /// servers, firewall narrowing, denied/erroring tools, stale trust. Every
-    /// recommendation carries evidence, the exact command/TOML, and why it is
-    /// safe or needs review. Read-only by default; `--write` applies only the
-    /// safe class.
+    /// Turn agentstack's collected signals into concrete recommendations.
+    ///
+    /// Usage, call audit log, context costs, and trust ledger feed
+    /// inert-server, firewall-narrowing, denied/erroring-tool, and
+    /// stale-trust findings. Every recommendation carries evidence, the
+    /// exact command/TOML, and why it is safe or needs review. Read-only by
+    /// default; `--write` applies only the safe class.
     #[command(hide = true)]
     Optimize(OptimizeArgs),
 
-    /// Start the wire relay: a localhost proxy in front of the Anthropic API
-    /// that forwards every request verbatim (observe only) while accounting the
+    /// Start the wire relay: a localhost proxy in front of the Anthropic API.
+    ///
+    /// Forwards every request verbatim (observe only) while accounting the
     /// tools block's per-turn token cost. Point a harness at it with
-    /// `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`, then rank what it observed
-    /// with `agentstack report wire`.
+    /// `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`, then rank what it
+    /// observed with `agentstack report wire`.
     #[command(hide = true)]
     Proxy(ProxyStartArgs),
 
@@ -208,9 +231,10 @@ pub enum Command {
     /// Manage secrets in the OS keychain.
     Secret(SecretArgs),
 
-    /// Edit a target's native `[settings.<target>]` entries (e.g. Claude Code
-    /// `model`) instead of hand-editing the manifest. Dry-run by default;
-    /// `--write` applies.
+    /// Edit a target's native `[settings.<target>]` entries.
+    ///
+    /// e.g. Claude Code `model`, instead of hand-editing the manifest.
+    /// Dry-run by default; `--write` applies.
     #[command(hide = true)]
     Settings(SettingsArgs),
 
@@ -349,6 +373,11 @@ pub struct TrustArgs {
     /// Withdraw trust for the project instead of granting it.
     #[arg(long)]
     pub revoke: bool,
+
+    /// Grant without a terminal: acknowledge the review non-interactively
+    /// (required when stdin is not a TTY).
+    #[arg(long)]
+    pub yes: bool,
 }
 
 #[derive(Args, Debug)]
@@ -383,13 +412,17 @@ pub enum ReportCmd {
     /// cost).
     Usage(StatsArgs),
 
-    /// Report brokered call activity (from the audit log) and library-wide
-    /// dead weight — capabilities installed but never used. Read-only, local.
+    /// Report brokered call activity and library-wide dead weight.
+    ///
+    /// From the audit log: capabilities installed but never used.
+    /// Read-only, local.
     Calls(AnalyzeArgs),
 
-    /// Rank what's been observed on the wire by the `proxy` relay: per-capability
-    /// tokens/turn, how many turns each tool was actually called, and a
-    /// loaded-vs-called hint. On-wire ground truth complementing `report usage`.
+    /// Rank what's been observed on the wire by the `proxy` relay.
+    ///
+    /// Per-capability tokens/turn, how many turns each tool was actually
+    /// called, and a loaded-vs-called hint. On-wire ground truth
+    /// complementing `report usage`.
     Wire(WireArgs),
 }
 
@@ -400,7 +433,9 @@ pub enum ReportCmd {
 #[derive(Subcommand, Debug)]
 pub enum GatewayCmd {
     /// Register the agentstack gateway once, globally, in a harness's MCP
-    /// config — after that, every trusted repo brings its own servers through
+    /// config.
+    ///
+    /// After that, every trusted repo brings its own servers through
     /// `agentstack mcp --auto-project` with no per-project files. Dry-run by
     /// default.
     Connect(ConnectArgs),
@@ -790,6 +825,12 @@ pub struct InitArgs {
     /// the run prints each unstored `${REF}` and how to store it.
     #[arg(long)]
     pub no_keychain: bool,
+
+    /// Run the promptless import without a terminal: acknowledge that the
+    /// manifest (and any lifted token values) will be written. Required when
+    /// stdin is not a TTY and no other init-shaping flag is given.
+    #[arg(long)]
+    pub yes: bool,
 }
 
 /// Where `init` (and `secret set`) put lifted token values when the manifest's

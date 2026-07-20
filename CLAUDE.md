@@ -13,7 +13,7 @@ later-phase work merely because it appears in the strategy.
 ## Where this starts (not greenfield)
 
 This repo is the shipped `agentstack` binary — a working nine-crate Rust
-workspace (v0.10.x). The security architecture is implemented, not greenfield:
+workspace (v0.14.x). The security architecture is implemented, not greenfield:
 
 - Manifest + lockfile with SHA-256 digests (`crates/core`)
 - Content-bound trust: `agentstack trust .` pins consent identity; edits re-gate
@@ -99,7 +99,7 @@ cargo build --workspace
 cargo nextest run --workspace   # preferred: parallel test binaries, ~3x faster than cargo test
 cargo test --workspace          # fallback if nextest is unavailable
 cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt
+cargo fmt --check               # the gate; plain `cargo fmt` applies the fixes
 ```
 
 The Docker sidecar tests (`crates/egress/tests/sidecar_image.rs`) are `#[ignore]`d

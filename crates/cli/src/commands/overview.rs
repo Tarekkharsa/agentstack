@@ -137,26 +137,39 @@ pub(crate) fn detect_mode(ctx: &super::Context, target_ids: &[String]) -> Mode {
 }
 
 /// The single next command bare orientation recommends, from cheap signals.
-/// Trust comes first (P16): an untrusted or trust-stale manifest points at
-/// `trust .` before anything else, because until the digest is pinned the
-/// bridge serves control-plane tools only and no server runs — trusting is the
-/// gate, distinct from the `init`/`doctor` next-steps. A *trusted* manifest
-/// that was never activated still has skills/servers to wire → `init`;
-/// otherwise the wiring is in place → `doctor`. Pure over its inputs so the
-/// routing is unit-tested without touching disk.
+/// Trust routing is the headline *only when trusting buys something here*
+/// (`trust_relevant`, P16 refined): the gateway/bridge is registered for a
+/// harness, or the derived mode depends on the trust gate (zero-files /
+/// clean-at-rest). In those cases an untrusted or trust-stale manifest points
+/// at `trust .` first, because until the digest is pinned the bridge serves
+/// control-plane tools only and no server runs — trusting is the gate. A
+/// static, no-gateway project gains nothing from trusting: its configs render
+/// through `apply`/`use` whatever the trust state, and no bridge exists to
+/// unlock. So it is *not* nagged toward a `trust .` that never converges — its
+/// untrusted state stays a true Status label, and the next step falls through
+/// to the normal ladder. That ladder: a manifest never activated but holding
+/// capabilities → `init`; otherwise the wiring is in place → `doctor`. Pure
+/// over its inputs so the routing is unit-tested without touching disk.
 pub(crate) fn next_step(
     trust: crate::trust::TrustState,
     locked: bool,
     has_capabilities: bool,
+    trust_relevant: bool,
 ) -> (&'static str, &'static str) {
     use crate::trust::TrustState;
     match trust {
-        TrustState::Untrusted => ("agentstack trust .", "review it to unlock its servers"),
-        TrustState::Changed => (
+        TrustState::Untrusted if trust_relevant => {
+            ("agentstack trust .", "review it to unlock its servers")
+        }
+        TrustState::Changed if trust_relevant => (
             "agentstack trust .",
             "the manifest or lock changed — review and re-trust",
         ),
-        TrustState::Trusted => {
+        // Untrusted or trust-stale but trust changes nothing here (static, no
+        // gateway), or already trusted: fall through to the normal ladder. A
+        // never-activated manifest with capabilities finishes its first run via
+        // `init`; otherwise the wiring is in place → `doctor`.
+        _ => {
             if !locked && has_capabilities {
                 (
                     "agentstack init",
@@ -174,7 +187,12 @@ pub(crate) fn next_step(
 
 /// The one-line explanation of an untrusted (or trust-stale) manifest shown
 /// under the Status line (P16). `None` for a trusted manifest — there is
-/// nothing to teach. A `&'static str` because the sentence never varies.
+/// nothing to teach. A `&'static str` because the sentence never varies. The
+/// caller shows it only when trust is *relevant* here (a bridge exists): the
+/// note describes the bridge serving control-plane tools only, which is simply
+/// untrue for a static, no-gateway project whose servers render regardless —
+/// so that project keeps the honest `· untrusted` Status label without this
+/// line.
 pub(crate) fn orientation_trust_note(trust: crate::trust::TrustState) -> Option<&'static str> {
     use crate::trust::TrustState;
     match trust {
@@ -299,19 +317,35 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
                     }
                 );
 
+                // Delivery mode and gateway state, derived from what's on disk
+                // (P4) — computed here (before the trust note) because whether
+                // trust is even *relevant* depends on them. Trust genuinely
+                // gates capability delivery only through the bridge (zero-files)
+                // or the trust-gated run/session paths (clean-at-rest); a
+                // static, no-gateway project renders through `apply`/`use`
+                // regardless. So trust is the headline next-step, and the
+                // "inert servers" note is shown, only when a bridge is
+                // registered or the mode depends on the gate.
+                let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
+                let gateway = gateway_connected(&ctx, &target_ids);
+                let mode = detect_mode(&ctx, &target_ids);
+                let trust_relevant = gateway || matches!(mode, Mode::ZeroFiles | Mode::CleanAtRest);
+
                 // Untrusted (or trust-stale) teaches the human what that state
                 // *means*, not just the label (P16): an untrusted manifest's
                 // servers stay inert — the bridge serves control-plane tools
                 // only until the digest is reviewed and pinned. One line,
-                // aligned under the Status content it explains.
-                if let Some(note) = orientation_trust_note(trust) {
-                    println!("            {}", note.dimmed());
+                // aligned under the Status content it explains. Only shown when
+                // trust is relevant — for a static, no-gateway project the note
+                // would be false (its servers are not inert), so the honest
+                // `· untrusted` Status label stands alone.
+                if trust_relevant {
+                    if let Some(note) = orientation_trust_note(trust) {
+                        println!("            {}", note.dimmed());
+                    }
                 }
 
-                // Which delivery mode this project is in, derived from what's on
-                // disk (P4) — so "which mode am I in?" is a glance, not a guess.
-                let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
-                let mode = detect_mode(&ctx, &target_ids);
+                // Which delivery mode this project is in — a glance, not a guess.
                 println!(
                     "  {}  {} {}",
                     "Mode    ".bold(),
@@ -320,7 +354,7 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
                 );
 
                 let has_capabilities = !m.skills.is_empty() || !m.servers.is_empty();
-                next_step(trust, locked, has_capabilities)
+                next_step(trust, locked, has_capabilities, trust_relevant)
             }
             Err(err) => {
                 println!(
@@ -375,16 +409,21 @@ mod tests {
         assert_eq!(mode_from_signals(false, false, false, false), Mode::Static);
     }
 
-    // P16 witness: an untrusted or trust-stale manifest teaches what that means
-    // in one line and routes to `trust .` — the trust gate comes before the
-    // `init`/`doctor` next-steps, because until the digest is pinned the bridge
-    // serves control-plane tools only and nothing activates.
+    // P16 witness (refined): trust is the headline next-step only when trusting
+    // buys something here — a bridge is registered, or the mode depends on the
+    // trust gate (`trust_relevant`). When it does, an untrusted or trust-stale
+    // manifest routes to `trust .` ahead of `init`/`doctor` and teaches what the
+    // state means. When it does not (a static, no-gateway project whose configs
+    // render regardless of trust), the trust route is NOT the headline: the next
+    // step falls through to the normal ladder, and the "inert servers" note is
+    // withheld — because it would be false — leaving only the true Status label.
     #[test]
     fn untrusted_orientation_teaches_and_routes_to_trust() {
         use crate::trust::TrustState;
 
         // The one-line note appears for untrusted AND trust-stale, and explains
-        // the *consequence* (inert servers), not just the label.
+        // the *consequence* (inert servers), not just the label. (Its caller
+        // gates it on trust relevance; the sentence itself is unchanged.)
         for st in [TrustState::Untrusted, TrustState::Changed] {
             let note = orientation_trust_note(st).expect("untrusted states teach");
             assert!(note.contains("inert"), "explains the consequence: {note}");
@@ -396,36 +435,59 @@ mod tests {
         // A trusted manifest has nothing to teach here.
         assert_eq!(orientation_trust_note(TrustState::Trusted), None);
 
-        // Trust routing wins over locked/capability state: untrusted and stale
-        // both send the human to `trust .`, whatever the lock or manifest holds.
+        // Trust-relevant (bridge registered / gate-dependent mode): untrusted
+        // and stale both send the human to `trust .`, whatever the lock holds.
         assert_eq!(
-            next_step(TrustState::Untrusted, false, true).0,
+            next_step(TrustState::Untrusted, false, true, true).0,
             "agentstack trust ."
         );
         assert_eq!(
-            next_step(TrustState::Untrusted, true, false).0,
+            next_step(TrustState::Untrusted, true, false, true).0,
             "agentstack trust ."
         );
         assert_eq!(
-            next_step(TrustState::Changed, true, true).0,
+            next_step(TrustState::Changed, true, true, true).0,
             "agentstack trust ."
         );
 
-        // Only once trusted do the first-run vs. verify next-steps apply: a
-        // never-activated manifest with capabilities finishes setup via `init`,
-        // an activated (or empty) one verifies via `doctor`.
+        // Static, no-gateway (trust irrelevant): the untrusted/stale state does
+        // NOT hijack the headline — it falls through to the normal ladder. A
+        // never-activated manifest with capabilities finishes its first run via
+        // `init`; an activated (or empty) one verifies via `doctor`. This is the
+        // fix for the never-converging trust nag.
         assert_eq!(
-            next_step(TrustState::Trusted, false, true).0,
+            next_step(TrustState::Untrusted, false, true, false).0,
             "agentstack init"
         );
         assert_eq!(
-            next_step(TrustState::Trusted, true, false).0,
+            next_step(TrustState::Untrusted, true, false, false).0,
             "agentstack doctor"
         );
         assert_eq!(
-            next_step(TrustState::Trusted, false, false).0,
+            next_step(TrustState::Changed, true, true, false).0,
             "agentstack doctor"
         );
+        assert_eq!(
+            next_step(TrustState::Changed, false, false, false).0,
+            "agentstack doctor"
+        );
+
+        // Once trusted the trust-relevance flag is moot: the first-run vs. verify
+        // ladder applies either way.
+        for relevant in [true, false] {
+            assert_eq!(
+                next_step(TrustState::Trusted, false, true, relevant).0,
+                "agentstack init"
+            );
+            assert_eq!(
+                next_step(TrustState::Trusted, true, false, relevant).0,
+                "agentstack doctor"
+            );
+            assert_eq!(
+                next_step(TrustState::Trusted, false, false, relevant).0,
+                "agentstack doctor"
+            );
+        }
     }
 
     // P18(a) witness: orientation names profiles rather than counting them, one

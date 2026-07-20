@@ -122,7 +122,7 @@ fi
 
 # ── 2 + 3) TRUSTED — discovery filtering + execution firewall + audit ─────────
 say "2+3) Trusted: review the manifest, then drive the gateway through one session"
-echo y | "$AS" trust . >/dev/null 2>&1
+"$AS" trust . --yes >/dev/null 2>&1
 
 PROBE="$(python3 "$HERE/gateway_probe.py" "$AS" "$PROJECT")"
 

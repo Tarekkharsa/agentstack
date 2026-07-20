@@ -55,9 +55,11 @@ To record it with [VHS](https://github.com/charmbracelet/vhs):
 vhs demo-firstrun.tape
 ```
 
-The GIF is written to `../docs/firstrun.gif`, the path embedded in the product
-README. Review its size before committing. For an asciinema workflow, use the
-commands in the script header.
+The GIF lands at `../../docs/firstrun.gif` — nothing embeds it, so review its
+size before committing one. The replay actually shown on the site
+(`docs/firstrun.svg`) is a condensed transcript maintained in
+`tools/make-term-svgs.py`; regenerate it with `python3 tools/make-term-svgs.py`.
+For an asciinema workflow, use the commands in the script header.
 
 ## Central library demo
 

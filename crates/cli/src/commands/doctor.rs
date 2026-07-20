@@ -320,16 +320,19 @@ fn run_checks(
         match ctx.registry.get(id) {
             None => report.line(Level::Error, format!("{id}: unknown adapter")),
             Some(desc) => {
-                let path_label = desc
+                // "<path> parses" only makes sense when there is a config to
+                // parse; an adapter with none (e.g. Pi) gets an honest label
+                // instead of the garbled "no MCP config parses".
+                let wiring = desc
                     .config
                     .as_ref()
-                    .map(|c| paths::expand_tilde(&c.path).display().to_string())
-                    .unwrap_or_else(|| "no MCP config".to_string());
+                    .map(|c| format!("{} parses", paths::expand_tilde(&c.path).display()))
+                    .unwrap_or_else(|| "no MCP config to check".to_string());
                 if desc.is_installed() {
                     match desc.read_config_value() {
                         Ok(_) => report.line(
                             Level::Ok,
-                            format!("{:<14} installed · {} parses", desc.display, path_label),
+                            format!("{:<14} installed · {}", desc.display, wiring),
                         ),
                         Err(e) => report.line(
                             Level::Error,

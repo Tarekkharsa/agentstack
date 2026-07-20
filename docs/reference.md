@@ -450,9 +450,9 @@ files), and `doctor --ci` fails on high-severity findings, so a poisoned skill
 can't slide into CI unnoticed. Everyday `doctor` skips this scan (it reads every
 skill body); opt in with `doctor --deep` — `--ci` always includes it, `--json`
 emits the whole report machine-readably, and the dashboard's Doctor pane runs it
-too. `setup` offers the deep scan as an explicit yes/no at its closing doctor
-step, but only when the project actually has skills — no empty questions on a
-server-only manifest.
+too. Interactive `init` offers the deep scan as an explicit yes/no at its
+closing doctor step, but only when the project actually has skills — no empty
+questions on a server-only manifest.
 
 ### `doctor --live`
 
@@ -618,10 +618,10 @@ a name. When a prune empties the managed skills dir (deactivation,
 `session end`), the dir itself is removed too — rmdir semantics, so a dir
 holding any user content always survives.
 
-`setup` finishes with the same activation: it picks the profile (an explicit
-`--profile`, the only one declared, or an interactive offer of the
+Interactive `init` finishes with the same activation: it picks the profile (an
+explicit `--profile`, the only one declared, or an interactive offer of the
 first-declared) and materializes its skills through the exact `use` code
-path — so a completed setup leaves nothing left to activate. Plain `apply`
+path — so a completed init leaves nothing left to activate. Plain `apply`
 still never touches skills; it reminds you which profile activates them.
 
 ### Instruction files
@@ -630,7 +630,7 @@ Compile shared + harness-specific `[instructions.*]` fragments into each
 CLI's `CLAUDE.md` / `AGENTS.md`, inside a managed `<!-- agentstack -->` region
 that preserves all surrounding hand-written prose (`agentstack instructions`;
 dry-run by default, `--write` applies). Part of the mainstream lifecycle:
-`apply` (and therefore `setup`) compiles the region alongside
+`apply` (and therefore `init`) compiles the region alongside
 servers/settings/hooks behind the same `--write` gate — a manifest with no
 `[instructions.*]` never touches a region another layer owns — and `doctor`
 flags a stale managed region (warn ↳ `instructions --write`) or a missing
@@ -664,8 +664,8 @@ that teaches every agent the manifest-first workflow: never edit rendered
 configs, the three artifact modes (a clean-at-rest project's missing
 `.mcp.json` is intentional), re-lock after editing profiles, and the drift
 decision rule (keep a hand-added server → `adopt`; manifest is truth →
-`apply --write`). `init --global` and `setup` offer to install it into the
-machine manifest — opt-in, like pack instructions.
+`apply --write`). `init --global` and the interactive `init` wizard offer to
+install it into the machine manifest — opt-in, like pack instructions.
 
 ### Native settings
 
@@ -702,9 +702,12 @@ target = "pi"                      # exactly one adapter id
 - **Source.** A local `path` (a `.ts`/`.js` file or a directory), anchored at
   the manifest dir exactly like skills and instructions; a `git` source (which
   requires a `subpath` pointing at the extension's directory in the repo, plus
-  an optional `rev`); or a bare name resolved from the central library. A
-  declaration with none of these is a validation error, so an unpinnable
-  extension can never exist half-declared.
+  an optional `rev`); or a bare name resolved from the central library. Put
+  one in the library with `agentstack lib add-extension <name> --target
+  <adapter> --path <dir>` (or `--git <url> --subpath <dir>`, optionally
+  `--rev`) — same content scan and strict digest as `lib add`. A declaration
+  with none of these is a validation error, so an unpinnable extension can
+  never exist half-declared.
 - **`target` is singular.** Extension code is written against one CLI's API, so
   it names exactly one adapter id — there is no `targets` list and no `"*"`
   fan-out. An unknown target, or `"*"`, is a validation error.
@@ -1391,14 +1394,19 @@ The full command surface in one place, kept honest by a test against the CLI's
 own command tree. Reach for it when you need the exact verb, flag, or
 subcommand.
 
-`setup`, `init` (`--global`, `--secrets env|keychain|skip`), `add`, `search`,
+`init` (interactive wizard; `--global`, `--secrets env|keychain|skip`; `setup`
+is a hidden alias), `add from|server|skill` (`add server`: `--type`,
+`--url`/`--header` or `--command`/`--arg`, `--target`; `add skill`: `--path`),
+`search`,
 `install` (`--locked`, `--allow-flagged`),
 `lock` (`--profile`; `--update [NAME]` re-resolves git skills, `--upgrade
 [PACK]` + `--all`/`--with-instructions`/`--yes`/`--write` re-resolves vendor
 packs), `remove`, `apply` (`--scope`, `--write`, `--prune-foreign`), `diff`,
-`explain`, `use <profile>`, `session`, `instructions`, `adopt`,
-`lib add|add-server|list|remove|remove-server|sync|pack-init`
-(`lib add`: `--path`, `--git`/`--subpath`, `--allow-flagged`; `lib sync`:
+`explain`, `use <profile>`, `session start|end|list|freeze`, `instructions`, `adopt`,
+`lib add|add-server|add-extension|add-hook|list|remove|remove-server|remove-extension|remove-hook|sync|pack-init`
+(`lib add`: `--path`, `--git`/`--subpath`, `--allow-flagged`; `lib add-extension`:
+`--target`, `--path` or `--git`/`--subpath`/`--rev`, `--allow-flagged`; `lib
+add-hook`: `--file`/`--from-manifest`; `lib sync`:
 `--init`, `--remote`, `--status`, `--allow-secrets`), `restore` (`--last`; a
 recorded-change id or an adapter id),
 `doctor` (`--ci`, `--live`, `--fix`, `--deep`, `--all`, `--json`), `optimize` (`--json`, `--write`, `--since`),
@@ -1406,7 +1414,7 @@ recorded-change id or an adapter id),
 `usage`: `--live`; `calls`: `--since`), `proxy` (`--port`,
 `--upstream`),
 `secret set|get|rm|list` (`set --env-file`), `export`/`import`, `adapters` (`list|show|validate`),
-`settings`,
+`settings set|unset`,
 `dashboard`, `mcp` (`--auto-project`, `--transparent`),
 `gateway connect|disconnect` (`connect`: `--all`, `--transparent`, `--write`),
 `trust` (`--list`, `--revoke` — pins the manifest layers **and lockfile**;

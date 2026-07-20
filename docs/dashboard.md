@@ -36,7 +36,7 @@ disk (lifting inline secrets into `${REF}`s), run the command it shows:
   reachable capabilities, and per-run **Calls** (the audited tool-call footprint,
   digests only). Stop one with the shown `agentstack kill <id>`.
 - **Discover** — search the embedded catalog and the official MCP Registry. Each
-  result shows its trust signals and the `agentstack add <id>` command to add it.
+  result shows its trust signals and the `agentstack add from <id>` command to add it.
 - **Servers** — the cross-harness matrix: where each server is enabled, per CLI and
   scope (global/project switch at the top). Click a name for its config and the
   trust lens (**Explain trust ⓘ**). The **context** column shows each server's

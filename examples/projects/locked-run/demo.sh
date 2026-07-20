@@ -104,7 +104,7 @@ scene_safe() {
   setup
   banner "run --locked · SAFE REPO — pin it, review it, trust it, launch it"
   say "You cloned a repo that declares two MCP servers. It is inert until you consent."
-  run "$AS lock && $AS trust ." "$AS lock >/dev/null && $AS trust . <<< y 2>&1 | sed -n '1,3p'"
+  run "$AS lock && $AS trust ." "$AS lock >/dev/null && $AS trust . --yes 2>&1 | sed -n '1,3p'"
   say "The surface is pinned and trusted. Preview the locked launch — it runs nothing."
   run "$AS run claude-code --locked --plan" "$AS run claude-code --locked --plan 2>&1 | tail -n 12"
   say "Every gate is green. Launch for real — the grant freezes, then the harness runs."
@@ -129,7 +129,7 @@ EOF
   run "cat \$AGENTSTACK_HOME/agentstack.toml"
   say "This cloned repo declares an HTTP server that wants exactly that host."
   run "grep -A2 'servers.partner-api' .agentstack/agentstack.toml"
-  run "$AS lock && $AS trust ." "$AS lock >/dev/null && $AS trust . <<< y >/dev/null 2>&1; echo 'pinned + trusted'"
+  run "$AS lock && $AS trust ." "$AS lock >/dev/null && $AS trust . --yes >/dev/null 2>&1; echo 'pinned + trusted'"
   say "You can trust the bytes — but a locked run still refuses what policy forbids."
   run "$AS run claude-code --locked" "$AS run claude-code --locked 2>&1 | grep -iaE 'refused|policy.egress|admission' | head -n 4"
   say "Refused at admission, before launch — the exact rule and its source, named."
@@ -140,13 +140,13 @@ scene_drift() {
   setup
   banner "run --locked · DRIFT — a pinned byte changes, the run re-gates"
   say "The repo is pinned and trusted, and a locked run launches cleanly."
-  run "$AS run claude-code --locked" "$AS lock >/dev/null && $AS trust . <<< y >/dev/null 2>&1; $AS run claude-code --locked 2>&1 | tail -n 2"
+  run "$AS run claude-code --locked" "$AS lock >/dev/null && $AS trust . --yes >/dev/null 2>&1; $AS run claude-code --locked 2>&1 | tail -n 2"
   say "Now someone edits a server executable that was pinned by \`lock\`."
   run "echo '# tampered' >> opsbox.sh" "printf '# a new line, after lock\n' >> opsbox.sh; echo 'opsbox.sh edited'"
   say "The next locked run refuses BEFORE launch — the pinned byte no longer matches."
   run "$AS run claude-code --locked" "$AS run claude-code --locked 2>&1 | grep -iaE 'refused|opsbox|drift|lock' | head -n 4"
   say "Re-lock and re-trust to readmit — a consent re-gate, never a silent lockout."
-  run "$AS lock && $AS trust . && $AS run claude-code --locked" "$AS lock >/dev/null && $AS trust . <<< y >/dev/null 2>&1; $AS run claude-code --locked 2>&1 | tail -n 2"
+  run "$AS lock && $AS trust . && $AS run claude-code --locked" "$AS lock >/dev/null && $AS trust . --yes >/dev/null 2>&1; $AS run claude-code --locked 2>&1 | tail -n 2"
   teardown
 }
 

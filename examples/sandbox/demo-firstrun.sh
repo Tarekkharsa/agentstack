@@ -59,7 +59,7 @@ line "0. Starting point — Claude Code already has one MCP server, nothing else
 cat "$home/.claude.json"
 
 line "1. init — detect the CLIs on this machine, import what already exists"
-as init
+as init --yes
 
 line "2. The generated manifest — one server, portable across every CLI"
 cat "$proj/.agentstack/agentstack.toml"

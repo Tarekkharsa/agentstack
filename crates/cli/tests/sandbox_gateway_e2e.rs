@@ -243,7 +243,7 @@ fn trusted_bundle_routes_denied_tool_and_records_it() {
     // Lock + trust the bundle so the gateway builds a live surface. `lock`
     // takes no positional (uses cwd); `trust` defaults to `.`.
     let bin = env!("CARGO_BIN_EXE_agentstack");
-    for step in [vec!["lock"], vec!["trust"]] {
+    for step in [vec!["lock"], vec!["trust", "--yes"]] {
         let s = Command::new(bin)
             .args(&step)
             .current_dir(&proj)
@@ -338,7 +338,7 @@ fn lockdown_routes_denied_tool_through_the_sidecar_relay() {
     .unwrap();
 
     let bin = env!("CARGO_BIN_EXE_agentstack");
-    for step in [vec!["lock"], vec!["trust"]] {
+    for step in [vec!["lock"], vec!["trust", "--yes"]] {
         let s = Command::new(bin)
             .args(&step)
             .current_dir(&proj)

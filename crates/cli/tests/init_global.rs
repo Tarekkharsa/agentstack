@@ -23,6 +23,7 @@ fn args(force: bool) -> InitArgs {
         dry_run: false,
         secrets: None,
         no_keychain: false,
+        yes: false,
     }
 }
 

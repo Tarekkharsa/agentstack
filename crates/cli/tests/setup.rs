@@ -131,6 +131,7 @@ fn init_records_its_manifest_and_restore_last_removes_it() {
             dry_run: false,
             secrets: Some(SecretStore::Skip),
             no_keychain: false,
+            yes: false,
         },
         Some(&proj),
     )
@@ -178,6 +179,7 @@ fn init_rolls_back_when_history_cannot_be_recorded() {
             dry_run: false,
             secrets: Some(SecretStore::Skip),
             no_keychain: false,
+            yes: false,
         },
         Some(&proj),
     )

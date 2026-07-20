@@ -89,7 +89,7 @@ line "0. A vendor publishes a pack — a git repo with a pack.toml, tagged v1.0.
 sed -n '1,12p' "$packrepo/pack.toml"
 
 line "1. A fresh machine: import what exists, then install the pack AT ITS TAG"
-as init >/dev/null
+as init --yes >/dev/null
 as add from "git:$packurl@v1.0.0" --write
 
 line "2. Secrets stayed \${REF}s — the manifest is commit-safe"

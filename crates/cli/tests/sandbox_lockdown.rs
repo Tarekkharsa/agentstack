@@ -320,7 +320,7 @@ fn run_lockdown_routed(shell_cmd: &str, server_url: &str) -> (bool, String, std:
 
     // Lock + trust so the gateway serves the declared upstream (from_frozen
     // hard-gates on trust; the relay only exists when the gateway is non-empty).
-    for args in [&["lock"][..], &["trust", "."][..]] {
+    for args in [&["lock"][..], &["trust", ".", "--yes"][..]] {
         let status = Command::new(env!("CARGO_BIN_EXE_agentstack"))
             .args(args)
             .current_dir(&proj)
@@ -544,7 +544,7 @@ fn lockdown_refuses_an_adapter_that_cannot_carry_the_gateway_token() {
     .unwrap();
     // Trust + lock so the gateway is non-empty and the run reaches the preflight
     // (an untrusted bundle would short-circuit to the empty-gateway path first).
-    for args in [&["lock"][..], &["trust", "."][..]] {
+    for args in [&["lock"][..], &["trust", ".", "--yes"][..]] {
         let status = Command::new(env!("CARGO_BIN_EXE_agentstack"))
             .args(args)
             .current_dir(&proj)

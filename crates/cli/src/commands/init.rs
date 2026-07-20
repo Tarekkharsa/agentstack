@@ -246,22 +246,48 @@ fn report_skipped(lifted: &[Lifted]) {
 }
 
 pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    // The TTY probe is injected so the non-interactive refusal below is
+    // testable without a real terminal (the same seam as `trust::grant_gated`).
+    run_gated(args, manifest_dir, crate::util::confirm::is_interactive())
+}
+
+/// The `init` dispatch with the interactive probe injected. `interactive` is
+/// whether this is an attended terminal session; production passes
+/// `crate::util::confirm::is_interactive()`.
+fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) -> Result<()> {
     if args.global {
         return run_global(args);
     }
-    // P27 — one verb: a bare interactive `init` IS the guided wizard (the
-    // former `setup`). Any explicit flag opts back into the scriptable
-    // primitive, and non-interactive shells never route (their contract is
-    // unchanged: import, write, no prompts beyond what flags allow).
-    let bare = !args.force && !args.dry_run && args.secrets.is_none() && !args.no_keychain;
-    if bare && crate::util::confirm::is_interactive() {
-        let wizard = crate::cli::SetupArgs {
-            targets: Vec::new(),
-            profile: None,
-            scope: None,
-        };
-        return super::setup::run(&wizard, manifest_dir);
+    // A truly flagless invocation: no flag opts into either the guided path or
+    // the scripted primitive. `--yes` counts as an init-shaping flag — it is
+    // the explicit acknowledgement that the scripted import will write.
+    let bare =
+        !args.force && !args.dry_run && args.secrets.is_none() && !args.no_keychain && !args.yes;
+    if bare {
+        // P27 — one verb: a bare interactive `init` IS the guided wizard (the
+        // former `setup`).
+        if interactive {
+            let wizard = crate::cli::SetupArgs {
+                targets: Vec::new(),
+                profile: None,
+                scope: None,
+            };
+            return super::setup::run(&wizard, manifest_dir);
+        }
+        // Non-TTY with no flags: refuse before writing anything. A flagless
+        // `init` here would import configs and lift live token values into
+        // files with no prompt — the help promises scripts opt in via flags, so
+        // honor it. Naming both escapes keeps the scripted path discoverable.
+        anyhow::bail!(
+            "refusing to init: stdin is not a terminal and no flags were given — a flagless \
+             `agentstack init` would import your CLI configs and lift live token values into \
+             files with no prompt. Re-run interactively for the guided wizard, or take the \
+             scripted path: pass --yes (import with the default secret store), \
+             --secrets <env|keychain|skip>, or --dry-run to preview without writing."
+        );
     }
+    // Any explicit flag (or --yes) proceeds promptlessly as the scriptable
+    // primitive: import, write, no prompts beyond what flags allow.
     run_impl(args, manifest_dir, true)
 }
 
@@ -814,8 +840,10 @@ version = 1
 
     println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());
     if show_next {
+        // The import is done — pointing back at `init` would be circular. Send
+        // the user forward: preview what renders, then verify.
         println!(
-            "\nNext: review the manifest, then `agentstack init` for the guided path (or `agentstack apply` to preview changes)."
+            "\nNext: review the manifest, then `agentstack apply` to preview what renders into each CLI (and `agentstack doctor` to verify)."
         );
     }
     Ok(())
@@ -875,5 +903,33 @@ mod tests {
         assert_eq!(secret_store_at(0), SecretStore::Env);
         assert_eq!(secret_store_at(1), SecretStore::Keychain);
         assert_eq!(secret_store_at(2), SecretStore::Skip);
+    }
+
+    /// FIX D witness: a flagless `init` with no terminal must REFUSE before
+    /// writing anything — otherwise it would silently import configs and lift
+    /// live token values into files, contradicting its own help ("scripts get
+    /// the promptless primitive via flags"). The TTY probe is injected
+    /// (`interactive: false`) so the refusal path runs without a real terminal.
+    #[test]
+    fn non_tty_flagless_init_refuses_and_writes_nothing() {
+        let dir = assert_fs::TempDir::new().unwrap();
+        let args = InitArgs {
+            global: false,
+            force: false,
+            dry_run: false,
+            secrets: None,
+            no_keychain: false,
+            yes: false,
+        };
+        let err = run_gated(&args, Some(dir.path()), false)
+            .expect_err("a flagless non-TTY init must refuse");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("--yes") && msg.contains("not a terminal"),
+            "the refusal names the scripted escape and the reason: {msg}"
+        );
+        // Nothing was written under either manifest layout.
+        assert!(!dir.path().join(".agentstack/agentstack.toml").exists());
+        assert!(!dir.path().join("agentstack.toml").exists());
     }
 }

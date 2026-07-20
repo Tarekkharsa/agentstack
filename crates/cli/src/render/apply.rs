@@ -64,6 +64,18 @@ pub struct TargetPlan {
     pub warnings: Vec<String>,
 }
 
+/// Render one `TargetPlan::failed` entry — already shaped as
+/// `NAME (server 'X') — <root cause>` — into a full report line for `apply` and
+/// `use`. Shared by both so their advice never drifts. The fix is naming the
+/// secret to set: a read that *errored* (as opposed to a *missing* secret) is
+/// not something a bare retry fixes, so we point at `agentstack secret set`
+/// unconditionally rather than the old "may be set; retry" guess. The `${REF}`
+/// name is the entry's first token — ref names never contain whitespace.
+pub fn failed_secret_line(entry: &str) -> String {
+    let name = entry.split_whitespace().next().unwrap_or(entry);
+    format!("secret read failed {entry} ↳ run `agentstack secret set {name}`, then re-run")
+}
+
 impl TargetPlan {
     pub fn changed(&self) -> bool {
         diff::differs(&self.existing, &self.proposed)
@@ -499,6 +511,32 @@ mod tests {
     use crate::library::LibraryServer;
     use crate::secret::MapResolver;
     use assert_fs::prelude::*;
+
+    #[test]
+    fn failed_secret_line_names_the_fix_and_says_the_cause_once() {
+        // Shape of a real `failed` entry after render + keychain root_cause.
+        let entry = "FAKE_TOKEN_XYZ (server 'github') — keychain read failed: \
+                     A default keychain could not be found.";
+        let line = failed_secret_line(entry);
+
+        // Names the secret and the correct fix (not the old "retry" guess).
+        assert!(line.contains("FAKE_TOKEN_XYZ"), "{line}");
+        assert!(
+            line.contains("agentstack secret set FAKE_TOKEN_XYZ"),
+            "{line}"
+        );
+        assert!(line.contains("then re-run"), "{line}");
+        assert!(!line.contains("retry"), "old advice removed: {line}");
+        assert!(!line.contains("may be set"), "old advice removed: {line}");
+
+        // The root cause is stated exactly once — no doubled sentence.
+        assert_eq!(
+            line.matches("A default keychain could not be found.")
+                .count(),
+            1,
+            "{line}"
+        );
+    }
 
     /// Write a library server definition and return its index entry.
     fn write_lib_server(lib_home: &assert_fs::TempDir, name: &str, url: &str, with_ref: bool) {

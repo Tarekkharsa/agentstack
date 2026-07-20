@@ -7,10 +7,13 @@
 //!
 //! Two checks:
 //! 1. `every_subcommand_is_documented_in_the_reference` — every top-level
-//!    subcommand (hidden ones included — `trust`, `connect`, `mcp` are
-//!    hidden but documented) must appear in docs/reference.md's "All
-//!    commands" inventory. The command surface grows fast; a hand-maintained
-//!    list silently rots without this.
+//!    subcommand (hidden ones included — `gateway` and `mcp` are hidden in
+//!    `--help` but documented; `trust` is a visible top-level command), plus
+//!    every *visible* nested subcommand one level down (e.g. `lib add-hook`,
+//!    `session freeze`), must appear in docs/reference.md's "All commands"
+//!    inventory. Hidden nested verbs like `guard check` are exempt — they're
+//!    kept out of the surface a reader is pointed at. The command surface
+//!    grows fast; a hand-maintained list silently rots without this.
 //! 2. `every_prose_command_is_real` — the inverse direction: every
 //!    `agentstack <verb> [<subverb>]` invocation written in a code span or
 //!    fenced block across the docs must name a command that actually exists
@@ -51,6 +54,20 @@ fn every_subcommand_is_documented_in_the_reference() {
         }
         if !section.contains(name) {
             missing.push(name.to_string());
+        }
+        // One level down: every *visible* nested subcommand (e.g. `lib
+        // add-hook`, `session freeze`) must be inventoried too. Hidden nested
+        // verbs (`guard check`) are exempt — `is_hide_set()` is clap's
+        // runtime introspection for `#[command(hide = true)]`, the same signal
+        // that keeps them out of `--help`.
+        for nested in sc.get_subcommands() {
+            let nested_name = nested.get_name();
+            if nested_name == "help" || nested.is_hide_set() {
+                continue;
+            }
+            if !section.contains(nested_name) {
+                missing.push(format!("{name} {nested_name}"));
+            }
         }
     }
     assert!(
@@ -159,6 +176,25 @@ fn files_to_scan(root: &Path) -> Vec<(PathBuf, Kind)> {
                 files.push((path, Kind::Html));
             }
             _ => {}
+        }
+    }
+
+    // Example-project docs are prose-command surface too: the top-level
+    // examples/projects/README.md plus one README.md per example dir.
+    let examples_dir = root.join("examples/projects");
+    let top_readme = examples_dir.join("README.md");
+    if top_readme.is_file() {
+        files.push((top_readme, Kind::Markdown));
+    }
+    if let Ok(entries) = std::fs::read_dir(&examples_dir) {
+        for entry in entries {
+            let path = entry.expect("readable dir entry").path();
+            if path.is_dir() {
+                let readme = path.join("README.md");
+                if readme.is_file() {
+                    files.push((readme, Kind::Markdown));
+                }
+            }
         }
     }
 
@@ -349,9 +385,11 @@ fn scan_file(
         .into_owned();
 
     for (match_pos, _) in content.match_indices("agentstack") {
-        // Word boundary before the match: skip "myagentstack" etc.
+        // Word boundary before the match: skip "myagentstack" etc., and skip
+        // path segments like "/path/to/agentstack" — a binary path is not a
+        // prose invocation, and whatever follows it is not our subcommand.
         if let Some(prev) = content[..match_pos].chars().next_back() {
-            if prev.is_ascii_alphanumeric() || prev == '-' || prev == '_' {
+            if prev.is_ascii_alphanumeric() || prev == '-' || prev == '_' || prev == '/' {
                 continue;
             }
         }

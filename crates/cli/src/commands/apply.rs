@@ -318,11 +318,7 @@ fn render(
             println!("  {} blocked by policy: {}", "✗".red(), d);
         }
         for f in &plan.failed {
-            println!(
-                "  {} secret read failed {} — the secret may be set; retry the apply",
-                "✗".red(),
-                f
-            );
+            println!("  {} {}", "✗".red(), crate::render::failed_secret_line(f));
             error_count += 1;
         }
         // `${REF}`s that didn't resolve must never reach a live config file —
@@ -344,7 +340,7 @@ fn render(
             if will_write && blocked {
                 blocked_targets.insert(desc.display.clone());
                 let reason = if plan.unresolved.is_empty() {
-                    "secret read failure(s); retry the apply"
+                    "secret read failure(s); set them"
                 } else {
                     "unresolved secret(s); set them"
                 };

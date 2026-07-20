@@ -89,7 +89,7 @@ printf '\033[1;36m  agentstack — device onboarding matrix\033[0m\n'
 hdr "A1) zero CLIs — honest fallback, everything still green"
 device
 rm -f "$SBX/bin/claude"   # truly zero CLIs
-OUT=$("$AS" init 2>&1) && ok "init exits 0 on a CLI-less device" || bad "init failed: $OUT"
+OUT=$("$AS" init --yes 2>&1) && ok "init exits 0 on a CLI-less device" || bad "init failed: $OUT"
 grep -qi "No supported CLIs detected" <<<"$OUT" && ok "honest zero-CLI message + starter manifest" || bad "detection: $(grep -i detect <<<"$OUT")"
 [ -f .agentstack/agentstack.toml ] && ok "starter manifest written" || bad "no manifest"
 "$AS" apply --write >/dev/null 2>&1 && ok "apply graceful with zero targets" || bad "apply failed"
@@ -98,7 +98,7 @@ grep -qi "No supported CLIs detected" <<<"$OUT" && ok "honest zero-CLI message +
 hdr "A2) one CLI, empty config"
 device
 echo '{}' > "$H/.claude.json"
-OUT=$("$AS" init 2>&1)
+OUT=$("$AS" init --yes 2>&1)
 grep -q "1 CLI binary on PATH" <<<"$OUT" && ok "detects exactly 1 CLI" || bad "$(grep -i detect <<<"$OUT")"
 grep -q "Imported 0" <<<"$OUT" && ok "imports 0 from an empty config" || bad "$(grep -i import <<<"$OUT")"
 grep -q 'claude-code' .agentstack/agentstack.toml && ok "targets include claude-code" || bad "targets wrong"
@@ -136,15 +136,16 @@ device
 echo '{"mcpServers":{"api":{"type":"http","url":"https://a.example/mcp"}}}' > "$H/.claude.json"
 mkdir -p "$H/.cursor"
 echo '{"mcpServers":{"api":{"url":"https://b.example/mcp"}}}' > "$H/.cursor/mcp.json"
-OUT=$("$AS" init 2>&1)
+OUT=$("$AS" init --yes 2>&1)
 grep -qiE "conflict|differs|mismatch" <<<"$OUT" && ok "conflict surfaced, not silently picked" || bad "silent pick: $(grep -o '[ab].example' .agentstack/agentstack.toml | tr '\n' ' ')"
 
 hdr "B2) re-init never clobbers a hand-edited manifest"
 device
 echo '{"mcpServers":{"github":{"type":"http","url":"https://x.example/mcp"}}}' > "$H/.claude.json"
-"$AS" init >/dev/null 2>&1
+"$AS" init --yes >/dev/null 2>&1
 echo "# my note" >> .agentstack/agentstack.toml
-"$AS" init >/dev/null 2>&1
+# Re-init without --force refuses to overwrite (that's the protection here).
+"$AS" init --yes >/dev/null 2>&1
 grep -q "# my note" .agentstack/agentstack.toml && ok "hand edit survived re-init" || bad "re-init clobbered the manifest"
 
 hdr "B3) hand-written .mcp.json + CLAUDE.md prose survive apply AND restore"
@@ -195,7 +196,7 @@ grep -q "my-hand-server" .mcp.json && ok "hand-written server untouched by pruni
 hdr "B6) idempotency + doctor --ci + restore round-trip"
 device
 echo '{"mcpServers":{"docs":{"type":"http","url":"https://docs.example/mcp"}}}' > "$H/.claude.json"
-"$AS" init >/dev/null 2>&1 && "$AS" apply --write >/dev/null 2>&1
+"$AS" init --yes >/dev/null 2>&1 && "$AS" apply --write >/dev/null 2>&1
 OUT=$("$AS" apply 2>&1)
 grep -qiE "no changes|up to date|0 target" <<<"$OUT" && ok "second apply reports nothing to do" || bad "not idempotent: $(tail -2 <<<"$OUT")"
 "$AS" doctor --ci >/dev/null 2>&1 && ok "doctor --ci green after apply" || bad "doctor --ci red"
@@ -210,7 +211,7 @@ device "My Projects/app one"
 echo '{}' > "$H/.claude.json"
 seed_manifest
 "$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "apply in a spaced path" || bad "apply failed"
-"$AS" lock >/dev/null 2>&1 && echo y | "$AS" trust . >/dev/null 2>&1 && ok "lock + trust in a spaced path" || bad "lock/trust failed"
+"$AS" lock >/dev/null 2>&1 && "$AS" trust . --yes >/dev/null 2>&1 && ok "lock + trust in a spaced path" || bad "lock/trust failed"
 "$AS" run claude-code --locked --plan 2>&1 | grep -q "would proceed" && ok "locked --plan green in a spaced path" || bad "locked plan failed"
 
 hdr "C2) unicode project path"
@@ -226,7 +227,7 @@ echo '{}' > "$H/.claude.json"
 printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' > agentstack.toml
 "$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "legacy layout applies" || bad "apply failed"
 "$AS" lock >/dev/null 2>&1 && [ -f agentstack.lock ] && ok "lock lands beside the legacy manifest" || bad "lock misplaced"
-echo y | "$AS" trust . >/dev/null 2>&1
+"$AS" trust . --yes >/dev/null 2>&1
 "$AS" run claude-code --locked --plan 2>&1 | grep -q "would proceed" && ok "locked --plan green on the legacy layout" || bad "legacy locked plan failed"
 
 hdr "C4) non-git project"
@@ -258,7 +259,7 @@ mkdir -p src/deep && cd src/deep
 "$AS" doctor >/dev/null 2>&1 && ok "doctor resolves the root manifest from src/deep" || bad "doctor errored from a subdir"
 "$AS" apply --scope project --write >/dev/null 2>&1
 if [ -f ../../.mcp.json ] && [ ! -f .mcp.json ]; then ok "apply from a subdir renders at the PROJECT ROOT"; else bad "apply from a subdir misplaced the render"; fi
-"$AS" init 2>&1 | grep -qiE "already|initialized|--force" && ok "init from a subdir refuses to silently nest" || bad "init nested a second manifest"
+"$AS" init --yes 2>&1 | grep -qiE "already|initialized|--force" && ok "init from a subdir refuses to silently nest" || bad "init nested a second manifest"
 
 hdr "D2) adopt pulls a hand-EDITED field of a manifest-known server"
 device "proj2"

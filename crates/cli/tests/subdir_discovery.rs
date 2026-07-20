@@ -64,12 +64,16 @@ fn init_from_a_subdir_refuses_to_silently_nest() {
     let deep = root.join("src/deep");
     fs::create_dir_all(&deep).unwrap();
 
+    // `--yes` takes the scripted path (tests run without a TTY, where a flagless
+    // `init` now refuses up front); this asserts the *nesting* refusal, which
+    // lives deeper in the import path.
     let args = InitArgs {
         global: false,
         force: false,
         dry_run: false,
         secrets: None,
         no_keychain: false,
+        yes: true,
     };
     let err = with_cwd(&deep, || commands::init::run(&args, None)).unwrap_err();
     let msg = format!("{err:#}");

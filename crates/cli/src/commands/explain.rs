@@ -200,6 +200,12 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
         .collect();
     o.push_str("  Writes to     the MCP config of each tool it's enabled for:\n");
     let mut enabled_summary: Vec<String> = Vec::new();
+    // With [targets] declared, the full 13-adapter table buries the two or
+    // three CLIs this project actually renders to — scope the list to the
+    // declared targets (plus anywhere it's already enabled) and summarize the
+    // rest as a count. No targets declared → the full machine-wide view.
+    let scoped = !default.is_empty();
+    let mut outside_targets = 0usize;
     for d in ctx.registry.iter() {
         if d.mcp.is_none() {
             continue;
@@ -213,6 +219,10 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
             .iter()
             .any(|s| s == name);
         let default_for = default.iter().any(|t| *t == d.id);
+        if scoped && !default_for && !g_on && !p_on {
+            outside_targets += 1;
+            continue;
+        }
         if let Some(cfg) = &d.config {
             let scope = if g_on {
                 " (enabled, global)"
@@ -239,6 +249,11 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
         if p_on {
             enabled_summary.push(format!("{} (project)", d.id));
         }
+    }
+    if outside_targets > 0 {
+        o.push_str(&format!(
+            "                + {outside_targets} more CLI(s) outside this project's [targets]\n"
+        ));
     }
     if enabled_summary.is_empty() {
         kv(
@@ -540,6 +555,17 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
     let state = State::load().unwrap_or_default();
     o.push_str("  Writes to     each tool's skills dir when enabled:\n");
     let mut enabled_summary: Vec<String> = Vec::new();
+    // Same scoping as the server view: with [targets] declared, show the CLIs
+    // this project renders to (plus anywhere it's already enabled) and count
+    // the rest instead of listing every adapter on the machine.
+    let default: Vec<&str> = manifest
+        .targets
+        .default
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let scoped = !default.is_empty();
+    let mut outside_targets = 0usize;
     for d in ctx.registry.iter() {
         let Some(sk) = &d.skills else { continue };
         let g_on = state
@@ -550,6 +576,10 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
             .managed_skills(&target_key(&d.id, Scope::Project, &ctx.dir))
             .iter()
             .any(|s| s == name);
+        if scoped && !default.iter().any(|t| *t == d.id) && !g_on && !p_on {
+            outside_targets += 1;
+            continue;
+        }
         let strat = format!("{:?}", sk.strategy).to_lowercase();
         o.push_str(&format!(
             "                {:<14} {}/{}  ({strat}{})\n",
@@ -573,6 +603,11 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
         if p_on {
             enabled_summary.push(format!("{} (project)", d.id));
         }
+    }
+    if outside_targets > 0 {
+        o.push_str(&format!(
+            "                + {outside_targets} more CLI(s) outside this project's [targets]\n"
+        ));
     }
     if !enabled_summary.is_empty() {
         kv(&mut o, "Enabled for", &enabled_summary.join(", "));

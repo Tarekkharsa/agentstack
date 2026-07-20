@@ -274,4 +274,61 @@ fn use_write_errors_when_all_targets_blocked() {
         !home.join(".claude.json").exists(),
         "blocked use must not write the live config"
     );
+    // A fully-blocked activation is a no-op on disk, so it must NOT leave a
+    // lockfile behind: a lock alone flips the project's inferred delivery mode
+    // to "clean-at-rest" (overview.rs P4), teaching the wrong workflow to a
+    // static-mode user whose activation merely failed.
+    assert!(
+        !proj.join("agentstack.lock").exists(),
+        "a fully-blocked use --write must not leave a phantom lockfile behind"
+    );
+}
+
+/// A partially-blocked activation still writes its skills, so it genuinely
+/// activated — the lockfile must be pinned even though a server target was
+/// refused over an unresolved secret. (The other half of the atomicity rule:
+/// only a *total* failure skips the lock.)
+#[test]
+fn partially_blocked_use_still_pins_the_lock() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("skills/demo")).unwrap();
+    fs::write(proj.join("skills/demo/SKILL.md"), "# demo\n").unwrap();
+    // The server is blocked (unresolved secret) but the profile also carries a
+    // materializable skill — so at least one artifact lands and the activation
+    // is a partial success, not a total failure.
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.kibana]\ntype = \"http\"\nurl = \"https://k/mcp\"\n\
+         headers = { Authorization = \"Bearer ${NOPE_TOKEN}\" }\n\
+         [skills.demo]\npath = \"./skills/demo\"\n\
+         [profiles.p]\nservers = [\"kibana\"]\nskills = [\"demo\"]\n",
+    )
+    .unwrap();
+
+    let uargs = agentstack::cli::UseArgs {
+        profile: Some("p".into()),
+        targets: vec![],
+        scope: Some(Scope::Global),
+        write: true,
+        allow_unresolved: false,
+        prune_foreign: false,
+        no_gitignore: true,
+    };
+    // The server target is still blocked, so the activation exits nonzero...
+    let err = agentstack::commands::use_profile::run(&uargs, Some(&proj))
+        .expect_err("a blocked server target must still error");
+    assert!(err.to_string().contains("blocked"), "{err}");
+    // ...but the skill genuinely materialized, so the lock IS pinned.
+    assert!(
+        proj.join("agentstack.lock").exists(),
+        "a partially-successful activation must still pin the lockfile"
+    );
 }

@@ -91,6 +91,14 @@ same commits as the behavior.
   Code hook support labelled Preview, and every doc/example that captured
   the old outputs updated and asserted.
 
+## v0.13.0 — 2026-07-19
+
+Tagged for the `init` wizard work the day it landed, then superseded hours
+later by v0.14.0, which folded in the docs-quality wave and shipped both
+under the one combined entry above. No separate v0.13.0 changes exist
+beyond what v0.14.0's entry already carries — this entry exists for
+tag↔changelog parity.
+
 ## v0.12.0 — 2026-07-18
 
 **Breaking: the off-strategy surface is gone.** A full project review cut

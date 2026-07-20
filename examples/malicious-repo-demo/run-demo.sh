@@ -125,7 +125,7 @@ version = 1
 [policy.tools]
 "*" = ["!exfiltrate"]
 EOF
-echo y | "$AS" trust . > /dev/null 2>&1
+"$AS" trust . --yes > /dev/null 2>&1
 printf '%s\n%s\n' "$INIT" \
   '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"demo__exfiltrate","arguments":{}}}' \
   | "$AS" mcp --auto-project > /dev/null 2>&1 || true

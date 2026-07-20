@@ -364,11 +364,7 @@ pub fn activate(
                     println!("  {} blocked by policy: {}", "✗".red(), d);
                 }
                 for f in &plan.failed {
-                    println!(
-                        "  {} secret read failed {} — the secret may be set; retry",
-                        "✗".red(),
-                        f
-                    );
+                    println!("  {} {}", "✗".red(), crate::render::failed_secret_line(f));
                 }
                 let blocked = ((!plan.unresolved.is_empty() || !plan.failed.is_empty())
                     && !args.allow_unresolved)
@@ -377,7 +373,7 @@ pub fn activate(
                     if args.write && blocked {
                         blocked_targets.push(desc.display.clone());
                         let reason = if plan.unresolved.is_empty() {
-                            "secret read failure(s); retry"
+                            "secret read failure(s); set them"
                         } else {
                             "unresolved secret(s); set them"
                         };
@@ -520,17 +516,30 @@ pub fn activate(
 
     if args.write {
         state.save()?;
-        // Record each activated skill + server's resolved digest so a fresh
-        // checkout resolves the same content (and `doctor`/`explain` can flag
-        // drift). Server locks store the definition digest only — never a
-        // resolved secret value.
-        record_lock(
-            &ctx.dir,
-            resolved_skills,
-            resolved_servers,
-            manifest,
-            &libctx.library,
-        )?;
+        // Fully-blocked activation is a no-op on disk: every target refused its
+        // write, so no server config and no skill dir landed. Pinning the
+        // lockfile here would leave a phantom behind — an activation that never
+        // happened, yet a lock alone is enough for `overview` to infer a
+        // delivery mode ("clean-at-rest") the project never reached. So skip the
+        // lock write on total failure; a pre-existing lock keeps its own bytes
+        // untouched (record_lock is the only path that would rewrite it).
+        // Partial success — at least one server config or skill dir written —
+        // genuinely activated, so it still pins.
+        let nothing_activated = wrote == 0 && wrote_skill_dirs == 0;
+        let total_failure = !blocked_targets.is_empty() && nothing_activated;
+        if !total_failure {
+            // Record each activated skill + server's resolved digest so a fresh
+            // checkout resolves the same content (and `doctor`/`explain` can
+            // flag drift). Server locks store the definition digest only — never
+            // a resolved secret value.
+            record_lock(
+                &ctx.dir,
+                resolved_skills,
+                resolved_servers,
+                manifest,
+                &libctx.library,
+            )?;
+        }
         if blocked_targets.is_empty() {
             if wrote == 0 && wrote_skill_dirs > 0 {
                 println!(

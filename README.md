@@ -17,8 +17,8 @@
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
-agentstack init     # your existing CLI configs → one reviewed manifest
-agentstack apply    # preview every CLI's changes, confirm to write
+agentstack init      # your CLI configs → one reviewed manifest, previewed and applied
+agentstack doctor    # verify it landed — every warning names its exact fix
 ```
 
 Real tokens are lifted out of your config files into `${REF}`s as part of the
@@ -85,8 +85,8 @@ stop wherever your setup stops hurting.
 
 Steps 1–4 are the everyday loop; 5–6 are shipped and hardening — what each
 mode enforces, and where it stops, is spelled out per dimension in the
-[enforcement matrix](docs/ENFORCEMENT.md). The same ladder, with expected
-output at every step, is the
+[enforcement matrix](docs/ENFORCEMENT.md). The same ground, arranged as a
+two-track walkthrough with expected output at every step, is the
 [getting-started walkthrough](https://tarekkharsa.github.io/agentstack/start.html);
 agents get the same map via the shipped
 [`using-agentstack` skill](crates/cli/catalog/skills/using-agentstack/SKILL.md).
@@ -132,8 +132,8 @@ headers = { Authorization = "Bearer ${GH_PAT}" } # resolved per machine
 [servers.github.extra.codex]                 # native keys one CLI needs pass
 startup_timeout_sec = 20                     # through verbatim, per adapter
 
-[profiles.backend]
-servers = ["github"]
+[profiles.backend]                           # a named capability set you
+servers = ["github"]                         # activate per task: `use backend`
 skills = ["sql-review"]                      # resolves from your central library
 
 [targets]

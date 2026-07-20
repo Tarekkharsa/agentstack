@@ -361,7 +361,7 @@ function trustBadges(t) {
 }
 
 function discover(c) {
-  c.appendChild(pageHead("Discover", "Browse capabilities across the catalog and the official MCP Registry. Add one with `agentstack add <id>` in your terminal, then review the pending change here."));
+  c.appendChild(pageHead("Discover", "Browse capabilities across the catalog and the official MCP Registry. Add one with `agentstack add from <id>` in your terminal, then review the pending change here."));
 
   const input = el("input", { class: "inp", placeholder: "search capabilities…", style: "width:280px", value: DISCOVER.q });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") doDiscoverSearch(input.value.trim()); });
@@ -389,7 +389,7 @@ function resultsBody() {
   DISCOVER.results.forEach((r) => {
     const head = el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" }, [
       el("span", null, [el("span", { class: "name" }, [r.name]), el("span", { class: "k" }, [r.source])]),
-      r.installed ? badge("in stack", "green") : cmd("agentstack add " + r.addId),
+      r.installed ? badge("in stack", "green") : cmd("agentstack add from " + r.addId),
     ]);
     const meta = el("div", { class: "muted", style: "font-size:12px;margin:2px 0 6px" }, [r.description || r.id]);
     const trust = el("div", { class: "row-actions", style: "margin-bottom:6px" }, trustBadges(r.trust));
@@ -714,7 +714,7 @@ function servers(c) {
   }, ["context" + (SORT_BY_COST ? " ↓" : "")]));
 
   const body = el("tbody");
-  if (!d.servers.length) body.appendChild(el("tr", null, [el("td", { colspan: cols.length + 3 }, [el("span", { class: "empty" }, ["No servers yet. Add one with `agentstack add <id>` or from the Discover tab."])])]));
+  if (!d.servers.length) body.appendChild(el("tr", null, [el("td", { colspan: cols.length + 3 }, [el("span", { class: "empty" }, ["No servers yet. Add one with `agentstack add from <id>` or from the Discover tab."])])]));
   const rows = SORT_BY_COST
     ? [...d.servers].sort((a, b) => ((b.footprint || {}).estTokens || 0) - ((a.footprint || {}).estTokens || 0))
     : d.servers;

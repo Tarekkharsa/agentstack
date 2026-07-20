@@ -35,7 +35,13 @@ fn read_with_retry(read: impl Fn() -> Result<Option<String>>) -> Lookup {
     match read() {
         Ok(Some(v)) => Lookup::Found(v.into()),
         Ok(None) => Lookup::Missing,
-        Err(e) => Lookup::Failed(format!("keychain read failed: {e:#}")),
+        // Report the root cause only. anyhow's `{e:#}` walks every `source()`
+        // and joins with ": ", but keyring/io errors already fold their
+        // source's text into their own Display — so `{e:#}` prints the root
+        // sentence twice ("… not found.: … not found.") behind two restated
+        // context prefixes. `root_cause()` is the single actionable line; the
+        // render layer supplies the secret name and store around it.
+        Err(e) => Lookup::Failed(format!("keychain read failed: {}", e.root_cause())),
     }
 }
 

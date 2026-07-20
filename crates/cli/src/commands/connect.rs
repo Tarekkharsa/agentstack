@@ -176,15 +176,19 @@ pub fn run_disconnect(args: &DisconnectArgs) -> Result<()> {
     finish(args.write, changed, touched, backups)
 }
 
-/// Which adapters to act on. Explicit ids must exist and support MCP; `--all`
-/// selects detected harnesses with MCP support (for removal: any with the
-/// bridge present, detected or not — leftover config should be removable).
+/// Which adapters to act on. Explicit ids must exist and support MCP; naming
+/// none is the documented default — it acts on every eligible harness, exactly
+/// like `--all` (for removal: any with the bridge present, detected or not —
+/// leftover config should be removable).
 fn select_targets<'r>(
     registry: &'r Registry,
     ids: &[String],
     all: bool,
     for_removal: bool,
 ) -> Result<Vec<&'r AdapterDescriptor>> {
+    // No harnesses named falls through to the `--all` path (documented
+    // default). `--all` stays an explicit way to ask for the same thing.
+    let all = all || ids.is_empty();
     if !ids.is_empty() {
         let mut out = Vec::new();
         for id in ids {
@@ -224,19 +228,10 @@ fn select_targets<'r>(
         }
         return Ok(out);
     }
-    let eligible: Vec<&str> = registry
-        .iter()
-        .filter(|d| d.mcp.is_some() && d.config.is_some() && d.detected())
-        .map(|d| d.id.as_str())
-        .collect();
-    anyhow::bail!(
-        "name at least one harness or pass --all. Detected here: {}",
-        if eligible.is_empty() {
-            "none".to_string()
-        } else {
-            eligible.join(", ")
-        }
-    )
+    // Unreachable: the normalization above forces `all` true whenever no ids
+    // were named, and named ids returned in the first block — so we never fall
+    // through here.
+    unreachable!("select_targets: either explicit ids or the --all path is taken")
 }
 
 /// The bridge, expressed as a manifest server so the existing per-adapter
@@ -416,6 +411,22 @@ mod tests {
         assert!(out.contains("[mcp_servers.agentstack]"));
         assert!(out.contains("--auto-project"));
         assert!(has_bridge_entry(&out, &mcp.location, Format::Toml));
+    }
+
+    /// Naming no harnesses is the documented default (`ConnectArgs.harnesses`:
+    /// "With none given, use --all") — it must select the same set as `--all`,
+    /// not bail. Uses the removal path so the set is detection-independent and
+    /// the assertion is deterministic across machines.
+    #[test]
+    fn bare_connect_selects_same_targets_as_all() {
+        let reg = Registry::load().unwrap();
+        let ids_of = |v: &[&AdapterDescriptor]| v.iter().map(|d| d.id.clone()).collect::<Vec<_>>();
+
+        let bare = select_targets(&reg, &[], /*all=*/ false, /*for_removal=*/ true).unwrap();
+        let all = select_targets(&reg, &[], /*all=*/ true, /*for_removal=*/ true).unwrap();
+
+        assert!(!bare.is_empty(), "some harness supports the bridge");
+        assert_eq!(ids_of(&bare), ids_of(&all));
     }
 
     /// After `self link`, connect must register the stable symlink path — not

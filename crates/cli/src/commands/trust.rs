@@ -8,6 +8,7 @@
 //! manifest would actually run.
 
 use std::collections::{HashMap, HashSet};
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -104,7 +105,7 @@ pub fn run(args: &TrustArgs) -> Result<()> {
     if args.revoke {
         return revoke(&base);
     }
-    grant(&base)
+    grant(&base, args.yes)
 }
 
 /// Resolve the project base to act on: walk up from the given path (or cwd) so
@@ -124,7 +125,21 @@ fn resolve_base(path: Option<&Path>) -> Result<PathBuf> {
     })
 }
 
-fn grant(base: &Path) -> Result<()> {
+fn grant(base: &Path, yes: bool) -> Result<()> {
+    grant_gated(base, yes, std::io::stdin().is_terminal())
+}
+
+/// The grant path with the TTY probe injected, so the non-interactive consent
+/// gate is testable without a real terminal. `interactive` is whether stdin is
+/// a TTY; production passes `std::io::stdin().is_terminal()`.
+///
+/// Typing `agentstack trust` at a terminal IS the consent (direnv-allow style),
+/// so an interactive session is unchanged. When stdin is NOT a terminal — a
+/// pipe, a here-string, or an agent driving the shell — the command refuses
+/// unless `--yes` explicitly acknowledges the review, so an agent with shell
+/// access cannot silently self-trust a repo and defeat the untrusted-means-inert
+/// gate.
+fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
     let dir = crate::manifest::resolve_manifest_dir(base);
     let loaded = crate::manifest::load_from_dir(&dir)?;
     let m = &loaded.manifest;
@@ -516,6 +531,20 @@ fn grant(base: &Path) -> Result<()> {
         );
     }
 
+    // Consent gate: the review above is now fully printed. Trust is granted by
+    // a human who read it — typing the command at a terminal IS that consent.
+    // When stdin is not a terminal (a pipe, a here-string, an agent driving the
+    // shell), there is no interactive consent, so refuse unless `--yes` was
+    // passed to acknowledge the review explicitly. This runs BEFORE anything is
+    // pinned or written, so a refusal leaves the trust store untouched — an
+    // agent with shell access cannot self-trust a repo to defeat the
+    // untrusted-means-inert gate.
+    if !interactive && !yes {
+        anyhow::bail!(
+            "refusing to trust: stdin is not a terminal — review the declarations above and re-run interactively, or pass --yes to acknowledge"
+        );
+    }
+
     // Store the reviewed surface alongside the pin so the NEXT re-trust can
     // diff against it (P14). Display metadata only — it does not enter the
     // trust digest, so recording it never re-gates the project.
@@ -650,6 +679,39 @@ fn list() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_fs::prelude::*;
+
+    // SECURITY WITNESS (trust granting): the non-interactive consent gate. An
+    // agent with shell access must NOT be able to self-trust a repo when stdin
+    // is not a terminal — doing so would defeat the untrusted-means-inert gate.
+    // Tests run without a TTY, so `interactive: false` is the real refusal path;
+    // `grant_gated` takes the probe as a parameter so both branches are driven
+    // directly. NEVER delete or weaken this test.
+    #[test]
+    fn non_tty_grant_refuses_without_yes_and_leaves_the_store_clean() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        // A minimal, blocker-free project: one inline HTTP server needs no lock
+        // pin, so the review reaches the consent gate with nothing to block on.
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
+            .unwrap();
+
+        // (a) Non-TTY, no --yes: refuse, and the trust store keeps no grant.
+        assert!(grant_gated(proj.path(), false, false).is_err());
+        assert_eq!(trust::check(proj.path()), TrustState::Untrusted);
+
+        // (b) Non-TTY with --yes: the explicit acknowledgement grants trust.
+        grant_gated(proj.path(), true, false).unwrap();
+        assert_eq!(trust::check(proj.path()), TrustState::Trusted);
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
 
     fn item(kind: &str, name: &str, identity: &str) -> SurfaceItem {
         SurfaceItem {

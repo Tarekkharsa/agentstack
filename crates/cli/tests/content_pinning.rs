@@ -133,6 +133,7 @@ fn trust_grant_requires_a_pinned_matching_surface() {
         path: Some(proj.clone()),
         list: false,
         revoke: false,
+        yes: true,
     };
 
     // Unpinned inline skill → refused, pointing at `agentstack lock`.
@@ -197,6 +198,7 @@ fn trust_grant_surfaces_requested_policy() {
         path: Some(proj.clone()),
         list: false,
         revoke: false,
+        yes: true,
     };
     trust_cmd::run(&grant_args).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
@@ -240,6 +242,7 @@ fn instruction_drift_blocks_apply_until_relocked() {
         path: Some(proj.clone()),
         list: false,
         revoke: false,
+        yes: true,
     };
 
     // Unpinned instruction → trust refuses.
@@ -343,6 +346,7 @@ fn machine_layer_fragments_are_exempt_from_pinning() {
         path: Some(proj.clone()),
         list: false,
         revoke: false,
+        yes: true,
     })
     .unwrap();
     apply::run(&apply_args(), Some(&proj)).unwrap();

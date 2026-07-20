@@ -144,7 +144,7 @@ agentstack doctor --deep         # re-scan skills/instructions for hidden-unicod
 agentstack report calls          # summarize the gateway call log (who called what, outcomes)
 agentstack guard status          # which CLIs have the destructive-command hook wired
 agentstack guard test <command>  # judge a shell command against guard policy (nonzero on deny)
-agentstack report calls          # usage analysis: unused servers, context cost, recommendations
+agentstack optimize              # usage analysis: unused servers, context cost, recommendations
 agentstack secret set NAME       # store a secret in the OS keychain
 agentstack restore <target>      # undo a write from its pre-write backup
 ```
