@@ -80,7 +80,11 @@ fn sync(
         } {
             Ok(r) => r,
             Err(e) => {
-                println!("  {} {name}: {}", "✗".red(), classify_resolve_err(&e, skill));
+                println!(
+                    "  {} {name}: {}",
+                    "✗".red(),
+                    classify_resolve_err(&e, skill)
+                );
                 errors += 1;
                 continue;
             }
@@ -203,23 +207,31 @@ fn classify_resolve_err(e: &anyhow::Error, skill: &crate::manifest::Skill) -> St
     let chain = crate::text::sanitize_line(&format!("{e:#}"));
     let lower = chain.to_lowercase();
     if skill.git.is_some() {
-        let unreachable = [
-            "not found",
-            "does not exist",
-            "could not read from remote",
-            "could not resolve host",
-            "unable to access",
-            "no such device",
-        ]
-        .iter()
-        .any(|s| lower.contains(s));
         if lower.contains("subpath '") {
             return format!("vanished upstream — {chain} (keep the pin, or remove the skill)");
         }
-        if unreachable {
+        // Truly-gone signals get the removal remedy; transient transport
+        // failures must NOT suggest removing a skill over a DNS blip.
+        let gone = ["not found", "does not exist", "no such device"]
+            .iter()
+            .any(|s| lower.contains(s));
+        let transient = [
+            "could not resolve host",
+            "could not read from remote",
+            "unable to access",
+        ]
+        .iter()
+        .any(|s| lower.contains(s));
+        if gone {
             return format!(
-                "upstream unreachable or deleted — {chain} (the lock pin still guards the \
+                "upstream deleted or moved — {chain} (the lock pin still guards the \
                  cached content; remove the skill to drop it)"
+            );
+        }
+        if transient {
+            return format!(
+                "upstream not reachable right now — {chain} (check the network and retry; \
+                 the lock pin still guards the cached content)"
             );
         }
     }

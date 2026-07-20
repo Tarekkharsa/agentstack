@@ -908,8 +908,10 @@ fn add_skill_from_git(
     let (clone_root, head) = crate::store::checkout(&staging, url, rev.as_deref())?;
     let disc_root = match &subpath {
         // An explicit subpath scopes discovery — the user already navigated.
+        // Containment-guarded: a checked-out symlink must not route the
+        // preview outside the clone (same refusal Store::resolve applies).
         Some(s) => {
-            let d = clone_root.join(s);
+            let d = crate::store::contained_content_dir(&clone_root, Some(s))?;
             anyhow::ensure!(
                 d.is_dir(),
                 "subpath '{}' does not exist in {}",
@@ -945,10 +947,11 @@ fn add_skill_from_git(
     // Scan the STAGED bytes before anything is offered for writing.
     let mut planned = Vec::new();
     for (skill, name) in selected.iter().zip(&names) {
-        let dir = join_rel(&disc_root, &skill.rel_path);
+        let full_sub = join_subpath(subpath.as_deref(), &skill.rel_path);
+        // Containment-guarded against checked-out symlink escapes.
+        let dir = crate::store::contained_content_dir(&clone_root, full_sub.as_deref())?;
         let mut warnings = Vec::new();
         crate::scan::gate(name, &dir, a.allow_flagged, &mut warnings)?;
-        let full_sub = join_subpath(subpath.as_deref(), &skill.rel_path);
         planned.push(PlannedSkill {
             name: name.clone(),
             entry: Skill {
@@ -982,7 +985,8 @@ fn add_skill_from_git(
                 // Freshly-fetched bytes: re-scan before the lock write. The
                 // entry's subpath is exactly the clone-root-relative dir.
                 for p in &mut planned {
-                    let dir = join_rel(&root, p.entry.subpath.as_deref().unwrap_or(""));
+                    let dir =
+                        crate::store::contained_content_dir(&root, p.entry.subpath.as_deref())?;
                     let mut warnings = Vec::new();
                     crate::scan::gate(&p.name, &dir, a.allow_flagged, &mut warnings)?;
                     p.scan_warnings = warnings;
@@ -991,11 +995,11 @@ fn add_skill_from_git(
                 root
             }
         };
-        // The common (adopted) path: content dirs move with the rename.
+        // Content dirs re-derive under the promoted root (containment-guarded;
+        // idempotent for the re-resolve branch, which already did this).
         for p in &mut planned {
-            if let Ok(rel) = p.content_dir.strip_prefix(&clone_root) {
-                p.content_dir = promoted.join(rel);
-            }
+            p.content_dir =
+                crate::store::contained_content_dir(&promoted, p.entry.subpath.as_deref())?;
         }
     }
 

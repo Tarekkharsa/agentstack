@@ -553,20 +553,22 @@ with `agentstack trust .` — new pins are new consent.
 ### Adding capabilities
 
 ```text
-agentstack lib add <name> --path <dir>                 # copy a local skill in
-agentstack lib add <name> --git <url> --subpath <dir>  # from a repo subdirectory
+agentstack lib add ./<dir> --name <name>               # copy a local skill in
+agentstack lib add owner/repo --skill <name>           # from any skills repo
+agentstack lib add owner/repo --subpath <dir>          # from a repo subdirectory
 agentstack lib add-server <name>                        # reusable server definition
 ```
 `lib add` copies a skill's source into `lib/skills/<name>` (the library copy is canonical from then on), records its provenance, and runs the same content scan as `install` before the copy lands.
 
-`lib add <name> --path <dir>` **copies** the source into
+`lib add ./<dir>` **copies** the source into
 `lib/skills/<name>` — the library copy is canonical from then on (edits to
 the source have no effect), provenance records the original path for
 `lib list`/`explain`, and a temp-dir source gets a warning since that recorded
-path will dangle. `lib add <name> --git <url> --subpath <dir>` (or
-`--git <url>#<dir>`) installs a skill living in a repo subdirectory — the
-marketplace/monorepo layout — recording truthful `git:<url>@<rev>#<dir>`
-provenance. `lib add-server` stores a reusable server definition with its
+path will dangle. `lib add owner/repo --subpath <dir>` (or any git URL,
+with `--skill <name>` selecting from a multi-skill repo) installs a skill
+living in a repo subdirectory — the marketplace/monorepo layout — staging
+the fetch so a dry run never touches the persistent store, and recording
+truthful `git:<url>@<rev>#<dir>` provenance. `lib add-server` stores a reusable server definition with its
 `${REF}`s intact.
 
 Every `lib add` runs the same hidden-unicode / prompt-injection content scan

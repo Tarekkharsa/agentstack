@@ -61,7 +61,8 @@ fn fixture_repo(tmp: &Path, hostile: bool) -> String {
             String::from_utf8_lossy(&out.stderr)
         );
     };
-    git(&["init", "-q"]);
+    // Explicit default-branch name so branch-pin tests are deterministic.
+    git(&["init", "-q", "-b", "main"]);
     git(&["add", "-A"]);
     git(&[
         "-c",
@@ -329,15 +330,20 @@ fn update_refreshes_revless_git_skills_and_detects_deletion() {
     let repo = tmp.path().join("skills-repo");
     let proj = seed_project(tmp.path());
 
+    // Two pin forms: pdf rev-less (tracks the default branch implicitly),
+    // docx pinned to the branch by name — the reviewed regression was that
+    // `checkout <branch>` after fetch lands on the stale LOCAL branch, so
+    // branch pins silently never advanced.
     add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
+    let mut branch_pinned = add_args(&url, &["docx"], true);
+    if let AddKind::Skill(a) = &mut branch_pinned.kind {
+        a.rev = Some("main".to_string());
+    }
+    add::run(&branch_pinned, Some(&proj)).unwrap();
     let lock_before = fs::read_to_string(proj.join("agentstack.lock")).unwrap();
 
     // Upstream moves: new commit changes the skill body.
-    fs::write(
-        repo.join("skills/pdf/EXTRA.md"),
-        "new upstream content\n",
-    )
-    .unwrap();
+    fs::write(repo.join("skills/pdf/EXTRA.md"), "new upstream content\n").unwrap();
     let git = |args: &[&str]| {
         let out = std::process::Command::new("git")
             .arg("-C")
@@ -345,7 +351,11 @@ fn update_refreshes_revless_git_skills_and_detects_deletion() {
             .args(args)
             .output()
             .unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     };
     git(&["add", "-A"]);
     git(&[
@@ -368,6 +378,19 @@ fn update_refreshes_revless_git_skills_and_detects_deletion() {
     assert_ne!(
         lock_before, lock_after,
         "update must re-track a rev-less git skill to the new upstream head"
+    );
+    let new_head = {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert!(
+        lock_after.matches(&new_head).count() >= 2,
+        "BOTH the rev-less and the branch-pinned skill must adopt the new head:\n{lock_after}"
     );
 
     // Upstream vanishes entirely: the update must fail loudly, not no-op.

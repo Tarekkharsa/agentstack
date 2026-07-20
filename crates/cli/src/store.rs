@@ -370,14 +370,24 @@ fn ensure_git(url: &str, want_rev: Option<&str>, dest: &Path, refresh: bool) -> 
             if refresh {
                 run_git(&["fetch", "--all", "--tags"], Some(dest))
                     .with_context(|| format!("fetching {url}"))?;
+                // A branch pin must adopt the FETCHED head: `checkout
+                // <branch>` lands on the stale LOCAL branch, which fetch
+                // never fast-forwards (only remote-tracking refs moved).
+                // Try the remote-tracking ref first; tags and commit shas
+                // have no origin/ form and fall back to the plain checkout.
+                let remote_ref = format!("origin/{rev}");
+                if run_git(&["checkout", "--detach", &remote_ref], Some(dest)).is_err() {
+                    run_git(&["checkout", rev], Some(dest))
+                        .with_context(|| format!("checking out {rev}"))?;
+                }
             } else {
                 // Best-effort fetch so a pinned rev that arrived later is
                 // available; a resolve against a cached clone stays offline-
                 // tolerant.
                 let _ = run_git(&["fetch", "--all", "--tags"], Some(dest));
+                run_git(&["checkout", rev], Some(dest))
+                    .with_context(|| format!("checking out {rev}"))?;
             }
-            run_git(&["checkout", rev], Some(dest))
-                .with_context(|| format!("checking out {rev}"))?;
         }
         None if refresh && !fresh => {
             run_git(&["fetch", "origin", "HEAD", "--tags"], Some(dest))
@@ -388,6 +398,15 @@ fn ensure_git(url: &str, want_rev: Option<&str>, dest: &Path, refresh: bool) -> 
         None => {}
     }
     Ok(fresh)
+}
+
+/// The clone-containment guard, exposed for callers that hold a checkout
+/// root directly (the add/lib source-grammar paths): resolves `subpath`
+/// inside `clone_root` and refuses a checked-out symlink that escapes it —
+/// the same refusal `Store::resolve` applies, so a hostile repo can't get a
+/// preview's digest or scan to read files outside the repo.
+pub fn contained_content_dir(clone_root: &Path, subpath: Option<&str>) -> Result<PathBuf> {
+    git_content_dir(clone_root, subpath)
 }
 
 fn git_head(dest: &Path) -> Result<String> {

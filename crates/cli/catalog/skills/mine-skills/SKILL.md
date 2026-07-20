@@ -38,7 +38,7 @@ assume a fixed schema. Use python for the parsing, not shell one-liners.
    SKILL.md (use the skill-creator skill if available). The skill teaches the
    right way, not a description of the failure.
 5. **Land it on the rails** — show the draft to the user; on approval:
-   `agentstack lib add <name> --path <draft-dir> --write`. That path
+   `agentstack lib add ./<draft-dir> --name <name> --write`. That path
    content-scans it, records provenance, checksums it, and makes it
    referenceable by name from any project (and syncable via `lib sync`).
 

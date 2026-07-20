@@ -374,8 +374,10 @@ fn add(args: &LibAddArgs) -> Result<()> {
             let staging = stage.store();
             let (clone_root, head) = crate::store::checkout(&staging, &url, rev.as_deref())?;
             let disc_root = match &subpath {
+                // Containment-guarded: a checked-out symlink must not route
+                // the preview outside the clone.
                 Some(s) => {
-                    let d = clone_root.join(s);
+                    let d = crate::store::contained_content_dir(&clone_root, Some(s))?;
                     if !d.is_dir() {
                         bail!(
                             "subpath '{}' does not exist in {}",
@@ -419,10 +421,8 @@ fn add(args: &LibAddArgs) -> Result<()> {
             let mut dry = false;
             for (skill, name) in selected.iter().zip(&names) {
                 let full_sub = super::add::join_subpath(subpath.as_deref(), &skill.rel_path);
-                let dir = match &full_sub {
-                    Some(s) => content_root.join(s),
-                    None => content_root.clone(),
-                };
+                // Containment-guarded against checked-out symlink escapes.
+                let dir = crate::store::contained_content_dir(&content_root, full_sub.as_deref())?;
                 let resolved = crate::store::Resolved {
                     checksum: crate::store::dir_digest(&dir)?.hex().to_string(),
                     path: dir,
