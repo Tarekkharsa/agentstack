@@ -137,20 +137,33 @@ impl Store {
     pub fn snapshot_content(&self, src: &Path, digest_hex: &str) -> Result<PathBuf> {
         let content_root = self.root.join("content");
         let dest = content_root.join(digest_hex);
-        if dest.exists() {
+        // Trust an existing snapshot ONLY if it still hashes to its own name.
+        // The dir is writable and could have been corrupted, truncated by an
+        // interrupted run, or replaced with a symlink — a bare `exists()`
+        // would then materialize tampered bytes under a trusted digest.
+        if verified_snapshot(&dest, digest_hex) {
             return Ok(dest);
         }
         fs::create_dir_all(&content_root)
             .with_context(|| format!("creating {}", content_root.display()))?;
+        // A leftover under this name that failed verification is rebuilt.
+        if dest.symlink_metadata().is_ok() {
+            remove_any(&dest);
+        }
         // Copy to a temp then rename into place, so a crash never leaves a
         // partial dir under a digest name (which would read as complete).
         let tmp = content_root.join(format!(".tmp-{}", crate::runs::gen_id()));
         crate::util::fsx::copy_dir_all(src, &tmp)
             .with_context(|| format!("snapshotting {}", src.display()))?;
         if fs::rename(&tmp, &dest).is_err() {
-            // Lost a race (another resolve created it) — drop our temp and
-            // use the winner's dir.
             let _ = fs::remove_dir_all(&tmp);
+            // A concurrent writer may have placed a VALID snapshot; accept it
+            // only if it verifies. Otherwise the rename failed for a real
+            // reason (permissions, cross-device) — surface it, never return a
+            // path we didn't successfully write.
+            if !verified_snapshot(&dest, digest_hex) {
+                bail!("could not place the content snapshot at {}", dest.display());
+            }
         }
         Ok(dest)
     }
@@ -177,20 +190,110 @@ impl Store {
                     source_kind: "path",
                 }))
             }
-            SkillSource::Git { url, subpath, .. } => {
-                let clone = self.git_dir(&url);
-                if !clone.exists() {
+            SkillSource::Git { url, rev, subpath } => {
+                // Read the INTENDED commit's immutable worktree, never the
+                // shared clone's working tree — another resolve may have
+                // checked out a different revision there, which would make
+                // this skill falsely drift or load the wrong bytes.
+                let Some((content, commit)) =
+                    self.git_worktree_content(&url, rev.as_deref(), subpath.as_deref())?
+                else {
                     return Ok(None);
-                }
-                let content = git_content_dir(&clone, subpath.as_deref())?;
+                };
+                crate::scan::reject_symlinks(&content)?;
                 Ok(Some(Resolved {
-                    rev: git_head(&clone).ok(),
                     checksum: dir_digest(&content)?.hex().to_string(),
                     path: content,
+                    rev: Some(commit),
                     fetched: false,
                     source_kind: "git",
                 }))
             }
+        }
+    }
+
+    /// The intended commit's content, from an immutable per-commit detached
+    /// worktree (`store/co/<url>/<commit>`) — no network, no shared working
+    /// tree. Returns `(content_dir, commit)`, or `None` when the clone or the
+    /// commit isn't available offline. The commit is resolved locally: a
+    /// pinned rev wins; an unpinned skill uses the fetched default branch
+    /// (`origin/HEAD`), which only moves on fetch — never when another
+    /// revision is checked out.
+    pub(crate) fn git_worktree_content(
+        &self,
+        url: &str,
+        rev: Option<&str>,
+        subpath: Option<&str>,
+    ) -> Result<Option<(PathBuf, String)>> {
+        let clone = self.git_dir(url);
+        if !clone.exists() {
+            return Ok(None);
+        }
+        let spec = rev
+            .map(|r| format!("{r}^{{commit}}"))
+            .unwrap_or_else(|| "origin/HEAD^{commit}".to_string());
+        let Ok(commit) = crate::gitx::run(
+            crate::gitx::Profile::Ingest,
+            &["rev-parse", "--verify", "--quiet", &spec],
+            Some(&clone),
+        ) else {
+            return Ok(None);
+        };
+        if commit.is_empty() {
+            return Ok(None);
+        }
+        let Some(co) = self.ensure_worktree(&clone, &commit)? else {
+            return Ok(None);
+        };
+        let content = git_content_dir(&co, subpath)?;
+        if !content.exists() {
+            return Ok(None);
+        }
+        Ok(Some((content, commit)))
+    }
+
+    /// Ensure an immutable detached worktree of `clone` at `commit` under
+    /// `store/co/<url>/<commit>`. Idempotent, no network (the commit's
+    /// objects are already local). `None` if the commit can't be checked out
+    /// offline. Different commits get different dirs, so a materialized
+    /// symlink or an offline read is never churned by another revision.
+    fn ensure_worktree(&self, clone: &Path, commit: &str) -> Result<Option<PathBuf>> {
+        let co = self
+            .root
+            .join("co")
+            .join(sanitize(&clone.to_string_lossy()))
+            .join(commit);
+        // A worktree carries a `.git` gitlink file; a complete one is reused.
+        if co.join(".git").is_file() {
+            return Ok(Some(co));
+        }
+        if let Some(parent) = co.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+        }
+        // Clear any stale admin entry (a dir removed out from under git) and a
+        // partial leftover, then add fresh.
+        let _ = crate::gitx::run(
+            crate::gitx::Profile::Ingest,
+            &["worktree", "prune"],
+            Some(clone),
+        );
+        if co.exists() {
+            fs::remove_dir_all(&co).ok();
+        }
+        match crate::gitx::run(
+            crate::gitx::Profile::Ingest,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--force",
+                &co.to_string_lossy(),
+                commit,
+            ],
+            Some(clone),
+        ) {
+            Ok(_) => Ok(Some(co)),
+            Err(_) => Ok(None), // commit not present offline
         }
     }
 
@@ -213,18 +316,19 @@ impl Store {
                 fetched: false,
                 source_kind: "path",
             })),
-            SkillSource::Git { url, subpath, .. } => {
-                let clone = self.git_dir(&url);
-                if !clone.exists() {
-                    return Ok(None);
+            SkillSource::Git { url, rev, subpath } => {
+                // Same immutable-worktree read as `resolve_local`, minus the
+                // digest — display/listing callers only need the path.
+                match self.git_worktree_content(&url, rev.as_deref(), subpath.as_deref())? {
+                    Some((content, _)) => Ok(Some(Resolved {
+                        path: content,
+                        rev: None,
+                        checksum: String::new(),
+                        fetched: false,
+                        source_kind: "git",
+                    })),
+                    None => Ok(None),
                 }
-                Ok(Some(Resolved {
-                    path: git_content_dir(&clone, subpath.as_deref())?,
-                    rev: None,
-                    checksum: String::new(),
-                    fetched: false,
-                    source_kind: "git",
-                }))
             }
         }
     }
@@ -314,13 +418,14 @@ pub fn local_source_dir(store: &Store, skill: &Skill, manifest_dir: &Path) -> Op
             let path = resolve_path(manifest_dir, &p);
             path.exists().then_some(path)
         }
-        SkillSource::Git { url, subpath, .. } => {
-            let clone = store.git_dir(&url);
-            if !clone.exists() {
-                return None;
-            }
-            let content = git_content_dir(&clone, subpath.as_deref()).ok()?;
-            content.exists().then_some(content)
+        SkillSource::Git {
+            url, rev, subpath, ..
+        } => {
+            // Immutable per-commit worktree, not the churnable clone tree.
+            store
+                .git_worktree_content(&url, rev.as_deref(), subpath.as_deref())
+                .ok()?
+                .map(|(content, _)| content)
         }
     }
 }
@@ -448,6 +553,32 @@ fn ensure_git(url: &str, want_rev: Option<&str>, dest: &Path, refresh: bool) -> 
 /// preview's digest or scan to read files outside the repo.
 pub fn contained_content_dir(clone_root: &Path, subpath: Option<&str>) -> Result<PathBuf> {
     git_content_dir(clone_root, subpath)
+}
+
+/// Whether `dest` is a real directory (not a symlink) whose content digest
+/// equals `digest_hex` — the only condition under which a cached snapshot is
+/// trusted without rebuilding.
+fn verified_snapshot(dest: &Path, digest_hex: &str) -> bool {
+    match dest.symlink_metadata() {
+        Ok(m) if m.file_type().is_dir() => dir_digest(dest)
+            .map(|d| d.hex() == digest_hex)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// Remove a path whether it's a dir, file, or symlink (best-effort).
+fn remove_any(path: &Path) {
+    if path.is_dir()
+        && !path
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+    {
+        let _ = fs::remove_dir_all(path);
+    } else {
+        let _ = fs::remove_file(path);
+    }
 }
 
 fn git_head(dest: &Path) -> Result<String> {

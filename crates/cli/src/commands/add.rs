@@ -1399,19 +1399,16 @@ fn preview_and_commit(
         );
         return Ok(());
     }
-    // The manifest is the source of truth and is written atomically first;
-    // the lock is derived from it. If the lock write below fails, the
-    // manifest still stands and `agentstack lock` reconciles it — the pair
-    // is never left with the manifest ahead and no path back to a match.
-    crate::util::atomic::write(manifest_path, &text)
-        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    // Everything fallible — snapshots, digests, lock entries — is prepared
+    // BEFORE the manifest is touched, so a failure here leaves the manifest
+    // (and lock) untouched: no half-written state to recover from. Git
+    // content is snapshotted out of the churning clone (finding 1) so a
+    // later add of another revision can't mutate this skill's symlinked
+    // bytes; path sources already live in a stable dir.
     let store = crate::store::Store::default_store();
     let mut lock = crate::lock::Lock::load(&ctx.dir)?;
-    // The immutable materialization source per skill: git content is
-    // snapshotted out of the churning clone (finding 1) so a later add of
-    // another revision can't mutate this skill's symlinked bytes; path
-    // sources already live in a stable dir.
     let mut mat_sources: Vec<(String, PathBuf)> = Vec::new();
+    let mut entries = Vec::new();
     for p in planned {
         let checksum = crate::store::dir_digest(&p.content_dir)?.hex().to_string();
         let source = if p.source_kind == "git" {
@@ -1426,8 +1423,18 @@ fn preview_and_commit(
             fetched: true,
             source_kind: p.source_kind,
         };
-        lock.upsert(super::install::locked_entry(&p.name, &p.entry, &resolved)?);
+        entries.push(super::install::locked_entry(&p.name, &p.entry, &resolved)?);
         mat_sources.push((p.name.clone(), source));
+    }
+
+    // Now commit: the manifest atomically (source of truth), then the lock
+    // derived from it. If only the lock write fails, the manifest still
+    // stands and the error names `agentstack lock` to reconcile — the pair
+    // is never left with the manifest ahead and no path back to a match.
+    crate::util::atomic::write(manifest_path, &text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    for entry in entries {
+        lock.upsert(entry);
     }
     lock.save(&ctx.dir).with_context(|| {
         format!(

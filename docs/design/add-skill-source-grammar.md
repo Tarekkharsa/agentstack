@@ -314,7 +314,10 @@ manifest diff renders — nothing is offered that can't be written.
 
 ### What `--write` does (and doesn't)
 
-In order, all-or-nothing:
+In order (the manifest + lock **commit** is all-or-nothing — every fallible
+step is prepared before either file is touched; the materialization that
+follows in priority 3 is additive and report-and-leave, not transactional,
+per the transaction note below):
 
 1. Duplicate manifest names hard-block first (before selection UI, before
    promotion), with the existing remedy message.

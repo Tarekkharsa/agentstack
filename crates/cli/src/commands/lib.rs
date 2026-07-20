@@ -346,7 +346,10 @@ fn add(args: &LibAddArgs) -> Result<()> {
                     abs.join(&skill.rel_path)
                 }
             };
-            // Pass 1 — validate & scan every selection before any write.
+            // Pass 1 — validate & scan every selection before any write, so a
+            // scan/validation failure never partially installs (the content
+            // gate is all-or-nothing; a mid-commit I/O failure in pass 2 is
+            // not rolled back — re-run to converge).
             for (skill, name) in selected.iter().zip(&names) {
                 let outcome = add_skill(
                     &lib_home,
@@ -437,8 +440,11 @@ fn add(args: &LibAddArgs) -> Result<()> {
             };
 
             // Pass 1 — validate & scan EVERY selection off the staged clone
-            // before any write, so a later scan failure never leaves earlier
-            // skills installed (all-or-nothing).
+            // before any write. This makes the content gate all-or-nothing: a
+            // scan or validation failure aborts before a single skill is
+            // installed. (It is not a full transaction — a mid-commit I/O
+            // failure in pass 2 can leave earlier selections installed; re-run
+            // to converge. Full staged-artifact rollback is a future step.)
             for (skill, name) in selected.iter().zip(&names) {
                 let (full_sub, resolved) = resolved_for(&clone_root, skill)?;
                 let outcome = add_skill(

@@ -470,6 +470,67 @@ fn materialized_git_skill_survives_a_later_checkout_of_another_revision() {
     );
 }
 
+/// Follow-up finding 1: offline (NoFetch) resolution must read the pinned
+/// commit's immutable worktree, not the shared clone — so after another
+/// revision is checked out, an earlier skill neither falsely drifts nor
+/// reads the wrong bytes.
+#[test]
+fn offline_resolution_reads_the_pinned_commit_not_the_churned_clone() {
+    use agentstack::store::Store;
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let url = fixture_repo(tmp.path(), false);
+    let repo = tmp.path().join("skills-repo");
+    let proj = seed_project(tmp.path());
+
+    // Fetch pdf at v1 (populates the clone + records the commit's checksum).
+    let store = Store::default_store();
+    let pdf_v1: agentstack::manifest::Skill =
+        toml::from_str(&format!("git = \"{url}\"\nsubpath = \"skills/pdf\"")).unwrap();
+    let r1 = store.resolve(&pdf_v1, &proj, None).unwrap();
+    let commit_v1 = r1.rev.clone().unwrap();
+    let checksum_v1 = r1.checksum.clone();
+
+    // Advance the repo and churn the shared clone to the new commit.
+    fs::write(
+        repo.join("skills/pdf/SKILL.md"),
+        "---\ndescription: v2\n---\nV2\n",
+    )
+    .unwrap();
+    assert!(std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "-c",
+            "user.email=t@e.st",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-qam",
+            "v2"
+        ])
+        .status()
+        .unwrap()
+        .success());
+    let pdf_head: agentstack::manifest::Skill =
+        toml::from_str(&format!("git = \"{url}\"\nsubpath = \"skills/pdf\"")).unwrap();
+    store.resolve(&pdf_head, &proj, None).unwrap(); // clone now at v2
+
+    // Offline resolution PINNED to v1 must still yield v1's checksum — the
+    // worktree is immutable, not the churned clone working tree.
+    let pinned: agentstack::manifest::Skill = toml::from_str(&format!(
+        "git = \"{url}\"\nrev = \"{commit_v1}\"\nsubpath = \"skills/pdf\""
+    ))
+    .unwrap();
+    let offline = store.resolve_local(&pinned, &proj).unwrap().unwrap();
+    assert_eq!(
+        offline.checksum, checksum_v1,
+        "offline resolution of the pinned commit must not read the churned clone"
+    );
+}
+
 /// Finding 2: a symlink anywhere in skill content is rejected before the
 /// content is scanned, pinned, or delivered.
 #[test]

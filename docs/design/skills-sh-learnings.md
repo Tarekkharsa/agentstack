@@ -233,9 +233,12 @@ run, `lib.rs:178`, which the new flow must not inherit):
 - `--write` promotes the staged content; manifest/lock changes commit only
   after fetch, discovery, validation, and scan have all succeeded.
 - Materialization failing halfway across targets has defined semantics:
-  report per-target outcomes explicitly, and either roll back the completed
-  targets or leave a state `doctor` names precisely — never a silent
-  partial success.
+  report per-target outcomes explicitly and leave a state `doctor` names
+  precisely — never a silent partial success. (As built there is **no**
+  cross-target rollback: symlinks/copies are additive, and `use --write`
+  completes a half-materialized set. The manifest+lock *commit* is the
+  all-or-nothing part; see the transaction note in
+  add-skill-source-grammar §4.)
 
 What we reject (review correction — these prompts are their substitute for a
 manifest, and we have one):
@@ -406,7 +409,7 @@ Behavior:
 - Preview stages transiently and mutates nothing; `--write` promotes, and
   commits manifest/lock only after fetch + discovery + validation + scan
   succeed; partial materialization failure has defined per-target reporting
-  and rollback (§4).
+  and is left doctor-diagnosable — not rolled back (§4).
 - Profile targeting: no profiles → implicit default; exactly one → automatic;
   several → `--profile` required, or an interactive ask in a TTY.
 - Exactly one discovered skill → auto-selected; several → selector in a TTY,
