@@ -45,7 +45,7 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
         crate::verify::ensure_instructions_compilable(&ctx.dir.display().to_string(), &statuses)?;
     }
 
-    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
+    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
 
     // The unknown-target validation `apply`/`doctor` already run, scoped to
     // the instruction issues this command owns: a typo'd adapter id means the

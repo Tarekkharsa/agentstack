@@ -1,4 +1,4 @@
-//! `agentstack trust` — the human gate for the zero-files bridge.
+//! `agentstack trust` — the human gate for the zero-files gateway.
 //!
 //! `connect` registers one global gateway per harness; `mcp --auto-project`
 //! then discovers whatever manifest the current repo carries. This command is
@@ -145,7 +145,7 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
     let m = &loaded.manifest;
 
     println!(
-        "Trusting {} for the zero-files bridge.\n",
+        "Trusting {} for the zero-files gateway.\n",
         base.display().to_string().bold()
     );
 

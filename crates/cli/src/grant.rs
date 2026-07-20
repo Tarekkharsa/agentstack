@@ -1305,7 +1305,7 @@ pub fn verify_handoff_for(handoff: &GrantHandoff, base: &Path) -> Result<()> {
         std::fs::canonicalize(base).with_context(|| format!("project root {}", base.display()))?;
     if artifact_root != current_root {
         bail!(
-            "run-grant artifact was frozen for {} but this bridge serves {} — refusing",
+            "run-grant artifact was frozen for {} but this gateway serves {} — refusing",
             artifact_root.display(),
             current_root.display()
         );

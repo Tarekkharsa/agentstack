@@ -9,6 +9,8 @@ and ephemeral generated capabilities — as trusted, portable bundles.
 
 The strategic frame: the **agent bundle** is the standard unit (the way the image was Docker's unit). Everything else in the system gates it, constrains it, records it, or distributes it. Config unification across agent CLIs is the adoption wedge; the trust gate, firewall, and audit trail are the durable value. The registry/marketplace is the endgame, only viable because trust and signing exist first.
 
+(The README, written for newcomers, calls this same directory of declared capabilities the **manifest**; this document uses **bundle** for the same thing.)
+
 Core principle: **nothing executes automatically until its content is trusted;
 governed execution is constrained and recorded.**
 

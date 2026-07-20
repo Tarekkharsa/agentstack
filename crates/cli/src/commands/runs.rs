@@ -20,6 +20,23 @@ pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
     if args.sandbox || args.lockdown {
         return crate::commands::sandbox::run_sandboxed(dir, args);
     }
+    // `--plan` promises "print the plan, run NOTHING" — it is only defined for
+    // the locked/sandbox flows above. Bare `run --plan` used to fall through
+    // and launch the CLI anyway (audit finding: an unintended launch during a
+    // read-only review); refuse instead and name the two real forms.
+    if args.plan {
+        anyhow::bail!(
+            "--plan needs a run mode — nothing was launched\n\
+             \n  \
+             protected host plan:  agentstack run --locked --plan {h}\n  \
+             sandbox plan:         agentstack run --sandbox --plan {h}",
+            h = args.harness
+        );
+    }
+    // Validate BEFORE the banner: a missing manifest, unknown id, or absent
+    // binary must be the first (and only) thing the user reads — never below a
+    // "▶ launching…" line claiming something started.
+    let plan = crate::runs::prepare(dir, &args.harness)?;
     if let Some(p) = &args.profile {
         println!(
             "{} launching {} with profile '{}' ({})…",
@@ -45,8 +62,8 @@ pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
         "⚠".yellow()
     );
     crate::runs::launch(
+        plan,
         dir,
-        &args.harness,
         args.profile.as_deref(),
         args.scope,
         &args.args,

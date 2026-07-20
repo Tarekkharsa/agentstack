@@ -38,6 +38,14 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
         // `--write`: apply directly. The scripting / CI escape hatch — never
         // prompts, whatever the terminal is.
         let outcome = render(args, manifest_dir, true, false, true)?;
+        // A refused write is a failed command: scripts must never read a
+        // validation-blocked `apply --write` as success (exit 0 was audit
+        // finding A0).
+        if outcome.validation_errors {
+            anyhow::bail!(
+                "manifest has validation errors — nothing was written; fix the ✗ above, then re-run `agentstack apply --write`"
+            );
+        }
         restart_hint(&outcome);
         return Ok(());
     }
@@ -52,7 +60,12 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // Interactive default: show the dry-run diff (no re-run hint), then offer to
     // apply it in place.
     let outcome = render(args, manifest_dir, false, false, false)?;
-    if outcome.changed_count == 0 || outcome.validation_errors {
+    if outcome.validation_errors {
+        // The would-be write is already off the table; say so with a nonzero
+        // exit instead of silently returning success.
+        anyhow::bail!("manifest has validation errors — fix the ✗ above");
+    }
+    if outcome.changed_count == 0 {
         return Ok(());
     }
     if crate::util::confirm::confirm("\nApply these changes?")? {
@@ -67,12 +80,15 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
 /// Configs changed on disk, but a harness only reads them at startup — say so.
 /// Standalone `apply` only; `setup` prints its own closing "Next" block.
+/// The undo pointer rides along: every write is snapshotted into history, and
+/// telling the user so at the moment of mutation is the cheapest trust there is.
 fn restart_hint(outcome: &Outcome) {
     if outcome.written_count > 0 {
         println!(
             "{} Restart or reopen your agent CLI(s) so they pick up the new config.",
             "→".cyan()
         );
+        println!("  {}", "undo: agentstack restore".dimmed());
     }
 }
 
@@ -176,7 +192,7 @@ fn render(
         crate::verify::ensure_instructions_compilable(&ctx.dir.display().to_string(), &statuses)?;
     }
 
-    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
+    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
     if target_ids.is_empty() {
         if !quiet {
             println!("No targets to apply to. Set [targets].default or pass --target.");
@@ -190,6 +206,14 @@ fn render(
     }
 
     println!("Scope: {scope}");
+    // When the target list was implicit (no [targets], no --target), say what
+    // it resolved to and how to pin it — the fan-out should never be a surprise.
+    if !quiet && args.targets.is_empty() && manifest.targets.default.is_empty() {
+        println!(
+            "Targets: {} detected CLI(s) — no [targets] in the manifest; pin the list with `agentstack init` or a [targets] block",
+            target_ids.len()
+        );
+    }
     // The effective (machine ∩ project) policy artifact, compiled once for
     // every render-time check this pass makes (secret scoping, egress).
     let ruleset = crate::render::ruleset_for(manifest)?;
@@ -198,6 +222,10 @@ fn render(
     let mut changed_count = 0;
     let mut error_count = 0;
     let mut write_blockers = 0;
+    // Every distinct missing secret name seen across all targets, so the final
+    // blocked-write error can print the exact fix commands instead of a
+    // `<NAME>` placeholder. BTreeSet: deduped and deterministic order.
+    let mut missing_secrets: std::collections::BTreeSet<String> = Default::default();
     // Server entries a write would delete, across all targets — deletions get
     // called out in the dry-run summary, not folded into "would change".
     let mut removed_count = 0;
@@ -311,7 +339,14 @@ fn render(
             );
         }
         for u in &plan.unresolved {
-            println!("  {} unresolved secret {}", "✗".red(), u);
+            // Entries read "NAME (server 'x')" — the first token is the ref
+            // name, which is all `secret set` needs.
+            let name = u.split_whitespace().next().unwrap_or(u.as_str());
+            println!(
+                "  {} unresolved secret {u} ↳ agentstack secret set {name}",
+                "✗".red()
+            );
+            missing_secrets.insert(name.to_string());
             error_count += 1;
         }
         for d in &plan.denied {
@@ -394,7 +429,12 @@ fn render(
             &ctx.dir,
         )? {
             for u in &sp.unresolved {
-                println!("  {} unresolved secret {} (settings)", "✗".red(), u);
+                let name = u.split_whitespace().next().unwrap_or(u.as_str());
+                println!(
+                    "  {} unresolved secret {u} (settings) ↳ agentstack secret set {name}",
+                    "✗".red()
+                );
+                missing_secrets.insert(name.to_string());
                 error_count += 1;
             }
             let sblocked = !sp.unresolved.is_empty() && !args.allow_unresolved;
@@ -460,7 +500,12 @@ fn render(
             &machine_hooks,
         )? {
             for u in &hp.unresolved {
-                println!("  {} unresolved secret {} (hook)", "✗".red(), u);
+                let name = u.split_whitespace().next().unwrap_or(u.as_str());
+                println!(
+                    "  {} unresolved secret {u} (hook) ↳ agentstack secret set {name}",
+                    "✗".red()
+                );
+                missing_secrets.insert(name.to_string());
                 error_count += 1;
             }
             let hblocked = !hp.unresolved.is_empty() && !args.allow_unresolved;
@@ -762,11 +807,22 @@ fn render(
             );
         }
     } else if rerun_hint {
-        println!(
-            "{changed_count} target(s) would change{}. Re-run with {} to write.",
-            removal_note(removed_count),
-            "--write".bold()
-        );
+        if has_errors {
+            // Don't point at `--write` when validation already guarantees it
+            // would refuse — the next command is fixing the manifest, not
+            // re-running the one that just failed.
+            println!(
+                "{changed_count} target(s) would change{} — fix the {} validation error(s) above before writing.",
+                removal_note(removed_count),
+                "✗".red()
+            );
+        } else {
+            println!(
+                "{changed_count} target(s) would change{}. Re-run with {} to write.",
+                removal_note(removed_count),
+                "--write".bold()
+            );
+        }
     } else {
         // A confirm prompt is about to follow — don't tell the user to re-run.
         println!(
@@ -774,7 +830,10 @@ fn render(
             removal_note(removed_count)
         );
     }
-    if error_count > 0 && !quiet {
+    // On a blocked write the count line above plus the bail below already tell
+    // the whole story — a third "N issue(s)" line in between was pure repetition.
+    let blocked_write = will_write && !blocked_targets.is_empty();
+    if error_count > 0 && !quiet && !blocked_write {
         println!("{error_count} issue(s) — resolve before writing.");
     }
 
@@ -782,9 +841,20 @@ fn render(
     // can't mistake a fail-closed apply for success. Mirrors `use --write`.
     // (`doctor --ci` runs its own checks and never reads apply's exit code,
     // and `setup` stops on `write_blockers` before its write pass.)
-    if will_write && !blocked_targets.is_empty() {
+    if blocked_write {
+        // Name the exact fixes when we know them (missing secrets are by far
+        // the common case); anything else keeps its ✗ line above.
+        let fix = if missing_secrets.is_empty() {
+            "each ✗ above names the blocker".to_string()
+        } else {
+            let cmds: Vec<String> = missing_secrets
+                .iter()
+                .map(|n| format!("agentstack secret set {n}"))
+                .collect();
+            format!("fix: {} (or pass --allow-unresolved)", cmds.join(" · "))
+        };
         anyhow::bail!(
-            "blocked write(s) on {} target(s) — set the missing secret(s) (`agentstack secret set <NAME>`), restore missing fragment source(s), or pass --allow-unresolved for unresolved secrets",
+            "blocked write(s) on {} target(s) — {fix}",
             blocked_targets.len()
         );
     }

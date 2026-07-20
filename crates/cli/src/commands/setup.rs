@@ -156,7 +156,7 @@ fn configure(
     // Default scope follows the manifest's home: project for a repo manifest,
     // global only for the machine manifest (see docs/design/default-scope.md).
     let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
-    let target_ids = resolve_targets(&ctx.loaded.manifest, &ctx.registry, &args.targets);
+    let target_ids = resolve_targets(&ctx.loaded.manifest, &ctx.registry, &args.targets)?;
 
     // Preflight inspection (adapters, skills, secrets) — read-only.
     let pf = preflight(&ctx, &target_ids)?;

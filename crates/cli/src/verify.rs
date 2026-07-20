@@ -6,7 +6,7 @@
 //! The re-gate chain this module completes: content drifts → the use path
 //! blocks and directs the human to `agentstack lock` → re-locking changes the
 //! lockfile bytes → the trust digest (manifest + local + lock) flips → the
-//! zero-files bridge drops to control-plane-only until the project is
+//! zero-files gateway drops to control-plane-only until the project is
 //! reviewed and re-trusted. Trust stays bound to content because nothing is
 //! used that doesn't match the lock the human trusted.
 

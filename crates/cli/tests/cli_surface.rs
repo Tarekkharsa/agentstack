@@ -15,6 +15,39 @@ fn command_tree_is_well_formed() {
     Cli::command().debug_assert();
 }
 
+// DX witnesses for the progressive-disclosure help surface:
+// `status` exists (git/docker muscle memory), the visible list stays the
+// small beginner loop, and the after_help map lists every top-level command
+// so nothing hidden is undiscoverable.
+#[test]
+fn status_parses_and_help_maps_every_command() {
+    Cli::try_parse_from(["agentstack", "status"]).expect("status must parse");
+
+    let cmd = Cli::command();
+    let visible: Vec<&str> = cmd
+        .get_subcommands()
+        .filter(|c| !c.is_hide_set() && c.get_name() != "help")
+        .map(|c| c.get_name())
+        .collect();
+    assert_eq!(
+        visible,
+        ["init", "status", "add", "search", "apply", "doctor", "use", "run", "trust"],
+        "the visible list is the beginner loop, in task order"
+    );
+
+    let after_help = cmd.get_after_help().expect("after_help exists").to_string();
+    for c in cmd.get_subcommands() {
+        let name = c.get_name();
+        if name == "help" || name == "setup" {
+            continue; // setup is a deliberately unadvertised legacy alias.
+        }
+        assert!(
+            after_help.contains(name),
+            "'{name}' must appear in the grouped after_help map"
+        );
+    }
+}
+
 #[test]
 fn consolidated_verbs_parse() {
     for argv in [

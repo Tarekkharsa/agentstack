@@ -49,7 +49,7 @@ fn unused_feature_sections_are_tagged_irrelevant_but_still_reported() {
     // Unused features are tagged irrelevant — but their sections still exist
     // in the JSON: checks ran, nothing was skipped.
     for title in [
-        "Zero-files bridge",
+        "Zero-files gateway",
         "Secrets",
         "Drift",
         "Instructions",

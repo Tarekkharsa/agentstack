@@ -134,7 +134,7 @@ fn untrusted_warns_only_when_bridge_is_registered_and_servers_declared() {
         let sections = report["sections"].as_array().unwrap();
         let s = sections
             .iter()
-            .find(|s| s["title"] == "Zero-files bridge")
+            .find(|s| s["title"] == "Zero-files gateway")
             .expect("bridge section present");
         let line = s["lines"]
             .as_array()

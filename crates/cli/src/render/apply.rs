@@ -490,19 +490,77 @@ pub fn effective_servers(
 }
 
 /// Decide which target ids to act on: explicit `--target` wins, else the
-/// manifest's `[targets].default`, else every registered adapter.
+/// manifest's `[targets].default`, else the CLIs actually detected on this
+/// machine — a hand-written manifest without `[targets]` should not create
+/// `.cursor/`, `.junie/`, … config dirs for tools the user doesn't have. Only
+/// when NOTHING is detected (e.g. a CI box rendering configs for the team)
+/// does the fallback widen to every registered adapter, preserving the old
+/// behavior where it was the only useful one.
+///
+/// An explicitly requested id that isn't a registered adapter is an ERROR
+/// (with a did-you-mean), exactly as `--target`'s help promises — a typo'd
+/// `--target codx` must never become a successful no-op that passes CI.
+/// Manifest-sourced `[targets]` entries are NOT gated here: each command
+/// reports those per target so `doctor` can diagnose a broken manifest
+/// instead of dying on it.
 pub fn resolve_targets(
     manifest: &Manifest,
     registry: &Registry,
     requested: &[String],
-) -> Vec<String> {
+) -> anyhow::Result<Vec<String>> {
     if !requested.is_empty() {
-        return requested.to_vec();
+        for id in requested {
+            if registry.get(id).is_none() {
+                let hint = closest_id(registry, id)
+                    .map(|c| format!(" — did you mean '{c}'?"))
+                    .unwrap_or_default();
+                anyhow::bail!(
+                    "unknown CLI '{id}'{hint} (`agentstack adapters list` shows all ids)"
+                );
+            }
+        }
+        return Ok(requested.to_vec());
     }
     if !manifest.targets.default.is_empty() {
-        return manifest.targets.default.clone();
+        return Ok(manifest.targets.default.clone());
     }
-    registry.ids().map(String::from).collect()
+    let detected: Vec<String> = registry
+        .iter()
+        .filter(|d| d.detected())
+        .map(|d| d.id.clone())
+        .collect();
+    Ok(if detected.is_empty() {
+        registry.ids().map(String::from).collect()
+    } else {
+        detected
+    })
+}
+
+/// The registered id closest to `input` by edit distance, when it's close
+/// enough (≤ 2 edits, or ≤ 3 for longer ids) to be a plausible typo.
+fn closest_id<'r>(registry: &'r Registry, input: &str) -> Option<&'r str> {
+    let cap = if input.len() > 6 { 3 } else { 2 };
+    registry
+        .ids()
+        .map(|id| (edit_distance(input, id), id))
+        .filter(|(d, _)| *d <= cap)
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, id)| id)
+}
+
+/// Classic two-row Levenshtein — ids are short, so O(a·b) is nothing.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b_chars: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b_chars.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, cb) in b_chars.iter().enumerate() {
+            let sub = prev[j] + usize::from(ca != *cb);
+            cur.push(sub.min(prev[j + 1] + 1).min(cur[j] + 1));
+        }
+        prev = cur;
+    }
+    *prev.last().expect("row is never empty")
 }
 
 #[cfg(test)]
@@ -511,6 +569,20 @@ mod tests {
     use crate::library::LibraryServer;
     use crate::secret::MapResolver;
     use assert_fs::prelude::*;
+
+    // DX witness: a typo'd `--target` is an ERROR with a did-you-mean, never a
+    // successful no-op (the old "unknown adapter — skipping" + exit 0 could
+    // pass CI while skipping the intended CLI).
+    #[test]
+    fn unknown_requested_target_errors_with_suggestion() {
+        let registry = Registry::load().expect("built-in registry loads");
+        let manifest: Manifest = toml::from_str("version = 1").expect("minimal manifest");
+        let err = resolve_targets(&manifest, &registry, &["codx".to_string()])
+            .expect_err("typo must not silently no-op");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("did you mean 'codex'"), "{msg}");
+        assert!(msg.contains("adapters list"), "{msg}");
+    }
 
     #[test]
     fn failed_secret_line_names_the_fix_and_says_the_cause_once() {

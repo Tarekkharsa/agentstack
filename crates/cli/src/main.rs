@@ -22,6 +22,7 @@ fn run() -> Result<()> {
     };
     match command {
         Command::Init(args) => commands::init::run(args, dir),
+        Command::Status(_) => commands::overview::run_status(dir),
         Command::Add(args) => commands::add::run(args, dir),
         Command::Install(args) => commands::install::run(args, dir),
         Command::Lock(args) => commands::lock::dispatch(args, dir),

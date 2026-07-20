@@ -479,7 +479,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         })
         .collect();
 
-    // Zero-files bridge: which detected harnesses carry the global
+    // Zero-files gateway: which detected harnesses carry the global
     // `agentstack mcp --auto-project` entry, and where this project stands with
     // the trust gate. Read-only mirror of `doctor`'s bridge section — the
     // dashboard shows it; granting trust stays a terminal act.
@@ -606,7 +606,7 @@ fn render_drift_targets(
     scope: Scope,
     set: DriftSet,
 ) -> Result<Vec<DriftTarget>> {
-    let selected = crate::render::resolve_targets(manifest, &ctx.registry, &[]);
+    let selected = crate::render::resolve_targets(manifest, &ctx.registry, &[])?;
     let ids: Vec<String> = match set {
         DriftSet::Selected => selected.clone(),
         DriftSet::InstalledNonSelected => ctx

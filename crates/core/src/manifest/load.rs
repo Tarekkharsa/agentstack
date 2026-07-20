@@ -128,16 +128,26 @@ pub struct LoadedManifest {
 /// it when present.
 pub fn load_from_dir(dir: &Path) -> Result<LoadedManifest> {
     let manifest_path = dir.join(MANIFEST_FILE);
+    // Missing manifest is the most common first-contact error, so it gets a
+    // purpose-built message as a ROOT error (`bail!`), not a `.context()` on
+    // the read: main prints errors with `{:#}`, which joins the whole context
+    // chain with ": " — a wrapped io::Error would append a raw
+    // ": No such file or directory (os error 2)" to the friendly text.
+    if !manifest_path.exists() {
+        anyhow::bail!(
+            "no agentstack manifest in {}\n\
+             (a project keeps one at {MANIFEST_SUBDIR}/{MANIFEST_FILE}, \
+             or {MANIFEST_FILE} at the repo root)\n\
+             \n  \
+             create one here:   agentstack init\n  \
+             or point at one:   agentstack --manifest-dir <dir> <command>",
+            project_root_of(dir).display()
+        );
+    }
     // Bounded: a cloned repo's manifest is hostile input (rule 7).
     let base_text =
         crate::util::read_to_string_bounded(&manifest_path, crate::util::MAX_CONFIG_BYTES)
-            .with_context(|| {
-                format!(
-                    "no manifest here (looked for {}) — run `agentstack init` to create \
-                 .agentstack/agentstack.toml, or point at one with --manifest-dir",
-                    manifest_path.display()
-                )
-            })?;
+            .with_context(|| format!("reading {}", manifest_path.display()))?;
     let mut base: toml::Value = toml::from_str(&base_text)
         .with_context(|| format!("parsing {}", manifest_path.display()))?;
 
@@ -379,6 +389,29 @@ mod tests {
         fs::write(nested.join(MANIFEST_FILE), "version = 1\n").unwrap();
         assert_eq!(resolve_manifest_dir(base2), nested);
         assert_eq!(new_manifest_dir(base2), nested);
+    }
+
+    // DX witness: the most common first-contact error is a purpose-built root
+    // error — the exact fix commands, no io::Error chain (the old `.context()`
+    // form leaked ": No such file or directory (os error 2)" through `{:#}`).
+    #[test]
+    fn missing_manifest_error_names_the_fix_without_io_noise() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let err = load_from_dir(tmp.path()).expect_err("no manifest here");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("agentstack init"), "names the fix: {msg}");
+        assert!(
+            msg.contains("--manifest-dir"),
+            "names the alternative: {msg}"
+        );
+        assert!(
+            msg.contains(".agentstack/agentstack.toml"),
+            "names the real layout: {msg}"
+        );
+        assert!(
+            !msg.contains("os error"),
+            "no raw io error may leak through: {msg}"
+        );
     }
 
     #[test]

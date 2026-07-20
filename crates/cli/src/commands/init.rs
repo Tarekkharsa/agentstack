@@ -279,11 +279,15 @@ fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) ->
         // files with no prompt — the help promises scripts opt in via flags, so
         // honor it. Naming both escapes keeps the scripted path discoverable.
         anyhow::bail!(
-            "refusing to init: stdin is not a terminal and no flags were given — a flagless \
-             `agentstack init` would import your CLI configs and lift live token values into \
-             files with no prompt. Re-run interactively for the guided wizard, or take the \
-             scripted path: pass --yes (import with the default secret store), \
-             --secrets <env|keychain|skip>, or --dry-run to preview without writing."
+            "refusing to init without a terminal: a flagless `agentstack init` imports your \
+             CLI configs and can lift live token values into files, so it never runs without \
+             a prompt or an explicit flag\n\
+             \n  \
+             preview only (writes nothing):  agentstack init --dry-run\n  \
+             import without prompts:         agentstack init --yes   (secrets → keychain)\n  \
+             choose the secret store:        agentstack init --secrets <env|keychain|skip>\n\
+             \n\
+             (in a terminal, plain `agentstack init` is the guided wizard)"
         );
     }
     // Any explicit flag (or --yes) proceeds promptlessly as the scriptable
@@ -316,7 +320,7 @@ version = 1
 /// `instructions/` dir. This blesses the home layer as a first-class manifest:
 /// `agentstack instructions` run from `$HOME` (or with `--manifest-dir`)
 /// compiles its fragments into each CLI's global instruction file. The
-/// zero-files bridge deliberately never discovers this layer as a project
+/// zero-files gateway deliberately never discovers this layer as a project
 /// (see `manifest::discover_project_base`).
 fn run_global(args: &InitArgs) -> Result<()> {
     let home = crate::util::paths::agentstack_home();
@@ -565,6 +569,9 @@ fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Re
     let mut servers: IndexMap<String, Server> = IndexMap::new();
     let mut settings: IndexMap<String, serde_json::Value> = IndexMap::new();
     let mut display_names: Vec<String> = Vec::new();
+    // name → how many later CLIs defined it differently (IndexMap keeps
+    // first-seen order so the warnings print in import order).
+    let mut conflict_counts: IndexMap<String, usize> = IndexMap::new();
 
     for desc in registry.iter() {
         if !desc.detected() {
@@ -575,12 +582,11 @@ fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Re
 
         if let Some(value) = desc.read_config_value()? {
             let imported = extract_servers(desc, &value);
-            let conflicts = merge_servers(&mut servers, imported);
-            for c in conflicts {
-                println!(
-                    "{} server '{c}' differs between CLIs — kept the first definition",
-                    "⚠".yellow()
-                );
+            // Collect conflicts across ALL CLIs and report each name once at
+            // the end of the loop — a server defined differently in 4 CLIs used
+            // to print the same warning 3 times.
+            for c in merge_servers(&mut servers, imported) {
+                *conflict_counts.entry(c).or_insert(0usize) += 1;
             }
         }
         // Import this CLI's existing native settings (catalog keys only).
@@ -590,6 +596,14 @@ fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Re
                 settings.insert(desc.id.clone(), serde_json::Value::Object(imported));
             }
         }
+    }
+    for (name, extra) in &conflict_counts {
+        println!(
+            "{} server '{name}' is defined differently by {} other CLI(s) — kept the first \
+             definition imported (the others stay in their CLI's own config)",
+            "⚠".yellow(),
+            extra
+        );
     }
 
     if detected.is_empty() {
@@ -925,7 +939,7 @@ mod tests {
             .expect_err("a flagless non-TTY init must refuse");
         let msg = format!("{err:#}");
         assert!(
-            msg.contains("--yes") && msg.contains("not a terminal"),
+            msg.contains("--yes") && msg.contains("without a terminal"),
             "the refusal names the scripted escape and the reason: {msg}"
         );
         // Nothing was written under either manifest layout.

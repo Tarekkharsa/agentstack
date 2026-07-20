@@ -425,7 +425,13 @@ impl ExecutionPlan {
 fn preflight_prerequisites() -> Result<()> {
     agentstack_runtime::docker::DockerSandbox::connect()
         .map(|_backend| ())
-        .map_err(|e| anyhow::anyhow!("cannot reach Docker ({e}) — is the daemon running?"))
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "cannot reach Docker ({e}) — nothing was launched\n\n  \
+             start Docker Desktop (or your Docker daemon), verify with: docker info\n  \
+             then re-run the same command"
+            )
+        })
 }
 
 #[cfg(not(feature = "sandbox"))]
@@ -1239,8 +1245,13 @@ fn execute_proxy(
         &format!("http://agentstack:{proxy_token}@host.docker.internal:{port}"),
     );
 
-    let backend = agentstack_runtime::docker::DockerSandbox::connect()
-        .map_err(|e| anyhow::anyhow!("cannot reach Docker ({e}) — is the daemon running?"))?;
+    let backend = agentstack_runtime::docker::DockerSandbox::connect().map_err(|e| {
+        anyhow::anyhow!(
+            "cannot reach Docker ({e}) — nothing was launched\n\n  \
+             start Docker Desktop (or your Docker daemon), verify with: docker info\n  \
+             then re-run the same command"
+        )
+    })?;
     let result = run_container_to_completion(&spec, &log, &backend);
     drop(bridge); // stop the proxy now the run is done
     result
@@ -1297,8 +1308,13 @@ fn execute_lockdown(
         events.send(line.to_string());
     });
 
-    let backend = agentstack_runtime::docker::DockerSandbox::connect()
-        .map_err(|e| anyhow::anyhow!("cannot reach Docker ({e}) — is the daemon running?"))?;
+    let backend = agentstack_runtime::docker::DockerSandbox::connect().map_err(|e| {
+        anyhow::anyhow!(
+            "cannot reach Docker ({e}) — nothing was launched\n\n  \
+             start Docker Desktop (or your Docker daemon), verify with: docker info\n  \
+             then re-run the same command"
+        )
+    })?;
 
     // The per-run token (from execute_plan) authenticates the sandbox to the
     // sidecar: the sidecar reads it from its env; the sandbox presents it via

@@ -495,7 +495,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 impact: "medium",
                 title: format!("manifest changed since trusted: {path}"),
                 evidence: vec![
-                    "content digest no longer matches the trust grant — the bridge already dropped it to control-plane only (trust.json)".into(),
+                    "content digest no longer matches the trust grant — the gateway already dropped it to control-plane only (trust.json)".into(),
                 ],
                 action: format!("review the manifest, then: agentstack trust {path}"),
                 safe_auto: false,
@@ -575,7 +575,7 @@ fn print_report(ctx: &super::Context, recs: &[Recommendation], calls: &[CallReco
     );
     if calls.is_empty() {
         println!(
-            "{} the audit log is empty — recommendations are limited to static signals. Use the gateway (zero-files bridge or `agentstack run`) to collect runtime evidence.\n",
+            "{} the audit log is empty — recommendations are limited to static signals. Use the gateway (zero-files gateway or `agentstack run`) to collect runtime evidence.\n",
             "⚠".yellow()
         );
     }

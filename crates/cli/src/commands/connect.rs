@@ -1,4 +1,4 @@
-//! `agentstack gateway connect` / `disconnect` — register the zero-files bridge.
+//! `agentstack gateway connect` / `disconnect` — register the zero-files gateway.
 //!
 //! One tiny global entry per harness — `agentstack mcp --auto-project` — and
 //! every trusted repo brings its own servers, skills-over-MCP, firewall, and
@@ -49,7 +49,7 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
         let rendered = render_server(desc, &bridge, &MapResolver::default());
         if !rendered.representable {
             println!(
-                "  {} can't host a stdio MCP server — the bridge doesn't apply here",
+                "  {} can't host a stdio MCP server — the gateway doesn't apply here",
                 "↳".cyan()
             );
             continue;
@@ -87,11 +87,11 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
             touched.push(desc.display.clone());
             crate::util::atomic::write(&path, &proposed)?;
             println!(
-                "  {} bridge registered (agentstack mcp --auto-project)",
+                "  {} gateway registered (agentstack mcp --auto-project)",
                 "✓".green()
             );
         } else {
-            println!("  {} would register the bridge", "→".cyan());
+            println!("  {} would register the gateway", "→".cyan());
         }
         print_limits(desc);
     }
@@ -104,7 +104,7 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
     if changed > 0 {
         println!(
             "\nEach repo now only needs a trusted manifest: `agentstack trust <dir>` unlocks its \
-             servers for the bridge. Untrusted repos get control-plane tools only."
+             servers for the gateway. Untrusted repos get control-plane tools only."
         );
     }
     Ok(())
@@ -167,9 +167,9 @@ pub fn run_disconnect(args: &DisconnectArgs) -> Result<()> {
             ));
             touched.push(desc.display.clone());
             crate::util::atomic::write(&path, &proposed)?;
-            println!("  {} bridge removed", "✓".green());
+            println!("  {} gateway removed", "✓".green());
         } else {
-            println!("  {} would remove the bridge", "→".cyan());
+            println!("  {} would remove the gateway", "→".cyan());
         }
     }
 
@@ -196,7 +196,7 @@ fn select_targets<'r>(
                 format!("unknown adapter '{id}' (see `agentstack adapters list`)")
             })?;
             if desc.mcp.is_none() || desc.config.is_none() {
-                anyhow::bail!("{id} has no MCP config — the bridge doesn't apply to it");
+                anyhow::bail!("{id} has no MCP config — the gateway doesn't apply to it");
             }
             out.push(desc);
         }
@@ -211,7 +211,7 @@ fn select_targets<'r>(
                 // Say so for harnesses that are actually present.
                 if !for_removal && d.detected() {
                     println!(
-                        "{} {}: no MCP config support — the bridge doesn't apply, skipped",
+                        "{} {}: no MCP config support — the gateway doesn't apply, skipped",
                         "·".dimmed(),
                         d.id
                     );

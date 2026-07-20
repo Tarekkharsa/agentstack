@@ -257,7 +257,7 @@ pub fn activate(
         }
     }
 
-    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
+    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
     let ruleset = crate::render::ruleset_for(manifest)?;
     println!(
         "Activating profile '{}' (scope: {scope}) — {} server(s), {} skill(s)",
@@ -289,6 +289,9 @@ pub fn activate(
     // CLI binaries are on PATH but skills were genuinely written.
     let mut wrote_skill_dirs = 0;
     let mut blocked_targets: Vec<String> = Vec::new();
+    // Distinct missing secret names across targets — the final blocked error
+    // prints their exact `secret set` commands (see the apply counterpart).
+    let mut missing_secrets: std::collections::BTreeSet<String> = Default::default();
     // Project-scope artifacts we write are machine-local (absolute-path
     // symlinks, resolved values) — collect them for the managed .gitignore
     // block unless the user opts out. Entries are stable and directory-level
@@ -296,6 +299,12 @@ pub fn activate(
     // profile membership changes.
     let project_root = crate::manifest::project_root_of(&ctx.dir);
     let mut ignore_entries: Vec<String> = Vec::new();
+    // Pre-write snapshots of every server config this activation touches, so
+    // `agentstack restore` can undo a `use --write` exactly like an `apply
+    // --write` (skill materializations are additive and reverted by `session
+    // end`, so they are not captured here).
+    let mut backups: Vec<crate::history::FileChange> = Vec::new();
+    let mut history_targets: Vec<String> = Vec::new();
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -360,7 +369,14 @@ pub fn activate(
                     );
                 }
                 for u in &plan.unresolved {
-                    println!("  {} unresolved secret {}", "✗".red(), u);
+                    // Same ↳ fix convention as doctor: the entry reads
+                    // "NAME (server 'x')", so the first token is the ref name.
+                    let name = u.split_whitespace().next().unwrap_or(u.as_str());
+                    println!(
+                        "  {} unresolved secret {u} ↳ agentstack secret set {name}",
+                        "✗".red()
+                    );
+                    missing_secrets.insert(name.to_string());
                 }
                 for d in &plan.denied {
                     println!("  {} blocked by policy: {}", "✗".red(), d);
@@ -384,6 +400,11 @@ pub fn activate(
                             "✗".red()
                         );
                     } else if args.write {
+                        backups.push(crate::history::capture(
+                            &plan.config_path,
+                            format!("{} · servers", desc.display),
+                        ));
+                        history_targets.push(desc.display.clone());
                         plan.write()?;
                         state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
                         // Track what this guarded write kept on disk (empty
@@ -529,6 +550,12 @@ pub fn activate(
         // genuinely activated, so it still pins.
         let nothing_activated = wrote == 0 && wrote_skill_dirs == 0;
         let total_failure = !blocked_targets.is_empty() && nothing_activated;
+        // One undoable history entry for the server configs this activation
+        // wrote. Best-effort, like apply: never fail a successful use over it.
+        if !backups.is_empty() {
+            history_targets.dedup();
+            let _ = crate::history::record(scope.as_str(), history_targets.clone(), backups);
+        }
         if !total_failure {
             // Record each activated skill + server's resolved digest so a fresh
             // checkout resolves the same content (and `doctor`/`explain` can
@@ -556,6 +583,11 @@ pub fn activate(
                     label
                 );
             }
+            // Only claim undoability for what restore actually covers: the
+            // server configs captured above (skills revert via `session end`).
+            if wrote > 0 {
+                println!("  {}", "undo: agentstack restore".dimmed());
+            }
         } else {
             // A blocked target is a failure, not a footnote: report it in the
             // summary and exit nonzero so scripts can't mistake this for done.
@@ -566,8 +598,17 @@ pub fn activate(
                 blocked_targets.len(),
                 blocked_targets.join(", ")
             );
+            let fix = if missing_secrets.is_empty() {
+                "each ✗ above names the blocker".to_string()
+            } else {
+                let cmds: Vec<String> = missing_secrets
+                    .iter()
+                    .map(|n| format!("agentstack secret set {n}"))
+                    .collect();
+                format!("fix: {} (or pass --allow-unresolved)", cmds.join(" · "))
+            };
             anyhow::bail!(
-                "unresolved secret(s) blocked {} target(s) — `agentstack secret set <NAME>` or pass --allow-unresolved",
+                "unresolved secret(s) blocked {} target(s) — {fix}",
                 blocked_targets.len()
             );
         }

@@ -196,7 +196,7 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
         .with_context(|| format!("no profile '{profile}' in the manifest"))?;
 
     let state = State::load().unwrap_or_default();
-    let target_ids = resolve_targets(manifest, &ctx.registry, &[]);
+    let target_ids = resolve_targets(manifest, &ctx.registry, &[])?;
 
     // Resolve the profile once (library-aware, inline-first) — the same
     // prepared set drives the snapshot planning below AND the activation, so

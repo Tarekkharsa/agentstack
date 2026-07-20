@@ -119,22 +119,33 @@ pub fn list() -> Vec<RunRecord> {
     map.into_values().collect()
 }
 
-/// Launch `harness` as a tracked child, optionally applying `profile` for the
-/// life of the run. Blocks until the harness exits (it's attached to this
-/// terminal), then prunes the record and reverts the profile unless `keep`.
-pub fn launch(
-    manifest_dir: Option<&Path>,
-    harness: &str,
-    profile: Option<&str>,
-    scope: Scope,
-    extra_args: &[String],
-    keep: bool,
-) -> Result<()> {
+/// Everything `launch` needs, resolved and validated up front — so the CLI
+/// layer can run every check that might fail (manifest present, harness id
+/// known, binary on PATH) BEFORE printing its "▶ launching…" banner. Split for
+/// the same reason `sandbox.rs` checks the Docker daemon before its banner: a
+/// user must never read "launching" above an error that means nothing launched.
+pub struct LaunchPlan {
+    ctx: crate::commands::Context,
+    /// The id as the user typed it — recorded verbatim so `report runs` shows
+    /// what was actually invoked.
+    harness: String,
+    bin: String,
+    display: String,
+}
+
+/// Resolve and validate a launch without side effects: load the manifest, look
+/// up `harness` in the adapter registry, and confirm its binary is on PATH.
+pub fn prepare(manifest_dir: Option<&Path>, harness: &str) -> Result<LaunchPlan> {
     let ctx = crate::commands::load(manifest_dir)?;
-    let desc = ctx
-        .registry
-        .get(harness)
-        .with_context(|| format!("unknown harness '{harness}' — see `agentstack adapters list`"))?;
+    let desc = ctx.registry.get(harness).with_context(|| {
+        // Name the valid ids right in the error: the full set is small (13),
+        // and "see `agentstack adapters list`" alone costs a round-trip.
+        let ids: Vec<&str> = ctx.registry.ids().collect();
+        format!(
+            "unknown CLI '{harness}' — valid ids: {} (details: `agentstack adapters list`)",
+            ids.join(" · ")
+        )
+    })?;
     let bin = desc
         .detect
         .bin
@@ -147,6 +158,33 @@ pub fn launch(
         );
     }
     let display = desc.display.clone();
+    Ok(LaunchPlan {
+        ctx,
+        harness: harness.to_string(),
+        bin,
+        display,
+    })
+}
+
+/// Launch a prepared harness as a tracked child, optionally applying `profile`
+/// for the life of the run. Blocks until the harness exits (it's attached to
+/// this terminal), then prunes the record and reverts the profile unless
+/// `keep`. Build the plan with [`prepare`].
+pub fn launch(
+    plan: LaunchPlan,
+    manifest_dir: Option<&Path>,
+    profile: Option<&str>,
+    scope: Scope,
+    extra_args: &[String],
+    keep: bool,
+) -> Result<()> {
+    let LaunchPlan {
+        ctx,
+        harness,
+        bin,
+        display,
+    } = plan;
+    let harness = harness.as_str();
     let dir = ctx.dir.clone();
 
     // Apply a profile for the lifetime of this run, if asked. Reuses the session

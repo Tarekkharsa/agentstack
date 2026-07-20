@@ -36,7 +36,7 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // Collect servers present on disk but absent from the manifest, plus
     // hand-edited fields of servers the manifest already knows.
     let mut collected: IndexMap<String, Server> = IndexMap::new();
-    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
+    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
     // Detecting an edited field needs the rendered baseline, and rendering
     // resolves secrets under the effective policy — same gate as apply/diff.
     let ruleset = ruleset_for(manifest)?;

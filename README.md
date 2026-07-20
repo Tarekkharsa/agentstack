@@ -140,6 +140,9 @@ skills = ["sql-review"]                      # resolves from your central librar
 default = ["claude-code", "codex"]
 ```
 
+You can hand-write this, but you don't have to: `agentstack add server` and
+`agentstack add from <id>` append servers to the manifest for you.
+
 One `agentstack apply` compiles it into the native config of every CLI in
 `[targets]` — each adapter's quirks handled for you:
 

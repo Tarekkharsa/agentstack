@@ -211,7 +211,7 @@ pub fn serve(
         return Ok(());
     }
 
-    // --auto-project (the zero-files bridge, registered once globally by
+    // --auto-project (the zero-files gateway, registered once globally by
     // `agentstack gateway connect`): discover the active project per session — client
     // roots → cwd walk-up → $AGENTSTACK_MANIFEST_DIR — and trust-gate it. The
     // gateway is built lazily on the first tools/call, which gives the client

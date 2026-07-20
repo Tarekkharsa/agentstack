@@ -197,7 +197,7 @@ pub(crate) fn orientation_trust_note(trust: crate::trust::TrustState) -> Option<
     use crate::trust::TrustState;
     match trust {
         TrustState::Untrusted | TrustState::Changed => {
-            Some("its servers are inert — the bridge serves control-plane tools only until you review it")
+            Some("its servers are inert — the gateway serves control-plane tools only until you review it")
         }
         TrustState::Trusted => None,
     }
@@ -230,7 +230,50 @@ pub(crate) fn profiles_line(names: &[String], active: Option<&str>) -> String {
     }
 }
 
+/// `agentstack status` — the orientation screen by name, plus the cheap health
+/// signals a glance wants (secrets resolving?) and the pointer to the deep
+/// check. Everything expensive (drift rendering, content scans) stays in
+/// `doctor`; status must feel instant.
+pub fn run_status(manifest_dir: Option<&Path>) -> Result<()> {
+    render(manifest_dir, true)
+}
+
 pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
+    render(manifest_dir, false)
+}
+
+/// Secrets at a glance for `status`: the single most common thing broken after
+/// setup. One aligned line when everything resolves; one line per missing
+/// secret, each carrying its exact fix command.
+fn print_secrets_line(ctx: &super::Context) {
+    let refs = ctx.loaded.manifest.referenced_secrets();
+    if refs.is_empty() {
+        return;
+    }
+    let sources = crate::secret::SecretSources::detect(&ctx.dir);
+    let missing: Vec<&String> = refs
+        .iter()
+        .filter(|n| sources.source_of(n).is_none())
+        .collect();
+    if missing.is_empty() {
+        println!(
+            "  {}  {} referenced, all resolve",
+            "Secrets ".bold(),
+            refs.len()
+        );
+    } else {
+        for name in missing {
+            println!(
+                "  {}  {} {name} not set   {}",
+                "Secrets ".bold(),
+                "✗".red(),
+                format!("fix: agentstack secret set {name}").dimmed()
+            );
+        }
+    }
+}
+
+fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
     println!(
         "{} {} — one portable manifest, every agent CLI\n",
         "agentstack".bold(),
@@ -274,12 +317,22 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
                 if !m.skills.is_empty() {
                     parts.push(format!("{} skill(s)", m.skills.len()));
                 }
+                // No [targets] pinned → commands fan out to the detected CLIs
+                // (see render::resolve_targets); "0 target(s)" would be false.
+                let targets_note = if m.targets.default.is_empty() {
+                    let n = crate::render::resolve_targets(m, &ctx.registry, &[])
+                        .map(|t| t.len())
+                        .unwrap_or_default();
+                    format!("{n} detected CLI(s), no [targets] pinned")
+                } else {
+                    format!("{} target(s)", m.targets.default.len())
+                };
                 println!(
-                    "  {}  {} — {} → {} target(s)",
+                    "  {}  {} — {} → {}",
                     "Manifest".bold(),
                     manifest_path.display(),
                     parts.join(" · "),
-                    m.targets.default.len()
+                    targets_note
                 );
 
                 // Profiles get their own line, named rather than counted (P18):
@@ -333,7 +386,7 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
 
                 // Untrusted (or trust-stale) teaches the human what that state
                 // *means*, not just the label (P16): an untrusted manifest's
-                // servers stay inert — the bridge serves control-plane tools
+                // servers stay inert — the gateway serves control-plane tools
                 // only until the digest is reviewed and pinned. One line,
                 // aligned under the Status content it explains. Only shown when
                 // trust is relevant — for a static, no-gateway project the note
@@ -352,6 +405,10 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
                     mode.label(),
                     format!("— {}", mode.short()).dimmed()
                 );
+
+                if status {
+                    print_secrets_line(&ctx);
+                }
 
                 let has_capabilities = !m.skills.is_empty() || !m.servers.is_empty();
                 next_step(trust, locked, has_capabilities, trust_relevant)
@@ -375,6 +432,12 @@ pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
         next.1.dimmed()
     );
     println!("  {}", "All commands: agentstack --help".dimmed());
+    if status {
+        println!(
+            "  {}",
+            "Deep check (drift, quirks, supply chain): agentstack doctor".dimmed()
+        );
+    }
     Ok(())
 }
 

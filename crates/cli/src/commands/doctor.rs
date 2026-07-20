@@ -25,6 +25,10 @@ use crate::util::paths;
 #[derive(PartialEq)]
 enum Level {
     Ok,
+    /// True but not actionable here: an undetected CLI, another manifest's
+    /// leftovers. Rendered dimmed, counted in neither total — so the closing
+    /// "N error(s), M warning(s)" only counts things this project should act on.
+    Info,
     Warn,
     Error,
 }
@@ -79,6 +83,7 @@ impl Report {
     fn line(&mut self, level: Level, msg: impl AsRef<str>) {
         let tag = match level {
             Level::Ok => "ok",
+            Level::Info => "info",
             Level::Warn => {
                 self.warnings += 1;
                 "warn"
@@ -109,7 +114,12 @@ impl Report {
     fn print(&self, show_all: bool) {
         let mut hidden = 0;
         for s in &self.sections {
-            let flagged = s.lines.iter().any(|(tag, _)| *tag != "ok");
+            // Info lines are context, not findings — they don't force an
+            // otherwise-irrelevant section into view.
+            let flagged = s
+                .lines
+                .iter()
+                .any(|(tag, _)| *tag == "warn" || *tag == "error");
             if !(show_all || s.relevant || flagged) {
                 hidden += 1;
                 continue;
@@ -119,9 +129,15 @@ impl Report {
                 let mark = match *tag {
                     "warn" => "⚠".yellow().to_string(),
                     "error" => "✗".red().to_string(),
+                    "info" => "·".dimmed().to_string(),
                     _ => "✓".green().to_string(),
                 };
-                println!("  {mark} {msg}");
+                // Dim info lines whole so the eye skips them on a first read.
+                if *tag == "info" {
+                    println!("  {mark} {}", msg.dimmed());
+                } else {
+                    println!("  {mark} {msg}");
+                }
             }
         }
         if hidden > 0 {
@@ -131,6 +147,25 @@ impl Report {
                 "agentstack doctor --all".bold()
             );
         }
+    }
+
+    /// The fix from the first error line (or first warning when there are no
+    /// errors) that carries a `↳ fix` hint — the "start here" pointer for the
+    /// closing summary. Reuses the `↳` convention every actionable line in
+    /// this file already follows, so it needs no extra bookkeeping.
+    fn first_fix(&self) -> Option<&str> {
+        for want in ["error", "warn"] {
+            for s in &self.sections {
+                for (tag, msg) in &s.lines {
+                    if *tag == want {
+                        if let Some((_, fix)) = msg.split_once("↳ ") {
+                            return Some(fix.trim());
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn to_json(&self) -> serde_json::Value {
@@ -172,6 +207,12 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
             "{} error(s), {} warning(s).",
             report.errors, report.warnings
         );
+        // Triage, not just totals: name the one fix to start with.
+        if report.errors + report.warnings > 0 {
+            if let Some(fix) = report.first_fix() {
+                println!("  start with: {}", fix.bold());
+            }
+        }
     }
 
     // In CI mode any error fails the trust gate. Return an error rather than
@@ -311,7 +352,7 @@ fn run_checks(
         report.line(level, issue.message);
     }
 
-    let target_ids = resolve_targets(manifest, &ctx.registry, &[]);
+    let target_ids = resolve_targets(manifest, &ctx.registry, &[])?;
     let mut state = State::load()?;
     let mut fixed = 0;
 
@@ -345,17 +386,22 @@ fn run_checks(
                         format!("{:<14} config present but binary not on PATH", desc.display),
                     );
                 } else {
-                    report.line(Level::Warn, format!("{:<14} not detected", desc.display));
+                    // Not having a CLI installed is a fact, not a fault — Info,
+                    // so a machine with 5 of 13 CLIs isn't greeted by 8 warnings.
+                    report.line(
+                        Level::Info,
+                        format!("{:<14} not detected (ok unless you use it)", desc.display),
+                    );
                 }
             }
         }
     }
 
-    // Zero-files bridge: which harnesses have the global `agentstack mcp
+    // Zero-files gateway: which harnesses have the global `agentstack mcp
     // --auto-project` gateway registered, and where this project stands with
     // the trust gate. Not being connected is a choice, not a fault — only a
     // stale trust digest warns.
-    report.section("Zero-files bridge");
+    report.section("Zero-files gateway");
     let mut connected = 0;
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -373,14 +419,14 @@ fn run_checks(
             connected += 1;
             report.line(
                 Level::Ok,
-                format!("{:<14} bridge registered (agentstack mcp)", desc.display),
+                format!("{:<14} gateway registered (agentstack mcp)", desc.display),
             );
         }
     }
     if connected == 0 {
         report.line(
             Level::Ok,
-            "no harness connected — optional ↳ agentstack gateway connect --all",
+            "no CLI connected — optional ↳ agentstack gateway connect --all",
         );
     }
     let base = crate::manifest::project_root_of(&ctx.dir);
@@ -403,7 +449,7 @@ fn run_checks(
                 report.line(
                     Level::Warn,
                     format!(
-                        "not trusted — {connected} harness(es) use the bridge, but this project's {} server(s) are not proxied ↳ agentstack trust {}",
+                        "not trusted — {connected} CLI(s) use the gateway, but this project's {} server(s) are not proxied ↳ agentstack trust {}",
                         runtime.len(),
                         base.display()
                     ),
@@ -568,8 +614,11 @@ fn run_checks(
 
                 if !kept_report.is_empty() {
                     any_drift = true;
+                    // Another manifest's entries: apply already refuses to touch
+                    // them without --prune-foreign, so this is context (Info),
+                    // not something a fresh project must act on.
                     report.line(
-                        Level::Warn,
+                        Level::Info,
                         format!(
                             "{:<14} kept {} — applied by another manifest ↳ keep them: \
                      agentstack adopt{scope_flag} · prune them: agentstack apply \
@@ -601,10 +650,17 @@ fn run_checks(
                         // a real hand-edit to our keys. (A pure manifest change
                         // leaves the file untouched, so `touched` is false and this
                         // stays quiet; the pending-changes branch below reports that
-                        // case instead.)
+                        // case instead.) When the last write came from a DIFFERENT
+                        // manifest, "since last apply" isn't this project's story —
+                        // demote to Info so machine-wide state doesn't drown a
+                        // fresh project's report.
                         any_drift = true;
                         report.line(
-                            Level::Warn,
+                            if foreign_key {
+                                Level::Info
+                            } else {
+                                Level::Warn
+                            },
                             format!(
                                 "{:<14} edited on disk since last apply ↳ review: agentstack \
                              diff{scope_flag} · keep the hand-edit: agentstack \
@@ -697,8 +753,15 @@ fn run_checks(
                         } else {
                             "agentstack apply --write"
                         };
+                        // Foreign entries are safe by default (apply keeps them),
+                        // so that case is Info; a removal of entries THIS manifest
+                        // wrote stays a warning.
                         report.line(
-                            Level::Warn,
+                            if foreign_key {
+                                Level::Info
+                            } else {
+                                Level::Warn
+                            },
                             format!(
                             "{:<14} would REMOVE {} ↳ keep them: agentstack adopt{scope_flag} · \
                          prune them: {prune_cmd}{scope_flag}",
@@ -2175,6 +2238,32 @@ fn check_quirks(manifest: &Manifest) -> Vec<String> {
 mod tests {
     use super::*;
     use assert_fs::prelude::*;
+
+    /// DX witness for the closing triage line: `first_fix` returns the fix
+    /// from the first ERROR carrying a `↳` hint, falls back to the first
+    /// warning, and Info lines never count as findings.
+    #[test]
+    fn first_fix_prefers_errors_and_ignores_info() {
+        let mut r = Report::new();
+        r.section("A");
+        r.line(Level::Info, "cursor not detected ↳ not a real fix");
+        r.line(Level::Warn, "drift pending ↳ agentstack apply --write");
+        r.section("B");
+        r.line(
+            Level::Error,
+            "TOKEN not found ↳ agentstack secret set TOKEN",
+        );
+        // The error's fix wins even though the warning came first.
+        assert_eq!(r.first_fix(), Some("agentstack secret set TOKEN"));
+
+        let mut warn_only = Report::new();
+        warn_only.section("A");
+        warn_only.line(Level::Info, "context ↳ never surfaces");
+        warn_only.line(Level::Warn, "drift ↳ agentstack apply --write");
+        assert_eq!(warn_only.first_fix(), Some("agentstack apply --write"));
+        // Info lines count in neither total.
+        assert_eq!((warn_only.errors, warn_only.warnings), (0, 1));
+    }
 
     /// Build a `[policy.<dimension>]`-shaped map from `(server, patterns)`
     /// entries — the same keyed grammar underlies tools/egress/secrets.

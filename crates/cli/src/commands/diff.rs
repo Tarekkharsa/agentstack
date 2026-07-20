@@ -55,7 +55,7 @@ pub fn report(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<Outcome> {
         );
     }
 
-    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets);
+    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
     let state = State::load()?;
     let mut drift = 0;
     let mut kept_all: Vec<(String, Vec<String>)> = Vec::new();

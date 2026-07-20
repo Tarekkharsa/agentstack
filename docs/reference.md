@@ -54,7 +54,7 @@ The complete, implemented-and-tested feature inventory. The
   - [The Protected tier in detail (`run --locked`)](#the-protected-tier-in-detail-run---locked)
 - [Agent-operable (`agentstack mcp`)](#agent-operable-agentstack-mcp)
   - [Transparent mode (`--transparent`)](#transparent-mode---transparent)
-  - [The zero-file bridge (`--auto-project` + `trust`)](#the-zero-file-bridge---auto-project--trust)
+  - [The zero-files gateway (`--auto-project` + `trust`)](#the-zero-files-gateway---auto-project--trust)
   - [MCP profile leases](#mcp-profile-leases-one-connection-one-capability-fence)
   - [Compact proxied surface + code mode](#compact-proxied-surface--code-mode)
   - [Experimental `tools_execute`](#experimental-tools_execute)
@@ -68,6 +68,12 @@ The complete, implemented-and-tested feature inventory. The
   - [`tools_execute` cancellation](#tools_execute-cancellation)
 - [All commands](#all-commands)
 - [Everything shipped so far](#everything-shipped-so-far)
+
+**A few words used throughout:**
+
+- **CLI** — the agent tool you run (Claude Code, Codex, …). Some flags and output call it a *harness*.
+- **adapter** — agentstack's per-CLI config compiler; `agentstack adapters list` shows their ids.
+- **target** — an adapter id listed in `[targets]`, naming which CLIs a command acts on.
 
 ## Core engine
 
@@ -151,7 +157,7 @@ Cursor, Gemini CLI, OpenCode, and Copilot CLI) and round-trips through
 `init`/`adopt`. Adapters whose config has no such key (Claude Code, VS Code,
 Windsurf, Kiro, Claude Desktop, …) render the server without it and `apply`
 prints a warning — the server may need a shell wrapper that `cd`s first on
-those harnesses.
+those CLIs.
 
 The gateway honors `cwd` too: stdio upstreams are spawned in the server's
 `cwd` (relative paths anchor at the project root), defaulting to the project
@@ -168,7 +174,7 @@ provenance and lock pinning but delivered by some other path). `apply`,
 
 ### Owned servers (`owner = "codex"`)
 
-Some harness apps rewrite their own server entries — the Codex desktop app,
+Some CLIs rewrite their own server entries — the Codex desktop app,
 for one, refreshes `node_repl` env values on every self-update. Left alone,
 the manifest goes stale, `doctor` flags drift, and a blind `apply --write`
 would *downgrade* the app's fresh values. Marking the server as owned flips
@@ -234,18 +240,18 @@ rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled `CLAUDE.md`
   `agentstack lock` pins name refs without rendering, so `git status` stays
   silent.
 - **Zero files / MCP** — no persistent per-project provider artifacts. `agentstack
-  gateway connect` registers the gateway once per harness (one write to each
-  harness's global config) and every **trusted** repo serves its own stack
+  gateway connect` registers the gateway once per CLI (one write to each
+  CLI's global config) and every **trusted** repo serves its own stack
   live. `agentstack_lease_open(profile)` can fence one MCP connection to a
   profile without rendering native files; `agentstack_lease_status` shows its
   in-memory load trail, `agentstack_lease_freeze` promotes the observed set to
   a manifest profile (review it, then run `agentstack lock`), and close/process
   exit drops it. A machine-local
   `codemode/endpoint.json` coordinate may exist for the connection's duration — see
-  [the zero-file bridge](#the-zero-file-bridge---auto-project--trust).
+  [the zero-files gateway](#the-zero-files-gateway---auto-project--trust).
 
 **Recommendation:** prefer the zero-file lease path for interactive work when
-the harness supports MCP; use static or clean-at-rest delivery when the harness
+the CLI supports MCP; use static or clean-at-rest delivery when the CLI
 must read native skill/instruction files. Add `--sandbox --lockdown` when the
 agent process itself needs isolation—a lease is a capability fence, not a
 sandbox. See [the primitives and decision table](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need).
@@ -473,7 +479,7 @@ pending again.
 
 Every check always runs, but the default report prints only the sections
 relevant to this project — a feature you've never touched (the zero-files
-bridge, native extensions, reproducibility pins…) stays out of the way until it
+gateway, native extensions, reproducibility pins…) stays out of the way until it
 either gets used or produces a warning/error, which always shows. A closing
 line counts what was hidden; `doctor --all` prints everything, and `--ci`
 always shows the full report (a team gate prints exactly what it evaluated).
@@ -645,7 +651,7 @@ instruction fragments — the operational knowledge you'd otherwise re-teach
 each agent. Compile them with `agentstack instructions --manifest-dir ~
 --write`. It also seeds the machine `[guard]` + `[policy.filesystem]` deny
 defaults (the same list `guard install` writes) and offers to install the host
-guard into detected CLIs. The zero-files bridge deliberately never discovers
+guard into detected CLIs. The zero-files gateway deliberately never discovers
 this layer as a project — it cannot be `trust`ed or activated by
 `mcp --auto-project`.
 
@@ -673,7 +679,10 @@ Manage each CLI's own settings file (Claude Code `~/.claude/settings.json`
 permissions/feature flags, Codex `config.toml`) from one `[settings.<cli>]`
 block. `apply` merges only the keys you declare into the real file (top-level
 ownership), resolves `${REF}`s, preserves hand-set keys, and prunes keys that
-leave the manifest. Viewable in the dashboard's Settings tab.
+leave the manifest. Viewable in the dashboard's Settings tab. Edit these keys
+without hand-editing the manifest with `agentstack settings set <target> <key>
+<value>` (and `settings unset <target> <key>` to drop one) — dry-run by
+default, `--write` applies.
 
 ### Lifecycle hooks
 
@@ -916,7 +925,7 @@ agentstack kill <id>           # SIGTERM, then SIGKILL if it won't go
 agentstack kill <id> --force   # SIGKILL immediately
 ```
 
-Launching is a terminal act (the harnesses are interactive TUIs); the dashboard's
+Launching is a terminal act (the CLIs are interactive TUIs); the dashboard's
 **Runs** panel is for observing tracked runs (it shows the `kill` command). The registry is
 self-healing: a run whose wrapper died is pruned on the next `report runs`. A
 profile-bound run uses the session engine, so one is allowed per directory at a
@@ -1029,7 +1038,7 @@ and propose capabilities. The control-plane surface it advertises, grouped:
   sandbox-enabled builds — the experimental
   [`tools_execute`](#experimental-tools_execute).
 
-Register it once per harness:
+Register it once per CLI:
 
 ```bash
 agentstack gateway connect claude-code codex   # dry-run: shows the config diff
@@ -1037,7 +1046,7 @@ agentstack gateway connect --all --write       # every installed harness
 ```
 
 `gateway connect` writes one small entry — `agentstack mcp --auto-project` — into the
-harness's **global** MCP config (undo with `gateway disconnect`, verify with `doctor`).
+CLI's **global** MCP config (undo with `gateway disconnect`, verify with `doctor`).
 You can still register it by hand like any stdio MCP server if you prefer:
 
 ```json
@@ -1065,7 +1074,7 @@ the `listChanged` capability and sends `notifications/tools/list_changed`
 once the (trust-gated) gateway comes up — clients re-fetch `tools/list` and
 see the upstream tools without ever calling a control-plane tool first.
 
-### The zero-file bridge (`--auto-project` + `trust`)
+### The zero-files gateway (`--auto-project` + `trust`)
 
 With `--auto-project`, one global registration serves **every** repo: at session
 start the gateway discovers the active project — MCP client roots → cwd walk-up →
@@ -1142,8 +1151,8 @@ instructions point at `agentstack_list_loadable` instead of probing the cwd.
 Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
 skills-over-MCP (`agentstack_list_loadable`/`agentstack_load`) create no
 per-project native artifacts. Native skill folders and instruction files (`CLAUDE.md`/`AGENTS.md`)
-are read from disk by the harnesses themselves and still need render mode
-(`apply`/`use`) — `gateway connect` prints this per harness.
+are read from disk by the CLIs themselves and still need render mode
+(`apply`/`use`) — `gateway connect` prints this per CLI.
 
 ### MCP profile leases: one connection, one capability fence
 
@@ -1316,8 +1325,8 @@ manifest (lifting inline secrets to `${REF}`s) from what's on disk.
 
 **The tabs:**
 
-- **Overview** — stat tiles, next-actions, stack summary, the zero-files bridge
-  (connected harnesses + this repo's trust state), profiles, and usage. Each
+- **Overview** — stat tiles, next-actions, stack summary, the zero-files gateway
+  (connected CLIs + this repo's trust state), profiles, and usage. Each
   next-action links to the relevant tab or opens a read-only diff.
 - **Runs** — live `agentstack run` processes, with uptime, profile, reachable
   capabilities, and per-run **Calls** (the audited tool-call footprint, digests
@@ -1387,9 +1396,9 @@ were previously only on the docs site.
 
 AgentStack assumes harness-native configuration is established **when the CLI
 launches**. `use` and `session start` write a profile's native MCP config and
-skills to disk, but a harness that is already running may not observe the change
+skills to disk, but a CLI that is already running may not observe the change
 until it is relaunched. To switch profiles deterministically for a running
-harness — `use profile-B --write` rewrites the files, then relaunch it — rather
+CLI — `use profile-B --write` rewrites the files, then relaunch it — rather
 than assuming a live reload. Live, in-process switching is the MCP lease path's
 job, not the native-file path's.
 
@@ -1448,34 +1457,35 @@ Reach for it when you need the exact verb, flag, or subcommand.
 <!-- agentstack:generated commands -->
 - **`setup`** _(hidden)_ — Hidden alias of interactive `init` (P27: one front-door verb) — flags `--target/--profile/--scope`
 - **`init`** — Set up everything in one command: detect, import, choose, apply, verify — flags `--global/--force/--dry-run/--secrets/--no-keychain/--yes`
+- **`status`** — Where this project stands, on one screen: detected CLIs, manifest, trust, secrets, and the one next step
 - **`add`** — Add a server or skill to the manifest — subcommands `from/server/skill`
 - **`search`** — Search the capability catalog (and mark what's already added)
 - **`apply`** — Render the manifest into each target's native config — flags `--target/--profile/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore`
-- **`instructions`** — Compile [instructions.*] into each harness's CLAUDE.md / AGENTS.md — flags `--target/--scope/--write`
+- **`instructions`** _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags `--target/--scope/--write`
 - **`doctor`** — Verify everything is wired up: adapters, secrets, drift, quirks, skills — flags `--ci/--live/--fix/--deep/--all/--json`
-- **`dashboard`** — Open the local web dashboard — a read-only view of your stack — flags `--port/--no-open`
+- **`dashboard`** _(hidden)_ — Open the local web dashboard — a read-only view of your stack — flags `--port/--no-open`
 - **`remove`** _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags `--write`
 - **`install`** _(hidden)_ — Fetch skill sources into the store and write the lockfile — flags `--locked/--allow-flagged`
-- **`lock`** — Resolve each profile's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`
-- **`lib`** — Manage the central capability library — subcommands `add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/sync/pack-init`
-- **`adopt`** — Keep a hand-edit: pull drifted native config back into the manifest — flags `--target/--scope/--write/--no-keychain`
+- **`lock`** _(hidden)_ — Resolve each profile's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`
+- **`lib`** _(hidden)_ — Manage the central capability library — subcommands `add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/sync/pack-init`
+- **`adopt`** _(hidden)_ — Keep a hand-edit: pull drifted native config back into the manifest — flags `--target/--scope/--write/--no-keychain`
 - **`use`** — Activate a profile: render its servers + materialize its skills — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore`
 - **`session`** _(hidden)_ — Manage ephemeral sessions: load a profile for now, then revert it — subcommands `start/end/list/freeze`
 - **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--profile/--scope/--keep/--sandbox/--lockdown/--plan`
 - **`kill`** _(hidden)_ — Kill a tracked run by id (and revert its profile if it owned one) — flags `--force`
-- **`report`** — Every "what happened" view in one place — subcommands `run/runs/usage/calls/wire`
+- **`report`** _(hidden)_ — Every "what happened" view in one place — subcommands `run/runs/usage/calls/wire`
 - **`sign`** _(hidden)_ — Sign this project's agentstack.lock with a fresh ed25519 key (writes a detached agentstack.lock.sig, prints the public key to publish) — flags `--print-key-only`
 - **`verify`** _(hidden)_ — Verify agentstack.lock against a published ed25519 public key and its detached signature — flags `--pubkey/--signature`
-- **`guard`** — Machine-level destructive-command guard — subcommands `test/install/uninstall/status`
-- **`gateway`** _(hidden)_ — The zero-files gateway: register it once per harness (`connect`) and every trusted repo brings its own servers through `agentstack mcp --auto-project` with no per-project files — subcommands `connect/disconnect`
-- **`trust`** — Trust a project's manifest for the zero-files bridge (direnv-style) — flags `--list/--revoke/--yes`
+- **`guard`** _(hidden)_ — Machine-level destructive-command guard — subcommands `test/install/uninstall/status`
+- **`gateway`** _(hidden)_ — The zero-files gateway: register it once per CLI (`connect`) and every trusted repo brings its own servers through `agentstack mcp --auto-project` with no per-project files — subcommands `connect/disconnect`
+- **`trust`** — Trust a project's manifest for the zero-files gateway (direnv-style) — flags `--list/--revoke/--yes`
 - **`mcp`** _(hidden)_ — Run agentstack as an MCP server over stdio (for an agent to call) — flags `--auto-project/--transparent`
 - **`diff`** _(hidden)_ — Show drift between the manifest and the on-disk configs — flags `--target/--profile/--scope`
-- **`explain`** — Explain a server or skill before you rely on it
+- **`explain`** _(hidden)_ — Explain a server or skill before you rely on it
 - **`optimize`** _(hidden)_ — Turn agentstack's collected signals into concrete recommendations — flags `--json/--write/--since`
 - **`proxy`** _(hidden)_ — Start the wire relay: a localhost proxy in front of the Anthropic API — flags `--port/--upstream`
 - **`restore`** _(hidden)_ — Undo a recorded write: revert an apply/use/session history entry (servers, settings, hooks, instructions), or restore one adapter's config from its single-slot backup — flags `--last/--scope/--write`
-- **`secret`** — Manage secrets in the OS keychain — subcommands `set/get/rm/list`
+- **`secret`** _(hidden)_ — Manage secrets in the OS keychain — subcommands `set/get/rm/list`
 - **`settings`** _(hidden)_ — Edit a target's native `[settings.<target>]` entries — subcommands `set/unset`
 - **`export`** _(hidden)_ — Export the manifest (+ lock, + optionally secrets) as an encrypted bundle — flags `--output/--secrets/--passphrase`
 - **`import`** _(hidden)_ — Import an encrypted bundle on a new machine — flags `--force/--no-keychain/--passphrase`
@@ -1500,7 +1510,7 @@ content-pinned harness add-ons, re-verified at `run --locked`) · atomic writes 
 `export`/`import` · portable lifecycle hooks · agent-operable `mcp` server · local read-only dashboard
 (server/skill matrices, Discover, Doctor, Runs; GET-only, copies the CLI command for every change) · live runs
 (`run`/`report runs`/`kill` + dashboard Runs panel) · GitHub Action trust gate ·
-nightly adapter-conformance CI · zero-file bridge (`gateway connect` + `mcp
+nightly adapter-conformance CI · zero-files gateway (`gateway connect` + `mcp
 --auto-project` + digest-pinned `trust`) · `optimize` (evidence-backed
 recommendations from usage/audit/cost signals, safe-class `--write`) ·
 fail-closed `lib sync` secret gate (all server fields + outgoing history) ·

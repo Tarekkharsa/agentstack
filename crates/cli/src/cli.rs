@@ -1,10 +1,9 @@
-//! Command-line surface (clap derive). The visible set is the everyday loop
-//! (init/add/search/apply/use/run/doctor/report/trust/guard/secret/
-//! dashboard/instructions — `setup` survives only as a hidden alias of init)
-//! plus the four that carry the product's core
-//! promises — explain (inspect before trusting), lock (reproducible pins),
-//! lib (the central library), adopt (keep a hand-edit); everything else is
-//! hidden-but-functional and cataloged in the `after_help` map below.
+//! Command-line surface (clap derive). The visible set is the beginner loop —
+//! init/status/add/search/apply/use/doctor/run/trust (`setup` survives only as
+//! a hidden alias of init) — and EVERY command, visible or hidden, appears in
+//! the task-grouped map in `after_help` below, so `--help` is one complete
+//! screen: a short list to start from, a full map to grow into. Hidden
+//! commands still run and still have their own `--help`.
 
 use std::path::PathBuf;
 
@@ -24,16 +23,20 @@ use crate::scope::Scope;
 Start here:
   agentstack                     orientation + the one next step for this directory
   agentstack init                one command sets up everything: import, choose, apply, verify
-  init --secrets … / apply / use             the same steps for scripts, no prompts
+  agentstack status              where this project stands, on one screen
 
-The list above is the everyday surface. Everything else is grouped below —
-run `agentstack <command> --help` for any of them:
+The list above is the everyday loop. This is the full map, grouped by task —
+every command (listed or not) has its own --help:
 
-  Capabilities & library   remove · install
-  Activate & run           session · kill
-  Zero-files bridge        gateway · mcp
-  Inspect & tune           diff · optimize · proxy · restore · settings · sign · verify
-  Share & extend           export · import · adapters · self"
+  Set up      init · status · adapters · settings · self
+  Edit        add · search · remove · install · lib · adopt · export · import
+  Render      apply · use · instructions · lock · session · diff · restore
+  Protect     trust · explain · secret · guard · sign · verify
+  Run         run · kill · gateway · mcp
+  Inspect     doctor · report · dashboard · optimize · proxy
+
+Words: a CLI (a.k.a. harness) is the agent tool you run; an adapter compiles
+its native config; [targets] in the manifest lists which CLIs commands act on."
 )]
 pub struct Cli {
     /// Project or manifest directory (prefers .agentstack/agentstack.toml).
@@ -70,6 +73,14 @@ pub enum Command {
     /// guided; scripts get the promptless primitive via flags.
     Init(InitArgs),
 
+    /// Where this project stands, on one screen: detected CLIs, manifest,
+    /// trust, secrets, and the one next step.
+    ///
+    /// The same orientation bare `agentstack` prints — reachable by name so
+    /// muscle memory (`git status`, `docker status`, …) and scripts land
+    /// somewhere useful. Deep verification stays in `agentstack doctor`.
+    Status(StatusArgs),
+
     /// Add a server or skill to the manifest.
     Add(AddArgs),
 
@@ -82,10 +93,11 @@ pub enum Command {
     /// to apply directly.
     Apply(ApplyArgs),
 
-    /// Compile [instructions.*] into each harness's CLAUDE.md / AGENTS.md.
+    /// Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md.
     ///
     /// Fragments render into a managed region; hand-written prose is
     /// preserved. Dry-run by default; `--write` applies.
+    #[command(hide = true)]
     Instructions(InstructionsArgs),
 
     /// Verify everything is wired up: adapters, secrets, drift, quirks, skills.
@@ -95,6 +107,7 @@ pub enum Command {
     ///
     /// Shows state, diffs, doctor, runs, and audited calls. Every change
     /// happens through the CLI.
+    #[command(hide = true)]
     Dashboard(DashboardArgs),
 
     // ── Capabilities & library ───────────────────────────────────────────
@@ -113,18 +126,21 @@ pub enum Command {
     /// for clean-at-rest repos that keep no generated files. `--update`
     /// re-resolves git skills to their latest first; `--upgrade` re-resolves
     /// an installed vendor pack and applies its changes.
+    #[command(hide = true)]
     Lock(LockArgs),
 
     /// Manage the central capability library.
     ///
     /// `~/.agentstack/lib/` holds capabilities that projects reference by
     /// name instead of copying files.
+    #[command(hide = true)]
     Lib(LibArgs),
 
     /// Keep a hand-edit: pull drifted native config back into the manifest.
     ///
     /// Imports hand-added servers and hand-edited fields from target configs
     /// so the manifest stays the source of truth.
+    #[command(hide = true)]
     Adopt(AdoptArgs),
 
     // ── Activate & run ───────────────────────────────────────────────────
@@ -149,7 +165,7 @@ pub enum Command {
     ///
     /// A sandboxed run's flight recorder, live tracked runs, usage
     /// analytics, and brokered-call activity.
-    #[command(subcommand)]
+    #[command(subcommand, hide = true)]
     Report(ReportCmd),
 
     /// Sign this project's agentstack.lock with a fresh ed25519 key (writes a
@@ -170,16 +186,17 @@ pub enum Command {
     /// and friends), and writes outside the workspace + `[guard]
     /// allow_roots`. Cooperative accident protection — the kernel-enforced
     /// story is `run --sandbox`.
+    #[command(hide = true)]
     Guard(GuardArgs),
 
-    // ── Zero-files bridge ────────────────────────────────────────────────
-    /// The zero-files gateway: register it once per harness (`connect`) and
+    // ── Zero-files gateway ────────────────────────────────────────────────
+    /// The zero-files gateway: register it once per CLI (`connect`) and
     /// every trusted repo brings its own servers through `agentstack mcp
     /// --auto-project` with no per-project files.
     #[command(subcommand, hide = true)]
     Gateway(GatewayCmd),
 
-    /// Trust a project's manifest for the zero-files bridge (direnv-style).
+    /// Trust a project's manifest for the zero-files gateway (direnv-style).
     ///
     /// Until trusted, an auto-discovered project gets control-plane tools
     /// only: none of its servers are spawned or contacted, no secrets are
@@ -201,6 +218,7 @@ pub enum Command {
     ///
     /// Shows where it came from, what secrets it needs, which tools get it and
     /// what files get written, and its safety signals.
+    #[command(hide = true)]
     Explain(ExplainArgs),
 
     /// Turn agentstack's collected signals into concrete recommendations.
@@ -216,7 +234,7 @@ pub enum Command {
     /// Start the wire relay: a localhost proxy in front of the Anthropic API.
     ///
     /// Forwards every request verbatim (observe only) while accounting the
-    /// tools block's per-turn token cost. Point a harness at it with
+    /// tools block's per-turn token cost. Point a CLI at it with
     /// `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`, then rank what it
     /// observed with `agentstack report wire`.
     #[command(hide = true)]
@@ -229,6 +247,7 @@ pub enum Command {
     Restore(RestoreArgs),
 
     /// Manage secrets in the OS keychain.
+    #[command(hide = true)]
     Secret(SecretArgs),
 
     /// Edit a target's native `[settings.<target>]` entries.
@@ -333,22 +352,22 @@ pub struct McpArgs {
 
 #[derive(Args, Debug)]
 pub struct ConnectArgs {
-    /// Harness/adapter ids to register the gateway in (e.g. `claude-code`
+    /// CLI ids to register the gateway in (e.g. `claude-code`
     /// `codex`). With none given, use --all.
-    #[arg(value_name = "HARNESS")]
+    #[arg(value_name = "CLI")]
     pub harnesses: Vec<String>,
 
-    /// Register in every installed harness that supports MCP.
+    /// Register in every installed CLI that supports MCP.
     #[arg(long)]
     pub all: bool,
 
-    /// Register the bridge in transparent mode (`agentstack mcp --auto-project
+    /// Register the gateway in transparent mode (`agentstack mcp --auto-project
     /// --transparent`): upstream tools are advertised in `tools/list` instead
     /// of being reached via `tools_search`.
     #[arg(long)]
     pub transparent: bool,
 
-    /// Write the change (else dry-run: show the diff per harness).
+    /// Write the change (else dry-run: show the diff per CLI).
     #[arg(long)]
     pub write: bool,
 
@@ -359,15 +378,15 @@ pub struct ConnectArgs {
 
 #[derive(Args, Debug)]
 pub struct DisconnectArgs {
-    /// Harness/adapter ids to remove the gateway from.
-    #[arg(value_name = "HARNESS")]
+    /// CLI ids to remove the gateway from.
+    #[arg(value_name = "CLI")]
     pub harnesses: Vec<String>,
 
-    /// Remove from every harness that currently has the gateway registered.
+    /// Remove from every CLI that currently has the gateway registered.
     #[arg(long)]
     pub all: bool,
 
-    /// Write the change (else dry-run: show the diff per harness).
+    /// Write the change (else dry-run: show the diff per CLI).
     #[arg(long)]
     pub write: bool,
 }
@@ -417,7 +436,7 @@ pub enum ReportCmd {
     /// decisions, and tool calls) by run id.
     Run(ReportArgs),
 
-    /// List live tracked runs (harness, pid, profile, uptime).
+    /// List live tracked runs (CLI, pid, profile, uptime).
     Runs(RunsArgs),
 
     /// Show local usage analytics (activation counts + footprint + context
@@ -444,7 +463,7 @@ pub enum ReportCmd {
 /// configs, so it stays a top-level command.
 #[derive(Subcommand, Debug)]
 pub enum GatewayCmd {
-    /// Register the agentstack gateway once, globally, in a harness's MCP
+    /// Register the agentstack gateway once, globally, in a CLI's MCP
     /// config.
     ///
     /// After that, every trusted repo brings its own servers through
@@ -452,7 +471,7 @@ pub enum GatewayCmd {
     /// default.
     Connect(ConnectArgs),
 
-    /// Remove the agentstack gateway entry from a harness's global MCP config.
+    /// Remove the agentstack gateway entry from a CLI's global MCP config.
     Disconnect(DisconnectArgs),
 }
 
@@ -477,7 +496,8 @@ pub struct VerifyArgs {
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    /// Harness/adapter id to launch, e.g. `claude-code` or `codex`.
+    /// CLI id to launch, e.g. `claude-code` or `codex` (`agentstack adapters list` shows all ids).
+    #[arg(value_name = "CLI")]
     pub harness: String,
 
     /// Promote this host run to the Protected tier (fail-closed): refuse to
@@ -501,7 +521,7 @@ pub struct RunArgs {
     #[arg(long)]
     pub keep: bool,
 
-    /// Launch the harness inside a sandbox container instead of on the host
+    /// Launch the CLI inside a sandbox container instead of on the host
     /// (Phase 2). The container mounts the project as its workspace and points
     /// HTTPS traffic at the policy proxy, but its ordinary bridge still permits
     /// direct connections that ignore the proxy. Use `--lockdown` to remove that
@@ -527,7 +547,7 @@ pub struct RunArgs {
     #[arg(long)]
     pub plan: bool,
 
-    /// Extra arguments passed through to the harness (after `--`).
+    /// Extra arguments passed through to the CLI (after `--`).
     #[arg(
         trailing_var_arg = true,
         allow_hyphen_values = true,
@@ -662,6 +682,11 @@ pub struct UpgradeArgs {
     #[arg(long)]
     pub write: bool,
 }
+
+/// `status` takes no flags of its own — `--manifest-dir` is global, and the
+/// deep flags all belong to `doctor`.
+#[derive(Args, Debug)]
+pub struct StatusArgs {}
 
 /// `setup` is the interactive newcomer wizard; it deliberately has no `--write`
 /// (it confirms in a terminal and stays dry-run everywhere else). Scripts use

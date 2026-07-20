@@ -1034,7 +1034,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     }
     crate::util::restrict(&handoff_path, false);
     println!(
-        "  {} run grant handed to the bridge ({})",
+        "  {} run grant handed to the gateway ({})",
         "✓".green(),
         handoff_path.display()
     );
@@ -1052,7 +1052,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         Ok(None) => {
             println!(
                 "  {} {} has no project-scope MCP config to launch-scope (stated honestly; \
-                 the global bridge entry still gates declared servers)",
+                 the global gateway entry still gates declared servers)",
                 "ℹ".cyan(),
                 display
             );

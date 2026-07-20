@@ -52,6 +52,19 @@ fn setup(manifest: &str) -> (assert_fs::TempDir, PathBuf) {
     (tmp, proj)
 }
 
+/// The prepare→launch pair as one call — what `agentstack run` does after its
+/// banner. Keeps the tests reading like the old single-call `launch`.
+fn prepare_and_launch(
+    dir: &Path,
+    harness: &str,
+    profile: Option<&str>,
+    args: &[String],
+    keep: bool,
+) -> anyhow::Result<()> {
+    let plan = agentstack::runs::prepare(Some(dir), harness)?;
+    agentstack::runs::launch(plan, Some(dir), profile, Scope::Project, args, keep)
+}
+
 fn wait_until<F: Fn() -> bool>(f: F, max: Duration) -> bool {
     let start = Instant::now();
     while start.elapsed() < max {
@@ -73,14 +86,7 @@ fn launch_lists_then_kill_removes_the_run() {
 
     let proj2 = proj.clone();
     let handle = thread::spawn(move || {
-        let _ = agentstack::runs::launch(
-            Some(&proj2),
-            "sleeptest",
-            None,
-            Scope::Project,
-            &["30".to_string()],
-            false,
-        );
+        let _ = prepare_and_launch(&proj2, "sleeptest", None, &["30".to_string()], false);
     });
 
     assert!(
@@ -116,15 +122,7 @@ fn run_cleans_up_its_record_on_normal_exit() {
     let (_tmp, proj) = setup("version = 1\n[meta]\nname = \"t\"\n");
 
     // Blocks ~1s, then launch() removes the record before returning.
-    agentstack::runs::launch(
-        Some(&proj),
-        "sleeptest",
-        None,
-        Scope::Project,
-        &["1".to_string()],
-        false,
-    )
-    .unwrap();
+    prepare_and_launch(&proj, "sleeptest", None, &["1".to_string()], false).unwrap();
 
     assert!(
         agentstack::runs::list().is_empty(),
@@ -154,11 +152,10 @@ fn run_launches_the_harness_at_the_project_root() {
     )
     .unwrap();
 
-    agentstack::runs::launch(
-        Some(&proj),
+    prepare_and_launch(
+        &proj,
         "shtest",
         None,
-        Scope::Project,
         &["-c".to_string(), "pwd > launched-from.txt".to_string()],
         false,
     )
@@ -194,14 +191,7 @@ fn profile_run_applies_then_reverts_on_exit() {
 
     let proj2 = proj.clone();
     let handle = thread::spawn(move || {
-        let _ = agentstack::runs::launch(
-            Some(&proj2),
-            "sleeptest",
-            Some("p1"),
-            Scope::Project,
-            &["30".to_string()],
-            false,
-        );
+        let _ = prepare_and_launch(&proj2, "sleeptest", Some("p1"), &["30".to_string()], false);
     });
 
     // Once the run is tracked, the profile's server must be written to config.
@@ -246,11 +236,10 @@ fn kill_escalates_to_sigkill_when_sigterm_is_ignored() {
 
     let proj2 = proj.clone();
     let handle = thread::spawn(move || {
-        let _ = agentstack::runs::launch(
-            Some(&proj2),
+        let _ = prepare_and_launch(
+            &proj2,
             "stubborn",
             None,
-            Scope::Project,
             &[
                 "-c".to_string(),
                 "trap '' TERM; while :; do sleep 1; done".to_string(),
