@@ -15,6 +15,13 @@ Releases are published from tags (v0.2.0 onward). Per release:
   `rg -n "@v0\.|agentstack 0\." README.md docs/*.html docs/start.html action.yml`
   (the Action `uses:` examples and start.html's `--version` capture are the
   known offenders).
+- Stamp `action.yml`'s pinned binary default to the new tag: the `version`
+  input's `default: vX.Y.Z` line (under `inputs.version`) must equal this
+  release's tag, so `uses: Tarekkharsa/agentstack@vX.Y.Z` installs the binary
+  that shipped with it rather than a future one. The `@v` sweep above catches
+  the `uses:` example comment but not this `default:`, so bump it explicitly.
+  `docs_commands::action_default_binary_matches_this_release` fails CI when
+  this stamp and the CLI crate version differ.
 
 ## 1. Release binaries (GitHub Releases)
 

@@ -16,9 +16,13 @@ branding:
 
 inputs:
   version:
-    description: agentstack release tag to install (e.g. v0.1.0), or "latest"
+    description: agentstack release tag to install (e.g. v0.14.0), or "latest"
     required: false
-    default: latest
+    # Pin the default to *this action's* release tag so `uses: …@vX` installs
+    # the binary that shipped with vX — never a newer one. This MUST be bumped
+    # to the new tag on every release (RELEASING.md § 0 owns the stamp step).
+    # Override with `version: latest` to opt into the newest published binary.
+    default: v0.14.0
   working-directory:
     description: Directory containing .agentstack/ (or a legacy root manifest)
     required: false

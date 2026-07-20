@@ -437,3 +437,23 @@ fn every_prose_command_is_real() {
             .join("\n")
     );
 }
+
+#[test]
+fn action_default_binary_matches_this_release() {
+    let action = include_str!("../../../action.yml");
+    let version_input = action
+        .split("  version:\n")
+        .nth(1)
+        .and_then(|tail| tail.split("  working-directory:\n").next())
+        .expect("action.yml must keep inputs.version before working-directory");
+    let default = version_input
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("default:"))
+        .map(str::trim)
+        .expect("action.yml inputs.version must have a default");
+    assert_eq!(
+        default,
+        format!("v{}", env!("CARGO_PKG_VERSION")),
+        "a pinned action release must install its matching binary by default"
+    );
+}
