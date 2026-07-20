@@ -69,8 +69,8 @@ printf '\033[1;36m  skills-workout — static render vs zero-files lease, identi
 
 # ── seed the central library with the two profile-referenced library skills ──
 say "Seed the isolated central library (sql-review, incident-runbook):"
-"$AS" lib add sql-review       --path "$PROJECT/lib-sources/sql-review"       --write >/dev/null
-"$AS" lib add incident-runbook --path "$PROJECT/lib-sources/incident-runbook" --write >/dev/null
+"$AS" lib add "$PROJECT/lib-sources/sql-review"       --name sql-review       --write >/dev/null
+"$AS" lib add "$PROJECT/lib-sources/incident-runbook" --name incident-runbook --write >/dev/null
 if "$AS" lib list 2>&1 | grep -q 'sql-review' && "$AS" lib list 2>&1 | grep -q 'incident-runbook'; then
   ok "library holds sql-review + incident-runbook"
 else

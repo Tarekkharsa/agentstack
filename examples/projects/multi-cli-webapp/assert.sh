@@ -92,7 +92,7 @@ fi
 
 # ── 1. seed the central library, then lock ───────────────────────────────────
 say "Seed the isolated central library with the team's skill, then lock:"
-"$AS" lib add api-conventions --path team-library/api-conventions --write >/dev/null 2>&1
+"$AS" lib add ./team-library/api-conventions --name api-conventions --write >/dev/null 2>&1
 if "$AS" lib list 2>&1 | nocolor | grep -q "api-conventions"; then
   ok "api-conventions is in the central library (referenced by name from the profile)"
 else

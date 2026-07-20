@@ -17,7 +17,7 @@ line() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 
 line "1. Put a server + skill into the CENTRAL LIBRARY (~/.agentstack/lib)"
 ./as lib add-server kibana --file "$src/kibana.toml" --replace --write
-./as lib add sql-review --path "$src/sql-review" --replace --write
+./as lib add "$src/sql-review" --name sql-review --replace --write
 
 line "2. What's in the library now"
 ./as lib list
