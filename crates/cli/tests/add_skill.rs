@@ -422,6 +422,8 @@ fn materialized_git_skill_survives_a_later_checkout_of_another_revision() {
     add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
     let mat = proj.join(".claude/skills/pdf/SKILL.md");
     let original = fs::read_to_string(&mat).unwrap();
+    let lock = agentstack::lock::Lock::load(&proj).unwrap();
+    let commit_v1 = lock.get("pdf").unwrap().rev.clone().unwrap();
     // The symlink resolves into the immutable content cache, not the clone.
     let real = fs::canonicalize(&mat).unwrap();
     assert!(
@@ -431,8 +433,9 @@ fn materialized_git_skill_survives_a_later_checkout_of_another_revision() {
         real.display()
     );
 
-    // Advance the repo, then churn the shared clone to the new commit via a
-    // direct resolve (what a second add of another revision would do).
+    // Advance the repo, then really fetch and churn the shared clone to the
+    // new commit (a cached rev-less `resolve` alone would intentionally do no
+    // fetch, making this witness vacuous).
     fs::write(
         repo.join("skills/pdf/SKILL.md"),
         "---\ndescription: v2\n---\nCHANGED\n",
@@ -458,9 +461,14 @@ fn materialized_git_skill_survives_a_later_checkout_of_another_revision() {
     ]);
     let skill: agentstack::manifest::Skill =
         toml::from_str(&format!("git = \"{url}\"\nsubpath = \"skills/pdf\"")).unwrap();
-    agentstack::store::Store::default_store()
-        .resolve(&skill, &proj, None)
+    let refreshed = agentstack::store::Store::default_store()
+        .resolve_refresh(&skill, &proj)
         .unwrap();
+    assert_ne!(
+        refreshed.rev.as_deref(),
+        Some(commit_v1.as_str()),
+        "the shared clone must actually have advanced before testing snapshot immutability"
+    );
 
     // pdf's materialized bytes are unchanged — the snapshot is immutable.
     assert_eq!(
@@ -485,13 +493,17 @@ fn offline_resolution_reads_the_pinned_commit_not_the_churned_clone() {
     let repo = tmp.path().join("skills-repo");
     let proj = seed_project(tmp.path());
 
-    // Fetch pdf at v1 (populates the clone + records the commit's checksum).
+    // Add a rev-less skill through the real command path. Its authoritative
+    // commit exists only in the lock; the manifest deliberately has no rev.
+    add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
+    let ctx = agentstack::commands::load(Some(&proj)).unwrap();
+    let lock = agentstack::lock::Lock::load(&ctx.dir).unwrap();
+    let pin = lock.get("pdf").unwrap();
+    let commit_v1 = pin.rev.clone().unwrap();
+    let checksum_v1 = pin.checksum.hex().to_string();
     let store = Store::default_store();
-    let pdf_v1: agentstack::manifest::Skill =
-        toml::from_str(&format!("git = \"{url}\"\nsubpath = \"skills/pdf\"")).unwrap();
-    let r1 = store.resolve(&pdf_v1, &proj, None).unwrap();
-    let commit_v1 = r1.rev.clone().unwrap();
-    let checksum_v1 = r1.checksum.clone();
+    let skill = ctx.loaded.manifest.skills.get("pdf").unwrap();
+    assert!(skill.rev.is_none(), "the manifest must remain rev-less");
 
     // Advance the repo and churn the shared clone to the new commit.
     fs::write(
@@ -514,21 +526,43 @@ fn offline_resolution_reads_the_pinned_commit_not_the_churned_clone() {
         .status()
         .unwrap()
         .success());
-    let pdf_head: agentstack::manifest::Skill =
-        toml::from_str(&format!("git = \"{url}\"\nsubpath = \"skills/pdf\"")).unwrap();
-    store.resolve(&pdf_head, &proj, None).unwrap(); // clone now at v2
-
-    // Offline resolution PINNED to v1 must still yield v1's checksum — the
-    // worktree is immutable, not the churned clone working tree.
-    let pinned: agentstack::manifest::Skill = toml::from_str(&format!(
-        "git = \"{url}\"\nrev = \"{commit_v1}\"\nsubpath = \"skills/pdf\""
-    ))
-    .unwrap();
-    let offline = store.resolve_local(&pinned, &proj).unwrap().unwrap();
-    assert_eq!(
-        offline.checksum, checksum_v1,
-        "offline resolution of the pinned commit must not read the churned clone"
+    let refreshed = store.resolve_refresh(skill, &ctx.dir).unwrap();
+    assert_ne!(
+        refreshed.rev.as_deref(),
+        Some(commit_v1.as_str()),
+        "the shared clone must actually have advanced to v2"
     );
+
+    // The normal offline verification seam must thread the lock pin into a
+    // rev-less manifest and still read v1, not the churned v2 clone.
+    let library = agentstack::library::Library::default();
+    let report = agentstack::resolve::skill_lock_status(
+        "pdf",
+        &ctx.loaded.manifest,
+        &ctx.dir,
+        &library,
+        &home.join(".agentstack/lib"),
+        &store,
+        &lock,
+        agentstack::resolve::ResolveMode::NoFetch,
+    );
+    assert_eq!(
+        report.status,
+        agentstack::resolve::SkillLockStatus::Matches,
+        "offline verification must honor the lock pin after clone churn: {report:?}"
+    );
+    let offline = agentstack::resolve::resolve_skill_with_pin(
+        &ctx.loaded.manifest,
+        &ctx.dir,
+        &library,
+        &home.join(".agentstack/lib"),
+        &store,
+        "pdf",
+        agentstack::resolve::ResolveMode::NoFetch,
+        Some(&commit_v1),
+    )
+    .unwrap();
+    assert_eq!(offline.checksum, checksum_v1);
 }
 
 /// Finding 2: a symlink anywhere in skill content is rejected before the

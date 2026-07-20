@@ -203,7 +203,7 @@ impl LibrarySkill {
         };
         Some(
             Store::default_store()
-                .resolve_path_only(&skill, &lib_home.join("skills"))
+                .resolve_path_only(&skill, &lib_home.join("skills"), None)
                 .ok()
                 .flatten()?
                 .path,

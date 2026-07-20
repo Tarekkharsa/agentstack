@@ -169,15 +169,21 @@ impl Store {
     }
 
     /// Resolve a skill to a local directory **without any network access**.
-    /// Path sources resolve as usual. Git sources resolve to the store clone
-    /// *only if it already exists* (reporting its current HEAD); an
-    /// un-cached git source yields `Ok(None)` so callers can report it as
-    /// unavailable offline rather than fetching.
-    pub fn resolve_local(&self, skill: &Skill, manifest_dir: &Path) -> Result<Option<Resolved>> {
+    /// Path sources resolve as usual. Git sources resolve to an immutable
+    /// worktree for the pinned/declared commit *only if its clone already
+    /// exists*; an un-cached git source yields `Ok(None)` so callers can report
+    /// it as unavailable offline rather than fetching.
+    pub fn resolve_local(
+        &self,
+        skill: &Skill,
+        manifest_dir: &Path,
+        pinned_rev: Option<&str>,
+    ) -> Result<Option<Resolved>> {
         match skill.source()? {
             SkillSource::Path(p) => {
                 let path = resolve_path(manifest_dir, &p);
                 let checksum = if path.exists() {
+                    crate::scan::reject_symlinks(&path)?;
                     dir_digest(&path)?.hex().to_string()
                 } else {
                     String::new()
@@ -195,12 +201,12 @@ impl Store {
                 // shared clone's working tree — another resolve may have
                 // checked out a different revision there, which would make
                 // this skill falsely drift or load the wrong bytes.
+                let want = pinned_rev.or(rev.as_deref());
                 let Some((content, commit)) =
-                    self.git_worktree_content(&url, rev.as_deref(), subpath.as_deref())?
+                    self.git_worktree_content(&url, want, subpath.as_deref())?
                 else {
                     return Ok(None);
                 };
-                crate::scan::reject_symlinks(&content)?;
                 Ok(Some(Resolved {
                     checksum: dir_digest(&content)?.hex().to_string(),
                     path: content,
@@ -229,19 +235,26 @@ impl Store {
         if !clone.exists() {
             return Ok(None);
         }
-        let spec = rev
-            .map(|r| format!("{r}^{{commit}}"))
-            .unwrap_or_else(|| "origin/HEAD^{commit}".to_string());
-        let Ok(commit) = crate::gitx::run(
-            crate::gitx::Profile::Ingest,
-            &["rev-parse", "--verify", "--quiet", &spec],
-            Some(&clone),
-        ) else {
+        // Prefer a fetched remote-tracking branch for a symbolic rev, then
+        // fall back to the exact local tag/commit spelling. An authoritative
+        // lock pin is a commit id, so the first probe harmlessly misses and
+        // the second resolves it exactly.
+        let specs = match rev {
+            Some(r) => vec![format!("origin/{r}^{{commit}}"), format!("{r}^{{commit}}")],
+            None => vec!["origin/HEAD^{commit}".to_string()],
+        };
+        let commit = specs.into_iter().find_map(|spec| {
+            crate::gitx::run(
+                crate::gitx::Profile::Ingest,
+                &["rev-parse", "--verify", "--quiet", &spec],
+                Some(&clone),
+            )
+            .ok()
+            .filter(|commit| !commit.is_empty())
+        });
+        let Some(commit) = commit else {
             return Ok(None);
         };
-        if commit.is_empty() {
-            return Ok(None);
-        }
         let Some(co) = self.ensure_worktree(&clone, &commit)? else {
             return Ok(None);
         };
@@ -249,6 +262,9 @@ impl Store {
         if !content.exists() {
             return Ok(None);
         }
+        // This is the common boundary for resolve_local, resolve_path_only,
+        // and local_source_dir: none may expose a worktree containing links.
+        crate::scan::reject_symlinks(&content)?;
         Ok(Some((content, commit)))
     }
 
@@ -307,19 +323,27 @@ impl Store {
         &self,
         skill: &Skill,
         manifest_dir: &Path,
+        pinned_rev: Option<&str>,
     ) -> Result<Option<Resolved>> {
         match skill.source()? {
-            SkillSource::Path(p) => Ok(Some(Resolved {
-                path: resolve_path(manifest_dir, &p),
-                rev: None,
-                checksum: String::new(),
-                fetched: false,
-                source_kind: "path",
-            })),
+            SkillSource::Path(p) => {
+                let path = resolve_path(manifest_dir, &p);
+                if path.exists() {
+                    crate::scan::reject_symlinks(&path)?;
+                }
+                Ok(Some(Resolved {
+                    path,
+                    rev: None,
+                    checksum: String::new(),
+                    fetched: false,
+                    source_kind: "path",
+                }))
+            }
             SkillSource::Git { url, rev, subpath } => {
                 // Same immutable-worktree read as `resolve_local`, minus the
                 // digest — display/listing callers only need the path.
-                match self.git_worktree_content(&url, rev.as_deref(), subpath.as_deref())? {
+                let want = pinned_rev.or(rev.as_deref());
+                match self.git_worktree_content(&url, want, subpath.as_deref())? {
                     Some((content, _)) => Ok(Some(Resolved {
                         path: content,
                         rev: None,
@@ -412,18 +436,23 @@ impl Drop for Stage {
 
 /// Resolve a skill's local source dir for materialization, *without* fetching
 /// (path → local; git → store dir if already installed, else `None`).
-pub fn local_source_dir(store: &Store, skill: &Skill, manifest_dir: &Path) -> Option<PathBuf> {
+pub fn local_source_dir(
+    store: &Store,
+    skill: &Skill,
+    manifest_dir: &Path,
+    pinned_rev: Option<&str>,
+) -> Option<PathBuf> {
     match skill.source().ok()? {
         SkillSource::Path(p) => {
             let path = resolve_path(manifest_dir, &p);
-            path.exists().then_some(path)
+            (path.exists() && crate::scan::reject_symlinks(&path).is_ok()).then_some(path)
         }
         SkillSource::Git {
             url, rev, subpath, ..
         } => {
             // Immutable per-commit worktree, not the churnable clone tree.
             store
-                .git_worktree_content(&url, rev.as_deref(), subpath.as_deref())
+                .git_worktree_content(&url, pinned_rev.or(rev.as_deref()), subpath.as_deref())
                 .ok()?
                 .map(|(content, _)| content)
         }
@@ -560,9 +589,12 @@ pub fn contained_content_dir(clone_root: &Path, subpath: Option<&str>) -> Result
 /// trusted without rebuilding.
 fn verified_snapshot(dest: &Path, digest_hex: &str) -> bool {
     match dest.symlink_metadata() {
-        Ok(m) if m.file_type().is_dir() => dir_digest(dest)
-            .map(|d| d.hex() == digest_hex)
-            .unwrap_or(false),
+        Ok(m) if m.file_type().is_dir() => {
+            crate::scan::reject_symlinks(dest).is_ok()
+                && dir_digest(dest)
+                    .map(|d| d.hex() == digest_hex)
+                    .unwrap_or(false)
+        }
         _ => false,
     }
 }
@@ -825,5 +857,60 @@ mod tests {
             err.to_string().contains("outside the repo"),
             "symlink escape must be refused: {err}"
         );
+    }
+
+    /// A digest does not include symlink entries, so re-hashing alone cannot
+    /// detect a link added to an otherwise valid cached snapshot. Verification
+    /// must reject the link and rebuild from the trusted, symlink-free source.
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_rebuilds_when_nested_symlink_is_added() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let src = tmp.child("src");
+        src.child("nested/SKILL.md").write_str("# safe\n").unwrap();
+        let digest = dir_digest(src.path()).unwrap().hex().to_string();
+        let store = Store::with_root(tmp.child("store").path().to_path_buf());
+
+        let snapshot = store.snapshot_content(src.path(), &digest).unwrap();
+        std::os::unix::fs::symlink("SKILL.md", snapshot.join("nested/leak")).unwrap();
+        assert!(
+            !verified_snapshot(&snapshot, &digest),
+            "a symlink must invalidate a snapshot even when its file digest is unchanged"
+        );
+
+        let rebuilt = store.snapshot_content(src.path(), &digest).unwrap();
+        assert_eq!(rebuilt, snapshot);
+        assert!(rebuilt.join("nested/leak").symlink_metadata().is_err());
+        assert!(verified_snapshot(&rebuilt, &digest));
+    }
+
+    /// Every no-network path reader shares the same symlink refusal as fetch
+    /// resolution; otherwise doctor, MCP load, or dry-run use could expose
+    /// bytes that the ingest gate would reject.
+    #[cfg(unix)]
+    #[test]
+    fn offline_path_readers_reject_symlinked_content() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let skill_dir = tmp.child("skills/x");
+        skill_dir.child("SKILL.md").write_str("# safe\n").unwrap();
+        std::os::unix::fs::symlink("SKILL.md", skill_dir.path().join("leak")).unwrap();
+        let store = Store::with_root(tmp.child("store").path().to_path_buf());
+        let skill: Skill = toml::from_str("path = \"./skills/x\"").unwrap();
+
+        assert!(store.resolve_local(&skill, tmp.path(), None).is_err());
+        assert!(store.resolve_path_only(&skill, tmp.path(), None).is_err());
+        assert!(local_source_dir(&store, &skill, tmp.path(), None).is_none());
+
+        // The source directory itself being a link is equally forbidden; a
+        // recursive walk alone would otherwise follow it before seeing a link.
+        let safe_dir = tmp.child("skills/safe");
+        safe_dir.child("SKILL.md").write_str("# safe\n").unwrap();
+        std::os::unix::fs::symlink("safe", tmp.path().join("skills/root-link")).unwrap();
+        let root_link: Skill = toml::from_str("path = \"./skills/root-link\"").unwrap();
+        assert!(store.resolve_local(&root_link, tmp.path(), None).is_err());
+        assert!(store
+            .resolve_path_only(&root_link, tmp.path(), None)
+            .is_err());
+        assert!(local_source_dir(&store, &root_link, tmp.path(), None).is_none());
     }
 }

@@ -472,6 +472,8 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
     let store = Store::default_store();
     let library = crate::library::Library::load_default().unwrap_or_default();
     let lib_home = crate::util::paths::lib_home();
+    let lock = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
+    let pinned_rev = lock.get(name).and_then(|entry| entry.rev.as_deref());
 
     // A skill is defined inline in the project manifest, or (failing that) in the
     // central library. Compute its source + local dir from wherever it lives.
@@ -523,9 +525,9 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
 
     // Resolve the local dir offline (never fetch) for description + installed.
     let local: Option<std::path::PathBuf> = if let Some(skill) = inline {
-        local_source_dir(&store, skill, &ctx.dir)
+        local_source_dir(&store, skill, &ctx.dir, pinned_rev)
     } else {
-        crate::resolve::resolve_skill(
+        crate::resolve::resolve_skill_with_pin(
             manifest,
             &ctx.dir,
             &library,
@@ -533,6 +535,7 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
             &store,
             name,
             crate::resolve::ResolveMode::NoFetch,
+            pinned_rev,
         )
         .ok()
         .map(|r| r.path)

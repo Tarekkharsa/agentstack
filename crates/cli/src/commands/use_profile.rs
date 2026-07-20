@@ -54,7 +54,11 @@ pub fn prepare(
     } else {
         ResolveMode::NoFetch
     };
-    let resolved_skills = resolve_active_skills(
+    // Activation and its dry run reproduce existing lock pins. Without
+    // threading these commits into resolution, a rev-less or branch-based
+    // manifest could follow a shared clone that another skill has churned.
+    let lock = Lock::load(&ctx.dir)?;
+    let resolved_skills = resolve_active_skills_with_pins(
         manifest,
         profile.as_deref(),
         &ctx.dir,
@@ -62,6 +66,7 @@ pub fn prepare(
         &libctx.lib_home,
         &libctx.store,
         mode,
+        Some(&lock),
     )?;
 
     // `${REF}`s stay intact; they are resolved per-target at render time, not
@@ -781,6 +786,29 @@ pub(crate) fn resolve_active_skills(
     store: &crate::store::Store,
     mode: ResolveMode,
 ) -> Result<Vec<ResolvedSkill>> {
+    resolve_active_skills_with_pins(
+        manifest,
+        profile_name,
+        dir,
+        library,
+        lib_home,
+        store,
+        mode,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_active_skills_with_pins(
+    manifest: &Manifest,
+    profile_name: Option<&str>,
+    dir: &Path,
+    library: &Library,
+    lib_home: &Path,
+    store: &crate::store::Store,
+    mode: ResolveMode,
+    pins: Option<&Lock>,
+) -> Result<Vec<ResolvedSkill>> {
     // `None` is the implicit default (no profiles declared): every inline
     // skill — the same inline-only expansion the `"*"` wildcard uses.
     let names: Vec<String> = match profile_name {
@@ -800,9 +828,13 @@ pub(crate) fn resolve_active_skills(
 
     let mut out = Vec::new();
     for name in names {
-        let resolved =
-            crate::resolve::resolve_skill(manifest, dir, library, lib_home, store, &name, mode)
-                .with_context(|| format!("resolving skill '{name}' for profile '{plabel}'"))?;
+        let pinned_rev = pins
+            .and_then(|lock| lock.get(&name))
+            .and_then(|entry| entry.rev.as_deref());
+        let resolved = crate::resolve::resolve_skill_with_pin(
+            manifest, dir, library, lib_home, store, &name, mode, pinned_rev,
+        )
+        .with_context(|| format!("resolving skill '{name}' for profile '{plabel}'"))?;
         if !resolved.path.exists() {
             anyhow::bail!(
                 "skill '{name}' (profile '{plabel}') resolved to {} but it is not present on disk — run `agentstack install`",

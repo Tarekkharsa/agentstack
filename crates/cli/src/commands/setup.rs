@@ -1153,7 +1153,9 @@ fn print_skills(ctx: &super::Context) -> Result<usize> {
     let lock = Lock::load(&ctx.dir)?;
     let mut issues = 0;
     for (name, skill) in &manifest.skills {
-        let Some(local) = local_source_dir(&store, skill, &ctx.dir) else {
+        let locked = lock.get(name);
+        let pinned_rev = locked.and_then(|entry| entry.rev.as_deref());
+        let Some(local) = local_source_dir(&store, skill, &ctx.dir, pinned_rev) else {
             issues += 1;
             println!(
                 "  {} {name:<20} source missing — run agentstack install",
@@ -1161,7 +1163,7 @@ fn print_skills(ctx: &super::Context) -> Result<usize> {
             );
             continue;
         };
-        let Some(locked) = lock.get(name) else {
+        let Some(locked) = locked else {
             issues += 1;
             println!("  {} {name:<20} present, not locked", "⚠".yellow());
             continue;

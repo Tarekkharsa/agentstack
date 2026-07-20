@@ -272,9 +272,11 @@ pub fn collect_content_units(
     store: &crate::store::Store,
 ) -> Vec<Unit> {
     use crate::scan;
+    let lock = crate::lock::Lock::load(dir).unwrap_or_default();
     let mut units = Vec::new();
     for (name, skill) in &manifest.skills {
-        let unit = match crate::store::local_source_dir(store, skill, dir) {
+        let pinned_rev = lock.get(name).and_then(|entry| entry.rev.as_deref());
+        let unit = match crate::store::local_source_dir(store, skill, dir, pinned_rev) {
             None => skipped_unit(
                 "skill",
                 name,
@@ -1049,15 +1051,21 @@ fn run_checks(
     let store = crate::store::Store::default_store();
     let skills_library = crate::library::Library::load_default().unwrap_or_default();
     let skills_lib_home = paths::lib_home();
+    let skills_lock = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
     for name in &skill_names {
         // Inline definitions resolve straight to their local dir; a
         // profile-only name resolves through the central library (offline —
         // NoFetch, so a git body that isn't cached reports as not installed
         // rather than triggering a fetch).
         let dir = if let Some(skill) = manifest.skills.get(name) {
-            crate::store::local_source_dir(&store, skill, &ctx.dir)
+            crate::store::local_source_dir(
+                &store,
+                skill,
+                &ctx.dir,
+                skills_lock.get(name).and_then(|entry| entry.rev.as_deref()),
+            )
         } else {
-            crate::resolve::resolve_skill(
+            crate::resolve::resolve_skill_with_pin(
                 manifest,
                 &ctx.dir,
                 &skills_library,
@@ -1065,6 +1073,7 @@ fn run_checks(
                 &store,
                 name,
                 crate::resolve::ResolveMode::NoFetch,
+                skills_lock.get(name).and_then(|entry| entry.rev.as_deref()),
             )
             .ok()
             .map(|r| r.path)

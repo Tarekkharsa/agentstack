@@ -2068,6 +2068,7 @@ fn list_loadable_with_lease(
     };
     let m = &ctx.loaded.manifest;
     let libctx = ctx.library_ctx();
+    let lock = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
     let lease = lease_snapshot(lease_store);
     let session = crate::session::active(&ctx.dir);
     let profile = lease
@@ -2088,7 +2089,7 @@ fn list_loadable_with_lease(
         // PathOnly: this catalog only reads SKILL.md descriptions — digesting
         // every skill body here would turn a cheap list into a full-library
         // read+hash pass.
-        let resolved = crate::resolve::resolve_skill(
+        let resolved = crate::resolve::resolve_skill_with_pin(
             m,
             &ctx.dir,
             &libctx.library,
@@ -2096,6 +2097,7 @@ fn list_loadable_with_lease(
             &libctx.store,
             &name,
             crate::resolve::ResolveMode::PathOnly,
+            lock.get(&name).and_then(|entry| entry.rev.as_deref()),
         );
         let (desc, origin) = match &resolved {
             Ok(r) => (
@@ -2195,6 +2197,7 @@ fn load_capability_with_lease(
         let project_copy = trust_note.is_none()
             && ctx.as_ref().ok().is_some_and(|ctx| {
                 let libctx = ctx.library_ctx();
+                let lock = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
                 let session = crate::session::active(&ctx.dir);
                 let profile = lease
                     .as_ref()
@@ -2203,7 +2206,7 @@ fn load_capability_with_lease(
                 loadable_skill_names(&ctx.loaded.manifest, &libctx.library, profile)
                     .iter()
                     .any(|n| n == BUILTIN_MANUAL)
-                    && crate::resolve::resolve_skill(
+                    && crate::resolve::resolve_skill_with_pin(
                         &ctx.loaded.manifest,
                         &ctx.dir,
                         &libctx.library,
@@ -2211,6 +2214,8 @@ fn load_capability_with_lease(
                         &libctx.store,
                         BUILTIN_MANUAL,
                         crate::resolve::ResolveMode::NoFetch,
+                        lock.get(BUILTIN_MANUAL)
+                            .and_then(|entry| entry.rev.as_deref()),
                     )
                     .is_ok()
             });
@@ -2274,7 +2279,9 @@ fn load_capability_with_lease(
     // (not PathOnly): what's served must be digest-verified against its
     // agentstack.lock pin — the content the human trusted — so the body is
     // hashed even though nothing here records a lock entry.
-    let resolved = crate::resolve::resolve_skill(
+    let lock = crate::lock::Lock::load(&ctx.dir)?;
+    let pinned_rev = lock.get(name).and_then(|entry| entry.rev.as_deref());
+    let resolved = crate::resolve::resolve_skill_with_pin(
         m,
         &ctx.dir,
         &libctx.library,
@@ -2282,6 +2289,7 @@ fn load_capability_with_lease(
         &libctx.store,
         name,
         crate::resolve::ResolveMode::NoFetch,
+        pinned_rev,
     )
     .with_context(|| format!("loading skill '{name}'"))?;
 
@@ -2290,7 +2298,6 @@ fn load_capability_with_lease(
     // are outside the trust digest until pinned — refuse; a LIBRARY skill's
     // bytes live in the user's own curated, scan-gated central library —
     // serve, with a warning nudging toward a pin.
-    let lock = crate::lock::Lock::load(&ctx.dir)?;
     let status =
         crate::resolve::classify_skill(name, &resolved.checksum, resolved.rev.as_deref(), &lock);
     let mut warning: Option<String> = None;

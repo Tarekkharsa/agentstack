@@ -221,7 +221,12 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 "name": name,
                 "source": kind,
                 "src": src,
-                "installed": local_source_dir(&store, sk, &ctx.dir).is_some(),
+                "installed": local_source_dir(
+                    &store,
+                    sk,
+                    &ctx.dir,
+                    locked.and_then(|entry| entry.rev.as_deref()),
+                ).is_some(),
                 "lockedRev": locked.and_then(|l| l.rev.clone()),
                 "checksum": locked.map(|l| l.checksum.clone()),
                 "cells": cells,

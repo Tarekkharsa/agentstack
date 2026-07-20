@@ -394,7 +394,7 @@ fn freeze_grant(
     // this NoFetch resolution reproduces the verified content identities).
     let store = crate::store::Store::default_store();
     for (name, _) in &inputs.skill_statuses {
-        let r = crate::resolve::resolve_skill(
+        let r = crate::resolve::resolve_skill_with_pin(
             m,
             &ctx.dir,
             &inputs.library,
@@ -402,6 +402,7 @@ fn freeze_grant(
             &store,
             name,
             crate::resolve::ResolveMode::NoFetch,
+            inputs.lock.get(name).and_then(|entry| entry.rev.as_deref()),
         )
         .map_err(|e| anyhow::anyhow!("skill '{name}' failed after verification: {e}"))?;
         let origin = match r.origin {

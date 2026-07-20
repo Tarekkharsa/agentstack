@@ -210,6 +210,15 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Finding>) -> Result<()> {
 /// this before trusting content — via [`gate`] for add/lib add/try, and in
 /// the store's resolve for install/use/lock.
 pub fn reject_symlinks(root: &Path) -> Result<()> {
+    let root_meta = fs::symlink_metadata(root)
+        .with_context(|| format!("reading metadata for {}", root.display()))?;
+    if root_meta.file_type().is_symlink() {
+        anyhow::bail!(
+            "skill content root is a symlink ('{}') — skills must be self-contained; \
+             a link can't be pinned and its target may lie outside the source",
+            crate::text::sanitize_line(&root.display().to_string())
+        );
+    }
     reject_symlinks_in(root, root)
 }
 

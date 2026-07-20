@@ -111,6 +111,32 @@ pub fn resolve_skill(
     name: &str,
     mode: ResolveMode,
 ) -> Result<ResolvedSkill, ResolveError> {
+    resolve_skill_with_pin(
+        manifest,
+        manifest_dir,
+        library,
+        lib_home,
+        store,
+        name,
+        mode,
+        None,
+    )
+}
+
+/// Resolve a skill while honoring an authoritative lock commit when one is
+/// available. The pin wins over a manifest branch/tag/empty `rev` in both the
+/// fetching and offline paths; callers without a lock use [`resolve_skill`].
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_skill_with_pin(
+    manifest: &Manifest,
+    manifest_dir: &Path,
+    library: &Library,
+    lib_home: &Path,
+    store: &Store,
+    name: &str,
+    mode: ResolveMode,
+    pinned_rev: Option<&str>,
+) -> Result<ResolvedSkill, ResolveError> {
     // Locate the source (inline wins over the central library) and the base dir
     // its relative paths resolve against.
     let (skill, base, origin, provenance) = if let Some(skill) = manifest.skills.get(name) {
@@ -151,7 +177,7 @@ pub fn resolve_skill(
         });
     };
 
-    let resolved = resolve_source(store, &skill, &base, mode, name)?;
+    let resolved = resolve_source(store, &skill, &base, mode, name, pinned_rev)?;
     Ok(ResolvedSkill {
         name: name.to_string(),
         origin,
@@ -172,11 +198,12 @@ fn resolve_source(
     base: &Path,
     mode: ResolveMode,
     name: &str,
+    pinned_rev: Option<&str>,
 ) -> Result<crate::store::Resolved, ResolveError> {
     let local = match mode {
-        ResolveMode::Fetch => return Ok(store.resolve(skill, base, skill.rev.as_deref())?),
-        ResolveMode::NoFetch => store.resolve_local(skill, base)?,
-        ResolveMode::PathOnly => store.resolve_path_only(skill, base)?,
+        ResolveMode::Fetch => return Ok(store.resolve(skill, base, pinned_rev)?),
+        ResolveMode::NoFetch => store.resolve_local(skill, base, pinned_rev)?,
+        ResolveMode::PathOnly => store.resolve_path_only(skill, base, pinned_rev)?,
     };
     match local {
         Some(r) => Ok(r),
@@ -983,7 +1010,26 @@ pub fn skill_lock_status(
     lock: &Lock,
     mode: ResolveMode,
 ) -> SkillLockReport {
-    match resolve_skill(manifest, manifest_dir, library, lib_home, store, name, mode) {
+    // Offline readers reproduce the lock's intended commit rather than the
+    // mutable clone checkout. Fetch-mode status checks intentionally resolve
+    // the manifest source itself: their job is to detect that it has moved
+    // away from the lock, not to force it back to the locked revision.
+    let pinned_rev = match mode {
+        ResolveMode::Fetch => None,
+        ResolveMode::NoFetch | ResolveMode::PathOnly => {
+            lock.get(name).and_then(|entry| entry.rev.as_deref())
+        }
+    };
+    match resolve_skill_with_pin(
+        manifest,
+        manifest_dir,
+        library,
+        lib_home,
+        store,
+        name,
+        mode,
+        pinned_rev,
+    ) {
         Err(ResolveError::NotAvailableOffline { url, .. }) => SkillLockReport {
             name: name.to_string(),
             origin: None,
