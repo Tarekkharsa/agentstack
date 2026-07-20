@@ -135,6 +135,13 @@
   homepage: https://github.com/Tarekkharsa/agentstack
   tags: [agentstack, meta, setup, mcp, skills]
   path: skills/using-agentstack
+- kind: skill
+  name: finding-skills
+  display: Finding skills
+  description: "Find and install agent skills — search the library/catalog/registry, pull from any skills repo with add skill, and judge quality by scan verdicts, pins, and provenance"
+  homepage: https://github.com/Tarekkharsa/agentstack
+  tags: [agentstack, meta, skills, search, discovery]
+  path: skills/finding-skills
 
 - kind: skill
   name: pr-triage

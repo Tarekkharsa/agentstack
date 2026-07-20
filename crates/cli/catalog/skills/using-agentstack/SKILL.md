@@ -136,6 +136,9 @@ agentstack use <profile> --scope project           # dry-run (always safe)
 agentstack use <profile> --scope project --write   # activate
 agentstack search <query>        # your central library + catalog + official MCP Registry
 agentstack add from <id>         # add a found server to the manifest (not applied)
+agentstack add skill <source>    # skills from any repo: owner/repo, git URL, ./dir — preview first
+agentstack add skill <src> --list  # inspect a source's skills without adding
+agentstack lib add <source> --skill <name>  # same grammar, into the central library
 agentstack lib list              # what the central library holds
 agentstack lib sync              # commit/pull/push the library across machines (secret gate enforced)
 agentstack explain <name>        # provenance, secrets, footprint of a capability
