@@ -51,6 +51,24 @@ impl Store {
         manifest_dir: &Path,
         pinned_rev: Option<&str>,
     ) -> Result<Resolved> {
+        self.resolve_inner(skill, manifest_dir, pinned_rev, false)
+    }
+
+    /// The update/relock posture: ignore the lock pin, honor the manifest
+    /// rev, and REQUIRE the fetch — a rev-less git skill re-tracks the
+    /// remote's default-branch head, and an unreachable upstream errors
+    /// instead of silently reusing the cached clone (see `ensure_git`).
+    pub fn resolve_refresh(&self, skill: &Skill, manifest_dir: &Path) -> Result<Resolved> {
+        self.resolve_inner(skill, manifest_dir, None, true)
+    }
+
+    fn resolve_inner(
+        &self,
+        skill: &Skill,
+        manifest_dir: &Path,
+        pinned_rev: Option<&str>,
+        refresh: bool,
+    ) -> Result<Resolved> {
         match skill.source()? {
             SkillSource::Path(p) => {
                 let path = resolve_path(manifest_dir, &p);
@@ -70,7 +88,7 @@ impl Store {
             SkillSource::Git { url, rev, subpath } => {
                 let want = pinned_rev.map(str::to_string).or(rev);
                 let clone = self.git_dir(&url);
-                let fetched = ensure_git(&url, want.as_deref(), &clone)?;
+                let fetched = ensure_git(&url, want.as_deref(), &clone, refresh)?;
                 // HEAD is read from the clone root (`.git` lives there); the
                 // skill body — and thus the checksum — is the subpath dir.
                 let resolved_rev = git_head(&clone)?;
@@ -310,7 +328,7 @@ fn resolve_path(dir: &Path, p: &str) -> PathBuf {
 /// git-pack provider uses; skills keep going through [`Store::resolve`].
 pub fn checkout(store: &Store, url: &str, rev: Option<&str>) -> Result<(PathBuf, String)> {
     let dest = store.git_dir(url);
-    ensure_git(url, rev, &dest)?;
+    ensure_git(url, rev, &dest, false)?;
     let head = git_head(&dest)?;
     Ok((dest, head))
 }
@@ -330,9 +348,14 @@ pub fn ls_remote_tags(url: &str) -> Result<Vec<String>> {
     Ok(tags)
 }
 
-/// Ensure a git clone exists at `dest` and is checked out at `want_rev` (or its
-/// default branch). Returns whether a clone happened.
-fn ensure_git(url: &str, want_rev: Option<&str>, dest: &Path) -> Result<bool> {
+/// Ensure a git clone exists at `dest` and is checked out at `want_rev` (or
+/// its default branch). `refresh` is the update/relock posture: fetching is
+/// REQUIRED — an unreachable or deleted upstream must surface, detecting
+/// that is what update exists for — and a rev-less skill re-tracks the
+/// remote's current default-branch head. Without that, `lock --update` on a
+/// rev-less git skill with a cached clone made no network call at all: a
+/// silent no-op that could neither update nor notice a vanished upstream.
+fn ensure_git(url: &str, want_rev: Option<&str>, dest: &Path, refresh: bool) -> Result<bool> {
     crate::gitx::deny_weird_transport(url)?;
     let fresh = !dest.exists();
     if fresh {
@@ -342,10 +365,27 @@ fn ensure_git(url: &str, want_rev: Option<&str>, dest: &Path) -> Result<bool> {
         run_git(&["clone", url, &dest.to_string_lossy()], None)
             .with_context(|| format!("cloning {url}"))?;
     }
-    if let Some(rev) = want_rev {
-        // Best-effort fetch so a pinned rev that arrived later is available.
-        let _ = run_git(&["fetch", "--all", "--tags"], Some(dest));
-        run_git(&["checkout", rev], Some(dest)).with_context(|| format!("checking out {rev}"))?;
+    match want_rev {
+        Some(rev) => {
+            if refresh {
+                run_git(&["fetch", "--all", "--tags"], Some(dest))
+                    .with_context(|| format!("fetching {url}"))?;
+            } else {
+                // Best-effort fetch so a pinned rev that arrived later is
+                // available; a resolve against a cached clone stays offline-
+                // tolerant.
+                let _ = run_git(&["fetch", "--all", "--tags"], Some(dest));
+            }
+            run_git(&["checkout", rev], Some(dest))
+                .with_context(|| format!("checking out {rev}"))?;
+        }
+        None if refresh && !fresh => {
+            run_git(&["fetch", "origin", "HEAD", "--tags"], Some(dest))
+                .with_context(|| format!("fetching {url}"))?;
+            run_git(&["checkout", "--detach", "FETCH_HEAD"], Some(dest))
+                .with_context(|| format!("checking out the latest revision of {url}"))?;
+        }
+        None => {}
     }
     Ok(fresh)
 }

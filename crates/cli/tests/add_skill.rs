@@ -316,6 +316,73 @@ fn several_profiles_write_does_not_materialize() {
     );
 }
 
+/// `lock --update` on a REV-LESS git skill used to be a silent no-op (cached
+/// clone + no rev → no network call at all). resolve_refresh re-tracks the
+/// remote head; this witnesses both the update and the deletion detection.
+#[test]
+fn update_refreshes_revless_git_skills_and_detects_deletion() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let url = fixture_repo(tmp.path(), false);
+    let repo = tmp.path().join("skills-repo");
+    let proj = seed_project(tmp.path());
+
+    add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
+    let lock_before = fs::read_to_string(proj.join("agentstack.lock")).unwrap();
+
+    // Upstream moves: new commit changes the skill body.
+    fs::write(
+        repo.join("skills/pdf/EXTRA.md"),
+        "new upstream content\n",
+    )
+    .unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    };
+    git(&["add", "-A"]);
+    git(&[
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-q",
+        "-m",
+        "update",
+    ]);
+
+    agentstack::commands::install::run_update(
+        &agentstack::cli::UpdateArgs { name: None },
+        Some(&proj),
+    )
+    .unwrap();
+    let lock_after = fs::read_to_string(proj.join("agentstack.lock")).unwrap();
+    assert_ne!(
+        lock_before, lock_after,
+        "update must re-track a rev-less git skill to the new upstream head"
+    );
+
+    // Upstream vanishes entirely: the update must fail loudly, not no-op.
+    fs::remove_dir_all(&repo).unwrap();
+    let err = agentstack::commands::install::run_update(
+        &agentstack::cli::UpdateArgs { name: None },
+        Some(&proj),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("failed to resolve"),
+        "deleted upstream must surface: {err:#}"
+    );
+}
+
 #[test]
 fn scan_gate_blocks_hostile_content_before_any_offer() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());

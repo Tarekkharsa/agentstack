@@ -71,10 +71,16 @@ fn sync(
             lock.get(name).and_then(|l| l.rev.clone())
         };
 
-        let resolved = match store.resolve(skill, &ctx.dir, pinned.as_deref()) {
+        // Relock = the update posture: ignore the pin, require the fetch, and
+        // re-track rev-less skills to the remote head (resolve_refresh).
+        let resolved = match if relock {
+            store.resolve_refresh(skill, &ctx.dir)
+        } else {
+            store.resolve(skill, &ctx.dir, pinned.as_deref())
+        } {
             Ok(r) => r,
             Err(e) => {
-                println!("  {} {name}: {e}", "✗".red());
+                println!("  {} {name}: {}", "✗".red(), classify_resolve_err(&e, skill));
                 errors += 1;
                 continue;
             }
@@ -119,7 +125,10 @@ fn sync(
         let fetched_note = if resolved.fetched { " (fetched)" } else { "" };
 
         match lock.get(name) {
-            Some(prev) if prev == &entry && !relock => {
+            // Unchanged content reads as cached even under a relock — an
+            // update that fetched and found nothing new must not claim
+            // "updated" (previously every path skill did, on every update).
+            Some(prev) if prev == &entry => {
                 println!("  {} {name} cached ({})", "✓".green(), resolved.source_kind);
             }
             Some(_) => {
@@ -142,6 +151,21 @@ fn sync(
                     println!("  {} {name} locked{fetched_note}", "+".green());
                 }
             }
+        }
+    }
+
+    // Skip-with-reason: profile-referenced (library-backed) names are not
+    // re-resolved by this pass — under an update they'd otherwise vanish from
+    // the output entirely, reading as "checked" when they weren't.
+    for name in &profile_names {
+        if manifest.skills.contains_key(name) {
+            continue;
+        }
+        if relock_all || only == Some(name.as_str()) {
+            println!(
+                "  {} {name} skipped (library-referenced — `agentstack lock` refreshes it)",
+                "·".dimmed()
+            );
         }
     }
 
@@ -170,6 +194,36 @@ fn sync(
         anyhow::bail!("{errors} skill(s) failed to resolve");
     }
     Ok(())
+}
+
+/// Turn a resolve failure into a line that names the likely upstream cause —
+/// a deleted repo or a vanished subpath should not read like a generic git
+/// hiccup (design follow-up: skills-sh-learnings §5, skip/deletion reasons).
+fn classify_resolve_err(e: &anyhow::Error, skill: &crate::manifest::Skill) -> String {
+    let chain = crate::text::sanitize_line(&format!("{e:#}"));
+    let lower = chain.to_lowercase();
+    if skill.git.is_some() {
+        let unreachable = [
+            "not found",
+            "does not exist",
+            "could not read from remote",
+            "could not resolve host",
+            "unable to access",
+            "no such device",
+        ]
+        .iter()
+        .any(|s| lower.contains(s));
+        if lower.contains("subpath '") {
+            return format!("vanished upstream — {chain} (keep the pin, or remove the skill)");
+        }
+        if unreachable {
+            return format!(
+                "upstream unreachable or deleted — {chain} (the lock pin still guards the \
+                 cached content; remove the skill to drop it)"
+            );
+        }
+    }
+    chain
 }
 
 /// Every skill name any profile references, deduplicated (wildcards expand
