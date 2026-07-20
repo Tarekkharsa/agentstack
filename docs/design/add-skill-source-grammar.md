@@ -1,6 +1,8 @@
 # `add skill <source>` — speaking the ecosystem's grammar (priority 2)
 
-Status: **proposed, awaiting approval**. Implements priority 2 of
+Status: **implemented 2026-07-20** (session 1: `22a8161` — grammar +
+discovery modules; session 2: `d7c3a4b` — staging, promotion, the verb,
+witnesses, reference docs). Implements priority 2 of
 [`skills-sh-learnings.md`](skills-sh-learnings.md) §10 — the acquisition
 layer: source grammar, conventional discovery, `--list`, fail-loud
 duplicates — landing on the priority-1 hardening
