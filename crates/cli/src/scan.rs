@@ -143,6 +143,10 @@ pub fn scan_tree(root: &Path) -> Result<Vec<Finding>> {
 /// add-skill-source-grammar design §3).
 pub fn gate(name: &str, dir: &Path, allow_flagged: bool, warnings: &mut Vec<String>) -> Result<()> {
     use anyhow::Context;
+    // Reject symlinks BEFORE reading a byte: a link is never part of the
+    // pinned digest and its target can change or escape the source, so
+    // scanning or delivering one would trust bytes we cannot pin.
+    reject_symlinks(dir)?;
     let findings = scan_tree(dir).with_context(|| format!("scanning {}", dir.display()))?;
     let high: Vec<_> = findings
         .iter()
@@ -175,8 +179,16 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Finding>) -> Result<()> {
         if entry.file_name() == ".git" {
             continue;
         }
+        let ft = entry.file_type()?;
+        // Never follow a symlink: its target may lie outside the source, so
+        // following it would scan (and effectively read) unbounded content.
+        // `reject_symlinks` hard-fails on these upstream in the gate; here we
+        // skip, so a direct `scan_tree` caller still can't read out of bounds.
+        if ft.is_symlink() {
+            continue;
+        }
         let path = entry.path();
-        if entry.file_type()?.is_dir() {
+        if ft.is_dir() {
             walk(root, &path, out)?;
         } else {
             let label = path
@@ -185,6 +197,45 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Finding>) -> Result<()> {
                 .display()
                 .to_string();
             out.extend(scan_file(&path, &label)?);
+        }
+    }
+    Ok(())
+}
+
+/// Reject any symlink anywhere under `root` (recursively, `.git` excluded).
+/// Skill content must be self-contained and pinnable: a link is excluded
+/// from the content digest (so its target's bytes are never pinned) and can
+/// point outside the source, so a remote skill could otherwise read or
+/// deliver files its checkout never contained. Every ingestion path runs
+/// this before trusting content — via [`gate`] for add/lib add/try, and in
+/// the store's resolve for install/use/lock.
+pub fn reject_symlinks(root: &Path) -> Result<()> {
+    reject_symlinks_in(root, root)
+}
+
+fn reject_symlinks_in(root: &Path, dir: &Path) -> Result<()> {
+    for entry in fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let entry = entry?;
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        // `file_type()` from a dir entry does NOT dereference the link.
+        let ft = entry.file_type()?;
+        if ft.is_symlink() {
+            let rel = entry
+                .path()
+                .strip_prefix(root)
+                .unwrap_or(&entry.path())
+                .display()
+                .to_string();
+            anyhow::bail!(
+                "skill content contains a symlink ('{}') — skills must be self-contained; \
+                 a link can't be pinned and its target may lie outside the source",
+                crate::text::sanitize_line(&rel)
+            );
+        }
+        if ft.is_dir() {
+            reject_symlinks_in(root, &entry.path())?;
         }
     }
     Ok(())

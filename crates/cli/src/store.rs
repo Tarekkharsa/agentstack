@@ -73,6 +73,9 @@ impl Store {
             SkillSource::Path(p) => {
                 let path = resolve_path(manifest_dir, &p);
                 let checksum = if path.exists() {
+                    // Same self-contained rule as git content: a symlink is
+                    // excluded from the digest, so its bytes are never pinned.
+                    crate::scan::reject_symlinks(&path)?;
                     dir_digest(&path)?.hex().to_string()
                 } else {
                     String::new()
@@ -102,9 +105,19 @@ impl Store {
                         );
                     }
                 }
+                // Reject symlinks before pinning or delivering the content
+                // (findings: the digest excludes links, so a link's bytes are
+                // never pinned, and following one escapes the checkout).
+                crate::scan::reject_symlinks(&content)?;
                 let checksum = dir_digest(&content)?.hex().to_string();
+                // Immutable per-commit snapshot: the mutable clone's working
+                // tree churns as other revisions of the same URL check out,
+                // but a materialized symlink must point at bytes that never
+                // change under it. Content-addressed by the digest, so a
+                // different commit is a different dir — never a clobber.
+                let path = self.snapshot_content(&content, &checksum)?;
                 Ok(Resolved {
-                    path: content,
+                    path,
                     rev: Some(resolved_rev),
                     checksum,
                     fetched,
@@ -112,6 +125,34 @@ impl Store {
                 })
             }
         }
+    }
+
+    /// Copy `src` (a resolved, symlink-free skill body) into the immutable
+    /// content-addressed cache `store/content/<digest>` and return that path.
+    /// Write-once: if the digest dir already exists it is reused as-is, so
+    /// two resolves of the same commit share one immutable dir and a later
+    /// resolve of a *different* commit lands in a different dir — the bytes a
+    /// materialized symlink points at can never change under it. Callers
+    /// reject symlinks first, so `copy_dir_all` is faithful here.
+    pub fn snapshot_content(&self, src: &Path, digest_hex: &str) -> Result<PathBuf> {
+        let content_root = self.root.join("content");
+        let dest = content_root.join(digest_hex);
+        if dest.exists() {
+            return Ok(dest);
+        }
+        fs::create_dir_all(&content_root)
+            .with_context(|| format!("creating {}", content_root.display()))?;
+        // Copy to a temp then rename into place, so a crash never leaves a
+        // partial dir under a digest name (which would read as complete).
+        let tmp = content_root.join(format!(".tmp-{}", crate::runs::gen_id()));
+        crate::util::fsx::copy_dir_all(src, &tmp)
+            .with_context(|| format!("snapshotting {}", src.display()))?;
+        if fs::rename(&tmp, &dest).is_err() {
+            // Lost a race (another resolve created it) — drop our temp and
+            // use the winner's dir.
+            let _ = fs::remove_dir_all(&tmp);
+        }
+        Ok(dest)
     }
 
     /// Resolve a skill to a local directory **without any network access**.
@@ -627,12 +668,20 @@ mod tests {
         let store = Store::with_root(tmp.child("store").path().to_path_buf());
         let url = format!("file://{}", repo.path().display());
 
-        // Good subpath → the subdir's SKILL.md.
+        // Good subpath → an immutable content-addressed snapshot of the
+        // subdir (not the churning clone), carrying its SKILL.md.
         let ok: Skill =
             toml::from_str(&format!("git = \"{url}\"\nsubpath = \"skills/improve\"")).unwrap();
         let r = store.resolve(&ok, tmp.path(), None).unwrap();
-        assert!(r.path.ends_with("skills/improve"));
+        assert!(
+            r.path
+                .starts_with(tmp.child("store").path().join("content")),
+            "resolved path must be the immutable snapshot: {}",
+            r.path.display()
+        );
         assert!(r.path.join("SKILL.md").exists());
+        // The snapshot dir is named by the content digest.
+        assert_eq!(r.path.file_name().unwrap().to_string_lossy(), r.checksum);
 
         // `..` component → rejected before any read.
         let dots: Skill = toml::from_str(&format!("git = \"{url}\"\nsubpath = \"../x\"")).unwrap();

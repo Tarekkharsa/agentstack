@@ -337,20 +337,34 @@ In order, all-or-nothing:
    `lock --update` relocks, at which point it re-tracks the branch tip.
 5. Lock: upsert a `LockedSkill` per skill via the existing
    `install::locked_entry` shape — `rev` = the staged HEAD commit,
-   `checksum` = `dir_digest` of the resolved subpath dir (computed on the
-   promoted clone, which rename left byte-identical to what was
-   scanned). After one `--write`, `doctor` is green
-   (`present · SKILL.md ok`) and `install` is a no-op for these entries.
+   `checksum` = `dir_digest` of the resolved subpath dir. After one
+   `--write`, `doctor` is green (`present · SKILL.md ok`) and `install`
+   is a no-op for these entries.
 
-**Not** in this write (priority 3's transaction): no profile *activation*,
-no target materialization, no server rendering. The `·` footer names the
-next command.
+**Transaction guarantee (honest scope).** The manifest is written
+**atomically first** (temp + rename) and is the source of truth; the lock
+is derived from it. Two files can't be renamed as one, so the guarantee is
+not two-phase commit — it is: if the lock write fails, the manifest still
+stands and the error tells the user to run `agentstack lock`, which
+reconciles it. The manifest never lands ahead with no path back to a
+matching lock. Materialization (priority 3) runs after and is additive; it
+reports per-target `✓`/`⚠`/`✗` outcomes and the command exits non-zero
+naming any failed target — the manifest and lock stand, and
+`use --write` completes the materialization. There is no cross-target
+rollback (symlinks/copies are additive, not transactional); the
+"report-and-leave-diagnosable" path is the guarantee, and `doctor` names
+any half-materialized target.
 
-Multi-skill note: all entries share one URL and one implicit rev, so the
-store's shared-clone-per-URL model is safe (the verified caveat — same
-URL, *different* pinned revs mutating one working tree — cannot be
-produced by a single `add skill` invocation, and the lock pins commits,
-not the clone's mutable HEAD).
+**Immutable content (the shared-clone hazard, closed).** The store's
+per-URL clone has a single mutable working tree, so checking out a second
+revision of the same repo would change the bytes an already-materialized
+symlink points at — across invocations, silently, while the first skill's
+lock still pins the first commit. The write therefore **snapshots the
+resolved, symlink-free content into a content-addressed immutable dir**
+(`store/content/<digest>`) and materializes symlinks against *that*: a
+different commit is a different digest is a different dir, so a later add
+can never clobber an earlier skill's bytes. (Symlinks are rejected at
+every ingestion gate first, so the snapshot copy is faithful.)
 
 ### Profile membership (replaces `add`'s current do-nothing)
 

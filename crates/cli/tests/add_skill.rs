@@ -406,6 +406,98 @@ fn update_refreshes_revless_git_skills_and_detects_deletion() {
     );
 }
 
+/// Finding 1: a materialized git skill must point at an immutable snapshot,
+/// so checking out a different revision of the same repo can't change its
+/// bytes out from under it (the cross-invocation clobber).
+#[test]
+fn materialized_git_skill_survives_a_later_checkout_of_another_revision() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let url = fixture_repo(tmp.path(), false);
+    let repo = tmp.path().join("skills-repo");
+    let proj = seed_project(tmp.path());
+
+    add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
+    let mat = proj.join(".claude/skills/pdf/SKILL.md");
+    let original = fs::read_to_string(&mat).unwrap();
+    // The symlink resolves into the immutable content cache, not the clone.
+    let real = fs::canonicalize(&mat).unwrap();
+    assert!(
+        real.components().any(|c| c.as_os_str() == "content")
+            && real.to_string_lossy().contains("store/content/"),
+        "materialized skill must point at the immutable snapshot, got {}",
+        real.display()
+    );
+
+    // Advance the repo, then churn the shared clone to the new commit via a
+    // direct resolve (what a second add of another revision would do).
+    fs::write(
+        repo.join("skills/pdf/SKILL.md"),
+        "---\ndescription: v2\n---\nCHANGED\n",
+    )
+    .unwrap();
+    let git = |args: &[&str]| {
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    };
+    git(&[
+        "-c",
+        "user.email=t@e.st",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-qam",
+        "v2",
+    ]);
+    let skill: agentstack::manifest::Skill =
+        toml::from_str(&format!("git = \"{url}\"\nsubpath = \"skills/pdf\"")).unwrap();
+    agentstack::store::Store::default_store()
+        .resolve(&skill, &proj, None)
+        .unwrap();
+
+    // pdf's materialized bytes are unchanged — the snapshot is immutable.
+    assert_eq!(
+        fs::read_to_string(&mat).unwrap(),
+        original,
+        "a later checkout of another revision must not mutate a materialized skill"
+    );
+}
+
+/// Finding 2: a symlink anywhere in skill content is rejected before the
+/// content is scanned, pinned, or delivered.
+#[test]
+fn symlink_in_skill_content_is_rejected() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+
+    let src = tmp.path().join("my-skill");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("SKILL.md"), "---\ndescription: ok\n---\nbody\n").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("/etc/hosts", src.join("leak")).unwrap();
+    let proj = seed_project(tmp.path());
+
+    let err = add::run(
+        &add_args(&src.display().to_string(), &[], true),
+        Some(&proj),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("symlink"),
+        "symlinked content must be refused: {err:#}"
+    );
+    assert!(!proj.join("agentstack.lock").exists(), "nothing written");
+}
+
 #[test]
 fn scan_gate_blocks_hostile_content_before_any_offer() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());

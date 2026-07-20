@@ -109,15 +109,20 @@ pub fn discover_skills(root: &Path, root_name: Option<&str>) -> Result<Vec<Disco
                 found.push(make(&child.path, child.name, rel, false));
                 continue; // never descend past a found SKILL.md
             }
-            // Catalog layout: one extra level (skills/<category>/<skill>).
-            for grand in read_dirs_sorted(&child.path)? {
-                if grand.path.join("SKILL.md").is_file() {
-                    found.push(make(
-                        &grand.path,
-                        grand.name.clone(),
-                        format!("{rel}/{}", grand.name),
-                        false,
-                    ));
+            // The one extra level is the `skills/<category>/<skill>` catalog
+            // layout ONLY — the agent-convention dirs (.claude/skills, …)
+            // hold flat skills, so descending a level there would discover
+            // more than the stated policy. Grandchildren only under skills/.
+            if *container == "skills" || container.starts_with("skills/") {
+                for grand in read_dirs_sorted(&child.path)? {
+                    if grand.path.join("SKILL.md").is_file() {
+                        found.push(make(
+                            &grand.path,
+                            grand.name.clone(),
+                            format!("{rel}/{}", grand.name),
+                            false,
+                        ));
+                    }
                 }
             }
         }
@@ -186,7 +191,10 @@ fn walk_fallback(
     depth: usize,
     found: &mut Vec<DiscoveredSkill>,
 ) -> Result<()> {
-    if depth > FALLBACK_MAX_DEPTH {
+    // A call at `depth` inspects children at level `depth + 1`, so returning
+    // at `depth == FALLBACK_MAX_DEPTH` caps discovered skills at exactly that
+    // depth (a `>` guard admitted one level deeper than documented).
+    if depth >= FALLBACK_MAX_DEPTH {
         return Ok(());
     }
     for child in read_dirs_sorted(dir)? {
@@ -258,8 +266,11 @@ mod tests {
         skill(&tmp, "skills/alpha", "first");
         skill(&tmp, "skills/.curated/beta", "curated");
         skill(&tmp, ".claude/skills/gamma", "agent dir");
-        // Catalog layout: one extra level under a container.
+        // Catalog layout: one extra level, but ONLY under skills/.
         skill(&tmp, "skills/writing/delta", "nested catalog");
+        // A grandchild under an agent dir is NOT discovered — the extra
+        // level is a skills/<category>/<skill> convention only.
+        skill(&tmp, ".claude/skills/cat/hidden", "agent grandchild");
         // Below a found SKILL.md — must NOT be discovered.
         skill(&tmp, "skills/alpha/inner", "too deep");
         // Never-entered dirs.
@@ -308,10 +319,14 @@ mod tests {
         assert_eq!(found[0].rel_path, "tools/helper");
         assert!(found[0].via_fallback);
 
-        // Depth cap: 6 levels below root is out of reach.
-        let deep = assert_fs::TempDir::new().unwrap();
-        skill(&deep, "a/b/c/d/e/f/toodeep", "beyond the cap");
-        assert!(discover_skills(deep.path(), None).unwrap().is_empty());
+        // Depth cap is exactly 5: a skill 5 levels below root is found, 6 is
+        // out of reach (the guard was off-by-one, admitting depth 6).
+        let at5 = assert_fs::TempDir::new().unwrap();
+        skill(&at5, "a/b/c/d/e", "at the cap");
+        assert_eq!(discover_skills(at5.path(), None).unwrap().len(), 1);
+        let at6 = assert_fs::TempDir::new().unwrap();
+        skill(&at6, "a/b/c/d/e/f", "beyond the cap");
+        assert!(discover_skills(at6.path(), None).unwrap().is_empty());
     }
 
     #[test]

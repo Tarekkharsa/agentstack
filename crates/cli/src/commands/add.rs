@@ -1047,11 +1047,11 @@ fn add_skill_from_dir(
         let dir = join_rel(&abs, &skill.rel_path);
         let mut warnings = Vec::new();
         crate::scan::gate(name, &dir, a.allow_flagged, &mut warnings)?;
-        let path_field = if skill.rel_path.is_empty() {
-            a.source.clone()
-        } else {
-            format!("{}/{}", a.source.trim_end_matches('/'), skill.rel_path)
-        };
+        // Store the path relative to the MANIFEST dir, not the user's cwd
+        // spelling: discovery resolved `./x` against the current directory,
+        // but the store later resolves the manifest value against `.agentstack/`
+        // (`ctx.dir`). Storing the raw `./x` would resolve to `.agentstack/x`.
+        let path_field = manifest_rel_path(&ctx.dir, &dir);
         planned.push(PlannedSkill {
             name: name.clone(),
             entry: Skill {
@@ -1068,6 +1068,35 @@ fn add_skill_from_dir(
     }
     print_selection(&discovered, &selected, &planned);
     preview_and_commit(ctx, a.write, &planned, profile.as_deref())
+}
+
+/// Express the absolute `target` as a path the manifest can store — one that
+/// `store::resolve_path(base, _)` maps back to `target` no matter which
+/// directory the command ran from. `base` is the manifest dir. Prefers a
+/// relative path (portable across machines); falls back to the absolute
+/// target only when the two share no common root.
+fn manifest_rel_path(base: &Path, target: &Path) -> String {
+    let base = std::fs::canonicalize(base).unwrap_or_else(|_| base.to_path_buf());
+    let target = std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+    let bc: Vec<_> = base.components().collect();
+    let tc: Vec<_> = target.components().collect();
+    let common = bc.iter().zip(&tc).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return target.to_string_lossy().into_owned();
+    }
+    let mut rel = PathBuf::new();
+    for _ in 0..(bc.len() - common) {
+        rel.push("..");
+    }
+    for c in &tc[common..] {
+        rel.push(c.as_os_str());
+    }
+    if rel.as_os_str().is_empty() {
+        ".".to_string()
+    } else {
+        rel.to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/")
+    }
 }
 
 /// A canonical flag beats its in-URL alias; disagreement is an error.
@@ -1370,29 +1399,49 @@ fn preview_and_commit(
         );
         return Ok(());
     }
+    // The manifest is the source of truth and is written atomically first;
+    // the lock is derived from it. If the lock write below fails, the
+    // manifest still stands and `agentstack lock` reconciles it — the pair
+    // is never left with the manifest ahead and no path back to a match.
     crate::util::atomic::write(manifest_path, &text)
         .with_context(|| format!("writing {}", manifest_path.display()))?;
+    let store = crate::store::Store::default_store();
     let mut lock = crate::lock::Lock::load(&ctx.dir)?;
+    // The immutable materialization source per skill: git content is
+    // snapshotted out of the churning clone (finding 1) so a later add of
+    // another revision can't mutate this skill's symlinked bytes; path
+    // sources already live in a stable dir.
+    let mut mat_sources: Vec<(String, PathBuf)> = Vec::new();
     for p in planned {
+        let checksum = crate::store::dir_digest(&p.content_dir)?.hex().to_string();
+        let source = if p.source_kind == "git" {
+            store.snapshot_content(&p.content_dir, &checksum)?
+        } else {
+            p.content_dir.clone()
+        };
         let resolved = crate::store::Resolved {
-            path: p.content_dir.clone(),
+            path: source.clone(),
             rev: p.rev.clone(),
-            checksum: crate::store::dir_digest(&p.content_dir)?.hex().to_string(),
+            checksum,
             fetched: true,
             source_kind: p.source_kind,
         };
         lock.upsert(super::install::locked_entry(&p.name, &p.entry, &resolved)?);
+        mat_sources.push((p.name.clone(), source));
     }
-    lock.save(&ctx.dir)?;
+    lock.save(&ctx.dir).with_context(|| {
+        format!(
+            "the manifest was written but the lockfile at {} could not be — \
+             run `agentstack lock` to reconcile",
+            crate::lock::Lock::path(&ctx.dir).display()
+        )
+    })?;
     println!("{} added {names}.", "✓".green());
 
     // Mode-aware tail (`act` was captured pre-write — see its doc).
     use super::overview::Mode;
     if act.mode == Mode::Static && !act.ambiguous {
-        let new_skills: Vec<(String, PathBuf)> = planned
-            .iter()
-            .map(|p| (p.name.clone(), p.content_dir.clone()))
-            .collect();
+        let new_skills: Vec<(String, PathBuf)> = mat_sources.clone();
         let outcome = super::use_profile::materialize_skills_additive(
             ctx,
             act.scope,
@@ -2035,5 +2084,24 @@ mod tests {
         let out = stamped_instruction_from("linear-pack", &instr, &AssetSource::Embedded).unwrap();
         assert!(out.starts_with("<!-- agentstack:vendor linear-pack (unofficial) -->"));
         assert!(out.contains("# vendor: linear-pack (unofficial)"));
+    }
+
+    /// Finding 3: a local skill path is stored relative to the MANIFEST dir,
+    /// so it resolves correctly no matter which cwd the command ran from.
+    #[test]
+    fn manifest_rel_path_rebases_against_the_manifest_dir() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let proj = tmp.path().join("proj");
+        let manifest_dir = proj.join(".agentstack");
+        let skill = proj.join("my-skill");
+        std::fs::create_dir_all(&manifest_dir).unwrap();
+        std::fs::create_dir_all(&skill).unwrap();
+
+        // A skill in the project root is one level up from `.agentstack/`.
+        assert_eq!(manifest_rel_path(&manifest_dir, &skill), "../my-skill");
+        // A skill under the manifest dir stays a plain relative path.
+        let nested = manifest_dir.join("skills/x");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(manifest_rel_path(&manifest_dir, &nested), "skills/x");
     }
 }

@@ -443,8 +443,11 @@ Priority order:
    fail-loud duplicates.
 3. **One preview, one write on the `use` seam** (§4, §10) — after the
    destination decision above.
-4. **Update ergonomics** (§5): Trees-API batch checking, skip-reasons,
-   upstream-deletion detection in `lock --update`/`doctor`.
+4. **Update ergonomics** (§5): skip-reasons and upstream-deletion
+   detection in `lock --update`. (The "Trees-API batch checking" idea —
+   one API call per source instead of a fetch per skill — was **not**
+   built: `lock --update` resolves each git source individually. Left as a
+   future optimization; correctness doesn't depend on it.)
 5. **Distribution loop** (§7, §8): finding-skills catalog skill, `lib new`
    scaffolding, ephemeral use.
 
@@ -452,8 +455,10 @@ Priority order:
 hardening-remote-ingestion.md; 2 → add-skill-source-grammar.md; 3 →
 add-skill-activation.md; 4 → update refresh semantics + upstream-deletion
 detection + skip reasons (a review round additionally fixed branch-pin
-re-tracking and restored preview containment); 5 → `lib add` gained the
-source grammar and the finding-skills catalog skill shipped. The §8
+re-tracking and restored preview containment) — **excluding** the
+Trees-API batch optimization, which was not built (see priority 4 above);
+5 → `lib add` gained the source grammar and the finding-skills catalog
+skill shipped. The §8
 smaller ideas landed too: `lib new` scaffolding and `agentstack try
 <source> | <cli>` ephemeral use (staged, scanned, symlink-refusing,
 manifest-free). The deliberate rejections (§9) stand.
