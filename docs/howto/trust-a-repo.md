@@ -1,3 +1,7 @@
+<!-- INTERNAL SOURCE: this file is the build input for its page on
+     https://tarekkharsa.github.io/agentstack/ — readers go to the site.
+     Edit here, then run: python3 tools/make-docs-pages.py -->
+
 # Trust a cloned repo
 
 For anyone who clones repos that ship their own agent capabilities and wants
@@ -27,14 +31,16 @@ no secrets resolve, until you run `agentstack trust .`. Trust shows exactly what
 the manifest runs and contacts, then pins the [consent digest](../concepts.md)
 of the [manifest](../concepts.md), its local overlay, and the
 [lockfile](../concepts.md). Any edit — a `git pull`, an `agentstack lock` —
-drops the repo back to inert until you trust it again.
+drops the repo back to inert until you trust it again. To vet one server or
+skill in depth first — its provenance, effective policy, and context cost — run
+`agentstack explain <name>`; see [see what your agents did](see-what-happened.md).
 
 **What trust covers, and what it doesn't.** Trust pins those three files and
-gates whether the declared servers may run. It does **not** cover arbitrary code
-those servers point at: trusting a repo whose server runs `python3 ./server.py`
-authorizes *that command*, not later edits to `server.py`. Review referenced
-local scripts as part of `trust .`, the same discipline as reading a `.envrc`
-before `direnv allow`. The full boundary is in the enforcement matrix —
+gates whether the declared servers may run; it does **not** vouch for the code
+those servers point at. A server that runs a local script authorizes *that
+command*, not later edits to it — so review referenced scripts as part of
+`trust .`, the way you'd read a `.envrc` before `direnv allow`. The full boundary
+is the enforcement matrix's
 [What "trusted" does and does not mean](../ENFORCEMENT.md#what-trusted-does-and-does-not-mean).
 
 **Limits.** Trust is consent to a set of bytes, not a sandbox. It gates

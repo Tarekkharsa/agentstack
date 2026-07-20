@@ -466,12 +466,12 @@
 <main id="main">
 
   <section id="hero" style="margin-top:2.75rem">
-    <h1 style="margin:0.7rem 0 0.8rem">Build, govern, and run<br>your agent stack.<span class="cursor" aria-hidden="true"></span></h1>
+    <h1 style="margin:0.7rem 0 0.8rem">Cloning a repo shouldn't hand<br>your agent to a stranger.<span class="cursor" aria-hidden="true"></span></h1>
     <p class="lede">
-      One manifest for all 13 agent CLIs — servers, skills, instructions, and
-      secrets, defined once. Untrusted repos never auto-activate, and governed
-      runs are firewalled, recorded, and labelled with exactly how strongly
-      that is enforced.
+      AgentStack is one reviewed manifest for all 13 agent CLIs — servers,
+      skills, instructions, and secrets, defined once. Untrusted repos never
+      auto-activate, and governed runs are firewalled, recorded, and labelled
+      with exactly how strongly that is enforced.
     </p>
     <div class="cta" style="margin-top:1.1rem">
       <a class="btn primary" href="start.html">Get started · 10 min →</a>
@@ -725,7 +725,7 @@
       The whole story, in one binary: an untrusted repo exposes no
       project-declared capability through the auto-project gateway, and every
       brokered capability call is firewallable and logged
-      (<a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#secrets-and-trust">the documented limits</a> say exactly what trust does and doesn't cover). Prefer a drop-in proxy? <code>--transparent</code>
+      (<a href="reference.html#secrets-and-trust">the documented limits</a> say exactly what trust does and doesn't cover). Prefer a drop-in proxy? <code>--transparent</code>
       advertises every policy-filtered upstream tool straight in
       <code>tools/list</code>, so any standard MCP client works with zero
       agentstack knowledge — the default compact mode keeps them behind one
@@ -831,8 +831,8 @@
       A focused implementation review and regression-hardening pass completed
       on 2026-07-13. It remains experimental while executor-specific
       SBOM/attestation and longer-running soak evidence are outstanding.
-      Read the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#experimental-tools_execute">exact contract</a>
-      and <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md#experimental-tools_execute">enforcement matrix</a>.
+      Read the <a href="reference.html#experimental-tools_execute">exact contract</a>
+      and <a href="enforcement.html#experimental-tools_execute">enforcement matrix</a>.
     </p>
   </section>
 
@@ -856,7 +856,7 @@
 
     <div class="matrix-wrap">
       <table class="matrix">
-        <caption class="small muted" style="text-align:left;padding:0.7rem 0.8rem;caption-side:top">Derived from <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">docs/ENFORCEMENT.md</a>, which is checked against the source per cell.</caption>
+        <caption class="small muted" style="text-align:left;padding:0.7rem 0.8rem;caption-side:top">Derived from <a href="enforcement.html">docs/ENFORCEMENT.md</a>, which is checked against the source per cell.</caption>
         <thead>
           <tr>
             <th scope="col">Dimension</th>
@@ -909,7 +909,7 @@
       through an allowed destination.</strong> The full per-cell reasoning —
       including where <code>--sandbox</code>'s bridge network stops short of
       <code>--lockdown</code>'s topological confinement — is in the
-      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">enforcement matrix</a>.
+      <a href="enforcement.html">enforcement matrix</a>.
     </p>
   </section>
 
@@ -1021,24 +1021,24 @@ default = ["claude-code", "codex"]</code></pre>
     <dl class="modes">
       <div>
         <dt>static <small>default</small></dt>
-        <dd>Artifacts (<code>.mcp.json</code>, <code>.claude/skills/</code>, and the
-            compiled <code>CLAUDE.md</code>&nbsp;/&nbsp;<code>AGENTS.md</code>) sit on
-            disk, kept out of git by a managed <code>.gitignore</code> block that only
-            ever covers files agentstack itself wrote — so a repo tracks only your
-            <code>.agentstack/</code> intent and a hand-maintained file is never
-            hidden. Works however you launch your tools.</dd>
+        <dd>Rendered configs sit on disk, kept out of git by a managed
+            <code>.gitignore</code> block. Works however you launch your tools.</dd>
       </div>
       <div>
         <dt>clean-at-rest</dt>
-        <dd>Nothing generated exists between sessions. <code>agentstack run &lt;cli&gt; --profile &lt;p&gt;</code>
-            injects on launch and reverts on exit; <code>git status</code> stays silent.</dd>
+        <dd>Nothing generated exists between sessions — injected on launch,
+            reverted on exit; <code>git status</code> stays silent.</dd>
       </div>
       <div>
         <dt>zero files</dt>
-        <dd>Nothing generated at all — the gateway serves each repo's servers on the
-            fly, behind the <a href="#trust">trust gate</a> above.</dd>
+        <dd>Nothing generated at all — the gateway serves each repo's servers
+            live, behind the <a href="#trust">trust gate</a> above.</dd>
       </div>
     </dl>
+    <p class="small muted">
+      Deciding? <a href="choose.html">Which mode do I need?</a> · the full
+      lifecycle per mode: <a href="reference.html#where-rendered-files-live-three-modes">delivery modes in the reference</a>.
+    </p>
   </section>
 
   <section id="team" class="reveal">
@@ -1052,10 +1052,10 @@ agentstack doctor                # verify the wiring</code></pre>
     <pre><code>agentstack install --locked   # fail if sources drifted from the pinned lock
 agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</code></pre>
     <p class="small muted">
-      Provenance, too: <code>agentstack sign</code> writes a detached ed25519
-      signature over the lockfile, and <code>agentstack verify</code> checks
-      it — so CI can prove the pinned content is the content someone actually
-      reviewed.
+      The step-by-step versions, with limits and the optional
+      <code>sign</code>/<code>verify</code> provenance path:
+      <a href="howto/team-setup.html">team setup</a> ·
+      <a href="howto/ci.html">use in CI</a>.
     </p>
   </section>
 
@@ -1071,17 +1071,17 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
         <a class="tag" href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">Review the strategy</a>
       </div>
       <div class="fcard">
-        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">Choose the right boundary</a></h3>
+        <h3><a href="architecture.html#operating-model--choose-the-boundary-you-need">Choose the right boundary</a></h3>
         <p>Our recommendation for composing profiles, delivery, trust, policy,
            isolation, and evidence—plus the cases where the default should change.</p>
-        <a class="tag" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">Decision guide</a>
+        <a class="tag" href="architecture.html#operating-model--choose-the-boundary-you-need">Decision guide</a>
       </div>
       <div class="fcard">
-        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library">Central library</a></h3>
+        <h3><a href="reference.html#the-central-library">Central library</a></h3>
         <p>One managed home for skills and servers; projects select by name and stay
            digest-pinned. Install from a local dir or a git subdirectory, sync across
            machines, and pull ready-made skills from the shipped catalog.</p>
-        <a class="tag" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library">Reference</a>
+        <a class="tag" href="reference.html#the-central-library">Reference</a>
       </div>
       <div class="fcard">
         <h3>Usage insight</h3>
@@ -1091,17 +1091,17 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
         <span class="tag" style="color:var(--faint)">Read-only &amp; local</span>
       </div>
       <div class="fcard">
-        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Feature reference</a></h3>
+        <h3><a href="reference.html">Feature reference</a></h3>
         <p>The complete tested inventory: vendor packs, MCP firewall, call audit log,
            <code>optimize</code>, native extensions, live runs, code mode, and the full
            command list.</p>
-        <a class="tag" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Full reference</a>
+        <a class="tag" href="reference.html">Full reference</a>
       </div>
       <div class="fcard">
-        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#dashboard">The read-only lens</a></h3>
+        <h3><a href="reference.html#dashboard">The read-only lens</a></h3>
         <p>A local, token-gated dashboard that shows your whole stack — servers, skills,
            secrets, runs, diffs, doctor, Proxy and Insights. It reads; the CLI writes.</p>
-        <a class="tag" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#dashboard">Dashboard guide</a>
+        <a class="tag" href="reference.html#dashboard">Dashboard guide</a>
       </div>
       <div class="fcard">
         <h3>Vendor packs</h3>
@@ -1153,8 +1153,8 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
             <ul>
               <li><a href="start.html">Get started</a><small>guided setup, ~10 minutes</small></li>
               <li><a href="index.html#install">Install</a><small>one static binary</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/concepts.md">Concepts</a><small>every term, two screens</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/choose.md">Which mode do I need?</a><small>protection level &amp; delivery mode</small></li>
+              <li><a href="concepts.html">Concepts</a><small>every term, two screens</small></li>
+              <li><a href="choose.html">Which mode do I need?</a><small>protection level &amp; delivery mode</small></li>
               <li><a href="examples.html">Examples</a><small>25 runnable walkthroughs</small></li>
             </ul>
           </div>
@@ -1162,22 +1162,24 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
             <h3>Configure</h3>
             <code class="dmcmd">$ agentstack apply</code>
             <ul>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md">How it works</a><small>activation, leases, policy layers</small></li>
+              <li><a href="architecture.html">How it works</a><small>activation, leases, policy layers</small></li>
               <li><a href="index.html#manifest">The manifest</a><small>servers, skills, ${REF} secrets</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library">Central library</a><small>one library, every project</small></li>
+              <li><a href="reference.html#the-central-library">Central library</a><small>one library, every project</small></li>
               <li><a href="index.html#modes">Delivery modes</a><small>static, clean-at-rest, or zero files</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#dashboard">Dashboard</a><small>the same loop, in a web UI</small></li>
+              <li><a href="reference.html#dashboard">Dashboard</a><small>the same loop, in a web UI</small></li>
             </ul>
           </div>
           <div class="fcard">
             <h3>How-to</h3>
             <ul>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/add-a-server.md">Add a server</a><small>four verbs, one table</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/trust-a-repo.md">Trust a cloned repo</a><small>review, then consent</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/lock-down-a-run.md">Lock down a run</a><small>the escalation ladder</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/team-setup.md">Team setup</a><small>clone, apply, done</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/ci.md">Use in CI</a><small>install --locked + doctor --ci</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/undo.md">Undo anything</a><small>restore, plus the rest</small></li>
+              <li><a href="howto/add-a-server.html">Add a server</a><small>four verbs, one table</small></li>
+              <li><a href="howto/add-a-skill.html">Add a skill</a><small>install, author, or just try one</small></li>
+              <li><a href="howto/trust-a-repo.html">Trust a cloned repo</a><small>review, then consent</small></li>
+              <li><a href="howto/lock-down-a-run.html">Lock down a run</a><small>the escalation ladder</small></li>
+              <li><a href="howto/team-setup.html">Team setup</a><small>clone, apply, done</small></li>
+              <li><a href="howto/ci.html">Use in CI</a><small>install --locked + doctor --ci</small></li>
+              <li><a href="howto/undo.html">Undo anything</a><small>restore, plus the rest</small></li>
+              <li><a href="howto/see-what-happened.html">See what happened</a><small>runs, calls, cost, explain</small></li>
             </ul>
           </div>
           <div class="fcard">
@@ -1185,7 +1187,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
             <code class="dmcmd">$ agentstack trust · guard</code>
             <ul>
               <li><a href="index.html#trust">The trust gate</a><small>cloned repos stay inert</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a><small>the honest limits, code-grounded</small></li>
+              <li><a href="enforcement.html#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a><small>the honest limits, code-grounded</small></li>
               <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a><small>rm -rf blocked, runnable</small></li>
               <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Policy presets</a><small>developer, CI, locked-down</small></li>
             </ul>
@@ -1196,7 +1198,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
             <ul>
               <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a><small>container + egress firewall</small></li>
               <li><a href="index.html#enforced">What's enforced</a><small>the honest per-mode matrix</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">Enforcement matrix</a><small>checked against the source</small></li>
+              <li><a href="enforcement.html">Enforcement matrix</a><small>checked against the source</small></li>
             </ul>
           </div>
           <div class="fcard">
@@ -1210,7 +1212,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
           <div class="fcard">
             <h3>Reference</h3>
             <ul>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Every command</a><small>every command, CI-tested</small></li>
+              <li><a href="reference.html">Every command</a><small>every command, CI-tested</small></li>
               <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md">Agent manual (skill)</a><small>ships inside the binary</small></li>
             </ul>
           </div>
@@ -1219,7 +1221,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
             <ul>
               <li><a href="security-review-2026-07-11.html">Security review</a><small>findings and closures</small></li>
               <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">Strategy</a><small>phases, gates, decisions</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/HISTORY.md">History</a><small>dated corrections</small></li>
+              <li><a href="history.html">History</a><small>dated corrections</small></li>
             </ul>
           </div>
         </div>
@@ -1235,7 +1237,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
       <a href="https://github.com/Tarekkharsa/agentstack">source</a>
       <a href="https://github.com/Tarekkharsa/agentstack/issues">issues</a>
       <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
-      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">primitives</a>
+      <a href="architecture.html#operating-model--choose-the-boundary-you-need">primitives</a>
       <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">strategy</a>
       <a href="security-review-2026-07-11.html">security&nbsp;review</a>
     </nav>

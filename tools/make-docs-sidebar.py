@@ -4,14 +4,19 @@
 One tree, defined once below, spliced into docs.html, start.html, and
 examples.html between `<!-- sidebar:begin -->` / `<!-- sidebar:end -->`
 markers. (how-it-works, primitives, library, and strategy were folded into the
-Markdown source of truth and are now redirect stubs; the tree links out to that
-Markdown for those entries.) Each page gets the
+Markdown source of truth; their old URLs are redirect stubs. The Markdown docs
+now render as site pages via make-docs-pages.py, so the tree links those
+locally — only repo-root and non-doc files still link out to GitHub.) Each
+page gets the
 IDENTICAL tree; the only per-page differences are (a) the current entry is
 highlighted and (b) the current page's own sections expand inline beneath its
 entry (the nub-docs pattern). Links that point at the page being generated
 collapse to plain `#anchor`s so in-page navigation doesn't reload.
 
 Usage: python3 tools/make-docs-sidebar.py   # rewrites docs/*.html
+
+make-docs-pages.py imports this TREE live to build the generated Markdown
+pages' sidebars — after editing the TREE, run that script too.
 """
 
 import html
@@ -26,48 +31,50 @@ TREE = [
     ("Start", None, [
         ("Get started", "start.html", "start"),
         ("Install", "index.html#install", "install"),
-        ("Concepts", f"{GH}/blob/main/docs/concepts.md", "concepts"),
-        ("Which mode do I need?", f"{GH}/blob/main/docs/choose.md", "choose"),
+        ("Concepts", "concepts.html", "concepts"),
+        ("Which mode do I need?", "choose.html", "choose"),
         ("Examples", "examples.html", "examples"),
     ]),
     ("Configure", "$ agentstack apply", [
-        ("How it works", f"{GH}/blob/main/docs/ARCHITECTURE.md", "how-it-works"),
+        ("How it works", "architecture.html", "how-it-works"),
         ("The manifest", "index.html#manifest", "manifest"),
-        ("Central library", f"{GH}/blob/main/docs/reference.md#the-central-library", "library"),
+        ("Central library", "reference.html#the-central-library", "library"),
         ("Delivery modes", "index.html#modes", "modes"),
-        ("Dashboard", f"{GH}/blob/main/docs/reference.md#dashboard", "dashboard"),
+        ("Dashboard", "reference.html#dashboard", "dashboard"),
     ]),
     ("How-to", None, [
-        ("Add a server", f"{GH}/blob/main/docs/howto/add-a-server.md", "howto-server"),
-        ("Trust a cloned repo", f"{GH}/blob/main/docs/howto/trust-a-repo.md", "howto-trust"),
-        ("Lock down a run", f"{GH}/blob/main/docs/howto/lock-down-a-run.md", "howto-lockdown"),
-        ("Team setup", f"{GH}/blob/main/docs/howto/team-setup.md", "howto-team"),
-        ("Use in CI", f"{GH}/blob/main/docs/howto/ci.md", "howto-ci"),
-        ("Undo anything", f"{GH}/blob/main/docs/howto/undo.md", "howto-undo"),
+        ("Add a server", "howto/add-a-server.html", "howto-server"),
+        ("Add a skill", "howto/add-a-skill.html", "howto-skill"),
+        ("Trust a cloned repo", "howto/trust-a-repo.html", "howto-trust"),
+        ("Lock down a run", "howto/lock-down-a-run.html", "howto-lockdown"),
+        ("Team setup", "howto/team-setup.html", "howto-team"),
+        ("Use in CI", "howto/ci.html", "howto-ci"),
+        ("Undo anything", "howto/undo.html", "howto-undo"),
+        ("See what happened", "howto/see-what-happened.html", "howto-audit"),
     ]),
     ("Protect", "$ agentstack trust · guard", [
         ("The trust gate", "index.html#trust", "trust"),
-        ("What trust does & doesn't", f"{GH}/blob/main/docs/ENFORCEMENT.md#what-trusted-does-and-does-not-mean", "trustlimits"),
+        ("What trust does & doesn't", "enforcement.html#what-trusted-does-and-does-not-mean", "trustlimits"),
         ("Guard demo", f"{GH}/tree/main/examples/guard-demo", "guard"),
         ("Policy presets", f"{GH}/tree/main/examples/policies", "presets"),
     ]),
     ("Run confined", "$ agentstack run --lockdown", [
         ("Sandbox & lockdown", "index.html#sandbox", "sandbox"),
         ("What's enforced", "index.html#enforced", "enforced"),
-        ("Enforcement matrix", f"{GH}/blob/main/docs/ENFORCEMENT.md", "matrix"),
+        ("Enforcement matrix", "enforcement.html", "matrix"),
     ]),
     ("Observe", "$ agentstack report", [
         ("Reports & call audit", "examples.html#e20", "reports"),
         ("Wire-cost analysis", "examples.html#e21", "wirecost"),
     ]),
     ("Reference", None, [
-        ("Every command", f"{GH}/blob/main/docs/reference.md", "reference"),
+        ("Every command", "reference.html", "reference"),
         ("Agent manual (skill)", f"{GH}/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md", "manual"),
     ]),
     ("Project", None, [
         ("Security review", "security-review-2026-07-11.html", "secreview"),
         ("Strategy", f"{GH}/blob/main/STRATEGY.md", "strategy"),
-        ("History", f"{GH}/blob/main/docs/HISTORY.md", "history"),
+        ("History", "history.html", "history"),
     ]),
 ]
 
@@ -193,11 +200,13 @@ MAP_HOOKS = {
     "choose": "protection level & delivery mode",
     "examples": "25 runnable walkthroughs",
     "howto-server": "four verbs, one table",
+    "howto-skill": "install, author, or just try one",
     "howto-trust": "review, then consent",
     "howto-lockdown": "the escalation ladder",
     "howto-team": "clone, apply, done",
     "howto-ci": "install --locked + doctor --ci",
     "howto-undo": "restore, plus the rest",
+    "howto-audit": "runs, calls, cost, explain",
     "trustlimits": "the honest limits, code-grounded",
     "how-it-works": "activation, leases, policy layers",
     "manifest": "servers, skills, ${REF} secrets",

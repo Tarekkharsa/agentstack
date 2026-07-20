@@ -1,4 +1,17 @@
+<!-- INTERNAL SOURCE: this file is the build input for its page on
+     https://tarekkharsa.github.io/agentstack/ — readers go to the site.
+     Edit here, then run: python3 tools/make-docs-pages.py -->
+
 # AgentStack — History
+
+**How to read this.** The shorthand in the entries below is stable:
+**H1–H5**, **M1–M7**, and the **L-numbered** items are the High, Medium, and
+Low findings of the [2026-07-11 security review](security-review-2026-07-11.html),
+tracked here to closure. **D-numbered** items (D1, D2, D4, …) are decision
+items carried from the planning documents, [`../STRATEGY.md`](../STRATEGY.md)
+(product phases and exit gates) and [`../TODO.md`](../TODO.md) (the ordered
+current work). Those planning files — and `ARCHITECTURE.md` / `ENFORCEMENT.md`
+— stay the present tense; the entries here only record how it was reached.
 
 Dated corrections and closed-out ledgers. Nothing here is current spec — it is
 the record of *how* the current spec was reached, kept out of `ARCHITECTURE.md`
@@ -169,4 +182,3 @@ behavior-preserved. D4 subsequently made the frozen server definitions shared
 authority for gateway dispatch and lockdown egress classification. Extending
 the full resolved grant through the locked host run, native render, and profile
 leases remains D2 work tracked in `TODO.md`.
-</content>

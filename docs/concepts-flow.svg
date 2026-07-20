@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="230" viewBox="0 0 900 230" role="img" aria-label="How the pieces relate: the central library feeds the manifest; manifest to lockfile to trust to policy (machine intersect project) to gateway and runs to the audit log; the delivery modes — static, clean-at-rest, zero-files — decide how it reaches a run">
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }
+    .lbl { fill: #D7DEE4; }
+    .mut { fill: #97A1AD; font-size: 12.5px; }
+    .box { fill: rgba(255,255,255,0.02); stroke: #3A424B; rx: 8; }
+    .feed { fill: none; stroke: #3A424B; stroke-dasharray: 4 4; rx: 8; }
+    .arrow { stroke: #F0975A; stroke-width: 1.6; fill: none; marker-end: url(#a); }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#F0975A"/>
+    </marker>
+  </defs>
+  <rect x="0.5" y="0.5" width="899" height="229" rx="12" fill="#0E1114" stroke="#2A3138"/>
+
+  <!-- feeder: central library -->
+  <rect class="feed" x="28" y="22" width="150" height="32"/>
+  <text class="mut" x="103" y="43" text-anchor="middle">central library</text>
+  <path class="arrow" d="M 76 54 L 76 88"/>
+
+  <!-- main pipeline -->
+  <rect class="box" x="28" y="92" width="96" height="36"/>
+  <text class="lbl" x="76" y="115" text-anchor="middle">manifest</text>
+  <path class="arrow" d="M 128 110 L 152 110"/>
+
+  <rect class="box" x="156" y="92" width="96" height="36"/>
+  <text class="lbl" x="204" y="115" text-anchor="middle">lockfile</text>
+  <path class="arrow" d="M 256 110 L 280 110"/>
+
+  <rect class="box" x="284" y="92" width="70" height="36"/>
+  <text class="lbl" x="319" y="115" text-anchor="middle">trust</text>
+  <path class="arrow" d="M 358 110 L 382 110"/>
+
+  <rect class="box" x="386" y="92" width="196" height="36"/>
+  <text class="lbl" x="484" y="110" text-anchor="middle">policy</text>
+  <text class="mut" x="484" y="123" text-anchor="middle">machine ∩ project</text>
+  <path class="arrow" d="M 586 110 L 610 110"/>
+
+  <rect class="box" x="614" y="92" width="134" height="36"/>
+  <text class="lbl" x="681" y="115" text-anchor="middle">gateway / runs</text>
+  <path class="arrow" d="M 752 110 L 776 110"/>
+
+  <rect class="box" x="780" y="92" width="94" height="36"/>
+  <text class="lbl" x="827" y="115" text-anchor="middle">audit log</text>
+
+  <!-- feeder: delivery modes -->
+  <rect class="feed" x="518" y="170" width="290" height="44"/>
+  <text class="mut" x="663" y="188" text-anchor="middle">delivery modes</text>
+  <text class="mut" x="663" y="205" text-anchor="middle">static · clean-at-rest · zero-files</text>
+  <path class="arrow" d="M 663 170 L 663 132"/>
+</svg>

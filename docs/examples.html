@@ -302,9 +302,9 @@
       </li>
       <li><a href="index.html#install">Install</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/concepts.md">Concepts</a>
+      <li><a href="concepts.html">Concepts</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/choose.md">Which mode do I need?</a>
+      <li><a href="choose.html">Which mode do I need?</a>
       </li>
       <li><a class="on-page" href="examples.html">Examples</a>
         <ul class="sub">
@@ -344,32 +344,36 @@
     <b>Configure</b>
     <code>$ agentstack apply</code>
     <ul>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md">How it works</a>
+      <li><a href="architecture.html">How it works</a>
       </li>
       <li><a href="index.html#manifest">The manifest</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library">Central library</a>
+      <li><a href="reference.html#the-central-library">Central library</a>
       </li>
       <li><a href="index.html#modes">Delivery modes</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#dashboard">Dashboard</a>
+      <li><a href="reference.html#dashboard">Dashboard</a>
       </li>
     </ul>
   </div>
   <div class="grp">
     <b>How-to</b>
     <ul>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/add-a-server.md">Add a server</a>
+      <li><a href="howto/add-a-server.html">Add a server</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/trust-a-repo.md">Trust a cloned repo</a>
+      <li><a href="howto/add-a-skill.html">Add a skill</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/lock-down-a-run.md">Lock down a run</a>
+      <li><a href="howto/trust-a-repo.html">Trust a cloned repo</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/team-setup.md">Team setup</a>
+      <li><a href="howto/lock-down-a-run.html">Lock down a run</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/ci.md">Use in CI</a>
+      <li><a href="howto/team-setup.html">Team setup</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/undo.md">Undo anything</a>
+      <li><a href="howto/ci.html">Use in CI</a>
+      </li>
+      <li><a href="howto/undo.html">Undo anything</a>
+      </li>
+      <li><a href="howto/see-what-happened.html">See what happened</a>
       </li>
     </ul>
   </div>
@@ -379,7 +383,7 @@
     <ul>
       <li><a href="index.html#trust">The trust gate</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
+      <li><a href="enforcement.html#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
       </li>
@@ -395,7 +399,7 @@
       </li>
       <li><a href="index.html#enforced">What's enforced</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md">Enforcement matrix</a>
+      <li><a href="enforcement.html">Enforcement matrix</a>
       </li>
     </ul>
   </div>
@@ -412,7 +416,7 @@
   <div class="grp">
     <b>Reference</b>
     <ul>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Every command</a>
+      <li><a href="reference.html">Every command</a>
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md">Agent manual (skill)</a>
       </li>
@@ -425,7 +429,7 @@
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">Strategy</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/HISTORY.md">History</a>
+      <li><a href="history.html">History</a>
       </li>
     </ul>
   </div>
@@ -541,7 +545,7 @@
         <p>Use <code>install --locked</code> + <code>doctor --ci</code>. CI verifies pins and policy; it does not need interactive machine trust.</p>
       </div>
     </div>
-    <p class="small muted" style="margin-top:1rem">Full decision table: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">AgentStack primitives and recommendations</a>.</p>
+    <p class="small muted" style="margin-top:1rem">Full decision table: <a href="architecture.html#operating-model--choose-the-boundary-you-need">AgentStack primitives and recommendations</a>.</p>
   </section>
 
   <!-- ============ CATEGORY 1 · CONFIGURE ============ -->
@@ -747,11 +751,11 @@ agentstack doctor       <span class="cm"># verify wiring; every warning names it
 
     <h3 class="ex" id="e14"><span class="num">14</span> The central library</h3>
     <p class="intent">Install a capability <strong>once</strong> into your machine-wide library (<code>~/.agentstack/lib</code>), then reference it <strong>by name</strong> from any project — nothing copied, and every add is content-scanned before it lands.</p>
-    <p class="muted small">See <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#adding-capabilities">the central library quick start</a> for the full <code>lib add</code> flow.</p>
+    <p class="muted small">See <a href="reference.html#adding-capabilities">the central library quick start</a> for the full <code>lib add</code> flow.</p>
 
     <h3 class="ex" id="e15"><span class="num">15</span> Sync the library across machines</h3>
     <p class="intent">Version the library as a git repo with <code>agentstack lib sync</code> — a fail-closed gate scans every server field <strong>and the outgoing commits</strong> for secrets before pushing.</p>
-    <p class="muted small">A literal secret, or a definition it can't parse, blocks the sync rather than slipping through. See <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#syncing-across-machines-lib-sync">the library command reference</a>.</p>
+    <p class="muted small">A literal secret, or a definition it can't parse, blocks the sync rather than slipping through. See <a href="reference.html#syncing-across-machines-lib-sync">the library command reference</a>.</p>
 
     <h3 class="ex" id="e16"><span class="num">16</span> Versioned vendor packs</h3>
     <p class="intent">Install a pinned bundle of MCP servers, skills, and house rules in one shot — policy-gated and content-scanned first, with the lockfile recording exactly what you got.</p>
@@ -1049,15 +1053,15 @@ agentstack report wire                        <span class="cm"># ranks tokens/tu
         <p>The compact, code-grounded matrix: for host, gateway, sandbox, and lockdown, exactly which of tools, egress, secrets, filesystem, and audit are enforced.</p>
       </div>
       <div class="fcard">
-        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library">Central library</a></h3>
+        <h3><a href="reference.html#the-central-library">Central library</a></h3>
         <p>Install a skill or server once into your machine-wide library, then reference it by name from any project — every add content-scanned first.</p>
       </div>
       <div class="fcard">
-        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">Primitives &amp; recommendations</a></h3>
+        <h3><a href="architecture.html#operating-model--choose-the-boundary-you-need">Primitives &amp; recommendations</a></h3>
         <p>Choose static, session, lease, trust, policy, or lockdown from the boundary you need—not from one universal mode.</p>
       </div>
       <div class="fcard">
-        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Feature reference</a></h3>
+        <h3><a href="reference.html">Feature reference</a></h3>
         <p>The complete tested inventory: machine-policy presets, vendor packs, the MCP firewall, native extensions, live runs, and every command and flag.</p>
       </div>
     </div>
@@ -1122,7 +1126,7 @@ agentstack report wire                        <span class="cm"># ranks tokens/tu
     <nav aria-label="Footer links">
       <a href="index.html">home</a>
       <a href="start.html">get&nbsp;started</a>
-      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">primitives</a>
+      <a href="architecture.html#operating-model--choose-the-boundary-you-need">primitives</a>
       <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">strategy</a>
       <a href="https://github.com/Tarekkharsa/agentstack">source</a>
       <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>

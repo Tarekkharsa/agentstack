@@ -1,3 +1,7 @@
+<!-- INTERNAL SOURCE: this file is the build input for its page on
+     https://tarekkharsa.github.io/agentstack/ — readers go to the site.
+     Edit here, then run: python3 tools/make-docs-pages.py -->
+
 # Lock down a run
 
 For anyone launching an agent on work that must not leak. Prerequisite for the
@@ -15,7 +19,8 @@ agentstack run claude-code --sandbox --lockdown  # container, no route out
 ```
 
 Each step confines more, and each prints its [posture](../concepts.md) label —
-the honest measure of how strongly the policy is *enforced*, not just declared:
+what each label actually guarantees is the
+[enforcement matrix](../ENFORCEMENT.md#the-matrix):
 
 - `run --locked` promotes a plain host run to the Protected tier. No Docker. It
   enforces content trust, strict [lockfile](../concepts.md) verification, and
@@ -34,11 +39,14 @@ Point `AGENTSTACK_SANDBOX_IMAGE` at an image that carries your agent CLI. The
 lockdown egress sidecar is pulled from GHCR automatically, pinned per release
 (override with `AGENTSTACK_EGRESS_IMAGE`).
 
-**Limits.** Only lockdown is topologically confined, and even there the honest
-claim is *unapproved egress is blocked* — never that exfiltration is impossible,
-since a host you allowed can still receive data. `--locked` is pre-launch gating
-plus a frozen surface, not a kernel fence. What each mode enforces, per
-dimension, is the [enforcement matrix](../ENFORCEMENT.md#the-matrix).
+After a run, `agentstack report run <id>` replays its posture label and every
+egress and tool-call decision — see [see what your agents did](see-what-happened.md).
+
+**Limits.** The posture labels name each mode's ceiling honestly: `--locked` is
+pre-launch gating plus a frozen surface, not a kernel fence, and only
+`--lockdown` is topologically confined. What each mode actually enforces per
+dimension, with every strength caveat, is the
+[enforcement matrix](../ENFORCEMENT.md#the-matrix).
 
 - [Concepts](../concepts.md) — sandbox vs lockdown vs `--locked`, posture
 - [Reference: execution posture](../reference.md#execution-posture)

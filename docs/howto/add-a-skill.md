@@ -1,3 +1,7 @@
+<!-- INTERNAL SOURCE: this file is the build input for its page on
+     https://tarekkharsa.github.io/agentstack/ — readers go to the site.
+     Edit here, then run: python3 tools/make-docs-pages.py -->
+
 # Add a skill
 
 For anyone giving their agent CLIs a skill — a portable directory with a

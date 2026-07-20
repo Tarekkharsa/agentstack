@@ -1,3 +1,7 @@
+<!-- INTERNAL SOURCE: this file is the build input for its page on
+     https://tarekkharsa.github.io/agentstack/ — readers go to the site.
+     Edit here, then run: python3 tools/make-docs-pages.py -->
+
 # AgentStack — Architecture
 
 *Current as of agentstack 0.14.x.*
@@ -112,11 +116,11 @@ The recommended default and its exceptions:
 | CI | `install --locked` + `doctor --ci` | Checks reproducibility, policy, drift, and content without interactive trust. |
 
 Those three delivery mechanisms are what the user-facing docs call **delivery
-modes**, under newcomer names: a **static render** is the *static* mode, a
-**native session** (`session start`/`end`) is *clean-at-rest*, and an **MCP or
-profile lease** is *zero-files*. [Which mode do I need?](choose.md) is the
-user-facing decision page; this section is the architect's version of the same
-choice.
+modes**: a **static render** = *static*, a **native session** (`session
+start`/`end`) = *clean-at-rest*, an **MCP or profile lease** = *zero-files*.
+[concepts.md](concepts.md#delivery-modes) defines each mode and
+[which mode do I need?](choose.md) is the decision page; this section is the
+architect's version of the same choice.
 
 ### Product boundary and non-goals
 
@@ -289,33 +293,18 @@ not part of the trust digest**: one of its two inputs (machine policy) lives
 outside the pinned bundle by design, so folding it into the digest would
 create a second, machine-varying source of trust truth.
 
-Enforcement honesty, per dimension (today) — the authoritative,
-mode-by-dimension breakdown lives in [`ENFORCEMENT.md`](ENFORCEMENT.md); this is
-the policy-engine summary:
-- **Tools** — enforced: the gateway checks every call before dispatch
-  (Layer 4's single enforcement point).
-- **Secrets** — enforced, fail-closed: a denied `${REF}` never resolves,
-  at both adapter render and the gateway's per-server resolver.
-- **Egress** — enforced in sandbox mode: the egress proxy (host-process or
-  lockdown sidecar, Layer 4) filters in-flight traffic against the compiled
-  ruleset, Docker-verified end to end, and matches the exact CONNECT
-  **host:port** (`[policy.egress]` supports `host:port` patterns, RULESET_VERSION
-  2; see the dimension paragraph above). In host mode it is write/spawn-time
-  only: a server's *declared* URL host is checked (render and gateway
-  upstream construction), and a host hidden behind an unresolved `${REF}`
-  fails closed if the server is constrained at all. The remaining host-mode
-  gap: the write/spawn-time check matches only the declared *host* and defers
-  the port to runtime, so an HTTPS-only intent isn't verifiable until the CLI
-  actually connects.
-- **Filesystem** — write scope enforced in sandbox mode: the workspace mounts
-  read-only unless the effective write scope covers the workspace root
-  (deny-by-default — the one dimension where absence means deny, because a
-  sandbox grants nothing the policy doesn't name; a partial scope like
-  `src/**` rounds DOWN to read-only, since the workspace is one all-or-nothing
-  mount). The kernel enforces the `:ro` bind, not the harness. The semantics
-  live in one place, `CompiledRuleset::workspace_write_decision`. Read scopes
-  are informational while the only mount is the whole workspace, and host
-  mode enforces neither — never present those as enforced.
+Enforcement honesty, per dimension (today) — the authoritative
+mode-by-dimension matrix, with every caveat, lives in
+[`ENFORCEMENT.md`](ENFORCEMENT.md#the-matrix). The policy-engine summary:
+- **Tools** — enforced at the gateway (Layer 4's single enforcement point).
+- **Secrets** — enforced fail-closed, at both adapter render and the gateway's
+  per-server resolver.
+- **Egress** — enforced on proxied traffic under sandbox/lockdown (exact
+  CONNECT `host:port`); coarse and declared-host-only at write time in host
+  mode.
+- **Filesystem** — write scope enforced coarsely by the sandbox `:ro` mount
+  (deny-by-default, `CompiledRuleset::workspace_write_decision`); host mode
+  enforces neither.
 
 Invariant (property-tested): for all bundle policies B and machine policies M,
 `effective(B, M) ⊆ M`, across every dimension. This test is never deleted or
@@ -361,10 +350,8 @@ authoritative per-cell matrix. This section describes the mechanisms behind it.
 advisory enforcement — static apply is user-invoked rather than trust-gated,
 while render-time policy and fail-closed secret checks govern what gets
 written. A CLI on the host can still bypass that config and could in principle
-tamper with the trust store itself (Layer 2). Per dimension, host mode enforces
-only secrets (fail-closed at the write boundary); tools, filesystem, and
-audit are unsupported on this path, and egress is a coarse write-time host
-check — see [`ENFORCEMENT.md`](ENFORCEMENT.md).
+tamper with the trust store itself (Layer 2). What each dimension actually
+enforces on this path is in [`ENFORCEMENT.md`](ENFORCEMENT.md#the-matrix).
 
 **Single enforcement point (declared, not just observed):** every MCP tool
 call agentstack itself brokers — the gateway serve loop, the `agentstack mcp`

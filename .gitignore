@@ -24,3 +24,4 @@ agentstack.local.toml
 
 # macOS
 .DS_Store
+__pycache__/

@@ -1,3 +1,7 @@
+<!-- INTERNAL SOURCE: this file is the build input for its page on
+     https://tarekkharsa.github.io/agentstack/ — readers go to the site.
+     Edit here, then run: python3 tools/make-docs-pages.py -->
+
 # Undo anything
 
 For anyone who wants to reverse something agentstack did. Prerequisite: none —
@@ -7,13 +11,17 @@ these work in any project agentstack has touched.
 agentstack restore                 # list every undoable recorded write
 agentstack restore --last --write  # undo the most recent write
 agentstack restore a1b2 --write    # undo one write by its id prefix
+agentstack restore claude-code     # fallback: restore one adapter's config from its backup
 ```
 
 `restore` is the single undo verb for **writes**. Every write agentstack makes —
 servers, settings, hooks, instructions, even the owned-server manifest refresh —
-is recorded before it lands, and `restore` reverts one. Reverted files simply
-show up as pending again. Five other actions are undone by their own verb,
-because they are not file writes:
+is recorded before it lands, and `restore` reverts one; `restore <adapter>` is a
+fallback that restores one adapter's config from its single-slot backup.
+Reverted files simply show up as pending again — the dashboard's Activity tab
+lists the same recorded writes, each with the `restore` to roll it back (see
+[see what your agents did](see-what-happened.md)). Five other actions are undone
+by their own verb, because they are not file writes:
 
 | To undo… | Run | What it reverts |
 | --- | --- | --- |

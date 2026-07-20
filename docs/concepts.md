@@ -1,10 +1,14 @@
+<!-- INTERNAL SOURCE: this file is the build input for its page on
+     https://tarekkharsa.github.io/agentstack/ — readers go to the site.
+     Edit here, then run: python3 tools/make-docs-pages.py -->
+
 # Concepts and glossary
 
 For every reader. This page defines each term AgentStack uses, in two or three
 plain sentences. Every other page links here on first use instead of
 re-explaining — so keep it open the first time through.
 
-```mermaid
+<!-- Diagram source (regenerate concepts-flow.svg by hand from this):
 flowchart LR
   library["central library"] --> manifest["manifest"]
   manifest --> lockfile["lockfile"]
@@ -13,7 +17,9 @@ flowchart LR
   policy --> run["gateway / runs"]
   modes["delivery modes: static · clean-at-rest · zero-files"] --> run
   run --> audit["audit log + flight recorder"]
-```
+-->
+
+![How the pieces relate: the central library feeds the manifest; manifest → lockfile → trust → policy (machine ∩ project) → gateway/runs → audit log; the delivery modes decide how it reaches a run](concepts-flow.svg)
 
 Read it left to right: you write a **manifest**, the **lockfile** pins its
 contents, you **trust** the result, **policy** narrows what may run, the
@@ -138,41 +144,87 @@ there is no direct route at all. Strongest confinement AgentStack ships. More:
 **Posture** — the per-run label saying how strongly the effective policy is
 actually enforced for that run, printed on the run banner. The four labels are
 `HOST / ADVISORY`, `HOST / PROTECTED`, `SANDBOX / PROXIED`, and
-`LOCKDOWN / ENFORCED`. "Posture" always means this label.
+`LOCKDOWN / ENFORCED`; what each one actually guarantees lives in
+[ENFORCEMENT.md — the matrix](ENFORCEMENT.md#the-matrix). "Posture" always means
+this label.
 
 **Machine-policy summary** — a separate, one-word line `doctor` prints —
 `open`, `restrictive`, or `mixed` — describing your machine policy's shape, not a
-run. `restrictive` means a rename-proof `"*"` rule binds every server, not that
-the policy is tight. More:
+run. `restrictive` flags a rename-proof `"*"` rule, not a verdict that the policy
+is tight. More:
 [reference.md — execution posture](reference.md#execution-posture).
+
+## Machine manifest and machine policy
+
+**Machine manifest** — the personal layer at `~/.agentstack/agentstack.toml`,
+seeded by `agentstack init --global`. It holds your standing, cross-project
+rules — machine policy, personal instruction fragments, and the guard and
+filesystem-deny defaults. Only its `[instructions]` merge into a project load
+(beneath the project's own); servers, skills, and settings deliberately never
+inherit, so personal capabilities never auto-inject into a team repo and the
+project's trust digest is unaffected.
+
+**Machine policy** — the `[policy.*]` rules the machine manifest carries: your
+standing tool, egress, secret, and filesystem limits, checked **before** any
+project's on every brokered call. The effective policy is the intersection
+(machine ∩ project), so a repo can only narrow a machine rule, never loosen it;
+a machine refusal names its layer in the error and the audit log.
 
 ## Delivery modes
 
 The **delivery mode** decides where a project's rendered files live. You always
-commit the intent (manifest plus lockfile); the rendered artifacts are the
-choice:
+commit the intent (manifest plus lockfile); the rendered artifacts — `.mcp.json`,
+`.claude/skills/`, the compiled `CLAUDE.md` / `AGENTS.md` — are the choice:
 
-- **static** (the default) — rendered files sit on disk, kept out of git.
-- **clean-at-rest** — nothing generated persists; profiles are injected per
-  session and reverted on exit.
-- **zero-files** — no per-project files at all; every trusted repo serves its own
-  stack live over the gateway.
+- **static** (the default) — rendered files sit on disk, kept out of git by a
+  managed `.gitignore` block. Works however you launch your tools, because the
+  capabilities are real files the CLI reads directly.
+- **clean-at-rest** — nothing generated persists between sessions. A profile is
+  injected when a session or run starts and reverted on exit; `agentstack lock`
+  pins the manifest's name refs *without rendering anything*, so `git status`
+  stays silent.
+- **zero-files** — no per-project files at all. The gateway is registered once
+  per CLI, and every trusted repo serves its own stack live over that gateway; a
+  [lease](#lease-session-or-locked-run-fence) can fence one connection to a
+  profile without rendering native files.
 
 Not sure which you need? See [which mode do I need?](choose.md). More:
 [reference.md — where rendered files live](reference.md#where-rendered-files-live-three-modes).
 
+## Lease, session, or locked-run fence
+
+Three ways to give a run only *part* of a manifest for a while, then take it
+back. They differ in what they touch and how they clean up:
+
+| Mechanism | What it scopes | How long it lives | How it ends | Read more |
+|---|---|---|---|---|
+| **MCP profile lease** (`agentstack_lease_open` / `_status` / `_close` / `_freeze`) | the live gateway and the loadable-skill menu, narrowed to one profile — no native files rendered | one MCP connection, in the memory of a single `agentstack mcp` process | `lease_close` or process exit; nothing to restore, since it rendered nothing | [reference.md — MCP profile leases](reference.md#mcp-profile-leases-one-connection-one-capability-fence) |
+| **Native session** (`agentstack session start` / `end` / `freeze`) | a profile's servers, skills, instructions, settings, and hooks, *rendered to disk* | from `session start` until you end it | `session end` (or `end --all`) reverts the write | [reference.md — ephemeral sessions](reference.md#ephemeral-sessions-agentstack-session) |
+| **Locked-run fence** (`agentstack run <cli> --locked --profile <p>`) | the run's frozen capability surface, narrowed to that profile's server subset — a fence, not a session, so no native state is applied or reverted | the life of the run process | the run process exits | [reference.md — the Protected tier](reference.md#the-protected-tier-in-detail-run---locked) |
+
+The lease is the zero-file counterpart of a native session, so the two are
+mutually exclusive: the MCP control plane refuses to place a lease over an active
+native session, or to start a native session over an active lease. `freeze` (on
+either the lease or the session) promotes the observed set into a new manifest
+profile — a proposal you review, then `agentstack lock`.
+
 ## Secrets
 
 **Placeholder (`${REF}`)** — the only form a secret takes in the manifest: a
-named reference like `${GH_TOKEN}`, never the value. Placeholders resolve in
-memory at run time; if one can't resolve, the write or run fails closed rather
-than leaking a placeholder into live config.
+named reference like `${GH_TOKEN}`, never the value. A ref is a strict
+`${IDENTIFIER}`; shell fallback syntax (`${VAR:-default}`) and prompt-style
+placeholders (`${input:key}`) pass through verbatim and are **not** treated as
+secrets. Placeholders resolve in memory at run time; if one can't resolve, the
+write or run fails closed — the unresolved ref is reported, never silently
+blanked or leaked into live config.
 
 **Keychain and varlock** — the two backing stores a `${REF}` can resolve from.
 The OS **keychain** (service `agentstack`) holds values locally; **varlock** is
-an optional resolver that fronts 1Password, cloud secret managers, and more when
-a project opts in. The full chain is process env → varlock → keychain → project
-`.env`. More: [reference.md — secret resolution](reference.md#secret-resolution).
+an optional resolver that fronts 1Password, cloud secret managers, and more, and
+activates only when a project opts in and the `varlock` binary is present —
+otherwise the chain skips it. The full chain is process env → varlock → keychain
+→ project `.env`. More:
+[reference.md — secret resolution](reference.md#secret-resolution).
 
 ## Library, catalog, registry, trust store
 
