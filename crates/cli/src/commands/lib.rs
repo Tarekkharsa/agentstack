@@ -27,6 +27,7 @@ const LARGE_SKILL_BYTES: u64 = 10 * 1024 * 1024;
 
 pub fn run(args: &LibArgs, manifest_dir: Option<&Path>) -> Result<()> {
     match &args.kind {
+        LibKind::New(a) => new_skill(a),
         LibKind::Add(a) => add(a),
         LibKind::AddServer(a) => add_server_cli(a, manifest_dir),
         LibKind::AddExtension(a) => add_extension_cli(a),
@@ -451,6 +452,47 @@ fn add(args: &LibAddArgs) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// `agentstack lib new <name>` — scaffold `./<name>/SKILL.md` with the house
+/// template, closing the authoring loop (skills-sh-learnings §8). Writes
+/// directly like `lib pack-init`: creating a template is the command's whole
+/// point, it refuses an existing path, and adoption stays a separate,
+/// gated step (`add skill` / `lib add`).
+fn new_skill(args: &crate::cli::LibNewArgs) -> Result<()> {
+    crate::text::validate_name(&args.name)?;
+    let dir = std::env::current_dir()?.join(&args.name);
+    if dir.exists() {
+        bail!("{} already exists — refusing to overwrite", dir.display());
+    }
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let name = &args.name;
+    let template = format!(
+        "---\nname: {name}\ndescription: One line — what this does and when an agent should reach for it.\n---\n\n\
+         # {name}\n\n\
+         Instructions the agent follows when this skill is loaded.\n\n\
+         ## When to use\n\n\
+         Describe the trigger — the user asks X, the task looks like Y.\n\n\
+         ## Workflow\n\n\
+         1. First step\n\
+         2. Second step\n\n\
+         ## Conventions\n\n\
+         Guardrails: what this skill must never do without asking.\n"
+    );
+    std::fs::write(dir.join("SKILL.md"), template)
+        .with_context(|| format!("writing {}", dir.join("SKILL.md").display()))?;
+    println!("{} scaffolded ./{name}/SKILL.md", "✓".green());
+    println!("  edit the description first — search and agents find skills by it");
+    println!("  then adopt it:");
+    println!(
+        "    agentstack add skill ./{name} --write     {}",
+        "# this project".dimmed()
+    );
+    println!(
+        "    agentstack lib add ./{name} --write       {}",
+        "# every project (central library)".dimmed()
+    );
+    Ok(())
 }
 
 /// Library-side name resolution for the grammar path: --name for a single

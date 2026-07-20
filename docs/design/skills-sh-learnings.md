@@ -453,6 +453,7 @@ hardening-remote-ingestion.md; 2 → add-skill-source-grammar.md; 3 →
 add-skill-activation.md; 4 → update refresh semantics + upstream-deletion
 detection + skip reasons (a review round additionally fixed branch-pin
 re-tracking and restored preview containment); 5 → `lib add` gained the
-source grammar and the finding-skills catalog skill shipped. Still open
-from the smaller ideas: `lib new` scaffolding and ephemeral use (§8) —
-unclaimed, not forgotten. The deliberate rejections (§9) stand.
+source grammar and the finding-skills catalog skill shipped. The §8
+smaller ideas landed too: `lib new` scaffolding and `agentstack try
+<source> | <cli>` ephemeral use (staged, scanned, symlink-refusing,
+manifest-free). The deliberate rejections (§9) stand.

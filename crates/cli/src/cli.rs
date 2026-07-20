@@ -32,7 +32,7 @@ every command (listed or not) has its own --help:
   Edit        add · set · search · remove · install · lib · adopt · export · import
   Render      apply · use · instructions · lock · session · diff · restore
   Protect     trust · explain · secret · guard · sign · verify
-  Run         run · kill · gateway · mcp
+  Run         run · kill · gateway · mcp · try
   Inspect     doctor · report · dashboard · optimize · proxy
 
 Words: a CLI (a.k.a. harness) is the agent tool you run; an adapter compiles
@@ -138,6 +138,14 @@ pub enum Command {
     /// an installed vendor pack and applies its changes.
     #[command(hide = true)]
     Lock(LockArgs),
+
+    /// Try a skill without installing anything: stage, scan, and emit a
+    /// wrapper prompt on stdout for piping into any agent CLI.
+    ///
+    /// `agentstack try owner/repo --skill pdf | claude` — no manifest, lock,
+    /// or config is touched; support files land under ~/.agentstack/try/.
+    #[command(hide = true)]
+    Try(TryArgs),
 
     /// Manage the central capability library.
     ///
@@ -640,6 +648,24 @@ pub struct UpdateArgs {
     pub name: Option<String>,
 }
 
+#[derive(Args, Debug)]
+pub struct TryArgs {
+    /// owner/repo, a git URL, or a spelled local path (./dir, /abs, ~/dir).
+    pub source: String,
+    /// The skill to run when the source holds several.
+    #[arg(long)]
+    pub skill: Vec<String>,
+    /// Branch/tag/commit to resolve (git sources).
+    #[arg(long)]
+    pub rev: Option<String>,
+    /// Directory within the repo to scope discovery to (git sources).
+    #[arg(long)]
+    pub subpath: Option<String>,
+    /// Admit content the scan flagged high-severity.
+    #[arg(long)]
+    pub allow_flagged: bool,
+}
+
 #[derive(Args, Debug, Default)]
 pub struct LockArgs {
     /// Only pin this profile's refs (default: every profile in the manifest).
@@ -1131,6 +1157,8 @@ pub struct LibArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum LibKind {
+    /// Scaffold a new skill: ./<name>/SKILL.md with the house template.
+    New(LibNewArgs),
     /// Add a skill to the central library from a local path or git source.
     Add(LibAddArgs),
     /// Add an MCP server definition to the central library from a `.toml` file.
@@ -1294,6 +1322,12 @@ pub struct LibRemoveArgs {
     /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibNewArgs {
+    /// Skill name (the directory and manifest key — lowercase [a-z0-9._-]).
+    pub name: String,
 }
 
 #[derive(Args, Debug)]

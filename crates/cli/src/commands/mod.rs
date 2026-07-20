@@ -34,6 +34,7 @@ pub mod settings;
 pub mod setup;
 pub mod stats;
 pub mod trust;
+pub mod try_skill;
 pub mod upgrade;
 pub mod use_profile;
 pub mod verify_cmd;

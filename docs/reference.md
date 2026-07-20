@@ -571,6 +571,11 @@ the fetch so a dry run never touches the persistent store, and recording
 truthful `git:<url>@<rev>#<dir>` provenance. `lib add-server` stores a reusable server definition with its
 `${REF}`s intact.
 
+`lib new <name>` scaffolds `./<name>/SKILL.md` with the house template
+(frontmatter, when-to-use, workflow, guardrails) — edit it, then adopt with
+`agentstack add skill ./<name>` (this project) or `agentstack lib add
+./<name>` (every project).
+
 Every `lib add` runs the same hidden-unicode / prompt-injection content scan
 as `install`/`doctor --deep` before the copy becomes canonical (high findings block
 unless `--allow-flagged`), and warns when a skill exceeds ~10 MiB — vendored
@@ -938,6 +943,19 @@ Profile membership: no declared profiles → the implicit default covers it;
 exactly one → added automatically; several → `--profile` (or an
 interactive pick). Naming a nonexistent profile is an error, never a
 silent create.
+
+### `try` — run a skill without installing anything
+
+```text
+agentstack try anthropics/skills --skill pdf | claude
+```
+
+Stages and scans exactly like `add skill`, materializes the one selected
+skill under `~/.agentstack/try/`, and prints a wrapper prompt on stdout —
+pipe it into any agent CLI. Nothing touches the manifest, lock, library, or
+configs; status goes to stderr with a provenance line naming what loaded.
+Skills containing symlinks are refused (the ephemeral copy must not
+dereference one), and `doctor` names leftover try dirs with the remedy.
 
 ### `report usage` (usage analytics)
 
@@ -1656,7 +1674,8 @@ Reach for it when you need the exact verb, flag, or subcommand.
 - **`remove`** _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags `--write`
 - **`install`** _(hidden)_ — Fetch skill sources into the store and write the lockfile — flags `--locked/--allow-flagged`
 - **`lock`** _(hidden)_ — Resolve each profile's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`
-- **`lib`** _(hidden)_ — Manage the central capability library — subcommands `add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/sync/pack-init`
+- **`try`** _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags `--skill/--rev/--subpath/--allow-flagged`
+- **`lib`** _(hidden)_ — Manage the central capability library — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/sync/pack-init`
 - **`adopt`** _(hidden)_ — Keep a hand-edit: pull drifted native config back into the manifest — flags `--target/--scope/--write/--no-keychain`
 - **`use`** — Activate a profile: render its servers + materialize its skills — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore`
 - **`session`** _(hidden)_ — Manage ephemeral sessions: load a profile for now, then revert it — subcommands `start/end/list/freeze`

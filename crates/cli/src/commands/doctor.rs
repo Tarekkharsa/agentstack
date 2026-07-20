@@ -1132,20 +1132,23 @@ fn run_checks(
         }
     }
     // Stale staging leftovers from crashed `add skill` previews — harmless
-    // (never reused; random ids) but worth naming with the remedy.
-    {
-        let stage = paths::agentstack_home().join("stage");
-        let stale = std::fs::read_dir(&stage)
+    // (never reused; random ids) but worth naming with the remedy. Same for
+    // `try` support dirs, which deliberately outlive their process.
+    for (dir, what) in [
+        ("stage", "crashed previews"),
+        ("try", "ephemeral `try` support files"),
+    ] {
+        let root = paths::agentstack_home().join(dir);
+        let stale = std::fs::read_dir(&root)
             .map(|entries| entries.count())
             .unwrap_or(0);
         if stale > 0 {
             report.line(
                 Level::Warn,
                 format!(
-                    "{stale} stale staging dir(s) under {} — crashed previews; \
-                     remove with `rm -rf {}`",
-                    stage.display(),
-                    stage.display()
+                    "{stale} leftover dir(s) under {} — {what}; remove with `rm -rf {}`",
+                    root.display(),
+                    root.display()
                 ),
             );
         }
