@@ -48,6 +48,30 @@ fn status_parses_and_help_maps_every_command() {
     }
 }
 
+// `--help --all` must be a genuinely different, longer view: every command
+// (hidden ones and nested subcommands included) WITH its summary — not a
+// byte-for-byte copy of the abbreviated help (audit finding C5).
+#[test]
+fn full_inventory_differs_from_short_help_and_covers_hidden_commands() {
+    let inventory = agentstack::cli::full_command_inventory();
+    let short_after_help = Cli::command()
+        .get_after_help()
+        .expect("after_help exists")
+        .to_string();
+    assert_ne!(inventory, short_after_help);
+    // Hidden top-level commands appear with their summaries…
+    for hidden in ["optimize", "gateway", "restore", "settings"] {
+        assert!(inventory.contains(hidden), "inventory lists '{hidden}'");
+    }
+    // …and so do nested subcommands the short help never shows.
+    assert!(
+        inventory.contains("pack-init"),
+        "nested lib subcommands listed"
+    );
+    // The short help advertises how to reach it.
+    assert!(short_after_help.contains("--help --all"));
+}
+
 #[test]
 fn consolidated_verbs_parse() {
     for argv in [

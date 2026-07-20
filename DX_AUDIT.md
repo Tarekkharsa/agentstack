@@ -800,19 +800,31 @@ error: --plan needs a run mode — nothing was launched
 Docker-unreachable now prints "nothing was launched" + `docker info` + retry
 guidance (B5).
 
-## Still open (needs a product decision or larger surgery)
+## Remainder round (same day, after the second-pass report)
 
-- **B6** keychain error duplication + `--env-file` fallback hint (the
-  suggested `secret set --env-file` flag doesn't exist yet).
-- **B7** stdout/stderr interleaving on non-TTY `trust .`.
-- **C5** `--help --all`: not implemented as a flag; the after_help map now
-  covers every command, which serves the same goal — decide whether a separate
-  full-detail listing is still wanted.
-- **C6** wizard decision count / machine-global upsells — scope change.
-- **D5** `set server` idempotent verb — new surface, needs approval.
-- **E7–E9** README claims (security headline vs. enforcement matrix, mode
-  choice vs. write order, interactive-only 60-second path) — E7 especially is
-  a product-voice decision the maintainer should make deliberately.
+- **B6 fixed** — `secret get` on a broken keychain now names the cause once
+  and both stores: `agentstack secret set NAME` and `agentstack secret set
+  NAME --env-file` (the flag already existed; the audit's wished-for fallback
+  was real). The low-level keychain read also stopped double-printing its
+  platform cause.
+- **B7 fixed** — `main` flushes stdout before printing the final error, so
+  piped narrative can no longer land after the refusal it explains.
+- **C5 fixed** — `agentstack --help --all` is now a real, different view:
+  every command (hidden and nested included) with its one-line summary,
+  advertised from the short help's footer. Snapshot-style test asserts the
+  two outputs differ and that hidden commands appear.
+- **E8/E9 fixed** — README now says the mode choice comes after the confirmed
+  import writes the manifest but before any native config; the 60-second block
+  is labeled interactive with the scripted `init --secrets skip` +
+  `apply --write` path directly below it.
+
+## Still open (needs a product decision)
+
+- **C6** wizard decision count / machine-global Guard + House-rules upsells —
+  scope change to the init flow.
+- **D5** `set server` idempotent verb — new command surface.
+- **E7** README security headline ("Nothing runs until it's trusted") vs.
+  host-mode reality and the enforcement matrix — product-voice decision.
 
 ## Verification
 

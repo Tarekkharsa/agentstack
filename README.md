@@ -21,6 +21,10 @@ agentstack init      # your CLI configs → one reviewed manifest, previewed and
 agentstack doctor    # verify it landed — every warning names its exact fix
 ```
 
+That's the interactive path — `init` in a terminal is a guided wizard.
+Scripting or CI? `agentstack init --secrets skip` writes only the manifest
+(no prompts, no token values); review it, then `agentstack apply --write`.
+
 Real tokens are lifted out of your config files into `${REF}`s as part of the
 import. That's step 1 of 6 — bare `agentstack` always names your next one.
 
@@ -98,8 +102,9 @@ activates interactively. It opens with a plan (nothing written until you
 confirm), and when it lifts inline tokens it asks where the values should
 live — a gitignored project `.env` by default, the OS keychain, or skip and
 decide later, each with a one-line explanation at the moment of choice. Then
-it asks you to pick a **delivery mode** with the arrow keys, *before* it
-writes anything — and that choice forks the rest of the run: **static**
+it asks you to pick a **delivery mode** with the arrow keys — after the
+confirmed import has written the manifest, but before any CLI's native
+config is touched — and that choice forks the rest of the run: **static**
 previews and renders configs into every CLI; **clean-at-rest** pins the
 lockfile and teaches the `session start`/`session end` rhythm without
 rendering; **zero-files** offers to register the gateway and points you at
@@ -146,7 +151,7 @@ You can hand-write this, but you don't have to: `agentstack add server` and
 One `agentstack apply` compiles it into the native config of every CLI in
 `[targets]` — each adapter's quirks handled for you:
 
-![agentstack init, the guided wizard: it opens with a plan (nothing written until you confirm), detects your CLIs and lifts inline tokens to ${REF}s, asks where the values live (project .env selected), then asks you to pick a delivery mode (static selected) before writing — the fork that decides the rest of the run — applies into every CLI, and closes with a machine-change summary, the undo one-liner, and a link to learn the rest](docs/wizard-replay.svg)
+![agentstack init, the guided wizard: it opens with a plan (nothing written until you confirm), detects your CLIs and lifts inline tokens to ${REF}s, asks where the values live (project .env selected), then asks you to pick a delivery mode (static selected) before any native config is written — the fork that decides the rest of the run — applies into every CLI, and closes with a machine-change summary, the undo one-liner, and a link to learn the rest](docs/wizard-replay.svg)
 
 In a repo, writes default to **project** scope (artifacts land repo-local,
 kept out of git by a managed `.gitignore` block that only ever covers files

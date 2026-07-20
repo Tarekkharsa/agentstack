@@ -7,7 +7,27 @@ use agentstack::cli::{Cli, Command};
 use agentstack::commands;
 
 fn main() {
+    // `agentstack --help --all` → the full command inventory. Intercepted
+    // before clap parses: its built-in --help prints and exits before a
+    // sibling flag is ever seen, so the pair can't be expressed as a normal
+    // arg. Only the exact top-level spelling (nothing but these flags)
+    // triggers it — `agentstack apply --help --all` still goes to clap.
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.iter().any(|a| a == "--all")
+        && argv.iter().any(|a| a == "--help" || a == "-h")
+        && argv
+            .iter()
+            .all(|a| a == "--all" || a == "--help" || a == "-h")
+    {
+        print!("{}", agentstack::cli::full_command_inventory());
+        return;
+    }
     if let Err(err) = run() {
+        // Flush buffered narrative BEFORE the error: stdout is block-buffered
+        // when piped, so without this the unbuffered stderr line could print
+        // above output that explains it (remediation after the refusal).
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
         eprintln!("error: {err:#}");
         std::process::exit(1);
     }

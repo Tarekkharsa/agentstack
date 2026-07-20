@@ -61,7 +61,16 @@ pub fn get(name: &str) -> Result<Option<String>> {
     match entry(name)?.get_password() {
         Ok(v) => Ok(Some(v)),
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(e).with_context(|| format!("reading secret '{name}' from keychain")),
+        // Same dedup as `lookup` above: keyring's Display already embeds its
+        // platform cause, so a plain `.context()` chain would print the root
+        // sentence twice. Surface the root cause exactly once.
+        Err(e) => {
+            let e = anyhow::Error::new(e);
+            let root = e.root_cause().to_string();
+            Err(anyhow::anyhow!(
+                "reading secret '{name}' from keychain: {root}"
+            ))
+        }
     }
 }
 

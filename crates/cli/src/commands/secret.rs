@@ -57,14 +57,26 @@ fn set(name: &str, value: Option<&str>, env_file: bool, manifest_dir: Option<&Pa
 }
 
 fn get(name: &str) -> Result<()> {
-    match keychain::get(name)? {
+    // A broken keychain (no default keychain, locked, headless CI) is a
+    // machine problem, not a typo — name the cause once and both supported
+    // stores, so the user isn't stranded on the keychain path.
+    let value = keychain::get(name).map_err(|e| {
+        anyhow::anyhow!(
+            "'{name}' is not readable from the OS keychain ({})\n\
+             \n  \
+             store it in the keychain:   agentstack secret set {name}\n  \
+             or in this project's .env:  agentstack secret set {name} --env-file",
+            e.root_cause()
+        )
+    })?;
+    match value {
         Some(v) => {
             println!("{v}");
             Ok(())
         }
         None => {
             anyhow::bail!(
-                "no secret '{name}' in keychain — run `agentstack secret set {name}` to store one"
+                "no secret '{name}' in keychain — run `agentstack secret set {name}` to store one (or `--env-file` for a project .env)"
             );
         }
     }

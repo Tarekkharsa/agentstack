@@ -36,7 +36,9 @@ every command (listed or not) has its own --help:
   Inspect     doctor · report · dashboard · optimize · proxy
 
 Words: a CLI (a.k.a. harness) is the agent tool you run; an adapter compiles
-its native config; [targets] in the manifest lists which CLIs commands act on."
+its native config; [targets] in the manifest lists which CLIs commands act on.
+
+Full inventory with one-line summaries: agentstack --help --all"
 )]
 pub struct Cli {
     /// Project or manifest directory (prefers .agentstack/agentstack.toml).
@@ -1450,4 +1452,32 @@ pub enum SecretCommand {
     Rm { name: String },
     /// Show every secret the manifest references and whether it resolves.
     List,
+}
+
+/// The `--help --all` view: every command — visible or hidden — with its
+/// one-line summary, subcommands indented under their parent. This is the
+/// "long" half of the progressive-disclosure pair; the default `--help` shows
+/// only the beginner loop plus the grouped name map.
+pub fn full_command_inventory() -> String {
+    use clap::CommandFactory;
+
+    fn push(out: &mut String, cmd: &clap::Command, indent: usize) {
+        for sub in cmd.get_subcommands() {
+            if sub.get_name() == "help" {
+                continue;
+            }
+            let about = sub.get_about().map(|s| s.to_string()).unwrap_or_default();
+            let pad = " ".repeat(indent);
+            out.push_str(&format!("{pad}{:<16} {about}\n", sub.get_name()));
+            push(out, sub, indent + 2);
+        }
+    }
+
+    let cmd = Cli::command();
+    let mut out = String::from(
+        "agentstack — every command, including the ones the default --help groups away.\n\
+         Run `agentstack <command> --help` for flags and details.\n\n",
+    );
+    push(&mut out, &cmd, 2);
+    out
 }
