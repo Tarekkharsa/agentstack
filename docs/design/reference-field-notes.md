@@ -41,6 +41,17 @@ precisely because a lease serves no bundle content, resolves no secret, spawns
 no server, and touches no file. Any renewed activity still requires fresh review,
 locking where needed, and trust.
 
+## Zero-files gateway: always-on manual
+
+agentstack's own manual — the bundled `using-agentstack` skill — is always
+loadable through the control plane: it appears in `agentstack_list_loadable` even
+with no project manifest, in untrusted sessions, and through session fences,
+served from the copy embedded in the binary (a project's own `using-agentstack`
+skill overrides it). The `initialize` handshake also carries an ambient skill
+index in the server's `instructions` field — every loadable skill (name +
+one-line description) — subject to the same trust gate (untrusted projects list
+names only) and any active session fence.
+
 ## Central library: server definitions and bundled catalog
 
 - `lib add-server <name> --file <definition.toml>` stores a standalone server
@@ -54,6 +65,18 @@ locking where needed, and trust.
 - Every central-library flow is exercised by
   `examples/sandbox/demo-central-library.sh`, a sandboxed demo that never
   touches your real provider folders.
+
+## `add skill`: discovery and staging
+
+`agentstack add skill <source>` discovery scans the ecosystem's conventional
+locations (repo root, `skills/` and its dot-variants, the agent-convention dirs)
+one level deep, two for `skills/<category>/<skill>` catalogs. When nothing
+conventional exists, a depth-5 fallback walk runs — its hits are announced with
+their paths and are never auto-selected. Duplicate skill names across locations
+are an error naming every path. The dry run stages the fetch under
+`~/.agentstack/stage/…` (removed on exit) and never touches the manifest, lock,
+or content store; `--write` promotes the staged clone rename-only, so the scanned
+bytes land verbatim.
 
 ## Orphaned digest cache
 

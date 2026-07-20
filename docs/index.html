@@ -687,14 +687,14 @@
     <h2>Repo-declared servers wait for your consent.</h2>
     <p class="muted">
       Register the gateway once (<code>agentstack gateway connect --all --write</code>)
-      and every repo you open brings its own servers — no files copied in. But
-      a repo you haven't reviewed is <strong>inert</strong>: none of its MCP
-      servers are spawned or contacted, no secrets resolved. You review what it
-      declares, <code>trust</code> it (pinned to a consent digest of the
-      manifest, local overlay, <em>and lockfile</em>, so any later edit re-gates it), and from
-      then on every brokered call passes <strong>two firewall layers</strong> —
-      the repo's <code>[policy.tools]</code>, and your own machine-level rules
-      that no repo can see, shadow, or loosen — and lands in the call log.
+      and every repo brings its own servers — no files copied in. Until you
+      review and <code>trust</code> it, a repo is <strong>inert</strong>: no MCP
+      server spawned or contacted, no secret resolved. Trust pins a consent
+      digest of the manifest, local overlay, <em>and lockfile</em>, so any later
+      edit re-gates it — and every brokered call then passes
+      <strong>two firewall layers</strong> (the repo's <code>[policy.tools]</code>
+      and your machine rules, which no repo can see or loosen) and lands in the
+      call log.
     </p>
     <div class="term">
       <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → review → trust → firewalled → audited</b></div>
@@ -711,25 +711,16 @@
 <span class="c">  agent → demo.delete_all   </span><span class="no">✗ denied</span><span class="c">   YOUR machine policy — "*" = ["!delete_*"]</span>
 <span class="c">  every call → ~/.agentstack/audit/calls.jsonl  (tool · outcome · latency)</span></code></pre>
     </div>
-    <div class="term" data-replay style="margin-top:1.6rem">
-      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>…and secrets never travel</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
-      <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack lib sync</span><span class="c">   # your library syncs machine-to-machine over git</span></span>
-<span class="row" data-d="800"><span class="no">  ✗ refusing to sync — 'Authorization' looks like a literal secret</span></span>
-<span class="row"><span class="ok">  ✓</span><span class="c"> make it a ${REF} and it travels safely — values never leave the keychain</span></span></code></pre>
-    </div>
     <p class="small muted" style="margin-top:0.8rem">
-      Condensed from a real run — reproduce the whole gate:
+      How consent works, and the honest limits it doesn't cover:
+      <a href="howto/trust-a-repo.html">trust a cloned repo</a> ·
+      <a href="enforcement.html#what-trusted-does-and-does-not-mean">what trust does &amp; doesn't</a>.
+      Prefer a drop-in proxy? <code>--transparent</code> advertises every
+      policy-filtered upstream tool straight in <code>tools/list</code> (the
+      default compact mode keeps them behind one search tool) —
+      <a href="reference.html#compact-proxied-surface--code-mode">reference</a>.
+      Reproduce the whole gate:
       <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/trust-gate-demo.sh"><code>docs/trust-gate-demo.sh</code></a>.
-    </p>
-    <p class="small muted">
-      The whole story, in one binary: an untrusted repo exposes no
-      project-declared capability through the auto-project gateway, and every
-      brokered capability call is firewallable and logged
-      (<a href="reference.html#secrets-and-trust">the documented limits</a> say exactly what trust does and doesn't cover). Prefer a drop-in proxy? <code>--transparent</code>
-      advertises every policy-filtered upstream tool straight in
-      <code>tools/list</code>, so any standard MCP client works with zero
-      agentstack knowledge — the default compact mode keeps them behind one
-      search tool so agent context stays small.
     </p>
   </section>
 
@@ -737,33 +728,18 @@
     <p class="eyebrow">The sandbox</p>
     <h2>Don't trust the agent? Take away the network.</h2>
     <p class="muted">
-      The trust gate decides what an agent <em>may</em> do.
-      <code>agentstack run --sandbox</code> decides what it <em>can</em> do:
-      the harness runs in a container, its traffic routes through an egress
-      proxy enforcing your machine <code>[policy.egress]</code>, and every
-      allow and block lands in a per-run flight recorder you read back with
-      <code>agentstack report</code>. The workspace mounts read-only unless
-      your <code>[policy.filesystem]</code> says otherwise — the kernel
-      enforces the bind, not the harness.
+      The trust gate decides what an agent <em>may</em> do;
+      <code>agentstack run --sandbox</code> decides what it <em>can</em> do. The
+      harness runs in a container, its egress routes through a proxy enforcing
+      your machine <code>[policy.egress]</code>, and every allow and block lands
+      in a per-run flight recorder you read with <code>agentstack report</code>;
+      the workspace mounts read-only unless your <code>[policy.filesystem]</code>
+      says otherwise, and the kernel — not the harness — enforces the bind.
+      <code>--sandbox</code> leaves an ordinary bridge open, so a proxy-ignoring
+      process still has a direct route; <code>--lockdown</code> removes it — the
+      container's only peer is the egress sidecar, and ignoring the proxy reaches
+      nothing.
     </p>
-    <dl class="modes">
-      <div>
-        <dt>--sandbox <small>proxied · direct route open</small></dt>
-        <dd>The container gets an ordinary bridge network with its
-            <code>HTTPS_PROXY</code> pointed at the agentstack proxy: configured
-            egress is filtered and recorded. A process that ignores the proxy
-            env still has a direct route — that caveat is what the next flag
-            removes.</dd>
-      </div>
-      <div>
-        <dt>--lockdown <small>no route out</small></dt>
-        <dd>The container's only network is an internal one whose single
-            reachable peer is the egress-proxy <strong>sidecar</strong>. No host
-            route, no internet, no DNS beyond it. An agent that ignores the
-            proxy reaches nothing — the confinement is topology, not
-            convention. Verified live on Docker through the real binary.</dd>
-      </div>
-    </dl>
     <div class="term" data-replay style="margin-top:1.6rem">
       <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>no route out · denied host blocked · on the record</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
       <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">cat ~/.agentstack/agentstack.toml</span><span class="c">   # YOUR machine firewall</span></span>
@@ -784,20 +760,16 @@
 <span class="row"><span class="no">    ✗ shtest → blocked.invalid</span><span class="c">  denied by rule "!blocked.invalid" (machine policy)</span></span></code></pre>
     </div>
     <p class="small muted" style="margin-top:0.8rem">
-      Condensed from a real run. The full script is runnable (needs Docker):
+      Condensed from a real run, verified on Docker; the full script is runnable
+      (needs Docker):
       <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/sandbox/demo-lockdown.sh"><code>examples/sandbox/demo-lockdown.sh</code></a>.
-    </p>
-    <p class="small muted">
-      The proxy is picky on purpose: hostnames are normalized before matching,
-      a tunnel's TLS SNI must equal the CONNECT host (no domain fronting),
-      any name resolving to a loopback, private, link-local, or cloud-metadata
-      address is refused (no SSRF into your own network), and a per-run
-      credential means only its own sandbox can use it. This boundary was
-      swept by a <a href="security-review-2026-07-11.html">two-reviewer
-      security review</a> — all five High and all seven Medium findings are
-      closed; the remaining accepted debt is tracked. Honest scope: hosts you allow
-      stay allowed — the claim is <em>unapproved egress is blocked</em>,
-      never "exfiltration is impossible."
+      The proxy is picky on purpose — normalized hostnames, TLS SNI pinned to the
+      CONNECT host, no SSRF to loopback/private/metadata addresses, a per-run
+      credential — and a <a href="security-review-2026-07-11.html">two-reviewer
+      security review</a> closed all five High and all seven Medium findings.
+      Honest scope: hosts you allow stay allowed, so the claim is
+      <em>unapproved egress is blocked</em>, never "exfiltration is impossible."
+      Per-cell reasoning: <a href="enforcement.html">the enforcement matrix</a>.
     </p>
   </section>
 
@@ -900,15 +872,12 @@
       matrix. <strong>¶</strong> — only when the guard hook is installed.
     </p>
     <p class="small muted" style="margin-top:1.1rem">
-      Read every "enforced" with the ceiling in mind: it means the disallowed
-      action is prevented at runtime — never that the <em>allowed</em> action is
-      safe. An enforced egress allowlist blocks hosts you didn't approve; it
-      doesn't inspect payloads, and it permits traffic to every host you did
-      approve (the model API included). <strong>agentstack restricts destinations
-      and records decisions; it can't guarantee sensitive content never leaves
-      through an allowed destination.</strong> The full per-cell reasoning —
-      including where <code>--sandbox</code>'s bridge network stops short of
-      <code>--lockdown</code>'s topological confinement — is in the
+      Read every "enforced" as the ceiling it is: the disallowed action is
+      prevented at runtime, never that the <em>allowed</em> one is safe — an
+      egress allowlist blocks unapproved hosts but doesn't inspect payloads, so
+      <strong>agentstack restricts destinations and records decisions; it can't
+      guarantee sensitive content never leaves through an allowed one.</strong>
+      Full per-cell reasoning is in the
       <a href="enforcement.html">enforcement matrix</a>.
     </p>
   </section>
@@ -1003,11 +972,11 @@ skills  = ["sql-review"]               # resolves from your central library
 [targets]
 default = ["claude-code", "codex"]</code></pre>
     <p class="muted">
-      Secrets resolve locally — process env, <a href="https://varlock.dev">varlock</a>,
-      OS keychain, or <code>.env</code> — and unresolved secrets block writes,
-      so placeholders never leak into live config. A lockfile pins every skill
-      and server by digest; <code>install --locked</code> reproduces the setup
-      in CI.
+      Secrets stay <code>${REF}</code> placeholders that
+      <a href="concepts.html">resolve per machine</a>; an unresolved one blocks
+      the write, so a value never leaks into live config. A lockfile pins every
+      skill and server by digest, and <code>install --locked</code> reproduces
+      the setup in CI.
     </p>
   </section>
 
@@ -1015,29 +984,28 @@ default = ["claude-code", "codex"]</code></pre>
     <p class="eyebrow">Rendered files</p>
     <h2>Pick where artifacts live</h2>
     <p class="muted">
-      You always commit the intent (manifest + lock). The rendered artifacts
+      You always commit the intent (manifest + lock); the rendered artifacts
       (<code>.mcp.json</code>, <code>.claude/skills/</code>) are a per-project choice:
     </p>
     <dl class="modes">
       <div>
         <dt>static <small>default</small></dt>
-        <dd>Rendered configs sit on disk, kept out of git by a managed
-            <code>.gitignore</code> block. Works however you launch your tools.</dd>
+        <dd>Rendered configs sit on disk, gitignored by a managed block.</dd>
       </div>
       <div>
         <dt>clean-at-rest</dt>
-        <dd>Nothing generated exists between sessions — injected on launch,
-            reverted on exit; <code>git status</code> stays silent.</dd>
+        <dd>Nothing persists between sessions — injected on launch, reverted on exit.</dd>
       </div>
       <div>
         <dt>zero files</dt>
-        <dd>Nothing generated at all — the gateway serves each repo's servers
-            live, behind the <a href="#trust">trust gate</a> above.</dd>
+        <dd>Nothing rendered at all; the gateway serves each repo's servers live,
+            behind the <a href="#trust">trust gate</a>.</dd>
       </div>
     </dl>
     <p class="small muted">
-      Deciding? <a href="choose.html">Which mode do I need?</a> · the full
-      lifecycle per mode: <a href="reference.html#where-rendered-files-live-three-modes">delivery modes in the reference</a>.
+      The full lifecycle of each mode:
+      <a href="concepts.html#delivery-modes">delivery modes</a>. Deciding?
+      <a href="choose.html">Which mode do I need?</a>
     </p>
   </section>
 
@@ -1179,7 +1147,6 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
               <li><a href="howto/team-setup.html">Team setup</a><small>clone, apply, done</small></li>
               <li><a href="howto/ci.html">Use in CI</a><small>install --locked + doctor --ci</small></li>
               <li><a href="howto/undo.html">Undo anything</a><small>restore, plus the rest</small></li>
-              <li><a href="howto/see-what-happened.html">See what happened</a><small>runs, calls, cost, explain</small></li>
             </ul>
           </div>
           <div class="fcard">
@@ -1205,6 +1172,7 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
             <h3>Observe</h3>
             <code class="dmcmd">$ agentstack report</code>
             <ul>
+              <li><a href="howto/see-what-happened.html">See what happened</a><small>runs, calls, cost, explain</small></li>
               <li><a href="examples.html#e20">Reports &amp; call audit</a><small>per-run evidence, by example</small></li>
               <li><a href="examples.html#e21">Wire-cost analysis</a><small>what your tools cost</small></li>
             </ul>

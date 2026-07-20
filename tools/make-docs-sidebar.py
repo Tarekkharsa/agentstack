@@ -50,7 +50,6 @@ TREE = [
         ("Team setup", "howto/team-setup.html", "howto-team"),
         ("Use in CI", "howto/ci.html", "howto-ci"),
         ("Undo anything", "howto/undo.html", "howto-undo"),
-        ("See what happened", "howto/see-what-happened.html", "howto-audit"),
     ]),
     ("Protect", "$ agentstack trust · guard", [
         ("The trust gate", "index.html#trust", "trust"),
@@ -64,6 +63,7 @@ TREE = [
         ("Enforcement matrix", "enforcement.html", "matrix"),
     ]),
     ("Observe", "$ agentstack report", [
+        ("See what happened", "howto/see-what-happened.html", "howto-audit"),
         ("Reports & call audit", "examples.html#e20", "reports"),
         ("Wire-cost analysis", "examples.html#e21", "wirecost"),
     ]),
