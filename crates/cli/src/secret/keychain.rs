@@ -63,13 +63,14 @@ pub fn get(name: &str) -> Result<Option<String>> {
         Err(keyring::Error::NoEntry) => Ok(None),
         // Same dedup as `lookup` above: keyring's Display already embeds its
         // platform cause, so a plain `.context()` chain would print the root
-        // sentence twice. Surface the root cause exactly once.
+        // sentence twice. Keep exactly two layers — our context over the bare
+        // root — so `{e:#}` prints each once and `root_cause()` stays the
+        // single platform sentence (flattening both into one string made
+        // every downstream `root_cause()` re-print the name and store).
         Err(e) => {
             let e = anyhow::Error::new(e);
             let root = e.root_cause().to_string();
-            Err(anyhow::anyhow!(
-                "reading secret '{name}' from keychain: {root}"
-            ))
+            Err(anyhow::anyhow!(root).context(format!("reading secret '{name}' from keychain")))
         }
     }
 }

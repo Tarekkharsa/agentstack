@@ -149,18 +149,20 @@ impl Report {
         }
     }
 
-    /// The fix from the first error line (or first warning when there are no
-    /// errors) that carries a `↳ fix` hint — the "start here" pointer for the
-    /// closing summary. Reuses the `↳` convention every actionable line in
-    /// this file already follows, so it needs no extra bookkeeping.
+    /// The fix from the first error line carrying a `↳ fix` hint — or the
+    /// first warning's, but only when there are NO errors at all. An
+    /// outstanding error usually blocks the warnings' commands (an invalid
+    /// manifest refuses `apply --write`), so pointing at a warning fix while
+    /// an error exists would send the user into a wall; better no triage line
+    /// than a misleading one. Reuses the `↳` convention every actionable line
+    /// in this file already follows, so it needs no extra bookkeeping.
     fn first_fix(&self) -> Option<&str> {
-        for want in ["error", "warn"] {
-            for s in &self.sections {
-                for (tag, msg) in &s.lines {
-                    if *tag == want {
-                        if let Some((_, fix)) = msg.split_once("↳ ") {
-                            return Some(fix.trim());
-                        }
+        let want = if self.errors > 0 { "error" } else { "warn" };
+        for s in &self.sections {
+            for (tag, msg) in &s.lines {
+                if *tag == want {
+                    if let Some((_, fix)) = msg.split_once("↳ ") {
+                        return Some(fix.trim());
                     }
                 }
             }
@@ -349,7 +351,13 @@ fn run_checks(
         } else {
             Level::Warn
         };
-        report.line(level, issue.message);
+        // Carry the repair command in the `↳` voice so the line is actionable
+        // in place and the closing `start with:` triage can pick it up.
+        let msg = match &issue.fix {
+            Some(fix) => format!("{} ↳ {fix}", issue.message),
+            None => issue.message,
+        };
+        report.line(level, msg);
     }
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &[])?;
@@ -2263,6 +2271,15 @@ mod tests {
         assert_eq!(warn_only.first_fix(), Some("agentstack apply --write"));
         // Info lines count in neither total.
         assert_eq!((warn_only.errors, warn_only.warnings), (0, 1));
+
+        // T3: an error WITHOUT a fix never falls through to a warning's fix —
+        // the error usually blocks that very command (an invalid manifest
+        // refuses `apply --write`). No triage line beats a misleading one.
+        let mut fixless_error = Report::new();
+        fixless_error.section("A");
+        fixless_error.line(Level::Warn, "drift ↳ agentstack apply --write");
+        fixless_error.line(Level::Error, "manifest invalid, no hint");
+        assert_eq!(fixless_error.first_fix(), None);
     }
 
     /// Build a `[policy.<dimension>]`-shaped map from `(server, patterns)`

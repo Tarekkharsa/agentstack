@@ -1455,7 +1455,7 @@ summary, visible subcommands, and long-form flags; hidden commands are marked.
 Reach for it when you need the exact verb, flag, or subcommand.
 
 <!-- agentstack:generated commands -->
-- **`setup`** _(hidden)_ — Hidden alias of interactive `init` (P27: one front-door verb) — flags `--target/--profile/--scope`
+- **`setup`** _(hidden)_ — Hidden alias of interactive `init` — same guided wizard, older name — flags `--target/--profile/--scope`
 - **`init`** — Set up everything in one command: detect, import, choose, apply, verify — flags `--global/--force/--dry-run/--secrets/--no-keychain/--yes`
 - **`status`** — Where this project stands, on one screen: detected CLIs, manifest, trust, secrets, and the one next step
 - **`add`** — Add a server or skill to the manifest — subcommands `from/server/skill`

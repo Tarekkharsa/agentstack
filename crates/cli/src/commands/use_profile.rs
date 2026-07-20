@@ -383,6 +383,10 @@ pub fn activate(
                 }
                 for f in &plan.failed {
                     println!("  {} {}", "✗".red(), crate::render::failed_secret_line(f));
+                    // Same `secret set` fix whether missing or unreadable —
+                    // keep the closing tail copy-pasteable in both cases.
+                    let name = f.split_whitespace().next().unwrap_or(f.as_str());
+                    missing_secrets.insert(name.to_string());
                 }
                 let blocked = ((!plan.unresolved.is_empty() || !plan.failed.is_empty())
                     && !args.allow_unresolved)

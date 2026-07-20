@@ -354,6 +354,11 @@ fn render(
         }
         for f in &plan.failed {
             println!("  {} {}", "✗".red(), crate::render::failed_secret_line(f));
+            // The fix is the same `secret set` whether the secret is missing
+            // or its store failed to read — collect the name so the closing
+            // tail stays copy-pasteable in both cases.
+            let name = f.split_whitespace().next().unwrap_or(f.as_str());
+            missing_secrets.insert(name.to_string());
             error_count += 1;
         }
         // `${REF}`s that didn't resolve must never reach a live config file —
@@ -883,12 +888,15 @@ fn print_validation(
             has_error = true;
         }
         if !quiet {
-            let (mark, msg) = if issue.kind.is_error() {
-                ("✗".red().to_string(), &issue.message)
+            let mark = if issue.kind.is_error() {
+                "✗".red().to_string()
             } else {
-                ("⚠".yellow().to_string(), &issue.message)
+                "⚠".yellow().to_string()
             };
-            println!("{mark} {msg}");
+            match &issue.fix {
+                Some(fix) => println!("{mark} {} ↳ {fix}", issue.message),
+                None => println!("{mark} {}", issue.message),
+            }
         }
     }
     has_error

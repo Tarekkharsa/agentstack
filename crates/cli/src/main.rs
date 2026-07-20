@@ -7,6 +7,9 @@ use agentstack::cli::{Cli, Command};
 use agentstack::commands;
 
 fn main() {
+    // A reader hanging up (`agentstack diff | head`) must end the process
+    // silently, not as a println! panic with exit 101.
+    agentstack::reset_sigpipe();
     // `agentstack --help --all` → the full command inventory. Intercepted
     // before clap parses: its built-in --help prints and exits before a
     // sibling flag is ever seen, so the pair can't be expressed as a normal

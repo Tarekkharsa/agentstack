@@ -105,6 +105,24 @@ impl Drop for SigintGuard {
     }
 }
 
+/// Restore the default `SIGPIPE` disposition. The Rust runtime starts every
+/// process with `SIGPIPE` ignored, which turns a reader hanging up early
+/// (`agentstack diff | head`) into a `println!` panic — exit 101 plus a
+/// backtrace note — instead of the silent exit every Unix CLI has. Called
+/// once, first thing in `main`, before anything writes to stdout.
+#[cfg(unix)]
+pub fn reset_sigpipe() {
+    // SAFETY: `signal` with `SIG_DFL` installs the kernel's default
+    // disposition for a valid signal number — no handler of ours runs, no
+    // pointers, no memory it can corrupt.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+pub fn reset_sigpipe() {}
+
 /// Whether the process `pid` is still alive — `kill(pid, 0)` delivers no
 /// signal, it only probes for the target's existence and our permission to
 /// signal it.

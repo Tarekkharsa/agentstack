@@ -51,6 +51,9 @@ pub mod state;
 pub mod store;
 #[allow(unsafe_code)]
 pub(crate) mod sys;
+// The binary calls this before its first print; the module itself stays
+// crate-private so the unsafe surface is reachable only through this fn.
+pub use sys::reset_sigpipe;
 // TODO(phase-1): shim — migrate callers to agentstack_trust:: and drop.
 pub use agentstack_trust as trust;
 pub mod usage;

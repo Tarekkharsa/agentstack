@@ -27,6 +27,10 @@ pub struct ValidateCtx<'a> {
 pub struct Issue {
     pub kind: IssueKind,
     pub message: String,
+    /// A copy-pasteable repair command, where one is derivable from the issue
+    /// alone. Printers append it in the `↳ fix` voice doctor established, and
+    /// doctor's closing `start with:` line reads it for triage.
+    pub fix: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,7 +133,13 @@ impl Issue {
         Issue {
             kind,
             message: message.into(),
+            fix: None,
         }
+    }
+
+    fn with_fix(mut self, fix: impl Into<String>) -> Self {
+        self.fix = Some(fix.into());
+        self
     }
 }
 
@@ -189,18 +199,26 @@ fn run<'a>(
         match server.server_type {
             ServerType::Http => {
                 if server.url.is_none() {
-                    issues.push(Issue::new(
-                        IssueKind::MissingTransportFields,
-                        format!("server '{name}' is type=http but has no `url`"),
-                    ));
+                    issues.push(
+                        Issue::new(
+                            IssueKind::MissingTransportFields,
+                            format!("server '{name}' is type=http but has no `url`"),
+                        )
+                        .with_fix(format!("agentstack set server {name} --url <URL> --write")),
+                    );
                 }
             }
             ServerType::Stdio => {
                 if server.command.is_none() {
-                    issues.push(Issue::new(
-                        IssueKind::MissingTransportFields,
-                        format!("server '{name}' is type=stdio but has no `command`"),
-                    ));
+                    issues.push(
+                        Issue::new(
+                            IssueKind::MissingTransportFields,
+                            format!("server '{name}' is type=stdio but has no `command`"),
+                        )
+                        .with_fix(format!(
+                            "agentstack set server {name} --command \"<CMD>\" --write"
+                        )),
+                    );
                 }
             }
         }

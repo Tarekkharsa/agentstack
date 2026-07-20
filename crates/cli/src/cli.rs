@@ -62,7 +62,7 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     // ── Everyday: the core loop most projects ever need (shown in --help) ─
-    /// Hidden alias of interactive `init` (P27: one front-door verb).
+    /// Hidden alias of interactive `init` — same guided wizard, older name.
     ///
     /// Kept so muscle memory and old links keep working; never advertised.
     #[command(hide = true)]
@@ -851,7 +851,7 @@ pub struct SettingsUnsetArgs {
     pub write: bool,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Clone, Debug)]
 pub struct InitArgs {
     /// Seed the machine-level manifest (`~/.agentstack/agentstack.toml`)
     /// instead of importing a project: an empty [instructions] block plus an

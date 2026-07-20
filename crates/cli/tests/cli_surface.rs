@@ -70,6 +70,15 @@ fn full_inventory_differs_from_short_help_and_covers_hidden_commands() {
     );
     // The short help advertises how to reach it.
     assert!(short_after_help.contains("--help --all"));
+    // T6: internal audit shorthand ("P27" and friends) never leaks into the
+    // help a user reads.
+    let leaks_p_number = |s: &str| {
+        s.as_bytes()
+            .windows(2)
+            .any(|w| w[0] == b'P' && w[1].is_ascii_digit())
+    };
+    assert!(!leaks_p_number(&inventory), "P-number in --help --all");
+    assert!(!leaks_p_number(&short_after_help), "P-number in --help");
 }
 
 #[test]
@@ -128,4 +137,68 @@ fn retired_top_level_verbs_are_gone() {
             "{argv:?} should no longer parse"
         );
     }
+}
+
+// T1 (third-pass DX audit): a reader hanging up early must end the process
+// silently — the Unix default — not as a `println!` panic with exit 101 and
+// a backtrace note. The reader side of the pipe is dropped BEFORE the child
+// spawns, so its very first write hits a closed pipe deterministically.
+#[cfg(unix)]
+#[test]
+fn broken_pipe_exits_silently_not_as_a_panic() {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    let (reader, writer) = std::io::pipe().expect("pipe");
+    drop(reader); // hang up before the child ever writes
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(["--help", "--all"]) // long output, needs no manifest
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn agentstack");
+
+    let status = child.wait().expect("wait");
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .expect("stderr piped")
+        .read_to_string(&mut stderr)
+        .expect("read stderr");
+
+    assert!(
+        !stderr.contains("panicked"),
+        "broken pipe must not panic; stderr: {stderr}"
+    );
+    assert_ne!(status.code(), Some(101), "exit 101 is a Rust panic");
+}
+
+// T2 (third-pass DX audit): `secret set` without a terminal must refuse with
+// the flags that solve it, not rpassword's raw "Device not configured".
+#[test]
+fn secret_set_without_tty_names_value_flag() {
+    use std::process::{Command, Stdio};
+
+    let out = Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(["secret", "set", "DEMO_TOKEN"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("run agentstack");
+
+    assert!(!out.status.success(), "refusal must be an error");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("needs a terminal"),
+        "names the cause; got: {stderr}"
+    );
+    assert!(
+        stderr.contains("secret set DEMO_TOKEN --value"),
+        "names the copy-pasteable fix; got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("os error"),
+        "no raw OS error; got: {stderr}"
+    );
 }

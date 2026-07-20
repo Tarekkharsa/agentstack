@@ -278,6 +278,14 @@ fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) ->
         // `init` here would import configs and lift live token values into
         // files with no prompt — the help promises scripts opt in via flags, so
         // honor it. Naming both escapes keeps the scripted path discoverable.
+        //
+        // But adapt to state first: when a manifest already exists, the
+        // generic escapes mislead — `--yes` walks into the --force wall and
+        // `--dry-run` previews a from-scratch replacement. The scripted next
+        // steps for an initialized project are the render/activate commands.
+        if let Some(path) = existing_manifest(manifest_dir)? {
+            return Err(already_initialized(&path));
+        }
         anyhow::bail!(
             "refusing to init without a terminal: a flagless `agentstack init` imports your \
              CLI configs and can lift live token values into files, so it never runs without \
@@ -517,6 +525,37 @@ pub(crate) fn run_for_setup(args: &InitArgs, manifest_dir: Option<&Path>) -> Res
     run_impl(args, manifest_dir, false)
 }
 
+/// The manifest this invocation would collide with, if one already exists:
+/// the explicit `--manifest-dir`'s manifest, or the nearest ancestor
+/// project's (the same walk every other command does).
+fn existing_manifest(manifest_dir: Option<&Path>) -> Result<Option<std::path::PathBuf>> {
+    Ok(match manifest_dir {
+        Some(d) => {
+            let path = crate::manifest::resolve_manifest_dir(d).join(MANIFEST_FILE);
+            path.exists().then_some(path)
+        }
+        None => crate::manifest::discover_project_base(&std::env::current_dir()?)
+            .map(|root| crate::manifest::resolve_manifest_dir(&root).join(MANIFEST_FILE)),
+    })
+}
+
+/// The refusal for a scripted `init` against an already-initialized project.
+/// Another import is almost never what the script wants — name the actual
+/// next steps, and keep `--force` available but labeled as the destructive
+/// path. (Interactive bare `init` never hits this: the wizard resumes.)
+fn already_initialized(manifest_path: &Path) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{} already exists — init has nothing left to do here\n\
+         \n  \
+         render it into your CLIs:  agentstack apply --write\n  \
+         activate a profile:        agentstack use <profile> --write\n  \
+         re-import from scratch:    agentstack init --force   (replaces the manifest)\n\
+         \n\
+         (in a terminal, plain `agentstack init` resumes the wizard: preview, apply, verify)",
+        manifest_path.display()
+    )
+}
+
 /// Refuse a bare `init` from inside an already-initialized project: every
 /// other command walks up to that root's manifest (`commands::project_base`),
 /// so silently creating a NESTED one here would fork the project into two
@@ -555,9 +594,17 @@ fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Re
     // Create new manifests in `.agentstack/`; keep updating a legacy root one.
     let dir = crate::manifest::new_manifest_dir(&base);
     let manifest_path = dir.join(MANIFEST_FILE);
-    if manifest_path.exists() && !args.force && !args.dry_run {
-        anyhow::bail!(
-            "{} already exists — use --force to overwrite or --dry-run to preview",
+    if manifest_path.exists() && !args.force {
+        if !args.dry_run {
+            return Err(already_initialized(&manifest_path));
+        }
+        // The preview below is a fresh re-import, not the file on disk — say
+        // so, or a reader assumes init merges and that their current servers
+        // survived (they would not: a write replaces the manifest).
+        println!(
+            "{} existing manifest at {} — this preview shows a fresh re-import, not the file \
+             on disk; writing it takes `agentstack init --force` and replaces the manifest",
+            "⚠".yellow(),
             manifest_path.display()
         );
     }
@@ -945,5 +992,48 @@ mod tests {
         // Nothing was written under either manifest layout.
         assert!(!dir.path().join(".agentstack/agentstack.toml").exists());
         assert!(!dir.path().join("agentstack.toml").exists());
+    }
+
+    /// T4 (third-pass DX audit): scripted `init` against an initialized
+    /// project must recommend the real next steps (`apply --write`), not the
+    /// generic escapes — `--yes` would hit the --force wall and `--dry-run`
+    /// previews a from-scratch replacement. Both the flagless non-TTY path
+    /// and the explicit `--yes` path land on the same adapted refusal.
+    #[test]
+    fn scripted_init_with_existing_manifest_names_apply_not_yes() {
+        let dir = assert_fs::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("agentstack.toml"), "version = 1\n").unwrap();
+
+        let flagless = InitArgs {
+            global: false,
+            force: false,
+            dry_run: false,
+            secrets: None,
+            no_keychain: false,
+            yes: false,
+        };
+        let with_yes = InitArgs {
+            yes: true,
+            ..flagless.clone()
+        };
+        for args in [flagless, with_yes] {
+            let err = run_gated(&args, Some(dir.path()), false)
+                .expect_err("init over an existing manifest must refuse");
+            let msg = format!("{err:#}");
+            assert!(msg.contains("already exists"), "{msg}");
+            assert!(
+                msg.contains("agentstack apply --write"),
+                "names the real scripted next step: {msg}"
+            );
+            assert!(
+                !msg.contains("--yes"),
+                "no escape that would just error again: {msg}"
+            );
+        }
+        // The manifest survived untouched.
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("agentstack.toml")).unwrap(),
+            "version = 1\n"
+        );
     }
 }

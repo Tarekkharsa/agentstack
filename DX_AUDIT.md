@@ -842,3 +842,254 @@ warnings` clean · **812 tests pass** (cli + core, including new witnesses:
 missing-manifest error shape, doctor `first_fix`/Info levels, help surface +
 `status` parse, `--target` typo suggestion) · sandbox-feature build compiles ·
 docs command inventory regenerated (`self docs --write`).
+
+---
+
+# Third pass — fresh newcomer walkthrough at HEAD `6570db2` (2026-07-20)
+
+Run against a debug build of the committed HEAD, with a fresh `HOME`, an empty
+directory, a hand-written minimal project, an invalid manifest, typos, and
+closed stdin. Environment caveat: the fresh `HOME` makes the macOS keychain
+*unreadable* ("A default keychain could not be found"), so secret failures in
+this pass are read-failures, not not-found — noted where it changes a verdict.
+
+**Headline: the fix rounds held.** Every fix the before/after section claims
+was re-verified live on HEAD: the missing-manifest error (all commands,
+consistent, exit 1), the init refusal layout, `--plan` guard, `--target codx`
+did-you-mean, semantic-invalid `apply --write` exit 1, `secret get` fallback
+listing both stores, `status` by name with the Secrets fix line, one target
+resolver in orientation *and* apply, `--help` at 9 visible commands with the
+task map + glossary, a genuinely different `--help --all`, doctor's
+`start with:` triage line, `trust --yes` → `run --locked --plan` →
+"✓ live launch would proceed". The findings below are what's left.
+
+## Ranked findings
+
+### T1. Broken pipe = Rust panic: exit 101 + panic spew (b: confusing errors)
+
+The single worst remaining first-session experience. Any command with more
+output than the terminal consumes — `agentstack diff | head`, `doctor | less`
+(quit early), any script piping to `grep -m1` — dies as:
+
+```
+$ agentstack diff | head -3
+…3 lines…
+thread 'main' (92101784) panicked at …/library/std/src/io/stdio.rs:1165:9:
+failed printing to stdout: Broken pipe (os error 32)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+$ echo $?   # of agentstack
+101
+```
+
+A security tool printing a panic backtrace note on a routine pipe reads as
+"this tool crashes." **A great CLI:** exits silently on SIGPIPE like every
+Unix tool (ripgrep, fd, git). Fix in `cli/src/sys.rs` (the designated libc
+call-site module — `SigintGuard` already lives there): restore `SIG_DFL` for
+`SIGPIPE` at the top of `main`.
+
+### T2. `secret set` without a TTY leaks a raw OS error (b)
+
+```
+$ agentstack secret set DEMO_TOKEN </dev/null
+error: reading secret from prompt: Device not configured (os error 6)
+```
+
+CI and scripts hit this on their first secret. The flags that solve it
+(`--value`, `--env-file`) exist but are never mentioned. **A great CLI**
+detects the missing TTY before prompting:
+
+```
+error: secret set needs a terminal to prompt for the value
+
+  pass it inline:            agentstack secret set DEMO_TOKEN --value <VALUE>
+  (…lands in shell history — prefer the prompt or an env-managed store)
+```
+
+### T3. Doctor's `start with:` recommends a command that will refuse to run (b)
+
+With an invalid manifest (`[servers.demo]` type=http, no url):
+
+```
+Manifest
+  ✗ server 'demo' is type=http but has no `url`
+Drift
+  ⚠ Claude Code    1 change(s) pending ↳ agentstack apply --write
+…
+1 error(s), 4 warning(s).
+  start with: agentstack apply --write
+```
+
+`apply --write` refuses while the manifest is invalid — the triage line sends
+the newcomer into a wall. Two gaps: the validation ✗ carries no `↳ fix` (so
+it can't win), and the first-fix picker doesn't prefer errors over warnings.
+**A great CLI prints:** `start with: agentstack set server demo --url <URL>
+--write` (the repair skeleton `add server` already prints).
+
+### T4. Non-TTY `init` advice misleads when a manifest already exists (d)
+
+Interactive `init` in an existing project correctly *resumes* the wizard
+(import is skipped — `setup.rs` checks `manifest_path.exists()`). But the
+non-TTY refusal prints the same three options regardless of state, and in an
+existing project two of them mislead: `init --yes` hits `error: …
+agentstack.toml already exists — use --force to overwrite`, and `init
+--dry-run` previews a **from-scratch import** — in the test project the
+preview showed an empty `[servers]`, silently dropping the existing server,
+with no hint that writing it would need `--force` and would replace the file.
+**A great CLI:** when a manifest exists, the non-TTY refusal recommends the
+actual scripted next steps (`agentstack apply --write`, `agentstack use
+<profile> --write`), and `init --dry-run` opens with `existing manifest at …
+— this preview shows a fresh re-import (writing it requires --force and
+replaces the file)`.
+
+### T5. Per-target secret read-failures stack three layers of context (b)
+
+`apply`/`use` ✗ lines on a broken keychain:
+
+```
+✗ secret read failed DEMO_TOKEN (server 'demo') — keychain read failed: reading secret 'DEMO_TOKEN' from keychain: A default keychain could not be found. ↳ run `agentstack secret set DEMO_TOKEN`, then re-run
+```
+
+The name appears twice and "keychain read failed: reading secret … from
+keychain" says the same thing twice ("`secret get`'s cause was deduplicated
+in the remainder round; this sibling path wasn't"). One cause is enough:
+`✗ DEMO_TOKEN unreadable (server 'demo') — a default keychain could not be
+found ↳ …`.
+
+### T6. `--help --all` leaks internal ticket ids (c)
+
+`setup            Hidden alias of interactive `init` (P27: one front-door
+verb)` — P-numbers are audit-internal shorthand, meaningless to users. Sweep
+user-visible clap strings for `P\d+`.
+
+### T7. Blocked-write tail goes vague exactly when the keychain breaks (b, nit)
+
+The tail names exact commands for *missing* secrets, but read-*failures* fall
+back to "each ✗ above names the blocker" even when every ✗ names the same
+one command. Naming commands whenever the distinct fix set is small (regardless
+of failure kind) would keep the last line copy-pasteable in both cases.
+
+## Third-pass walkthrough log
+
+| # | Command | Context | Result |
+|---|---------|---------|--------|
+| 1–2 | no-args / `status` | empty dir, fresh HOME | ✅ orientation, one next step |
+| 3–4 | `--help` / `--help --all` | — | ✅ distinct views, task map, glossary; T6 P27 leak |
+| 5–6, 9–10, 14, 16 | `apply` `doctor` `run` `explain` `add server` | no manifest | ✅ one consistent error, exit 1 |
+| 7–8 | `aply` / `--wirte` | typos | ✅ did-you-mean |
+| 11 | `run --plan` | bare | ✅ refuses, names both modes |
+| 12–13 | `trust .` / `init` | non-TTY | ✅ ordered refusals |
+| 15 | `secret get` | broken keychain | ✅ both stores named |
+| 17–18 | orientation / `apply` | manifest, no `[targets]` | ✅ same resolver, same count |
+| 19 | `apply --write` | unreadable secret | ✅ fail-closed, exit 1; T5, T7 |
+| 20 | `apply --target codx` | typo | ✅ did-you-mean, exit 1 |
+| 21 | `apply --write` | invalid manifest | ✅ exit 1, nothing written |
+| 22 | `doctor` | invalid manifest | ❌ T3 `start with: apply --write` |
+| 25–26 | `add server` | missing url / dup name | ✅ retry skeleton, points at `set server` |
+| 29, 31, 43 | `init` variants | existing manifest | ⚠ T4 (interactive resume ✅, `--yes` walled, `--dry-run` misleads) |
+| 33, 46 | `trust .` / `--yes` → plan | manifest | ✅ declarations → refusal / "live launch would proceed" |
+| 35–36 | `restore` / `remove nosuch` | — | ✅ friendly |
+| 37 | `secret set` | non-TTY | ❌ T2 raw os error 6 |
+| 40–41 | `diff \| head` | — | ❌ T1 panic, exit 101 |
+
+---
+
+# Before / after — the third-pass fix round (2026-07-20, same day)
+
+All seven findings (T1–T7) fixed and re-verified on the rebuilt binary; every
+block below is actual output from the same scenarios that produced the
+findings.
+
+## T1 — broken pipe
+
+Before: 3 lines of output, then `thread 'main' panicked … Broken pipe (os
+error 32)` + the RUST_BACKTRACE note, exit 101. After — `agentstack diff |
+head -3` prints 3 lines, empty stderr, silent exit (the Unix default).
+`main` restores `SIGPIPE`'s default disposition via `sys.rs` — the designated
+libc module — and an integration test pre-closes the pipe before spawn so the
+first write deterministically hits it.
+
+## T2 — `secret set` without a terminal
+
+```
+error: secret set needs a terminal to prompt for the value
+
+  pass it inline:  agentstack secret set DEMO_TOKEN --value <VALUE>
+  (inline values can land in shell history — prefer the prompt when you can)
+```
+
+(was: `error: reading secret from prompt: Device not configured (os error 6)`)
+
+## T3 — doctor triage on an invalid manifest
+
+```
+Manifest
+  ✗ server 'demo' is type=http but has no `url` ↳ agentstack set server demo --url <URL> --write
+…
+1 error(s), 4 warning(s).
+  start with: agentstack set server demo --url <URL> --write
+```
+
+(was: `start with: agentstack apply --write` — a command the error itself
+blocks.) Validation issues now carry a `fix` field printed in the `↳` voice by
+doctor, `apply`, and the wizard; and `first_fix` never falls through to a
+warning's fix while an error is outstanding — no triage line beats a
+misleading one.
+
+## T4 — scripted `init` in an initialized project
+
+Both the flagless non-TTY path and `init --yes` now land on one adapted
+refusal (was: generic advice whose options walked into the `--force` wall):
+
+```
+error: …/.agentstack/agentstack.toml already exists — init has nothing left to do here
+
+  render it into your CLIs:  agentstack apply --write
+  activate a profile:        agentstack use <profile> --write
+  re-import from scratch:    agentstack init --force   (replaces the manifest)
+
+(in a terminal, plain `agentstack init` resumes the wizard: preview, apply, verify)
+```
+
+And `init --dry-run` opens with the banner that was missing:
+
+```
+⚠ existing manifest at … — this preview shows a fresh re-import, not the file
+on disk; writing it takes `agentstack init --force` and replaces the manifest
+```
+
+## T5 — secret read-failure context, said once
+
+```
+✗ secret read failed DEMO_TOKEN (server 'demo') — keychain read failed: A default keychain could not be found. ↳ run `agentstack secret set DEMO_TOKEN`, then re-run
+```
+
+(was: `— keychain read failed: reading secret 'DEMO_TOKEN' from keychain: A
+default keychain could not be found.` — name twice, store thrice.) The fix is
+structural: `keychain::get` keeps its context and the platform root as two
+error layers instead of flattening them into one string, so every downstream
+`root_cause()` gets the bare platform sentence. `secret get`'s parenthetical
+dropped its duplicate the same way.
+
+## T6 — help hygiene
+
+`--help --all` now contains zero P-numbers (`setup  Hidden alias of
+interactive `init` — same guided wizard, older name`), and the inventory test
+asserts no `P<digit>` ever returns to either help view.
+
+## T7 — blocked-write tail on a broken keychain
+
+```
+error: blocked write(s) on 4 target(s) — fix: agentstack secret set DEMO_TOKEN (or pass --allow-unresolved)
+```
+
+(was: `— each ✗ above names the blocker`.) Read-failures now feed the same
+fix-command set as missing secrets in both `apply` and `use`.
+
+## Verification
+
+`cargo fmt --check` clean · `cargo clippy --workspace --all-targets -- -D
+warnings` clean · **736 cli-crate tests pass**, including the new witnesses:
+pre-closed-pipe no-panic, `secret set` non-TTY error shape, `first_fix`
+no-fall-through, scripted-init adapted refusal (flagless + `--yes`, manifest
+untouched), P-number help guard · docs command inventory regenerated
+(`self docs --write`).

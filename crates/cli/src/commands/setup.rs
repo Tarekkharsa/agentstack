@@ -1105,11 +1105,15 @@ fn print_validation(ctx: &super::Context) -> bool {
     println!("\n{}", "Manifest".bold());
     let mut has_errors = false;
     for issue in issues {
-        if issue.kind.is_error() {
+        let mark = if issue.kind.is_error() {
             has_errors = true;
-            println!("  {} {}", "✗".red(), issue.message);
+            "✗".red().to_string()
         } else {
-            println!("  {} {}", "⚠".yellow(), issue.message);
+            "⚠".yellow().to_string()
+        };
+        match &issue.fix {
+            Some(fix) => println!("  {mark} {} ↳ {fix}", issue.message),
+            None => println!("  {mark} {}", issue.message),
         }
     }
     has_errors

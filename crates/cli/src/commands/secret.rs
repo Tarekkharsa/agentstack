@@ -25,6 +25,18 @@ pub fn run(args: &SecretArgs, manifest_dir: Option<&Path>) -> Result<()> {
 fn set(name: &str, value: Option<&str>, env_file: bool, manifest_dir: Option<&Path>) -> Result<()> {
     let value = match value {
         Some(v) => v.to_string(),
+        // Refuse before rpassword touches /dev/tty: in CI or a pipe the raw
+        // failure is "Device not configured (os error 6)", which names
+        // neither the cause nor the flags that solve it.
+        None if !crate::util::confirm::is_interactive() => {
+            anyhow::bail!(
+                "secret set needs a terminal to prompt for the value\n\
+                 \n  \
+                 pass it inline:  agentstack secret set {name} --value <VALUE>{}\n  \
+                 (inline values can land in shell history — prefer the prompt when you can)",
+                if env_file { " --env-file" } else { "" }
+            );
+        }
         None => rpassword::prompt_password(format!("Value for {name}: "))
             .context("reading secret from prompt")?,
     };
