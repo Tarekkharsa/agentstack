@@ -1102,7 +1102,7 @@ fn tool_defs() -> Value {
         },
         {
             "name": "agentstack_add_skill",
-            "description": "Add a skill to the manifest (commit-safe — nothing executed, not applied). A human runs `agentstack install` then `apply`.",
+            "description": "Add a skill to the manifest (commit-safe — nothing executed, not activated). A human runs `agentstack use [<profile>] --write` to activate it.",
             "inputSchema": {
                 "type": "object",
                 "required": ["name"],
@@ -1373,7 +1373,7 @@ fn run_tool_with_lease(
         "agentstack_add_skill" => {
             let name = crate::commands::add::add_skill_json(dir, args)?;
             Ok(format!(
-                "Added skill '{name}' to the manifest (not installed or applied). A human runs `agentstack install` then `agentstack apply`."
+                "Added skill '{name}' to the manifest (not installed or activated). A human runs `agentstack use [<profile>] --write` to activate it."
             ))
         }
         "agentstack_create_profile" => {
