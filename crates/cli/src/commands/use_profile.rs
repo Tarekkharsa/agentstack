@@ -609,12 +609,19 @@ pub fn activate(
             } else {
                 println!("  {} skills up to date", "✓".green());
             }
-        } else if !active_skills.is_empty() && desc.skills.is_none() {
-            // This CLI has no skills directory agentstack manages, so the
-            // profile's skills silently reach it nowhere — say so in its block
-            // rather than leaving the count unaccounted for.
+        } else if !active_skills.is_empty() {
+            // This CLI can't take the skills at this scope — either it has no
+            // skills support at all, or (copilot-cli shape) it declares a
+            // global skills dir but no project one. Both are REPORTED: a
+            // resolved target that can't be materialized is never silently
+            // skipped (add-skill-activation design, follow-up landed).
+            let reason = if desc.skills.is_none() {
+                "skills not supported by this CLI"
+            } else {
+                "no skills dir at this scope for this CLI"
+            };
             println!(
-                "  {} (skills not supported by this CLI — {} skill(s) not materialized)",
+                "  {} ({reason} — {} skill(s) not materialized)",
                 "·".dimmed(),
                 active_skills.len()
             );
