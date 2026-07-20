@@ -1293,16 +1293,65 @@ every action still happens through the CLI.
 
 An embedded localhost server + a self-contained UI (shadcn aesthetic,
 hand-written CSS — no Node, no framework, still one `cargo build`):
-`agentstack dashboard` opens a **read-only** cross-harness view with secrets,
-skills, settings, profiles, runs, and usage panels. It shows state, previews
-diffs, and **runs doctor** (full check-up rendered in the Health tab), but it
-never writes: the server exposes read (GET) routes only, so a POST to any path
-404s — the read-only property is a property of the router, not the UI, and a
-route-matrix test pins it. Every change happens through the CLI; where a
-control would live, the dashboard shows the command to copy (e.g. `agentstack
-apply --write`, `agentstack secret set <REF>`, `agentstack use <profile>
---write`). Bound to 127.0.0.1, token-gated, it never exposes secret values. The
-tabs and views are walked through in [dashboard.md](dashboard.md).
+
+```sh
+agentstack dashboard            # token-gated, localhost-only view
+agentstack dashboard --no-open  # print the URL, don't open a browser
+```
+
+It opens a **read-only** cross-harness view with secrets, skills, settings,
+profiles, runs, and usage panels. It shows state, previews diffs, and **runs
+doctor** (full check-up rendered in the Health tab), but it never writes: bound
+to 127.0.0.1 and token-gated, the server exposes read (GET) routes only, so a
+POST to any path 404s — the read-only property is a property of the router, not
+the UI, and a route-matrix test pins it. Secret values never reach the browser.
+Every change happens through the CLI; where a control would live, the dashboard
+shows the command to copy (e.g. `agentstack apply --write`, `agentstack secret
+set <REF>`, `agentstack use <profile> --write`).
+
+On a machine with no `agentstack.toml`, it opens a welcome screen instead: the
+agent CLIs it detected, the MCP servers already in their configs, where those
+tools disagree today, and the `agentstack init` command to reverse-engineer a
+manifest (lifting inline secrets to `${REF}`s) from what's on disk.
+
+**The tabs:**
+
+- **Overview** — stat tiles, next-actions, stack summary, the zero-files bridge
+  (connected harnesses + this repo's trust state), profiles, and usage. Each
+  next-action links to the relevant tab or opens a read-only diff.
+- **Runs** — live `agentstack run` processes, with uptime, profile, reachable
+  capabilities, and per-run **Calls** (the audited tool-call footprint, digests
+  only). Stop one with the shown `agentstack kill <id>`.
+- **Discover** — search the embedded catalog and the official MCP Registry; each
+  result shows its trust signals and the `agentstack add from <id>` command.
+- **Servers** / **Skills** — the cross-harness matrix: where each capability is
+  enabled, per CLI and scope (global/project switch at the top). Click a server
+  for its config and the trust lens (**Explain trust ⓘ**); the **context**
+  column shows each server's per-session token cost (click to sort). Skills also
+  lists dirs discovered on disk but not in the manifest, each with the
+  `agentstack adopt <name>` command.
+- **Settings** — each tool's current settings, read from its real config file,
+  and which keys agentstack manages. Edit `[settings.<tool>]`, then `agentstack
+  apply --write`.
+- **Hooks / Instructions / Extensions** — read-only inventories of lifecycle
+  hooks, CLAUDE.md/AGENTS.md fragments, and content-pinned native add-ons.
+- **Secrets** — every `${REF}` the manifest mentions, whether it resolves on
+  this machine and from which layer (env / varlock / keychain / .env); missing
+  ones show `agentstack secret set <REF>`. Values are never shown.
+- **Activity** — every apply, with the files it touched; roll one back with the
+  shown `agentstack restore`.
+- **Health** — the standing summary plus **Run doctor**: the same checks as
+  `agentstack doctor`, rendered as the familiar ✓/⚠/✗ report.
+- **Proxy** — the wire lens, the same ranked report as `agentstack report wire`:
+  per-turn tools and token weight, per-capability. Observe-only.
+- **Insights** — **Optimize**, **Analyze**, and **Stats** as three read-only
+  reports, each recommendation carrying its evidence and the exact command/TOML
+  to act on it.
+
+Anywhere drift exists — the pending bar, an Overview next-action, the Health
+tab — **Review** opens a real diff of every native config that would change and
+shows the `agentstack apply --write` to reconcile it; the write happens in your
+terminal.
 
 ## Optimize (`agentstack optimize`)
 
@@ -1390,44 +1439,49 @@ cancelled or timed-out run leaves no orphaned guest processes.
 
 ## All commands
 
-The full command surface in one place, kept honest by a test against the CLI's
-own command tree. Reach for it when you need the exact verb, flag, or
-subcommand.
+The full command surface in one place, generated from the CLI's own command
+tree by `agentstack self docs --write` (CI fails if this list goes stale, and
+regenerating trues it up). Each line is a top-level command with its one-line
+summary, visible subcommands, and long-form flags; hidden commands are marked.
+Reach for it when you need the exact verb, flag, or subcommand.
 
-`init` (interactive wizard; `--global`, `--secrets env|keychain|skip`; `setup`
-is a hidden alias), `add from|server|skill` (`add server`: `--type`,
-`--url`/`--header` or `--command`/`--arg`, `--target`; `add skill`: `--path`),
-`search`,
-`install` (`--locked`, `--allow-flagged`),
-`lock` (`--profile`; `--update [NAME]` re-resolves git skills, `--upgrade
-[PACK]` + `--all`/`--with-instructions`/`--yes`/`--write` re-resolves vendor
-packs), `remove`, `apply` (`--scope`, `--write`, `--prune-foreign`), `diff`,
-`explain`, `use <profile>`, `session start|end|list|freeze`, `instructions`, `adopt`,
-`lib add|add-server|add-extension|add-hook|list|remove|remove-server|remove-extension|remove-hook|sync|pack-init`
-(`lib add`: `--path`, `--git`/`--subpath`, `--allow-flagged`; `lib add-extension`:
-`--target`, `--path` or `--git`/`--subpath`/`--rev`, `--allow-flagged`; `lib
-add-hook`: `--file`/`--from-manifest`; `lib sync`:
-`--init`, `--remote`, `--status`, `--allow-secrets`), `restore` (`--last`; a
-recorded-change id or an adapter id),
-`doctor` (`--ci`, `--live`, `--fix`, `--deep`, `--all`, `--json`), `optimize` (`--json`, `--write`, `--since`),
-`report run <id>|runs|usage|calls|wire` (`run`/`runs`/`calls`/`wire`: `--json`;
-`usage`: `--live`; `calls`: `--since`), `proxy` (`--port`,
-`--upstream`),
-`secret set|get|rm|list` (`set --env-file`), `export`/`import`, `adapters` (`list|show|validate`),
-`settings set|unset`,
-`dashboard`, `mcp` (`--auto-project`, `--transparent`),
-`gateway connect|disconnect` (`connect`: `--all`, `--transparent`, `--write`),
-`trust` (`--list`, `--revoke` — pins the manifest layers **and lockfile**;
-re-locking re-gates),
-`guard` (`install|uninstall|status|test|check` —
-the machine-level destructive-command hook for every agent CLI; cooperative,
-see ENFORCEMENT.md), `run` (`--sandbox`)/`kill`,
-`sign`/`verify` (`--pubkey`, `--signature` — detached ed25519 lockfile
-signatures), `self link|which`.
-
-This inventory is checked by a test against the CLI's own command list
-(`tests/docs_commands.rs`) — a new subcommand fails CI until it's documented
-here.
+<!-- agentstack:generated commands -->
+- **`setup`** _(hidden)_ — Hidden alias of interactive `init` (P27: one front-door verb) — flags `--target/--profile/--scope`
+- **`init`** — Set up everything in one command: detect, import, choose, apply, verify — flags `--global/--force/--dry-run/--secrets/--no-keychain/--yes`
+- **`add`** — Add a server or skill to the manifest — subcommands `from/server/skill`
+- **`search`** — Search the capability catalog (and mark what's already added)
+- **`apply`** — Render the manifest into each target's native config — flags `--target/--profile/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore`
+- **`instructions`** — Compile [instructions.*] into each harness's CLAUDE.md / AGENTS.md — flags `--target/--scope/--write`
+- **`doctor`** — Verify everything is wired up: adapters, secrets, drift, quirks, skills — flags `--ci/--live/--fix/--deep/--all/--json`
+- **`dashboard`** — Open the local web dashboard — a read-only view of your stack — flags `--port/--no-open`
+- **`remove`** _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags `--write`
+- **`install`** _(hidden)_ — Fetch skill sources into the store and write the lockfile — flags `--locked/--allow-flagged`
+- **`lock`** — Resolve each profile's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`
+- **`lib`** — Manage the central capability library — subcommands `add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/sync/pack-init`
+- **`adopt`** — Keep a hand-edit: pull drifted native config back into the manifest — flags `--target/--scope/--write/--no-keychain`
+- **`use`** — Activate a profile: render its servers + materialize its skills — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore`
+- **`session`** _(hidden)_ — Manage ephemeral sessions: load a profile for now, then revert it — subcommands `start/end/list/freeze`
+- **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--profile/--scope/--keep/--sandbox/--lockdown/--plan`
+- **`kill`** _(hidden)_ — Kill a tracked run by id (and revert its profile if it owned one) — flags `--force`
+- **`report`** — Every "what happened" view in one place — subcommands `run/runs/usage/calls/wire`
+- **`sign`** _(hidden)_ — Sign this project's agentstack.lock with a fresh ed25519 key (writes a detached agentstack.lock.sig, prints the public key to publish) — flags `--print-key-only`
+- **`verify`** _(hidden)_ — Verify agentstack.lock against a published ed25519 public key and its detached signature — flags `--pubkey/--signature`
+- **`guard`** — Machine-level destructive-command guard — subcommands `test/install/uninstall/status`
+- **`gateway`** _(hidden)_ — The zero-files gateway: register it once per harness (`connect`) and every trusted repo brings its own servers through `agentstack mcp --auto-project` with no per-project files — subcommands `connect/disconnect`
+- **`trust`** — Trust a project's manifest for the zero-files bridge (direnv-style) — flags `--list/--revoke/--yes`
+- **`mcp`** _(hidden)_ — Run agentstack as an MCP server over stdio (for an agent to call) — flags `--auto-project/--transparent`
+- **`diff`** _(hidden)_ — Show drift between the manifest and the on-disk configs — flags `--target/--profile/--scope`
+- **`explain`** — Explain a server or skill before you rely on it
+- **`optimize`** _(hidden)_ — Turn agentstack's collected signals into concrete recommendations — flags `--json/--write/--since`
+- **`proxy`** _(hidden)_ — Start the wire relay: a localhost proxy in front of the Anthropic API — flags `--port/--upstream`
+- **`restore`** _(hidden)_ — Undo a recorded write: revert an apply/use/session history entry (servers, settings, hooks, instructions), or restore one adapter's config from its single-slot backup — flags `--last/--scope/--write`
+- **`secret`** — Manage secrets in the OS keychain — subcommands `set/get/rm/list`
+- **`settings`** _(hidden)_ — Edit a target's native `[settings.<target>]` entries — subcommands `set/unset`
+- **`export`** _(hidden)_ — Export the manifest (+ lock, + optionally secrets) as an encrypted bundle — flags `--output/--secrets/--passphrase`
+- **`import`** _(hidden)_ — Import an encrypted bundle on a new machine — flags `--force/--no-keychain/--passphrase`
+- **`adapters`** _(hidden)_ — Inspect the available CLI adapters — subcommands `list/show/validate`
+- **`self`** _(hidden)_ — Manage this binary's own install: `self link` puts a stable `agentstack` on PATH (a symlink, no installer needed); `self which` shows which binary a bare `agentstack` runs and flags stale links — subcommands `link/which`
+<!-- agentstack:end -->
 
 ## Everything shipped so far
 

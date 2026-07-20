@@ -28,7 +28,10 @@ pub fn run(args: &RemoveArgs, manifest_dir: Option<&Path>) -> Result<()> {
     } else if manifest.skills.contains_key(&args.name) {
         "skills"
     } else {
-        anyhow::bail!("no server or skill named '{}' in the manifest", args.name);
+        anyhow::bail!(
+            "no server or skill named '{}' in the manifest — check the `[servers]`/`[skills]` tables for the exact name",
+            args.name
+        );
     };
     let is_skill = kind == "skills";
 

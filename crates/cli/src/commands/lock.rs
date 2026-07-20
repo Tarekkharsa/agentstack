@@ -113,7 +113,9 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
             manifest
                 .profiles
                 .get(p)
-                .with_context(|| format!("no profile '{p}' in manifest"))?;
+                .with_context(|| {
+                    format!("no profile '{p}' in manifest — check the `[profiles.*]` tables there for the exact name")
+                })?;
             Some(vec![p.clone()])
         }
         None if manifest.profiles.is_empty() => None,

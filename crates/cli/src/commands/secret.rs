@@ -29,7 +29,9 @@ fn set(name: &str, value: Option<&str>, env_file: bool, manifest_dir: Option<&Pa
             .context("reading secret from prompt")?,
     };
     if value.is_empty() {
-        anyhow::bail!("refusing to store an empty value for '{name}'");
+        anyhow::bail!(
+            "refusing to store an empty value for '{name}' — pass a non-empty --value, or omit --value to be prompted"
+        );
     }
     if env_file {
         // Write to the project `.env` next to the manifest (the same file init's
@@ -61,7 +63,9 @@ fn get(name: &str) -> Result<()> {
             Ok(())
         }
         None => {
-            anyhow::bail!("no secret '{name}' in keychain");
+            anyhow::bail!(
+                "no secret '{name}' in keychain — run `agentstack secret set {name}` to store one"
+            );
         }
     }
 }

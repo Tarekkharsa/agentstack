@@ -661,7 +661,7 @@ pub struct ServerRemoveOutcome {
 pub fn remove_server(lib_home: &Path, name: &str, write: bool) -> Result<ServerRemoveOutcome> {
     let mut library = Library::load(lib_home)?;
     if library.get_server(name).is_none() {
-        bail!("'{name}' is not a server in the central library");
+        bail!("'{name}' is not a server in the central library — run `agentstack lib list` to see what's there");
     }
     // The definition file is always `lib/servers/<name>.toml`; only compute it
     // for a safe name so a hand-edited index can never target an outside path.
@@ -917,7 +917,7 @@ pub struct HookRemoveOutcome {
 pub fn remove_hook(lib_home: &Path, name: &str, write: bool) -> Result<HookRemoveOutcome> {
     let mut library = Library::load(lib_home)?;
     if library.get_hook(name).is_none() {
-        bail!("'{name}' is not a hook in the central library");
+        bail!("'{name}' is not a hook in the central library — run `agentstack lib list` to see what's there");
     }
     let removed_file =
         valid_lib_name(name).then(|| lib_home.join("hooks").join(format!("{name}.toml")));
@@ -1261,7 +1261,7 @@ pub fn remove_extension(
 ) -> Result<ExtensionRemoveOutcome> {
     let mut library = Library::load(lib_home)?;
     let Some(entry) = library.get_extension(name).cloned() else {
-        bail!("'{name}' is not an extension in the central library");
+        bail!("'{name}' is not an extension in the central library — run `agentstack lib list` to see what's there");
     };
     let removed_dir = if entry.source == "path" {
         entry
@@ -1509,7 +1509,7 @@ pub struct RemoveOutcome {
 pub fn remove_skill(lib_home: &Path, name: &str, write: bool) -> Result<RemoveOutcome> {
     let mut library = Library::load(lib_home)?;
     let Some(entry) = library.get(name).cloned() else {
-        bail!("'{name}' is not in the central library");
+        bail!("'{name}' is not in the central library — run `agentstack lib list` to see what's there");
     };
 
     // Only path skills own files to delete, and only within lib/skills. A git

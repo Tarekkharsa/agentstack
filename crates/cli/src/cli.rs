@@ -272,6 +272,18 @@ pub enum SelfCommand {
     /// Show what `agentstack` on PATH resolves to vs the binary running now,
     /// flagging stale or broken links (e.g. after a rebuild).
     Which,
+    /// Regenerate the "All commands" inventory in docs/reference.md from the
+    /// live clap tree. No flag prints the block; `--write` splices it into the
+    /// managed region. A maintainer/CI command, not part of the daily surface.
+    #[command(hide = true)]
+    Docs(SelfDocsArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct SelfDocsArgs {
+    /// Splice the generated block into docs/reference.md (else print to stdout).
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[derive(Args, Debug)]

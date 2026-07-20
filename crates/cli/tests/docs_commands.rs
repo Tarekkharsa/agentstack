@@ -6,73 +6,54 @@
 //! Docs-vs-CLI sync gate.
 //!
 //! Two checks:
-//! 1. `every_subcommand_is_documented_in_the_reference` — every top-level
-//!    subcommand (hidden ones included — `gateway` and `mcp` are hidden in
-//!    `--help` but documented; `trust` is a visible top-level command), plus
-//!    every *visible* nested subcommand one level down (e.g. `lib add-hook`,
-//!    `session freeze`), must appear in docs/reference.md's "All commands"
-//!    inventory. Hidden nested verbs like `guard check` are exempt — they're
-//!    kept out of the surface a reader is pointed at. The command surface
-//!    grows fast; a hand-maintained list silently rots without this.
+//! 1. `all_commands_region_matches_generator` — docs/reference.md's "All
+//!    commands" inventory is generated from the clap tree by `agentstack self
+//!    docs --write`, spliced into a managed HTML-comment region. This asserts
+//!    the on-disk region matches the generator byte-for-byte, so it can never
+//!    drift (a new subcommand or flag fails CI until `self docs --write` is
+//!    re-run). This subsumes the old hand-inventory roster checks: a generated
+//!    region needs no separate "is every subcommand listed" test.
 //! 2. `every_prose_command_is_real` — the inverse direction: every
 //!    `agentstack <verb> [<subverb>]` invocation written in a code span or
 //!    fenced block across the docs must name a command that actually exists
 //!    on the clap tree. A second token is checked as a subcommand, or accepted
 //!    only when Clap declares a positional argument; this catches shapes such
 //!    as the retired `proxy start`, not just nonexistent top-level verbs. The
-//!    roster check above only verifies the inventory list, not free prose.
+//!    generator check above only concerns the inventory region, not free prose.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use clap::CommandFactory;
 
-/// The clap `Command` tree, as `every_subcommand_is_documented_in_the_reference`
-/// already builds it. Shared by both tests so there's one source of truth for
-/// "what does the CLI actually expose".
+/// The clap `Command` tree that `every_prose_command_is_real` walks to learn
+/// "what does the CLI actually expose". (The inventory freshness test builds
+/// its block through the cli crate's own generator instead.)
 fn cli_command() -> clap::Command {
     agentstack::cli::Cli::command()
 }
 
 #[test]
-fn every_subcommand_is_documented_in_the_reference() {
-    let reference = include_str!("../../../docs/reference.md");
-    let section = reference
-        .split("## All commands")
-        .nth(1)
-        .expect("docs/reference.md must keep an '## All commands' section")
-        .split("\n## ")
-        .next()
-        .unwrap();
+fn all_commands_region_matches_generator() {
+    use agentstack::commands::self_cmd::{
+        commands_block, COMMANDS_MARKER_BEGIN, COMMANDS_MARKER_END,
+    };
 
-    let cmd = cli_command();
-    let mut missing: Vec<String> = Vec::new();
-    for sc in cmd.get_subcommands() {
-        let name = sc.get_name();
-        if name == "help" {
-            continue;
-        }
-        if !section.contains(name) {
-            missing.push(name.to_string());
-        }
-        // One level down: every *visible* nested subcommand (e.g. `lib
-        // add-hook`, `session freeze`) must be inventoried too. Hidden nested
-        // verbs (`guard check`) are exempt — `is_hide_set()` is clap's
-        // runtime introspection for `#[command(hide = true)]`, the same signal
-        // that keeps them out of `--help`.
-        for nested in sc.get_subcommands() {
-            let nested_name = nested.get_name();
-            if nested_name == "help" || nested.is_hide_set() {
-                continue;
-            }
-            if !section.contains(nested_name) {
-                missing.push(format!("{name} {nested_name}"));
-            }
-        }
-    }
-    assert!(
-        missing.is_empty(),
-        "subcommand(s) missing from the 'All commands' inventory in docs/reference.md: {missing:?}"
+    let reference = include_str!("../../../docs/reference.md");
+    let begin = reference
+        .find(COMMANDS_MARKER_BEGIN)
+        .expect("docs/reference.md must keep the generated-commands begin marker");
+    let end = reference
+        .find(COMMANDS_MARKER_END)
+        .expect("docs/reference.md must keep the generated-commands end marker");
+    // `splice_commands` writes `<begin>\n{block}\n<end>`; the region between the
+    // markers is exactly that middle, newlines included.
+    let region = &reference[begin + COMMANDS_MARKER_BEGIN.len()..end];
+    assert_eq!(
+        region,
+        format!("\n{}\n", commands_block()),
+        "the 'All commands' inventory in docs/reference.md is stale ↳ run \
+         `agentstack self docs --write` (or `cargo run -p agentstack -- self docs --write`)"
     );
 }
 

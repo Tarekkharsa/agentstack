@@ -40,8 +40,12 @@ fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return add_git_pack(a, &ctx, &git_ref);
     }
 
-    let candidate = provider::resolve(&a.id)
-        .with_context(|| format!("no capability '{}' in the catalog or registry", a.id))?;
+    let candidate = provider::resolve(&a.id).with_context(|| {
+        format!(
+            "no capability '{}' in the catalog or registry — run `agentstack search {}` to find one",
+            a.id, a.id
+        )
+    })?;
     println!(
         "{} {} ({}) — {}",
         "found".green(),
@@ -121,7 +125,11 @@ pub(crate) fn resolve_git_pack_gated(
 
 fn add_from_server(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate) -> Result<()> {
     if ctx.loaded.manifest.servers.contains_key(&candidate.name) {
-        anyhow::bail!("server '{}' already exists in the manifest", candidate.name);
+        anyhow::bail!(
+            "server '{}' already exists in the manifest — run `agentstack remove {}` first, or rename it",
+            candidate.name,
+            candidate.name
+        );
     }
     let server = candidate.to_server();
     write_manifest(
@@ -148,7 +156,13 @@ fn add_from_server(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate)
 /// Hooks are global (not profile-scoped), so `--profile` does not apply.
 fn add_from_hook(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate) -> Result<()> {
     if ctx.loaded.manifest.hooks.contains_key(&candidate.name) {
-        anyhow::bail!("hook '{}' already exists in the manifest", candidate.name);
+        // Unlike servers/skills, `agentstack remove` does not recognize hooks by
+        // name — the fix is a manifest edit, not a remove command.
+        anyhow::bail!(
+            "hook '{}' already exists in the manifest — edit `[hooks.{}]` in the manifest to change it, or delete that entry by hand",
+            candidate.name,
+            candidate.name
+        );
     }
     write_manifest(
         ctx,
@@ -174,7 +188,11 @@ fn add_from_skill(
     skill: &SkillRef,
 ) -> Result<()> {
     if ctx.loaded.manifest.skills.contains_key(&candidate.name) {
-        anyhow::bail!("skill '{}' already exists in the manifest", candidate.name);
+        anyhow::bail!(
+            "skill '{}' already exists in the manifest — run `agentstack remove {}` first, or rename it",
+            candidate.name,
+            candidate.name
+        );
     }
     let (entry, asset) = skill_entry(skill)?;
     if let Some(asset) = &asset {
@@ -362,7 +380,9 @@ fn add_pack(
         }
     }
     if manifest.packs.contains_key(pack) {
-        anyhow::bail!("a pack '{pack}' is already installed in the manifest");
+        anyhow::bail!(
+            "a pack '{pack}' is already installed in the manifest — run `agentstack remove {pack}` first to reinstall"
+        );
     }
 
     // On-disk collision: an extraction must never overwrite files a user already
@@ -700,7 +720,11 @@ fn sanitize_ref(name: &str) -> String {
 fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
     if ctx.loaded.manifest.servers.contains_key(&a.name) {
-        anyhow::bail!("server '{}' already exists in the manifest", a.name);
+        anyhow::bail!(
+            "server '{}' already exists in the manifest — run `agentstack remove {}` first, or rename it",
+            a.name,
+            a.name
+        );
     }
 
     // Per-CLI scoping straight from the flag. Validate eagerly against the
@@ -755,7 +779,11 @@ fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
 fn add_skill(a: &AddSkillArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
     if ctx.loaded.manifest.skills.contains_key(&a.name) {
-        anyhow::bail!("skill '{}' already exists in the manifest", a.name);
+        anyhow::bail!(
+            "skill '{}' already exists in the manifest — run `agentstack remove {}` first, or rename it",
+            a.name,
+            a.name
+        );
     }
     let skill = Skill {
         path: Some(a.path.clone()),
@@ -859,13 +887,18 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
         });
     }
 
-    let candidate = provider::resolve(id)
-        .with_context(|| format!("no capability '{id}' in the catalog or registry"))?;
+    let candidate = provider::resolve(id).with_context(|| {
+        format!("no capability '{id}' in the catalog or registry — run `agentstack search {id}` to find one")
+    })?;
     match &candidate.kind {
         CandidateKind::Server(_) => {
             let manifest = &ctx.loaded.manifest;
             if manifest.servers.contains_key(&candidate.name) {
-                anyhow::bail!("server '{}' already exists", candidate.name);
+                anyhow::bail!(
+                    "server '{}' already exists — run `agentstack remove {}` first, or rename it",
+                    candidate.name,
+                    candidate.name
+                );
             }
             let original = fs::read_to_string(&ctx.loaded.manifest_path)?;
             let body = serde_json::to_value(candidate.to_server())?;
@@ -881,13 +914,17 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
         CandidateKind::Skill(skill) => {
             let manifest = &ctx.loaded.manifest;
             if manifest.skills.contains_key(&candidate.name) {
-                anyhow::bail!("skill '{}' already exists", candidate.name);
+                anyhow::bail!(
+                    "skill '{}' already exists — run `agentstack remove {}` first, or rename it",
+                    candidate.name,
+                    candidate.name
+                );
             }
             let (entry, asset) = skill_entry(skill)?;
             if let Some(asset) = &asset {
                 if ctx.dir.join(asset).exists() {
                     anyhow::bail!(
-                        "destination '{}' already exists",
+                        "destination '{}' already exists — remove it first",
                         ctx.dir.join(asset).display()
                     );
                 }
@@ -931,7 +968,13 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
         CandidateKind::Hook(_) => {
             let manifest = &ctx.loaded.manifest;
             if manifest.hooks.contains_key(&candidate.name) {
-                anyhow::bail!("hook '{}' already exists", candidate.name);
+                // `agentstack remove` does not recognize hooks by name — the fix
+                // is a manifest edit, not a remove command.
+                anyhow::bail!(
+                    "hook '{}' already exists — edit `[hooks.{}]` in the manifest to change it, or delete that entry by hand",
+                    candidate.name,
+                    candidate.name
+                );
             }
             let original = fs::read_to_string(&ctx.loaded.manifest_path)?;
             // Hooks are global (not profile-scoped); ignore any passed profile.

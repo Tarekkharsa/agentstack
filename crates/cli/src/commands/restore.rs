@@ -231,7 +231,7 @@ fn restore_one(registry: &Registry, dir: &Path, id: &str, scope: Scope, write: b
     let backup = atomic::backup_path(&path);
     if !backup.exists() {
         anyhow::bail!(
-            "no backup for {} ({scope}) — none has been written yet",
+            "no backup for {} ({scope}) — none has been written yet; run `agentstack apply --write` once first, then `agentstack restore` can revert it",
             desc.display
         );
     }

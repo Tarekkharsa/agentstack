@@ -318,7 +318,7 @@ canonical); usage insight (`report calls`, and `agentstack optimize` to turn
 the audit log into concrete pruning recommendations); an observe-only wire
 relay (`agentstack proxy`, ranked by `agentstack report wire`) that measures
 what each tool actually costs in tokens per turn; and
-[the read-only dashboard](docs/dashboard.md).
+[the read-only dashboard](docs/reference.md#dashboard).
 
 The closed loop in under a minute — install a versioned pack, spread it to
 every CLI, firewall a tool, watch the refusal in the audit log, upgrade:

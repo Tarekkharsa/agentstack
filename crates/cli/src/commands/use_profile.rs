@@ -112,7 +112,9 @@ pub(crate) fn selected_profile(
             manifest
                 .profiles
                 .get(p)
-                .with_context(|| format!("no profile '{p}' in manifest"))?;
+                .with_context(|| {
+                    format!("no profile '{p}' in manifest — check the `[profiles.*]` tables there for the exact name")
+                })?;
             Ok(Some(p.to_string()))
         }
         None => {

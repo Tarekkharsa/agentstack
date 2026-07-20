@@ -233,8 +233,11 @@ fn configure(
     // Reload so a static apply's manifest refresh (owned-server tables) is
     // reflected in the summary; a no-render fork reloads an unchanged manifest.
     let ctx = super::load(manifest_dir)?;
+    // Step 3 of the adoption ladder: offer to wire the destructive-command
+    // guard. Sits before house rules — it's the bigger one-keystroke safety win.
+    let guard_wired = offer_guard()?;
     let seeded_house_rules = offer_house_rules(&ctx, &target_ids)?;
-    print_change_summary(&ctx, history_before, seeded_house_rules);
+    print_change_summary(&ctx, history_before, seeded_house_rules, guard_wired);
     Ok(())
 }
 
@@ -486,6 +489,66 @@ fn offer_deep_scan(ctx: &super::Context) -> Result<bool> {
     Ok(crate::util::confirm::confirm(
         "  Run a deep content scan now?",
     )?)
+}
+
+/// Whether the wizard should offer to wire the guard: only when the shell is
+/// interactive AND the guard isn't already wired. Pure so the gate is
+/// unit-testable without a live wizard or a machine config on disk.
+fn should_offer_guard(interactive: bool, guard_wired: bool) -> bool {
+    interactive && !guard_wired
+}
+
+/// Step 3 of the adoption ladder: offer to wire the destructive-command guard —
+/// the biggest one-keystroke safety win. Shown only when the shell is
+/// interactive and the guard isn't already wired (reusing guard's own
+/// enablement detection). Accepting runs the same path as `agentstack guard
+/// install`; declining leaves a one-line pointer, teach-once style. Returns
+/// whether the guard was wired this run, so the P7 close folds it into the
+/// summary. Never fails setup: the configs are already written by now, so a
+/// guard-install error is surfaced with its manual command and swallowed —
+/// like the house-rules and gateway offers.
+fn offer_guard() -> Result<bool> {
+    if !should_offer_guard(
+        crate::util::confirm::is_interactive(),
+        super::guard::is_wired(),
+    ) {
+        return Ok(false);
+    }
+
+    let manifest_path = crate::util::paths::agentstack_home().join(MANIFEST_FILE);
+    println!("\n{}", "Guard".bold());
+    println!(
+        "  a destructive-command guard, wired into each detected CLI's own\n\
+         \x20 pre-tool-use hook — it blocks rm -rf, git reset --hard, and .env reads\n\
+         \x20 before they land."
+    );
+    println!(
+        "  {} writes a hook entry into each detected CLI's config and a [guard] block\n\
+         \x20   in {}.",
+        "·".dimmed(),
+        manifest_path.display()
+    );
+    if !crate::util::confirm::confirm("  Install the guard now?")? {
+        println!(
+            "  {} skipped — install later with {}.",
+            "·".dimmed(),
+            "agentstack guard install".bold()
+        );
+        return Ok(false);
+    }
+
+    // `guard install` prints its own per-CLI write lines and config path, so the
+    // summary surfaces those (below) rather than duplicating them here.
+    println!();
+    if let Err(err) = super::guard::install() {
+        println!(
+            "  {} guard install failed ({err:#}) — setup itself succeeded; retry with {}.",
+            "⚠".yellow(),
+            "agentstack guard install".bold()
+        );
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 /// Pick the profile setup should activate: an explicit `--profile` wins, a
@@ -850,6 +913,7 @@ fn print_change_summary(
     ctx: &super::Context,
     history_before: &std::collections::HashSet<String>,
     seeded_house_rules: bool,
+    guard_wired: bool,
 ) {
     let files = files_written_since(history_before);
 
@@ -879,10 +943,11 @@ fn print_change_summary(
     }
 
     // Restart advice is warranted only when a native CLI config actually
-    // changed — a rendered config/skill in the ledger, or the house-rules
-    // fragment we compiled into the global instruction files (which is NOT in
-    // the ledger, hence the explicit OR).
-    let cli_config_changed = cli_config_touched(&files) || seeded_house_rules;
+    // changed — a rendered config/skill in the ledger, the house-rules fragment
+    // we compiled into the global instruction files (NOT in the ledger), or the
+    // guard hooks `guard install` wrote into each CLI's config (also outside the
+    // ledger — hence the explicit ORs).
+    let cli_config_changed = cli_config_touched(&files) || seeded_house_rules || guard_wired;
 
     println!("\n{} Setup complete.", "✓".green());
     println!("\n{}", "What changed on this machine".bold());
@@ -894,6 +959,7 @@ fn print_change_summary(
             &seeded,
             cli_config_changed,
             &keychain_secrets,
+            guard_wired,
         )
     );
 }
@@ -909,6 +975,7 @@ fn render_change_summary(
     seeded: &[String],
     cli_config_changed: bool,
     keychain_secrets: &[String],
+    guard_wired: bool,
 ) -> String {
     let mut out = String::new();
     if files.is_empty() {
@@ -934,6 +1001,16 @@ fn render_change_summary(
     out.push_str(
         "  Undo recorded file writes from this setup:  agentstack restore --last --write\n",
     );
+    // The guard manages its own install/uninstall (its hook writes are outside
+    // the apply history `restore` reads), so it carries its own undo line. The
+    // per-CLI writes were already listed by `guard install` above — surface the
+    // fact and the reversal here, don't re-enumerate them.
+    if guard_wired {
+        out.push_str(
+            "  Guard wired into your CLIs' pre-tool-use hooks (listed above).\n\
+             \x20 Undo the guard:  agentstack guard uninstall\n",
+        );
+    }
     if !keychain_secrets.is_empty() {
         out.push_str(
             "  Keychain values are outside file history; remove them explicitly if needed:\n",
@@ -1138,8 +1215,26 @@ mod tests {
     use super::super::overview::Mode;
     use super::{
         cli_config_touched, fork_plan, is_cli_config_path, mode_switch_plan, render_change_summary,
-        render_stop_summary,
+        render_stop_summary, should_offer_guard,
     };
+
+    // TASK 3: the guard offer is gated — shown only when the shell is
+    // interactive AND the guard isn't already wired. Every other combination
+    // stays silent (a scripted shell never offers; an already-wired machine
+    // isn't nagged).
+    #[test]
+    fn guard_offer_shows_only_when_interactive_and_not_wired() {
+        assert!(
+            should_offer_guard(true, false),
+            "interactive + unwired → offer"
+        );
+        assert!(!should_offer_guard(true, true), "already wired → silent");
+        assert!(!should_offer_guard(false, false), "scripted → silent");
+        assert!(
+            !should_offer_guard(false, true),
+            "scripted + wired → silent"
+        );
+    }
 
     // P28: the delivery-mode choice is a real fork — each mode runs a distinct,
     // fixed sequence of steps. Only static renders (preview → confirm → apply);
@@ -1201,8 +1296,14 @@ mod tests {
         ];
         let secrets = vec![("API_TOKEN".to_string(), "keychain".to_string())];
         let seeded = vec!["agentstack house rules → ~/.agentstack/agentstack.toml".to_string()];
-        let out =
-            render_change_summary(&files, &secrets, &seeded, true, &["API_TOKEN".to_string()]);
+        let out = render_change_summary(
+            &files,
+            &secrets,
+            &seeded,
+            true,
+            &["API_TOKEN".to_string()],
+            true,
+        );
 
         assert!(out.contains("Files written (2)"));
         assert!(out.contains("~/.claude.json  (Claude Code · servers)"));
@@ -1213,12 +1314,15 @@ mod tests {
         assert!(out.contains("agentstack secret rm API_TOKEN"));
         // A CLI config changed → the restart advice is present.
         assert!(out.contains("Restart your agent CLI(s)"));
+        // guard_wired → the guard carries its own undo line (its writes are
+        // outside the apply history `restore` reverses).
+        assert!(out.contains("agentstack guard uninstall"));
     }
 
     // With nothing written, the summary says so but still offers the one-liners.
     #[test]
     fn change_summary_with_no_writes_still_offers_undo() {
-        let out = render_change_summary(&[], &[], &[], false, &[]);
+        let out = render_change_summary(&[], &[], &[], false, &[], false);
         assert!(out.contains("No files were written"));
         assert!(out.contains("agentstack restore --last --write"));
     }
@@ -1233,14 +1337,14 @@ mod tests {
             ".agentstack/agentstack.toml".to_string(),
             "manifest · import".to_string(),
         )];
-        let out = render_change_summary(&files, &[], &[], false, &[]);
+        let out = render_change_summary(&files, &[], &[], false, &[], false);
         assert!(out.contains("manifest · import"));
         assert!(
             !out.contains("Restart your agent CLI(s)"),
             "an import-only run must not advise a restart:\n{out}"
         );
         // But it is still present when a CLI config did change.
-        let out_changed = render_change_summary(&files, &[], &[], true, &[]);
+        let out_changed = render_change_summary(&files, &[], &[], true, &[], false);
         assert!(out_changed.contains("Restart your agent CLI(s)"));
     }
 
@@ -1300,7 +1404,7 @@ mod tests {
     // every delivery-mode fork (all three end through this one formatter).
     #[test]
     fn change_summary_ends_with_the_start_page_doorway() {
-        let out = render_change_summary(&[], &[], &[], false, &[]);
+        let out = render_change_summary(&[], &[], &[], false, &[], false);
         // The exact URL + single-space em dash pins that the string
         // line-continuation collapsed to one space, not zero or two.
         assert!(out.contains(

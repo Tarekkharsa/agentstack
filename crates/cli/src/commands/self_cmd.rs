@@ -10,9 +10,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use clap::CommandFactory;
 use owo_colors::OwoColorize;
 
-use crate::cli::{SelfArgs, SelfCommand, SelfLinkArgs};
+use crate::cli::{Cli, SelfArgs, SelfCommand, SelfDocsArgs, SelfLinkArgs};
 
 /// The binary name a shell looks up on PATH (`agentstack.exe` on Windows).
 pub fn bin_name() -> String {
@@ -23,7 +24,128 @@ pub fn run(args: &SelfArgs) -> Result<()> {
     match &args.command {
         SelfCommand::Link(link) => run_link(link),
         SelfCommand::Which => run_which(),
+        SelfCommand::Docs(docs) => run_docs(docs),
     }
+}
+
+// ── `self docs` — the self-compiling command reference ──────────────────────
+//
+// The "All commands" inventory in docs/reference.md used to be hand-written and
+// rotted repeatedly. It's now generated from the clap tree: [`commands_block`]
+// renders the block, `--write` splices it into a managed HTML-comment region,
+// and a docs-freshness test (tests/docs_commands.rs) asserts the region matches
+// this generator byte-for-byte, so it can never drift.
+
+/// The HTML-comment markers bracketing the generated inventory in
+/// docs/reference.md. Everything outside them is preserved on `--write`.
+pub const COMMANDS_MARKER_BEGIN: &str = "<!-- agentstack:generated commands -->";
+pub const COMMANDS_MARKER_END: &str = "<!-- agentstack:end -->";
+
+/// Render the "All commands" inventory from the live clap tree — one line per
+/// top-level command, in declaration order, with its one-line summary, visible
+/// nested subcommands, and non-global long-form flags. Deterministic: shared by
+/// `self docs` and the docs-freshness test so the doc region tracks the CLI.
+pub fn commands_block() -> String {
+    let cli = Cli::command();
+    let mut lines: Vec<String> = Vec::new();
+    for sc in cli.get_subcommands() {
+        let name = sc.get_name();
+        if name == "help" {
+            continue;
+        }
+        // Hidden top-level commands are still real surface — list them, marked.
+        let hidden = if sc.is_hide_set() { " _(hidden)_" } else { "" };
+        // `get_about()` is the short help (first paragraph); collapse any wrap
+        // newlines so each command renders as a single clean line.
+        let summary = sc
+            .get_about()
+            .map(|a| a.to_string())
+            .unwrap_or_default()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut line = format!("- **`{name}`**{hidden} — {summary}");
+
+        // Visible nested subcommands, declaration order. `is_hide_set()` is
+        // clap's runtime read of `#[command(hide = true)]` — the same signal
+        // that keeps a verb out of `--help`.
+        let subs: Vec<&str> = sc
+            .get_subcommands()
+            .filter(|s| s.get_name() != "help" && !s.is_hide_set())
+            .map(|s| s.get_name())
+            .collect();
+        if !subs.is_empty() {
+            line.push_str(&format!(" — subcommands `{}`", subs.join("/")));
+        }
+
+        // Non-global, non-hidden long flags. `filter_map(get_long)` drops
+        // positionals (no long) automatically; `help`/`version` are clap's
+        // auto-args, not part of the surface.
+        let flags: Vec<String> = sc
+            .get_arguments()
+            .filter(|a| !a.is_global_set() && !a.is_hide_set())
+            .filter_map(|a| a.get_long())
+            .filter(|l| *l != "help" && *l != "version")
+            .map(|l| format!("--{l}"))
+            .collect();
+        if !flags.is_empty() {
+            line.push_str(&format!(" — flags `{}`", flags.join("/")));
+        }
+        lines.push(line);
+    }
+    lines.join("\n")
+}
+
+fn run_docs(args: &SelfDocsArgs) -> Result<()> {
+    let block = commands_block();
+    if !args.write {
+        println!("{block}");
+        return Ok(());
+    }
+    let path = reference_md_path();
+    let doc =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let updated = splice_commands(&doc, &block)?;
+    if updated == doc {
+        println!("{} {} already up to date", "✓".green(), path.display());
+    } else {
+        std::fs::write(&path, &updated).with_context(|| format!("writing {}", path.display()))?;
+        println!(
+            "{} regenerated the command inventory in {}",
+            "✓".green(),
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+/// Replace the text between the managed markers with `block`, leaving the
+/// markers and everything outside them untouched. Fails with a clear message
+/// if either marker is missing (so a mangled doc can't be silently half-written).
+pub fn splice_commands(doc: &str, block: &str) -> Result<String> {
+    let begin = doc.find(COMMANDS_MARKER_BEGIN).with_context(|| {
+        format!("docs/reference.md is missing the `{COMMANDS_MARKER_BEGIN}` marker")
+    })?;
+    let end = doc.find(COMMANDS_MARKER_END).with_context(|| {
+        format!("docs/reference.md is missing the `{COMMANDS_MARKER_END}` marker")
+    })?;
+    if end < begin {
+        anyhow::bail!("docs/reference.md markers are out of order (end before begin)");
+    }
+    let content_start = begin + COMMANDS_MARKER_BEGIN.len();
+    Ok(format!(
+        "{}\n{}\n{}",
+        &doc[..content_start],
+        block,
+        &doc[end..]
+    ))
+}
+
+/// docs/reference.md, anchored at the repo root the same way
+/// tests/docs_commands.rs does (`CARGO_MANIFEST_DIR` is `crates/cli`, so the
+/// repo root is two levels up). `self docs` is a source-tree maintainer command.
+fn reference_md_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/reference.md")
 }
 
 fn run_link(args: &SelfLinkArgs) -> Result<()> {

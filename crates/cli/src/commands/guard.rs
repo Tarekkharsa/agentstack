@@ -325,7 +325,9 @@ fn tmp_dirs() -> Vec<PathBuf> {
 fn test(command: &str) -> Result<()> {
     let guard_cfg = match manifest::machine_guard_health() {
         Some(Ok(cfg)) => cfg,
-        Some(Err(e)) => anyhow::bail!("machine config unreadable: {e:#}"),
+        Some(Err(e)) => anyhow::bail!(
+            "machine config unreadable: {e:#} — run `agentstack doctor` to see what's wrong, then fix the machine manifest's TOML by hand"
+        ),
         None => Default::default(),
     };
     let machine_policy = crate::machine_policy::load()?;
@@ -522,16 +524,25 @@ fn exe() -> String {
         .unwrap_or_else(|_| "agentstack".to_string())
 }
 
+/// Whether the machine guard is already wired — i.e. enabled in the machine
+/// manifest. This is the guard's OWN definition of "active": the live `check`
+/// path stays inert unless `[guard] enabled` is true, and `apply` renders the
+/// guard hook only when it holds. The interactive `init` wizard reuses this to
+/// decide whether to OFFER installing the guard, so both call sites share one
+/// detection rather than each spelling the match out.
+pub(crate) fn is_wired() -> bool {
+    matches!(
+        manifest::machine_guard_health(),
+        Some(Ok(cfg)) if cfg.enabled()
+    )
+}
+
 /// The machine-layer hook entries `apply` must render alongside a manifest's
 /// own (global scope only): the guard hook, when `[guard]` is enabled. This
 /// is what keeps a global-scope `apply` — which owns the whole hooks key —
 /// from stripping the guard the user installed.
 pub fn machine_hooks_for_apply() -> Vec<(String, crate::manifest::Hook)> {
-    let enabled = matches!(
-        manifest::machine_guard_health(),
-        Some(Ok(cfg)) if cfg.enabled()
-    );
-    if !enabled {
+    if !is_wired() {
         return Vec::new();
     }
     vec![(
@@ -1024,7 +1035,14 @@ pub(crate) fn seed_machine_config() -> Result<()> {
     let path = paths::agentstack_home().join("agentstack.toml");
     fs::create_dir_all(paths::agentstack_home())?;
     let text = fs::read_to_string(&path).unwrap_or_else(|_| "version = 1\n".to_string());
-    let seeded = seed_machine_toml(&text).with_context(|| format!("seeding {}", path.display()))?;
+    // Reached by both `guard install` and `init --global`, so the hint names no
+    // single command — just the file to fix.
+    let seeded = seed_machine_toml(&text).with_context(|| {
+        format!(
+            "seeding {} — fix its TOML syntax by hand, then re-run",
+            path.display()
+        )
+    })?;
     crate::util::atomic::write(&path, &seeded)?;
     Ok(())
 }
@@ -1046,7 +1064,12 @@ fn set_guard_enabled(enabled: bool) -> Result<()> {
     };
     let mut doc: toml_edit::DocumentMut = text
         .parse()
-        .with_context(|| format!("{} is not valid TOML", path.display()))?;
+        .with_context(|| {
+            format!(
+                "{} is not valid TOML — fix the syntax by hand, then re-run `agentstack guard uninstall`",
+                path.display()
+            )
+        })?;
     doc["guard"]["enabled"] = toml_edit::value(enabled);
     crate::util::atomic::write(&path, &doc.to_string())?;
     Ok(())
