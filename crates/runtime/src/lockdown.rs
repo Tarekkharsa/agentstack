@@ -417,26 +417,29 @@ async fn follow_sidecar_logs(
     let mut logs = docker.logs(&id, Some(opts));
     let mut signalled = false;
     let mut tail = String::new();
-    let mut line = String::new();
+    // Raw byte buffer, deliberately not a `String`: log chunks arrive split at
+    // arbitrary byte boundaries, so a single multi-byte UTF-8 character (an
+    // em-dash in an enforcement reason, say) can straddle two chunks. We
+    // accumulate raw bytes and decode only whole lines — see
+    // `split_complete_lines`. The old code pushed `b as char` per byte, which
+    // reinterprets each byte as a Latin-1 scalar and mangles anything
+    // non-ASCII in the recorded evidence.
+    let mut buf: Vec<u8> = Vec::new();
 
     while let Some(next) = logs.next().await {
         let bytes = match next {
             Ok(out) => out.into_bytes(),
             Err(_) => break,
         };
-        for &b in bytes.iter() {
-            if b == b'\n' {
-                handle_line(&line, &sink, &ready_tx, &mut signalled, &mut tail);
-                line.clear();
-            } else {
-                line.push(b as char);
-            }
+        for line in split_complete_lines(&mut buf, &bytes) {
+            handle_line(&line, &sink, &ready_tx, &mut signalled, &mut tail);
         }
     }
-    // Flush any unterminated final line, then, if we never saw READY, report
-    // the sidecar's tail as the failure reason.
-    if !line.is_empty() {
-        handle_line(&line, &sink, &ready_tx, &mut signalled, &mut tail);
+    // Flush any unterminated final line (decoded lossily, like the rest), then,
+    // if we never saw READY, report the sidecar's tail as the failure reason.
+    if !buf.is_empty() {
+        let last = String::from_utf8_lossy(&buf).into_owned();
+        handle_line(&last, &sink, &ready_tx, &mut signalled, &mut tail);
     }
     if !signalled {
         let _ = ready_tx.send(Err(if tail.is_empty() {
@@ -474,4 +477,63 @@ fn handle_line(
     }
     // Diagnostic (e.g. a startup error on stderr): keep the most recent line.
     *tail = trimmed.to_string();
+}
+
+/// Fold a freshly-arrived log chunk into `buf` and return every line that is
+/// now complete, each decoded lossily. `buf` carries the bytes left over from
+/// earlier chunks (everything after the last newline seen so far); on return it
+/// holds the bytes after the last newline in `chunk`, ready for the next call.
+///
+/// Working in bytes and decoding only whole lines is what keeps multi-byte
+/// UTF-8 intact when a character's bytes are split across two chunks: the
+/// partial bytes simply wait in `buf` until the rest arrive. Pure (no I/O, no
+/// shared state), so it is unit-testable without touching Docker.
+fn split_complete_lines(buf: &mut Vec<u8>, chunk: &[u8]) -> Vec<String> {
+    buf.extend_from_slice(chunk);
+    let mut lines = Vec::new();
+    // Drain each newline-terminated run from the front of the buffer, leaving
+    // any trailing partial line behind for the next chunk. `drain(..=nl)`
+    // removes the line together with its `\n`; `from_utf8_lossy` returns a
+    // `Cow<str>` that `into_owned` turns into an owned `String`.
+    while let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+        let line: Vec<u8> = buf.drain(..=nl).collect();
+        lines.push(String::from_utf8_lossy(&line[..line.len() - 1]).into_owned());
+    }
+    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_complete_lines;
+
+    #[test]
+    fn reassembles_a_multibyte_char_split_across_chunks() {
+        // An em-dash (U+2014, bytes E2 80 94) inside an enforcement reason.
+        let mut buf = Vec::new();
+        let full = "blocked — egress denied\n".as_bytes();
+        // Split the chunk *inside* the em-dash's 3 bytes: "blocked " is 8 bytes,
+        // so byte 9 lands after the first em-dash byte (E2), leaving 80 94 for
+        // the next chunk.
+        let (first, second) = full.split_at(9);
+
+        // No newline in the first chunk yet, and the em-dash is still partial —
+        // nothing complete to emit.
+        assert!(split_complete_lines(&mut buf, first).is_empty());
+
+        // The second chunk completes both the character and the line.
+        let lines = split_complete_lines(&mut buf, second);
+        assert_eq!(lines, vec!["blocked — egress denied".to_string()]);
+        assert!(buf.is_empty(), "buffer fully drained after the newline");
+    }
+
+    #[test]
+    fn splits_multiple_lines_and_keeps_the_partial_remainder() {
+        let mut buf = Vec::new();
+        // Two complete lines, then a partial third carrying a multi-byte '…'
+        // (U+2026, bytes E2 80 A6) with no trailing newline.
+        let lines = split_complete_lines(&mut buf, "READY\n{\"e\":1}\ntail…".as_bytes());
+        assert_eq!(lines, vec!["READY".to_string(), "{\"e\":1}".to_string()]);
+        // The unterminated final line waits in the buffer, its char intact.
+        assert_eq!(String::from_utf8_lossy(&buf), "tail…");
+    }
 }
