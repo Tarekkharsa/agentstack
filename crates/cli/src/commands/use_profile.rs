@@ -189,6 +189,129 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
 /// state, and pin the lockfile. The write half of `run` — takes pre-loaded
 /// context and pre-resolved sets so callers like session start don't load and
 /// resolve everything twice.
+/// Per-target outcomes of an add-only skill materialization, for the caller
+/// to print in house style.
+pub(crate) struct SkillsActivation {
+    /// (target id, skills dir written into).
+    pub written: Vec<(String, PathBuf)>,
+    /// (target id, skill name) where a user-owned dir was left as is.
+    pub conflicts: Vec<(String, String)>,
+    /// (target id, reason) — reported, never silently skipped.
+    pub unsupported: Vec<(String, &'static str)>,
+    /// (target id, sanitized error) — the loop continues past a failure.
+    pub failed: Vec<(String, String)>,
+}
+
+/// Additive skill materialization for `agentstack add skill --write`
+/// (design: docs/design/add-skill-activation.md §1). A SECOND path beside
+/// `activate()`'s skills block — that block prunes and full-replaces state,
+/// which are load-bearing `use` behaviors this helper must NOT share:
+/// `plan()` runs with `previously_managed = &[]` (an add never prunes) and
+/// state records the UNION of the prior managed set and what materialized
+/// (`record_skills` is a full overwrite; recording less would silently
+/// untrack live symlinks). Skills-only by construction: no server, hook,
+/// settings, or instruction path is touched.
+pub(crate) fn materialize_skills_additive(
+    ctx: &super::Context,
+    scope: Scope,
+    target_ids: &[String],
+    new_skills: &[(String, PathBuf)],
+    no_gitignore: bool,
+) -> Result<SkillsActivation> {
+    let mut out = SkillsActivation {
+        written: Vec::new(),
+        conflicts: Vec::new(),
+        unsupported: Vec::new(),
+        failed: Vec::new(),
+    };
+    let mut state = State::load()?;
+    let mut ignore_entries: Vec<String> = Vec::new();
+    for id in target_ids {
+        let Some(desc) = ctx.registry.get(id) else {
+            // resolve_targets validated ids; a manifest-sourced unknown is
+            // reported, not dropped.
+            out.unsupported.push((id.clone(), "unknown adapter"));
+            continue;
+        };
+        let Some(skills_dir) = desc.skills_dir_for(scope, &ctx.dir) else {
+            // BOTH absent cases are reported (binding decision: never a
+            // silent skip) — including the copilot-cli shape (`skills`
+            // declared, no project dir), which `use` still skips silently
+            // today (named follow-up).
+            out.unsupported.push((
+                id.clone(),
+                if desc.skills.is_none() {
+                    "skills not supported by this CLI"
+                } else {
+                    "no skills dir at this scope for this CLI"
+                },
+            ));
+            continue;
+        };
+        let strategy = desc.skills.as_ref().map(|s| s.strategy).unwrap_or_default();
+        let key = target_key(id, scope, &ctx.dir);
+        let plan = match skills::plan(skills_dir.clone(), strategy, new_skills.to_vec(), &[]) {
+            Ok(p) => p,
+            Err(e) => {
+                out.failed
+                    .push((id.clone(), crate::text::sanitize_line(&format!("{e:#}"))));
+                continue;
+            }
+        };
+        for c in &plan.conflicts {
+            out.conflicts.push((id.clone(), c.clone()));
+        }
+        if let Err(e) = skills::materialize(&plan) {
+            out.failed
+                .push((id.clone(), crate::text::sanitize_line(&format!("{e:#}"))));
+            continue;
+        }
+        // The union rule: conflicted names are already excluded by
+        // managed_names(), so a user-owned dir is never claimed as managed.
+        let mut union = state.managed_skills(&key);
+        for n in plan.managed_names() {
+            if !union.contains(&n) {
+                union.push(n);
+            }
+        }
+        state.record_skills(&key, union);
+        crate::usage::bump(&plan.managed_names());
+        if scope == Scope::Project {
+            let instr_path = desc
+                .instructions
+                .as_ref()
+                .and_then(|s| s.path_for(scope, &ctx.dir));
+            let managed = crate::render::gitignore::Managed {
+                config: !state.managed_servers(&key).is_empty()
+                    || !state.kept_foreign(&key).is_empty(),
+                skills: !state.managed_skills(&key).is_empty(),
+                instructions: instr_path
+                    .as_deref()
+                    .is_some_and(crate::render::instructions::manages_file),
+            };
+            ignore_entries.extend(crate::render::gitignore::managed_entries(
+                desc, scope, &ctx.dir, managed,
+            ));
+        }
+        out.written.push((id.clone(), skills_dir));
+    }
+    if scope == Scope::Project && !no_gitignore && !out.written.is_empty() {
+        // The block is one shared artifact: harvest extension entries too
+        // (write=false — plan only) so rewriting it never drops them.
+        ignore_entries.extend(crate::render::extensions::render(
+            &ctx.loaded.manifest,
+            &ctx.registry,
+            scope,
+            &ctx.dir,
+            false,
+        )?);
+        let project_root = crate::manifest::project_root_of(&ctx.dir);
+        let _ = crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true)?;
+    }
+    state.save()?;
+    Ok(out)
+}
+
 pub fn activate(
     ctx: &super::Context,
     libctx: &super::LibraryCtx,

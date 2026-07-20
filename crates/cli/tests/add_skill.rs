@@ -149,6 +149,14 @@ fn write_lands_manifest_store_and_lock_then_use_materializes() {
     set_home(&home);
     let url = fixture_repo(tmp.path(), false);
     let proj = seed_project(tmp.path());
+    // The managed .gitignore block only applies inside a git repo.
+    assert!(std::process::Command::new("git")
+        .arg("-C")
+        .arg(&proj)
+        .args(["init", "-q"])
+        .status()
+        .unwrap()
+        .success());
 
     add::run(&add_args(&url, &["pdf", "docx"], true), Some(&proj)).unwrap();
 
@@ -157,6 +165,26 @@ fn write_lands_manifest_store_and_lock_then_use_materializes() {
     assert!(manifest.contains("[skills.docx]"));
     assert!(manifest.contains(&format!("git = \"{url}\"")));
     assert!(manifest.contains("subpath = \"skills/pdf\""));
+
+    // Priority 3: static mode + implicit default → the SAME write activated
+    // (project scope by default for a project manifest). This assertion is
+    // also the mode-self-poisoning trap: if detect_mode ran after the lock
+    // write, a fresh project would misread as clean-at-rest and skip this.
+    assert!(
+        proj.join(".claude/skills/pdf/SKILL.md").exists(),
+        "add --write materializes at project scope in static mode"
+    );
+    // Skills-only claim, asserted: no server config was created.
+    assert!(
+        !proj.join(".mcp.json").exists(),
+        "an add-skill activation must not touch server configs"
+    );
+    // The managed .gitignore block covers the new symlink dir.
+    let gitignore = fs::read_to_string(proj.join(".gitignore")).unwrap_or_default();
+    assert!(
+        gitignore.contains(".claude/skills"),
+        "managed gitignore block must include the skills dir: {gitignore}"
+    );
 
     let lock = fs::read_to_string(proj.join("agentstack.lock")).unwrap();
     assert!(lock.contains("pdf") && lock.contains("docx"));
@@ -225,6 +253,66 @@ fn taken_slot_falls_back_to_pinned_re_resolve() {
     assert!(
         lock.matches(&head_before).count() >= 2,
         "both entries pin the same commit through the re-resolve path"
+    );
+}
+
+/// The union rule (design §1): record_skills is a full overwrite, so a
+/// second add must record prior ∪ new — recording only the new skill would
+/// silently untrack the first one's live symlink.
+#[test]
+fn second_add_records_the_union_of_managed_skills() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let url = fixture_repo(tmp.path(), false);
+    let proj = seed_project(tmp.path());
+
+    add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
+    add::run(&add_args(&url, &["docx"], true), Some(&proj)).unwrap();
+
+    assert!(proj.join(".claude/skills/pdf/SKILL.md").exists());
+    assert!(proj.join(".claude/skills/docx/SKILL.md").exists());
+    let state = agentstack::state::State::load().unwrap();
+    let key = agentstack::state::target_key("claude-code", Scope::Project, &proj);
+    let managed = state.managed_skills(&key);
+    assert!(
+        managed.contains(&"pdf".to_string()) && managed.contains(&"docx".to_string()),
+        "state must record the union, got {managed:?}"
+    );
+}
+
+/// The ambiguity rule (design §2): several profiles → which one is live is
+/// unknowable, so a static-mode add writes manifest+lock but materializes
+/// nothing (profile fencing wins).
+#[test]
+fn several_profiles_write_does_not_materialize() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let url = fixture_repo(tmp.path(), false);
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [profiles.a]\nskills = []\n[profiles.b]\nskills = []\n",
+    )
+    .unwrap();
+
+    let mut args = add_args(&url, &["pdf"], true);
+    if let AddKind::Skill(a) = &mut args.kind {
+        a.profile = Some("a".to_string());
+    }
+    add::run(&args, Some(&proj)).unwrap();
+
+    let manifest = fs::read_to_string(proj.join("agentstack.toml")).unwrap();
+    assert!(manifest.contains("[skills.pdf]"));
+    assert!(proj.join("agentstack.lock").exists());
+    assert!(
+        !proj.join(".claude/skills/pdf").exists(),
+        "ambiguous profiles must not materialize"
     );
 }
 

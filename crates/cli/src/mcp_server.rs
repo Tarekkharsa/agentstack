@@ -248,7 +248,15 @@ pub fn serve(
             .unwrap_or("")
             .to_string();
         let tool_name = req.pointer("/params/name").and_then(Value::as_str);
-        if is_lease_mutation(&req) {
+        // Trust is refreshed before content-loading calls (stale-window fix,
+        // design: add-skill-activation.md §4) — and refresh_trust's
+        // trust-flip branch tears the runtime down and swaps the gateway, so
+        // those calls need the same worker barrier lease mutations get.
+        let refreshes_trust = matches!(
+            tool_name,
+            Some("agentstack_load" | "agentstack_session_start")
+        );
+        if is_lease_mutation(&req) || refreshes_trust {
             workers.join_all();
         }
         match method.as_str() {
@@ -272,6 +280,19 @@ pub fn serve(
                     // merely to select a profile.
                     auto.ensure_project();
                     auto.refresh_trust();
+                } else if refreshes_trust {
+                    // Content-loading calls re-check trust so a mid-connection
+                    // manifest+lock edit (now pinnable in one `add skill
+                    // --write`) can't serve under a stale Trusted snapshot.
+                    // Workers were joined above; this SUPPLEMENTS the
+                    // transparent-mode handling rather than replacing it.
+                    auto.ensure_project();
+                    auto.refresh_trust();
+                    if transparent {
+                        notify_if_gateway_appears(&mut auto, &out);
+                    } else {
+                        auto.ensure_gateway();
+                    }
                 } else if transparent {
                     notify_if_gateway_appears(&mut auto, &out);
                 } else {

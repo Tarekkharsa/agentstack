@@ -15,6 +15,7 @@ use crate::cli::{AddArgs, AddFromArgs, AddKind, AddServerArgs, AddSkillArgs};
 use crate::manifest::{Manifest, PackInstall, Server, ServerType, Skill};
 use crate::provider::{self, Candidate, CandidateKind, InstrRef, PackSpec, SkillRef};
 use crate::render::merge_toml;
+use crate::scope::Scope;
 use crate::util::diff;
 
 /// Provenance header prepended to a pack's extracted instruction file so its
@@ -813,10 +814,12 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
 }
 
 /// `agentstack add skill <source>` — the ecosystem-grammar acquisition verb
-/// (design: docs/design/add-skill-source-grammar.md). Parse → stage (git) →
-/// discover → select → scan → preview; `--write` promotes the staged clone,
-/// writes the manifest entries, and records the lock pins. Activation stays
-/// `use --write`.
+/// (designs: add-skill-source-grammar.md, add-skill-activation.md). Parse →
+/// stage (git) → discover → select → scan → preview; `--write` promotes the
+/// staged clone, writes the manifest entries, records the lock pins, and —
+/// when the delivery mode is static and the active profile is unambiguous —
+/// materializes the new skills into the default targets. Other modes get
+/// the honest next-step hint instead.
 fn add_skill(a: &AddSkillArgs, manifest_dir: Option<&Path>) -> Result<()> {
     use crate::provider::source::{parse_source, SkillSource};
     let ctx = super::load(manifest_dir)?;
@@ -842,6 +845,33 @@ fn add_skill(a: &AddSkillArgs, manifest_dir: Option<&Path>) -> Result<()> {
         SkillSource::Git { url, ref_, subpath } => {
             add_skill_from_git(a, &ctx, &url, ref_, subpath, &requested)
         }
+    }
+}
+
+/// Activation context for the write's tail, captured ONCE from pre-write
+/// disk state (design §3): `detect_mode` reads lock-existence as a
+/// clean-at-rest signal, and this command's own `lock.save` would flip a
+/// fresh static project's detected mode if recomputed in the tail.
+struct ActivationCtx {
+    mode: super::overview::Mode,
+    target_ids: Vec<String>,
+    scope: Scope,
+    /// Several profiles declared → which one is live per target is
+    /// unknowable; profile fencing wins over "static → activation".
+    ambiguous: bool,
+    session_active: bool,
+}
+
+impl ActivationCtx {
+    fn detect(ctx: &super::Context) -> Result<Self> {
+        let target_ids = crate::render::resolve_targets(&ctx.loaded.manifest, &ctx.registry, &[])?;
+        Ok(ActivationCtx {
+            mode: super::overview::detect_mode(ctx, &target_ids),
+            scope: Scope::default_for(&ctx.dir),
+            ambiguous: ctx.loaded.manifest.profiles.len() > 1,
+            session_active: crate::session::active(&ctx.dir).is_some(),
+            target_ids,
+        })
     }
 }
 
@@ -1288,14 +1318,17 @@ fn print_selection(
 }
 
 /// The one preview + one write: manifest diff (always), then on `--write`
-/// the atomic manifest write and the lock pins. All-or-nothing with the
-/// promotion the caller already performed.
+/// the atomic manifest write, the lock pins, and — mode-aware — activation
+/// (design: docs/design/add-skill-activation.md). The activation context is
+/// captured HERE, before any write, so this command's own lock.save can
+/// never flip the detected mode.
 fn preview_and_commit(
     ctx: &super::Context,
     write: bool,
     planned: &[PlannedSkill],
     profile: Option<&str>,
 ) -> Result<()> {
+    let act = ActivationCtx::detect(ctx)?;
     let manifest_path = &ctx.loaded.manifest_path;
     let original = fs::read_to_string(manifest_path)
         .with_context(|| format!("reading {}", manifest_path.display()))?;
@@ -1324,6 +1357,7 @@ fn preview_and_commit(
         println!("  {line}");
     }
     if !write {
+        print_activation_footer(&act, profile);
         println!(
             "\nDry run. Re-run with {} to update the manifest.",
             "--write".bold()
@@ -1345,12 +1379,100 @@ fn preview_and_commit(
     }
     lock.save(&ctx.dir)?;
     println!("{} added {names}.", "✓".green());
-    println!(
-        "{} activate with `agentstack use{} --write`",
-        "·".dimmed(),
-        profile.map(|p| format!(" {p}")).unwrap_or_default()
-    );
+
+    // Mode-aware tail (`act` was captured pre-write — see its doc).
+    use super::overview::Mode;
+    if act.mode == Mode::Static && !act.ambiguous {
+        let new_skills: Vec<(String, PathBuf)> = planned
+            .iter()
+            .map(|p| (p.name.clone(), p.content_dir.clone()))
+            .collect();
+        let outcome = super::use_profile::materialize_skills_additive(
+            ctx,
+            act.scope,
+            &act.target_ids,
+            &new_skills,
+            false,
+        )?;
+        for (id, dir) in &outcome.written {
+            println!(
+                "  {} {id}: {} skill(s) → {}",
+                "✓".green(),
+                new_skills.len(),
+                dir.display()
+            );
+        }
+        for (id, name) in &outcome.conflicts {
+            println!(
+                "  {} {id}: skill '{}' already exists (not managed) — left as is",
+                "⚠".yellow(),
+                crate::text::sanitize_line(name)
+            );
+        }
+        for (id, reason) in &outcome.unsupported {
+            println!("  {} {id}: {reason}", "·".dimmed());
+        }
+        for (id, err) in &outcome.failed {
+            println!("  {} {id}: {err}", "✗".red());
+        }
+        if outcome.written.is_empty() && outcome.failed.is_empty() {
+            // Declared and pinned, materialized nowhere: a successful add
+            // that must not read as an activation.
+            println!(
+                "{} no target took the skill files — activate later with `agentstack use{} --target <id> --write`",
+                "⚠".yellow(),
+                profile.map(|p| format!(" {p}")).unwrap_or_default()
+            );
+        }
+        if !outcome.failed.is_empty() {
+            anyhow::bail!(
+                "{} target(s) failed to materialize (the manifest and lock writes stand — \
+                 retry with `agentstack use{} --write`)",
+                outcome.failed.len(),
+                profile.map(|p| format!(" {p}")).unwrap_or_default()
+            );
+        }
+    } else {
+        print_activation_footer(&act, profile);
+    }
     Ok(())
+}
+
+/// The §3 footer matrix: what the write will (or did) do about activation,
+/// per pre-write mode and profile ambiguity.
+fn print_activation_footer(act: &ActivationCtx, profile: Option<&str>) {
+    use super::overview::Mode;
+    let profile_word = profile.map(|p| format!(" {p}")).unwrap_or_default();
+    match act.mode {
+        Mode::Static if !act.ambiguous => println!(
+            "{} will materialize into {} target(s)",
+            "→".cyan(),
+            act.target_ids.len()
+        ),
+        Mode::Static => println!(
+            "{} several profiles declared — activate with `agentstack use{profile_word} --write`",
+            "·".dimmed()
+        ),
+        Mode::CleanAtRest => {
+            println!(
+                "{} next session picks this up: `agentstack session start{}`",
+                "·".dimmed(),
+                profile
+                    .map(|p| format!(" {p}"))
+                    .unwrap_or(" <profile>".into())
+            );
+            if act.session_active {
+                println!(
+                    "{} a session is active — it won't see this until the next `session start`",
+                    "⚠".yellow()
+                );
+            }
+        }
+        Mode::ZeroFiles => println!(
+            "{} trust re-gates on this edit: run `agentstack trust .` to re-consent",
+            "·".dimmed()
+        ),
+    }
 }
 
 fn write_manifest(

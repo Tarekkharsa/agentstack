@@ -920,8 +920,17 @@ lock, or content store. `--write` promotes the staged clone into the store
 a no-op immediately. Content is scan-gated before anything is offered;
 high-severity findings block unless `--allow-flagged`. The manifest `rev`
 records your branch/tag intent; the lock commit is authoritative until
-`agentstack lock --update` relocks. Activation stays explicit:
-`agentstack use [<profile>] --write`.
+`agentstack lock --update` relocks.
+
+**Activation is part of the same write, mode-aware.** The delivery mode is
+detected from pre-write disk state and forks the tail:
+
+| Mode | `--write` does |
+|---|---|
+| static, unambiguous profile (none declared, or exactly one) | manifest + lock + **materialize** into the default targets (project scope for a project manifest), per-target `✓`/`⚠`/`✗` reporting |
+| static, several profiles | manifest + lock; activate with `agentstack use <profile> --write` (which profile is live is unknowable — profile fencing wins) |
+| clean-at-rest | manifest + lock; the next `agentstack session start <profile>` picks it up (an active session won't) |
+| zero-files | manifest + lock, the current lease untouched; **trust re-gates on the edit** — run `agentstack trust .` to re-consent, or the gateway serves control-plane-only on its next connection |
 
 Profile membership: no declared profiles → the implicit default covers it;
 exactly one → added automatically; several → `--profile` (or an
