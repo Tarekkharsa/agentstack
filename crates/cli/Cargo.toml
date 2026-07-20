@@ -70,6 +70,9 @@ libc = "0.2"
 insta = { version = "1", features = ["yaml"] }
 assert_fs = "1"
 tempfile = "3"
+# Witness for the name-contract path-safety invariant (maintainer-approved
+# 2026-07-20; already blessed for trust/policy). Dev-only.
+proptest = "1"
 # For the Docker-gated sandbox-egress integration test (feature `sandbox`).
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
 

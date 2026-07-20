@@ -110,9 +110,9 @@ fn add_skill_inner(
     allow_flagged: bool,
     provenance_override: Option<&str>,
 ) -> Result<AddOutcome> {
-    if !valid_lib_name(name) {
-        bail!("invalid library skill name '{name}' — must be non-empty and contain no path separators");
-    }
+    // Skills get the strict contract (design §C.3); servers/hooks/extensions
+    // keep `valid_lib_name` until the name-harmonization follow-up.
+    crate::text::validate_name(name)?;
 
     let mut library = Library::load(lib_home)?;
     let replacing = library.get(name).is_some();
@@ -2455,7 +2455,7 @@ mod tests {
             false,
         )
         .unwrap_err();
-        assert!(err.to_string().contains("invalid library skill name"));
+        assert!(err.to_string().contains("invalid skill name"));
     }
 
     fn path_entry(name: &str, checksum: &str) -> LibrarySkill {

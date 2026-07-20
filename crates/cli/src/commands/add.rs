@@ -489,6 +489,12 @@ fn add_pack(
     if want_instructions {
         for instr in &spec.instructions {
             let body = stamped_instruction_from(pack, instr, &origin.assets)?;
+            // Defense in depth: `instr.name` is remote (pack.toml) and becomes
+            // a path component. The parse gate already enforced the contract;
+            // re-assert here so this join can never traverse even if a new
+            // pack source forgets the gate (design §C.1).
+            crate::text::validate_name(&instr.name)
+                .with_context(|| format!("pack instruction '{}'", instr.name.escape_debug()))?;
             let dest = format!("instructions/{}.md", instr.name);
             let entry = crate::manifest::Instruction {
                 path: format!("./{dest}"),
@@ -804,6 +810,7 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
 }
 
 fn add_skill(a: &AddSkillArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    crate::text::validate_name(&a.name)?;
     let ctx = super::load(manifest_dir)?;
     if ctx.loaded.manifest.skills.contains_key(&a.name) {
         anyhow::bail!(
@@ -1139,6 +1146,7 @@ pub fn add_skill_json(manifest_dir: Option<&Path>, args: &Value) -> Result<Strin
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .context("skill name is required")?;
+    crate::text::validate_name(name)?;
     let str_field = |key: &str| -> Option<String> {
         args.get(key)
             .and_then(Value::as_str)

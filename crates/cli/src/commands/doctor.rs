@@ -1090,6 +1090,47 @@ fn run_checks(
             Some(_) => report.line(Level::Ok, format!("{name:<20} present · SKILL.md ok")),
         }
     }
+    // Name-contract sweep (design §C.3): entries that predate the contract
+    // (or were hand-edited in) are diagnosed here — the dangerous operations
+    // (add, pack parse, materialize) fail closed, doctor explains. Also flag
+    // pairs that collide once case-folded: the index keeps them distinct but
+    // a case-insensitive filesystem (macOS default) gives them one body dir.
+    {
+        let mut names: Vec<String> = skill_names.clone();
+        names.extend(skills_library.skills.iter().map(|s| s.name.clone()));
+        names.sort();
+        names.dedup();
+        let mut by_folded: std::collections::BTreeMap<String, Vec<&String>> =
+            std::collections::BTreeMap::new();
+        for name in &names {
+            if crate::text::validate_name(name).is_err() {
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "skill name '{}' violates the name contract (lowercase [a-z0-9._-], \
+                         starts alphanumeric, ≤64 chars) ↳ rename it: remove and re-add \
+                         under a conforming name",
+                        name.escape_debug()
+                    ),
+                );
+            }
+            by_folded.entry(name.to_lowercase()).or_default().push(name);
+        }
+        for group in by_folded.values().filter(|g| g.len() > 1) {
+            let list = group
+                .iter()
+                .map(|n| format!("'{}'", n.escape_debug()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            report.line(
+                Level::Warn,
+                format!(
+                    "skill names {list} collide case-insensitively — on a case-insensitive \
+                     filesystem they share one directory ↳ rename so only one remains"
+                ),
+            );
+        }
+    }
     // Broken skill links on disk: a symlink in a detected CLI's skills dir
     // whose target is gone loads nothing, so name it here with the fix
     // instead of leaving the skill silently dead. Every detected adapter is
@@ -1227,12 +1268,14 @@ fn run_checks(
     // Project policy is optional; the machine layer applies either way, so the
     // "Policy" section shows whenever EITHER has something to report.
     let machine_policy = crate::machine_policy::inspect();
-    // Machine-policy posture: one honest word (open / mixed / restrictive) for
+    // Machine-policy summary: one honest word (open / mixed / restrictive) for
     // how locked-down THIS machine's own firewall layer is — shown even when
     // there's no machine policy at all, because "open" is the case most worth
-    // stating out loud. Borrows `machine_policy`; the Policy section below still
+    // stating out loud. ("posture" is reserved for the per-run enforcement
+    // label — HOST / ADVISORY etc. — so this section deliberately avoids it.)
+    // Borrows `machine_policy`; the Policy section below still
     // moves it into `check_machine_policy`.
-    report.section("Machine policy posture");
+    report.section("Machine policy");
     let (posture, why) = classify_machine_posture(&machine_policy);
     report.line(Level::Ok, format!("{posture} — {why}"));
     if !manifest.policy.is_empty() || machine_policy_reports(&machine_policy) {

@@ -115,6 +115,22 @@ pub struct PackMemberToml {
     pub path: String,
 }
 
+/// Name-contract gate for everything a remote `pack.toml` self-reports
+/// (design §C.3). The pack's own name becomes `[packs.<name>]` and
+/// `[servers.<name>]` manifest keys; member names become `[skills.<name>]`
+/// keys and — for instructions — path components. All-or-nothing: one bad
+/// name rejects the whole pack, matching the atomic-install semantics.
+fn validate_pack_names(parsed: &PackToml) -> anyhow::Result<()> {
+    use anyhow::Context;
+    crate::text::validate_name(&parsed.name)
+        .with_context(|| format!("pack.toml name '{}'", parsed.name.escape_debug()))?;
+    for m in parsed.skills.iter().chain(parsed.instructions.iter()) {
+        crate::text::validate_name(&m.name)
+            .with_context(|| format!("pack.toml member '{}'", m.name.escape_debug()))?;
+    }
+    Ok(())
+}
+
 /// A git pack resolved to concrete content on disk.
 pub struct ResolvedGitPack {
     pub candidate: Candidate,
@@ -188,6 +204,7 @@ pub fn resolve(refr: &GitPackRef) -> Result<ResolvedGitPack> {
     let text = std::fs::read_to_string(&pack_toml)
         .with_context(|| format!("{} has no pack.toml at {}", refr.url, pack_toml.display()))?;
     let parsed: PackToml = toml::from_str(&text).context("parsing pack.toml")?;
+    validate_pack_names(&parsed)?;
 
     // Content scan at fetch time — the same gate `install` applies to skills.
     // High severity (hidden Unicode) blocks; heuristics print as warnings.
@@ -293,6 +310,47 @@ fn contained(root: &Path, rel: &str, member: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// C.1 regression (design §C.1): a pack whose instruction member name
+    /// traverses — previously interpolated into `instructions/{name}.md`
+    /// unchecked — is rejected at the parse gate, before any extraction. Same
+    /// gate covers a hostile pack-level name.
+    #[test]
+    fn hostile_pack_names_rejected_at_parse() {
+        let traversing: PackToml = toml::from_str(
+            r#"
+            name = "ok-pack"
+            [[instruction]]
+            name = "../../outside"
+            path = "docs/i.md"
+            "#,
+        )
+        .unwrap();
+        let err = validate_pack_names(&traversing).unwrap_err();
+        assert!(err.to_string().contains("../../outside"), "{err:#}");
+
+        let bad_pack_name: PackToml = toml::from_str(
+            r#"
+            name = "Bad Pack"
+            [[skill]]
+            name = "fine"
+            path = "skills/fine"
+            "#,
+        )
+        .unwrap();
+        assert!(validate_pack_names(&bad_pack_name).is_err());
+
+        let clean: PackToml = toml::from_str(
+            r#"
+            name = "ok-pack"
+            [[skill]]
+            name = "sql-review"
+            path = "skills/sql-review"
+            "#,
+        )
+        .unwrap();
+        assert!(validate_pack_names(&clean).is_ok());
+    }
 
     #[test]
     fn parses_git_refs() {

@@ -451,7 +451,7 @@ pub fn activate(
                 strategy,
                 active_skills.clone(),
                 &prev_skills,
-            );
+            )?;
 
             for c in &plan.conflicts {
                 println!(

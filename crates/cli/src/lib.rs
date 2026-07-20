@@ -51,6 +51,7 @@ pub mod state;
 pub mod store;
 #[allow(unsafe_code)]
 pub(crate) mod sys;
+pub mod text;
 // The binary calls this before its first print; the module itself stays
 // crate-private so the unsafe surface is reachable only through this fn.
 pub use sys::reset_sigpipe;

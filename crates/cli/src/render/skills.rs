@@ -43,12 +43,21 @@ impl SkillPlan {
 }
 
 /// Compute the plan without touching the filesystem.
+///
+/// Fallible since the name contract (design §C.3): every active name is
+/// validated before it can reach the `skills_dir.join(name)` below and in
+/// `materialize` — a bad name in a hand-edited manifest fails the whole plan
+/// here, at the last gate before filesystem writes, instead of traversing.
 pub fn plan(
     skills_dir: PathBuf,
     strategy: SkillStrategy,
     active: Vec<(String, PathBuf)>,
     previously_managed: &[String],
-) -> SkillPlan {
+) -> Result<SkillPlan> {
+    for (name, _) in &active {
+        crate::text::validate_name(name)
+            .with_context(|| format!("refusing to materialize skill '{}'", name.escape_debug()))?;
+    }
     let active_names: Vec<&String> = active.iter().map(|(n, _)| n).collect();
     let to_remove: Vec<String> = previously_managed
         .iter()
@@ -64,13 +73,13 @@ pub fn plan(
         }
     }
 
-    SkillPlan {
+    Ok(SkillPlan {
         skills_dir,
         strategy,
         active,
         to_remove,
         conflicts,
-    }
+    })
 }
 
 /// Perform the plan: remove pruned managed skills, then materialize the active
@@ -178,7 +187,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![("a".into(), a.clone()), ("b".into(), b.clone())],
             &[],
-        );
+        )
+        .unwrap();
         materialize(&p1).unwrap();
         assert!(skills_dir.join("a").join("SKILL.md").exists());
         assert!(skills_dir.join("b").join("SKILL.md").exists());
@@ -189,7 +199,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![("a".into(), a.clone())],
             &["a".to_string(), "b".to_string()],
-        );
+        )
+        .unwrap();
         assert_eq!(p2.to_remove, vec!["b".to_string()]);
         materialize(&p2).unwrap();
         assert!(skills_dir.join("a").exists());
@@ -207,7 +218,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![("a".into(), a)],
             &[],
-        );
+        )
+        .unwrap();
         materialize(&p1).unwrap();
         assert!(skills_dir.exists());
 
@@ -217,7 +229,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![],
             &["a".to_string()],
-        );
+        )
+        .unwrap();
         materialize(&p2).unwrap();
         assert!(!skills_dir.exists(), "emptied managed dir removed");
     }
@@ -237,7 +250,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![],
             &["gone".to_string()],
-        );
+        )
+        .unwrap();
         materialize(&p).unwrap();
         assert!(skills_dir.child("mine/SKILL.md").path().exists());
         assert!(skills_dir.path().exists());
@@ -249,7 +263,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![],
             &["gone".to_string()],
-        );
+        )
+        .unwrap();
         materialize(&p2).unwrap();
         assert!(
             !missing.exists(),
@@ -273,7 +288,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![("a".into(), a)],
             &[],
-        );
+        )
+        .unwrap();
         assert_eq!(p.conflicts, vec!["a".to_string()]);
         materialize(&p).unwrap();
         // Untouched.
@@ -294,7 +310,8 @@ mod tests {
             SkillStrategy::Copy,
             vec![("a".into(), a)],
             &[],
-        );
+        )
+        .unwrap();
         materialize(&p1).unwrap();
         assert!(skills_dir.join("a").join("SKILL.md").exists());
         assert!(skills_dir.join("a").join(MARKER).exists());
@@ -304,7 +321,8 @@ mod tests {
             SkillStrategy::Copy,
             vec![],
             &["a".to_string()],
-        );
+        )
+        .unwrap();
         materialize(&p2).unwrap();
         assert!(!skills_dir.join("a").exists());
     }
@@ -323,7 +341,8 @@ mod tests {
             SkillStrategy::Copy,
             vec![("a".into(), a)],
             &[],
-        );
+        )
+        .unwrap();
         materialize(&p).unwrap();
         assert!(skills_dir.join("a").join("SKILL.md").exists());
         assert!(!skills_dir.join("a").join(".git").exists());
