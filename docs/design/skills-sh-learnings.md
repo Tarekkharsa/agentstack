@@ -447,3 +447,12 @@ Priority order:
    upstream-deletion detection in `lock --update`/`doctor`.
 5. **Distribution loop** (§7, §8): finding-skills catalog skill, `lib new`
    scaffolding, ephemeral use.
+
+**Status 2026-07-20: all five priorities implemented.** 1 →
+hardening-remote-ingestion.md; 2 → add-skill-source-grammar.md; 3 →
+add-skill-activation.md; 4 → update refresh semantics + upstream-deletion
+detection + skip reasons (a review round additionally fixed branch-pin
+re-tracking and restored preview containment); 5 → `lib add` gained the
+source grammar and the finding-skills catalog skill shipped. Still open
+from the smaller ideas: `lib new` scaffolding and ephemeral use (§8) —
+unclaimed, not forgotten. The deliberate rejections (§9) stand.
