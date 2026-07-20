@@ -14,10 +14,10 @@
 //! 2. `every_prose_command_is_real` — the inverse direction: every
 //!    `agentstack <verb> [<subverb>]` invocation written in a code span or
 //!    fenced block across the docs must name a command that actually exists
-//!    on the clap tree. This is how `agentstack stats` and a bare
-//!    `agentstack connect` (neither ever existed / needed an argument)
-//!    survived review — the roster check above only verifies the inventory
-//!    list, not free prose elsewhere in the docs.
+//!    on the clap tree. A second token is checked as a subcommand, or accepted
+//!    only when Clap declares a positional argument; this catches shapes such
+//!    as the retired `proxy start`, not just nonexistent top-level verbs. The
+//!    roster check above only verifies the inventory list, not free prose.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -333,6 +333,7 @@ fn scan_file(
     kind: &Kind,
     top: &HashSet<String>,
     subs: &HashMap<String, HashSet<String>>,
+    positional: &HashSet<String>,
     violations: &mut Vec<Violation>,
 ) {
     let content = std::fs::read_to_string(path).expect("readable scan-set file");
@@ -376,13 +377,6 @@ fn scan_file(
             });
             continue;
         }
-        // Top-level verb is real. Only a real command with actual
-        // sub-subcommands gets its second token checked — otherwise a
-        // positional argument (`agentstack use backend`) would be
-        // misread as a subcommand attempt.
-        let Some(sub_names) = subs.get(tok1).filter(|s| !s.is_empty()) else {
-            continue;
-        };
         let Some((tok2_pos, tok2)) = second else {
             continue;
         };
@@ -392,7 +386,11 @@ fn scan_file(
         if ALLOWLIST.contains(&tok2) {
             continue;
         }
-        if !sub_names.contains(tok2) {
+        let valid_second = match subs.get(tok1).filter(|names| !names.is_empty()) {
+            Some(sub_names) => sub_names.contains(tok2),
+            None => positional.contains(tok1),
+        };
+        if !valid_second {
             violations.push(Violation {
                 file: display_path.clone(),
                 line: line_number(&content, tok2_pos),
@@ -407,6 +405,7 @@ fn every_prose_command_is_real() {
     let cmd = cli_command();
     let mut top: HashSet<String> = HashSet::new();
     let mut subs: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut positional: HashSet<String> = HashSet::new();
     for sc in cmd.get_subcommands() {
         let name = sc.get_name();
         if name == "help" {
@@ -417,6 +416,9 @@ fn every_prose_command_is_real() {
             .map(|s| s.get_name().to_string())
             .filter(|n| n != "help")
             .collect();
+        if sc.get_positionals().next().is_some() {
+            positional.insert(name.to_string());
+        }
         subs.insert(name.to_string(), sub_names);
         top.insert(name.to_string());
     }
@@ -424,7 +426,7 @@ fn every_prose_command_is_real() {
     let root = repo_root();
     let mut violations = Vec::new();
     for (path, kind) in files_to_scan(&root) {
-        scan_file(&path, &kind, &top, &subs, &mut violations);
+        scan_file(&path, &kind, &top, &subs, &positional, &mut violations);
     }
 
     assert!(

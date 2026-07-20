@@ -28,6 +28,13 @@ still-managed and the hand-written entries. `apply` is idempotent,
 project with no git, and an `AGENTSTACK_HOME` containing spaces — with the
 guard still denying `.env` through it.
 
+**D. Discovery & adoption.** From a nested `src/deep/` subdirectory, bare
+`agentstack`, `doctor`, and `apply` all walk up to the project root (the render
+lands at the root, never nested), and a nested `init` refuses to silently
+create a second manifest. `adopt` pulls a hand-*edited* field of a
+manifest-known server into the manifest, and the adopted value survives the
+next `apply`.
+
 ## Run it
 
 ```bash
@@ -35,9 +42,10 @@ cargo build --release            # or AGENTSTACK_BIN=/path/to/agentstack
 bash examples/projects/device-onboarding/assert.sh
 ```
 
-## Known gaps this example found (tracked, not asserted)
+## What the first round found (now fixed and asserted)
 
-Filed as tasks from the first round — see `../FINDINGS.md`
-("Device-onboarding round"): subdirectory walk-up for manifest discovery,
-`adopt` on hand-*edited* values, project-scope pending-removal warnings, and
-the `apply` default-scope vs. quickstart decision.
+The first round of this example surfaced four gaps — subdirectory walk-up for
+manifest discovery, `adopt` on hand-*edited* values, project-scope
+pending-removal warnings, and the `apply` default-scope vs. quickstart
+decision. All four are now fixed and covered above (sections A, B, and D); see
+`../FINDINGS.md` ("Device-onboarding round") for the original filings.

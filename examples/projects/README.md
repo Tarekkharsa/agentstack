@@ -1,6 +1,6 @@
 # Example projects — realistic use cases, asserted
 
-Six self-contained fake-but-realistic projects, each exercising one agentstack
+Seven self-contained fake-but-realistic projects, each exercising one agentstack
 use case end-to-end the way a real user would. Every project has a README
 explaining what it demonstrates and an `assert.sh` that proves it: isolated
 temp `HOME` + `AGENTSTACK_HOME` (nothing touches your real config), PASS/FAIL

@@ -57,7 +57,7 @@ disk (lifting inline secrets into `${REF}`s), run the command it shows:
   `agentstack doctor` (manifest validation, adapters, secrets, drift, quirks,
   skills, content scan, reproducibility, policy), rendered as the familiar ✓/⚠/✗
   report.
-- **Proxy** — the wire lens, the same ranked report as `agentstack proxy report`:
+- **Proxy** — the wire lens, the same ranked report as `agentstack report wire`:
   per-turn tools and token weight, and a per-capability table so you can see which
   loaded tools earn their context. Observe-only.
 - **Insights** — three read-only reports: **Optimize** (recommendations, each with

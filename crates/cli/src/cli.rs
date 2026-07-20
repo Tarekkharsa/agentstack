@@ -762,7 +762,9 @@ pub struct InitArgs {
     /// Seed the machine-level manifest (`~/.agentstack/agentstack.toml`)
     /// instead of importing a project: an empty [instructions] block plus an
     /// `instructions/` dir for personal, cross-project fragments compiled into
-    /// each CLI's global CLAUDE.md / AGENTS.md. Nothing is imported.
+    /// each CLI's global CLAUDE.md / AGENTS.md, and the machine `[guard]` +
+    /// `[policy.filesystem]` deny defaults (the same list `guard install`
+    /// seeds, then offered for install into detected CLIs). No project is imported.
     #[arg(long)]
     pub global: bool,
 

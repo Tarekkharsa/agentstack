@@ -532,7 +532,7 @@ provenance. `lib add-server` stores a reusable server definition with its
 `${REF}`s intact.
 
 Every `lib add` runs the same hidden-unicode / prompt-injection content scan
-as `install`/`audit` before the copy becomes canonical (high findings block
+as `install`/`doctor --deep` before the copy becomes canonical (high findings block
 unless `--allow-flagged`), and warns when a skill exceeds ~10 MiB — vendored
 dependencies make every full-library pass pay to read them.
 
@@ -643,8 +643,11 @@ the exact compile command as the next step.
 `instructions/` dir: a first-class home for *personal*, cross-project
 instruction fragments — the operational knowledge you'd otherwise re-teach
 each agent. Compile them with `agentstack instructions --manifest-dir ~
---write`. The zero-files bridge deliberately never discovers this layer as a
-project — it cannot be `trust`ed or activated by `mcp --auto-project`.
+--write`. It also seeds the machine `[guard]` + `[policy.filesystem]` deny
+defaults (the same list `guard install` writes) and offers to install the host
+guard into detected CLIs. The zero-files bridge deliberately never discovers
+this layer as a project — it cannot be `trust`ed or activated by
+`mcp --auto-project`.
 
 **The user layer** merges the machine manifest's `[instructions]` (and only
 those) in beneath each project load, order user → project → project-local; a
@@ -1428,12 +1431,12 @@ package manager (`install`/`lock --update`/`remove` + lockfile) · central capab
 library (`lib` skills + servers referenced by name, digest-pinned in the lock,
 drift in `doctor`/`explain`) · secrets (keychain +
 varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`/`--deep`) ·
-content scanning on install + `audit` · official MCP Registry provider +
+content scanning on install + `doctor --deep` · official MCP Registry provider +
 `search`/`add from` · `[policy]` trust gate · native per-CLI settings
 (`[settings.*]` → settings.json) · native extensions (`[extensions.*]` →
 content-pinned harness add-ons, re-verified at `run --locked`) · atomic writes + backups ·
-`export`/`import` · `hook` · agent-operable `mcp` server · local dashboard
-(server/skill matrices, Discover, add-skill, settings editor) · live runs
+`export`/`import` · portable lifecycle hooks · agent-operable `mcp` server · local read-only dashboard
+(server/skill matrices, Discover, Doctor, Runs; GET-only, copies the CLI command for every change) · live runs
 (`run`/`report runs`/`kill` + dashboard Runs panel) · GitHub Action trust gate ·
 nightly adapter-conformance CI · zero-file bridge (`gateway connect` + `mcp
 --auto-project` + digest-pinned `trust`) · `optimize` (evidence-backed

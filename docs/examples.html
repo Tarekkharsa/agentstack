@@ -1007,9 +1007,9 @@ agentstack report calls                            <span class="cm"># what you a
     <p class="intent">Every tool/server/skill you load is re-billed as input tokens <strong>every turn</strong>. Measure it with the passive wire proxy — observe only, cache stays warm.</p>
     <div class="copywrap">
       <pre><code>export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-agentstack proxy start                        <span class="cm"># in one shell, then use your agent normally</span>
-agentstack proxy report                       <span class="cm"># ranks tokens/turn vs. how often each was called</span></code></pre>
-      <button class="copybtn" data-copy="agentstack proxy start">copy</button>
+agentstack proxy                              <span class="cm"># in one shell, then use your agent normally</span>
+agentstack report wire                        <span class="cm"># ranks tokens/turn vs. how often each was called</span></code></pre>
+      <button class="copybtn" data-copy="agentstack proxy">copy</button>
     </div>
     <p class="muted small">A server that's expensive but never used is flagged <code>drop / lazy</code> — data-driven pruning that closes the loop with the profiles you manage.</p>
 

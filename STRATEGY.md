@@ -1,7 +1,8 @@
 # AgentStack strategy
 
 > **Status:** working strategy and decision framework, not a promise of shipped features<br/>
-> **Updated:** 2026-07-16<br/>
+> **Current as of:** agentstack 0.14.x<br/>
+> **Updated:** 2026-07-19<br/>
 > **Audience:** maintainers, contributors, design partners, and future collaborators<br/>
 > **Publication:** intentionally public. Open strategy supports trust and contribution; exact pricing, prospect details, and confidential commercial assumptions stay elsewhere.
 
@@ -22,7 +23,7 @@ The operating decisions are:
 3. Reserve the `AgentStack` GitHub organization name now; do not transfer the repository until an explicit trigger is met.
 4. Make local enforcement and portability open source. Monetize coordination across people, machines, and organizations.
 5. Import or federate existing discovery sources instead of building another public MCP directory.
-6. Make `agentstack run <harness> --locked` from the current repository the supervised product milestone. The locked modifier is not shipped today; the existing harness positional remains intact.
+6. Make `agentstack run <harness> --locked` from the current repository the supervised product milestone. The locked modifier shipped in v0.11 as the Protected tier; the existing harness positional remains intact, and expanding its contract (remote sources, declared local-executable integrity) stays supervised work.
 7. Run product validation and distribution work in parallel with the engineering critical path.
 8. After the locked-run activation gate, make **Workspace Grants**—exact, reviewable read/write/deny roots plus tool, secret, egress, and budget limits—the next enforcement product milestone.
 9. Use Cloudflare as the first hosted execution backend only after scoped local execution is proven. Cloudflare is an adapter behind AgentStack's portable policy contract, not the product identity.
@@ -50,7 +51,7 @@ That is a good internal architecture. It does **not** yet mean that AgentStack h
 Important factual baselines:
 
 - `agentstack run` exists. It launches a supported harness as a tracked run and can use profile, sandbox, lockdown, and plan options.
-- The proposed `agentstack run <harness> --locked` contract does not exist yet. Trust, lock verification, policy compilation, guarded host execution, and reporting are not yet one completed public workflow.
+- `agentstack run <harness> --locked` shipped in v0.11 as the Protected tier: trust, lock verification, policy compilation, guarded host execution, and reporting are one completed public workflow. Expanding its contract — remote sources, declared local-executable integrity — remains supervised work.
 - `--sandbox` and `--lockdown` require the sandbox feature plus a running Docker daemon. Official release binaries include that feature; default local source builds omit it. Docker is still too large a prerequisite for the first-run activation wedge.
 - A composite GitHub Action already exists in [`action.yml`](action.yml), and the README includes a copyable example. It runs `agentstack install --locked` and `agentstack doctor --ci`. The next job is to add a visible failure demo, publish it on the site, and distribute it—not rebuild it.
 - The manifest is the source of truth. Generated client files are compiled output.
