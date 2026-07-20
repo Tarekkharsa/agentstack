@@ -820,12 +820,9 @@ fn host_of(url: &str) -> String {
 }
 
 /// The `description:` from a skill's `SKILL.md` frontmatter, if present.
+/// Delegates to the shared parser (design §A.2 #2): the previous local
+/// duplicate skipped block scalars and bypassed sanitization.
 fn skill_description(source: &Path) -> Option<String> {
     let text = std::fs::read_to_string(source.join("SKILL.md")).ok()?;
-    let rest = text.trim_start().strip_prefix("---")?;
-    let end = rest.find("\n---")?;
-    rest[..end]
-        .lines()
-        .find_map(|l| l.trim().strip_prefix("description:"))
-        .map(|v| v.trim().trim_matches('"').trim_matches('\'').to_string())
+    crate::library::parse_frontmatter_description(&text)
 }

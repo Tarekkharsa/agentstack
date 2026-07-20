@@ -942,7 +942,7 @@ fn handle_with_lease(
                         ),
                         Err(error) => result(
                             id,
-                            json!({ "content": [{ "type": "text", "text": format!("Error [{}]: {}", serde_json::to_value(error.category).unwrap_or(Value::String("execution-error".into())).as_str().unwrap_or("execution-error"), error.public_message()) }], "isError": true }),
+                            json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error [{}]: {}", serde_json::to_value(error.category).unwrap_or(Value::String("execution-error".into())).as_str().unwrap_or("execution-error"), error.public_message())) }], "isError": true }),
                         ),
                     },
                 );
@@ -952,15 +952,18 @@ fn handle_with_lease(
             if let Some(forwarded) = gateway.try_call(name, &args) {
                 return Some(match forwarded {
                     Ok(v) => result(id, v),
+                    // Error text can embed remote bytes (upstream stderr,
+                    // registry HTTP, git output) and this path never reaches
+                    // main.rs's sanitized sink — strip here (§A.2 #9).
                     Err(e) => result(
                         id,
-                        json!({ "content": [{ "type": "text", "text": format!("Error: {e}") }], "isError": true }),
+                        json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error: {e}")) }], "isError": true }),
                     ),
                 });
             }
             let (text, is_error) = match run_tool_with_lease(name, &args, dir, trust_note, lease) {
                 Ok(t) => (t, false),
-                Err(e) => (format!("Error: {e}"), true),
+                Err(e) => (crate::text::sanitize_block(&format!("Error: {e}")), true),
             };
             Some(result(
                 id,
@@ -1868,14 +1871,9 @@ fn list_loadable(dir: Option<&Path>, trust_note: Option<&str>) -> Result<String>
 const INDEX_MAX_ENTRIES: usize = 50;
 const INDEX_MAX_DESC_CHARS: usize = 160;
 
-/// First line of `s`, capped at `max` characters.
+/// First line of `s`, capped at `max` characters (shared impl, §A.2 #7).
 fn one_line(s: &str, max: usize) -> String {
-    let line = s.lines().next().unwrap_or("").trim();
-    let mut out: String = line.chars().take(max).collect();
-    if line.chars().count() > max {
-        out.push('…');
-    }
-    out
+    crate::text::one_line(s, max)
 }
 
 /// The `instructions` string for the MCP initialize result: an ambient index

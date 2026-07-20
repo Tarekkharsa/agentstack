@@ -152,9 +152,5 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
 }
 
 fn truncate(s: &str, n: usize) -> String {
-    if s.chars().count() <= n {
-        s.to_string()
-    } else {
-        format!("{}…", s.chars().take(n).collect::<String>())
-    }
+    crate::text::truncate_chars(s, n)
 }

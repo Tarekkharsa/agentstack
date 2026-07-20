@@ -190,11 +190,19 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
     // `agentstack lock` is a prerequisite of `agentstack trust`.
     let mut blockers: Vec<(String, String)> = Vec::new();
     for (name, resolved) in &servers {
+        // This review is the consent screen for content that may be hostile —
+        // display copies are sanitized; diff identities and lookups stay RAW
+        // (two different hostile values must never collide after cleaning).
+        let disp = crate::text::sanitize_line(name);
         let r = match resolved {
             Ok(r) => r,
             Err(e) => {
                 let mk = diff.mark("server", name, "unresolvable");
-                println!("{mk}{} {name}: unresolvable ({e})", "✗".red());
+                println!(
+                    "{mk}{} {disp}: unresolvable ({})",
+                    "✗".red(),
+                    crate::text::sanitize_line(&e.to_string())
+                );
                 blockers.push((name.clone(), format!("broken server ref — {e}")));
                 continue;
             }
@@ -231,14 +239,19 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
                 let args = r.server.args.join(" ");
                 let mk = diff.mark("server", name, &format!("{command} {args}"));
                 println!(
-                    "{mk}{} {name}: runs `{command} {args}`{origin}",
-                    "▶".yellow()
+                    "{mk}{} {disp}: runs `{}`{origin}",
+                    "▶".yellow(),
+                    crate::text::sanitize_line(&format!("{command} {args}"))
                 );
             }
             ServerType::Http => {
                 let url = r.server.url.as_deref().unwrap_or("?");
                 let mk = diff.mark("server", name, url);
-                println!("{mk}{} {name}: contacts {url}{origin}", "→".cyan());
+                println!(
+                    "{mk}{} {disp}: contacts {}{origin}",
+                    "→".cyan(),
+                    crate::text::sanitize_line(url)
+                );
             }
         }
     }
@@ -266,20 +279,21 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
     if !exec_statuses.is_empty() {
         println!("  local executable content (pinned by current bytes):");
         for (label, status) in &exec_statuses {
+            let disp = crate::text::sanitize_line(label);
             // An executable is identified by its path (the label the review
             // shows); byte drift is caught by the verdict below, not the diff.
             let mk = diff.mark("executable", label, label);
             match crate::verify::executable_verdict(status) {
-                crate::verify::Verdict::Ok => println!("{mk}· {label}   [pinned]"),
+                crate::verify::Verdict::Ok => println!("{mk}· {disp}   [pinned]"),
                 crate::verify::Verdict::Unpinned => {
-                    println!("{mk}{} {label}   [{}]", "✗".red(), "unpinned".red());
+                    println!("{mk}{} {disp}   [{}]", "✗".red(), "unpinned".red());
                     blockers.push((
                         label.clone(),
                         "local executable unpinned — run `agentstack lock`".to_string(),
                     ));
                 }
                 crate::verify::Verdict::Block(why) => {
-                    println!("{mk}{} {label}   [{}]", "✗".red(), why.red());
+                    println!("{mk}{} {disp}   [{}]", "✗".red(), why.red());
                     blockers.push((label.clone(), why));
                 }
             }
@@ -300,7 +314,8 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
         let store = crate::store::Store::default_store();
         for (name, ext) in &m.extensions {
             use crate::resolve::{ExtensionLockStatus, ExtensionOrigin};
-            let dest = format!("→ {}", ext.target);
+            let disp = crate::text::sanitize_line(name);
+            let dest = format!("→ {}", crate::text::sanitize_line(&ext.target));
             // The extension's identity for the diff is its target (where it
             // installs); a retarget shows as `~ changed`.
             let mk = diff.mark("extension", name, &ext.target);
@@ -324,13 +339,13 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
             match report.status {
                 ExtensionLockStatus::Matches => {
                     println!(
-                        "{mk}{} {name} {dest}   [{origin_word}, pinned]",
+                        "{mk}{} {disp} {dest}   [{origin_word}, pinned]",
                         "▶".yellow()
                     );
                 }
                 ExtensionLockStatus::MissingLockEntry => {
                     println!(
-                        "{mk}{} {name} {dest}   [{origin_word}, {}]",
+                        "{mk}{} {disp} {dest}   [{origin_word}, {}]",
                         "✗".red(),
                         "unpinned".red()
                     );
@@ -342,7 +357,7 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
                 ExtensionLockStatus::ChecksumDrift { .. }
                 | ExtensionLockStatus::RevDrift { .. } => {
                     println!(
-                        "{mk}{} {name} {dest}   [{origin_word}, {}]",
+                        "{mk}{} {disp} {dest}   [{origin_word}, {}]",
                         "✗".red(),
                         "DRIFTED from lock".red()
                     );
@@ -353,9 +368,13 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
                 }
                 ExtensionLockStatus::TargetDrift { locked, .. } => {
                     println!(
-                        "{mk}{} {name} {dest}   [{origin_word}, {}]",
+                        "{mk}{} {disp} {dest}   [{origin_word}, {}]",
                         "✗".red(),
-                        format!("RETARGETED since locked (was '{locked}')").red()
+                        format!(
+                            "RETARGETED since locked (was '{}')",
+                            crate::text::sanitize_line(&locked)
+                        )
+                        .red()
                     );
                     blockers.push((
                         name.clone(),
@@ -365,12 +384,12 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
                 // Reproducibility can't be checked offline; not a blocker —
                 // same posture as skills' un-cached git sources.
                 ExtensionLockStatus::NotAvailableOffline { .. } => println!(
-                    "{mk}{} {name} {dest}   [{origin_word}, {}]",
+                    "{mk}{} {disp} {dest}   [{origin_word}, {}]",
                     "▶".yellow(),
                     "offline — pin unverified".yellow()
                 ),
                 ExtensionLockStatus::ResolveFailed { error } => {
-                    println!("{mk}{} {name} {dest}: {}", "✗".red(), error.red());
+                    println!("{mk}{} {disp} {dest}: {}", "✗".red(), error.red());
                     blockers.push((name.clone(), error));
                 }
             }
@@ -385,6 +404,7 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
         println!("  skills loadable over MCP:");
         let store = crate::store::Store::default_store();
         for name in &skill_names {
+            let disp = crate::text::sanitize_line(name);
             let report = crate::resolve::skill_lock_status(
                 name,
                 m,
@@ -406,11 +426,11 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
             let mk = diff.mark("skill", name, origin_word);
             match &report.status {
                 SkillLockStatus::Matches => {
-                    println!("{mk}· {name}   [{origin_word}, pinned]");
+                    println!("{mk}· {disp}   [{origin_word}, pinned]");
                 }
                 SkillLockStatus::ChecksumDrift { .. } | SkillLockStatus::RevDrift { .. } => {
                     println!(
-                        "{mk}{} {name}   [{origin_word}, {}]",
+                        "{mk}{} {disp}   [{origin_word}, {}]",
                         "✗".red(),
                         "DRIFTED from lock".red()
                     );
@@ -420,7 +440,7 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
                     // An inline skill's bytes live in the repo under review —
                     // unpinned means trusting would leave them ungoverned.
                     Some(SkillOrigin::Inline) => {
-                        println!("{mk}{} {name}   [inline, {}]", "✗".red(), "unpinned".red());
+                        println!("{mk}{} {disp}   [inline, {}]", "✗".red(), "unpinned".red());
                         blockers.push((
                             name.clone(),
                             "inline skill unpinned — run `agentstack lock`".to_string(),
@@ -429,17 +449,21 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
                     // A library skill's bytes are the user's own curated,
                     // scan-gated content — worth pinning, not worth blocking.
                     _ => println!(
-                        "{mk}· {name}   [{origin_word}, {}]",
+                        "{mk}· {disp}   [{origin_word}, {}]",
                         "unpinned — run `agentstack lock`".yellow()
                     ),
                 },
                 // Reproducibility can't be checked offline; not a blocker.
                 SkillLockStatus::NotAvailableOffline { .. } => println!(
-                    "{mk}· {name}   [{origin_word}, {}]",
+                    "{mk}· {disp}   [{origin_word}, {}]",
                     "offline — pin unverified".yellow()
                 ),
                 SkillLockStatus::ResolveFailed { error } => {
-                    println!("{mk}{} {name}: broken ref ({error})", "✗".red());
+                    println!(
+                        "{mk}{} {disp}: broken ref ({})",
+                        "✗".red(),
+                        crate::text::sanitize_line(error)
+                    );
                     blockers.push((name.clone(), format!("broken ref — {error}")));
                 }
             }
@@ -459,28 +483,33 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
     if !instructions.is_empty() {
         println!("  instruction fragments (compile into CLAUDE.md / AGENTS.md):");
         for (name, instr) in instructions {
+            let disp = crate::text::sanitize_line(name);
             use crate::resolve::InstructionLockStatus;
             // Instructions are keyed by name; there is no finer identity to
             // show, so they only ever read as added or removed.
             let mk = diff.mark("instruction", name, "");
             match crate::resolve::instruction_lock_status(name, instr, &dir, &lock) {
-                InstructionLockStatus::Matches => println!("{mk}· {name}   [pinned]"),
+                InstructionLockStatus::Matches => println!("{mk}· {disp}   [pinned]"),
                 InstructionLockStatus::ChecksumDrift { .. } => {
-                    println!("{mk}{} {name}   [{}]", "✗".red(), "DRIFTED from lock".red());
+                    println!("{mk}{} {disp}   [{}]", "✗".red(), "DRIFTED from lock".red());
                     blockers.push((
                         name.clone(),
                         "instruction content drifted from lock".to_string(),
                     ));
                 }
                 InstructionLockStatus::MissingLockEntry => {
-                    println!("{mk}{} {name}   [{}]", "✗".red(), "unpinned".red());
+                    println!("{mk}{} {disp}   [{}]", "✗".red(), "unpinned".red());
                     blockers.push((
                         name.clone(),
                         "instruction unpinned — run `agentstack lock`".to_string(),
                     ));
                 }
                 InstructionLockStatus::ResolveFailed { error } => {
-                    println!("{mk}{} {name}: broken ref ({error})", "✗".red());
+                    println!(
+                        "{mk}{} {disp}: broken ref ({})",
+                        "✗".red(),
+                        crate::text::sanitize_line(&error)
+                    );
                     blockers.push((name.clone(), format!("broken ref — {error}")));
                 }
             }
@@ -505,12 +534,12 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
                 let label = if it.name.is_empty() {
                     it.kind.clone()
                 } else {
-                    format!("{} {}", it.kind, it.name)
+                    format!("{} {}", it.kind, crate::text::sanitize_line(&it.name))
                 };
                 let detail = if it.identity.is_empty() {
                     String::new()
                 } else {
-                    format!("  ({})", it.identity)
+                    format!("  ({})", crate::text::sanitize_line(&it.identity))
                 };
                 println!("{} {label}{detail}", "-".red());
             }

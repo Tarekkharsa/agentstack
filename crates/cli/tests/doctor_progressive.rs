@@ -64,9 +64,9 @@ fn unused_feature_sections_are_tagged_irrelevant_but_still_reported() {
         );
     }
 
-    // The baseline and the machine-posture statement stay relevant always.
+    // The baseline and the machine-policy summary stay relevant always.
     assert!(relevant(&report, "Adapters & CLIs"));
-    assert!(relevant(&report, "Machine policy posture"));
+    assert!(relevant(&report, "Machine policy"));
 }
 
 #[test]

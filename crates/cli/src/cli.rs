@@ -110,7 +110,7 @@ pub enum Command {
     #[command(hide = true)]
     Instructions(InstructionsArgs),
 
-    /// Verify everything is wired up: adapters, secrets, drift, quirks, skills.
+    /// Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details.
     Doctor(DoctorArgs),
 
     /// Open the local web dashboard — a read-only view of your stack.
@@ -228,7 +228,13 @@ pub enum Command {
     ///
     /// Shows where it came from, what secrets it needs, which tools get it and
     /// what files get written, and its safety signals.
-    #[command(hide = true)]
+    #[command(
+        hide = true,
+        after_help = "\
+Examples:
+  agentstack explain github
+  agentstack explain sql-review"
+    )]
     Explain(ExplainArgs),
 
     /// Turn agentstack's collected signals into concrete recommendations.
@@ -253,7 +259,13 @@ pub enum Command {
     /// Undo a recorded write: revert an apply/use/session history entry
     /// (servers, settings, hooks, instructions), or restore one adapter's
     /// config from its single-slot backup.
-    #[command(hide = true)]
+    #[command(
+        hide = true,
+        after_help = "\
+Examples:
+  agentstack restore --last --write
+  agentstack restore claude-code --write"
+    )]
     Restore(RestoreArgs),
 
     /// Manage secrets in the OS keychain.
@@ -377,7 +389,7 @@ pub struct ConnectArgs {
     #[arg(long)]
     pub transparent: bool,
 
-    /// Write the change (else dry-run: show the diff per CLI).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 
@@ -396,7 +408,7 @@ pub struct DisconnectArgs {
     #[arg(long)]
     pub all: bool,
 
-    /// Write the change (else dry-run: show the diff per CLI).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -657,7 +669,7 @@ pub struct LockArgs {
     #[arg(long, requires = "upgrade")]
     pub yes: bool,
 
-    /// With --upgrade: write the change (else dry-run / diff preview).
+    /// With --upgrade: write the change (else preview).
     #[arg(long, requires = "upgrade")]
     pub write: bool,
 }
@@ -666,7 +678,7 @@ pub struct LockArgs {
 pub struct RemoveArgs {
     /// Name of the server or skill to remove.
     pub name: String,
-    /// Write the change (else dry-run).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -729,6 +741,10 @@ pub enum AddKind {
     /// Add a capability from a provider (catalog or official MCP Registry).
     From(AddFromArgs),
     /// Add an MCP server.
+    #[command(after_help = "\
+Examples:
+  agentstack add server github --type http --url https://api.githubcopilot.com/mcp/ --header \"Authorization=Bearer ${GH_PAT}\" --write
+  agentstack add server gitlab --type stdio --command npx --arg -y --arg @modelcontextprotocol/server-gitlab --env \"GITLAB_TOKEN=${GITLAB_TOKEN}\" --write")]
     Server(AddServerArgs),
     /// Add a skill (a SKILL.md directory).
     Skill(AddSkillArgs),
@@ -743,6 +759,10 @@ pub struct SetArgs {
 #[derive(Subcommand, Debug)]
 pub enum SetKind {
     /// Create or update an MCP server (same flags as `add server`).
+    #[command(after_help = "\
+Examples:
+  agentstack set server github --type http --url https://api.githubcopilot.com/mcp/ --write
+  agentstack set server gitlab --type stdio --command npx --arg -y --arg @modelcontextprotocol/server-gitlab --write")]
     Server(AddServerArgs),
 }
 
@@ -757,13 +777,14 @@ pub struct AddFromArgs {
     /// they steer your daily-driver agent). Off by default.
     #[arg(long)]
     pub with_instructions: bool,
-    /// Write the change (else dry-run).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct AddServerArgs {
+    /// Server name used in the manifest and policy rules, e.g. github.
     pub name: String,
     #[arg(long = "type", value_enum, default_value = "http")]
     pub transport: ServerType,
@@ -792,13 +813,14 @@ pub struct AddServerArgs {
     /// Default: every CLI in [targets]. Unknown adapter ids are an error.
     #[arg(long = "target", value_name = "CLI")]
     pub targets: Vec<String>,
-    /// Write the change (else dry-run).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct AddSkillArgs {
+    /// Skill name used in the manifest, e.g. sql-review.
     pub name: String,
     /// Path to the skill directory.
     #[arg(long)]
@@ -806,6 +828,7 @@ pub struct AddSkillArgs {
     /// Also add to this profile's skill list.
     #[arg(long)]
     pub profile: Option<String>,
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -820,6 +843,10 @@ pub struct SettingsArgs {
 pub enum SettingsKind {
     /// Set a `[settings.<target>]` key (dotted paths like
     /// `permissions.defaultMode` are supported).
+    #[command(after_help = "\
+Examples:
+  agentstack settings set claude-code permissions.defaultMode auto --write
+  agentstack settings set codex model gpt-5.5")]
     Set(SettingsSetArgs),
     /// Remove a `[settings.<target>]` key.
     Unset(SettingsUnsetArgs),
@@ -835,7 +862,7 @@ pub struct SettingsSetArgs {
     /// Value; coerced to bool/number/enum for keys in the adapter's catalog,
     /// stored as a string otherwise.
     pub value: String,
-    /// Write the change (else dry-run).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -846,7 +873,7 @@ pub struct SettingsUnsetArgs {
     pub target: String,
     /// Setting key to remove (dotted paths supported).
     pub key: String,
-    /// Write the change (else dry-run).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -918,7 +945,7 @@ pub struct ApplyArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Write the changes to disk without prompting.
+    /// Write the changes without prompting (else interactive preview).
     #[arg(long)]
     pub write: bool,
 
@@ -948,12 +975,15 @@ pub struct ApplyArgs {
 
 #[derive(Args, Debug)]
 pub struct DiffArgs {
+    /// Only act on these target ids (repeatable). Defaults to [targets].default.
     #[arg(long = "target", value_name = "ID")]
     pub targets: Vec<String>,
 
     #[arg(long, value_name = "NAME")]
     pub profile: Option<String>,
 
+    /// Where writes land: global (each CLI user-level config) or project
+    /// (repo-local). Defaults to the manifest home.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
 }
@@ -965,14 +995,16 @@ pub struct UseArgs {
     /// inline skill and server — activates. Several profiles need a name.
     pub profile: Option<String>,
 
-    /// Only act on these target ids (repeatable).
+    /// Only act on these target ids (repeatable). Defaults to [targets].default.
     #[arg(long = "target", value_name = "ID")]
     pub targets: Vec<String>,
 
+    /// Where writes land: global (each CLI user-level config) or project
+    /// (repo-local). Defaults to the manifest home.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
 
-    /// Actually write configs and materialize skills (else dry-run).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 
@@ -1009,6 +1041,8 @@ pub enum SessionCmd {
     Start {
         /// Profile to load.
         profile: String,
+        /// Where writes land: global (each CLI user-level config) or project
+        /// (repo-local). Defaults to the manifest home.
         #[arg(long, value_enum, default_value_t = Scope::Project)]
         scope: Scope,
     },
@@ -1040,23 +1074,28 @@ pub struct RestoreArgs {
     #[arg(long, conflicts_with = "adapter")]
     pub last: bool,
 
+    /// Where writes land: global (each CLI user-level config) or project
+    /// (repo-local). Defaults to the manifest home.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
 
-    /// Actually restore (else show what would change).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct AdoptArgs {
+    /// Only act on these target ids (repeatable). Defaults to [targets].default.
     #[arg(long = "target", value_name = "ID")]
     pub targets: Vec<String>,
 
+    /// Where writes land: global (each CLI user-level config) or project
+    /// (repo-local). Defaults to the manifest home.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
 
-    /// Actually update agentstack.toml (else dry-run).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 
@@ -1079,6 +1118,10 @@ pub enum LibKind {
     AddServer(LibAddServerArgs),
     /// Add a native harness extension to the central library from a local path
     /// or git source.
+    #[command(after_help = "\
+Examples:
+  agentstack lib add-extension checkpoint --target pi --path ./extensions/checkpoint --write
+  agentstack lib add-extension checkpoint --target pi --git https://github.com/acme/checkpoint --subpath ext --write")]
     AddExtension(LibAddExtensionArgs),
     /// Add a declarative lifecycle hook definition to the central library from a
     /// `.toml` file or by lifting it out of the current manifest.
@@ -1138,7 +1181,7 @@ pub struct LibAddServerArgs {
     /// Overwrite an existing library server of the same name.
     #[arg(long)]
     pub replace: bool,
-    /// Write the change (else dry-run/preview).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -1147,7 +1190,7 @@ pub struct LibAddServerArgs {
 pub struct LibRemoveServerArgs {
     /// The library server name to remove.
     pub name: String,
-    /// Write the change (else dry-run/preview).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -1167,7 +1210,7 @@ pub struct LibAddHookArgs {
     /// Overwrite an existing library hook of the same name.
     #[arg(long)]
     pub replace: bool,
-    /// Write the change (else dry-run/preview).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -1176,7 +1219,7 @@ pub struct LibAddHookArgs {
 pub struct LibRemoveHookArgs {
     /// The library hook name to remove.
     pub name: String,
-    /// Write the change (else dry-run/preview).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -1211,7 +1254,7 @@ pub struct LibAddExtensionArgs {
     /// Add even if the content scan finds high-severity items (hidden Unicode).
     #[arg(long)]
     pub allow_flagged: bool,
-    /// Write the change (else dry-run/preview).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -1220,7 +1263,7 @@ pub struct LibAddExtensionArgs {
 pub struct LibRemoveExtensionArgs {
     /// The library extension name to remove.
     pub name: String,
-    /// Write the change (else dry-run/preview).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -1229,7 +1272,7 @@ pub struct LibRemoveExtensionArgs {
 pub struct LibRemoveArgs {
     /// The library skill name to remove.
     pub name: String,
-    /// Write the change (else dry-run/preview).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -1258,20 +1301,23 @@ pub struct LibAddArgs {
     /// Add even if the content scan finds high-severity items (hidden Unicode).
     #[arg(long)]
     pub allow_flagged: bool,
-    /// Write the change (else dry-run/preview).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct InstructionsArgs {
+    /// Only act on these target ids (repeatable). Defaults to [targets].default.
     #[arg(long = "target", value_name = "ID")]
     pub targets: Vec<String>,
 
+    /// Where writes land: global (each CLI user-level config) or project
+    /// (repo-local). Defaults to the manifest home.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
 
-    /// Actually write the instruction files (else dry-run).
+    /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
 }
@@ -1457,6 +1503,7 @@ pub struct SecretArgs {
 pub enum SecretCommand {
     /// Store a secret in the keychain (prompts hidden if --value omitted).
     Set {
+        /// Secret reference name, as used in ${REF} placeholders — e.g. GH_PAT.
         name: String,
         /// Provide the value inline (otherwise you'll be prompted).
         #[arg(long)]
@@ -1467,9 +1514,15 @@ pub enum SecretCommand {
         env_file: bool,
     },
     /// Print a secret's value.
-    Get { name: String },
+    Get {
+        /// Secret reference name, as used in ${REF} placeholders — e.g. GH_PAT.
+        name: String,
+    },
     /// Remove a secret from the keychain.
-    Rm { name: String },
+    Rm {
+        /// Secret reference name, as used in ${REF} placeholders — e.g. GH_PAT.
+        name: String,
+    },
     /// Show every secret the manifest references and whether it resolves.
     List,
 }

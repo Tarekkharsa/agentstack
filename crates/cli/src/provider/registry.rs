@@ -61,11 +61,14 @@ fn to_candidate(entry: ApiEntry) -> Option<Candidate> {
     if name.is_empty() {
         return None;
     }
-    let description = if s.description.is_empty() {
+    // Live remote HTTP text headed for terminals and MCP results — sanitized
+    // once at ingestion so every consumer inherits the clean value
+    // (design §A.2 #3).
+    let description = crate::text::sanitize_line(&if s.description.is_empty() {
         s.title.unwrap_or_default()
     } else {
         s.description
-    };
+    });
 
     // Prefer a remote (HTTP) install; else derive a stdio package install.
     if let Some(remote) = s.remotes.into_iter().next() {

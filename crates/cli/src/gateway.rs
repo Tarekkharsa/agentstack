@@ -953,7 +953,9 @@ impl Gateway {
                         if self.tool_allowed(&slot.name, bare).is_err() {
                             continue;
                         }
-                        out.push(namespace_tool(&slot.name, &t));
+                        if let Some(tool) = namespace_tool(&slot.name, &t) {
+                            out.push(tool);
+                        }
                     }
                 }
                 Err(e) => eprintln!("gateway: '{}' unavailable, skipping: {e}", slot.name),
@@ -1328,23 +1330,38 @@ fn score_tool(bare: &str, server: &str, desc: &str, tokens: &[&str]) -> i32 {
 /// The proxied-server allowlist for the current context. `None` (no active
 /// session, or its profile is gone) means no fence — every manifest server is
 /// proxied. `Some(set)` restricts the proxied surface to that profile's servers.
-fn namespace_tool(server: &str, tool: &Value) -> Value {
+/// `None` when the upstream tool's NAME contains hostile bytes: dispatch
+/// forwards the bare name verbatim to the upstream, so a sanitized-but-
+/// changed name would be uncallable — instead the tool is dropped from the
+/// listing entirely, same "invisible, not just refusable" shape as the
+/// policy firewall (design §A.2 #4). Descriptions and schema doc-strings are
+/// sanitized in place; the previous byte-level truncate panicked when the
+/// cap fell mid-UTF-8-char in a hostile description.
+fn namespace_tool(server: &str, tool: &Value) -> Option<Value> {
     let bare = tool.get("name").and_then(Value::as_str).unwrap_or("tool");
-    let mut desc = format!(
-        "[via {server}] {}",
-        tool.get("description")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-    );
-    if desc.len() > DESC_CAP {
-        desc.truncate(DESC_CAP);
-        desc.push('…');
+    if crate::text::sanitize_line(bare) != bare {
+        eprintln!("gateway: '{server}' reported a tool with hostile bytes in its name — hidden");
+        return None;
     }
-    json!({
+    let desc = crate::text::truncate_chars(
+        &crate::text::sanitize_line(&format!(
+            "[via {server}] {}",
+            tool.get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+        )),
+        DESC_CAP,
+    );
+    let mut schema = tool
+        .get("inputSchema")
+        .cloned()
+        .unwrap_or_else(|| json!({ "type": "object" }));
+    crate::text::sanitize_schema_docs(&mut schema);
+    Some(json!({
         "name": format!("{server}__{bare}"),
         "description": desc,
-        "inputSchema": tool.get("inputSchema").cloned().unwrap_or_else(|| json!({ "type": "object" })),
-    })
+        "inputSchema": schema,
+    }))
 }
 
 /// Concatenate `data:` lines of an SSE body and parse the JSON-RPC message.
@@ -1637,7 +1654,7 @@ mod tests {
     #[test]
     fn namespaces_and_caps_descriptions() {
         let t = json!({ "name": "get_file", "description": "x".repeat(900), "inputSchema": { "type": "object" } });
-        let n = namespace_tool("figma", &t);
+        let n = namespace_tool("figma", &t).unwrap();
         assert_eq!(n["name"], "figma__get_file");
         assert!(n["description"]
             .as_str()
@@ -1653,22 +1670,26 @@ mod tests {
         assert_eq!(parse_sse(body).unwrap()["result"]["ok"], true);
     }
 
+    fn must(t: Option<Value>) -> Value {
+        t.expect("fixture tool names are clean")
+    }
+
     /// A small fixture of two upstreams' worth of namespaced tools, shaped exactly
     /// like `namespaced_tools()` produces.
     fn fixture_tools() -> Vec<Value> {
         vec![
-            namespace_tool(
+            must(namespace_tool(
                 "figma",
                 &json!({ "name": "get_file", "description": "Get a file's node tree.", "inputSchema": { "type": "object", "properties": { "fileKey": { "type": "string" } } } }),
-            ),
-            namespace_tool(
+            )),
+            must(namespace_tool(
                 "figma",
                 &json!({ "name": "create_frame", "description": "Create a new frame on the canvas." }),
-            ),
-            namespace_tool(
+            )),
+            must(namespace_tool(
                 "github",
                 &json!({ "name": "list_issues", "description": "List issues in a repository." }),
-            ),
+            )),
         ]
     }
 

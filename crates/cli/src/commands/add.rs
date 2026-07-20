@@ -55,12 +55,15 @@ fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
             a.id, a.id
         )
     })?;
+    // Candidate name/id can be remote (registry id is the raw API string;
+    // pack names come from pack.toml) and print on a DRY RUN, before any
+    // gate — sanitize at this first human-read surface (design §A.2 #8).
     println!(
         "{} {} ({}) — {}",
         "found".green(),
-        candidate.name.bold(),
+        crate::text::sanitize_line(&candidate.name).bold(),
         candidate.source,
-        candidate.id
+        crate::text::sanitize_line(&candidate.id)
     );
     match &candidate.kind {
         CandidateKind::Server(_) => add_from_server(a, &ctx, &candidate),
@@ -96,9 +99,9 @@ fn add_git_pack(
     println!(
         "{} {} (git) — {} at {} ({})",
         "found".green(),
-        resolved.candidate.name.bold(),
-        git_ref.url,
-        resolved.tag.bold(),
+        crate::text::sanitize_line(&resolved.candidate.name).bold(),
+        crate::text::sanitize_line(&git_ref.url),
+        crate::text::sanitize_line(&resolved.tag).bold(),
         &resolved.commit[..resolved.commit.len().min(12)],
     );
     add_pack(a, ctx, &resolved.candidate, &resolved.spec, &origin)

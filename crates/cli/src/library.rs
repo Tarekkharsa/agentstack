@@ -69,10 +69,14 @@ pub fn parse_frontmatter_description(md: &str) -> Option<String> {
                 return None;
             }
             // Fold to one logical line — every consumer (search, lib list,
-            // the loadable index) wants a single description string.
-            return Some(parts.join(" "));
+            // the loadable index) wants a single description string. Sanitized
+            // at this single parse chokepoint: the description is remote text
+            // headed for terminals and agent context (design §A.2 #1).
+            return Some(crate::text::sanitize_line(&parts.join(" ")));
         }
-        return Some(v.trim_matches('"').trim_matches('\'').to_string());
+        return Some(crate::text::sanitize_line(
+            v.trim_matches('"').trim_matches('\''),
+        ));
     }
     None
 }

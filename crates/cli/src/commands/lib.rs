@@ -2189,11 +2189,7 @@ fn short(sum: &str) -> &str {
 /// Truncate a display string to `n` characters, appending an ellipsis when it
 /// was cut. Counts `char`s (not bytes) so multibyte descriptions don't panic.
 fn truncate(s: &str, n: usize) -> String {
-    if s.chars().count() <= n {
-        s.to_string()
-    } else {
-        format!("{}…", s.chars().take(n).collect::<String>())
-    }
+    crate::text::truncate_chars(s, n)
 }
 
 /// Human-readable byte count (binary units, one decimal).

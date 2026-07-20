@@ -31,7 +31,13 @@ fn main() {
         // above output that explains it (remediation after the refusal).
         use std::io::Write;
         let _ = std::io::stdout().flush();
-        eprintln!("error: {err:#}");
+        // One chokepoint for every CLI error path: a `.with_context()` chain
+        // can carry remote text (git stderr, URLs, frontmatter) — strip
+        // terminal escapes before it reaches the user's terminal (§A.2 #6).
+        eprintln!(
+            "error: {}",
+            agentstack::text::sanitize_block(&format!("{err:#}"))
+        );
         std::process::exit(1);
     }
 }
