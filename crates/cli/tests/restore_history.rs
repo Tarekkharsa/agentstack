@@ -60,3 +60,34 @@ fn restore_undoes_a_history_entry_by_prefix_and_last() {
 
     std::env::remove_var("AGENTSTACK_HOME");
 }
+
+#[test]
+fn restore_last_undoes_every_phase_in_one_batch() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = assert_fs::TempDir::new().unwrap();
+    std::env::set_var("HOME", home.path());
+    std::env::set_var("AGENTSTACK_HOME", home.path().join(".agentstack"));
+
+    let work = assert_fs::TempDir::new().unwrap();
+    let manifest = work.path().join("agentstack.toml");
+    let rendered = work.path().join(".mcp.json");
+    {
+        let _batch = history::begin_batch("setup");
+        let manifest_cap = history::capture(&manifest, "manifest · import");
+        fs::write(&manifest, "version = 1\n").unwrap();
+        history::record("project", Vec::new(), vec![manifest_cap]).unwrap();
+
+        let rendered_cap = history::capture(&rendered, "Claude Code · servers");
+        fs::write(&rendered, "{}\n").unwrap();
+        history::record("project", vec!["Claude Code".into()], vec![rendered_cap]).unwrap();
+    }
+
+    restore::run(&restore_args(None, true, true), None).unwrap();
+    assert!(!manifest.exists(), "the import phase belongs to the batch");
+    assert!(!rendered.exists(), "the apply phase belongs to the batch");
+    assert!(
+        history::list().iter().all(|entry| entry.undone),
+        "every entry in the setup batch is marked undone"
+    );
+    std::env::remove_var("AGENTSTACK_HOME");
+}

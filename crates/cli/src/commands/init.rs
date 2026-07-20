@@ -1,6 +1,15 @@
+//! Project-import writes are transactional and undoable; machine initialization
+//! is a separate path described below.
+//!
 //! `agentstack init` — never a blank page. Detect installed CLIs, import their
 //! existing MCP servers into one manifest, and lift inline secrets into
-//! `${REF}`s (stored in the keychain).
+//! `${REF}`s whose values land wherever you choose (P2) — a gitignored project
+//! `.env` (the default), the OS keychain, or skipped for you to provide later.
+//!
+//! Every file this writes — the manifest, a created/updated `.env`, and the
+//! `.gitignore` line that keeps `.env` out of git — is captured in the same undo
+//! ledger `restore` reads (P30). Keychain values deliberately never enter file
+//! history; setup names their explicit `secret rm` recovery command.
 
 use std::path::{Path, PathBuf};
 
@@ -21,6 +30,7 @@ use crate::secret::{env_file, keychain};
 /// every use site fails closed on it by name (rule 5) — so the honest behavior
 /// is to finish init and report the gap, never abort halfway (the old
 /// interactive path) or pretend it stored (the old dashboard path).
+#[cfg(test)]
 fn store_lifted(lifted: &[Lifted], mut store: impl FnMut(&str, &str) -> Result<()>) -> Vec<String> {
     let mut unstored = Vec::new();
     for l in lifted {
@@ -29,6 +39,48 @@ fn store_lifted(lifted: &[Lifted], mut store: impl FnMut(&str, &str) -> Result<(
         }
     }
     unstored
+}
+
+/// In-memory rollback metadata for keychain writes made before the manifest is
+/// durable. Values never enter file history; they live only for this call so a
+/// later file/history failure can restore the credential store exactly.
+struct KeychainChange {
+    name: String,
+    before: Option<String>,
+}
+
+fn store_lifted_reversibly(lifted: &[Lifted]) -> (Vec<String>, Vec<KeychainChange>) {
+    let mut unstored = Vec::new();
+    let mut changes = Vec::new();
+    for lifted_secret in lifted {
+        // Do not overwrite a value we cannot snapshot: without `before`, a
+        // later rollback could destroy a pre-existing credential.
+        let Ok(before) = keychain::get(&lifted_secret.reference) else {
+            unstored.push(lifted_secret.reference.clone());
+            continue;
+        };
+        if keychain::set(&lifted_secret.reference, &lifted_secret.value).is_err() {
+            unstored.push(lifted_secret.reference.clone());
+            continue;
+        }
+        changes.push(KeychainChange {
+            name: lifted_secret.reference.clone(),
+            before,
+        });
+    }
+    (unstored, changes)
+}
+
+fn rollback_keychain(changes: &[KeychainChange]) -> Result<()> {
+    for change in changes.iter().rev() {
+        match &change.before {
+            Some(value) => keychain::set(&change.name, value)?,
+            None => {
+                keychain::delete(&change.name)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Decide where lifted token values go (P2). Explicit flags always win; an
@@ -541,8 +593,22 @@ version = 1
             println!("No supported CLIs detected — would write a starter manifest:\n\n{STARTER}");
             return Ok(());
         }
-        crate::util::atomic::write(&manifest_path, STARTER)
-            .with_context(|| format!("writing {}", manifest_path.display()))?;
+        // Capture the pre-write state (the file is absent → `before: None`, so
+        // undo deletes it) BEFORE writing, then record one undoable entry — the
+        // same ledger `restore` reads. Best-effort: history never breaks init.
+        let cap = crate::history::capture(&manifest_path, "manifest · starter");
+        if let Err(err) = crate::util::atomic::write(&manifest_path, STARTER)
+            .with_context(|| format!("writing {}", manifest_path.display()))
+        {
+            let _ = crate::history::rollback(std::slice::from_ref(&cap));
+            return Err(err);
+        }
+        if let Err(err) = crate::history::record("project", Vec::new(), vec![cap.clone()]) {
+            crate::history::rollback(&[cap]).context(
+                "history recording failed and the starter manifest could not be rolled back",
+            )?;
+            return Err(err).context("recording the starter manifest for undo");
+        }
         println!(
             "No supported CLIs detected to import — wrote a starter manifest instead.\n{}  Wrote {}\n\nAdd a server with `agentstack search <query>` + `agentstack add from <id> --write`,\nor edit the manifest directly (it has a commented example).",
             "✅".dimmed(),
@@ -647,50 +713,104 @@ version = 1
         return Ok(());
     }
 
-    // Store lifted secret VALUES in the chosen backend (P2). The manifest only
-    // ever holds `${REF}` placeholders (rule 5) — this is where the real values
-    // land. An unreachable keychain (headless Linux: no Secret Service bus) must
-    // not abort init: inform and continue, refs stay honestly unresolved and
-    // fail closed at use time.
-    if !lifted.is_empty() {
-        match resolve_secret_store(args, true)? {
-            SecretStore::Keychain => {
-                let unstored = store_lifted(&lifted, keychain::set);
-                let stored = lifted.len() - unstored.len();
-                if stored > 0 {
-                    println!(
-                        "{}  Stored {stored} token(s) in the OS keychain (service `agentstack`)",
-                        "🔑".dimmed()
-                    );
+    // Every file init writes is captured (pre-write) into `backups`, then
+    // recorded as ONE undoable history entry below — the same ledger `restore`
+    // reads (P30). Capturing before each write is what lets undo restore the
+    // exact prior bytes (or delete a file that did not exist before).
+    let mut backups: Vec<crate::history::FileChange> = Vec::new();
+    let mut keychain_changes: Vec<KeychainChange> = Vec::new();
+    let mut secret_notice: Option<String> = None;
+
+    let writes = (|| -> Result<()> {
+        // Store lifted secret VALUES in the chosen backend (P2). The manifest
+        // only ever holds `${REF}` placeholders. File captures and temporary
+        // keychain snapshots make every pre-commit mutation reversible if a
+        // later write or the history record fails.
+        if !lifted.is_empty() {
+            match resolve_secret_store(args, true)? {
+                SecretStore::Keychain => {
+                    let (unstored, changes) = store_lifted_reversibly(&lifted);
+                    let stored = changes.len();
+                    keychain_changes = changes;
+                    if stored > 0 {
+                        secret_notice = Some(format!(
+                            "{}  Stored {stored} token(s) in the OS keychain (service `agentstack`)",
+                            "🔑".dimmed()
+                        ));
+                    }
+                    if !unstored.is_empty() {
+                        report_unstored_keychain(&unstored);
+                    }
                 }
-                if !unstored.is_empty() {
-                    report_unstored_keychain(&unstored);
+                SecretStore::Env => {
+                    let entries: Vec<(String, String)> = lifted
+                        .iter()
+                        .map(|l| (l.reference.clone(), l.value.clone()))
+                        .collect();
+                    backups.push(crate::history::capture(
+                        &dir.join(".env"),
+                        ".env · lifted secrets",
+                    ));
+                    env_file::write(&dir, &entries)?;
+                    let project_root = crate::manifest::project_root_of(&dir);
+                    let is_git = project_root.join(".git").exists();
+                    if is_git {
+                        // Capture before attempting the write. If it was already
+                        // ignored, remove the unused capture from the transaction.
+                        backups.push(crate::history::capture(
+                            &project_root.join(".gitignore"),
+                            ".gitignore · .env rule",
+                        ));
+                        if !env_file::ensure_gitignored(&project_root, true)? {
+                            backups.pop();
+                        }
+                    }
+                    secret_notice = Some(format!(
+                        "{}  Stored {} token(s) in .env{}",
+                        "🔑".dimmed(),
+                        entries.len(),
+                        if is_git { " (gitignored)" } else { "" }
+                    ));
                 }
+                SecretStore::Skip => report_skipped(&lifted),
             }
-            SecretStore::Env => {
-                let entries: Vec<(String, String)> = lifted
-                    .iter()
-                    .map(|l| (l.reference.clone(), l.value.clone()))
-                    .collect();
-                env_file::write(&dir, &entries)?;
-                let project_root = crate::manifest::project_root_of(&dir);
-                let is_git = project_root.join(".git").exists();
-                if is_git {
-                    env_file::ensure_gitignored(&project_root, true)?;
-                }
-                println!(
-                    "{}  Stored {} token(s) in .env{}",
-                    "🔑".dimmed(),
-                    entries.len(),
-                    if is_git { " (gitignored)" } else { "" }
-                );
-            }
-            SecretStore::Skip => report_skipped(&lifted),
         }
+
+        backups.push(crate::history::capture(&manifest_path, "manifest · import"));
+        crate::util::atomic::write(&manifest_path, &toml_text)
+            .with_context(|| format!("writing {}", manifest_path.display()))?;
+        Ok(())
+    })();
+
+    if let Err(err) = writes {
+        let file_rollback = crate::history::rollback(&backups);
+        let keychain_rollback = rollback_keychain(&keychain_changes);
+        if let Err(rollback_err) = file_rollback.and(keychain_rollback) {
+            return Err(err).context(format!(
+                "initialization failed and rollback also failed: {rollback_err:#}"
+            ));
+        }
+        return Err(err).context("initialization failed; completed writes were rolled back");
     }
 
-    crate::util::atomic::write(&manifest_path, &toml_text)
-        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    // The history record is part of the commit contract. If it cannot be made,
+    // restore the files and temporary keychain changes instead of claiming an
+    // undo that does not exist.
+    if let Err(err) = crate::history::record("project", detected.clone(), backups.clone()) {
+        let file_rollback = crate::history::rollback(&backups);
+        let keychain_rollback = rollback_keychain(&keychain_changes);
+        if let Err(rollback_err) = file_rollback.and(keychain_rollback) {
+            return Err(err).context(format!(
+                "recording initialization history failed and rollback also failed: {rollback_err:#}"
+            ));
+        }
+        return Err(err)
+            .context("recording initialization history failed; writes were rolled back");
+    }
+
+    if let Some(notice) = secret_notice {
+        println!("{notice}");
+    }
 
     println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());
     if show_next {

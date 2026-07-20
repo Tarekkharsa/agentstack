@@ -7,6 +7,7 @@
 //! undo reverts your tools, not your declared stack — so reverted changes simply
 //! show up as pending again.
 
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -36,8 +37,48 @@ pub struct Entry {
     pub summary: String,
     pub targets: Vec<String>,
     pub files: Vec<FileChange>,
+    /// Entries written as part of one user-facing operation share a batch id.
+    /// `restore --last` reverses the whole batch newest-to-oldest, so a setup
+    /// that imports a manifest and then applies native configs is genuinely
+    /// one undo even though each phase keeps its own history entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch: Option<String>,
     #[serde(default)]
     pub undone: bool,
+}
+
+thread_local! {
+    /// Batch context is thread-local: command execution is synchronous, while
+    /// tests may record history concurrently on independent worker threads.
+    static ACTIVE_BATCH: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// RAII scope for grouping every [`record`] call made by one user-facing
+/// operation. Dropping the guard restores any outer batch.
+pub struct BatchGuard {
+    previous: Option<String>,
+}
+
+impl Drop for BatchGuard {
+    fn drop(&mut self) {
+        ACTIVE_BATCH.with(|active| {
+            active.replace(self.previous.take());
+        });
+    }
+}
+
+/// Start a history batch for the current thread.
+pub fn begin_batch(label: &str) -> BatchGuard {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let id = format!("{label}-{:016x}", now.as_nanos());
+    let previous = ACTIVE_BATCH.with(|active| active.replace(Some(id)));
+    BatchGuard { previous }
+}
+
+fn active_batch() -> Option<String> {
+    ACTIVE_BATCH.with(|active| active.borrow().clone())
 }
 
 pub fn dir() -> PathBuf {
@@ -85,6 +126,7 @@ pub fn record(scope: &str, targets: Vec<String>, files: Vec<FileChange>) -> Resu
         summary,
         targets,
         files,
+        batch: active_batch(),
         undone: false,
     };
     let d = dir();
@@ -120,21 +162,30 @@ pub fn undo(id: &str) -> Result<()> {
     if entry.undone {
         anyhow::bail!("this change was already undone");
     }
-    for f in &entry.files {
+    rollback(&entry.files)?;
+    entry.undone = true;
+    let mut out = serde_json::to_string_pretty(&entry)?;
+    out.push('\n');
+    fs::write(&path, out).with_context(|| format!("updating history entry {id}"))?;
+    Ok(())
+}
+
+/// Restore captured files in reverse write order. Public so a command that is
+/// still assembling an entry can roll back partial writes if a later write or
+/// the history record itself fails.
+pub fn rollback(files: &[FileChange]) -> Result<()> {
+    for f in files.iter().rev() {
         let p = Path::new(&f.path);
         match &f.before {
             Some(content) => crate::util::atomic::write(p, content)?,
             None => {
                 if p.exists() {
-                    let _ = fs::remove_file(p);
+                    fs::remove_file(p)
+                        .with_context(|| format!("removing {} during rollback", p.display()))?;
                 }
             }
         }
     }
-    entry.undone = true;
-    let mut out = serde_json::to_string_pretty(&entry)?;
-    out.push('\n');
-    fs::write(&path, out).with_context(|| format!("updating history entry {id}"))?;
     Ok(())
 }
 
@@ -193,6 +244,37 @@ mod tests {
 
         undo(&id).unwrap();
         assert!(!file.exists());
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn batch_guard_tags_every_record_and_then_restores_the_outer_context() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let work = assert_fs::TempDir::new().unwrap();
+
+        {
+            let _batch = begin_batch("setup");
+            for name in ["one", "two"] {
+                let file = work.path().join(name);
+                let cap = capture(&file, name);
+                fs::write(&file, "after").unwrap();
+                record("project", Vec::new(), vec![cap]).unwrap();
+            }
+        }
+
+        let entries = list();
+        assert_eq!(entries.len(), 2);
+        let batch = entries[0].batch.as_deref().expect("batch id");
+        assert!(batch.starts_with("setup-"));
+        assert_eq!(entries[1].batch.as_deref(), Some(batch));
+
+        let file = work.path().join("outside");
+        let cap = capture(&file, "outside");
+        fs::write(&file, "after").unwrap();
+        record("project", Vec::new(), vec![cap]).unwrap();
+        assert!(list()[0].batch.is_none(), "batch context ended with guard");
         std::env::remove_var("AGENTSTACK_HOME");
     }
 }

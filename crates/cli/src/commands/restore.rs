@@ -27,7 +27,7 @@ pub fn run(args: &RestoreArgs, manifest_dir: Option<&Path>) -> Result<()> {
             .iter()
             .find(|e| !e.undone)
             .context("nothing to undo — no recorded write that isn't already undone")?;
-        return undo_entry(entry, &entries, args.write);
+        return undo_selection(entry, &entries, args.write);
     }
 
     match &args.adapter {
@@ -49,7 +49,7 @@ pub fn run(args: &RestoreArgs, manifest_dir: Option<&Path>) -> Result<()> {
             let entries = history::list();
             let matches: Vec<_> = entries.iter().filter(|e| id_matches(&e.id, id)).collect();
             match matches.as_slice() {
-                [one] => undo_entry(one, &entries, args.write),
+                [one] => undo_selection(one, &entries, args.write),
                 [] => anyhow::bail!(
                     "'{id}' is neither an adapter id nor a recorded change — `agentstack restore` lists both"
                 ),
@@ -160,9 +160,49 @@ fn list(registry: &Registry, dir: &Path) -> Result<()> {
 
 /// Preview (or perform) a recorded event's undo: every captured file goes back
 /// to its pre-write bytes; files that didn't exist before are deleted.
-fn undo_entry(entry: &history::Entry, entries: &[history::Entry], write: bool) -> Result<()> {
+fn undo_selection(entry: &history::Entry, entries: &[history::Entry], write: bool) -> Result<()> {
+    let selected: Vec<&history::Entry> = match &entry.batch {
+        Some(batch) => entries
+            .iter()
+            .filter(|candidate| candidate.batch.as_ref() == Some(batch) && !candidate.undone)
+            .collect(),
+        None => vec![entry],
+    };
+    if selected.is_empty() {
+        anyhow::bail!("this change batch was already undone");
+    }
+
+    if selected.len() > 1 {
+        println!(
+            "{} undo one setup batch ({} recorded phases, newest first)",
+            "↩".cyan(),
+            selected.len()
+        );
+    }
+    for selected_entry in &selected {
+        preview_entry(selected_entry, entries);
+    }
+
+    if write {
+        // Newest-to-oldest is essential when two phases touched the same path:
+        // first restore the state before the newest phase, then the state from
+        // before the whole batch began.
+        for selected_entry in &selected {
+            history::undo(&selected_entry.id)?;
+        }
+        println!(
+            "{} undone — reverted files show up as pending again; re-run `agentstack apply` to re-render.",
+            "✓".green()
+        );
+    } else {
+        println!("\nDry run. Re-run with {} to undo.", "--write".bold());
+    }
+    Ok(())
+}
+
+fn preview_entry(entry: &history::Entry, entries: &[history::Entry]) {
     println!(
-        "{} undo {} ({}, {}): {}",
+        "  {} {} ({}, {}): {}",
         "↩".cyan(),
         short_id(&entry.id, entries),
         entry.scope,
@@ -179,17 +219,6 @@ fn undo_entry(entry: &history::Entry, entries: &[history::Entry], write: bool) -
             None => println!("  {} {:<28} delete {}", "✗".red(), f.label, f.path),
         }
     }
-
-    if write {
-        history::undo(&entry.id)?;
-        println!(
-            "{} undone — reverted files show up as pending again; re-run `agentstack apply` to re-render.",
-            "✓".green()
-        );
-    } else {
-        println!("\nDry run. Re-run with {} to undo.", "--write".bold());
-    }
-    Ok(())
 }
 
 fn restore_one(registry: &Registry, dir: &Path, id: &str, scope: Scope, write: bool) -> Result<()> {

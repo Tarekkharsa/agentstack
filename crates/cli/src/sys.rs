@@ -17,6 +17,8 @@
 use std::io;
 use std::path::Path;
 use std::process::Command;
+#[cfg(unix)]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A signal we deliver to a process group. Kept as an enum so callers never
 /// name a raw `libc` constant.
@@ -26,6 +28,81 @@ pub enum Signal {
     Term,
     /// Unconditional kill (`SIGKILL`).
     Kill,
+}
+
+#[cfg(unix)]
+static SIGINT_SEEN: AtomicBool = AtomicBool::new(false);
+
+#[cfg(unix)]
+extern "C" fn mark_sigint(_signal: libc::c_int) {
+    // Atomic stores are signal-safe and allocate nothing. `SeqCst` keeps the
+    // observation simple across the terminal-reading thread and handler.
+    SIGINT_SEEN.store(true, Ordering::SeqCst);
+}
+
+/// Temporarily turn Ctrl-C into an observable cancellation instead of an
+/// immediate process exit. Used only around the interactive setup wizard so it
+/// can print the files already written and the exact undo command.
+pub struct SigintGuard {
+    #[cfg(unix)]
+    previous: libc::sigaction,
+}
+
+impl SigintGuard {
+    #[cfg(unix)]
+    pub fn install() -> io::Result<Self> {
+        use std::mem::MaybeUninit;
+
+        SIGINT_SEEN.store(false, Ordering::SeqCst);
+        // SAFETY: both sigaction values are fully initialized before use;
+        // `mark_sigint` has the required C ABI and only performs an atomic
+        // store. Passing a valid signal number and pointers follows sigaction's
+        // contract. Keeping SA_RESTART clear lets a blocked terminal read
+        // return so the wizard can observe the flag.
+        unsafe {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            action.sa_sigaction = mark_sigint as *const () as usize;
+            action.sa_flags = 0;
+            libc::sigemptyset(&mut action.sa_mask);
+            let mut previous = MaybeUninit::<libc::sigaction>::uninit();
+            if libc::sigaction(libc::SIGINT, &action, previous.as_mut_ptr()) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self {
+                previous: previous.assume_init(),
+            })
+        }
+    }
+
+    #[cfg(not(unix))]
+    pub fn install() -> io::Result<Self> {
+        Ok(Self {})
+    }
+
+    #[cfg(unix)]
+    pub fn interrupted(&self) -> bool {
+        SIGINT_SEEN.load(Ordering::SeqCst)
+    }
+
+    #[cfg(not(unix))]
+    pub fn interrupted(&self) -> bool {
+        false
+    }
+}
+
+impl Drop for SigintGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            // SAFETY: `previous` came from a successful sigaction call and
+            // remains valid for the guard's lifetime. Restoring it closes the
+            // wizard-only interception scope.
+            unsafe {
+                libc::sigaction(libc::SIGINT, &self.previous, std::ptr::null_mut());
+            }
+            SIGINT_SEEN.store(false, Ordering::SeqCst);
+        }
+    }
 }
 
 /// Whether the process `pid` is still alive — `kill(pid, 0)` delivers no
@@ -182,6 +259,20 @@ mod tests {
             !dir_writable(&tmp.path().join("does-not-exist")),
             "a missing path is not writable"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sigint_guard_observes_interrupt_and_restores_on_drop() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let signal = SigintGuard::install().expect("install scoped SIGINT handler");
+        // SAFETY: raise delivers SIGINT to this process; the scoped handler is
+        // installed and performs only an atomic store.
+        assert_eq!(unsafe { libc::raise(libc::SIGINT) }, 0);
+        assert!(signal.interrupted());
+        drop(signal); // restoring the test harness's prior handler is the check's contract
     }
 
     #[cfg(unix)]

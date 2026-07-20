@@ -684,13 +684,6 @@ fn render(
     let partially_written = touched_targets.intersection(&blocked_targets).count();
     if will_write {
         state.save()?;
-        // Record one undoable history entry for everything this apply wrote.
-        // Best-effort: never fail an otherwise-successful apply over history.
-        let _ = crate::history::record(
-            scope.as_str(),
-            touched_targets.into_iter().collect(),
-            backups,
-        );
         // Pin the project-declared instruction fragments that compiled. The
         // gate above already blocked on drift, so every checksum recorded
         // here is either unchanged or a first pin — never absorbed drift.
@@ -700,16 +693,34 @@ fn render(
         }
     }
 
-    if will_write
-        && scope == Scope::Project
-        && !args.no_gitignore
-        && crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true)?
-    {
-        println!(
-            "\n{} .gitignore: managed block updated — generated artifacts stay out of git ({} to commit them instead)",
-            "✓".green(),
-            "--no-gitignore".bold()
-        );
+    let history_targets: Vec<String> = touched_targets.iter().cloned().collect();
+    if will_write && scope == Scope::Project && !args.no_gitignore {
+        let gitignore = project_root.join(".gitignore");
+        let capture = crate::history::capture(&gitignore, ".gitignore · managed artifacts");
+        match crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true) {
+            Ok(true) => {
+                backups.push(capture);
+                println!(
+                    "\n{} .gitignore: managed block updated — generated artifacts stay out of git ({} to commit them instead)",
+                    "✓".green(),
+                    "--no-gitignore".bold()
+                );
+            }
+            Ok(false) => {}
+            Err(err) => {
+                // Config writes happened before the managed-block update. Keep
+                // them recoverable even when this final ancillary write fails.
+                let _ = crate::history::record(scope.as_str(), history_targets.clone(), backups);
+                return Err(err);
+            }
+        }
+    }
+
+    if will_write {
+        // Record one undoable history entry for every file this apply wrote,
+        // including the project-scope managed gitignore block above.
+        // Best-effort: never fail an otherwise-successful apply over history.
+        let _ = crate::history::record(scope.as_str(), history_targets, backups);
     }
 
     // `apply` renders servers/instructions/hooks/settings — never skills.

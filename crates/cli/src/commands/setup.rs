@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
 
 use crate::cli::{ApplyArgs, ConnectArgs, DoctorArgs, InitArgs, InstallArgs, LockArgs, SetupArgs};
@@ -30,16 +30,33 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     //    from a subdirectory continues the ROOT project instead of nesting.
     let base = super::project_base(manifest_dir)?;
     let interactive = crate::util::confirm::is_interactive();
+    // Every phase that records a write during this wizard belongs to one undo
+    // batch. `restore --last` reverses the batch newest-to-oldest.
+    let _history_batch = crate::history::begin_batch("setup");
+    // On Unix, keep Ctrl-C from terminating between the import write and the
+    // recovery summary. The guard restores the process's prior handler on exit.
+    let sigint = interactive
+        .then(crate::sys::SigintGuard::install)
+        .transpose()?;
 
     // P1: open with the plan, so the user knows the shape of the whole run
-    // before anything happens — and, crucially, that nothing is written until
-    // they confirm. The plan lives here in `setup`, not in plain `init` (which
-    // is the scriptable primitive).
+    // before anything happens — and, crucially, what the import step writes and
+    // that CLIs stay untouched until a later confirm. The plan lives here in
+    // `setup`, not in plain `init` (which is the scriptable primitive).
     if interactive {
         print_plan();
     }
 
+    // P30/P7: snapshot the write ledger at the very TOP — before the import can
+    // write anything — so both the closing summary and any cancel mini-summary
+    // reflect EVERY file this run wrote, init's manifest/.env/.gitignore
+    // included. (It used to be snapshotted after the import, which hid init's
+    // writes from the summary and made "No files were written" a lie.)
+    let history_before: std::collections::HashSet<String> =
+        crate::history::list().into_iter().map(|e| e.id).collect();
+
     let mut manifest_path = crate::manifest::resolve_manifest_dir(&base).join(MANIFEST_FILE);
+    let mut imported = false;
     if !manifest_path.exists() {
         if !interactive {
             println!(
@@ -52,7 +69,21 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             println!("    agentstack use <profile> --write   # if the manifest has skills");
             return Ok(());
         }
-        println!("\nNo manifest here yet — importing the setup already on this machine.\n");
+        println!("\nNo manifest here yet — importing the setup already on this machine.");
+        // P30: the plan promised nothing is written until you confirm — honor
+        // it with ONE explicit gate before the importer runs. This is the write
+        // the wizard performs up front; everything downstream still has its own
+        // confirm.
+        if !crate::util::confirm::confirm(
+            "\nImport now? The manifest and any lifted token values will be written — everything else still waits for its own confirm.",
+        )? {
+            println!(
+                "\n{} Nothing written. Re-run when you're ready to import.",
+                "·".dimmed()
+            );
+            return Ok(());
+        }
+        println!();
         super::init::run_for_setup(
             &InitArgs {
                 global: false,
@@ -65,6 +96,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             },
             manifest_dir,
         )?;
+        imported = true;
         manifest_path = crate::manifest::resolve_manifest_dir(&base).join(MANIFEST_FILE);
     }
     // `init` may have created `.agentstack/`, so re-resolve before loading.
@@ -79,25 +111,64 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
+    // 2. Everything past the import can early-stop (a declined confirm, a
+    //    validation stop) or hard-cancel (Esc at the mode fork). Route the whole
+    //    remainder through `configure`, which closes clean stops with a truthful
+    //    mini-summary of what the import already wrote; the outer arm below adds
+    //    the same mini-summary on a hard error so a stranded import is never
+    //    silent (P30). A run that started from an existing manifest never
+    //    imported, so its ledger diff is empty and the mini-summary is a no-op.
+    match configure(args, manifest_dir, &history_before) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            if sigint.as_ref().is_some_and(|guard| guard.interrupted()) {
+                println!("\n{} Setup canceled.", "·".dimmed());
+                if imported {
+                    print_stop_summary(&history_before);
+                }
+                return Ok(());
+            }
+            if imported {
+                print_stop_summary(&history_before);
+            }
+            Err(err)
+        }
+    }
+}
+
+/// The post-import remainder of the wizard: load, preflight, secrets, the P28
+/// delivery-mode fork, then the machine layer + P7 close. Split from `run` so
+/// every early stop routes through one truthful mini-summary of what the import
+/// already wrote (P30). Returns `Ok(())` on a clean completion OR a clean stop
+/// (its own summary already printed); `Err` only propagates a genuine failure,
+/// which the caller also closes with the mini-summary.
+fn configure(
+    args: &SetupArgs,
+    manifest_dir: Option<&Path>,
+    history_before: &std::collections::HashSet<String>,
+) -> Result<()> {
+    let interactive = crate::util::confirm::is_interactive();
     let ctx = super::load(manifest_dir)?;
     // Default scope follows the manifest's home: project for a repo manifest,
     // global only for the machine manifest (see docs/design/default-scope.md).
     let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
     let target_ids = resolve_targets(&ctx.loaded.manifest, &ctx.registry, &args.targets);
 
-    // 2. Preflight inspection (adapters, skills, secrets) — read-only.
+    // Preflight inspection (adapters, skills, secrets) — read-only.
     let pf = preflight(&ctx, &target_ids)?;
 
-    // 3. Missing secrets — offer to set each one now (interactive only).
+    // Missing secrets — offer to set each one now (interactive only).
     let missing = resolve_missing_secrets(&ctx, pf.missing_secrets)?;
 
-    // 4. Blocking issues stop before anything is written.
+    // Blocking issues stop before the fork writes anything further — but the
+    // import above may already have landed, so close with the truthful summary.
     if pf.validation_errors {
         println!(
             "\n{} Fix the manifest validation error(s) above, then re-run {}.",
             "→".cyan(),
             "agentstack init".bold()
         );
+        print_stop_summary(history_before);
         return Ok(());
     }
     if !missing.is_empty() {
@@ -110,27 +181,30 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
         for name in &missing {
             println!("    agentstack secret set {name}");
         }
+        print_stop_summary(history_before);
         return Ok(());
     }
 
-    // 5. P28: the delivery mode is chosen BEFORE any write and forks the rest
-    //    of the run. static renders into every CLI (the original path);
-    //    clean-at-rest pins the lock and teaches the session rhythm without
-    //    rendering; zero-files offers the gateway and points at trust. No more
-    //    apply-first-then-print-the-undo.
+    // P28: the delivery mode is chosen BEFORE any further write and forks the
+    // rest of the run. static renders into every CLI (the original path);
+    // clean-at-rest pins the lock and teaches the session rhythm without
+    // rendering; zero-files offers the gateway and points at trust.
     let current_mode = super::overview::detect_mode(&ctx, &target_ids);
-    let mode = choose_delivery_mode(current_mode)?;
+    let mode = match choose_delivery_mode(current_mode)? {
+        Some(m) => m,
+        None => {
+            // Esc/q is an explicit cancellation. Ctrl-C interrupts the terminal
+            // read and is handled by `run`'s scoped SIGINT guard instead.
+            println!("\n{} Setup canceled.", "·".dimmed());
+            print_stop_summary(history_before);
+            return Ok(());
+        }
+    };
     if interactive {
         // A one-line plan of exactly what this fork will do next, straight from
         // the same pure mapping the test pins.
         println!("  {} {}", "→".cyan(), fork_plan(mode).join(" · ").dimmed());
     }
-
-    // P7: snapshot the write ledger now, so the closing summary shows exactly
-    // the files *this run* wrote — reusing the same ledger `restore` reads —
-    // regardless of which fork ran.
-    let history_before: std::collections::HashSet<String> =
-        crate::history::list().into_iter().map(|e| e.id).collect();
 
     let proceeded = match mode {
         super::overview::Mode::Static => run_static(args, scope, manifest_dir)?,
@@ -143,10 +217,11 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             true
         }
     };
-    // The static fork returns false only when its write confirm was declined —
-    // nothing was written and the message is already printed, so there is
-    // nothing to seed or summarize.
+    // The static fork returns false only when its write confirm was declined.
+    // No CLI config was written, but the import above may have been — so close
+    // with the truthful mini-summary (a no-op when the ledger diff is empty).
     if !proceeded {
+        print_stop_summary(history_before);
         return Ok(());
     }
 
@@ -155,7 +230,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // reflected in the summary; a no-render fork reloads an unchanged manifest.
     let ctx = super::load(manifest_dir)?;
     let seeded_house_rules = offer_house_rules(&ctx, &target_ids)?;
-    print_change_summary(&ctx, &history_before, seeded_house_rules);
+    print_change_summary(&ctx, history_before, seeded_house_rules);
     Ok(())
 }
 
@@ -178,10 +253,12 @@ fn run_static(args: &SetupArgs, scope: Scope, manifest_dir: Option<&Path>) -> Re
     }
 
     // `confirm` returns false without blocking when there's no terminal, so
-    // CI/pipes stop here having written nothing.
+    // CI/pipes stop here. Note the honest scope: no CLI config was written here,
+    // but the wizard's import step may already have (the caller closes with the
+    // truthful mini-summary), so this line no longer claims "nothing written".
     if !crate::util::confirm::confirm("\nApply this setup?")? {
         println!(
-            "\n{} Nothing written. Re-run in a terminal to apply, or use {}.",
+            "\n{} Stopped before writing any CLI config. Re-run in a terminal to apply, or use {}.",
             "·".dimmed(),
             "agentstack apply --write".bold()
         );
@@ -365,9 +442,10 @@ fn run_zero_files() -> Result<()> {
     Ok(())
 }
 
-/// P1: the opening plan. Four numbered steps and the promise that nothing is
-/// written until the user confirms — so a "machine setup" tool never surprises
-/// them. Printed only in an interactive `setup`.
+/// P1: the opening plan. Four numbered steps and a promise made precise for the
+/// P30 order: the import step — and only after you confirm it — writes the
+/// manifest plus any lifted token values; your CLIs' own configs stay untouched
+/// until a later apply confirm. Printed only in an interactive `setup`.
 fn print_plan() {
     println!("\n{}", "Setup will:".bold());
     println!("  1. detect the agent CLIs on this machine");
@@ -378,7 +456,9 @@ fn print_plan() {
     );
     println!("  4. write one agentstack manifest");
     println!(
-        "\n{} Nothing is written until you confirm. Your CLIs are not touched yet.",
+        "\n{} The import step writes only the manifest and any lifted token values,\n\
+         \x20   and only after you confirm it. Your CLI configs stay untouched until the\n\
+         \x20   later apply confirm.",
         "·".dimmed()
     );
 }
@@ -529,37 +609,73 @@ fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Resul
         return Ok(false);
     }
 
-    super::init::ensure_global_manifest()?;
-    super::init::seed_house_rules(&home)?;
-    let loaded = crate::manifest::load_from_dir(&home)?;
+    let manifest_path = home.join(MANIFEST_FILE);
+    let fragment_path = home
+        .join("instructions")
+        .join(format!("{}.md", super::init::HOUSE_RULES_NAME));
+    let mut backups = vec![
+        crate::history::capture(&manifest_path, "machine manifest · house rules"),
+        crate::history::capture(&fragment_path, "agentstack house-rules fragment"),
+    ];
 
-    // Consent was just given — compile the machine layer for the same targets
-    // this setup configured, at global scope (the layer's home turf).
-    for id in target_ids {
-        let Some(desc) = ctx.registry.get(id) else {
-            continue;
-        };
-        let Some(plan) = crate::render::instructions::plan_instructions(
-            &loaded.manifest,
-            desc,
-            Scope::Global,
-            &home,
-        ) else {
-            continue;
-        };
-        if plan.changed() {
-            plan.write()?;
-            println!(
-                "  {} {} — wrote managed region ({})",
-                "✓".green(),
-                desc.display,
-                plan.path.display()
-            );
-        } else {
-            println!("  {} {} — up to date", "✓".green(), desc.display);
+    let writes = (|| -> Result<()> {
+        super::init::ensure_global_manifest()?;
+        super::init::seed_house_rules(&home)?;
+        let loaded = crate::manifest::load_from_dir(&home)?;
+
+        // Consent was just given — compile the machine layer for the same
+        // targets this setup configured, at global scope (the layer's home turf).
+        for id in target_ids {
+            let Some(desc) = ctx.registry.get(id) else {
+                continue;
+            };
+            let Some(plan) = crate::render::instructions::plan_instructions(
+                &loaded.manifest,
+                desc,
+                Scope::Global,
+                &home,
+            ) else {
+                continue;
+            };
+            if plan.changed() {
+                backups.push(crate::history::capture(
+                    &plan.path,
+                    format!("{} · house-rules instructions", desc.display),
+                ));
+                plan.write()?;
+                println!(
+                    "  {} {} — wrote managed region ({})",
+                    "✓".green(),
+                    desc.display,
+                    plan.path.display()
+                );
+            } else {
+                println!("  {} {} — up to date", "✓".green(), desc.display);
+            }
         }
+        Ok(())
+    })();
+
+    if let Err(err) = writes {
+        crate::history::rollback(&backups)
+            .context("house-rules write failed and rollback also failed")?;
+        return Err(err).context("house-rules write failed; completed writes were rolled back");
+    }
+
+    // The initial captures include files that may already have existed and
+    // stayed byte-identical. Keep only actual writes in history and the summary.
+    backups.retain(file_change_differs_now);
+    if let Err(err) = crate::history::record("global", target_ids.to_vec(), backups.clone()) {
+        crate::history::rollback(&backups)
+            .context("house-rules history failed and rollback also failed")?;
+        return Err(err).context("recording house-rules writes failed; writes were rolled back");
     }
     Ok(true)
+}
+
+fn file_change_differs_now(change: &crate::history::FileChange) -> bool {
+    let current = std::fs::read_to_string(&change.path).ok();
+    current != change.before
 }
 
 /// P4: the commands a non-default mode maps to (v1 prints, never executes), plus
@@ -599,12 +715,12 @@ fn mode_switch_plan(
 /// help text and all, BEFORE any write — the selection forks the rest of the
 /// run. The current mode is preselected. Non-interactive shells never prompt
 /// and keep the current mode, so CI/pipes stay on the render path they had.
-fn choose_delivery_mode(current: super::overview::Mode) -> Result<super::overview::Mode> {
+fn choose_delivery_mode(current: super::overview::Mode) -> Result<Option<super::overview::Mode>> {
     use super::overview::Mode;
     let modes = [Mode::Static, Mode::CleanAtRest, Mode::ZeroFiles];
 
     if !crate::util::confirm::is_interactive() {
-        return Ok(current);
+        return Ok(Some(current));
     }
 
     // The full P4 help prints once above the selector; the menu items carry the
@@ -626,14 +742,15 @@ fn choose_delivery_mode(current: super::overview::Mode) -> Result<super::overvie
         .iter()
         .map(|m| format!("{} — {}", m.label(), m.short()))
         .collect();
-    // `.interact()` needs a TTY; we only reach it when `is_interactive()`, and
-    // an Esc/Ctrl-C bubbles up as an error that aborts the wizard cleanly.
+    // `interact_opt` distinguishes an explicit Esc/q cancellation from a real
+    // terminal error. Ctrl-C is converted into an interrupted read by the
+    // wizard's scoped SIGINT guard and handled by `run`.
     let idx = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
         .with_prompt("Pick a delivery mode")
         .items(&items)
         .default(default_idx)
-        .interact()?;
-    Ok(modes[idx])
+        .interact_opt()?;
+    Ok(idx.map(|selected| modes[selected]))
 }
 
 /// The ordered steps each delivery-mode fork runs, as plain labels. Pure, so
@@ -648,18 +765,14 @@ fn fork_plan(mode: super::overview::Mode) -> &'static [&'static str] {
     }
 }
 
-/// P7: the transparency close. Gathers what THIS run changed — every file
-/// written (from the apply-history entries new since `history_before`), where
-/// each referenced secret resolves now, and what was seeded — then prints it
-/// with the undo + inspect one-liners.
-fn print_change_summary(
-    ctx: &super::Context,
+/// The files written since `history_before` was snapshotted, deduped by path
+/// (an apply and a profile activation can touch the same file). New history
+/// entries hold the pre-write snapshot of each touched file; we surface the
+/// paths + labels. Shared basis for both the full P7 close and the P30 cancel
+/// mini-summary, so "what this run wrote" has one definition.
+fn files_written_since(
     history_before: &std::collections::HashSet<String>,
-    seeded_house_rules: bool,
-) {
-    // Files: new history entries hold the pre-write snapshot of each touched
-    // file; we only want the paths + labels, deduped by path (an apply and a
-    // profile activation can touch the same file).
+) -> Vec<(String, String)> {
     let mut files: Vec<(String, String)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for entry in crate::history::list() {
@@ -672,6 +785,69 @@ fn print_change_summary(
             }
         }
     }
+    files
+}
+
+/// Whether any written path is a native CLI-side config (server config,
+/// instruction file, settings, or a materialized skill) rather than
+/// agentstack's own bookkeeping (the manifest, a lifted-secret `.env`, the
+/// `.gitignore` line, or the lockfile). Only a CLI-config change warrants the
+/// "restart your CLIs" advice (P30) — importing a manifest does not.
+fn cli_config_touched(files: &[(String, String)]) -> bool {
+    files.iter().any(|(path, _)| is_cli_config_path(path))
+}
+
+fn is_cli_config_path(path: &str) -> bool {
+    let name = Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    // agentstack's own artifacts are the exception; everything else written
+    // during setup is a CLI-side file the harness reads at startup.
+    name != MANIFEST_FILE && name != ".env" && name != ".gitignore" && name != "agentstack.lock"
+}
+
+/// P30: a truthful mini-summary for any post-import stop — list whatever this
+/// run has ALREADY written (from the same ledger `restore` reads) and the one
+/// undo one-liner. A no-op when nothing was written this run (e.g. the manifest
+/// already existed), so callers can invoke it unconditionally at any stop.
+fn print_stop_summary(history_before: &std::collections::HashSet<String>) {
+    let files = files_written_since(history_before);
+    if files.is_empty() {
+        return;
+    }
+    print!("{}", render_stop_summary(&files));
+}
+
+/// Pure formatter for the P30 cancel mini-summary (what the import already
+/// wrote + the undo one-liner), so the cancel path is unit-testable without a
+/// live wizard. Only reached with a non-empty `files`.
+fn render_stop_summary(files: &[(String, String)]) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "\n  The import already wrote {} file(s) this run:\n",
+        files.len()
+    ));
+    for (path, label) in files {
+        out.push_str(&format!("    {path}  ({label})\n"));
+    }
+    out.push_str("  Undo recorded files:  agentstack restore --last --write\n");
+    out.push_str(
+        "  Keychain values are outside file history; inspect with `agentstack secret list` and remove with `agentstack secret rm <NAME>`.\n",
+    );
+    out
+}
+
+/// P7: the transparency close. Gathers what THIS run changed — every file
+/// written (from the apply-history entries new since `history_before`), where
+/// each referenced secret resolves now, and what was seeded — then prints it
+/// with the undo + inspect one-liners.
+fn print_change_summary(
+    ctx: &super::Context,
+    history_before: &std::collections::HashSet<String>,
+    seeded_house_rules: bool,
+) {
+    let files = files_written_since(history_before);
 
     // Secrets: re-derive where each referenced ref resolves now (the resolver is
     // the source of truth; we never stored a value to echo).
@@ -683,6 +859,11 @@ fn print_change_summary(
         .into_iter()
         .filter_map(|name| sources.source_of(&name).map(|s| (name, s.to_string())))
         .collect();
+    let keychain_secrets: Vec<String> = secrets
+        .iter()
+        .filter(|(_, source)| source == "keychain")
+        .map(|(name, _)| name.clone())
+        .collect();
 
     let mut seeded: Vec<String> = Vec::new();
     if seeded_house_rules {
@@ -693,19 +874,37 @@ fn print_change_summary(
         ));
     }
 
+    // Restart advice is warranted only when a native CLI config actually
+    // changed — a rendered config/skill in the ledger, or the house-rules
+    // fragment we compiled into the global instruction files (which is NOT in
+    // the ledger, hence the explicit OR).
+    let cli_config_changed = cli_config_touched(&files) || seeded_house_rules;
+
     println!("\n{} Setup complete.", "✓".green());
     println!("\n{}", "What changed on this machine".bold());
-    print!("{}", render_change_summary(&files, &secrets, &seeded));
+    print!(
+        "{}",
+        render_change_summary(
+            &files,
+            &secrets,
+            &seeded,
+            cli_config_changed,
+            &keychain_secrets,
+        )
+    );
 }
 
 /// Pure formatter for the P7 close body (files / secrets / seeded / one-liners),
 /// so the transparency block is unit-testable without a live setup run. Sections
 /// with nothing to show are omitted, except the always-present undo/inspect
-/// one-liners.
+/// one-liners. The restart-CLIs line prints only when a native CLI config
+/// changed this run (P30).
 fn render_change_summary(
     files: &[(String, String)],
     secrets: &[(String, String)],
     seeded: &[String],
+    cli_config_changed: bool,
+    keychain_secrets: &[String],
 ) -> String {
     let mut out = String::new();
     if files.is_empty() {
@@ -728,10 +927,23 @@ fn render_change_summary(
             out.push_str(&format!("    {s}\n"));
         }
     }
-    out.push_str("  Undo everything this run wrote:  agentstack restore --last --write\n");
+    out.push_str(
+        "  Undo recorded file writes from this setup:  agentstack restore --last --write\n",
+    );
+    if !keychain_secrets.is_empty() {
+        out.push_str(
+            "  Keychain values are outside file history; remove them explicitly if needed:\n",
+        );
+        for name in keychain_secrets {
+            out.push_str(&format!("    agentstack secret rm {name}\n"));
+        }
+    }
     out.push_str("  Inspect any time:  agentstack doctor  ·  agentstack\n");
-    // Harnesses read config at startup, so an open session won't see the writes.
-    out.push_str("\n  Restart your agent CLI(s) so they pick up the new config.\n");
+    // Harnesses read config at startup, so an open session won't see the writes
+    // — but only say so when a CLI config actually changed this run (P30).
+    if cli_config_changed {
+        out.push_str("\n  Restart your agent CLI(s) so they pick up the new config.\n");
+    }
     // P29.1: the closing doorway is the summary's FINAL line — it hands the user
     // to the walkthrough exactly when curiosity peaks, or back to bare
     // `agentstack` for the next step. Every delivery-mode fork ends through this
@@ -920,7 +1132,10 @@ fn resolve_missing_secrets(ctx: &super::Context, missing: Vec<String>) -> Result
 #[cfg(test)]
 mod tests {
     use super::super::overview::Mode;
-    use super::{fork_plan, mode_switch_plan, render_change_summary};
+    use super::{
+        cli_config_touched, fork_plan, is_cli_config_path, mode_switch_plan, render_change_summary,
+        render_stop_summary,
+    };
 
     // P28: the delivery-mode choice is a real fork — each mode runs a distinct,
     // fixed sequence of steps. Only static renders (preview → confirm → apply);
@@ -982,7 +1197,8 @@ mod tests {
         ];
         let secrets = vec![("API_TOKEN".to_string(), "keychain".to_string())];
         let seeded = vec!["agentstack house rules → ~/.agentstack/agentstack.toml".to_string()];
-        let out = render_change_summary(&files, &secrets, &seeded);
+        let out =
+            render_change_summary(&files, &secrets, &seeded, true, &["API_TOKEN".to_string()]);
 
         assert!(out.contains("Files written (2)"));
         assert!(out.contains("~/.claude.json  (Claude Code · servers)"));
@@ -990,13 +1206,89 @@ mod tests {
         assert!(out.contains("house rules"));
         assert!(out.contains("agentstack restore --last --write"));
         assert!(out.contains("agentstack doctor"));
+        assert!(out.contains("agentstack secret rm API_TOKEN"));
+        // A CLI config changed → the restart advice is present.
+        assert!(out.contains("Restart your agent CLI(s)"));
     }
 
     // With nothing written, the summary says so but still offers the one-liners.
     #[test]
     fn change_summary_with_no_writes_still_offers_undo() {
-        let out = render_change_summary(&[], &[], &[]);
+        let out = render_change_summary(&[], &[], &[], false, &[]);
         assert!(out.contains("No files were written"));
+        assert!(out.contains("agentstack restore --last --write"));
+    }
+
+    // P30: the restart-CLIs advice appears ONLY when a native CLI config
+    // changed this run. An import-only run (manifest but no rendered config)
+    // must not tell the user to restart harnesses that never changed.
+    #[test]
+    fn change_summary_restart_line_gates_on_cli_config_change() {
+        // Import-only: just the manifest was written, no CLI config.
+        let files = vec![(
+            ".agentstack/agentstack.toml".to_string(),
+            "manifest · import".to_string(),
+        )];
+        let out = render_change_summary(&files, &[], &[], false, &[]);
+        assert!(out.contains("manifest · import"));
+        assert!(
+            !out.contains("Restart your agent CLI(s)"),
+            "an import-only run must not advise a restart:\n{out}"
+        );
+        // But it is still present when a CLI config did change.
+        let out_changed = render_change_summary(&files, &[], &[], true, &[]);
+        assert!(out_changed.contains("Restart your agent CLI(s)"));
+    }
+
+    // P30: the classifier separates agentstack's own bookkeeping (manifest,
+    // .env, .gitignore, lockfile) from native CLI-side files that warrant a
+    // restart.
+    #[test]
+    fn cli_config_classifier_excludes_agentstack_bookkeeping() {
+        assert!(!is_cli_config_path("proj/.agentstack/agentstack.toml"));
+        assert!(!is_cli_config_path("proj/agentstack.toml")); // legacy root layout
+        assert!(!is_cli_config_path("proj/.env"));
+        assert!(!is_cli_config_path("proj/.gitignore"));
+        assert!(!is_cli_config_path("proj/agentstack.lock"));
+        // Native CLI-side artifacts.
+        assert!(is_cli_config_path("~/.claude.json"));
+        assert!(is_cli_config_path("proj/.mcp.json"));
+        assert!(is_cli_config_path("proj/CLAUDE.md"));
+        assert!(is_cli_config_path("~/.claude/skills/helper"));
+
+        // An import-only file set is not a CLI-config change; adding any
+        // rendered file flips it.
+        let import_only = vec![
+            (
+                ".agentstack/agentstack.toml".to_string(),
+                "manifest · import".to_string(),
+            ),
+            (".env".to_string(), ".env · lifted secrets".to_string()),
+        ];
+        assert!(!cli_config_touched(&import_only));
+        let mut with_render = import_only.clone();
+        with_render.push((
+            "~/.claude.json".to_string(),
+            "Claude Code · servers".to_string(),
+        ));
+        assert!(cli_config_touched(&with_render));
+    }
+
+    // P30: the cancel mini-summary lists what the import already wrote and the
+    // undo one-liner — the truthful close for a post-import stop.
+    #[test]
+    fn stop_summary_lists_import_writes_and_the_undo() {
+        let files = vec![
+            (
+                ".agentstack/agentstack.toml".to_string(),
+                "manifest · import".to_string(),
+            ),
+            (".env".to_string(), ".env · lifted secrets".to_string()),
+        ];
+        let out = render_stop_summary(&files);
+        assert!(out.contains("The import already wrote 2 file(s)"));
+        assert!(out.contains(".agentstack/agentstack.toml  (manifest · import)"));
+        assert!(out.contains(".env  (.env · lifted secrets)"));
         assert!(out.contains("agentstack restore --last --write"));
     }
 
@@ -1004,7 +1296,7 @@ mod tests {
     // every delivery-mode fork (all three end through this one formatter).
     #[test]
     fn change_summary_ends_with_the_start_page_doorway() {
-        let out = render_change_summary(&[], &[], &[]);
+        let out = render_change_summary(&[], &[], &[], false, &[]);
         // The exact URL + single-space em dash pins that the string
         // line-continuation collapsed to one space, not zero or two.
         assert!(out.contains(

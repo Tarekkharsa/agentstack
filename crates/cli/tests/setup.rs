@@ -11,8 +11,9 @@
 use std::fs;
 use std::sync::Mutex;
 
-use agentstack::cli::SetupArgs;
-use agentstack::commands::setup;
+use agentstack::cli::{InitArgs, RestoreArgs, SecretStore, SetupArgs};
+use agentstack::commands::{init, restore, setup};
+use agentstack::history;
 use agentstack::scope::Scope;
 
 // setup + init read/write process-global HOME; serialize with sibling tests.
@@ -112,5 +113,83 @@ fn setup_does_not_run_init_without_a_terminal() {
     assert!(
         !tmp.path().join("home/.claude.json").exists(),
         "setup must not write live config without a terminal"
+    );
+}
+
+#[test]
+fn init_records_its_manifest_and_restore_last_removes_it() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    set_home(&tmp.path().join("home"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    init::run(
+        &InitArgs {
+            global: false,
+            force: false,
+            dry_run: false,
+            secrets: Some(SecretStore::Skip),
+            no_keychain: false,
+        },
+        Some(&proj),
+    )
+    .unwrap();
+
+    let manifest = proj.join(".agentstack/agentstack.toml");
+    assert!(manifest.exists(), "init wrote the project manifest");
+    assert_eq!(history::list().len(), 1, "init wrote one undo entry");
+
+    restore::run(
+        &RestoreArgs {
+            adapter: None,
+            last: true,
+            scope: None,
+            write: true,
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    assert!(
+        !manifest.exists(),
+        "restore --last removed the imported manifest"
+    );
+}
+
+#[test]
+fn init_rolls_back_when_history_cannot_be_recorded() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    // A regular file cannot contain the history/ directory, forcing the final
+    // history commit to fail after the manifest write succeeds.
+    let blocked_history_home = tmp.path().join("history-blocked");
+    fs::write(&blocked_history_home, "not a directory").unwrap();
+    std::env::set_var("AGENTSTACK_HOME", &blocked_history_home);
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    let err = init::run(
+        &InitArgs {
+            global: false,
+            force: false,
+            dry_run: false,
+            secrets: Some(SecretStore::Skip),
+            no_keychain: false,
+        },
+        Some(&proj),
+    )
+    .expect_err("history commit must fail when its home is a regular file");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("history") || message.contains("recording"),
+        "error names the failed recovery contract: {err:#}"
+    );
+    assert!(
+        !proj.join(".agentstack/agentstack.toml").exists(),
+        "manifest write was rolled back when its undo record could not commit"
     );
 }
