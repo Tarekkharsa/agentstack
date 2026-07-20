@@ -1,6 +1,8 @@
 # Hardening remote ingestion — implementation design (priority 1)
 
-Status: **proposed, awaiting approval**. Implements priority 1 of
+Status: **implemented 2026-07-20** (C: `a1be9da`, A: `b6c47c0`, B: `c56d5f5`;
+one recorded refinement — hostile-named gateway tools are hidden, not
+remapped, §A.2 #4). Implements priority 1 of
 [`skills-sh-learnings.md`](skills-sh-learnings.md) §10: the three hardening
 prerequisites that must land before `agentstack add skill <any-repo>` invites
 arbitrary ecosystem content in. Grounded in a full survey of every affected
