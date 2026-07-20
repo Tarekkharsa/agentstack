@@ -174,6 +174,25 @@ impl Store {
         self.root.join("git").join(sanitize(url))
     }
 
+    /// Adopt a staged clone into this store's slot for `url` — only if the
+    /// slot is empty, and **rename-only**: staging (see [`Stage`]) lives on
+    /// this filesystem by construction, so the scanned bytes land verbatim
+    /// (`.git` and symlinks included). There is deliberately no copy
+    /// fallback — the shipped copy helpers strip `.git` and dereference
+    /// symlinks, either of which corrupts a promoted clone (design §3 of
+    /// add-skill-source-grammar.md). `Ok(None)` = slot taken or rename
+    /// refused; the caller falls back to a commit-pinned re-resolve.
+    pub fn adopt_clone(&self, url: &str, staged_clone: &Path) -> Result<Option<PathBuf>> {
+        let dest = self.git_dir(url);
+        if dest.exists() {
+            return Ok(None);
+        }
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+        }
+        Ok(fs::rename(staged_clone, &dest).ok().map(|()| dest))
+    }
+
     /// The cached clone **root** for `url` with no network access, plus its
     /// current HEAD — `None` when the clone does not exist yet (report it as
     /// unavailable offline). Unlike [`Store::resolve_local`], this returns the
@@ -186,6 +205,45 @@ impl Store {
             return None;
         }
         Some((clone.clone(), git_head(&clone).ok()))
+    }
+}
+
+/// Transient staging for previewing remote sources without touching the
+/// persistent store (design §3 of add-skill-source-grammar.md). Lives under
+/// the agentstack home — the store's own filesystem by construction, so
+/// promotion is a rename, never a copy. Random id (never reused: a crashed
+/// run's leftovers must not skip re-fetch/re-scan), 0700, best-effort
+/// removal on drop — the `SandboxGateway` RAII pattern.
+pub struct Stage {
+    root: PathBuf,
+}
+
+impl Stage {
+    pub fn create() -> Result<Self> {
+        let root = paths::agentstack_home()
+            .join("stage")
+            .join(crate::runs::gen_id());
+        if root.exists() {
+            bail!(
+                "staging path {} already exists — retry the command",
+                root.display()
+            );
+        }
+        fs::create_dir_all(&root).with_context(|| format!("creating {}", root.display()))?;
+        crate::util::restrict(&root, true);
+        Ok(Self { root })
+    }
+
+    /// A `Store` rooted at this staging area: clones land under
+    /// `<stage>/git/<sanitized-url>` with zero writes anywhere persistent.
+    pub fn store(&self) -> Store {
+        Store::with_root(self.root.clone())
+    }
+}
+
+impl Drop for Stage {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
     }
 }
 

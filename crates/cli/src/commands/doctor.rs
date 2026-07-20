@@ -1131,6 +1131,25 @@ fn run_checks(
             );
         }
     }
+    // Stale staging leftovers from crashed `add skill` previews — harmless
+    // (never reused; random ids) but worth naming with the remedy.
+    {
+        let stage = paths::agentstack_home().join("stage");
+        let stale = std::fs::read_dir(&stage)
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        if stale > 0 {
+            report.line(
+                Level::Warn,
+                format!(
+                    "{stale} stale staging dir(s) under {} — crashed previews; \
+                     remove with `rm -rf {}`",
+                    stage.display(),
+                    stage.display()
+                ),
+            );
+        }
+    }
     // Broken skill links on disk: a symlink in a detected CLI's skills dir
     // whose target is gone loads nothing, so name it here with the fix
     // instead of leaving the skill silently dead. Every detected adapter is

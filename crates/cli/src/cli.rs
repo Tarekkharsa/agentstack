@@ -820,14 +820,33 @@ pub struct AddServerArgs {
 
 #[derive(Args, Debug)]
 pub struct AddSkillArgs {
-    /// Skill name used in the manifest, e.g. sql-review.
-    pub name: String,
-    /// Path to the skill directory.
+    /// owner/repo, a git URL (incl. /tree/<ref>/<subpath>), or a spelled
+    /// local path (./dir, ../dir, /abs, ~/dir).
+    pub source: String,
+    /// Select skills by name (repeatable). Required in scripts when the
+    /// source holds several.
     #[arg(long)]
-    pub path: String,
+    pub skill: Vec<String>,
+    /// List the source's skills and exit — adds nothing.
+    #[arg(long)]
+    pub list: bool,
+    /// Branch/tag/commit recorded in the manifest; the exact commit is
+    /// pinned in the lock.
+    #[arg(long)]
+    pub rev: Option<String>,
+    /// Directory within the repo to scope discovery to.
+    #[arg(long)]
+    pub subpath: Option<String>,
+    /// Manifest name override (single selection only) — for a source whose
+    /// directory name doesn't fit the name contract.
+    #[arg(long)]
+    pub name: Option<String>,
     /// Also add to this profile's skill list.
     #[arg(long)]
     pub profile: Option<String>,
+    /// Admit content the scan flagged high-severity.
+    #[arg(long)]
+    pub allow_flagged: bool,
     /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,

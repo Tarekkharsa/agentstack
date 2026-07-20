@@ -289,6 +289,21 @@ fn deny_credentials(url: &str) -> Result<()> {
     Ok(())
 }
 
+/// The repo's short name from any accepted git URL form — the last path
+/// segment, `.git` stripped. Used as the root-as-skill name hint.
+pub fn repo_name(url: &str) -> Option<String> {
+    let tail = url
+        .trim_end_matches('/')
+        .rsplit(['/', ':'])
+        .next()?
+        .trim_end_matches(".git");
+    if tail.is_empty() {
+        None
+    } else {
+        Some(tail.to_string())
+    }
+}
+
 /// A `/tree/` or `--subpath` value: relative, normal components only.
 pub fn validate_subpath(sub: &str) -> Result<()> {
     use std::path::Component;

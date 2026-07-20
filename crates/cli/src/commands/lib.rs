@@ -18,7 +18,6 @@ use crate::cli::{
 };
 use crate::library::{Library, LibraryExtension, LibraryHook, LibraryServer, LibrarySkill};
 use crate::manifest::{Hook, Server, Skill};
-use crate::scan::Severity;
 use crate::store::{dir_digest, dir_size, Store};
 use crate::util::paths;
 
@@ -2125,28 +2124,7 @@ fn scan_gate(
     allow_flagged: bool,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
-    let findings =
-        crate::scan::scan_tree(dir).with_context(|| format!("scanning {}", dir.display()))?;
-    let high: Vec<_> = findings
-        .iter()
-        .filter(|f| f.severity == Severity::High)
-        .collect();
-    if !high.is_empty() && !allow_flagged {
-        let list = high
-            .iter()
-            .map(|f| format!("    {}", f.describe()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        bail!(
-            "'{name}': {} high-severity content finding(s) — add blocked \
-             (pass --allow-flagged to add anyway):\n{list}",
-            high.len()
-        );
-    }
-    for f in &findings {
-        warnings.push(format!("[{}] {}", f.severity.label(), f.describe()));
-    }
-    Ok(())
+    crate::scan::gate(name, dir, allow_flagged, warnings)
 }
 
 /// Whether two paths point at the same directory (best-effort via canonicalize).

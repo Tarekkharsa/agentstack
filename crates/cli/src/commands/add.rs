@@ -812,31 +812,545 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
     )
 }
 
+/// `agentstack add skill <source>` — the ecosystem-grammar acquisition verb
+/// (design: docs/design/add-skill-source-grammar.md). Parse → stage (git) →
+/// discover → select → scan → preview; `--write` promotes the staged clone,
+/// writes the manifest entries, and records the lock pins. Activation stays
+/// `use --write`.
 fn add_skill(a: &AddSkillArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    crate::text::validate_name(&a.name)?;
+    use crate::provider::source::{parse_source, SkillSource};
     let ctx = super::load(manifest_dir)?;
-    if ctx.loaded.manifest.skills.contains_key(&a.name) {
-        anyhow::bail!(
-            "skill '{}' already exists in the manifest — run `agentstack remove {}` first, or rename it",
-            a.name,
-            a.name
+    let parsed = parse_source(&a.source)?;
+
+    // `@skill` is the human alias for --skill; disagreement is an error,
+    // never a precedence puzzle.
+    let mut requested = a.skill.clone();
+    if let Some(alias) = &parsed.skill_alias {
+        if requested.is_empty() {
+            requested.push(alias.clone());
+        } else if !requested.contains(alias) {
+            anyhow::bail!(
+                "skill given twice and they disagree: @{} vs --skill {}",
+                crate::text::sanitize_line(alias),
+                requested.join(", ")
+            );
+        }
+    }
+
+    match parsed.source {
+        SkillSource::Local { path } => add_skill_from_dir(a, &ctx, &path, &requested),
+        SkillSource::Git { url, ref_, subpath } => {
+            add_skill_from_git(a, &ctx, &url, ref_, subpath, &requested)
+        }
+    }
+}
+
+/// One selected skill, ready to preview/write.
+struct PlannedSkill {
+    name: String,
+    entry: Skill,
+    /// Where the skill's bytes live for the lock digest (staged dir on
+    /// preview; promoted dir on write).
+    content_dir: std::path::PathBuf,
+    rev: Option<String>,
+    source_kind: &'static str,
+    scan_warnings: Vec<String>,
+}
+
+fn add_skill_from_git(
+    a: &AddSkillArgs,
+    ctx: &super::Context,
+    url: &str,
+    url_ref: Option<String>,
+    url_subpath: Option<String>,
+    requested: &[String],
+) -> Result<()> {
+    let rev = merge_source_opt("rev", a.rev.as_ref(), url_ref)?;
+    let subpath = merge_source_opt("subpath", a.subpath.as_ref(), url_subpath)?;
+    if let Some(s) = &subpath {
+        crate::provider::source::validate_subpath(s)?;
+    }
+
+    // Transient staging on the store's filesystem: a preview fetches, but
+    // never touches the persistent store (design §3).
+    let stage = crate::store::Stage::create()?;
+    let staging = stage.store();
+    let (clone_root, head) = crate::store::checkout(&staging, url, rev.as_deref())?;
+    let disc_root = match &subpath {
+        // An explicit subpath scopes discovery — the user already navigated.
+        Some(s) => {
+            let d = clone_root.join(s);
+            anyhow::ensure!(
+                d.is_dir(),
+                "subpath '{}' does not exist in {}",
+                crate::text::sanitize_line(s),
+                crate::text::sanitize_line(url)
+            );
+            d
+        }
+        None => clone_root.clone(),
+    };
+    let repo_name = crate::provider::source::repo_name(url);
+    let discovered = crate::provider::discover::discover_skills(&disc_root, repo_name.as_deref())?;
+    println!(
+        "{} {} (git) — {} at {}",
+        "found".green(),
+        crate::text::sanitize_line(repo_name.as_deref().unwrap_or(url)).bold(),
+        crate::text::sanitize_line(url),
+        &head[..head.len().min(12)]
+    );
+    anyhow::ensure!(
+        !discovered.is_empty(),
+        "no SKILL.md found in {} — not a skills repo (or pass --subpath)",
+        crate::text::sanitize_line(url)
+    );
+    if a.list {
+        return print_skill_listing(&discovered);
+    }
+
+    let selected = select_skills(&discovered, requested)?;
+    let names = final_names(a, ctx, &selected)?;
+    let profile = choose_profile(a, &ctx.loaded.manifest)?;
+
+    // Scan the STAGED bytes before anything is offered for writing.
+    let mut planned = Vec::new();
+    for (skill, name) in selected.iter().zip(&names) {
+        let dir = join_rel(&disc_root, &skill.rel_path);
+        let mut warnings = Vec::new();
+        crate::scan::gate(name, &dir, a.allow_flagged, &mut warnings)?;
+        let full_sub = join_subpath(subpath.as_deref(), &skill.rel_path);
+        planned.push(PlannedSkill {
+            name: name.clone(),
+            entry: Skill {
+                path: None,
+                git: Some(url.to_string()),
+                rev: rev.clone(),
+                subpath: full_sub,
+            },
+            content_dir: dir,
+            rev: Some(head.clone()),
+            source_kind: "git",
+            scan_warnings: warnings,
+        });
+    }
+    print_selection(&discovered, &selected, &planned);
+
+    if a.write {
+        // Promote BEFORE the manifest write (design §4): rename-only; a
+        // taken slot (or refused rename) falls back to a commit-pinned
+        // re-resolve, which re-clones via git and is re-scanned — never a
+        // byte-copy.
+        let real = crate::store::Store::default_store();
+        let promoted = match real.adopt_clone(url, &clone_root)? {
+            Some(root) => root,
+            None => {
+                let (root, head2) = crate::store::checkout(&real, url, Some(&head))?;
+                anyhow::ensure!(
+                    head2 == head,
+                    "re-resolve landed {head2} but the preview scanned {head} — retry"
+                );
+                // Freshly-fetched bytes: re-scan before the lock write. The
+                // entry's subpath is exactly the clone-root-relative dir.
+                for p in &mut planned {
+                    let dir = join_rel(&root, p.entry.subpath.as_deref().unwrap_or(""));
+                    let mut warnings = Vec::new();
+                    crate::scan::gate(&p.name, &dir, a.allow_flagged, &mut warnings)?;
+                    p.scan_warnings = warnings;
+                    p.content_dir = dir;
+                }
+                root
+            }
+        };
+        // The common (adopted) path: content dirs move with the rename.
+        for p in &mut planned {
+            if let Ok(rel) = p.content_dir.strip_prefix(&clone_root) {
+                p.content_dir = promoted.join(rel);
+            }
+        }
+    }
+
+    preview_and_commit(ctx, a.write, &planned, profile.as_deref())
+}
+
+fn add_skill_from_dir(
+    a: &AddSkillArgs,
+    ctx: &super::Context,
+    path: &Path,
+    requested: &[String],
+) -> Result<()> {
+    anyhow::ensure!(
+        a.rev.is_none() && a.subpath.is_none(),
+        "--rev/--subpath apply to git sources — point the path at the directory directly"
+    );
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    anyhow::ensure!(abs.is_dir(), "no such directory: {}", abs.display());
+    let root_name = abs.file_name().map(|n| n.to_string_lossy().into_owned());
+    let discovered = crate::provider::discover::discover_skills(&abs, root_name.as_deref())?;
+    println!(
+        "{} {} (local)",
+        "found".green(),
+        crate::text::sanitize_line(&a.source).bold()
+    );
+    anyhow::ensure!(
+        !discovered.is_empty(),
+        "no SKILL.md found under {}",
+        abs.display()
+    );
+    if a.list {
+        return print_skill_listing(&discovered);
+    }
+
+    let selected = select_skills(&discovered, requested)?;
+    let names = final_names(a, ctx, &selected)?;
+    let profile = choose_profile(a, &ctx.loaded.manifest)?;
+
+    let mut planned = Vec::new();
+    for (skill, name) in selected.iter().zip(&names) {
+        let dir = join_rel(&abs, &skill.rel_path);
+        let mut warnings = Vec::new();
+        crate::scan::gate(name, &dir, a.allow_flagged, &mut warnings)?;
+        let path_field = if skill.rel_path.is_empty() {
+            a.source.clone()
+        } else {
+            format!("{}/{}", a.source.trim_end_matches('/'), skill.rel_path)
+        };
+        planned.push(PlannedSkill {
+            name: name.clone(),
+            entry: Skill {
+                path: Some(path_field),
+                git: None,
+                rev: None,
+                subpath: None,
+            },
+            content_dir: dir,
+            rev: None,
+            source_kind: "path",
+            scan_warnings: warnings,
+        });
+    }
+    print_selection(&discovered, &selected, &planned);
+    preview_and_commit(ctx, a.write, &planned, profile.as_deref())
+}
+
+/// A canonical flag beats its in-URL alias; disagreement is an error.
+fn merge_source_opt(
+    kind: &str,
+    flag: Option<&String>,
+    from_url: Option<String>,
+) -> Result<Option<String>> {
+    match (flag, from_url) {
+        (Some(f), Some(u)) if *f != u => anyhow::bail!(
+            "{kind} given twice and they disagree: --{kind} {} vs {} in the URL",
+            crate::text::sanitize_line(f),
+            crate::text::sanitize_line(&u)
+        ),
+        (Some(f), _) => Ok(Some(f.clone())),
+        (None, u) => Ok(u),
+    }
+}
+
+fn join_rel(root: &Path, rel: &str) -> std::path::PathBuf {
+    if rel.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(rel)
+    }
+}
+
+fn join_subpath(user: Option<&str>, rel: &str) -> Option<String> {
+    match (user, rel.is_empty()) {
+        (Some(u), true) => Some(u.to_string()),
+        (Some(u), false) => Some(format!("{}/{rel}", u.trim_end_matches('/'))),
+        (None, true) => None,
+        (None, false) => Some(rel.to_string()),
+    }
+}
+
+fn print_skill_listing(discovered: &[crate::provider::discover::DiscoveredSkill]) -> Result<()> {
+    for s in discovered {
+        let mut notes = Vec::new();
+        if s.via_fallback {
+            notes.push("via recursive fallback".to_string());
+        }
+        if !s.name_valid {
+            notes.push("invalid name — needs --name".to_string());
+        }
+        let notes = if notes.is_empty() {
+            String::new()
+        } else {
+            format!("  [{}]", notes.join("; "))
+        };
+        println!(
+            "  {} {:<20} {:<28} {}{notes}",
+            "·".dimmed(),
+            crate::text::sanitize_line(&s.name).bold(),
+            crate::text::sanitize_line(if s.rel_path.is_empty() {
+                "(root)"
+            } else {
+                &s.rel_path
+            })
+            .dimmed(),
+            crate::text::truncate_chars(s.description.as_deref().unwrap_or("(no description)"), 60),
         );
     }
-    let skill = Skill {
-        path: Some(a.path.clone()),
-        git: None,
-        rev: None,
-        subpath: None,
+    println!("\nUse {} to add specific skills.", "--skill <name>".bold());
+    Ok(())
+}
+
+fn select_skills(
+    discovered: &[crate::provider::discover::DiscoveredSkill],
+    requested: &[String],
+) -> Result<Vec<crate::provider::discover::DiscoveredSkill>> {
+    let names_list = || {
+        discovered
+            .iter()
+            .map(|s| crate::text::sanitize_line(&s.name))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
-    write_manifest(
-        &ctx,
-        "skills",
-        &serde_json::to_value(&skill)?,
-        a.profile.as_deref(),
-        &a.name,
-        a.write,
-        "add",
-    )
+    if !requested.is_empty() {
+        let mut out = Vec::new();
+        for want in requested {
+            match discovered.iter().find(|s| s.name == *want) {
+                Some(s) => out.push(s.clone()),
+                None => anyhow::bail!(
+                    "no skill named '{}' in this source — found: {}",
+                    crate::text::sanitize_line(want),
+                    names_list()
+                ),
+            }
+        }
+        return Ok(out);
+    }
+    // Auto-select only a single conventional-location hit; fallback hits are
+    // never auto-selected (design §2).
+    if discovered.len() == 1 && !discovered[0].via_fallback {
+        return Ok(vec![discovered[0].clone()]);
+    }
+    if !crate::util::confirm::is_interactive() {
+        anyhow::bail!(
+            "{} skill(s) in this source — pass --skill <name> to choose: {}",
+            discovered.len(),
+            names_list()
+        );
+    }
+    // The crate's first multi-select: all entries start UNCHECKED (opt-in).
+    let items: Vec<String> = discovered
+        .iter()
+        .map(|s| {
+            format!(
+                "{:<20} {:<24} {}",
+                crate::text::sanitize_line(&s.name),
+                crate::text::sanitize_line(if s.rel_path.is_empty() {
+                    "(root)"
+                } else {
+                    &s.rel_path
+                }),
+                crate::text::truncate_chars(
+                    s.description.as_deref().unwrap_or("(no description)"),
+                    48
+                ),
+            )
+        })
+        .collect();
+    let picks = dialoguer::MultiSelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Select skills to add (space toggles, enter confirms)")
+        .items(&items)
+        .interact()?;
+    if picks.is_empty() {
+        anyhow::bail!("nothing selected — nothing to add");
+    }
+    Ok(picks.into_iter().map(|i| discovered[i].clone()).collect())
+}
+
+fn final_names(
+    a: &AddSkillArgs,
+    ctx: &super::Context,
+    selected: &[crate::provider::discover::DiscoveredSkill],
+) -> Result<Vec<String>> {
+    if a.name.is_some() && selected.len() != 1 {
+        anyhow::bail!(
+            "--name applies to a single selection; {} skills selected",
+            selected.len()
+        );
+    }
+    let mut names = Vec::new();
+    for s in selected {
+        let name = a.name.clone().unwrap_or_else(|| s.name.clone());
+        crate::text::validate_name(&name).with_context(|| {
+            if a.name.is_none() {
+                format!(
+                    "skill directory '{}' — pass --name to choose a conforming manifest name",
+                    crate::text::sanitize_line(&s.name)
+                )
+            } else {
+                "--name".to_string()
+            }
+        })?;
+        if ctx.loaded.manifest.skills.contains_key(&name) {
+            anyhow::bail!(
+                "skill '{name}' already exists in the manifest — run `agentstack remove {name}` first, or rename it"
+            );
+        }
+        names.push(name);
+    }
+    Ok(names)
+}
+
+/// Zero profiles → implicit default (no membership edit). One → automatic.
+/// Several → --profile, or an interactive pick. A --profile naming a profile
+/// that doesn't exist is an error — never a silent create (design §4).
+fn choose_profile(a: &AddSkillArgs, manifest: &Manifest) -> Result<Option<String>> {
+    let declared: Vec<String> = manifest.profiles.keys().cloned().collect();
+    if let Some(p) = &a.profile {
+        if declared.contains(p) {
+            return Ok(Some(p.clone()));
+        }
+        anyhow::bail!(
+            "no profile '{}' in the manifest — declared: {}",
+            p,
+            if declared.is_empty() {
+                "(none)".to_string()
+            } else {
+                declared.join(", ")
+            }
+        );
+    }
+    match declared.len() {
+        0 => Ok(None),
+        1 => Ok(Some(declared[0].clone())),
+        _ => {
+            if crate::util::confirm::is_interactive() {
+                let idx =
+                    dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt("Add to which profile?")
+                        .items(&declared)
+                        .default(0)
+                        .interact()?;
+                Ok(Some(declared[idx].clone()))
+            } else {
+                anyhow::bail!(
+                    "several profiles declared — pass --profile <name>: {}",
+                    declared.join(", ")
+                )
+            }
+        }
+    }
+}
+
+fn print_selection(
+    discovered: &[crate::provider::discover::DiscoveredSkill],
+    selected: &[crate::provider::discover::DiscoveredSkill],
+    planned: &[PlannedSkill],
+) {
+    println!(
+        "  skills discovered: {} ({} selected)",
+        discovered.len(),
+        selected.len()
+    );
+    for (s, p) in selected.iter().zip(planned) {
+        let status = match p.scan_warnings.len() {
+            0 => "scan: clean".to_string(),
+            n => format!("scan: {n} warning(s)"),
+        };
+        println!(
+            "  {} {:<20} {:<24} {:<18} {}",
+            "✓".green(),
+            crate::text::sanitize_line(&p.name).bold(),
+            crate::text::sanitize_line(if s.rel_path.is_empty() {
+                "(root)"
+            } else {
+                &s.rel_path
+            })
+            .dimmed(),
+            status,
+            crate::text::truncate_chars(s.description.as_deref().unwrap_or(""), 48),
+        );
+        for w in &p.scan_warnings {
+            println!("    {} {w}", "⚠".yellow());
+        }
+    }
+    for s in discovered
+        .iter()
+        .filter(|s| s.via_fallback && !selected.iter().any(|x| x.rel_path == s.rel_path))
+    {
+        println!(
+            "  {} {} found via recursive fallback at {} — select explicitly to include",
+            "·".dimmed(),
+            crate::text::sanitize_line(&s.name),
+            crate::text::sanitize_line(&s.rel_path)
+        );
+    }
+}
+
+/// The one preview + one write: manifest diff (always), then on `--write`
+/// the atomic manifest write and the lock pins. All-or-nothing with the
+/// promotion the caller already performed.
+fn preview_and_commit(
+    ctx: &super::Context,
+    write: bool,
+    planned: &[PlannedSkill],
+    profile: Option<&str>,
+) -> Result<()> {
+    let manifest_path = &ctx.loaded.manifest_path;
+    let original = fs::read_to_string(manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let mut text = original.clone();
+    for p in planned {
+        text = build_manifest_with(
+            &text,
+            "skills",
+            &p.name,
+            &serde_json::to_value(&p.entry)?,
+            profile,
+        )?;
+    }
+    toml::from_str::<Manifest>(&text).context("resulting manifest would be invalid")?;
+
+    if let Some(p) = profile {
+        println!("{} add to profile '{p}'", "→".cyan());
+    }
+    let names = planned
+        .iter()
+        .map(|p| format!("'{}'", p.name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!("{} add {names} in {}", "→".cyan(), manifest_path.display());
+    for line in crate::util::diff::render(&original, &text).lines() {
+        println!("  {line}");
+    }
+    if !write {
+        println!(
+            "\nDry run. Re-run with {} to update the manifest.",
+            "--write".bold()
+        );
+        return Ok(());
+    }
+    crate::util::atomic::write(manifest_path, &text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+    let mut lock = crate::lock::Lock::load(&ctx.dir)?;
+    for p in planned {
+        let resolved = crate::store::Resolved {
+            path: p.content_dir.clone(),
+            rev: p.rev.clone(),
+            checksum: crate::store::dir_digest(&p.content_dir)?.hex().to_string(),
+            fetched: true,
+            source_kind: p.source_kind,
+        };
+        lock.upsert(super::install::locked_entry(&p.name, &p.entry, &resolved)?);
+    }
+    lock.save(&ctx.dir)?;
+    println!("{} added {names}.", "✓".green());
+    println!(
+        "{} activate with `agentstack use{} --write`",
+        "·".dimmed(),
+        profile.map(|p| format!(" {p}")).unwrap_or_default()
+    );
+    Ok(())
 }
 
 fn write_manifest(

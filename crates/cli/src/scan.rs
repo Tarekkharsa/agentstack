@@ -136,6 +136,36 @@ pub fn scan_tree(root: &Path) -> Result<Vec<Finding>> {
     Ok(findings)
 }
 
+/// The shared block-or-warn gate over [`scan_tree`]: High findings bail
+/// (unless `allow_flagged`), everything found is appended to `warnings` for
+/// the caller to print. One home for the shape `lib add`, `add skill`, and
+/// `install` all need (extracted from `commands/lib.rs` per the
+/// add-skill-source-grammar design §3).
+pub fn gate(name: &str, dir: &Path, allow_flagged: bool, warnings: &mut Vec<String>) -> Result<()> {
+    use anyhow::Context;
+    let findings = scan_tree(dir).with_context(|| format!("scanning {}", dir.display()))?;
+    let high: Vec<_> = findings
+        .iter()
+        .filter(|f| f.severity == Severity::High)
+        .collect();
+    if !high.is_empty() && !allow_flagged {
+        let list = high
+            .iter()
+            .map(|f| format!("    {}", f.describe()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        anyhow::bail!(
+            "'{name}': {} high-severity content finding(s) — add blocked \
+             (pass --allow-flagged to add anyway):\n{list}",
+            high.len()
+        );
+    }
+    for f in &findings {
+        warnings.push(format!("[{}] {}", f.severity.label(), f.describe()));
+    }
+    Ok(())
+}
+
 fn walk(root: &Path, dir: &Path, out: &mut Vec<Finding>) -> Result<()> {
     let mut entries: Vec<_> = fs::read_dir(dir)
         .with_context(|| format!("reading {}", dir.display()))?
