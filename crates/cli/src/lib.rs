@@ -27,6 +27,7 @@ pub mod execution;
 pub mod footprint;
 pub mod gateway;
 pub mod gateway_http;
+pub mod gitx;
 pub mod grant;
 pub mod guard;
 pub mod history;

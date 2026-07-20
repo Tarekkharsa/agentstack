@@ -1651,32 +1651,16 @@ const LIB_GITIGNORE: &str = "# agentstack central library — synced across mach
 
 /// Run git in `dir`, returning trimmed stdout; a non-zero exit is an error
 /// carrying git's stderr.
+/// Library sync runs under the `Sync` profile — the user's own remote, so
+/// interactive auth stays possible; protocol allowlist, LFS suppression, and
+/// the timeout still apply (design §B).
 fn git_out(dir: &Path, args: &[&str]) -> Result<String> {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .context("running git (is it installed?)")?;
-    if !out.status.success() {
-        bail!(
-            "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    crate::gitx::run(crate::gitx::Profile::Sync, args, Some(dir))
 }
 
 /// Whether a git invocation succeeds — for probing state (remote set, upstream).
 fn git_ok(dir: &Path, args: &[&str]) -> bool {
-    std::process::Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    crate::gitx::succeeds(crate::gitx::Profile::Sync, args, Some(dir))
 }
 
 fn sync(args: &LibSyncArgs) -> Result<()> {
@@ -1728,15 +1712,15 @@ fn sync_init(lib: &Path, remote: Option<&str>) -> Result<()> {
         if let Some(parent) = lib.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let out = std::process::Command::new("git")
-            .args(["clone", url, &lib.to_string_lossy()])
-            .output()
-            .context("running git clone")?;
-        if !out.status.success() {
-            bail!(
-                "git clone failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
+        crate::gitx::deny_weird_transport(url)?;
+        let out = crate::gitx::run_raw(
+            crate::gitx::Profile::Sync,
+            &["clone", url, &lib.to_string_lossy()],
+            None,
+        )
+        .context("running git clone")?;
+        if !out.success {
+            bail!("git clone failed: {}", out.stderr.trim());
         }
         println!(
             "{} cloned library from {url} → {}",
@@ -1790,11 +1774,7 @@ fn sync_status(lib: &Path) -> Result<()> {
         }
     }
     if git_ok(lib, &["rev-parse", "--abbrev-ref", "@{u}"]) {
-        let _ = std::process::Command::new("git")
-            .arg("-C")
-            .arg(lib)
-            .args(["fetch", "--quiet"])
-            .output();
+        let _ = crate::gitx::run_raw(crate::gitx::Profile::Sync, &["fetch", "--quiet"], Some(lib));
         if let Ok(counts) = git_out(lib, &["rev-list", "--left-right", "--count", "@{u}...HEAD"]) {
             let mut it = counts.split_whitespace();
             let behind = it.next().unwrap_or("0");
@@ -1872,11 +1852,11 @@ fn sync_now(lib: &Path, message: Option<&str>, allow_secrets: bool) -> Result<()
     // round-trip.
     let mut remote_has_branch = false;
     if !has_upstream {
-        let _ = std::process::Command::new("git")
-            .arg("-C")
-            .arg(lib)
-            .args(["fetch", "origin", "--quiet"])
-            .output();
+        let _ = crate::gitx::run_raw(
+            crate::gitx::Profile::Sync,
+            &["fetch", "origin", "--quiet"],
+            Some(lib),
+        );
         remote_has_branch = git_ok(lib, &["rev-parse", "--verify", &format!("origin/{branch}")]);
     }
 
@@ -1888,14 +1868,10 @@ fn sync_now(lib: &Path, message: Option<&str>, allow_secrets: bool) -> Result<()
         if !has_upstream {
             pull.extend(["origin", branch.as_str()]);
         }
-        let out = std::process::Command::new("git")
-            .arg("-C")
-            .arg(lib)
-            .args(&pull)
-            .output()
+        let out = crate::gitx::run_raw(crate::gitx::Profile::Sync, &pull, Some(lib))
             .context("running git pull")?;
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
+        if !out.success {
+            let err = out.stderr.as_str();
             let el = err.to_lowercase();
             let d = lib.display();
             // Only point at `rebase --continue` when a rebase is actually

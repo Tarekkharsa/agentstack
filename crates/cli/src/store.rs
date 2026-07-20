@@ -5,7 +5,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 
@@ -261,6 +260,7 @@ pub fn checkout(store: &Store, url: &str, rev: Option<&str>) -> Result<(PathBuf,
 /// List `url`'s tags via `git ls-remote --tags`, peeled entries preferred,
 /// without cloning. Network; callers gate on policy first.
 pub fn ls_remote_tags(url: &str) -> Result<Vec<String>> {
+    crate::gitx::deny_weird_transport(url)?;
     let out = run_git(&["ls-remote", "--tags", url], None)?;
     let mut tags: Vec<String> = out
         .lines()
@@ -275,6 +275,7 @@ pub fn ls_remote_tags(url: &str) -> Result<Vec<String>> {
 /// Ensure a git clone exists at `dest` and is checked out at `want_rev` (or its
 /// default branch). Returns whether a clone happened.
 fn ensure_git(url: &str, want_rev: Option<&str>, dest: &Path) -> Result<bool> {
+    crate::gitx::deny_weird_transport(url)?;
     let fresh = !dest.exists();
     if fresh {
         if let Some(parent) = dest.parent() {
@@ -295,21 +296,10 @@ fn git_head(dest: &Path) -> Result<String> {
     run_git(&["rev-parse", "HEAD"], Some(dest))
 }
 
+/// All store git runs under the `Ingest` profile — this is remote content on
+/// its way to the trust gate (design §B).
 fn run_git(args: &[&str], cwd: Option<&Path>) -> Result<String> {
-    let mut cmd = Command::new("git");
-    if let Some(dir) = cwd {
-        cmd.arg("-C").arg(dir);
-    }
-    cmd.args(args);
-    let out = cmd.output().context("running git (is it installed?)")?;
-    if !out.status.success() {
-        bail!(
-            "git {:?} failed: {}",
-            args,
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    crate::gitx::run(crate::gitx::Profile::Ingest, args, cwd)
 }
 
 fn sanitize(url: &str) -> String {
