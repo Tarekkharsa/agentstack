@@ -2,6 +2,23 @@
 
 *Current as of agentstack 0.14.x.*
 
+For contributors and architects. If you just want to use AgentStack, start with
+the [README](../README.md) and the [getting-started walkthrough](start.html).
+
+**Contents**
+
+- [Vision](#vision)
+- [Where this starts](#where-this-starts)
+- [The flow](#the-flow)
+- [Operating model](#operating-model--choose-the-boundary-you-need)
+- [Layer 1 — The bundle](#layer-1--the-bundle-cratescore)
+- [Layer 2 — Trust gate](#layer-2--trust-gate-cratestrust)
+- [Layer 3 — Policy engine](#layer-3--policy-engine-cratespolicy)
+- [Layer 4 — Runtime](#layer-4--runtime-cratesadapters-cratesruntime-cratesegress)
+- [Layer 5 — Flight recorder](#layer-5--flight-recorder-cratesrecorder)
+- [Layer 6 — Registry](#layer-6--registry-future-phase-4)
+- [Crate dependency rules](#crate-dependency-rules)
+
 ## Vision
 
 AgentStack packages, runs, and governs AI agents — skills, tools, MCP servers,
@@ -9,7 +26,13 @@ and ephemeral generated capabilities — as trusted, portable bundles.
 
 The strategic frame: the **agent bundle** is the standard unit (the way the image was Docker's unit). Everything else in the system gates it, constrains it, records it, or distributes it. Config unification across agent CLIs is the adoption wedge; the trust gate, firewall, and audit trail are the durable value. The registry/marketplace is the endgame, only viable because trust and signing exist first.
 
-(The README, written for newcomers, calls this same directory of declared capabilities the **manifest**; this document uses **bundle** for the same thing.)
+**A note on vocabulary.** User-facing docs — the README, the getting-started
+walkthrough, and the how-to guides — call the reviewed config file the
+**manifest**. This document keeps **bundle** as its strategic frame: it means
+the manifest, its optional local overlay, and the resolved lockfile taken
+together as the single unit that gets declared, pinned, trusted, and
+distributed. Wherever you read "bundle" below, read "the manifest and its lock
+as one consent unit."
 
 Core principle: **nothing executes automatically until its content is trusted;
 governed execution is constrained and recorded.**
@@ -34,7 +57,7 @@ manifest + library → resolve + lock → adapters → native CLI config
                                       machine rules
 ```
 
-Static config compilation and governed execution are sibling paths. A normal
+Static config rendering and governed execution are sibling paths. A normal
 `apply` is an explicit, non-executing render operation; trust gates automatic
 project loading and execution paths, not every config write.
 
@@ -87,6 +110,13 @@ The recommended default and its exceptions:
 | Unfamiliar repository | Trust gate first | Selection must never grant consent; unreviewed auto-project bundles stay inert. |
 | High-risk code or strict egress | Policy + lockdown | Policy defines authority; lockdown removes direct routes and confines the process. |
 | CI | `install --locked` + `doctor --ci` | Checks reproducibility, policy, drift, and content without interactive trust. |
+
+Those three delivery mechanisms are what the user-facing docs call **delivery
+modes**, under newcomer names: a **static render** is the *static* mode, a
+**native session** (`session start`/`end`) is *clean-at-rest*, and an **MCP or
+profile lease** is *zero-files*. [Which mode do I need?](choose.md) is the
+user-facing decision page; this section is the architect's version of the same
+choice.
 
 ### Product boundary and non-goals
 
@@ -293,12 +323,12 @@ weakened.
 
 ## Layer 4 — Runtime (`crates/adapters`, `crates/runtime`, `crates/egress`)
 
-**Adapters** compile a bundle into native config for each supported agent CLI
+**Adapters** render a bundle into native config for each supported agent CLI
 (Claude Code, Cursor, Codex, …). Normal rendering is one-way and
 non-destructive; explicit `init`, `adopt`, and owned-server workflows can read
 native state back into the manifest. The 13 adapters are data-driven YAML
 descriptors, and writes stay blocked while any `${REF}` is unresolved.
-Resolution completes *before* the compiler runs: render receives
+Resolution completes *before* the renderer runs: render receives
 a concrete server and a resolver, never a library or store to consult — which
 is what lets a sandbox runtime materialize configs from core + adapters
 alone. One trust note, stated plainly: user drop-in adapter descriptors

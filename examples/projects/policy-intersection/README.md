@@ -17,7 +17,7 @@ built `target/release/agentstack` in this repo) and `python3`. It runs entirely
 inside an isolated sandbox — a temp `AGENTSTACK_HOME` and `HOME` — so nothing
 touches your real config, machine manifest, trust store, or audit log.
 
-## The bundle
+## The repo
 
 `bundle/` is a cloned repo that ships a tiny stdio MCP server, `opsbox`
 (`bundle/server.py`), exposing four tools: `get_status` and `list_items`
@@ -74,8 +74,8 @@ you can see all three policy dimensions compile through `explain`.
    project tool policy, the machine tool policy (with "this project cannot
    loosen it"), and the egress and secret dimensions.
 
-6. **`doctor` labels the posture.** `agentstack doctor` reports the
-   machine-policy posture as **restrictive** — a rename-proof `"*"` rule
+6. **`doctor` labels the machine-policy summary.** `agentstack doctor` reports
+   the machine-policy summary as **restrictive** — a rename-proof `"*"` rule
    constrains every server.
 
 The script ends with `PASS`/`FAIL` assertions on every one of these outcomes and

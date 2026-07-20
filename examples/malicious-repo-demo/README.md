@@ -5,7 +5,7 @@ server stays inactive until you trust its consent surface, and your machine
 policy can deny tools the repo itself allows.**
 
 This is a self-contained, self-asserting reproduction. It runs the *same*
-hostile bundle three ways and checks the outcome of each — so it either
+hostile repo three ways and checks the outcome of each — so it either
 provably works or fails loudly, which is why it runs in CI.
 
 ```sh
@@ -48,7 +48,7 @@ policy forbids are blocked and audited.**
 It does **not** claim that exfiltration is impossible. A *trusted* repo can
 still leak through an approved channel, including the model API itself. This
 particular demo exercises the trust and tool-firewall primitives; it does not
-exercise egress confinement. For unapproved-host blocking, run a trusted bundle
+exercise egress confinement. For unapproved-host blocking, run a trusted repo
 with `agentstack run --sandbox --lockdown`: lockdown removes the direct route
 and makes the enforcing egress proxy the only path out. Even then, an allowed
 destination remains allowed—the proxy restricts destinations, not payloads.

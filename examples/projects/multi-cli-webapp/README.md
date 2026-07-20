@@ -5,7 +5,7 @@ docs) whose team ships across **three** agent CLIs at once — Claude Code, Code
 and Cursor. Instead of hand-maintaining `.mcp.json`, `.codex/config.toml`,
 `.cursor/mcp.json`, a `CLAUDE.md`, and an `AGENTS.md` — and watching them drift —
 the team authors **one** `.agentstack/agentstack.toml` and lets `agentstack`
-compile it into each CLI's native format. This example is the runnable proof
+render it into each CLI's native format. This example is the runnable proof
 that the fan-out is faithful, secret-safe, and reproducible.
 
 The manifest declares one HTTP MCP server (the team's internal API, whose bearer

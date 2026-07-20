@@ -147,9 +147,11 @@
       </li>
       <li><a href="index.html#install">Install</a>
       </li>
-      <li><a href="examples.html">Examples</a>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/concepts.md">Concepts</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">Which primitive?</a>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/choose.md">Which mode do I need?</a>
+      </li>
+      <li><a href="examples.html">Examples</a>
       </li>
     </ul>
   </div>
@@ -163,9 +165,26 @@
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library">Central library</a>
       </li>
-      <li><a href="index.html#modes">Rendered-file modes</a>
+      <li><a href="index.html#modes">Delivery modes</a>
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#dashboard">Dashboard</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>How-to</b>
+    <ul>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/add-a-server.md">Add a server</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/trust-a-repo.md">Trust a cloned repo</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/lock-down-a-run.md">Lock down a run</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/team-setup.md">Team setup</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/ci.md">Use in CI</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/undo.md">Undo anything</a>
       </li>
     </ul>
   </div>
@@ -175,9 +194,11 @@
     <ul>
       <li><a href="index.html#trust">The trust gate</a>
       </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
+      </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Starter machine policies</a>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Policy presets</a>
       </li>
     </ul>
   </div>
@@ -240,17 +261,19 @@
       <p class="cmdline">Jump straight to the answer. The full directory is below.</p>
       <ul class="jobs">
         <li><a href="start.html">set up every CLI I use in one pass</a></li>
+        <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/add-a-server.md" class="gh">add a server to every CLI</a></li>
         <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#secrets-and-trust" class="gh">keep my tokens out of config files</a></li>
-        <li><a href="index.html#trust">try a repo I just cloned without trusting it</a></li>
+        <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/trust-a-repo.md" class="gh">try a repo I just cloned without trusting it</a></li>
         <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo" class="gh">stop an agent from running <code>rm -rf</code></a></li>
         <li><a href="index.html#modes">work across many repos with no files on disk</a></li>
-        <li><a href="index.html#sandbox">confine a run so it can't reach the network</a></li>
+        <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/lock-down-a-run.md" class="gh">confine a run so it can't reach the network</a></li>
         <li><a href="examples.html#e10">know what a server can do before I enable it</a></li>
         <li><a href="examples.html#e20">see what an agent actually did</a></li>
         <li><a href="index.html#manifest">pin and reproduce my exact setup</a></li>
-        <li><a href="index.html#team">share one reviewed setup with my team or CI</a></li>
+        <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/team-setup.md" class="gh">share one setup with my team</a></li>
+        <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/ci.md" class="gh">share a reviewed setup with CI</a></li>
         <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library" class="gh">add a skill from a git repo</a></li>
-        <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#one-undo-verb-restore" class="gh">undo what agentstack wrote to my configs</a></li>
+        <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/undo.md" class="gh">undo what agentstack wrote to my configs</a></li>
       </ul>
     </section>
 
@@ -259,6 +282,8 @@
       <h2>First run in about ten minutes</h2>
       <ul class="entries">
         <li><a href="start.html">Get started</a><small>guided setup: import what your CLIs already use</small></li>
+        <li><a class="gh" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/concepts.md">Concepts</a><small>every term, two screens</small></li>
+        <li><a class="gh" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/choose.md">Which mode do I need?</a><small>how much protection, and which delivery mode</small></li>
         <li><a href="index.html#install">Install</a><small>one static binary; Docker only for confinement</small></li>
         <li><a href="examples.html">Examples</a><small>25 runnable walkthroughs, simplest first</small></li>
         <li><a class="gh" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">Which primitive?</a><small>every boundary in one table — orientation before you choose</small></li>
@@ -315,7 +340,7 @@
       <p class="kick">Reference</p>
       <h2>The whole surface</h2>
       <ul class="entries">
-        <li><a class="gh" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Every command</a><small>all ~47 subcommands — the list is CI-tested</small></li>
+        <li><a class="gh" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md">Every command</a><small>all 37 subcommands — the list is CI-tested</small></li>
         <li><a class="gh" href="https://github.com/Tarekkharsa/agentstack/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md">using-agentstack — the agent manual</a><small>ships inside the binary; every agent can load it, even before trust</small></li>
         <li><a class="gh" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#experimental-tools_execute">tools_execute</a><small>experimental, machine-opt-in, Docker only</small></li>
         <li><a class="gh" href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#product-boundary-and-non-goals">tools_execute design memo</a><small>product-boundary notes, folded into ARCHITECTURE</small></li>

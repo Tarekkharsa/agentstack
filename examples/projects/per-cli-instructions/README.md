@@ -16,7 +16,7 @@ Requires `agentstack` on `PATH` (or `AGENTSTACK_BIN=/path/to/agentstack`, or a
 built `target/release/agentstack` in this repo). It runs entirely in an isolated
 temp `HOME` and `AGENTSTACK_HOME` — nothing touches your real config.
 
-## The bundle
+## The repo
 
 `bundle/.agentstack/agentstack.toml` targets **Claude Code and Codex** and
 declares three instruction fragments:

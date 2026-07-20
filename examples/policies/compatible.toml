@@ -6,7 +6,7 @@
 #
 # Install: copy to ~/.agentstack/agentstack.toml (it merges UNDER every project's
 # own policy with deny precedence — a project can only narrow it, never loosen).
-# Verify with: agentstack doctor  (look for the "Machine policy posture" line —
+# Verify with: agentstack doctor  (look for the "Machine policy" line —
 # this preset reads as "restrictive", because the "*" rules bind every server).
 
 version = 1

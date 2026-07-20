@@ -1,7 +1,7 @@
 # Restricted folders
 
 A runnable, recordable proof that AgentStack's **guard** keeps specific folders
-off-limits to agents. The bundle is a fake `acme-billing` service: agents may
+off-limits to agents. The repo is a fake `acme-billing` service: agents may
 read and edit `src/` and `docs/` freely, but `secrets/`, `personal-notes/`, and
 `infra/prod/` are declared off-limits — and the guard refuses every read and
 write to them, in whichever CLI dialect the harness speaks.
@@ -15,7 +15,7 @@ Requires `agentstack` on `PATH` (or `AGENTSTACK_BIN=/path/to/agentstack`, or a
 built `target/release/agentstack` in this repo) and `python3`. It runs entirely
 in an isolated temp `HOME`/`AGENTSTACK_HOME` — nothing touches your real config.
 
-## The bundle
+## The repo
 
 A realistic repo tree with two allowed areas and three off-limits ones:
 

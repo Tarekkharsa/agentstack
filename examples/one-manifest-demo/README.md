@@ -13,9 +13,10 @@ Requires `agentstack` on `PATH` (or `AGENTSTACK_BIN=/path/to/agentstack`, or a
 built `target/release/agentstack` in this repo) and `python3`. It runs entirely
 in an isolated temp `HOME` — nothing touches your real config.
 
-## The bundle
+## The manifest
 
-`bundle/.agentstack/agentstack.toml` is the single source of truth. It:
+The manifest in `bundle/.agentstack/agentstack.toml` is the single source of
+truth. It:
 
 - targets three CLIs — **Claude Code, Codex, Cursor**;
 - declares **one** stdio MCP server (`github`);
@@ -30,7 +31,7 @@ in an isolated temp `HOME` — nothing touches your real config.
    rendering anything.
 
 2. **One manifest fans out into three native formats.** `agentstack apply`
-   compiles the same server into each CLI's own shape, at each CLI's own path:
+   renders the same server into each CLI's own shape, at each CLI's own path:
 
    | CLI         | File                 | Native quirk                                   |
    |-------------|----------------------|------------------------------------------------|

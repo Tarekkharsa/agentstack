@@ -5,6 +5,19 @@ execution mode, what does AgentStack actually enforce, and by what mechanism?**
 When any other document and this one disagree, this one is right — it is checked
 against the source, not against intent.
 
+Audience: anyone deciding what a mode actually guarantees. As stated above, this
+file is the ground truth and wins on any disagreement with another doc.
+
+**Contents**
+
+- [Claim discipline](#claim-discipline)
+- [What "trusted" does and does not mean](#what-trusted-does-and-does-not-mean)
+- [Policy is authority, not isolation](#policy-is-authority-not-isolation)
+- [The matrix](#the-matrix)
+- [Per-cell notes](#per-cell-notes)
+- [Experimental `tools_execute`](#experimental-tools_execute)
+- [See also](#see-also)
+
 AgentStack intercepts an agent CLI on four independent lanes — one observes, three enforce:
 
 ![Four interception lanes: your agent CLI flows through the observe-only proxy to the Anthropic API, and through the enforcing gateway+mcp, guard, and egress interceptors to MCP servers, your filesystem, and the internet](interception-map.svg)

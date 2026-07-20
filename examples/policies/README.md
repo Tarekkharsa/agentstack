@@ -11,7 +11,7 @@ more `[policy.*]` tables). They are validated by the CLI's own loader in
 `crates/cli/tests/policy_presets.rs`, so what's here is exactly what
 `agentstack` will accept.
 
-| Preset            | Posture      | Use it when…                                             |
+| Preset            | Machine-policy summary | Use it when…                                             |
 |-------------------|--------------|----------------------------------------------------------|
 | `compatible.toml` | restrictive¹ | You've never set a machine policy; block only the obviously destructive, stay out of the way otherwise. |
 | `developer.toml`  | restrictive  | Everyday dev box: destructive + secret-exfil denied, egress sharp edges blocked, sandbox writes allowed. |
@@ -28,7 +28,7 @@ deny-list, which is still broad. The doctor line never overstates.
 ```sh
 # pick one, then:
 cp examples/policies/developer.toml ~/.agentstack/agentstack.toml
-agentstack doctor        # confirm it loads; read the "Machine policy posture" line
+agentstack doctor        # confirm it loads; read the "Machine policy" line
 ```
 
 The layer is read once per gateway launch, so tightening it takes effect on the
@@ -53,7 +53,7 @@ Full details in `docs/reference.md` (MCP firewall + machine layer). In short:
   (`api.anthropic.com:443` scopes the port; a bare host means any port).
 - **`[policy.secrets]`** globs match `${REF}` names.
 - **`[policy.filesystem]`** has `read` / `write` path globs and is
-  bundle-global (no server key). The `write` scope is enforced in `--sandbox` /
+  manifest-global (no server key). The `write` scope is enforced in `--sandbox` /
   `--lockdown`: the workspace mounts **read-only unless** a write scope covers
   its root (`./**`). `read` scopes are informational today; **host-mode runs
   enforce neither** (policy is advisory outside the sandbox — the run banner and

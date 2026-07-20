@@ -470,7 +470,8 @@
     <p class="lede">
       One manifest for all 13 agent CLIs — servers, skills, instructions, and
       secrets, defined once. Untrusted repos never auto-activate, and governed
-      runs enforce and record exactly what their printed posture names.
+      runs are firewalled, recorded, and labelled with exactly how strongly
+      that is enforced.
     </p>
     <div class="cta" style="margin-top:1.1rem">
       <a class="btn primary" href="start.html">Get started · 10 min →</a>
@@ -498,7 +499,8 @@
           <span class="lvl">01 · You juggle several CLIs</span><code class="cmd">$ agentstack apply</code>
           <h3>One manifest keeps them all in sync</h3>
           <p>Claude Code at work, Cursor for edits, Codex in CI — and every MCP
-            server configured three different ways. Define it once;
+            (Model Context Protocol — the plugin standard agent CLIs use for
+            tools) server configured three different ways. Define it once;
             <code>agentstack apply</code> renders each CLI's native config,
             with secrets left as per-machine references.</p>
           <a class="tag" href="#manifest">The manifest, in detail</a>
@@ -1151,8 +1153,9 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
             <ul>
               <li><a href="start.html">Get started</a><small>guided setup, ~10 minutes</small></li>
               <li><a href="index.html#install">Install</a><small>one static binary</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/concepts.md">Concepts</a><small>every term, two screens</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/choose.md">Which mode do I need?</a><small>protection level &amp; delivery mode</small></li>
               <li><a href="examples.html">Examples</a><small>25 runnable walkthroughs</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">Which primitive?</a><small>which boundary answers what</small></li>
             </ul>
           </div>
           <div class="fcard">
@@ -1162,8 +1165,19 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
               <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md">How it works</a><small>activation, leases, policy layers</small></li>
               <li><a href="index.html#manifest">The manifest</a><small>servers, skills, ${REF} secrets</small></li>
               <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library">Central library</a><small>one library, every project</small></li>
-              <li><a href="index.html#modes">Rendered-file modes</a><small>static, clean-at-rest, or zero files</small></li>
+              <li><a href="index.html#modes">Delivery modes</a><small>static, clean-at-rest, or zero files</small></li>
               <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#dashboard">Dashboard</a><small>the same loop, in a web UI</small></li>
+            </ul>
+          </div>
+          <div class="fcard">
+            <h3>How-to</h3>
+            <ul>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/add-a-server.md">Add a server</a><small>four verbs, one table</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/trust-a-repo.md">Trust a cloned repo</a><small>review, then consent</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/lock-down-a-run.md">Lock down a run</a><small>the escalation ladder</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/team-setup.md">Team setup</a><small>clone, apply, done</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/ci.md">Use in CI</a><small>install --locked + doctor --ci</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/undo.md">Undo anything</a><small>restore, plus the rest</small></li>
             </ul>
           </div>
           <div class="fcard">
@@ -1171,8 +1185,9 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
             <code class="dmcmd">$ agentstack trust · guard</code>
             <ul>
               <li><a href="index.html#trust">The trust gate</a><small>cloned repos stay inert</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a><small>the honest limits, code-grounded</small></li>
               <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a><small>rm -rf blocked, runnable</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Starter machine policies</a><small>developer, CI, locked-down</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Policy presets</a><small>developer, CI, locked-down</small></li>
             </ul>
           </div>
           <div class="fcard">

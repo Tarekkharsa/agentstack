@@ -4,6 +4,10 @@ A self-contained harness for exercising agentstack against a *simulated machine*
 without touching your real `~/.claude.json`, `~/.codex/`, etc. Everything runs
 under an isolated `HOME` inside `runtime/` (gitignored).
 
+**Prerequisites:** only `demo-lockdown.sh` needs Docker running (it launches a
+real `run --sandbox --lockdown` container). `demo-firstrun.sh`,
+`demo-central-library.sh`, and plain `./as` commands need no Docker.
+
 ## Layout
 
 ```
@@ -94,7 +98,7 @@ Two harnesses are simulated: **Claude Code** (has project scope) and **Codex**
 ```sh
 ./as --manifest-dir projects/web-app doctor          # detect harnesses, show drift
 ./as --manifest-dir projects/web-app dashboard       # open the web UI for this project
-./as --manifest-dir projects/web-app session start review   # load a bundle for now…
+./as --manifest-dir projects/web-app session start review   # load a profile for now…
 ./as --manifest-dir projects/web-app session end            # …then revert it
 ```
 

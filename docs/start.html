@@ -387,9 +387,11 @@
       </li>
       <li><a href="index.html#install">Install</a>
       </li>
-      <li><a href="examples.html">Examples</a>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/concepts.md">Concepts</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md#operating-model--choose-the-boundary-you-need">Which primitive?</a>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/choose.md">Which mode do I need?</a>
+      </li>
+      <li><a href="examples.html">Examples</a>
       </li>
     </ul>
   </div>
@@ -403,9 +405,26 @@
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#the-central-library">Central library</a>
       </li>
-      <li><a href="index.html#modes">Rendered-file modes</a>
+      <li><a href="index.html#modes">Delivery modes</a>
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.md#dashboard">Dashboard</a>
+      </li>
+    </ul>
+  </div>
+  <div class="grp">
+    <b>How-to</b>
+    <ul>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/add-a-server.md">Add a server</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/trust-a-repo.md">Trust a cloned repo</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/lock-down-a-run.md">Lock down a run</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/team-setup.md">Team setup</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/ci.md">Use in CI</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/undo.md">Undo anything</a>
       </li>
     </ul>
   </div>
@@ -415,9 +434,11 @@
     <ul>
       <li><a href="index.html#trust">The trust gate</a>
       </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ENFORCEMENT.md#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
+      </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
       </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Starter machine policies</a>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Policy presets</a>
       </li>
     </ul>
   </div>
@@ -544,14 +565,17 @@
         <code>agentstack init</code> runs the guided first setup. It opens with
         a short plan — nothing is written until you confirm — then detects your
         installed CLIs, imports their MCP configuration into one portable
-        manifest, and lifts any inline tokens to <code>${REF}</code> references.
+        <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/concepts.md">manifest</a>,
+        and lifts any inline tokens to <code>${REF}</code> references.
         It asks <em>where</em> those values should live (default: a gitignored
-        <code>.env</code>), then asks you to pick a <strong>delivery mode</strong>
+        <code>.env</code>), then asks you to pick a
+        <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/concepts.md"><strong>delivery mode</strong></a>
         with the arrow keys.
       </p>
       <p class="muted">
-        That last choice <em>forks the rest of the run</em> — so the walkthrough
-        forks too. Pick your mode in the panel below to follow it. Prefer the
+        The wizard's remaining steps differ per mode, so the walkthrough
+        forks too — this page follows <strong>static</strong>, the default,
+        and the panel below shows the other two. Prefer the
         primitives? The same flow is <code>agentstack init</code> →
         <code>agentstack apply --write</code> →
         <code>agentstack use &lt;profile&gt; --write</code>.
@@ -615,6 +639,12 @@
 <span class="c">  clean-at-rest — materialized only during a session</span>
 <span class="c">  zero-files — served live over the gateway, trust-gated</span></code></pre>
       </div>
+
+      <p class="muted">
+        Press Enter for <strong>static</strong> (the default) and keep going —
+        you can switch later. Choosing deliberately? See the
+        <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/choose.md">which-mode guide</a>.
+      </p>
 
       <div class="modefork" id="mode-fork">
         <p class="forklede">

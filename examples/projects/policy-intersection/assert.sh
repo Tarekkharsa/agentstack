@@ -19,7 +19,7 @@
 #                              call as "ok" and the denied calls as "denied"
 #                              with the exact rule.
 #     4. `explain opsbox`    → shows BOTH policy layers (project + machine).
-#     5. `doctor`            → reports the machine-policy posture as "restrictive".
+#     5. `doctor`            → reports the machine-policy summary as "restrictive".
 #
 # Exits nonzero and prints FAIL on any mismatch; safe to run unattended. Runs
 # entirely inside an isolated sandbox — nothing touches your real config.
@@ -214,15 +214,17 @@ else
   bad "explain: missing the egress/secret dimensions"
 fi
 
-# ── 5) doctor reports the machine-policy posture as restrictive ───────────────
-say "5) doctor — machine-policy posture"
+# ── 5) doctor reports the machine-policy summary as restrictive ───────────────
+say "5) doctor — machine-policy summary"
 DOCTOR="$("$AS" doctor --manifest-dir "$PROJECT" 2>&1)"
-POSTURE="$(grep -iA1 'Machine policy posture' <<< "$DOCTOR" | tail -1 || true)"
-printf '  %s\n' "$POSTURE"
-if grep -qi 'restrictive' <<< "$POSTURE"; then
-  ok "doctor: reports the machine-policy posture as \"restrictive\""
+ESC="$(printf '\033')"
+DOCTOR_PLAIN="$(sed "s/${ESC}\[[0-9;]*m//g" <<< "$DOCTOR")"
+SUMMARY="$(grep -A1 -m1 '^Machine policy$' <<< "$DOCTOR_PLAIN" | tail -1 || true)"
+printf '  %s\n' "$SUMMARY"
+if grep -qi 'restrictive' <<< "$SUMMARY"; then
+  ok "doctor: reports the machine-policy summary as \"restrictive\""
 else
-  bad "doctor: expected a restrictive posture line; got: ${POSTURE:-<none>}"
+  bad "doctor: expected a restrictive machine-policy line; got: ${SUMMARY:-<none>}"
 fi
 
 say "Two layers in. The intersection is the effective policy. The floor wins."

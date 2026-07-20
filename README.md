@@ -1,11 +1,11 @@
 <img alt="agentstack" src="docs/logo.svg" width="380">
 
 > **Cloning a repo shouldn't hand your agent to a stranger.**
-> AgentStack is a local control plane for AI coding agents: one reviewed
-> manifest defines what every agent CLI may run — then trust-gates,
-> firewalls, and audits it. An untrusted repo's declarations are never
-> auto-activated, and governed gateway and contained runs enforce and
-> record exactly the controls their printed posture names.
+> AgentStack puts everything your AI coding tools (Claude Code, Codex,
+> Cursor, …) are allowed to run into one reviewed file. A repo you clone
+> can't auto-activate any of it until you approve that repo — and what
+> runs through AgentStack's gateway is firewalled and logged. Each run is
+> labelled with [how strongly that is actually enforced](docs/ENFORCEMENT.md).
 
 **[Website](https://tarekkharsa.github.io/agentstack/)** ·
 [Docs](https://tarekkharsa.github.io/agentstack/docs.html) ·
@@ -13,6 +13,23 @@
 [Releases](https://github.com/Tarekkharsa/agentstack/releases)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Tarekkharsa/agentstack/ci.yml?branch=main&style=flat&label=CI)](https://github.com/Tarekkharsa/agentstack/actions/workflows/ci.yml) [![Conformance](https://img.shields.io/github/actions/workflow/status/Tarekkharsa/agentstack/conformance.yml?branch=main&style=flat&label=conformance)](https://github.com/Tarekkharsa/agentstack/actions/workflows/conformance.yml) [![Release](https://img.shields.io/github/v/release/Tarekkharsa/agentstack?style=flat&label=release)](https://github.com/Tarekkharsa/agentstack/releases) [![License](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue?style=flat)](https://github.com/Tarekkharsa/agentstack/blob/main/LICENSE-MIT)
+
+## Why
+
+Every skill, MCP (Model Context Protocol — the plugin standard agent CLIs use for tools) server, and
+agent config you adopt is **unreviewed code plus instructions**, wired into a process that holds your
+credentials, shell, and network. Adopting one is `npm install` with an agent attached — no lockfile,
+no review gate, no record of what it did. AgentStack closes four gaps:
+
+- **Anything a repo declares can run.** A clone stays *inert* until you trust its exact bytes; any edit re-gates it.
+- **Nothing narrows or records what agents do.** Your machine policy — which no repo can loosen — fences tools, secrets, and egress, and every brokered call lands in an audit log.
+- **Every CLI spells the same setup differently.** One reviewed [manifest](docs/concepts.md) renders them all; secrets stay references.
+- **An agent can wreck your working tree by accident.** `agentstack guard` blocks `rm -rf`, `git reset --hard`, and `.env` reads before they run.
+
+Using a single agent with one hand-managed server? You may not need this yet. The moment capabilities
+come from repos you didn't write, you do.
+
+![The trust gate: clone → inert → review → trust → firewalled → audited — and the library sync gate blocking a literal secret](docs/trust-gate.svg)
 
 ## Try it in 60 seconds
 
@@ -22,62 +39,47 @@ agentstack init      # your CLI configs → one reviewed manifest, previewed and
 agentstack doctor    # verify it landed — every warning names its exact fix
 ```
 
-That's the interactive path — `init` in a terminal is a guided wizard.
-Scripting or CI? `agentstack init --secrets skip` writes only the manifest
-(no prompts, no token values); review it, then `agentstack apply --write`.
+`init` is a guided wizard. Scripting or CI? `agentstack init --secrets skip` writes only the manifest
+— no prompts, no token values — then `agentstack apply --write`. Inline tokens are lifted into
+`${REF}` placeholders, resolved per machine and never stored in the manifest.
 
-Real tokens are lifted out of your config files into `${REF}`s as part of the
-import. That's step 1 of 6 — bare `agentstack` always names your next one.
+What you'll see — the core loop, one server you already have rendered into every CLI in its own
+syntax (a re-run changes nothing: `agentstack apply` → `✓ up to date`):
 
-## Why
+```text
+$ agentstack init --yes
+🔍  6 CLI binaries on PATH: Claude Code · Codex CLI · … · Pi
+📥  Imported 1 MCP server(s) from existing configs
+✅  Wrote .agentstack/agentstack.toml
 
-Every skill, MCP server, and agent config you adopt is **unreviewed code plus
-instructions**, wired into a process that holds your credentials, your shell,
-and the network. Installing one is `npm install` with an agent attached —
-except with no lockfile, no review gate, and no record of what it did.
-AgentStack closes those gaps:
+$ agentstack apply --write            # render the manifest into every CLI
+Claude Code (.mcp.json)              ✓ wrote 1 server(s)
+Codex CLI (.codex/config.toml)       ✓ wrote 1 server(s)
+Gemini CLI (.gemini/settings.json)   ✓ wrote 1 server(s)
+OpenCode (opencode.json)             ✓ wrote 1 server(s)
+Applied to 4 target(s).
+```
 
-- **Anything a repo declares can run.** Here a clone is *inert* until you
-  trust its exact bytes, and any edit re-gates it.
-- **Nothing narrows or records what agents do.** Here your *machine policy* —
-  which no repo can loosen — fences tools, secrets, and egress, and every
-  brokered call lands in an audit log.
-- **Every CLI spells the same setup differently.** Here one reviewed manifest
-  renders them all, secrets stay references, and a lockfile makes it
-  reproducible.
-- **An agent can wreck your working tree by accident.** Here `agentstack
-  guard` blocks destructive commands (`rm -rf`, `git reset --hard`, `.env`
-  reads) before they run.
-
-If you use a single agent with one hand-managed server, you may not need this
-yet. The moment capabilities come from repos you didn't write, you do.
-
-![The trust gate: clone → inert → review → trust → firewalled → audited — and the library sync gate blocking a literal secret](docs/trust-gate.svg)
-
-AgentStack resolves and pins capabilities from `.agentstack/agentstack.toml`,
-activates task-specific profiles, and either serves the stack live through a
-trust-gated gateway or compiles it into the native config of 13 agent CLIs —
-Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS Code,
-GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro, and Pi.
+Condensed from a real run. Reproduce it fenced (never touches your real configs):
+[`examples/sandbox/demo-firstrun.sh`](examples/sandbox/demo-firstrun.sh).
 
 ## Install
 
-The one-line installer above verifies the release tarball against the
-`checksums.txt` published with each release. Or build from a checkout:
+The one-line installer above verifies the release tarball against the `checksums.txt` published with
+each release. Or build from a checkout:
 
 ```sh
-cargo build --release
-./target/release/agentstack self link   # symlink onto your PATH
+cargo build --release                  # add --features sandbox for `run --sandbox` (step 6)
+./target/release/agentstack self link  # symlink onto your PATH
 ```
 
-One static binary for everything below. Docker is required only for step 6
-(`run --sandbox` / `--lockdown` and experimental `tools_execute`).
+Release binaries ship with sandbox support compiled in; a bare `cargo build` does not — pass
+`--features sandbox` to get `run --sandbox` / `--lockdown`.
 
 ## Climb as far as you need
 
-AgentStack is adopted in steps, not all at once. Each step pays off on its
-own, in minutes, and nothing later is required to keep the earlier wins —
-stop wherever your setup stops hurting.
+AgentStack is adopted in steps, not all at once. Each step pays off on its own, in minutes, and
+nothing later is required to keep the earlier wins.
 
 | Step | You run | You get |
 | --- | --- | --- |
@@ -88,279 +90,97 @@ stop wherever your setup stops hurting.
 | [5 — Scale](#step-5--scale-it-up-profiles-library-teams) | profiles · `lib` · extensions | one governed stack across projects, machines, and teammates |
 | [6 — Confine](#step-6--maximum-assurance-sandbox--lockdown-docker) | `run --sandbox --lockdown` | kernel-enforced confinement — the agent's only route out is the audited proxy |
 
-Steps 1–4 are the everyday loop; 5–6 are shipped and hardening — what each
-mode enforces, and where it stops, is spelled out per dimension in the
-[enforcement matrix](docs/ENFORCEMENT.md). The same ground, arranged as a
-two-track walkthrough with expected output at every step, is the
-[getting-started walkthrough](https://tarekkharsa.github.io/agentstack/start.html);
-agents get the same map via the shipped
-[`using-agentstack` skill](crates/cli/catalog/skills/using-agentstack/SKILL.md).
+Steps 1–4 are the everyday loop; 5–6 are shipped and hardening. What each mode enforces, and where it
+stops, is spelled out per dimension in the [enforcement matrix](docs/ENFORCEMENT.md); the same ground
+as a two-track walkthrough is the
+[getting-started tracks](https://tarekkharsa.github.io/agentstack/start.html). New to the vocabulary?
+[concepts.md](docs/concepts.md) defines every term.
 
 ## Step 1 — One manifest, every CLI (5 minutes)
 
-Interactive `agentstack init` is the guided path — it imports, previews, applies, and
-activates interactively. It opens with a plan (nothing written until you
-confirm), and when it lifts inline tokens it asks where the values should
-live — a gitignored project `.env` by default, the OS keychain, or skip and
-decide later, each with a one-line explanation at the moment of choice. Then
-it asks you to pick a **delivery mode** with the arrow keys — after the
-confirmed import has written the manifest, but before any CLI's native
-config is touched — and that choice forks the rest of the run: **static**
-previews and renders configs into every CLI; **clean-at-rest** pins the
-lockfile and teaches the `session start`/`session end` rhythm without
-rendering; **zero-files** offers to register the gateway and points you at
-`agentstack trust .`. Every path closes with a summary of every file it
-wrote, where each secret resolves, and the one-liner to undo it all. The
-same flow as individual commands: `init` → `apply` → `use --write` (skills
-activate through `use`, not `apply`; the wizard runs it for you). If `apply` or
-`doctor` reports a missing secret, store it once — by default it goes in your
-OS keychain, never in the manifest:
-
-```bash
-agentstack secret set GH_PAT
-```
-
-Prefer a secrets manager? Drop a `.env.schema` in the project and the same
-`${REF}`s resolve through varlock's providers (1Password, AWS/Azure/GCP,
-Bitwarden, …) instead — OS keychain by default, provider-backed when you opt
-in, and the manifest never changes either way.
-
-What you just wrote looks like this — one file, reviewed like code:
-
-```toml
-version = 1
-
-[servers.github]
-type = "http"
-url = "https://api.githubcopilot.com/mcp/"
-headers = { Authorization = "Bearer ${GH_PAT}" } # resolved per machine
-
-[servers.github.extra.codex]                 # native keys one CLI needs pass
-startup_timeout_sec = 20                     # through verbatim, per adapter
-
-[profiles.backend]                           # a named capability set you
-servers = ["github"]                         # activate per task: `use backend`
-skills = ["sql-review"]                      # resolves from your central library
-
-[targets]
-default = ["claude-code", "codex"]
-```
-
-You can hand-write this, but you don't have to: `agentstack add server` and
-`agentstack add from <id>` append servers to the manifest for you.
-
-One `agentstack apply` compiles it into the native config of every CLI in
-`[targets]` — each adapter's quirks handled for you:
-
-![agentstack init, the guided wizard: it opens with a plan (nothing written until you confirm), detects your CLIs and lifts inline tokens to ${REF}s, asks where the values live (project .env selected), then asks you to pick a delivery mode (static selected) before any native config is written — the fork that decides the rest of the run — applies into every CLI, and closes with a machine-change summary, the undo one-liner, and a link to learn the rest](docs/wizard-replay.svg)
-
-In a repo, writes default to **project** scope (artifacts land repo-local,
-kept out of git by a managed `.gitignore` block that only ever covers files
-agentstack wrote); the machine manifest (`~/.agentstack/`) defaults to your
-global configs — `--scope` overrides either way. Prefer no rendered files at
-all? Jump to [step 4](#step-4--keep-strangers-repos-inert-until-review).
-
-Servers and skills are two of six capability kinds: `[instructions.*]`
-compiles house rules into a managed region of each harness's `CLAUDE.md` /
-`AGENTS.md`, `[settings.*]` renders native per-CLI settings, `[hooks.*]`
-compiles lifecycle hooks, and `[extensions.*]` delivers native harness
-add-ons under the strictest pinning agentstack has. Every kind, every flag,
-and the manifest's path-anchoring rules: the
-[feature reference](docs/reference.md).
+`agentstack init` is a guided wizard: it detects your CLIs, imports their config, lifts inline tokens
+into `${REF}` placeholders, and asks you to pick a **delivery mode** — where rendered files live.
+Press Enter for **static** (the default); [which mode do I need?](docs/choose.md) explains the choice.
+Then `agentstack apply --write` renders the manifest into every CLI in `[targets]`. Servers and skills
+are two of six capability kinds — instructions, settings, hooks, and extensions are the rest, all in
+the [reference](docs/reference.md). Full walkthrough:
+[Track A](https://tarekkharsa.github.io/agentstack/start.html).
 
 ## Step 2 — Two habits that keep it healthy
 
-- `agentstack` with no arguments tells you the one next step for the
-  directory you're in.
-- `agentstack doctor` verifies everything is wired up and names the exact fix
-  for anything that isn't.
+- `agentstack` with no arguments names the one next step for the directory you're in.
+- `agentstack doctor` verifies everything is wired and names the exact fix for anything that isn't.
 
 Everything else you'll reach for day to day:
 
 | Command | What it does |
 | --- | --- |
-| `agentstack init` | Reverse-engineer a manifest from the configs you already have |
 | `agentstack apply` | Preview each CLI's config changes; confirm (or `--write`) to render |
-| `agentstack doctor` | Verify wiring; every warning comes with the exact fix command |
 | `agentstack diff` | What would change, read-only |
 | `agentstack secret set NAME` | Store a secret in the OS keychain |
-| `agentstack use --write` | Activate skills + servers (a named profile, or everything when none declared) |
-| `agentstack run <cli> --profile <p>` | Launch a harness as a tracked run, with a profile for its lifetime |
-| `agentstack report` | Every "what happened" view: live runs, a run's flight recorder, call activity |
-| `agentstack guard install` | Wire the destructive-command guard into your CLIs' hooks |
-| `agentstack lock` | Pin profile refs in the lockfile without rendering anything |
-| `agentstack restore --last --write` | Undo any write from its recorded history |
-| `agentstack adopt --write` | Keep a hand-edit: pull drifted native config back into the manifest |
-| `agentstack dashboard` | A read-only view of your stack in a local web UI |
+| `agentstack use --write` | Activate skills + servers (a profile, or everything when none declared) |
+| `agentstack run <cli> --profile <p>` | Launch a CLI as a tracked run, with a profile for its lifetime |
+| `agentstack report` | Every "what happened" view: live runs, a run's flight recorder, calls |
 
-When `doctor` flags drift, the rule is directional: the hand-edit on disk is
-right → `adopt` pulls it into the manifest; the manifest is right →
-`apply --write` re-renders over it. And before acting on any capability,
-`agentstack explain <name>` shows its provenance, secrets, and policy
-footprint. Complete command list: the [feature reference](docs/reference.md).
+When `doctor` flags **drift**, the rule is directional: the hand-edit is right → `adopt` pulls it into
+the manifest; the manifest is right → `apply --write` re-renders
+([add a server](docs/howto/add-a-server.md) · [undo anything](docs/howto/undo.md)). Complete list: the
+[reference](docs/reference.md).
 
 ## Step 3 — Block the accidents (one command)
 
-`agentstack guard install` wires a **cooperative** pre-tool-use hook into 9
-agent CLIs (Claude Code, Codex, Gemini, Cursor, Windsurf, Copilot CLI,
-Antigravity, OpenCode, Pi; VS Code reads the Claude-format hooks). (VS Code's
-hook support is in Preview and may be disabled by an organization — coverage
-there is best-effort.) It stops the commands an agent runs by mistake before
-they touch your machine:
-
-```text
-agent → rm -rf ~/other-project   ✗ blocked   # destructive, outside the workspace
-agent → git reset --hard         ✗ blocked   # discards uncommitted work
-agent → cat .env                 ✗ blocked   # [policy.filesystem] deny-glob
-every denial → ~/.agentstack/audit/calls.jsonl
-```
-
-`guard status` shows which CLIs are wired; `guard test rm -rf /` shows a
-denial without an agent. This catches *accidents*, not a determined attacker
-— kernel-enforced confinement is
-[step 6](#step-6--maximum-assurance-sandbox--lockdown-docker). Runnable
-walkthrough: [`examples/guard-demo/`](examples/guard-demo/).
+`agentstack guard install` wires a **cooperative** pre-tool-use hook into 9 agent CLIs, blocking the
+commands an agent runs by mistake — `rm -rf` outside the workspace, `git reset --hard`, `.env` reads —
+before they touch your machine; every denial is logged. It catches **accidents, not a determined
+attacker** (kernel-enforced confinement is [step 6](#step-6--maximum-assurance-sandbox--lockdown-docker)).
+What it does and doesn't stop: the [enforcement matrix](docs/ENFORCEMENT.md). Runnable:
+[`examples/guard-demo/`](examples/guard-demo/).
 
 ![agentstack guard blocking rm -rf, git reset --hard, and cat .env](docs/guard.svg)
 
 ## Step 4 — Keep strangers' repos inert until review
 
-Register the gateway once (`agentstack gateway connect --all --write`) and
-every repo you open brings its own MCP servers with **no files copied in**.
-But a repo you haven't reviewed is **inert** — none of its servers are
-spawned or contacted, no secrets resolved:
+Register the gateway once — `agentstack gateway connect --all --write` — and every repo you open brings
+its own MCP servers, no files copied in. An unreviewed repo is **inert**: no servers spawned or
+contacted, no secrets resolved. `agentstack trust .` shows what it declares before you authorize its
+exact bytes; any edit re-gates it. Then every brokered call is firewalled and audited under two policy
+layers — the repo's `[policy]` and your machine policy, which no repo can loosen. Detail, and exactly
+what trust does and doesn't cover: [trust a cloned repo](docs/howto/trust-a-repo.md).
 
-```bash
-git clone <some-repo> && cd <some-repo>
-agentstack mcp --auto-project    # an agent asks what it can use here → nothing (untrusted)
+Two extensions of the same consent machinery, both in the [reference](docs/reference.md):
 
-agentstack trust .               # you SEE what it declares before authorizing:
-#   ▶ demo: runs `python3 ./server.py`
-#   ✓ trusted at sha256:…        (editing the manifest re-gates it)
-```
-
-Trust pins the **manifest, local overlay, and lockfile** — so `agentstack
-lock` re-gates the project (new pins = new consent). You're authorizing the
-declared commands, not arbitrary code they point at: review referenced
-scripts as part of `trust .`, same discipline as reading a `.envrc` before
-`direnv allow`. After that, every brokered call is **firewalled** and
-**audited** under two policy layers — the repo's `[policy]` and your own
-machine-level policy, checked first, which no repo can loosen:
-
-```text
-agent → demo.echo         ✓ ok        # brokered through the gateway, logged
-agent → demo.secret_read  ✗ denied    # blocked by [policy.tools]
-every call → ~/.agentstack/audit/calls.jsonl   (tool · outcome · latency)
-```
-
-Starter machine policies: [`examples/policies/`](examples/policies/). The
-whole gate is a runnable 60-second demo —
-[`docs/trust-gate-demo.sh`](docs/trust-gate-demo.sh) — or
-[watch it live on the site](https://tarekkharsa.github.io/agentstack/#trust).
-
-Two extensions of the same consent machinery, both fully specified in the
-[feature reference](docs/reference.md):
-
-- **`run <cli> --locked`** gates a whole launch, no Docker required: trust at
-  the current digest, strict lock verification (a one-byte edit to a pinned
-  local server executable refuses the run), and policy admission under your
-  machine ceiling. What passed is **frozen** for the run — no mid-run lease
-  swaps or surface widening; `--plan` prints every gate decision without
-  launching. Honest scope: pre-launch gating plus a frozen surface, not
-  kernel isolation. Asserted example:
-  [`examples/projects/locked-run/`](examples/projects/locked-run/).
-- **`[extensions.*]`** delivers native harness add-ons (pi's TypeScript
-  extensions, OpenCode's JS plugins) — the highest-risk kind, so governance
-  is all pre-delivery and labelled that way: content-pinned in the lock, zero
-  bytes rendered while untrusted or drifted, copies re-verified by
-  `run --locked`. What you get is provenance, not runtime enforcement:
-  [enforcement matrix → native extensions](docs/ENFORCEMENT.md#native-extensions).
+- **`run <cli> --locked`** gates a whole launch with no Docker — pre-launch trust, strict lock verification, a frozen surface. Honest scope: not kernel isolation.
+- **`[extensions.*]`** delivers native CLI add-ons under the strictest pinning agentstack has — provenance, not runtime enforcement: [matrix](docs/ENFORCEMENT.md#native-extensions).
 
 ## Step 5 — Scale it up: profiles, library, teams
 
-Install a capability once into your machine-wide **central library**
-(`~/.agentstack/lib`), then reference it **by name** from any project's
-profile — no copying files between repos:
+Install a capability once into your machine-wide **central library** (`~/.agentstack/lib`), then
+reference it by name from any project's profile — no copying files between repos:
 
 ```bash
-agentstack search codex                    # your library + catalog + MCP registry
+agentstack search codex                      # your library + catalog + MCP registry
 agentstack lib add sql-review --path ./skills/sql-review --write
-agentstack lib add improve --git https://github.com/acme/skills \
-    --subpath skills/improve --write       # marketplace/monorepo layouts
-agentstack lib sync                        # version the library as a git repo
+agentstack lib sync                          # version the library as a git repo
 ```
 
-Every add is content-scanned (hidden-unicode / prompt-injection) before it
-lands, and `lib sync`'s fail-closed gate keeps secrets from ever traveling.
-A starter catalog ships in the binary (`run-codex`, `mine-skills`,
-`adversarial-review`, `using-agentstack`, …).
-
-**Teams and CI:** commit `.agentstack/` (manifest + lock); a teammate runs
-`agentstack secret set` + `apply --write` + `doctor`. In CI the trust gate is
-`agentstack install --locked` + `doctor --ci`, or the one-line GitHub Action:
-
-```yaml
-steps:
-  - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@v0.14.0  # pin a release tag, not @main
-```
-
-A maintainer can `sign` the lockfile (detached ed25519) for `verify` on the
-other end; `export` / `import` move a whole setup between machines as one
-age-encrypted bundle.
-
-**Where rendered files live** is a per-project choice — **static** (artifacts
-on disk, gitignored), **clean-at-rest** (nothing exists between sessions;
-profiles injected by `run` / `session start` and reverted on exit), or
-**zero-files** (everything served live through the gateway, with
-`agentstack_lease_open` profile fences, progressive skill loading, and
-`tools_search` / `tools_bindings` to keep a dozen servers out of every
-turn's context). Trade-offs and the full lease lifecycle:
-[feature reference → three modes](docs/reference.md#where-rendered-files-live-three-modes).
-
-**More power tools**, each one line here and fully documented in the
-[reference](docs/reference.md): vendor packs
-(`add from git:github.com/acme/pack@v1.2.0` — versioned, policy-gated
-bundles); a personal layer (`init --global`) that merges beneath every
-project; app-managed servers (`owner = "codex"` makes the owning app's config
-canonical); usage insight (`report calls`, and `agentstack optimize` to turn
-the audit log into concrete pruning recommendations); an observe-only wire
-relay (`agentstack proxy`, ranked by `agentstack report wire`) that measures
-what each tool actually costs in tokens per turn; and
-[the read-only dashboard](docs/reference.md#dashboard).
-
-The closed loop in under a minute — install a versioned pack, spread it to
-every CLI, firewall a tool, watch the refusal in the audit log, upgrade:
-
-![agentstack closed loop: install a versioned pack, spread it everywhere, firewall a tool, watch the audited refusal, upgrade](docs/closed-loop.svg)
-
-> ▶ Run it yourself: [`examples/sandbox/demo-closed-loop.sh`](examples/sandbox/demo-closed-loop.sh).
+Every add is content-scanned (hidden-unicode / prompt-injection) before it lands, and `lib sync`'s
+fail-closed gate keeps secrets from ever traveling. **Share with a team or CI:** commit `.agentstack/`,
+then [set up a team](docs/howto/team-setup.md) or [wire it into CI](docs/howto/ci.md). Where rendered
+files live — **static**, **clean-at-rest**, or **zero-files** — is a per-project choice
+([which mode?](docs/choose.md) · [lifecycle](docs/reference.md#where-rendered-files-live-three-modes)).
+Vendor packs, a personal layer, `agentstack optimize`, and the dashboard: the [reference](docs/reference.md).
 
 ## Step 6 — Maximum assurance: sandbox & lockdown (Docker)
 
-Everything so far decides what an agent *may* do. This step decides what it
-*can* do. `agentstack run --sandbox --lockdown` launches the agent in a
-container with **no host route and no internet**: its only path out is the
-egress-proxy sidecar, which enforces your machine `[policy.egress]` — SNI
-match, anti-SSRF address classes, host normalization — and records every
-decision to the run's flight recorder (`agentstack report`). Ignoring the
-proxy reaches nothing; the confinement is topological.
-
-![agentstack lockdown: a container with no host route — its only egress is the AgentStack proxy sidecar, which blocks a denied host and records it](docs/lockdown.svg)
-
-Build with `--features sandbox` and point it at an image carrying your
-harness — setup, image variables, and the runnable demo live in the
-[feature reference](docs/reference.md) and
-[`examples/sandbox/demo-lockdown.sh`](examples/sandbox/demo-lockdown.sh).
-Sandbox-enabled builds can also expose experimental **`tools_execute`** —
-one bounded TypeScript program calling an exact set of MCP tools from a
-read-only, no-network container, off by default and enabled only by the
-machine owner: [contract](docs/reference.md#experimental-tools_execute) ·
-[enforcement](docs/ENFORCEMENT.md#experimental-tools_execute).
-
-AgentStack restricts destinations and records decisions; it cannot guarantee
-sensitive content never leaves through a host you *allowed*. The per-mode
-truth table is the [enforcement matrix](docs/ENFORCEMENT.md).
+Everything so far decides what an agent *may* do; this step decides what it *can*. `agentstack run
+<cli> --sandbox --lockdown` launches the agent in a Docker container with **no host route and no
+internet** — its only path out is the egress-proxy sidecar, which enforces your machine
+`[policy.egress]` and records every decision to the run's flight recorder. **Unapproved egress is
+blocked.** Still, AgentStack restricts destinations and records decisions; it cannot guarantee
+sensitive content never leaves through a host you *allowed* — the
+[enforcement matrix](docs/ENFORCEMENT.md) is the per-mode truth table. The escalation ladder
+(`--locked` → `--sandbox` → `--lockdown`, and the posture each prints):
+[lock down a run](docs/howto/lock-down-a-run.md).
 
 ## Develop
 
@@ -370,14 +190,9 @@ cargo clippy --all-targets
 cargo fmt --check
 ```
 
-Install your build with `agentstack self link`. Adding a CLI is one YAML
-descriptor — copy `crates/adapters/descriptors/codex.yaml`, check it with
-`agentstack adapters validate`, drop it into `~/.agentstack/adapters/` (no
-rebuild). Ground rules and the security invariants:
-[CONTRIBUTING.md](CONTRIBUTING.md). Release history:
-[CHANGELOG.md](CHANGELOG.md).
+Install your build with `agentstack self link`. Ground rules and the security invariants:
+[CONTRIBUTING.md](CONTRIBUTING.md). Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-Dual-licensed under either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE)
-at your option.
+Dual-licensed under either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your option.
