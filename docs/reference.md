@@ -1279,7 +1279,7 @@ those disagree, and the `agentstack init` to reverse-engineer a manifest.
 | **Overview** | stat tiles, next-actions, stack summary, the zero-files gateway (connected CLIs + this repo's trust state), profiles, usage; each next-action links to a tab or a read-only diff |
 | **Runs** | live `agentstack run` processes — uptime, profile, reachable capabilities, per-run **Calls** (audited footprint, digests only); stop with the shown `agentstack kill <id>` |
 | **Discover** | search the embedded catalog + official MCP Registry; each result shows trust signals and its `agentstack add from <id>` |
-| **Servers** / **Skills** | the cross-harness matrix — where each capability is enabled per CLI and scope; click a server for its config, the trust lens (**Explain trust ⓘ**), and the **context** token cost. Skills also lists on-disk dirs not in the manifest, each with `agentstack adopt <name>` |
+| **Servers** / **Skills** | the cross-harness matrix — where each capability is enabled per CLI and scope; click a server for its config, the trust lens (**Explain trust ⓘ**), and the **context** token cost. Skills also lists on-disk dirs not in the manifest, each with its `agentstack add skill <path> --write` |
 | **Settings** | each tool's current settings (from its real config file) and which keys agentstack manages; edit `[settings.<tool>]`, then `agentstack apply --write` |
 | **Hooks / Instructions / Extensions** | read-only inventories of lifecycle hooks, CLAUDE.md/AGENTS.md fragments, and content-pinned native add-ons |
 | **Secrets** | every `${REF}` the manifest mentions, whether it resolves and from which layer (env / varlock / keychain / .env); missing ones show `agentstack secret set <REF>`, values never shown |

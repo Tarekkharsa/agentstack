@@ -256,7 +256,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
       <div id="quizDriftOpts" style="display:flex;flex-direction:column;gap:8px"></div>
       <div id="quizDriftFb" hidden style="margin-top:12px;font-size:13px;line-height:1.55"></div>
     </div>
-    <div style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.6"><strong>One undo verb:</strong> every write AgentStack makes is recorded — <code class="sm">agentstack restore --last --write</code> reverts the most recent one.</div>
+    <div style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.6"><strong>One undo verb:</strong> every rendered-config write (<code class="sm">apply</code>, <code class="sm">use</code>, sessions) is recorded — <code class="sm">agentstack restore --last --write</code> reverts the most recent one. The manifest itself is yours: an <code class="sm">adopt</code> you regret is undone in your editor or git.</div>
   </section>
 
   <section class="lesson-pane" id="lesson-4" hidden>
@@ -415,8 +415,7 @@ var TERM={
   verify:[
     {cmd:'agentstack doctor',out:[['✓ manifest valid  (.agentstack/agentstack.toml)',G],['✓ secrets — 2/2 ${REF}s resolve on this machine',G],['⚠ drift — .mcp.json edited on disk since last apply',A],['   fix: agentstack diff  →  adopt (keep edit)  or  apply --write (keep manifest)',D],['✓ guard installed in 4 CLIs',G],['3 sections hidden (features you don’t use) — doctor --all shows everything',D]]},
     {cmd:'agentstack diff',out:[['.mcp.json  (Claude Code)',W],['+ "context7": { "command": "npx", "args": ["-y", "context7-mcp"] }',G],['  ← hand-added since last apply; the manifest does not declare "context7"',D]]},
-    {cmd:'agentstack adopt --write',out:[['✓ pulled "context7" into .agentstack/agentstack.toml',G],['🔑 lifted inline token → ${CONTEXT7_KEY}',A],['comments in the live config preserved',D]]},
-    {cmd:'agentstack restore --last --write',out:[['reverting write w-31c8  (adopt context7)…',D],['✓ restored — the file shows as pending again in doctor',G]]}
+    {cmd:'agentstack adopt --write',out:[['✓ pulled "context7" into .agentstack/agentstack.toml',G],['🔑 lifted inline token → ${CONTEXT7_KEY}',A],['comments in the live config preserved',D]]}
   ],
   guard:[
     {cmd:'agentstack guard install',out:[['✓ wired pre-tool-use hook into 4 CLIs',G],['   Claude Code · Codex CLI · Gemini CLI · OpenCode',D]]},
@@ -621,12 +620,10 @@ function buildWizOpts(){
 /* ---------- lesson 4: drift resolver + checkpoint quiz ---------- */
 var DR={
   adopt:{lines:[['$ agentstack adopt --write','a'],['✓ pulled "context7" into .agentstack/agentstack.toml','g'],['🔑 lifted inline token → ${CONTEXT7_KEY}','a'],['✓ doctor: drift cleared — manifest now declares what disk has','g']],note:'The hand-edit held the truth: adopt made it official, and the inline token was lifted on the way in.'},
-  apply:{lines:[['$ agentstack apply --write','a'],['Claude Code (.mcp.json)   ✓ re-rendered — stray "context7" entry removed','g'],['✓ doctor: drift cleared — disk now matches the manifest','g']],note:'The manifest held the truth: apply re-rendered over the stray edit. The hand-added server is gone from the config.'},
-  restore:{lines:[['$ agentstack restore --last --write','a'],['reverting write w-31c8…','d'],['✓ restored — the file shows as pending again in doctor','g']],note:'Neither side yet — restore rewound agentstack’s own last write so you can decide with a clean slate.'}};
+  apply:{lines:[['$ agentstack apply --write','a'],['Claude Code (.mcp.json)   ✓ re-rendered — stray "context7" entry removed','g'],['✓ doctor: drift cleared — disk now matches the manifest','g']],note:'The manifest held the truth: apply re-rendered over the stray edit. The hand-added server is gone from the config.'}};
 var DRIFT_OPTS=[
   {k:'adopt',label:'my hand-edit is right → adopt',desc:'pull the edit into the manifest'},
-  {k:'apply',label:'the manifest is right → apply --write',desc:'re-render over the stray edit'},
-  {k:'restore',label:'not sure → restore --last',desc:'undo agentstack’s last write first'}];
+  {k:'apply',label:'the manifest is right → apply --write',desc:'re-render over the stray edit'}];
 function renderDrift(){
   var wrap=$('driftOpts');wrap.innerHTML='';
   DRIFT_OPTS.forEach(function(o){

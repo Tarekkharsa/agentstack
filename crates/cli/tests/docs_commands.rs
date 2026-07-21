@@ -399,6 +399,39 @@ fn scan_file(
         let Some((tok2_pos, tok2)) = second else {
             continue;
         };
+        // A `<placeholder>` argument after a leaf command that accepts no
+        // positional documents an argument the CLI doesn't take (the shipped
+        // `adopt <name>` bug). Markdown carries a raw `<name>` (the token
+        // splitter stops at `<`, leaving an empty token there); HTML escapes
+        // it as `&lt;name&gt;`. A raw `<` in HTML is always a real tag, so
+        // only the escaped form counts there.
+        let placeholder_arg = match kind {
+            Kind::Markdown => {
+                tok2.is_empty() && content[tok2_pos..].starts_with('<') && {
+                    let inner: String = content[tok2_pos + 1..]
+                        .chars()
+                        .take_while(|&c| c != '>')
+                        .collect();
+                    !inner.is_empty()
+                        && inner.chars().all(|c| {
+                            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_'
+                        })
+                }
+            }
+            Kind::Html => tok2.starts_with("&lt;"),
+        };
+        if placeholder_arg {
+            // (`is_none_or` needs Rust 1.82; the workspace MSRV is 1.80.)
+            let is_leaf = subs.get(tok1).map(|s| s.is_empty()).unwrap_or(true);
+            if is_leaf && !positional.contains(tok1) {
+                violations.push(Violation {
+                    file: display_path.clone(),
+                    line: line_number(&content, tok2_pos),
+                    snippet: snippet_for_line(&content, tok2_pos),
+                });
+            }
+            continue;
+        }
         if !looks_like_command_token(tok2) {
             continue;
         }

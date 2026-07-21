@@ -80,7 +80,7 @@ required to keep the earlier wins:
 
 | Step | You run | You get |
 | --- | --- | --- |
-| [1 — Unify](https://tarekkharsa.github.io/agentstack/start.html) | `agentstack init` → `apply` | one reviewed manifest for every CLI; real tokens out of your config files |
+| [1 — Unify](https://tarekkharsa.github.io/agentstack/start.html) | `agentstack init` → `apply` | one reviewed manifest for every CLI; secret values out of the manifest and lockfile (gateway modes keep them out of files at rest) |
 | [2 — Verify](https://tarekkharsa.github.io/agentstack/start.html#s-verify) | `agentstack` · `agentstack doctor` | drift caught early; every warning names its exact fix |
 | [3 — Guard](https://tarekkharsa.github.io/agentstack/start.html#s-guard) | `agentstack guard install` | `rm -rf`, `git reset --hard`, and `.env` reads blocked before they land |
 | [4 — Trust](https://tarekkharsa.github.io/agentstack/howto/trust-a-repo.html) | `gateway connect` · `trust .` | cloned repos stay inert until you review them; brokered calls firewalled and audited |

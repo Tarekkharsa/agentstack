@@ -72,12 +72,18 @@ jobs:
       - name: Live site byte-matches repo docs/
         run: |
           BASE="https://tarekkharsa.github.io/agentstack"
-          FILES="index.html start.html docs.html cookbook.html examples.html reference.html sitemap.xml"
+          # Every canonical page, derived from the sitemap so a page added
+          # there is automatically covered ("" → index.html, "dir/" →
+          # dir/index.html), plus the sitemap itself.
+          FILES="$(grep -o '<loc>[^<]*</loc>' docs/sitemap.xml \
+            | sed -e 's|<loc>||' -e 's|</loc>||' -e "s|$BASE/||" \
+            -e 's|^$|index.html|' -e 's|/$|/index.html|') sitemap.xml"
           mismatched=""
           for f in $FILES; do
             ok=""
+            tmp="/tmp/live-$(echo "$f" | tr / _)"
             for attempt in $(seq 1 8); do
-              if curl -fsSL "$BASE/$f" -o "/tmp/live-$f" 2>/dev/null && cmp -s "/tmp/live-$f" "docs/$f"; then
+              if curl -fsSL "$BASE/$f" -o "$tmp" 2>/dev/null && cmp -s "$tmp" "docs/$f"; then
                 ok="yes"
                 echo "match: $f (attempt $attempt)"
                 break
