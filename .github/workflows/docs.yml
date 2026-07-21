@@ -3,7 +3,7 @@ name: docs
 on:
   push:
     branches: [main]
-    paths: ["docs/**", ".github/workflows/docs.yml"]
+    paths: ["docs/**", "tools/**", ".github/workflows/docs.yml"]
   workflow_dispatch:
 
 permissions:
@@ -16,7 +16,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate deployment on the docs regression checks: broken links/fragments,
+  # sitemap drift, generated-HTML drift from the markdown sources, and a
+  # headless-browser smoke over the key pages at phone + desktop widths.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Link, fragment, and sitemap check
+        run: python3 tools/check-docs-site.py
+      - name: Generated pages are in sync with their markdown sources
+        # If a committed HTML page drifted from its .md source, regenerating
+        # produces a diff and this fails — forcing the source+HTML to be
+        # committed together.
+        run: |
+          python3 tools/make-docs-pages.py
+          git diff --exit-code docs/
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Install Playwright (library + Chromium)
+        # `npm i playwright --no-save` makes the package importable from the
+        # smoke script (`import('playwright')`); `playwright install` fetches
+        # the actual browser + OS deps.
+        run: |
+          npm i playwright@1.54.0 --no-save
+          npx playwright@1.54.0 install --with-deps chromium
+      - name: Browser smoke self-test (must catch injected overflow)
+        run: SMOKE_SELF_TEST=overflow node tools/site-smoke.mjs
+      - name: Browser smoke (real run)
+        run: node tools/site-smoke.mjs
+
   deploy:
+    needs: verify
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -28,3 +60,37 @@ jobs:
           path: docs
       - id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+
+  # Prove the CDN is serving exactly the bytes we deployed. GitHub Pages serves
+  # files verbatim, so the live pages must byte-match the repo's docs/ copy
+  # once propagation settles.
+  post-deploy-check:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Live site byte-matches repo docs/
+        run: |
+          BASE="https://tarekkharsa.github.io/agentstack"
+          FILES="index.html start.html docs.html cookbook.html examples.html reference.html sitemap.xml"
+          mismatched=""
+          for f in $FILES; do
+            ok=""
+            for attempt in $(seq 1 8); do
+              if curl -fsSL "$BASE/$f" -o "/tmp/live-$f" 2>/dev/null && cmp -s "/tmp/live-$f" "docs/$f"; then
+                ok="yes"
+                echo "match: $f (attempt $attempt)"
+                break
+              fi
+              echo "waiting for CDN propagation of $f (attempt $attempt/8)..."
+              sleep 15
+            done
+            if [ -z "$ok" ]; then
+              mismatched="$mismatched $f"
+            fi
+          done
+          if [ -n "$mismatched" ]; then
+            echo "::error::live site does not match repo docs/ for:$mismatched"
+            exit 1
+          fi
+          echo "all live pages byte-match the repo docs/ copy"

@@ -7,3 +7,11 @@ docs/
 demo/
 *.cast
 *.gif
+# Local agent-CLI state (root-anchored so example fixtures stay in): the
+# session/config dirs agent CLIs generate in this checkout are not workspace
+# source and can hold gigabytes of unrelated state.
+.claude/
+.cursor/
+.codex/
+.gemini/
+.agentstack/

@@ -102,3 +102,17 @@ jobs:
             --test sandbox_lockdown \
             --test sandbox_gateway_e2e \
             -- --nocapture
+
+  # Fast, dependency-light gate so a PR that breaks a docs link, drifts the
+  # sitemap, or hand-edits generated HTML fails before merge — without waiting
+  # on the Rust build. (The browser smoke lives in the docs deploy workflow.)
+  docs-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Link, fragment, and sitemap check
+        run: python3 tools/check-docs-site.py
+      - name: Generated pages are in sync with their markdown sources
+        run: |
+          python3 tools/make-docs-pages.py
+          git diff --exit-code docs/
