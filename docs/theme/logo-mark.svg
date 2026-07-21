@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="agentStack">
+
+<defs><linearGradient id="g" x1="18" y1="34" x2="84" y2="100" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F0975A"></stop><stop offset="1" stop-color="#C96F2F"></stop></linearGradient></defs>
+<rect stroke="#8A9099" x="44" y="8" width="66" height="66" rx="17" fill="none" stroke-width="7" opacity="0.25"></rect>
+<rect stroke="#8A9099" x="31" y="21" width="66" height="66" rx="17" fill="none" stroke-width="7" opacity="0.5"></rect>
+<rect x="18" y="34" width="66" height="66" rx="17" fill="url(#g)"></rect>
+<path d="M51 57 L61 67 L51 77 L41 67 Z" fill="#FDF6EE"></path>
+</svg>

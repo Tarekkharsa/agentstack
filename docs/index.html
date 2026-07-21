@@ -1,8 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-palette="slate">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="theme/theme.js"></script>
 <title>AgentStack — cloning a repo shouldn't hand your agent to a stranger</title>
 <meta name="description" content="One reviewed file defines what your AI coding tools may run. Cloned repos stay inert until you approve them; governed runs are firewalled, recorded, and honestly labelled.">
 <meta name="color-scheme" content="light dark">
@@ -21,866 +22,199 @@
 <meta name="twitter:title" content="AgentStack — cloning a repo shouldn't hand your agent to a stranger">
 <meta name="twitter:description" content="One reviewed file defines what your AI coding tools may run. Cloned repos stay inert until you approve them; governed runs are firewalled, recorded, and honestly labelled.">
 <meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
+<link rel="stylesheet" href="theme/organic.css">
 <style>
-  :root {
-    --paper: #FBFAF7;
-    --surface: #FFFFFF;
-    --ink: #1B1F24;
-    --muted: #5B6570;
-    --faint: #69727C;
-    --accent: #B4540A;
-    --accent-ink: #FFFFFF;
-    --accent-soft: rgba(180, 84, 10, 0.10);
-    --accent-line: rgba(180, 84, 10, 0.28);
-    --line: #E7E2D9;
-    --line-soft: #EFEBE3;
-    --term: #14181C;
-    --term-ink: #D7DEE4;
-    --term-dim: #97A1AD;
-    --term-green: #7CC08B;
-    --term-red: #E5786B;
-    --term-amber: #E0B04A;
-    --code-bg: #F3F0EA;
-    --shadow-sm: 0 1px 2px rgba(20,24,28,0.05), 0 1px 1px rgba(20,24,28,0.03);
-    --shadow-md: 0 4px 14px rgba(20,24,28,0.07), 0 1px 3px rgba(20,24,28,0.05);
-    --shadow-lg: 0 24px 60px -18px rgba(16,22,30,0.28), 0 8px 22px -12px rgba(16,22,30,0.20);
-    --radius: 14px;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    --wrap: 54rem;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper: #14171B;
-      --surface: #1A1E23;
-      --ink: #E9E7E2;
-      --muted: #9AA3AC;
-      --faint: #737C85;
-      --accent: #F0975A;
-      --accent-ink: #1A1206;
-      --accent-soft: rgba(240,151,90,0.12);
-      --accent-line: rgba(240,151,90,0.30);
-      --line: #292E34;
-      --line-soft: #23282E;
-      --code-bg: #1E2329;
-      --term: #0E1114;
-      --shadow-sm: 0 1px 2px rgba(0,0,0,0.30);
-      --shadow-md: 0 6px 18px rgba(0,0,0,0.32);
-      --shadow-lg: 0 30px 70px -20px rgba(0,0,0,0.60), 0 10px 24px -12px rgba(0,0,0,0.45);
-    }
-  }
-
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-  body {
-    margin: 0;
-    background: var(--paper);
-    color: var(--ink);
-    font: 17px/1.65 var(--sans);
-    -webkit-font-smoothing: antialiased;
-    text-rendering: optimizeLegibility;
-  }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover, a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
-  ::selection { background: var(--accent-soft); }
-
-  /* Skip link: visually hidden until focused. */
-  .skip { position: absolute; left: -9999px; top: 0; z-index: 100; background: var(--accent); color: var(--accent-ink); padding: 0.5rem 0.9rem; border-radius: 0 0 var(--radius-sm) 0; }
-  .skip:focus { left: 0; }
-
-  /* ---------- sticky nav ---------- */
-  header {
-    position: sticky; top: 0; z-index: 50;
-    background: color-mix(in srgb, var(--paper) 96%, transparent);
-    -webkit-backdrop-filter: saturate(1.4) blur(12px);
-    backdrop-filter: saturate(1.4) blur(12px);
-    border-bottom: 1px solid transparent;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  }
-  header.scrolled { border-bottom-color: var(--line); box-shadow: var(--shadow-sm); }
-  .bar {
-    /* Wider than the prose column so the nav fits on ONE row; the content
-       below keeps var(--wrap) for reading comfort. */
-    max-width: 74rem; margin: 0 auto; padding: 0.7rem 1.35rem;
-    display: flex; align-items: center; gap: 1.1rem;
-  }
-  .wordmark {
-    font-family: var(--mono); font-weight: 700; font-size: 1.02rem; color: var(--ink);
-    display: inline-flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em;
-  }
-  .wordmark:hover { text-decoration: none; }
-  .wordmark .wm2, .brand .wm2 { color: var(--accent); }
-  .wordmark .mark {
-    height: 26px; width: auto; flex: none; display: block;
-    filter: drop-shadow(0 1px 1.5px rgba(20,24,28,0.18));
-  }
-  nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.05rem; flex-wrap: nowrap; white-space: nowrap; }
-  nav.top a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
-  /* Never wrap to a second row: drop secondary links first, then all links,
-     keeping the wordmark + Get started at every width. */
-  @media (max-width: 1060px) { nav.top a.nav-x { display: none; } }
-  @media (max-width: 700px)  { nav.top a.refline { display: none; } }
-  nav.top a:hover { color: var(--accent); text-decoration: none; }
-  nav.top .ghost {
-    padding: 0.34rem 0.7rem; border: 1px solid var(--accent-line); border-radius: 7px;
-    color: var(--ink); background: var(--accent-soft);
-  }
-  nav.top .ghost:hover { border-color: var(--accent); }
-
-  /* ---------- layout ---------- */
-  main { max-width: var(--wrap); margin: 0 auto; padding: 0 1.35rem 4.5rem; }
-  section { margin-top: 4rem; scroll-margin-top: 5rem; }
-
-  .eyebrow {
-    font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
-    letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent);
-    margin: 0 0 0.7rem; display: inline-flex; align-items: center; gap: 0.55rem;
-  }
-  .eyebrow::before {
-    content: ""; width: 1.6rem; height: 1px; background: var(--accent-line);
-  }
-  h1 {
-    font-family: var(--mono);
-    font-size: clamp(1.9rem, 5.6vw, 3rem);
-    line-height: 1.12; letter-spacing: -0.03em; font-weight: 700;
-    margin: 1.1rem 0 1.1rem;
-  }
-  h1 .accent { color: var(--accent); }
-  .cursor {
-    display: inline-block; width: 0.58ch; height: 1.05em; vertical-align: -0.14em;
-    background: var(--accent); margin-left: 0.08em; border-radius: 1px;
-    animation: blink 1.15s steps(2, start) infinite;
-  }
-  @keyframes blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
-  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
-  h2 {
-    font-family: var(--mono); font-size: 1.28rem; letter-spacing: -0.015em; font-weight: 700;
-    margin: 0 0 0.9rem;
-  }
-  p { margin: 0 0 1rem; }
-  .lede { font-size: 1.16rem; line-height: 1.6; color: var(--muted); max-width: 42rem; }
-  .lede strong { color: var(--ink); font-weight: 600; }
-  .muted { color: var(--muted); }
-  .small { font-size: 0.86rem; }
-
-  /* ---------- buttons ---------- */
-  .cta { display: flex; gap: 0.7rem; flex-wrap: wrap; margin: 1.6rem 0 0; }
-  .btn {
-    font-family: var(--mono); font-size: 0.85rem; font-weight: 600;
-    display: inline-flex; align-items: center; gap: 0.5rem;
-    padding: 0.62rem 1.05rem; border-radius: 9px; cursor: pointer;
-    border: 1px solid transparent; transition: transform 0.12s ease, box-shadow 0.16s ease, background 0.16s ease, border-color 0.16s ease;
-  }
-  .btn:hover { text-decoration: none; }
-  .btn.primary { background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-md); }
-  .btn.primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-lg); }
-  .btn.secondary { background: var(--surface); color: var(--ink); border-color: var(--line); box-shadow: var(--shadow-sm); }
-  .btn.secondary:hover { border-color: var(--accent-line); background: var(--accent-soft); }
-
-  /* ---------- code + terminal ---------- */
-  code {
-    font-family: var(--mono); font-size: 0.86em;
-    background: var(--code-bg); padding: 0.12em 0.36em; border-radius: 5px;
-    border: 1px solid var(--line-soft);
-  }
-  pre {
-    background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius-sm);
-    padding: 1rem 1.15rem; overflow-x: auto; margin: 0 0 1rem;
-    font: 0.84rem/1.6 var(--mono);
-  }
-  pre code { background: none; padding: 0; border: 0; font-size: 1em; }
-
-  .term {
-    background: var(--term); color: var(--term-ink);
-    border-radius: var(--radius); margin: 1.75rem 0 0.5rem;
-    box-shadow: var(--shadow-lg);
-    border: 1px solid rgba(255,255,255,0.06);
-    overflow: hidden;
-  }
-  .term-head {
-    display: flex; align-items: center; gap: 0.5rem;
-    padding: 0.7rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.07);
-    background: rgba(255,255,255,0.015);
-  }
-  .term-head i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
-  /* ---------- terminal replays (term-replay.js) ---------- */
-  .term[data-replay].tr-armed .row { visibility: hidden; }
-  .term[data-replay].tr-armed .row.on { visibility: visible; }
-  .row.typing .c { visibility: hidden; }
-  .tr-armed .row.cur::after,
-  .tr-armed .row.typing .t::after {
-    content: ""; display: inline-block; width: 0.55ch; height: 1.05em;
-    vertical-align: -0.18em; margin-left: 0.06em; background: var(--term-green);
-    animation: blink 1.15s steps(2, start) infinite;
-  }
-  /* While a command types, the cursor rides the typed text, not the row end
-     (the hidden comment span still occupies its width). */
-  .tr-armed .row.cur.typing::after { display: none; }
-  .tr-replay {
-    margin-left: 0.8rem; font: 600 0.68rem/1.6 var(--mono); letter-spacing: 0.08em;
-    color: var(--term-dim); background: none; border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 5px; padding: 0.05rem 0.5rem; cursor: pointer; display: none;
-  }
-  .tr-replay:hover { color: var(--term-ink); border-color: rgba(255,255,255,0.3); }
-  .term.tr-done .tr-replay { display: inline-block; }
-  .term-head .r { background: var(--term-red); }
-  .term-head .y { background: var(--term-amber); }
-  .term-head .g { background: var(--term-green); }
-  .term-head b {
-    margin-left: auto; font: 600 0.7rem var(--mono); color: var(--term-dim); letter-spacing: 0.06em;
-  }
-  .term pre {
-    background: none; border: 0; margin: 0; padding: 1.15rem 1.3rem 1.35rem;
-    color: inherit; font-size: 0.865rem; line-height: 1.62;
-  }
-  .term .p { color: var(--accent); user-select: none; font-weight: 600; }
-  .term .c { color: var(--term-dim); }
-  .term .ok { color: var(--term-green); }
-  .term .no { color: var(--term-red); }
-  .term .am { color: var(--term-amber); }
-
-  .copywrap { position: relative; }
-  .copybtn {
-    position: absolute; top: 0.5rem; right: 0.5rem;
-    font: 600 0.68rem var(--mono); letter-spacing: 0.04em;
-    color: var(--muted); background: var(--surface);
-    border: 1px solid var(--line); border-radius: 7px;
-    padding: 0.28rem 0.6rem; cursor: pointer; transition: color 0.14s, border-color 0.14s;
-  }
-  .copybtn:hover { color: var(--accent); border-color: var(--accent-line); }
-
-  /* ---------- CLI chips ---------- */
-  .clis { margin: 2.25rem 0 0; }
-  .clis .lbl {
-    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em;
-    text-transform: uppercase; color: var(--faint); margin: 0 0 0.75rem;
-  }
-  .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-  .chip {
-    font-family: var(--mono); font-size: 0.78rem; color: var(--muted);
-    padding: 0.34rem 0.7rem; border: 1px solid var(--line); border-radius: 999px;
-    background: var(--surface); box-shadow: var(--shadow-sm); white-space: nowrap;
-    transition: color 0.14s, border-color 0.14s, transform 0.14s;
-  }
-  .chip:hover { color: var(--accent); border-color: var(--accent-line); transform: translateY(-1px); }
-
-  /* ---------- steps ---------- */
-  .steps { margin: 1.5rem 0 0; padding: 0; list-style: none; counter-reset: step; }
-  .steps li {
-    counter-increment: step;
-    padding: 1rem 0; border-top: 1px solid var(--line);
-    display: grid; grid-template-columns: 2.6rem 1fr; gap: 0.35rem 1rem; align-items: baseline;
-  }
-  .steps li::before {
-    content: counter(step, decimal-leading-zero);
-    font: 700 0.82rem var(--mono); color: var(--accent);
-    letter-spacing: -0.02em;
-  }
-  .steps b { font-family: var(--mono); font-size: 0.95rem; }
-  .steps p { margin: 0; color: var(--muted); font-size: 0.96rem; grid-column: 2; }
-
-  /* ---------- mode list ---------- */
-  dl.modes { margin: 1.5rem 0 0; display: grid; gap: 0.9rem; }
-  dl.modes > div {
-    border: 1px solid var(--line); border-radius: var(--radius-sm);
-    background: var(--surface); padding: 1.05rem 1.2rem; box-shadow: var(--shadow-sm);
-  }
-  dl.modes dt {
-    font-family: var(--mono); font-size: 0.98rem; font-weight: 700;
-    display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
-  }
-  dl.modes dt small {
-    color: var(--accent); font-weight: 600; font-size: 0.72rem; font-family: var(--mono);
-    letter-spacing: 0.06em; text-transform: uppercase;
-  }
-  dl.modes dd { margin: 0.45rem 0 0; color: var(--muted); font-size: 0.96rem; }
-
-  /* ---------- figures ---------- */
-  figure { margin: 1.75rem 0 0; }
-  figure img {
-    max-width: 100%; border-radius: var(--radius); border: 1px solid var(--line);
-    box-shadow: var(--shadow-md); display: block;
-  }
-  figcaption { font-size: 0.86rem; color: var(--muted); margin-top: 0.7rem; }
-
-  /* ---------- enforcement matrix ---------- */
-  .posture-legend { margin: 1.5rem 0 0; display: grid; gap: 0.7rem; grid-template-columns: 1fr 1fr; }
-  .posture-legend > div {
-    border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface);
-    padding: 0.7rem 0.85rem; box-shadow: var(--shadow-sm);
-  }
-  .posture-legend .lab { font-family: var(--mono); font-size: 0.76rem; font-weight: 700; letter-spacing: 0.02em; }
-  .posture-legend .lab .slug { color: var(--accent); }
-  .posture-legend small { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
-
-  @media (max-width: 620px) { .posture-legend { grid-template-columns: 1fr; } }
-
-  /* ---------- feature card grid ---------- */
-  .cards { margin: 1.6rem 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
-  .fcard {
-    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
-    padding: 1.2rem 1.25rem; box-shadow: var(--shadow-sm);
-    transition: transform 0.14s ease, box-shadow 0.16s ease, border-color 0.16s ease;
-    display: flex; flex-direction: column;
-  }
-  .fcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--accent-line); }
-  .fcard h3 { margin: 0 0 0.5rem; font-family: var(--mono); font-size: 0.98rem; font-weight: 700; letter-spacing: -0.01em; }
-  .fcard h3 a { color: var(--ink); }
-  .fcard h3 a:hover { color: var(--accent); }
-  .fcard p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.55; }
-  .fcard .tag {
-    margin-top: 0.85rem; font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.08em;
-    text-transform: uppercase; color: var(--accent); align-self: flex-start;
-    display: inline-flex; align-items: center; gap: 0.35rem;
-  }
-  .fcard a.tag::after { content: "→"; transition: transform 0.14s ease; }
-  .fcard:hover a.tag::after { transform: translateX(3px); }
-
-  /* ---------- "see it work" strip: four compact example cards ---------- */
-  #see-it { margin-top: 2.6rem; }
-  /* ---------- "See it work" visual showcase ---------- */
-  /* One numbered sequence on the page's shared left edge: short copy, then
-     the demo at full column width. No breakout, no alternation — the section
-     aligns with every other section and each terminal gets real width. */
-  .show { display: grid; gap: 2.7rem; margin-top: 1.3rem; }
-  .show-copy .lvl {
-    display: inline-flex; align-items: center; gap: 0.55rem;
-    font-family: var(--mono); font-size: 0.68rem; font-weight: 600;
-    letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
-    margin-bottom: 0.5rem;
-  }
-  .show-copy .lvl::after { content: ""; width: 2.2rem; height: 1px; background: var(--accent-line); }
-  /* The command that anchors each chapter (nub-style): quiet chip, accent prompt. */
-  .show-copy code.cmd {
-    display: inline-block; font-family: var(--mono); font-size: 0.72rem; color: var(--muted);
-    border: 1px solid var(--line); border-radius: 6px; padding: 0.16rem 0.55rem;
-    margin-left: 0.75rem; white-space: nowrap; vertical-align: 2px;
-  }
-  .show-copy code.cmd::first-letter { color: var(--accent); }
-  @media (max-width: 640px) { .show-copy code.cmd { display: none; } }
-  .show-copy h3 { margin: 0 0 0.4rem; font-family: var(--mono); font-size: 1.08rem; letter-spacing: -0.01em; }
-  .show-copy p { margin: 0; max-width: 46rem; color: var(--muted); font-size: 0.95rem; line-height: 1.62; }
-  .show-copy a.tag {
-    display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.6rem;
-    font-family: var(--mono); font-size: 0.7rem; font-weight: 600;
-    letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent);
-  }
-  .show-copy a.tag::after { content: "→"; transition: transform 0.14s ease; }
-  .show-copy a.tag:hover { text-decoration: none; }
-  .show-copy a.tag:hover::after { transform: translateX(3px); }
-  .show-visual { margin-top: 1rem; }
-  img.show-visual {
-    width: 100%; height: auto; display: block;
-    border: 1px solid var(--line); border-radius: 12px;
-  }
-  .show-visual .term { margin: 0; }
-  .show-visual .term pre { overflow-x: auto; }
-
-  /* ---------- footer ---------- */
-  footer { border-top: 1px solid var(--line); margin-top: 6rem; background: var(--line-soft); }
-  footer .bar { padding: 1.6rem 1.35rem; font-size: 0.85rem; color: var(--muted); flex-wrap: wrap; }
-  footer nav { margin-left: auto; display: flex; gap: 1.1rem; flex-wrap: wrap; }
-  footer nav a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
-  footer nav a:hover { color: var(--accent); }
-
-  /* ---------- scroll reveal ---------- */
-  html.js .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.6s ease, transform 0.6s ease; }
-  html.js .reveal.in, .reveal { opacity: 1; transform: none; }
-  @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
-
-  @media (max-width: 620px) {
-    body { font-size: 16px; }
-    .cards { grid-template-columns: 1fr; }
-    .steps li { grid-template-columns: 1.9rem 1fr; }
-    nav.top { gap: 0.85rem; }
-    nav.top .refline { display: none; }
-    section { margin-top: 4rem; }
-  }
+[data-theme="dark"]{
+--color-bg:#211E1B;--color-surface:#2A2622;--color-text:#F5EAD8;
+--color-divider:color-mix(in srgb, #F5EAD8 18%, transparent);
+--color-accent:#D98A52;--color-accent-2:#97A876;
+--color-neutral-100:#332E29;--color-neutral-200:#3A342E;--color-neutral-300:#46403A;--color-neutral-400:#5C554C;--color-neutral-500:#847767;--color-neutral-600:#A89B87;--color-neutral-700:#C9BCA7;--color-neutral-800:#DACDB8;--color-neutral-900:#EFE6D4;
+--color-accent-100:#3A2B1D;--color-accent-200:#4A3625;--color-accent-300:#5C4229;--color-accent-600:#E09B66;--color-accent-700:#E4A878;--color-accent-800:#EDBF97;--color-accent-900:#F4D5B8;
+--color-accent-2-100:#2A3122;--color-accent-2-200:#353D2B;--color-accent-2-700:#B5C69A;--color-accent-2-800:#C8D6B0;--color-accent-2-900:#DBE5C9;
+--shadow-sm:0 1px 2px rgba(0,0,0,0.4);--shadow-md:0 3px 10px rgba(0,0,0,0.45);--shadow-lg:0 12px 32px rgba(0,0,0,0.55)}
+.nav a.btn-primary{color:var(--color-bg)}
+.nav a.btn-primary:hover{color:var(--color-bg)}
+[data-palette]{--term-bg:#26211C;--term-hd:#1C1815;--term-btn:#38312A;--term-bd:#463D34;--term-muted:#A5988A;--term-text:#E6DCC9;--term-ok:#9DB380;--term-bad:#D97A62;--term-warn:#DDA84E}
+[data-palette="slate"]{--term-bg:#14181C;--term-hd:#0E1114;--term-btn:#23282E;--term-bd:#2E353C;--term-muted:#97A1AD;--term-text:#D7DEE4;--term-ok:#7CC08B;--term-bad:#E5786B;--term-warn:#E0B04A;
+--color-bg:#FBFAF7;--color-surface:#FFFFFF;--color-text:#1B1F24;--color-divider:rgba(27,31,36,0.16);
+--color-accent:#B4540A;--color-accent-2:#2A6F4E;
+--color-neutral-100:#F3F0EA;--color-neutral-200:#E7E2D9;--color-neutral-300:#D8D2C7;--color-neutral-400:#B9B3A8;--color-neutral-500:#7E858D;--color-neutral-600:#5B6570;--color-neutral-700:#3A424B;--color-neutral-800:#2B3138;--color-neutral-900:#1B1F24;
+--color-accent-100:#FBF1E7;--color-accent-200:#F5DFC8;--color-accent-300:#EECDA9;--color-accent-600:#9C4A08;--color-accent-700:#8A3F06;--color-accent-800:#6F3305;--color-accent-900:#542704;
+--color-accent-2-100:#EAF4EC;--color-accent-2-200:#D3E7D8;--color-accent-2-700:#1F5238;--color-accent-2-800:#183F2B;--color-accent-2-900:#112D1F}
+[data-palette="slate"][data-theme="dark"]{
+--color-bg:#14171B;--color-surface:#1A1E23;--color-text:#E9E7E2;--color-divider:rgba(233,231,226,0.16);
+--color-accent:#F0975A;--color-accent-2:#7CC08B;
+--color-neutral-100:#1E2329;--color-neutral-200:#292E34;--color-neutral-300:#343B43;--color-neutral-400:#454D57;--color-neutral-500:#69727C;--color-neutral-600:#9AA3AC;--color-neutral-700:#C3C9CF;--color-neutral-800:#D7DEE4;--color-neutral-900:#EDF1F4;
+--color-accent-100:#2B2018;--color-accent-200:#3A2A1C;--color-accent-300:#4A3520;--color-accent-600:#F2A470;--color-accent-700:#F5B183;--color-accent-800:#F8C7A3;--color-accent-900:#FBDCC5;
+--color-accent-2-100:#16281C;--color-accent-2-200:#1E3626;--color-accent-2-700:#A8D4B3;--color-accent-2-800:#C2E2CA;--color-accent-2-900:#DCEFE1;
+--shadow-sm:0 1px 2px rgba(0,0,0,0.4);--shadow-md:0 3px 10px rgba(0,0,0,0.45);--shadow-lg:0 12px 32px rgba(0,0,0,0.55)}
+.card{border-radius:var(--radius-md,16px)}
+body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)}
+@media (max-width:720px){
+  .grid-gaps,.grid-steps{grid-template-columns:1fr !important}
+  .nav{flex-wrap:wrap}
+  .nav-links{flex-wrap:wrap}
+}
 </style>
-<link rel="canonical" href="https://tarekkharsa.github.io/agentstack/">
 </head>
 <body>
-<a class="skip" href="#main">Skip to content</a>
+<div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
+  <nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
+    <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
+      <img src="theme/logo-mark.svg" alt="" style="width:34px;height:34px">
+      <span style="font-family:var(--font-heading);font-size:1.25rem">agent<span style="color:var(--color-accent)">Stack</span></span>
+    </a>
+    <div style="flex:1"></div>
+    <div class="nav-links" style="display:flex;align-items:center;gap:var(--space-4)">
+      <a href="docs.html" style="text-decoration:none;font-weight:600;color:var(--color-text)">Documentation</a>
+      <a href="cookbook.html" style="text-decoration:none;font-weight:600;color:var(--color-text)">Cookbook</a>
+      <a href="examples.html" style="text-decoration:none;font-weight:600;color:var(--color-text)">Demos</a>
+      <a href="tutorial/" style="text-decoration:none;font-weight:600;color:var(--color-text)">Tutorial</a>
+      <a href="https://github.com/Tarekkharsa/agentstack" style="text-decoration:none;font-weight:600;color:var(--color-text)">GitHub</a>
+      <button data-theme-toggle onclick="toggleTheme()" style="font-size:13px;font-weight:600;padding:7px 14px;border-radius:999px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit">Light mode</button>
+      <a href="docs.html#start" class="btn btn-primary">Get started</a>
+    </div>
+  </nav>
 
-<header id="site-header">
-  <div class="bar">
-    <a class="wordmark" href="./"><img class="mark" src="logo-mark.svg" alt=""><span>agent<span class="wm2">Stack</span></span></a>
-    <nav class="top" aria-label="Project links">
-      <a href="docs.html">docs</a>
-      <a href="examples.html">examples</a>
-      <a href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
-      <a class="ghost" href="start.html">Get&nbsp;started&nbsp;→</a>
-    </nav>
+  <div style="max-width:1060px;margin:0 auto;padding:calc(var(--space-8) * 1.5) var(--space-6) var(--space-8);position:relative">
+    <div style="position:absolute;top:56px;right:48px;width:260px;height:260px;pointer-events:none;z-index:0">
+      <div style="position:absolute;top:0;right:0;width:170px;height:170px;border-radius:44px;border:8px solid var(--color-accent-200);opacity:0.55"></div>
+      <div style="position:absolute;top:34px;right:34px;width:170px;height:170px;border-radius:44px;border:8px solid var(--color-accent-300);opacity:0.7"></div>
+      <div style="position:absolute;top:68px;right:68px;width:170px;height:170px;border-radius:44px;background:linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-600) 100%);box-shadow:var(--shadow-md);display:flex;align-items:center;justify-content:center">
+        <div style="width:52px;height:52px;background:#FDF6EE;border-radius:10px;transform:rotate(45deg)"></div>
+      </div>
+    </div>
+    <div style="max-width:720px;position:relative">
+      <span class="tag tag-accent-2">open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>
+      <h1 style="font-family:var(--font-heading);font-weight:400;font-size:3.4rem;line-height:1.08;margin:var(--space-4) 0 var(--space-4)">Cloning a repo shouldn't hand your agent to a stranger.</h1>
+      <p style="font-size:1.15rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:600px">AgentStack puts everything your AI coding tools are allowed to run into one reviewed file. A cloned repo can't auto-activate any of it until you approve it — and what runs through the gateway is firewalled and logged, with every run labelled by how strongly that is actually enforced.</p>
+      <div style="display:flex;gap:var(--space-3);flex-wrap:wrap">
+        <a href="tutorial/" class="btn btn-primary">Start the interactive tutorial</a>
+        <a href="docs.html" class="btn btn-secondary">Read the documentation</a>
+      </div>
+    </div>
+
+    <div style="margin-top:calc(var(--space-8) * 1.5)">
+      <h2 style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">Four gaps in how agents adopt code</h2>
+      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:560px">Each one is real today in every agent CLI — and each has one command that closes it.</p>
+      <div class="grid-gaps" style="display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-4)">
+        <div class="card elev-sm" style="gap:var(--space-2)">
+          <div style="display:flex;align-items:center;gap:var(--space-3)">
+            <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg></div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Anything a repo declares can run</div>
+          </div>
+          <div class="card-body" style="font-size:0.95rem;line-height:1.6">A clone stays inert until you approve its exact bytes. Any edit — even a git pull — drops it back to untrusted.</div>
+          <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
+            <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700);font-weight:700">closed by</span>
+            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack trust .</code>
+          </div>
+        </div>
+        <div class="card elev-sm" style="gap:var(--space-2)">
+          <div style="display:flex;align-items:center;gap:var(--space-3)">
+            <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg></div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Nothing narrows or records agents</div>
+          </div>
+          <div class="card-body" style="font-size:0.95rem;line-height:1.6">A machine policy no repo can loosen fences tools, secrets and egress — and every brokered call lands in the audit log.</div>
+          <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
+            <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-2-700);font-weight:700">closed by</span>
+            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">gateway connect --all</code>
+          </div>
+        </div>
+        <div class="card elev-sm" style="gap:var(--space-2)">
+          <div style="display:flex;align-items:center;gap:var(--space-3)">
+            <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg></div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Every CLI spells setup differently</div>
+          </div>
+          <div class="card-body" style="font-size:0.95rem;line-height:1.6">One reviewed manifest renders into every CLI's native config. Secrets stay ${REF} placeholders, never values.</div>
+          <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
+            <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-2-700);font-weight:700">closed by</span>
+            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack apply --write</code>
+          </div>
+        </div>
+        <div class="card elev-sm" style="gap:var(--space-2)">
+          <div style="display:flex;align-items:center;gap:var(--space-3)">
+            <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Agents wreck trees by accident</div>
+          </div>
+          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Hooks block rm -rf, git reset --hard and .env reads before they execute — the command never runs.</div>
+          <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
+            <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700);font-weight:700">closed by</span>
+            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack guard install</code>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:calc(var(--space-8) * 1.5)">
+      <h2 style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">One pipeline, six words</h2>
+      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:560px">You write a manifest, the lockfile pins it, you trust the result, policy narrows what may run, the gateway carries it — and every call lands in the audit log.</p>
+      <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-8)">
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">manifest</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">lockfile</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">trust</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">policy</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">gateway</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-text);color:var(--color-bg);border:1.5px solid var(--color-text)">audit log</span><span style="color:var(--color-accent);font-weight:700"></span></span>
+      </div>
+      <h2 style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">Climb in six steps</h2>
+      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:560px">Each step pays off on its own — nothing later is required to keep the earlier wins.</p>
+      <div class="grid-steps" style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-4)">
+        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">1</div>
+          <div><div style="font-weight:700;margin-bottom:2px">Unify</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">init → apply: one reviewed manifest for every CLI; real tokens out of your config files.</div></div>
+        </div>
+        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">2</div>
+          <div><div style="font-weight:700;margin-bottom:2px">Verify</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">doctor catches drift early; every warning names its exact fix.</div></div>
+        </div>
+        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">3</div>
+          <div><div style="font-weight:700;margin-bottom:2px">Guard</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Pre-tool-use hooks block destructive commands before they run.</div></div>
+        </div>
+        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">4</div>
+          <div><div style="font-weight:700;margin-bottom:2px">Trust</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Cloned repos stay inert until you approve their exact bytes.</div></div>
+        </div>
+        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">5</div>
+          <div><div style="font-weight:700;margin-bottom:2px">Scale</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Profiles, the central library and packs: one governed stack across projects, machines and teammates.</div></div>
+        </div>
+        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">6</div>
+          <div><div style="font-weight:700;margin-bottom:2px">Confine</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">run --sandbox --lockdown: kernel-enforced confinement; the agent's only route out is the audited proxy.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card elev-md" id="install" style="margin-top:calc(var(--space-8) * 1.5);border-radius:var(--radius-md)">
+      <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3)">
+        <div>
+          <div class="card-kicker">quick start</div>
+          <div class="card-title">Ten minutes to first value</div>
+        </div>
+        <div style="flex:1"></div>
+        <a href="tutorial/" style="font-weight:600;font-size:0.95rem">Prefer guided? Take the tutorial →</a>
+      </div>
+      <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:20px 24px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.85rem;line-height:2.1;overflow-x:auto">
+        <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
+        <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack init</span><span style="color:var(--term-muted)"># guided wizard: your CLI configs → one manifest</span></div>
+        <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack doctor</span><span style="color:var(--term-muted)"># health + drift; every warning names its fix</span></div>
+      </div>
+    </div>
   </div>
-</header>
 
-<main id="main">
-
-  <section id="hero" style="margin-top:2.75rem">
-    <h1 style="margin:0.7rem 0 0.8rem">Cloning a repo shouldn't hand<br>your agent to a stranger.<span class="cursor" aria-hidden="true"></span></h1>
-    <p class="lede">
-      One reviewed file defines what your AI coding tools —
-      <strong>Claude Code, Codex, Cursor, and ten more</strong> — may run. A
-      repo you clone can't activate any of it until you approve it. Sensitive
-      runs go in a container whose only way out is an egress firewall — and
-      every call routed through AgentStack lands in the audit log.
-    </p>
-    <div class="cta" style="margin-top:1.1rem">
-      <a class="btn primary" href="start.html">Get started · 10 min →</a>
-      <a class="btn secondary" href="docs.html">Browse the docs</a>
-      <a class="btn secondary" href="#install">Install</a>
+  <div style="border-top:1px solid var(--color-neutral-200);margin-top:var(--space-8)">
+    <div style="max-width:1060px;margin:0 auto;padding:var(--space-6);display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap">
+      <span style="font-family:var(--font-heading)">agent<span style="color:var(--color-accent)">Stack</span></span>
+      <span style="color:var(--color-neutral-700);font-size:0.9rem">Unify · Verify · Guard · Trust · Scale · Confine — dual-licensed MIT / Apache-2.0</span>
+      <div style="flex:1"></div>
+      <a href="docs.html" style="font-size:0.92rem">Documentation</a>
+      <a href="cookbook.html" style="font-size:0.92rem">Cookbook</a>
+      <a href="examples.html" style="font-size:0.92rem">Demos</a>
+      <a href="tutorial/" style="font-size:0.92rem">Tutorial</a>
+      <a href="https://github.com/Tarekkharsa/agentstack" style="font-size:0.92rem">GitHub</a>
     </div>
-
-    <div class="term" style="margin-top:1.5rem">
-      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>the whole stack, governed</b></div>
-      <pre><code><span class="row"><span class="p">$</span> <span class="t">agentstack apply</span><span class="c">            # one manifest → 13 CLIs, in sync</span></span>
-<span class="row"><span class="p">$</span> <span class="t">agentstack guard install</span><span class="c">    # blocks rm -rf / .env accidents in 9 CLIs</span></span>
-<span class="row"><span class="p">$</span> <span class="t">agentstack trust .</span><span class="c">          # cloned repos stay inert until you consent</span></span>
-<span class="row"><span class="p">$</span> <span class="t">agentstack run --lockdown</span><span class="c">   # no route out but the egress firewall</span></span>
-<span class="row"><span class="p">$</span> <span class="t">agentstack report</span><span class="c">           # every brokered call, on the record</span></span></code></pre>
-    </div>
-
-  </section>
-
-  <section id="see-it">
-    <p class="eyebrow">See it work</p>
-    <h2>Start with the problem you have today.</h2>
-    <div class="show" aria-label="Four user situations, each answered and shown live">
-
-      <div class="show-row">
-        <div class="show-copy">
-          <span class="lvl">01 · You juggle several CLIs</span><code class="cmd">$ agentstack apply</code>
-          <h3>One manifest keeps them all in sync</h3>
-          <p>Claude Code at work, Cursor for edits, Codex in CI — and every MCP
-            (Model Context Protocol — the plugin standard agent CLIs use for
-            tools) server configured three different ways. Define it once;
-            <code>agentstack apply</code> renders each CLI's native config,
-            with secrets left as per-machine references.</p>
-          <a class="tag" href="#manifest">The manifest, in detail</a>
-        </div>
-        <div class="show-visual">
-          <div class="term" style="margin:0">
-            <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>one manifest → .mcp.json · config.toml · mcp.json</b></div>
-            <pre><code><span class="row"><span class="p">$</span> <span class="t">cat .agentstack/agentstack.toml</span><span class="c">   # one committed source of truth</span></span>
-<span class="row"><span class="c">  [servers.github]</span></span>
-<span class="row"><span class="c">  command = "npx"  args = ["-y", "@modelcontextprotocol/server-github"]</span></span>
-<span class="row"><span class="c">  env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_TOKEN}" }</span></span>
-<span class="row"> </span>
-<span class="row"><span class="p">$</span> <span class="t">agentstack apply --write</span></span>
-<span class="row"><span class="c">  Claude Code   + .mcp.json                </span><span class="ok">✓ wrote 1 server</span></span>
-<span class="row"><span class="c">  Codex CLI     + .codex/config.toml       </span><span class="ok">✓ wrote 1 server</span></span>
-<span class="row"><span class="c">  Cursor        + .cursor/mcp.json         </span><span class="ok">✓ wrote 1 server</span></span>
-<span class="row"><span class="c">  instructions  → CLAUDE.md + AGENTS.md    </span><span class="ok">✓ compiled</span></span>
-<span class="row"> </span>
-<span class="row"><span class="ok">  ✓</span><span class="c"> same server, three native shapes — the manifest never holds the token</span></span></code></pre>
-          </div>
-        </div>
-      </div>
-
-      <div class="show-row">
-        <div class="show-copy">
-          <span class="lvl">02 · Your agent makes mistakes</span><code class="cmd">$ agentstack guard install</code>
-          <h3>Guardrails catch them before they land</h3>
-          <p>A well-meaning agent still runs <code>rm -rf</code> in the wrong
-            directory or reads <code>.env</code> into context. A cooperative
-            hook across 9 CLIs blocks those before they touch your machine —
-            and every denial lands in the audit log.</p>
-          <a class="tag" href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Run it yourself</a>
-        </div>
-        <div class="show-visual">
-          <div class="term" style="margin:0">
-            <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>rm -rf blocked · git reset blocked · .env denied · on the record</b></div>
-            <pre><code><span class="row"><span class="p">$</span> <span class="t">agentstack guard install</span><span class="c">     # a pre-tool-use hook in 9 CLIs</span></span>
-<span class="row"><span class="ok">  ✓</span><span class="c"> wired: Claude Code · Codex · Gemini · Cursor · Windsurf · +4</span></span>
-<span class="row"> </span>
-<span class="row"><span class="c">  agent → </span>rm -rf /opt/acme/data</span>
-<span class="row"><span class="no">    ✗ blocked</span><span class="c">   destructive, outside the workspace</span></span>
-<span class="row"><span class="c">  agent → </span>git reset --hard</span>
-<span class="row"><span class="no">    ✗ blocked</span><span class="c">   discards uncommitted work</span></span>
-<span class="row"><span class="c">  agent → </span>cat .env</span>
-<span class="row"><span class="no">    ✗ blocked</span><span class="c">   [policy.filesystem] deny glob</span></span>
-<span class="row"><span class="c">  agent → </span>ls -la</span>
-<span class="row"><span class="ok">    ✓ allowed</span></span>
-<span class="row"> </span>
-<span class="row"><span class="p">$</span> <span class="t">agentstack report calls</span></span>
-<span class="row"><span class="c">  3 denials recorded (host-guard) — tool + outcome, never file contents</span></span></code></pre>
-          </div>
-        </div>
-      </div>
-
-      <div class="show-row">
-        <div class="show-copy">
-          <span class="lvl">03 · You clone repos you didn't write</span><code class="cmd">$ agentstack trust .</code>
-          <h3>They stay inert until you consent</h3>
-          <p>The repo you just cloned declares MCP servers you've never read.
-            Nothing spawns and no secret resolves until you review what it
-            declares and trust it — and any later edit to the pinned surface
-            re-gates it.</p>
-          <a class="tag" href="howto/trust-a-repo.html">How consent works</a>
-        </div>
-        <div class="show-visual">
-          <div class="term" data-replay style="margin:0">
-            <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → trust → firewalled → logged</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
-            <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack gateway connect --all --write</span><span class="c">     # once: the gateway, in every CLI</span></span>
-<span class="row cmd"><span class="p">$</span> <span class="t">git clone some-repo &amp;&amp; cd some-repo</span><span class="c">  # declares servers you've never seen</span></span>
-<span class="row" data-d="450"><span class="c">  agent session starts…</span></span>
-<span class="row" data-d="800"><span class="no">  ✗ untrusted — no servers spawned, no secrets resolved</span></span>
-<span class="row" data-d="500"> </span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack trust .</span><span class="c">                   # you review, then consent</span></span>
-<span class="row" data-d="450"><span class="c">  ▶ demo: runs `python3 ./server.py`</span></span>
-<span class="row" data-d="800"><span class="ok">  ✓</span> trusted at sha256:945b4b…</span>
-<span class="row" data-d="500"> </span>
-<span class="row" data-d="450"><span class="c">  agent → demo.echo        </span><span class="ok">✓ ok</span><span class="c">      brokered, logged</span></span>
-<span class="row" data-d="800"><span class="c">  agent → demo.delete_all  </span><span class="no">✗ denied</span><span class="c">  rule "!delete_*" — YOUR machine policy</span></span>
-<span class="row" data-d="500"> </span>
-<span class="row"><span class="c">  # both brokered outcomes are in the audit log</span></span></code></pre>
-          </div>
-        </div>
-      </div>
-
-      <div class="show-row">
-        <div class="show-copy">
-          <span class="lvl">04 · Some work must not leak</span><code class="cmd">$ agentstack run --lockdown</code>
-          <h3>Lockdown: no route out but the proxy</h3>
-          <p>The trust gate decides what an agent <em>may</em> do; lockdown
-            decides what it <em>can</em>. For runs that touch sensitive code or
-            data: <code>--lockdown</code> puts the agent in a container whose only
-            network peer is the egress firewall. Ignoring the proxy reaches
-            nothing; a denied host is refused — and recorded.</p>
-          <a class="tag" href="enforcement.html">The enforcement story</a>
-        </div>
-        <div class="show-visual">
-          <div class="term" style="margin:0">
-            <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>no route out · denied host blocked · on the record</b></div>
-            <pre><code><span class="row"><span class="p">$</span> <span class="t">agentstack run --lockdown shtest -- -c 'unset HTTPS_PROXY; curl example.com'</span></span>
-<span class="row"><span class="c">  posture: </span><span class="am">LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span></span>
-<span class="row"><span class="c">  🔒 no host route, no internet — the only peer is the egress sidecar</span></span>
-<span class="row"><span class="no">  BLOCKED</span><span class="c">        # ignoring the proxy reaches nothing</span></span>
-<span class="row"> </span>
-<span class="row"><span class="p">$</span> <span class="t">agentstack run --lockdown shtest -- -c 'curl https://blocked.invalid/steal'</span></span>
-<span class="row"><span class="no">  ✗ refused at the sidecar</span><span class="c"> — and recorded</span></span>
-<span class="row"> </span>
-<span class="row"><span class="p">$</span> <span class="t">agentstack report run r-0859dcee73</span></span>
-<span class="row"><span class="c">  Posture   </span><span class="am">LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span></span>
-<span class="row"><span class="no">    ✗ shtest → blocked.invalid</span><span class="c">   denied by rule "!blocked.invalid" (machine policy)</span></span></code></pre>
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </section>
-
-  <section id="why" class="reveal">
-    <p class="eyebrow">Why this exists</p>
-    <h2>Your agents run whatever your repos tell them to.</h2>
-    <p class="muted">
-      Every skill, MCP server, and agent config you adopt is
-      <strong style="color:var(--ink)">unreviewed code plus instructions</strong>,
-      wired into a process that holds your credentials, your shell, and the
-      network. Installing one is <code>npm install</code> with an agent
-      attached — except with no lockfile, no review gate, and no record of
-      what it did. Three gaps follow from that:
-    </p>
-    <div class="cards">
-      <div class="fcard">
-        <h3>One clone away</h3>
-        <p>A repo can declare MCP servers, and the moment an agent session
-           starts, they want to run — commands you never read, with your
-           keychain in reach.<br>
-           <span style="color:var(--accent)">→</span> Here, a clone is
-           <strong>inert</strong> until you approve its consent surface. Any
-           manifest, local-overlay, or lockfile edit re-gates it; referenced
-           local code must still be reviewed separately.</p>
-      </div>
-      <div class="fcard">
-        <h3>One prompt away</h3>
-        <p>An injected instruction can steer a well-behaved agent into using a
-           legitimate tool against you — deleting, leaking, phoning home.<br>
-           <span style="color:var(--accent)">→</span> Here, your
-           <strong>machine policy</strong> — which no valid repo policy can
-           loosen — fences tools, secrets, and egress; <code>--lockdown</code>
-           removes the agent's direct network route while approved traffic can
-           still pass through the enforcing proxy.</p>
-      </div>
-      <div class="fcard">
-        <h3>Invisible afterwards</h3>
-        <p>When something does go wrong, most setups can't answer the first
-           question a reviewer asks: <em>what did the agent actually
-           call?</em><br>
-           <span style="color:var(--accent)">→</span> Here, every brokered
-           call and denial lands in the call audit; gateway-routed sandbox runs
-           also record secret-reference access in their per-run evidence.</p>
-      </div>
-      <div class="fcard">
-        <h3>Honestly scoped</h3>
-        <p>No tool can make agent use risk-free: hosts you allow stay allowed,
-           and payloads aren't inspected.<br>
-           <span style="color:var(--accent)">→</span> That's why every mode
-           carries an <a href="#enforced">honest posture label</a> — and if
-           you run one agent with one hand-managed server, you may not need
-           this yet. The moment capabilities come from repos you didn't
-           write, you do.</p>
-      </div>
-    </div>
-  </section>
-
-  <section id="install" class="reveal">
-    <p class="eyebrow">Install</p>
-    <div class="copywrap">
-      <pre><code>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</code></pre>
-      <button class="copybtn" data-copy="curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh">copy</button>
-    </div>
-    <p class="small muted">
-      One static binary, no runtime dependencies. From a checkout:
-      <code>cargo build --release &amp;&amp; target/release/agentstack self link</code>.
-    </p>
-  </section>
-
-  <section id="enforced" class="reveal">
-    <p class="eyebrow">What's enforced where</p>
-    <h2>"Trusted" is not "confined." Here's the difference.</h2>
-    <p class="muted">
-      Trusting a repo approves what it <em>may</em> load. How strongly a run is
-      <em>confined</em> is a separate choice — how you launch it. Every run
-      prints a posture label that says exactly how strongly its rules are
-      enforced:
-    </p>
-    <div class="posture-legend">
-      <div><div class="lab">host — <span class="slug">HOST / ADVISORY</span></div><small>No container. The gateway still brokers tool calls, but nothing confines the process's own egress or filesystem.</small></div>
-      <div><div class="lab">gateway — <span class="slug">GATEWAY / BROKERED</span></div><small>Every MCP call routes through the in-process broker: firewalled and audited, but the process runs on the bare machine.</small></div>
-      <div><div class="lab">--sandbox — <span class="slug">SANDBOX / PROXIED · DIRECT ROUTE OPEN</span></div><small>Proxied HTTPS egress is checked against your compiled policy — but the container keeps an ordinary bridge, so a proxy-ignoring process can still dial out. <code>--lockdown</code> closes that route.</small></div>
-      <div><div class="lab">--lockdown — <span class="slug">ENFORCED · NO DIRECT ROUTE</span></div><small>Container on an internal-only network whose sole peer is the egress sidecar. Enforced <em>and</em> topologically confined.</small></div>
-    </div>
-
-    <p class="small muted" style="margin-top:1.1rem">
-      Read every <strong>enforced</strong> as a ceiling: the disallowed action is prevented at runtime — never that an <em>allowed</em> one is safe. The full six-dimension matrix, per-cell reasoning checked against the source: <a href="enforcement.html">the enforcement matrix</a>.
-    </p>
-  </section>
-
-  <section id="start" class="reveal">
-    <p class="eyebrow">Portable config</p>
-    <h2>The same reviewed file, rendered into every CLI</h2>
-    <p>
-      Prefer native config files — instead of, or as well as, the live gateway?
-      The same manifest renders them. And you don't start from a blank page:
-      <code>init</code>
-      reads the agent config already on your machine and turns it into a
-      manifest you can review, commit, and share. (Nothing installed yet?
-      <code>init</code> writes a commented starter manifest instead — no dead
-      ends on a clean machine.)
-    </p>
-    <div class="clis">
-      <p class="lbl">Serves — and renders native config for —</p>
-      <div class="chips">
-        <span class="chip">Claude Code</span>
-        <span class="chip">Codex CLI</span>
-        <span class="chip">Cursor</span>
-        <span class="chip">Windsurf</span>
-        <span class="chip">Gemini CLI</span>
-        <span class="chip">VS Code</span>
-        <span class="chip">GitHub Copilot CLI</span>
-        <span class="chip">Claude Desktop</span>
-        <span class="chip">OpenCode</span>
-        <span class="chip">Antigravity</span>
-        <span class="chip">Junie</span>
-        <span class="chip">Kiro</span>
-        <span class="chip">Pi</span>
-      </div>
-    </div>
-    <ol class="steps">
-      <li>
-        <b>agentstack init</b>
-        <p>Imports the servers and skills you already have; inline tokens become <code>${REF}</code>s, stored in a gitignored <code>.env</code> or your OS keychain — never the manifest.</p>
-      </li>
-      <li>
-        <b>agentstack apply</b>
-        <p>Preview each CLI's config diff, confirm to write. Writes are atomic, backed up, and tracked — <code>restore</code> undoes them.</p>
-      </li>
-      <li>
-        <b>agentstack use &lt;profile&gt; --write</b>
-        <p>Activate a profile: its servers and skills, materialized for every CLI. The interactive <code>init</code> wizard runs this step for you.</p>
-      </li>
-      <li>
-        <b>agentstack doctor</b>
-        <p>Any time something feels off. Every warning names the exact fix command.</p>
-      </li>
-    </ol>
-  </section>
-
-  <section id="manifest" class="reveal">
-    <p class="eyebrow">The manifest</p>
-    <h2>One file, reviewed like code</h2>
-    <pre><code>version = 1
-
-[servers.github]
-type = "http"
-url = "https://api.githubcopilot.com/mcp/"
-headers = { Authorization = "Bearer ${GH_PAT}" } # resolved per machine, never stored
-
-[profiles.backend]
-servers = ["github", "kibana"]
-skills  = ["sql-review"]               # resolves from your central library
-
-[targets]
-default = ["claude-code", "codex"]</code></pre>
-    <p class="muted">
-      Secrets stay <code>${REF}</code> placeholders that
-      <a href="concepts.html">resolve per machine</a>; an unresolved one blocks
-      the write, so a value never leaks into live config. A lockfile pins every
-      skill and server by digest, and <code>install --locked</code> reproduces
-      the setup in CI.
-    </p>
-  </section>
-
-  <section id="modes" class="reveal">
-    <p class="eyebrow">Rendered files</p>
-    <h2>Pick where artifacts live</h2>
-    <p class="muted">
-      You always commit the intent (manifest + lock); the rendered artifacts
-      (<code>.mcp.json</code>, <code>.claude/skills/</code>) are a per-project choice:
-    </p>
-    <dl class="modes">
-      <div>
-        <dt>static <small>default</small></dt>
-        <dd>Rendered configs sit on disk, gitignored by a managed block.</dd>
-      </div>
-      <div>
-        <dt>clean-at-rest</dt>
-        <dd>Nothing persists between sessions — injected on launch, reverted on exit.</dd>
-      </div>
-      <div>
-        <dt>zero files</dt>
-        <dd>Nothing rendered at all; the gateway serves each repo's servers live,
-            behind the <a href="howto/trust-a-repo.html">trust gate</a>.</dd>
-      </div>
-    </dl>
-    <p class="small muted">
-      The full lifecycle of each mode:
-      <a href="concepts.html#delivery-modes">delivery modes</a>. Deciding?
-      <a href="choose.html">Which mode do I need?</a>
-    </p>
-  </section>
-
-  <section id="team" class="reveal">
-    <p class="eyebrow">Teams &amp; CI</p>
-    <h2>Clone, apply, done</h2>
-    <pre><code>git clone &lt;repo&gt;
-agentstack secret set GH_PAT     # local only; never committed
-agentstack apply --write
-agentstack doctor                # verify the wiring</code></pre>
-    <p class="muted">In CI, the trust gate is two commands — or the one-line GitHub Action:</p>
-    <pre><code>agentstack install --locked   # fail if sources drifted from the pinned lock
-agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</code></pre>
-    <p class="small muted">
-      The step-by-step versions, with limits and the optional
-      <code>sign</code>/<code>verify</code> provenance path:
-      <a href="howto/team-setup.html">team setup</a> ·
-      <a href="howto/ci.html">use in CI</a>.
-    </p>
-  </section>
-
-  <section id="more" class="reveal">
-    <p class="eyebrow">Going further</p>
-    <h2>When you want more than the loop</h2>
-    <div class="cards">
-      <div class="fcard">
-        <h3><a href="reference.html#the-central-library">Central library</a></h3>
-        <p>One managed home for skills and servers; projects select by name and stay
-           digest-pinned. Install from a local dir or a git subdirectory, sync across
-           machines, and pull ready-made skills from the shipped catalog.</p>
-        <a class="tag" href="reference.html#the-central-library">Reference</a>
-      </div>
-      <div class="fcard">
-        <h3><a href="reference.html#dashboard">The read-only lens</a></h3>
-        <p>A local, token-gated dashboard that shows your whole stack — servers, skills,
-           secrets, runs, diffs, doctor, Proxy and Insights. It reads; the CLI writes.</p>
-        <a class="tag" href="reference.html#dashboard">Dashboard guide</a>
-      </div>
-      <div class="fcard">
-        <h3>Vendor packs</h3>
-        <p><code>agentstack add from git:github.com/acme/pack@v1.2.0</code> installs a
-           versioned MCP + skills + house-rules bundle — policy-gated and
-           content-scanned before anything is written.</p>
-        <span class="tag" style="color:var(--faint)">Versioned by tag</span>
-      </div>
-      <div class="fcard">
-        <h3>Support any CLI, no rebuild</h3>
-        <p>Each of the 13 agents is one data-driven YAML descriptor. Drop your own into
-           <code>~/.agentstack/adapters/</code> to add or override a harness — validated
-           first, and a broken drop-in is skipped with a warning, never fatal.</p>
-        <span class="tag" style="color:var(--faint)">Data-driven adapters</span>
-      </div>
-    </div>
-  </section>
-
-  <section id="docs" class="reveal">
-    <p class="eyebrow">The documentation</p>
-    <h2>Where to go next.</h2>
-    <p class="muted">
-      Every guide, how-to, reference, and demo — organized by what you want to
-      do — lives in the <a href="docs.html">docs directory</a>. New to the
-      vocabulary? <a href="concepts.html">Concepts</a> defines every term in
-      plain sentences, and the <a href="start.html">ten-minute start</a> takes
-      you from install to a governed, verified setup.
-    </p>
-  </section>
-
-</main>
-
-<footer>
-  <div class="bar">
-    <span>MIT or Apache-2.0, at your option.</span>
-    <nav aria-label="Footer links">
-      <a href="https://github.com/Tarekkharsa/agentstack">source</a>
-      <a href="https://github.com/Tarekkharsa/agentstack/issues">issues</a>
-      <a href="https://github.com/Tarekkharsa/agentstack/releases">releases</a>
-      <a href="architecture.html#operating-model--choose-the-boundary-you-need">primitives</a>
-      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">strategy</a>
-      <a href="security-review-2026-07-11.html">security&nbsp;review</a>
-    </nav>
   </div>
-</footer>
-
-<script>
-  // Progressive enhancement marker: reveal-hiding only applies with JS alive.
-  document.documentElement.classList.add("js");
-
-  // Copy buttons.
-  for (const btn of document.querySelectorAll(".copybtn")) {
-    btn.setAttribute("aria-live", "polite"); // announce copy feedback
-    btn.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(btn.dataset.copy);
-        btn.textContent = "copied";
-        setTimeout(() => (btn.textContent = "copy"), 1600);
-      } catch { btn.textContent = "select + copy"; }
-    });
-  }
-
-  // Header border appears once you scroll past the hero top.
-  const header = document.getElementById("site-header");
-  const onScroll = () => header.classList.toggle("scrolled", window.scrollY > 8);
-  addEventListener("scroll", onScroll, { passive: true });
-  onScroll();
-
-  // Gentle scroll-reveal, disabled under reduced-motion.
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const reveals = document.querySelectorAll(".reveal");
-  if (reduce || !("IntersectionObserver" in window)) {
-    reveals.forEach((el) => el.classList.add("in"));
-  } else {
-    const io = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
-      }
-    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.06 });
-    reveals.forEach((el) => io.observe(el));
-  }
-</script>
-
-<script src="term-replay.js" defer></script>
+</div>
 </body>
 </html>

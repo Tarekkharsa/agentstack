@@ -1,0 +1,861 @@
+<!doctype html>
+<html lang="en" data-palette="slate">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>AgentStack Cookbook — 26 copy-paste recipes for the CLI</title>
+<meta name="description" content="Twenty-six copy-paste recipes for using the AgentStack CLI, building from a one-line manifest to sandboxed, governed execution. The manifest is the source of truth; generated native configuration is compiled output.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="canonical" href="https://tarekkharsa.github.io/agentstack/cookbook.html">
+<meta property="og:title" content="AgentStack Cookbook — 26 copy-paste recipes for the CLI">
+<meta property="og:description" content="Twenty-six copy-paste recipes for using the AgentStack CLI, from a one-line manifest to sandboxed, governed execution.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://tarekkharsa.github.io/agentstack/cookbook.html">
+<meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="AgentStack Cookbook — 26 copy-paste recipes for the CLI">
+<meta name="twitter:description" content="From a one-line manifest to sandboxed, governed execution — 26 copy-paste CLI recipes.">
+<meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
+<script src="theme/theme.js"></script>
+<link rel="stylesheet" href="theme/organic.css">
+<style>
+[data-theme="dark"]{
+--color-bg:#211E1B;--color-surface:#2A2622;--color-text:#F5EAD8;
+--color-divider:color-mix(in srgb, #F5EAD8 18%, transparent);
+--color-accent:#D98A52;--color-accent-2:#97A876;
+--color-neutral-100:#332E29;--color-neutral-200:#3A342E;--color-neutral-300:#46403A;--color-neutral-400:#5C554C;--color-neutral-500:#847767;--color-neutral-600:#A89B87;--color-neutral-700:#C9BCA7;--color-neutral-800:#DACDB8;--color-neutral-900:#EFE6D4;
+--color-accent-100:#3A2B1D;--color-accent-200:#4A3625;--color-accent-300:#5C4229;--color-accent-600:#E09B66;--color-accent-700:#E4A878;--color-accent-800:#EDBF97;--color-accent-900:#F4D5B8;
+--color-accent-2-100:#2A3122;--color-accent-2-200:#353D2B;--color-accent-2-700:#B5C69A;--color-accent-2-800:#C8D6B0;--color-accent-2-900:#DBE5C9;
+--shadow-sm:0 1px 2px rgba(0,0,0,0.4);--shadow-md:0 3px 10px rgba(0,0,0,0.45);--shadow-lg:0 12px 32px rgba(0,0,0,0.55)}
+.nav a.btn-primary{color:var(--color-bg)}
+.nav a.btn-primary:hover{color:var(--color-bg)}
+[data-palette]{--term-bg:#26211C;--term-hd:#1C1815;--term-btn:#38312A;--term-bd:#463D34;--term-muted:#A5988A;--term-text:#E6DCC9;--term-ok:#9DB380;--term-bad:#D97A62;--term-warn:#DDA84E}
+[data-palette="slate"]{--term-bg:#14181C;--term-hd:#0E1114;--term-btn:#23282E;--term-bd:#2E353C;--term-muted:#97A1AD;--term-text:#D7DEE4;--term-ok:#7CC08B;--term-bad:#E5786B;--term-warn:#E0B04A;
+--color-bg:#FBFAF7;--color-surface:#FFFFFF;--color-text:#1B1F24;--color-divider:rgba(27,31,36,0.16);
+--color-accent:#B4540A;--color-accent-2:#2A6F4E;
+--color-neutral-100:#F3F0EA;--color-neutral-200:#E7E2D9;--color-neutral-300:#D8D2C7;--color-neutral-400:#B9B3A8;--color-neutral-500:#7E858D;--color-neutral-600:#5B6570;--color-neutral-700:#3A424B;--color-neutral-800:#2B3138;--color-neutral-900:#1B1F24;
+--color-accent-100:#FBF1E7;--color-accent-200:#F5DFC8;--color-accent-300:#EECDA9;--color-accent-600:#9C4A08;--color-accent-700:#8A3F06;--color-accent-800:#6F3305;--color-accent-900:#542704;
+--color-accent-2-100:#EAF4EC;--color-accent-2-200:#D3E7D8;--color-accent-2-700:#1F5238;--color-accent-2-800:#183F2B;--color-accent-2-900:#112D1F}
+[data-palette="slate"][data-theme="dark"]{
+--color-bg:#14171B;--color-surface:#1A1E23;--color-text:#E9E7E2;--color-divider:rgba(233,231,226,0.16);
+--color-accent:#F0975A;--color-accent-2:#7CC08B;
+--color-neutral-100:#1E2329;--color-neutral-200:#292E34;--color-neutral-300:#343B43;--color-neutral-400:#454D57;--color-neutral-500:#69727C;--color-neutral-600:#9AA3AC;--color-neutral-700:#C3C9CF;--color-neutral-800:#D7DEE4;--color-neutral-900:#EDF1F4;
+--color-accent-100:#2B2018;--color-accent-200:#3A2A1C;--color-accent-300:#4A3520;--color-accent-600:#F2A470;--color-accent-700:#F5B183;--color-accent-800:#F8C7A3;--color-accent-900:#FBDCC5;
+--color-accent-2-100:#16281C;--color-accent-2-200:#1E3626;--color-accent-2-700:#A8D4B3;--color-accent-2-800:#C2E2CA;--color-accent-2-900:#DCEFE1;
+--shadow-sm:0 1px 2px rgba(0,0,0,0.4);--shadow-md:0 3px 10px rgba(0,0,0,0.45);--shadow-lg:0 12px 32px rgba(0,0,0,0.55)}
+.card{border-radius:var(--radius-md,16px)}
+
+/* prototype hover declarations → real :hover (sidebar rail links) */
+.rail-link:hover{background:var(--color-accent-100);color:var(--color-accent-700)}
+
+/* light responsive touch */
+@media (max-width:720px){
+  .nav{flex-wrap:wrap !important;row-gap:var(--space-2) !important}
+  .nav-actions{flex-wrap:wrap !important}
+  .ck-layout{flex-direction:column !important;gap:var(--space-6) !important;padding-left:var(--space-4) !important;padding-right:var(--space-4) !important}
+  .ck-rail{position:static !important;width:auto !important;max-height:none !important}
+}
+</style>
+</head>
+<body style="margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
+<div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
+  <nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
+    <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
+      <img src="theme/logo-mark.svg" alt="" style="width:34px;height:34px">
+      <span style="font-family:var(--font-heading);font-size:1.25rem">agent<span style="color:var(--color-accent)">Stack</span></span>
+    </a>
+    <div style="flex:1"></div>
+    <div class="nav-actions" style="display:flex;align-items:center;gap:var(--space-4)">
+      <a href="docs.html" style="text-decoration:none;font-weight:600;color:var(--color-text)">Documentation</a>
+      <span style="font-weight:700;color:var(--color-accent-700)">Cookbook</span>
+      <a href="examples.html" style="text-decoration:none;font-weight:600;color:var(--color-text)">Demos</a>
+      <a href="tutorial/" style="text-decoration:none;font-weight:600;color:var(--color-text)">Tutorial</a>
+      <a href="https://github.com/Tarekkharsa/agentstack" style="text-decoration:none;font-weight:600;color:var(--color-text)">GitHub</a>
+      <button data-theme-toggle onclick="toggleTheme()" style="font-size:13px;font-weight:600;padding:7px 14px;border-radius:999px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit;cursor:pointer">Light mode</button>
+    </div>
+  </nav>
+
+  <div class="ck-layout" style="max-width:1060px;margin:0 auto;padding:var(--space-8) var(--space-6) var(--space-8);display:flex;gap:var(--space-8)">
+    <div class="ck-rail" style="width:230px;flex:none;position:sticky;top:24px;align-self:flex-start;max-height:calc(100vh - 48px);overflow-y:auto;display:flex;flex-direction:column;gap:var(--space-3);padding-right:var(--space-2)">
+
+      <div>
+        <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+          <span style="width:8px;height:8px;border-radius:999px;background:var(--color-accent);flex:none"></span>
+          <span style="font-size:0.72rem;font-weight:700;letter-spacing:0.1em;color:var(--color-accent-700);text-transform:uppercase">Configure</span>
+        </div>
+        <div style="display:flex;flex-direction:column;border-left:2px solid var(--color-neutral-200);margin-left:3px;padding-left:var(--space-3);gap:2px">
+          <a href="#r1" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">1</span><span>The smallest manifest</span></a>
+          <a href="#r2" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">2</span><span>Fan out to several CLIs</span></a>
+          <a href="#r3" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">3</span><span>Keep secrets out of the file</span></a>
+          <a href="#r4" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">4</span><span>An HTTP server with auth</span></a>
+          <a href="#r5" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">5</span><span>A native key for one CLI</span></a>
+          <a href="#r6" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">6</span><span>Add skills</span></a>
+          <a href="#r7" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">7</span><span>Task-specific profiles</span></a>
+          <a href="#r8" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">8</span><span>Share house rules across CLIs</span></a>
+          <a href="#r26" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">26</span><span>Native extensions</span></a>
+          <a href="#r9" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">9</span><span>The everyday loop</span></a>
+          <a href="#r14" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">14</span><span>The central library</span></a>
+          <a href="#r15" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">15</span><span>Sync the library across machines</span></a>
+          <a href="#r16" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">16</span><span>Versioned vendor packs</span></a>
+          <a href="#r24" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">24</span><span>Extend it</span></a>
+          <a href="#r25" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">25</span><span>The personal layer &amp; app-owned servers</span></a>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+          <span style="width:8px;height:8px;border-radius:999px;background:var(--color-accent);flex:none"></span>
+          <span style="font-size:0.72rem;font-weight:700;letter-spacing:0.1em;color:var(--color-accent-700);text-transform:uppercase">Protect</span>
+        </div>
+        <div style="display:flex;flex-direction:column;border-left:2px solid var(--color-neutral-200);margin-left:3px;padding-left:var(--space-3);gap:2px">
+          <a href="#r10" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">10</span><span>The MCP tool firewall</span></a>
+          <a href="#r11" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">11</span><span>The machine layer</span></a>
+          <a href="#r12" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">12</span><span>Governance</span></a>
+          <a href="#r13" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">13</span><span>Zero files: the trust gate</span></a>
+          <a href="#r19" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">19</span><span>The other policy dimensions</span></a>
+          <a href="#r23" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">23</span><span>The CI trust gate</span></a>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+          <span style="width:8px;height:8px;border-radius:999px;background:var(--color-accent);flex:none"></span>
+          <span style="font-size:0.72rem;font-weight:700;letter-spacing:0.1em;color:var(--color-accent-700);text-transform:uppercase">Run confined</span>
+        </div>
+        <div style="display:flex;flex-direction:column;border-left:2px solid var(--color-neutral-200);margin-left:3px;padding-left:var(--space-3);gap:2px">
+          <a href="#r18" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">18</span><span>Sandboxed runs with egress policy</span></a>
+          <a href="#r22" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">22</span><span>Experimental: governed TypeScript</span></a>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+          <span style="width:8px;height:8px;border-radius:999px;background:var(--color-accent);flex:none"></span>
+          <span style="font-size:0.72rem;font-weight:700;letter-spacing:0.1em;color:var(--color-accent-700);text-transform:uppercase">Observe</span>
+        </div>
+        <div style="display:flex;flex-direction:column;border-left:2px solid var(--color-neutral-200);margin-left:3px;padding-left:var(--space-3);gap:2px">
+          <a href="#r20" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">20</span><span>See what happened</span></a>
+          <a href="#r21" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">21</span><span>See what your tools cost</span></a>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="flex:1;min-width:0">
+      <h1 style="font-family:var(--font-heading);font-weight:400;font-size:2.6rem;margin:0 0 var(--space-3)">Cookbook — AgentStack, by example</h1>
+      <p style="font-size:1.05rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">Twenty-six copy-paste recipes for <strong>using the CLI</strong>, building from a one-line manifest to sandboxed, governed execution. The manifest is the source of truth; generated native configuration is compiled output. Watching the security claims <em>proven</em> instead? That's the <a href="examples.html">Demos page</a>.</p>
+      <div class="card" style="background:var(--color-accent-100);margin-bottom:var(--space-6)"><div class="card-body" style="font-size:0.92rem;line-height:1.6"><strong>How to read the evidence:</strong> unless a recipe is marked <em>runnable fixture</em>, treat its code as a focused, CLI-validated recipe rather than a self-asserting end-to-end proof.</div></div>
+
+      <!-- ═══════════════ GROUP: Configure ═══════════════ -->
+      <div style="display:flex;align-items:baseline;gap:var(--space-3);margin:var(--space-7) 0 var(--space-2);padding-top:var(--space-2);border-top:2px solid var(--color-accent)">
+        <h2 style="font-family:var(--font-heading);font-weight:400;font-size:1.7rem;margin:0">Configure</h2>
+        <code style="font-size:0.82rem;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace">$ agentstack apply</code>
+      </div>
+      <p style="font-size:0.95rem;line-height:1.6;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">Get a server into your tools, organize capabilities by task, reuse them everywhere, extend the tool itself.</p>
+
+      <!-- Recipe 1 -->
+      <div id="r1" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">1</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">The smallest manifest</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">One MCP server, one CLI — the whole thing at its simplest. The CLI reads its rendered file once at launch; change the manifest, re-run apply, restart the CLI.</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">how it flows · manifest → your CLI</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">manifest</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">agentstack.toml</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">apply --write</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">renders config</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">.mcp.json</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">written to disk</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">Claude Code</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">reads at launch</div></div></div>
+          </div>
+          <div style="font-size:0.8rem;color:var(--color-neutral-700);margin-top:8px;line-height:1.5"><strong>note →</strong> the CLI reads that file once, at launch — change the manifest, re-run apply, restart the CLI.</div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="color:var(--term-muted);margin-bottom:4px"># .agentstack/agentstack.toml</div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">version = 1</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">[servers.time]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">type = "stdio"</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">command = "uvx"</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">args = ["mcp-server-time"]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">[targets]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">default = ["claude-code"]</span><span style="color:var(--term-muted)"></span></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack apply --write" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack apply --write</span><span style="color:var(--term-muted)">   # writes Claude Code's native .mcp.json for you</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Claude Code now has the official Time reference server, generated from your manifest — you never hand-edited its config.</div>
+      </div>
+
+      <!-- Recipe 2 -->
+      <div id="r2" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">2</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Fan out to several CLIs</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">The same server, spelled correctly for every tool. Just add names to targets.</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">one manifest · many CLIs</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">manifest</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">one source of truth</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">apply --write</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">compiles each format</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">native config</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">claude-code · codex · cursor · gemini…</div></div></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="default = [&quot;claude-code&quot;, &quot;codex&quot;, &quot;cursor&quot;, &quot;gemini-cli&quot;]" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[targets]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">default = ["claude-code", "codex", "cursor", "gemini-cli"]</span><span style="color:var(--term-muted)"></span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Four CLIs, four native config formats, one source of truth. No drift, no copy-paste. 13 CLIs supported — agentstack adapters list.</div>
+      </div>
+
+      <!-- Recipe 3 -->
+      <div id="r3" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">3</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Keep secrets out of the file</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Never paste a token in. Reference it as ${NAME}; it resolves per machine through the secret chain: environment, varlock, OS keychain, then .env.</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">a secret, resolved at runtime</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">${GH_PAT}</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">manifest holds the ref only</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">OS keychain</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">secret set — real value</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">per call</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">gateway injects it</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">server</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">gets the token</div></div></div>
+          </div>
+          <div style="font-size:0.8rem;color:var(--color-neutral-700);margin-top:8px;line-height:1.5"><strong>note →</strong> the committed file never contains a real secret; an unresolvable ref blocks the write, never leaves a placeholder.</div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[servers.github]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">type = "http"</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">url = "https://api.githubcopilot.com/mcp/"</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">headers = { Authorization = "Bearer ${GH_PAT}" }</span><span style="color:var(--term-muted)">   # a reference, never the value</span></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack secret set GH_PAT" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack secret set GH_PAT</span><span style="color:var(--term-muted)">   # stored in the OS keychain, not a file</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack doctor</span><span style="color:var(--term-muted)">   # flags a referenced secret that's missing</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> The committed manifest is safe to share. A missing secret blocks the write rather than leaking a placeholder into live config.</div>
+      </div>
+
+      <!-- Recipe 4 -->
+      <div id="r4" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">4</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">An HTTP server with auth</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Remote MCP servers use type = "http", a url, and headers. Run doctor --live before an agent depends on it: a stale token surfaces now, with the exact transport error, instead of mid-session.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[servers.kibana]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">type = "http"</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">url = "https://kibana-mcp.example.com/mcp"</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">headers = { Authorization = "Bearer ${KIBANA_TOKEN}" }</span><span style="color:var(--term-muted)"></span></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack doctor --live" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack doctor --live</span><span style="color:var(--term-muted)">   # real MCP handshake: name + tool count, or the exact error</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recipe 5 -->
+      <div id="r5" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">5</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">A native key for one CLI</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">When one CLI needs a native key another doesn't, pass it through verbatim under extra.&lt;cli&gt; — copied through, never interpreted.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[servers.filesystem]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">type = "stdio"</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">command = "npx"</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">args = ["-y", "@modelcontextprotocol/server-filesystem", "./"]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">[servers.filesystem.extra.codex]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">startup_timeout_sec = 20</span><span style="color:var(--term-muted)">   # Codex sees this; the others don't</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Only Codex's generated config carries startup_timeout_sec; every other CLI's stays untouched.</div>
+      </div>
+
+      <!-- Recipe 6 -->
+      <div id="r6" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">6</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Add skills</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Skills are reusable instruction/tool bundles. Point at a local directory — relative paths anchor at the manifest's directory (.agentstack/). Skills activate through profiles (next), not apply.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[skills.sql-review]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">path = "./skills/sql-review"</span><span style="color:var(--term-muted)">   # lives at .agentstack/skills/sql-review</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recipe 7 -->
+      <div id="r7" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">7</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Task-specific profiles</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">A profile is a named bundle of servers + skills you switch on for a kind of work. Fewer tools on the wire means fewer tokens billed every turn (see §21).</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">load only what the task needs</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">profile: backend</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">github, kibana + sql-review</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">use backend --write</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">materialize</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">loaded</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">just backend's set — others stay off</div></div></div>
+          </div>
+          <div style="font-size:0.8rem;color:var(--color-neutral-700);margin-top:8px;line-height:1.5"><strong>note →</strong> fewer tools on the wire = fewer tokens billed every turn (§21).</div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[profiles.backend]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">servers = ["github", "kibana"]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">skills  = ["sql-review"]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">[profiles.docs]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">servers = ["github"]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">skills  = ["writing-style"]</span><span style="color:var(--term-muted)"></span></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack use backend --write" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack use backend --write</span><span style="color:var(--term-muted)">   # activate the backend profile</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Load only what the task needs — others stay off.</div>
+      </div>
+
+      <!-- Recipe 8 -->
+      <div id="r8" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">8</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Share house rules across CLIs</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Compile shared instructions into each CLI's native file (CLAUDE.md, AGENTS.md…) from one source. Edit it, re-run instructions --write, and all targets update together.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[instructions.house_rules]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">path = "./house-rules.md"</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"># targets = ["*"]   # optional: which CLIs get it (default: all)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recipe 26 -->
+      <div id="r26" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">26</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Native extensions</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Manage a harness's native executable add-ons — pi's TypeScript extensions, OpenCode's JS plugins — the way [skills.*] manages skill dirs. The highest-risk capability agentstack delivers: the code runs inside the harness at full user permission, outside every policy ceiling. agentstack pins and delivers the bytes; it never executes or governs them at runtime.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[extensions.checkpoint]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">description = "Git checkpoint on every agent turn"</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">path = "./extensions/checkpoint"</span><span style="color:var(--term-muted)">   # or: git = "…", rev = "…", subpath = "…"</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">target = "pi"</span><span style="color:var(--term-muted)">   # exactly one adapter id — no targets list, no "*"</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Strictly pinned: a symlink is a hard error; unpinned executable content blocks until agentstack lock accepts it; an untrusted or drifted project renders zero extension bytes. Renders today for pi and OpenCode.</div>
+      </div>
+
+      <!-- Recipe 9 -->
+      <div id="r9" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">9</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">The everyday loop</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">The four commands you'll actually run. Two habits worth keeping: agentstack with no arguments tells you the single next step for the directory you're in; doctor --ci fails a build on errors, drift, policy, or unsafe content.</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">the everyday loop</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">init</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">configs → manifest</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">doctor</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">what's missing?</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">apply</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">preview → write</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">doctor</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">verify + fix</div></div></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack init" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack init</span><span style="color:var(--term-muted)">   # reverse-engineer a manifest from configs you already have</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack doctor</span><span style="color:var(--term-muted)">   # installed CLIs? missing secrets? drift? exact fixes</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack diff</span><span style="color:var(--term-muted)">   # read-only: exactly what would change</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack apply</span><span style="color:var(--term-muted)">   # preview only</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack apply --write</span><span style="color:var(--term-muted)">   # after review: render the native files</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack doctor</span><span style="color:var(--term-muted)">   # verify wiring; every warning names its exact fix</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recipe 14 -->
+      <div id="r14" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">14</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">The central library</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Install a capability once into your machine-wide library (~/.agentstack/lib), then reference it by name from any project — nothing copied, and every add is content-scanned before it lands.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack lib add server github" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack lib add server github</span><span style="color:var(--term-muted)">   # once, machine-wide, content-scanned</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack add github</span><span style="color:var(--term-muted)">   # any project: reference by name</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recipe 15 -->
+      <div id="r15" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">15</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Sync the library across machines</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Version the library as a git repo with lib sync — a fail-closed gate scans every server field and the outgoing commits for secrets before pushing. A literal secret, or a definition it can't parse, blocks the sync.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack lib sync" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack lib sync</span><span style="color:var(--term-muted)">   # git-versioned; secret-scanned before every push</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recipe 16 -->
+      <div id="r16" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">16</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Versioned vendor packs</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Install a pinned bundle of MCP servers, skills, and house rules in one shot — policy-gated and content-scanned first, with the lockfile recording exactly what you got. Upgrading is just the next tag.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack add pack github.com/acme/agent-pack@v2.1.0" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack add pack github.com/acme/agent-pack@v2.1.0</span><span style="color:var(--term-muted)">   # pinned, scanned, locked</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recipe 24 -->
+      <div id="r24" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">24</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Extend it — add a CLI in one file</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Support a new CLI with a single YAML descriptor — no rebuild. A broken drop-in is skipped with a warning, never fatal.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack adapters validate my-adapter.yaml" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ cp crates/adapters/descriptors/codex.yaml my-adapter.yaml</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"># edit it, then:</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack adapters validate my-adapter.yaml</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ cp my-adapter.yaml ~/.agentstack/adapters/</span><span style="color:var(--term-muted)">   # picked up on next run</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack adapters list</span><span style="color:var(--term-muted)">   # marks which adapters are yours</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recipe 25 -->
+      <div id="r25" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">25</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">The personal layer &amp; app-owned servers</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Machine-wide instructions that merge beneath every project without landing in any repo; and letting an app's own config be the source of truth. When the app rewrites its own entry (a self-update), apply refreshes the manifest and fans the fresh values out to every other CLI instead of reverting the app.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack init --global" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack init --global</span><span style="color:var(--term-muted)">   # a home for your machine-wide rules</span></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[servers.codex-native]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">owner = "codex"</span><span style="color:var(--term-muted)">   # codex owns this entry; apply follows it</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Machine policy survives bad edits: a validated policy continues from a secret-free last-known-good snapshot and reports DEGRADED; first-run corruption reports BLOCKED.</div>
+      </div>
+
+      <!-- ═══════════════ GROUP: Protect ═══════════════ -->
+      <div style="display:flex;align-items:baseline;gap:var(--space-3);margin:var(--space-7) 0 var(--space-2);padding-top:var(--space-2);border-top:2px solid var(--color-accent)">
+        <h2 style="font-family:var(--font-heading);font-weight:400;font-size:1.7rem;margin:0">Protect</h2>
+        <code style="font-size:0.82rem;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace">$ agentstack trust . · guard install</code>
+      </div>
+      <p style="font-size:0.95rem;line-height:1.6;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">Constrain what agents may do: the tool firewall, the machine layer no repo can loosen, governance, and the trust gate.</p>
+
+      <!-- Recipe 10 -->
+      <div id="r10" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">10</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">The MCP tool firewall</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Restrict which tools a server may expose. Plain globs allow; a leading ! denies. Any allow pattern makes the list an allowlist. A denied tool is invisible — filtered from discovery — and refused with the rule named if called anyway.</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">the firewall, on every call</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">agent</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">calls a tool</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">gateway</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">[policy.tools]</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">✓ get_issue</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">allowed</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent-800);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-800);font-family:ui-monospace,Menlo,monospace">✗ list_secrets</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">refused, rule named</div></div></div>
+          </div>
+          <div style="font-size:0.8rem;color:var(--color-neutral-700);margin-top:8px;line-height:1.5"><strong>note →</strong> a denied tool is refused before it reaches the server, and hidden from discovery entirely.</div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[policy.tools]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">github = ["get_*", "list_*", "!list_secrets"]</span><span style="color:var(--term-muted)">   # read-only, minus one tool</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> agentstack explain github shows the effective policy.</div>
+      </div>
+
+      <!-- Recipe 11 -->
+      <div id="r11" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">11</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">The machine layer — rules no repo can loosen</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Your standing rules live in ~/.agentstack/agentstack.toml and are checked before any project's. A call must pass both layers — the effective policy is the intersection, never more permissive than your machine layer.</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">policy is an intersection</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">machine policy</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">your standing rules</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">∩ repo policy</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">can only add, not loosen</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">effective</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">never more permissive than the machine layer</div></div></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="color:var(--term-muted);margin-bottom:4px"># ~/.agentstack/agentstack.toml — applies to every project on this machine</div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">[policy.tools]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">"*"    = ["!delete_*"]</span><span style="color:var(--term-muted)">   # no server, under any name, may delete_*</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">github = ["get_*", "list_*"]</span><span style="color:var(--term-muted)">   # servers NAMED github are read-only</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> The "*" key is rename-proof — it binds every server whatever a manifest calls it.</div>
+      </div>
+
+      <!-- Recipe 12 -->
+      <div id="r12" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">12</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Governance — require, forbid, allowed sources</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Gate where capabilities may come from and what must / mustn't be present — enforced by doctor --ci and add. Read carefully: governance fails add / CI. It places no runtime block on anything — that's [policy.tools] (§10).</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">a check, not a runtime firewall</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">[policy]</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">require / forbid / sources</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">doctor --ci · add</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">validation gate</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">build</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">✓ passes / ✗ fails</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent-800);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-800);font-family:ui-monospace,Menlo,monospace">a running agent</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">NOT consulted</div></div></div>
+          </div>
+          <div style="font-size:0.8rem;color:var(--color-neutral-700);margin-top:8px;line-height:1.5"><strong>note →</strong> governance fails add / CI. It places no runtime block on anything — that's [policy.tools] (§10).</div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[policy]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">allowed_sources = ["git:github.com/acme/*"]</span><span style="color:var(--term-muted)">   # only these origins may be installed</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">forbid = ["network-broker"]</span><span style="color:var(--term-muted)">   # never allow this capability</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recipe 13 -->
+      <div id="r13" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">13</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Zero files: the trust gate</div>
+          <span class="tag tag-accent-2" style="font-size:0.72rem">runnable fixtures</span>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Skip rendered files entirely. Register the gateway once; every trusted repo then serves its own servers live — an unreviewed repo is inert. Edit the manifest or lock and it drops back to inert until you review again.</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">clone → inert → trusted → audited</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent-800);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-800);font-family:ui-monospace,Menlo,monospace">clone</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">inert — nothing spawns</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">trust .</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">review, then pin bytes</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">firewalled</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">servers serve live</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">audited</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">every call logged</div></div></div>
+          </div>
+          <div style="font-size:0.8rem;color:var(--color-neutral-700);margin-top:8px;line-height:1.5"><strong>note →</strong> edit the manifest or lock and it drops back to inert until you review again.</div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack trust ." style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack gateway connect --all --write</span><span style="color:var(--term-muted)">   # register the gateway (once)</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ git clone &lt;some-repo&gt; &amp;&amp; cd &lt;some-repo&gt;</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack mcp --auto-project</span><span style="color:var(--term-muted)">   # an agent asks what's here → nothing (untrusted)</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack trust .</span><span style="color:var(--term-muted)">   # SEE what it declares, then authorize</span></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack trust .</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">  ▶ demo: runs `python3 ./server.py`</span><span style="color:var(--term-muted)">   # exactly what it would run</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-ok)">  ✓ trusted at sha256:945b4b…</span><span style="color:var(--term-muted)">   # editing the manifest/lock re-gates it</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"># now its servers serve live, through the firewall:</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-ok)">agent → demo.echo         ✓ ok</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-bad)">agent → demo.secret_read  ✗ denied  [policy.tools]</span><span style="color:var(--term-muted)"></span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Every brokered call lands in ~/.agentstack/audit/calls.jsonl. After trust, an agent can fence one MCP connection to a profile with agentstack_lease_open — no .mcp.json, skill folder, or session entry written; lease_freeze proposes a manifest profile from what the task actually used.</div>
+      </div>
+
+      <!-- Recipe 19 -->
+      <div id="r19" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">19</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">The other policy dimensions</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">The same two-layer intersection and "*" grammar apply beyond tools and egress. Enforcement depends on execution mode: host/gateway filesystem guards are cooperative harness hooks; sandbox/lockdown use coarse workspace mounts.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">[policy.secrets]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">github = ["GH_*"]</span><span style="color:var(--term-muted)">   # server named github may resolve only GH_* refs</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">[policy.filesystem]</span><span style="color:var(--term-muted)">   # bundle-global path globs</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">read  = ["./src/**", "./docs/**"]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">write = ["./out/**", "!**/.env"]</span><span style="color:var(--term-muted)">   # never write a .env, even under an allowed root</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recipe 23 -->
+      <div id="r23" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">23</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">The CI trust gate</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Two commands make a pipeline fail on drift or unsafe content — or use the pinned GitHub Action.</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">fail the build on drift</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">install --locked</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">fail on source drift</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">doctor --ci</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">policy · unsafe content</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">build</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">✓ green / ✗ blocked</div></div></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack install --locked" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack install --locked</span><span style="color:var(--term-muted)">   # fail if sources drifted from the pinned lock</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack doctor --ci</span><span style="color:var(--term-muted)">   # fail on errors, drift, policy, unsafe content</span></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-text)">steps:</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">  - uses: actions/checkout@v4</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">  - uses: Tarekkharsa/agentstack@v0.15.0</span><span style="color:var(--term-muted)">   # pin a release tag, not @main</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════ GROUP: Run confined ═══════════════ -->
+      <div style="display:flex;align-items:baseline;gap:var(--space-3);margin:var(--space-7) 0 var(--space-2);padding-top:var(--space-2);border-top:2px solid var(--color-accent)">
+        <h2 style="font-family:var(--font-heading);font-weight:400;font-size:1.7rem;margin:0">Run confined</h2>
+        <code style="font-size:0.82rem;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace">$ agentstack run --sandbox [--lockdown]</code>
+      </div>
+      <p style="font-size:0.95rem;line-height:1.6;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">Confine the run: containers whose only way out is the audited egress proxy, and governed code execution.</p>
+
+      <!-- Recipe 18 -->
+      <div id="r18" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">18</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Sandboxed runs with egress policy</div>
+          <span class="tag tag-accent-2" style="font-size:0.72rem">runnable · Docker</span>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Run the agent in a container with no host route and no internet — its only way out is the egress-proxy sidecar, which enforces your machine [policy.egress]. Confinement is topological: ignoring the proxy reaches nothing.</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">the only way out is the proxy</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent-800);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-800);font-family:ui-monospace,Menlo,monospace">container</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">no host route, no net</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">egress sidecar</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">[policy.egress]</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">✓ api.github.com</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">allowed host</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent-800);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-800);font-family:ui-monospace,Menlo,monospace">✗ evil.example</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">refused</div></div></div>
+          </div>
+          <div style="font-size:0.8rem;color:var(--color-neutral-700);margin-top:8px;line-height:1.5"><strong>note →</strong> ignoring the proxy reaches nothing — it's the network shape, not an honor system.</div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="color:var(--term-muted);margin-bottom:4px"># ~/.agentstack/agentstack.toml — same glob grammar as the tool firewall, over hosts</div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">[policy.egress]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">"*"    = ["!*"]</span><span style="color:var(--term-muted)">   # deny everything by default</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">github = ["api.github.com:443"]</span><span style="color:var(--term-muted)">   # a server named github may reach only this</span></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack run claude-code --sandbox --lockdown --profile backend" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack run claude-code --sandbox --lockdown --profile backend</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack report run &lt;run-id&gt;</span><span style="color:var(--term-muted)">   # the run's flight recorder: every egress decision</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Filters by host, requires a TLS connection's SNI to match the dialed host (no domain fronting), and refuses names resolving to loopback/private/link-local/metadata addresses (no SSRF). Needs Docker + --features sandbox.</div>
+      </div>
+
+      <!-- Recipe 22 -->
+      <div id="r22" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">22</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Experimental: governed TypeScript</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">tools_execute lets one bounded TypeScript program call a small, exact set of MCP tools through the gateway — as a non-root process in a read-only, resource-limited Docker container with no workspace, credentials, package install, or direct network. Off by default; only the machine owner enables it.</div>
+        <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
+          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">governed code, sandboxed</div>
+          <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">TS program</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">exact tool grant</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent-800);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-800);font-family:ui-monospace,Menlo,monospace">sandbox</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">no net, no creds</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">gateway</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">re-checks each call</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">result</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">attributed in report</div></div></div>
+          </div>
+        </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="color:var(--term-muted);margin-bottom:4px"># ~/.agentstack/agentstack.toml</div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">[experimental]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">tools_execute = true</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"># optional machine-owned ceilings; a request may only narrow them</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">[experimental.tools_execute_limits]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">timeout_ms       = 30000</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">max_calls        = 40</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">max_output_bytes = 131072</span><span style="color:var(--term-muted)"></span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Every allowed call is re-checked by the gateway and attributed in agentstack report. Docker-only; never a host-execution fallback.</div>
+      </div>
+
+      <!-- ═══════════════ GROUP: Observe ═══════════════ -->
+      <div style="display:flex;align-items:baseline;gap:var(--space-3);margin:var(--space-7) 0 var(--space-2);padding-top:var(--space-2);border-top:2px solid var(--color-accent)">
+        <h2 style="font-family:var(--font-heading);font-weight:400;font-size:1.7rem;margin:0">Observe</h2>
+        <code style="font-size:0.82rem;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace">$ agentstack report calls</code>
+      </div>
+      <p style="font-size:0.95rem;line-height:1.6;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">See what happened, and what it costs: the audit trail and the passive wire proxy.</p>
+
+      <!-- Recipe 20 -->
+      <div id="r20" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">20</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">See what happened — audit, analyze, report</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Every brokered call is recorded (digests and outcomes, never argument values or secrets). Turn that into insight.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack report calls --since 7" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack report calls --since 7</span><span style="color:var(--term-muted)">   # recent brokered calls: tool · outcome · latency</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack report run &lt;run-id&gt;</span><span style="color:var(--term-muted)">   # per-run tree, incl. sandbox egress decisions</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack report calls</span><span style="color:var(--term-muted)">   # what you actually call; flags installed-but-unused</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recipe 21 -->
+      <div id="r21" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">21</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">See what your tools cost</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Every tool/server/skill you load is re-billed as input tokens every turn. Measure it with the passive wire proxy — observe only, cache stays warm.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack proxy" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ export ANTHROPIC_BASE_URL=http://127.0.0.1:8787</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack proxy</span><span style="color:var(--term-muted)">   # in one shell, then use your agent normally</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack report wire</span><span style="color:var(--term-muted)">   # ranks tokens/turn vs. how often each was called</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> A server that's expensive but never used is flagged drop / lazy — data-driven pruning that closes the loop with the profiles you manage.</div>
+      </div>
+
+      <div class="card" style="background:var(--color-accent-100);margin-top:var(--space-6)"><div class="card-body" style="font-size:0.95rem;line-height:1.6"><strong>Our default recommendation:</strong> for interactive work in an MCP-capable harness, commit the manifest + lock, connect the gateway once, trust each reviewed repo, and open the smallest useful profile as an MCP lease. Choose native rendering only when the harness must read native files; add lockdown when the agent process needs isolation.</div></div>
+    </div>
+  </div>
+
+  <div style="border-top:1px solid var(--color-neutral-200)">
+    <div style="max-width:1060px;margin:0 auto;padding:var(--space-6);display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap">
+      <span style="font-family:var(--font-heading)">agent<span style="color:var(--color-accent)">Stack</span></span>
+      <div style="flex:1"></div>
+      <a href="index.html" style="font-size:0.92rem">Home</a>
+      <a href="docs.html" style="font-size:0.92rem">Documentation</a>
+      <a href="examples.html" style="font-size:0.92rem">Demos</a>
+      <a href="tutorial/" style="font-size:0.92rem">Tutorial</a>
+      <a href="https://github.com/Tarekkharsa/agentstack" style="font-size:0.92rem">GitHub</a>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Copy buttons — reproduces the prototype's clipboard + "copied ✓" reset. */
+document.addEventListener('click', function (e) {
+  var btn = e.target.closest('[data-copy]');
+  if (!btn) return;
+  try { navigator.clipboard.writeText(btn.getAttribute('data-copy')); } catch (err) {}
+  btn.textContent = 'copied ✓';
+  clearTimeout(btn._t);
+  btn._t = setTimeout(function () { btn.textContent = 'copy'; }, 1500);
+});
+</script>
+</body>
+</html>

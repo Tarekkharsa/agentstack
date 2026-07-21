@@ -340,26 +340,36 @@ def convert(md, src_rel, out_rel, warnings):
 
 
 # ----------------------------------------------------------------- template --
-# The shell mirrors docs.html: same variables, header, sidebar, footer. Keep
-# the CSS here in step with docs.html when the site design changes.
+# The shell matches the design-system pages (index/docs/examples/cookbook):
+# theme/organic.css supplies fonts and component tokens, theme/theme.js owns
+# the light/dark toggle (data-theme on <html>, dark default), and the token
+# blocks below pin the slate palette in both themes. Keep these overrides in
+# step with docs.html when the site design changes.
 CSS = """
   :root {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --accent-soft: rgba(180, 84, 10, 0.10); --accent-line: rgba(180, 84, 10, 0.28);
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-    --shadow-sm: 0 1px 2px rgba(20,24,28,0.05), 0 1px 1px rgba(20,24,28,0.03);
+    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
+    --accent: #C67139; --accent-ink: #FFFFFF;
+    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
+    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
     --radius-sm: 9px;
     --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --sans: var(--font-body, Figtree, sans-serif);
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-      --accent: #F0975A; --accent-ink: #1A1206;
-      --accent-soft: rgba(240,151,90,0.12); --accent-line: rgba(240,151,90,0.30);
-      --line: #292E34; --line-soft: #23282E; --code-bg: #20252B;
-    }
+  [data-theme="dark"] {
+    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
+    --accent: #D98A52; --accent-ink: #211406;
+    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
+  }
+  [data-palette="slate"] {
+    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
+    --accent: #B4540A; --accent-ink: #FFFFFF;
+    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
+  }
+  [data-palette="slate"][data-theme="dark"] {
+    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
+    --accent: #F0975A; --accent-ink: #1A1206;
+    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
@@ -367,17 +377,19 @@ CSS = """
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
-  header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--paper) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+  header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
   .bar { max-width: 74rem; margin: 0 auto; padding: 0.7rem 1.35rem; display: flex; align-items: center; gap: 1.1rem; }
-  .wordmark { font-family: var(--mono); font-weight: 700; font-size: 1.02rem; color: var(--ink); display: inline-flex; align-items: center; gap: 0.5rem; }
+  .wordmark { font-family: var(--font-heading, Caprasimo, serif); font-weight: 400; font-size: 1.15rem; color: var(--ink); display: inline-flex; align-items: center; gap: 0.6rem; }
   .wordmark:hover { text-decoration: none; }
-  .wordmark .mark { height: 26px; width: auto; display: block; }
+  .wordmark .mark { height: 28px; width: auto; display: block; }
   .wordmark .wm2 { color: var(--accent); }
   nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.05rem; flex-wrap: nowrap; white-space: nowrap; }
-  nav.top a { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+  nav.top a { font-weight: 600; font-size: 0.85rem; color: var(--ink); }
   nav.top a:hover { color: var(--accent); text-decoration: none; }
-  nav.top .ghost { padding: 0.34rem 0.7rem; border: 1px solid var(--accent-line); border-radius: 7px; color: var(--ink); background: var(--accent-soft); }
-  nav.top .ghost:hover { border-color: var(--accent); }
+  nav.top .themebtn { font-family: inherit; font-size: 0.8rem; font-weight: 600; padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+  nav.top .themebtn:hover { border-color: var(--accent); }
+  nav.top .ghost { padding: 0.4rem 0.95rem; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent-ink); background: var(--accent); }
+  nav.top .ghost:hover { filter: brightness(1.08); }
   .docwrap { max-width: 78rem; margin: 0 auto; padding: 0 1.35rem; display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 2.75rem; align-items: start; }
   aside.side { position: sticky; top: 4.2rem; max-height: calc(100vh - 5rem); overflow-y: auto; padding: 1.6rem 0 2rem; font-size: 0.85rem; }
   aside.side .grp { margin-bottom: 1.15rem; }
@@ -391,10 +403,10 @@ CSS = """
   aside.side li a { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.14rem 0.5rem; border-left: 2px solid transparent; border-radius: 0 5px 5px 0; font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }
   aside.side li a:hover { color: var(--accent); text-decoration: none; }
   aside.side li a.on-page { color: var(--ink); font-weight: 600; border-left-color: var(--accent); background: var(--accent-soft); }
-  @media (max-width: 960px) { .docwrap { display: block; } aside.side { display: none; } }
+  @media (max-width: 960px) { .docwrap { display: block; } aside.side { display: none; } .bar { flex-wrap: wrap; } nav.top { flex-wrap: wrap; white-space: normal; } }
   main { min-width: 0; padding: 1.6rem 0 4rem; }
-  main h1 { font-family: var(--mono); font-size: 1.7rem; letter-spacing: -0.01em; margin: 0 0 0.6rem; }
-  main h2 { font-family: var(--mono); font-size: 1.15rem; margin: 2.2rem 0 0.5rem; padding-top: 1.4rem; border-top: 1px solid var(--line-soft); }
+  main h1 { font-family: var(--font-heading, Caprasimo, serif); font-weight: 400; font-size: 2.1rem; line-height: 1.15; letter-spacing: normal; margin: 0 0 0.6rem; }
+  main h2 { font-family: var(--font-heading, Caprasimo, serif); font-weight: 400; font-size: 1.45rem; margin: 2.2rem 0 0.5rem; padding-top: 1.4rem; border-top: 1px solid var(--line-soft); }
   main h3 { font-family: var(--mono); font-size: 0.98rem; margin: 1.5rem 0 0.4rem; }
   main h4 { font-family: var(--mono); font-size: 0.9rem; margin: 1.2rem 0 0.3rem; }
   .hlink { margin-left: 0.45rem; opacity: 0; font-size: 0.85em; }
@@ -433,26 +445,32 @@ def build_page(src_rel, out_rel, key):
     gh_src = f"{GH}/blob/main/docs/{src_rel}"
     page = f"""<!doctype html>
 <!-- GENERATED by tools/make-docs-pages.py from docs/{src_rel} — edit the Markdown, not this file. -->
-<html lang="en">
+<html lang="en" data-palette="slate">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(title)} — agentstack</title>
 <meta name="description" content="{html.escape(desc, quote=True)}">
+<meta name="color-scheme" content="light dark">
 <link rel="icon" href="{base}favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="{SITE}/{out_rel}">
+<script src="{base}theme/theme.js"></script>
+<link rel="stylesheet" href="{base}theme/organic.css">
 <style>{CSS}</style>
 </head>
 <body>
 
 <header>
   <div class="bar">
-    <a class="wordmark" href="{base}./"><img class="mark" src="{base}logo-mark.svg" alt=""><span>agent<span class="wm2">Stack</span></span></a>
+    <a class="wordmark" href="{base}./"><img class="mark" src="{base}theme/logo-mark.svg" alt=""><span>agent<span class="wm2">Stack</span></span></a>
     <nav class="top" aria-label="Project links">
-      <a href="{base}docs.html">docs</a>
-      <a href="{base}examples.html">examples</a>
-      <a href="https://github.com/Tarekkharsa/agentstack">GitHub&nbsp;↗</a>
-      <a class="ghost" href="{base}start.html">Get&nbsp;started&nbsp;→</a>
+      <a href="{base}docs.html">Documentation</a>
+      <a href="{base}cookbook.html">Cookbook</a>
+      <a href="{base}examples.html">Demos</a>
+      <a href="{base}tutorial/">Tutorial</a>
+      <a href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
+      <button class="themebtn" data-theme-toggle onclick="toggleTheme()">Light mode</button>
+      <a class="ghost" href="{base}start.html">Get&nbsp;started</a>
     </nav>
   </div>
 </header>

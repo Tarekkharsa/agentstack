@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
-"""Generate the unified docs sidebar into every docs-experience page.
+"""The unified docs sidebar tree, embedded into the generated Markdown pages.
 
-One tree, defined once below, spliced into docs.html, start.html, and
-examples.html between `<!-- sidebar:begin -->` / `<!-- sidebar:end -->`
-markers. (how-it-works, primitives, library, and strategy were folded into the
-Markdown source of truth; their old URLs are redirect stubs. The Markdown docs
-now render as site pages via make-docs-pages.py, so the tree links those
-locally — only repo-root and non-doc files still link out to GitHub.) Each
-page gets the
-IDENTICAL tree; the only per-page differences are (a) the current entry is
-highlighted and (b) the current page's own sections expand inline beneath its
-entry (the nub-docs pattern). Links that point at the page being generated
-collapse to plain `#anchor`s so in-page navigation doesn't reload.
+One tree, defined once below. make-docs-pages.py imports it and calls
+render() to build each generated page's sidebar at build time. (The
+hand-written pages — index, docs, examples, cookbook, start, tutorial — are
+standalone design-system pages with their own rails and do not embed this
+tree. how-it-works, primitives, library, and strategy were folded into the
+Markdown source of truth; their old URLs are redirect stubs.) Each page gets
+the IDENTICAL tree; the only per-page differences are (a) the current entry
+is highlighted and (b) the current page's own sections expand inline beneath
+its entry (the nub-docs pattern). Links that point at the page being
+generated collapse to plain `#anchor`s so in-page navigation doesn't reload.
 
 The tree is split into two tiers: "open" groups render inline for the everyday
 path, while "deeper" groups render as collapsed <details> (auto-opened when
 they hold the current page) so power-user surface stays one click away.
 
-Usage: python3 tools/make-docs-sidebar.py   # rewrites docs/*.html
-
-make-docs-pages.py imports this TREE live to build the generated Markdown
-pages' sidebars — after editing the TREE, run that script too.
+After editing the TREE, run: python3 tools/make-docs-pages.py — it imports
+this TREE live and rewrites the generated pages. (Running this script
+directly is a no-op while PAGES is empty.)
 """
 
 import html
@@ -37,10 +35,12 @@ GH = "https://github.com/Tarekkharsa/agentstack"
 TREE = [
     ("Start", None, [
         ("Get started", "start.html", "start"),
+        ("Interactive tutorial", "tutorial/", "tutorial"),
         ("Install", "index.html#install", "install"),
         ("Concepts", "concepts.html", "concepts"),
         ("Which mode do I need?", "choose.html", "choose"),
         ("Examples", "examples.html", "examples"),
+        ("Cookbook", "cookbook.html", "cookbook"),
     ], "open"),
     ("Everyday", "$ agentstack add · apply · doctor", [
         ("The manifest", "concepts.html#the-manifest-and-the-lockfile", "manifest"),
@@ -75,7 +75,7 @@ TREE = [
     ], "deeper"),
     ("Observe deeper", "$ agentstack report", [
         ("Reports & call audit", "examples.html#e20", "reports"),
-        ("Wire-cost analysis", "examples.html#e21", "wirecost"),
+        ("Wire-cost analysis", "reference.html#wire-proxy-proxy", "wirecost"),
     ], "deeper"),
     ("Project", None, [
         ("Security review", "security-review-2026-07-11.html", "secreview"),
@@ -86,63 +86,18 @@ TREE = [
 
 # ------------------------------------------- per-page inline expansions -----
 # key -> [(num-or-None, label, anchor)]; None entries render as sub-headers.
-EXPANSIONS = {
-    "start": [
-        ("1", "Install the binary", "#s-install"),
-        (None, "Track A — unify your setup", None),
-        ("A1", "Import what's there", "#s-import"),
-        ("A2", "Render into every CLI", "#s-render"),
-        ("A3", "Wire the guardrails", "#s-guard"),
-        ("A4", "Verify the loop", "#s-verify"),
-        (None, "Track B — govern a repo", None),
-        ("B1", "Register the gateway", "#s-connect"),
-        ("B2", "Clone — it stays inert", "#s-clone"),
-        ("B3", "Review, then trust", "#s-trust"),
-        ("B4", "Secrets in the keychain", "#s-secret"),
-        ("B5", "Run it confined", "#s-run"),
-        ("B6", "Read the flight recorder", "#s-report"),
-    ],
-    "examples": [
-        (None, "Configure", None),
-        ("1", "The smallest manifest", "#e1"),
-        ("2", "Fan out to several CLIs", "#e2"),
-        ("3", "Secrets out of the file", "#e3"),
-        ("4", "HTTP server with auth", "#e4"),
-        ("5", "A native key for one CLI", "#e5"),
-        ("6", "Add skills", "#e6"),
-        ("7", "Task-specific profiles", "#e7"),
-        ("8", "Share house rules across CLIs", "#e8"),
-        ("26", "Native extensions", "#e26"),
-        ("9", "The everyday loop", "#e9"),
-        ("14", "The central library", "#e14"),
-        ("15", "Sync across machines", "#e15"),
-        ("16", "Versioned vendor packs", "#e16"),
-        ("24", "Add a CLI in one file", "#e24"),
-        ("25", "The personal layer", "#e25"),
-        (None, "Protect", None),
-        ("10", "The MCP tool firewall", "#e10"),
-        ("11", "The machine layer", "#e11"),
-        ("12", "Governance", "#e12"),
-        ("13", "The trust gate", "#e13"),
-        ("19", "Policy dimensions", "#e19"),
-        ("23", "The CI trust gate", "#e23"),
-        (None, "Run confined", None),
-        ("18", "Sandboxed runs", "#e18"),
-        ("22", "Governed TypeScript", "#e22"),
-        (None, "Observe", None),
-        ("20", "Audit, analyze, report", "#e20"),
-        ("21", "What your tools cost", "#e21"),
-    ],
-}
+# Empty since every hand-written page became a standalone design-system page
+# with its own "on this page" rail; kept because render() consults it.
+EXPANSIONS = {}
 
-# page file -> current tree key (docs.html is the hub: tree, nothing current).
-# Only the retained docs-experience pages are generated; the folded pages
-# (primitives/how-it-works/library/strategy) are now redirect stubs.
-PAGES = {
-    "docs.html": None,
-    "start.html": "start",
-    "examples.html": "examples",
-}
+# page file -> current tree key, for hand-written pages that embed the tree
+# between sidebar:begin/end markers. Empty since the redesign: docs.html,
+# examples.html, and start.html are standalone design-system pages now, so
+# this script's render() is only invoked by make-docs-pages.py, which builds
+# the generated Markdown pages' sidebars from the TREE at build time. The
+# folded pages (primitives/how-it-works/library/strategy) remain redirect
+# stubs.
+PAGES = {}
 
 BEGIN, END = "<!-- sidebar:begin (generated — edit tools/make-docs-sidebar.py) -->", "<!-- sidebar:end -->"
 

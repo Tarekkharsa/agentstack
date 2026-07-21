@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="en" data-palette="slate">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentStack Tutorial — learn the whole system in 11 short lessons</title>
+<meta name="description" content="An interactive tour of AgentStack: unify your CLI configs, verify drift, guard destructive commands, trust repos byte-for-byte, scale across machines, and confine runs — with simulated terminals, nothing touches your machine.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<meta property="og:title" content="AgentStack Tutorial — learn the whole system in 11 short lessons">
+<meta property="og:description" content="Interactive tutorial with simulated terminals: unify, verify, guard, trust, scale, confine — plus the policy engine and the audit trail.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://tarekkharsa.github.io/agentstack/tutorial/">
+<meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
+<meta name="twitter:card" content="summary_large_image">
+<script src="../theme/theme.js"></script>
+<link rel="stylesheet" href="../theme/organic.css">
+<style>
+:root{
+--paper:#211E1B;--surface:#2A2622;--ink:#F5EAD8;--body:#DACDB8;--muted:#A89B87;--faint:#6B6156;--line:#3A342E;--line-soft:#332E29;--code-bg:#332E29;
+--accent:#D98A52;--accent-ink:#211406;--accent-deep:#E4A878;--tint:#3A2B1D;
+--callout-bg:#33291C;--callout-bd:#54422B;--callout-fg:#E8CFA8;
+--ok:#9DB380;--ok-bg:#2A3122;--bad:#D97A62;--bad-bg:#3A2620;
+--strong-bg:#1A1714;--strong-fg:var(--term-text);--strong-bd:#3A342E;
+--term-bg:#26211C;--term-hd:#1C1815;--term-btn:#38312A;--term-bd:#463D34;--term-muted:#A5988A;--term-text:#E6DCC9;--term-ok:#9DB380;--term-bad:#D97A62;--term-warn:#DDA84E}
+[data-theme="light"]{
+--paper:#F5EAD8;--surface:#FFFDF6;--ink:#201E1D;--body:#4A443C;--muted:#6E6559;--faint:#C9BDA6;--line:#E2D5BD;--line-soft:#EADFC9;--code-bg:#ECE0C8;
+--accent:#C67139;--accent-ink:#FFFFFF;--accent-deep:#9C5527;--tint:#F0DCC9;
+--callout-bg:#F3E3CF;--callout-bd:#DFC39E;--callout-fg:#6B4A26;
+--ok:#5C6C42;--ok-bg:#E8ECDD;--bad:#B3462E;--bad-bg:#F4DED6;
+--strong-bg:#201E1D;--strong-fg:#F5EAD8;--strong-bd:#201E1D}
+[data-palette="slate"]{
+--term-bg:#14181C;--term-hd:#0E1114;--term-btn:#23282E;--term-bd:#2E353C;--term-muted:#97A1AD;--term-text:#D7DEE4;--term-ok:#7CC08B;--term-bad:#E5786B;--term-warn:#E0B04A;
+--paper:#14171B;--surface:#1A1E23;--ink:#E9E7E2;--body:#C3C9CF;--muted:#9AA3AC;--faint:#565F68;--line:#292E34;--line-soft:#23282E;--code-bg:#1E2329;
+--accent:#F0975A;--accent-ink:#1A1206;--accent-deep:#F5B183;--tint:#2B2018;
+--callout-bg:#241B10;--callout-bd:#4A3520;--callout-fg:#E8C9A8;
+--ok:#7CC08B;--ok-bg:#16281C;--bad:#E5786B;--bad-bg:#2E1A17;
+--strong-bg:#0E1114;--strong-fg:#D7DEE4;--strong-bd:#292E34}
+[data-palette="slate"][data-theme="light"]{
+--paper:#FBFAF7;--surface:#FFFFFF;--ink:#1B1F24;--body:#3A424B;--muted:#5B6570;--faint:#C8C2B8;--line:#E7E2D9;--line-soft:#EFEBE3;--code-bg:#F3F0EA;
+--accent:#B4540A;--accent-ink:#FFFFFF;--accent-deep:#8A3F06;--tint:#FBF1E7;
+--callout-bg:#FFF6EE;--callout-bd:#F0D9C2;--callout-fg:#6B4A26;
+--ok:#2A6F4E;--ok-bg:#EAF4EC;--bad:#B33F32;--bad-bg:#FDEEEC;
+--strong-bg:#1B1F24;--strong-fg:#D7DEE4;--strong-bd:#1B1F24}
+html,body{margin:0;height:100%}
+body{background:var(--paper);color:var(--ink);font-family:var(--font-body,Figtree,sans-serif)}
+a{color:var(--accent-deep)}a:hover{color:var(--accent)}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+button{cursor:pointer;font-family:inherit}
+.card{border-radius:var(--radius-md,16px)}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--code-bg);padding:2px 6px;border-radius:5px;font-size:0.9em}
+code.sm{padding:1px 5px;border-radius:4px;font-size:0.92em}
+.kicker{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;font-weight:600;letter-spacing:0.14em;color:var(--accent);margin-bottom:10px}
+h1.lesson{margin:0 0 14px;font-family:var(--font-heading,Caprasimo,serif);font-weight:400;font-size:30px;line-height:1.18}
+h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-weight:400;font-size:21px}
+.lede{font-size:15px;line-height:1.65;color:var(--body);margin:0 0 18px}
+.hint{font-size:13px;color:var(--muted);margin-bottom:12px}
+.callout{background:var(--callout-bg);border:1px solid var(--callout-bd);border-radius:10px;padding:14px 18px;font-size:13.5px;line-height:1.6;color:var(--callout-fg)}
+.lesson-pane{animation:fadeUp .35s ease}
+.lesson-pane[hidden]{display:none}
+.term{background:var(--term-bg);border:1px solid var(--strong-bd);border-radius:var(--radius-md,16px);overflow:hidden;margin-bottom:18px}
+.term-hd{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--term-hd)}
+.term-dot{width:10px;height:10px;border-radius:50%}
+.term-title{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--term-muted);margin-left:6px}
+.term-body{padding:16px 18px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.65;min-height:150px}
+.term-body>div{white-space:pre-wrap}
+.term-cursor{display:inline-block;width:8px;height:15px;background:var(--term-ok);animation:blink 1s step-end infinite;vertical-align:text-bottom}
+.term-cmds{display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px;border-top:1px solid var(--term-btn)}
+.tbtn{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;background:var(--term-btn);color:var(--term-text);border:1px solid var(--term-bd);border-radius:999px;padding:6px 13px}
+.tbtn:hover{background:var(--term-bd);border-color:var(--accent)}
+.opt{text-align:left;display:flex;gap:12px;align-items:baseline;font-size:13.5px;padding:12px 16px;border-radius:12px;border:1px solid var(--line);background:var(--paper);color:var(--ink)}
+.opt:hover{border-color:var(--accent)}
+.opt .opt-name{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700;flex:none}
+.opt .opt-desc{color:var(--muted);font-size:12.5px;line-height:1.5}
+.ghostpill{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;background:none;border:1px solid var(--line);border-radius:999px;padding:4px 12px;color:var(--muted)}
+.ghostpill:hover{border-color:var(--accent);color:var(--accent)}
+.cta{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;font-weight:700;background:var(--accent);color:var(--accent-ink);border:1px solid var(--accent);border-radius:999px;padding:9px 18px}
+.cta:hover{background:var(--accent-deep)}
+.termout{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.8;background:var(--term-bg);border-radius:12px;padding:14px 18px}
+.termout>div{white-space:pre-wrap}
+.navbtn{display:flex;align-items:center;gap:10px;text-align:left;border:none;border-radius:8px;padding:9px 10px;font-size:13px;background:transparent;color:var(--muted);font-weight:500}
+.navbtn .num{width:20px;height:20px;flex:none;border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;font-weight:700;background:var(--code-bg);color:var(--muted)}
+.navbtn.seen{color:var(--ink)}
+.navbtn.seen .num{background:var(--line)}
+.navbtn.active{background:var(--tint);color:var(--accent-deep);font-weight:700}
+.navbtn.active .num{background:var(--accent);color:var(--accent-ink)}
+.pill-toggle{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;font-weight:700;padding:8px 15px;border-radius:999px;border:1px solid var(--line);background:var(--code-bg);color:var(--ink)}
+.pill-toggle:hover{border-color:var(--accent)}
+.pill-toggle.on{background:var(--accent);color:var(--accent-ink)}
+.qbtn{text-align:left;font-size:13.5px;padding:10px 14px;border-radius:8px;border:1px solid var(--line);background:var(--paper);color:var(--ink);font-family:ui-monospace,Menlo,Consolas,monospace}
+.qbtn.correct{border-color:var(--ok);background:var(--ok-bg)}
+.qbtn.wrong{border-color:var(--bad);background:var(--bad-bg)}
+.gapcard{border:1px solid var(--line-soft);border-radius:9px;padding:14px 16px}
+.gapcard .t{font-weight:700;font-size:13.5px;margin-bottom:5px}
+.gapcard .d{font-size:13px;color:var(--muted);line-height:1.5}
+.gapcard .d code{font-size:0.92em;padding:0 2px;background:transparent}
+.stepchip{background:var(--term-btn);color:var(--term-text);padding:5px 11px;border-radius:6px}
+.rowcard{display:flex;gap:14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:13px 16px}
+@media (max-width:760px){
+  #app{flex-direction:column;height:auto;overflow:visible}
+  #sidebar{width:auto !important;border-right:none !important;border-bottom:1px solid var(--line)}
+  #lessonNav{flex-direction:row !important;overflow-x:auto;padding-bottom:12px !important}
+  #lessonNav .navbtn span:last-child{white-space:nowrap}
+  #content{overflow:visible !important}
+  #contentInner{padding:24px 18px 60px !important}
+  .grid2,.grid3,.grid4{grid-template-columns:1fr !important}
+  #topnav{flex-wrap:wrap}
+}
+</style>
+</head>
+<body>
+<div id="app" style="display:flex;flex-direction:column;height:100vh;overflow:hidden;background:var(--paper);color:var(--ink)">
+  <nav id="topnav" style="flex:none;display:flex;align-items:center;gap:20px;padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--line)">
+    <a href="../index.html" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)">
+      <img src="../theme/logo-mark.svg" alt="" style="width:30px;height:30px">
+      <span style="font-family:var(--font-heading,Caprasimo,serif);font-size:19px"><span style="color:var(--ink)">agent</span><span style="color:var(--accent)">Stack</span></span>
+    </a>
+    <div style="flex:1"></div>
+    <a href="../docs.html" style="text-decoration:none;font-weight:600;font-size:14px;color:var(--ink)">Documentation</a>
+    <a href="../cookbook.html" style="text-decoration:none;font-weight:600;font-size:14px;color:var(--ink)">Cookbook</a>
+    <a href="../examples.html" style="text-decoration:none;font-weight:600;font-size:14px;color:var(--ink)">Demos</a>
+    <span style="font-weight:700;font-size:14px;color:var(--accent)">Tutorial</span>
+    <a href="https://github.com/Tarekkharsa/agentstack" style="text-decoration:none;font-weight:600;font-size:14px;color:var(--ink)">GitHub</a>
+  </nav>
+  <div style="flex:1;display:flex;min-height:0">
+  <div id="sidebar" style="width:252px;flex:none;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;overflow-y:auto">
+    <div style="padding:16px 18px 12px;border-bottom:1px solid var(--line-soft)">
+      <div class="mono" style="font-size:11px;color:var(--muted);letter-spacing:0.08em">INTERACTIVE TUTORIAL</div>
+    </div>
+    <div id="lessonNav" style="padding:10px 10px 20px;display:flex;flex-direction:column;gap:2px"></div>
+    <div style="margin-top:auto;padding:14px 18px;border-top:1px solid var(--line-soft);font-size:11.5px;color:var(--muted)">
+      <div style="height:5px;background:var(--line-soft);border-radius:3px;overflow:hidden;margin-bottom:8px"><div id="progressBar" style="height:100%;background:var(--accent);border-radius:3px;transition:width .3s;width:9%"></div></div>
+      <span id="progressLabel">1 of 11 lessons visited</span>
+      <button id="themeBtn" class="mono" style="margin-top:12px;width:100%;font-size:11.5px;padding:7px 10px;border-radius:999px;border:1px solid var(--line);background:var(--code-bg);color:var(--ink)">Switch to light mode</button>
+    </div>
+  </div>
+
+  <div id="content" style="flex:1;overflow-y:auto">
+  <div id="contentInner" style="max-width:768px;margin:0 auto;padding:44px 44px 80px">
+
+  <section class="lesson-pane" id="lesson-0">
+    <div class="kicker">LESSON 1 · WELCOME</div>
+    <h1 class="lesson" style="font-size:33px">Cloning a repo shouldn't hand your agent to a stranger.</h1>
+    <p class="lede" style="font-size:15.5px;margin-bottom:22px">Your AI coding tools — Claude Code, Codex, Cursor — run <strong>unreviewed code plus instructions</strong> from every skill, MCP server, and agent config you adopt. That code is wired into a process holding your credentials, shell, and network. Adopting one is <code>npm install</code> with an agent attached — no lockfile, no review gate, no record of what it did.</p>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:22px 24px;margin-bottom:22px">
+      <div class="mono" style="font-size:11px;font-weight:600;letter-spacing:0.12em;color:var(--muted);margin-bottom:16px">THE FOUR GAPS AGENTSTACK CLOSES</div>
+      <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="gapcard"><div class="t">Anything a repo declares can run</div><div class="d">A clone stays <strong>inert</strong> until you trust its exact bytes; any edit re-gates it.</div></div>
+        <div class="gapcard"><div class="t">Nothing narrows or records agents</div><div class="d">A machine policy no repo can loosen fences tools, secrets, egress — every brokered call is logged.</div></div>
+        <div class="gapcard"><div class="t">Every CLI spells setup differently</div><div class="d">One reviewed manifest renders them all; secrets stay references, never values.</div></div>
+        <div class="gapcard"><div class="t">Agents wreck trees by accident</div><div class="d"><code>guard</code> blocks <code>rm -rf</code>, <code>git reset --hard</code>, and <code>.env</code> reads before they run.</div></div>
+      </div>
+    </div>
+    <div style="background:var(--term-bg);border:1px solid var(--strong-bd);border-radius:var(--radius-md,16px);padding:20px 24px;margin-bottom:8px">
+      <div class="mono" style="font-size:11px;font-weight:600;letter-spacing:0.12em;color:var(--term-muted);margin-bottom:14px">YOU CLIMB IN SIX STEPS — EACH PAYS OFF ON ITS OWN</div>
+      <div class="mono" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12.5px">
+        <span class="stepchip" style="background:var(--accent);color:var(--accent-ink);font-weight:700">1 Unify</span><span style="color:var(--muted)">→</span>
+        <span class="stepchip">2 Verify</span><span style="color:var(--muted)">→</span>
+        <span class="stepchip">3 Guard</span><span style="color:var(--muted)">→</span>
+        <span class="stepchip">4 Trust</span><span style="color:var(--muted)">→</span>
+        <span class="stepchip">5 Scale</span><span style="color:var(--muted)">→</span>
+        <span class="stepchip">6 Confine</span>
+      </div>
+      <div style="margin-top:12px;font-size:12.5px;color:var(--term-muted);line-height:1.5">Nothing later is required to keep the earlier wins. This tutorial walks all six, plus the policy engine and the audit trail.</div>
+    </div>
+  </section>
+
+  <section class="lesson-pane" id="lesson-1" hidden>
+    <div class="kicker">LESSON 2 · THE MAP</div>
+    <h1 class="lesson">Six words explain the whole system</h1>
+    <p class="lede" style="margin-bottom:20px">Read the pipeline left to right: you write a <strong>manifest</strong>, the <strong>lockfile</strong> pins it, you <strong>trust</strong> the result, <strong>policy</strong> narrows what may run, and the <strong>gateway</strong> carries it to your tools — every call landing in the <strong>audit</strong> log.</p>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:20px 22px;margin-bottom:20px;overflow-x:auto">
+      <div class="mono" style="display:flex;gap:6px;align-items:center;font-size:12px;white-space:nowrap">
+        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">manifest</span><span style="color:var(--accent);font-weight:700">→</span>
+        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">lockfile</span><span style="color:var(--accent);font-weight:700">→</span>
+        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">trust</span><span style="color:var(--accent);font-weight:700">→</span>
+        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">policy</span><span style="color:var(--accent);font-weight:700">→</span>
+        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">gateway</span><span style="color:var(--accent);font-weight:700">→</span>
+        <span style="background:var(--strong-bg);color:var(--strong-fg);padding:8px 12px;border-radius:8px;font-weight:700">audit log</span>
+      </div>
+    </div>
+    <div class="hint">Tap each term to open its plain-English definition — these eight cover 90% of what you'll read anywhere else.</div>
+    <div id="termCards" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
+  </section>
+
+  <section class="lesson-pane" id="lesson-2" hidden>
+    <div class="kicker">LESSON 3 · STEP 1 — UNIFY</div>
+    <h1 class="lesson">One manifest for every CLI</h1>
+    <p class="lede"><code>agentstack init</code> scans your machine, imports the MCP servers your CLIs already have, and writes <strong>one reviewed manifest</strong>: <code>.agentstack/agentstack.toml</code>. Then <code>apply --write</code> renders it back into every CLI's native config. Edit once, applied everywhere.</p>
+    <div class="callout" style="margin-bottom:18px"><strong>Secrets get lifted, not stored.</strong> Any inline token found in an imported config becomes a <code class="sm">${REF}</code> placeholder. The real value goes to a gitignored <code class="sm">.env</code> or the OS keychain — the manifest itself never holds a secret value.</div>
+    <div class="hint" style="margin-bottom:10px">▶ Run each command in order — this is a simulation, nothing touches your machine.</div>
+    <div class="term" style="margin-bottom:8px" data-term="unify" data-title="your-project — zsh"></div>
+    <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:22px">Scripting or CI? <code class="sm">init --secrets skip</code> writes only the manifest — no prompts, no token values.</div>
+
+    <h2 class="lesson">Walk the wizard yourself</h2>
+    <div class="hint">Interactive <code class="sm">init</code> is a guided wizard — every choice below is one it really presents, and it writes <strong>nothing</strong> until you confirm. Click through it:</div>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);overflow:hidden;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line-soft)">
+        <span id="wizCrumbs" style="display:contents"></span>
+        <span style="flex:1"></span>
+        <button class="ghostpill" onclick="wizReset()">↺ restart</button>
+      </div>
+      <div style="padding:20px 22px">
+        <div id="wiz-0">
+          <div style="font-size:14px;line-height:1.65;color:var(--body);margin-bottom:14px">The wizard starts by <strong>scanning, not asking</strong> — it finds your CLIs and imports what they already have:</div>
+          <div class="termout" style="margin-bottom:16px">
+            <div style="color:var(--term-text)">🔍  6 CLI binaries on PATH: Claude Code · Codex CLI · Cursor · Gemini CLI · OpenCode · Pi</div>
+            <div style="color:var(--term-text)">📥  Imported 1 MCP server(s) from existing configs</div>
+            <div style="color:var(--term-warn)">🔑  Found 1 inline token in .mcp.json — it should not stay in a config file</div>
+          </div>
+          <button class="cta" onclick="wizNext0()">Continue → where should that token live?</button>
+        </div>
+        <div id="wiz-1" hidden>
+          <div style="font-size:14px;line-height:1.65;color:var(--body);margin-bottom:14px"><strong>Secrets step.</strong> The manifest will only ever hold <code class="sm">${GITHUB_TOKEN}</code> — pick where the real value goes:</div>
+          <div id="wizSecretOpts" style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px"></div>
+        </div>
+        <div id="wiz-2" hidden>
+          <div style="font-size:14px;line-height:1.65;color:var(--body);margin-bottom:14px"><span style="color:var(--ok)">✓ <span id="wizSecretMsg"></span></span><br><strong>Delivery mode.</strong> An arrow-key choice, made <em>before any write</em> — it decides where rendered files live and forks the rest of the run:</div>
+          <div id="wizModeOpts" style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px"></div>
+        </div>
+        <div id="wiz-3" hidden>
+          <div style="font-size:14px;line-height:1.65;color:var(--body);margin-bottom:14px"><span style="color:var(--ok)">✓ secrets → <span id="wizSecretName"></span></span> · <span style="color:var(--ok)">✓ mode → <span id="wizModeName"></span></span></div>
+          <div id="wizForkLines" class="termout" style="margin-bottom:14px"></div>
+          <div id="wizForkNote" class="callout" style="border-radius:12px;padding:12px 18px;font-size:13px"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="lesson-pane" id="lesson-3" hidden>
+    <div class="kicker">LESSON 4 · STEP 2 — VERIFY</div>
+    <h1 class="lesson">Doctor catches drift; you pick the truth</h1>
+    <p class="lede"><strong>Drift</strong> = a mismatch between the manifest and what's on disk — someone hand-edited a config, or the manifest stopped declaring something. <code>doctor</code> flags it, and every warning names its exact fix. The decision is always the same question: <em>which side holds the truth?</em></p>
+    <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px"><div class="mono" style="font-weight:700;font-size:13.5px;color:var(--ok);margin-bottom:6px">hand-edit is right → adopt</div><div style="font-size:13px;color:var(--muted);line-height:1.55"><code class="sm">agentstack adopt</code> pulls the edit into the manifest, lifting any inline secret on the way.</div></div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px"><div class="mono" style="font-weight:700;font-size:13.5px;color:var(--accent);margin-bottom:6px">manifest is right → apply</div><div style="font-size:13px;color:var(--muted);line-height:1.55"><code class="sm">agentstack apply --write</code> re-renders the manifest over the stray edit.</div></div>
+    </div>
+    <div class="term" data-term="verify" data-title="your-project — zsh"></div>
+    <h2 class="lesson">Resolve the drift yourself</h2>
+    <div class="hint">doctor just flagged: <code class="sm">.mcp.json edited on disk since last apply</code> — a hand-added "context7" server. Which side holds the truth?</div>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:18px 20px;margin-bottom:18px">
+      <div id="driftOpts" style="display:flex;flex-direction:column;gap:8px"></div>
+      <div id="driftResult" hidden>
+        <div id="driftLines" class="termout" style="margin:14px 0"></div>
+        <div style="font-size:13px;line-height:1.6;color:var(--body)"><span id="driftNote"></span> <button class="ghostpill" style="padding:3px 10px;margin-left:6px" onclick="driftReset()">↺ try another</button></div>
+      </div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:18px 20px">
+      <div class="kicker" style="letter-spacing:0.12em;font-size:11px;margin-bottom:10px">CHECKPOINT</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">doctor says ".mcp.json edited on disk since last apply" — and you made that edit on purpose. What do you run?</div>
+      <div id="quizDriftOpts" style="display:flex;flex-direction:column;gap:8px"></div>
+      <div id="quizDriftFb" hidden style="margin-top:12px;font-size:13px;line-height:1.55"></div>
+    </div>
+    <div style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.6"><strong>One undo verb:</strong> every write AgentStack makes is recorded — <code class="sm">agentstack restore --last --write</code> reverts the most recent one.</div>
+  </section>
+
+  <section class="lesson-pane" id="lesson-4" hidden>
+    <div class="kicker">LESSON 5 · STEP 3 — GUARD</div>
+    <h1 class="lesson">Block the accidents before they land</h1>
+    <p class="lede"><code>agentstack guard install</code> wires a check into each CLI's own pre-tool-use hook. When the agent is about to run something obviously destructive, the hook refuses <em>before</em> the command executes.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">
+      <div style="flex:1;min-width:180px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--bad);margin-bottom:4px">⛔ rm -rf</div><div style="font-size:12.5px;color:var(--muted)">recursive deletes outside the workspace</div></div>
+      <div style="flex:1;min-width:180px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--bad);margin-bottom:4px">⛔ git reset --hard</div><div style="font-size:12.5px;color:var(--muted)">history-destroying git commands</div></div>
+      <div style="flex:1;min-width:180px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--bad);margin-bottom:4px">⛔ .env reads</div><div style="font-size:12.5px;color:var(--muted)">reads of secret and key files</div></div>
+    </div>
+    <div class="term" data-term="guard" data-title="what the agent sees" data-minh="130"></div>
+    <div class="callout"><strong>Honest limit:</strong> guard is <em>cooperative</em>, not enforcement. It catches an agent's accidents, not a determined attacker — a CLI that ignores its own hooks bypasses it entirely. Kernel-level confinement comes in Step 6.</div>
+  </section>
+
+  <section class="lesson-pane" id="lesson-5" hidden>
+    <div class="kicker">LESSON 6 · STEP 4 — TRUST</div>
+    <h1 class="lesson">Cloned repos stay inert until you approve them</h1>
+    <p class="lede">Register the gateway once (<code>gateway connect --all --write</code>) and every repo serves its capabilities through it — but a fresh clone is <strong>inert</strong>: no server spawns, no skill enters context, no secret resolves, until you run <code>agentstack trust .</code></p>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:20px 22px;margin-bottom:18px">
+      <div class="mono" style="font-size:11px;font-weight:600;letter-spacing:0.12em;color:var(--muted);margin-bottom:14px">TRY THE TRUST GATE — CLICK THE ACTIONS</div>
+      <div class="mono" style="display:flex;gap:6px;align-items:center;font-size:12px;flex-wrap:wrap;margin-bottom:16px">
+        <span id="tg-b1" style="padding:8px 12px;border-radius:8px;font-weight:700">cloned</span><span style="color:var(--accent);font-weight:700">→</span>
+        <span id="tg-b2" style="padding:8px 12px;border-radius:8px;font-weight:700">INERT</span><span style="color:var(--accent);font-weight:700">→</span>
+        <span id="tg-b3" style="padding:8px 12px;border-radius:8px;font-weight:700">review</span><span style="color:var(--accent);font-weight:700">→</span>
+        <span id="tg-b4" style="padding:8px 12px;border-radius:8px;font-weight:700">TRUSTED</span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+        <button class="mono tbtn" style="background:var(--code-bg);border-color:var(--line);color:var(--ink);font-size:12px;padding:8px 13px" onclick="tgSet('inert')">git clone …</button>
+        <button class="mono" style="font-size:12px;padding:8px 13px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink)" onclick="tgSet('trusted')">agentstack trust .</button>
+        <button class="mono tbtn" style="background:var(--code-bg);border-color:var(--line);color:var(--ink);font-size:12px;padding:8px 13px" onclick="tgPull()">git pull (bytes change)</button>
+      </div>
+      <div id="tgMsg" style="border-radius:9px;padding:12px 16px;font-size:13.5px;line-height:1.6"></div>
+    </div>
+    <div class="term" data-term="trust" data-title="~/tmp/cloned-repo — zsh"></div>
+    <div class="callout"><strong>What trust means — exactly.</strong> Trust pins a SHA-256 <em>consent digest</em> of the manifest, overlay, and lockfile, and gates whether declared servers may <em>load</em>. It does not vouch that the code is safe, and it does not confine a server once it runs. Vet one capability in depth first with <code class="sm">agentstack explain &lt;name&gt;</code>.</div>
+  </section>
+
+  <section class="lesson-pane" id="lesson-6" hidden>
+    <div class="kicker">LESSON 7 · STEP 5 — SCALE</div>
+    <h1 class="lesson">One governed stack across projects and machines</h1>
+    <p class="lede">Three tools carry your setup beyond a single project:</p>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
+      <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">profiles</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Named subsets of the manifest ("backend", "design"). <code class="sm">use &lt;profile&gt; --write</code> materializes only that profile's skills and prunes the rest it owns.</span></div>
+      <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">library</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Your central home at <code class="sm">~/.agentstack/lib/</code> — skills and server definitions projects reference <em>by name</em> instead of copying. <code class="sm">lib sync</code> carries it across machines.</span></div>
+      <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">search + add</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">One search over your library, the bundled catalog, and the official MCP Registry. <code class="sm">add from &lt;id&gt;</code> lifts its secrets and renders it to <strong>all your CLIs at once</strong>. Skills also install from any repo: <code class="sm">add skill owner/repo</code>.</span></div>
+    </div>
+    <div class="term" style="margin-bottom:8px" data-term="scale" data-title="your-project — zsh"></div>
+    <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-top:10px">Try before installing: <code class="sm">agentstack try &lt;skill&gt;</code> runs a skill without writing anything.</div>
+  </section>
+
+  <section class="lesson-pane" id="lesson-7" hidden>
+    <div class="kicker">LESSON 8 · STEP 6 — CONFINE</div>
+    <h1 class="lesson">Four postures, from advisory to kernel-enforced</h1>
+    <p class="lede">Every tracked run prints a <strong>posture</strong> label — how strongly the effective policy is <em>actually</em> enforced. Climb the ladder as trust in the workload drops:</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+      <div class="rowcard"><span class="mono" style="font-size:11.5px;font-weight:700;flex:none;width:190px;color:var(--muted)">HOST / ADVISORY</span><span style="font-size:13px;color:var(--body);flex:1;line-height:1.5">plain <code class="sm">run</code> — tracked and logged, guard hooks advise, nothing confined</span></div>
+      <div class="rowcard"><span class="mono" style="font-size:11.5px;font-weight:700;flex:none;width:190px;color:var(--term-warn)">HOST / PROTECTED</span><span style="font-size:13px;color:var(--body);flex:1;line-height:1.5"><code class="sm">run --locked</code> — fail-closed pre-launch gates (trust, lock, policy) + frozen tool surface; still on your host</span></div>
+      <div class="rowcard"><span class="mono" style="font-size:11.5px;font-weight:700;flex:none;width:190px;color:var(--accent)">SANDBOX / PROXIED</span><span style="font-size:13px;color:var(--body);flex:1;line-height:1.5"><code class="sm">run --sandbox</code> — Docker container + host-side egress proxy; a direct network route still exists</span></div>
+      <div class="rowcard" style="background:var(--strong-bg);border-color:var(--strong-bd)"><span class="mono" style="font-size:11.5px;font-weight:700;flex:none;width:190px;color:var(--term-ok)">LOCKDOWN / ENFORCED</span><span style="font-size:13px;color:var(--term-text);flex:1;line-height:1.5"><code class="sm" style="background:transparent">run --lockdown</code> — the container's <strong>only</strong> route out is the audited proxy. Strongest AgentStack ships.</span></div>
+    </div>
+    <h2 class="lesson">Build a run — watch the posture change</h2>
+    <div class="hint">Pick a tier; the banner shows exactly what that flag combination enforces:</div>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:18px 20px;margin-bottom:18px">
+      <div id="postureOpts" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+      <div class="mono" style="font-size:12.5px;background:var(--term-bg);border-radius:12px;padding:14px 18px;margin-bottom:12px">
+        <div style="color:var(--term-warn)">$ <span id="postureCmd"></span></div>
+        <div style="margin-top:6px;font-weight:700"><span id="postureLabel"></span></div>
+      </div>
+      <div id="postureRows" style="display:grid;grid-template-columns:auto 1fr;gap:5px 16px;font-size:12.5px;margin-bottom:12px"></div>
+      <div id="postureNote" style="font-size:13px;line-height:1.6;color:var(--body)"></div>
+    </div>
+    <div class="term" data-term="run" data-title="your-project — zsh"></div>
+    <div class="callout"><strong>Honest limit:</strong> even lockdown never makes exfiltration <em>impossible</em> — traffic to a host you did approve (including the model API) is still allowed. Egress rules bound where data can go; they can't read intent.</div>
+  </section>
+
+  <section class="lesson-pane" id="lesson-8" hidden>
+    <div class="kicker">LESSON 9 · POLICY &amp; AUDIT</div>
+    <h1 class="lesson">Machine ∩ project — and everything on the record</h1>
+    <p class="lede">Your <strong>machine policy</strong> (in <code>~/.agentstack/agentstack.toml</code>) sets standing limits checked <em>before</em> any project's on every brokered call. The effective policy is the <strong>intersection</strong> — a repo can only narrow a machine rule, never loosen it.</p>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:20px 22px;margin-bottom:18px">
+      <div class="mono" style="display:flex;align-items:center;justify-content:center;gap:0;font-size:12.5px">
+        <div style="width:170px;height:110px;border:2px solid var(--accent);border-radius:55px;display:flex;align-items:center;justify-content:flex-start;padding-left:24px;font-weight:700;color:var(--accent);background:color-mix(in srgb, var(--accent) 7%, transparent)">machine<br>policy</div>
+        <div style="width:170px;height:110px;border:2px solid var(--muted);border-radius:55px;display:flex;align-items:center;justify-content:flex-end;padding-right:28px;font-weight:700;color:var(--muted);background:color-mix(in srgb, var(--muted) 8%, transparent);margin-left:-58px">project<br>policy</div>
+      </div>
+      <div style="text-align:center;margin-top:10px;font-size:12.5px;color:var(--muted)">the overlap = <strong style="color:var(--ink)">effective policy</strong> — what a brokered call is actually checked against</div>
+      <div class="grid4" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:18px">
+        <div style="border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px"><div class="mono" style="font-size:11.5px;font-weight:700;margin-bottom:3px">[policy.tools]</div><div style="font-size:11.5px;color:var(--muted);line-height:1.45">MCP firewall — allow/deny per tool</div></div>
+        <div style="border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px"><div class="mono" style="font-size:11.5px;font-weight:700;margin-bottom:3px">[policy.egress]</div><div style="font-size:11.5px;color:var(--muted);line-height:1.45">which hosts a run may contact</div></div>
+        <div style="border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px"><div class="mono" style="font-size:11.5px;font-weight:700;margin-bottom:3px">[policy.secrets]</div><div style="font-size:11.5px;color:var(--muted);line-height:1.45">which ${REF}s each server may read</div></div>
+        <div style="border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px"><div class="mono" style="font-size:11.5px;font-weight:700;margin-bottom:3px">[policy.filesystem]</div><div style="font-size:11.5px;color:var(--muted);line-height:1.45">path scopes for reads and writes</div></div>
+      </div>
+    </div>
+    <h2 class="lesson">Fire a brokered call — see the verdict</h2>
+    <div class="hint">Every call through the gateway is checked machine-first, then project. Try these:</div>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:18px 20px;margin-bottom:18px">
+      <div id="callOpts" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+      <div id="callResult" hidden>
+        <div id="callVerdict" class="mono" style="display:inline-block;font-size:12.5px;font-weight:700;padding:6px 14px;border-radius:999px;margin-bottom:10px"></div>
+        <div id="callWhy" style="font-size:13px;line-height:1.6;color:var(--body);margin-bottom:8px"></div>
+        <div id="callAudit" class="mono" style="font-size:11.5px;color:var(--muted)"></div>
+      </div>
+    </div>
+    <p class="lede" style="margin-bottom:14px"><strong>Then see what actually happened.</strong> Two records: the per-run <em>flight recorder</em> (<code class="sm">report run &lt;id&gt;</code>) and the global <em>call audit log</em> — every brokered call, argument digests only, never values. <code class="sm">dashboard</code> shows it all read-only in a browser; <code class="sm">optimize</code> turns the signals into evidence-backed fixes.</p>
+    <div class="term" style="margin-bottom:8px" data-term="report" data-title="your-project — zsh"></div>
+  </section>
+
+  <section class="lesson-pane" id="lesson-9" hidden>
+    <div class="kicker">LESSON 10 · MODES, TEAMS &amp; UNDO</div>
+    <h1 class="lesson">Where files live, how teams share, how anything reverts</h1>
+    <p class="lede">You always commit the <strong>intent</strong> — manifest + lockfile. Where the rendered artifacts live is a per-project <strong>delivery mode</strong>, chosen during init and switchable any time (switching never changes what you trust or what policy allows):</p>
+    <div class="grid3" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px">
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--accent);margin-bottom:5px">static</div><div style="font-size:12.5px;color:var(--muted);line-height:1.55">default — rendered files on disk behind a managed .gitignore block. Zero moving parts, works with every CLI.</div></div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--accent);margin-bottom:5px">clean-at-rest</div><div style="font-size:12.5px;color:var(--muted);line-height:1.55">files exist only between session start and session end — the repo stays pristine at rest.</div></div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--accent);margin-bottom:5px">zero-files</div><div style="font-size:12.5px;color:var(--muted);line-height:1.55">nothing on disk — the gateway serves each trusted repo’s stack live over MCP.</div></div>
+    </div>
+    <p class="lede" style="margin-bottom:12px"><strong>Teams</strong> commit .agentstack/ and never credentials: each teammate stores their own values with <code>secret set</code>, then <code>apply --write</code>. A maintainer can <code>sign</code> the lockfile (detached ed25519) and teammates <code>verify --pubkey</code> it. In zero-files mode trust stays per person, per machine.</p>
+    <div class="term" data-term="undo" data-title="your-project — zsh" data-minh="130"></div>
+    <div class="callout" style="border-radius:var(--radius-md,16px);padding:12px 20px"><strong>Limit:</strong> restore reverts agentstack’s own recorded writes — a file a server already deleted is not brought back.</div>
+  </section>
+
+  <section class="lesson-pane" id="lesson-10" hidden>
+    <div class="kicker">LESSON 11 · RECAP</div>
+    <h1 class="lesson">Prove it stuck, then keep the cheat sheet</h1>
+    <div id="recapQuiz" style="display:flex;flex-direction:column;gap:14px;margin-bottom:24px"></div>
+    <div style="background:var(--term-bg);border:1px solid var(--strong-bd);border-radius:var(--radius-md,16px);padding:20px 24px">
+      <div class="mono" style="font-size:11px;font-weight:600;letter-spacing:0.12em;color:var(--term-muted);margin-bottom:14px">CHEAT SHEET — THE NINE EVERYDAY COMMANDS + THE LADDER</div>
+      <div id="cheats" class="mono" style="display:grid;grid-template-columns:auto 1fr;gap:6px 18px;font-size:12px;line-height:1.7"></div>
+    </div>
+    <div style="margin-top:18px;font-size:13.5px;color:var(--muted);line-height:1.65">Real setup takes ~10 minutes: install, <code class="sm">agentstack init</code>, <code class="sm">doctor</code> — then climb only as far as you need. The <a href="../start.html">docs site's "Get started" guide</a> shows expected output at every step.</div>
+  </section>
+
+  <div style="display:flex;justify-content:space-between;margin-top:36px;padding-top:20px;border-top:1px solid var(--line)">
+    <button id="prevBtn" class="mono" style="font-size:13px;padding:10px 18px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--faint)" onclick="go(state.lesson-1)">← Start</button>
+    <button id="nextBtn" class="mono cta" style="padding:10px 20px" onclick="go(state.lesson+1)">Next: The map →</button>
+  </div>
+  </div>
+  </div>
+</div>
+</div>
+
+<script>
+/* Compiled from the "AgentStack Tutorial" design prototype: same data, same
+   behavior, no template runtime. All terminals are simulations. */
+'use strict';
+
+var LESSONS=['Welcome — the problem','The map — concepts','Step 1 · Unify','Step 2 · Verify','Step 3 · Guard','Step 4 · Trust','Step 5 · Scale','Step 6 · Confine','Policy & audit','Modes, teams & undo','Recap & cheat sheet'];
+var W='var(--term-text)',G='var(--term-ok)',R='var(--term-bad)',A='var(--term-warn)',D='var(--term-muted)';
+var TERM={
+  unify:[
+    {cmd:'curl -fsSL …/install.sh | sh',out:[['downloading agentstack v1.4.2…',D],['verifying tarball against checksums.txt… ok',D],['✓ installed to ~/.local/bin/agentstack',G]]},
+    {cmd:'agentstack init --yes',out:[['🔍  6 CLI binaries on PATH: Claude Code · Codex CLI · Cursor · Gemini CLI · OpenCode · Pi',W],['📥  Imported 1 MCP server(s) from existing configs',W],['🔑  Lifted 1 inline token → ${GITHUB_TOKEN}  (stored in gitignored .env)',A],['✅  Wrote .agentstack/agentstack.toml',G]]},
+    {cmd:'agentstack apply --write',out:[['Claude Code (.mcp.json)              ✓ wrote 1 server(s)',G],['Codex CLI (.codex/config.toml)       ✓ wrote 1 server(s)',G],['Gemini CLI (.gemini/settings.json)   ✓ wrote 1 server(s)',G],['OpenCode (opencode.json)             ✓ wrote 1 server(s)',G],['Applied to 4 target(s).',W]]}
+  ],
+  verify:[
+    {cmd:'agentstack doctor',out:[['✓ manifest valid  (.agentstack/agentstack.toml)',G],['✓ secrets — 2/2 ${REF}s resolve on this machine',G],['⚠ drift — .mcp.json edited on disk since last apply',A],['   fix: agentstack diff  →  adopt (keep edit)  or  apply --write (keep manifest)',D],['✓ guard installed in 4 CLIs',G],['3 sections hidden (features you don’t use) — doctor --all shows everything',D]]},
+    {cmd:'agentstack diff',out:[['.mcp.json  (Claude Code)',W],['+ "context7": { "command": "npx", "args": ["-y", "context7-mcp"] }',G],['  ← hand-added since last apply; the manifest does not declare "context7"',D]]},
+    {cmd:'agentstack adopt context7',out:[['✓ pulled "context7" into .agentstack/agentstack.toml',G],['🔑 lifted inline token → ${CONTEXT7_KEY}',A],['comments in the live config preserved',D]]},
+    {cmd:'agentstack restore --last --write',out:[['reverting write w-31c8  (adopt context7)…',D],['✓ restored — the file shows as pending again in doctor',G]]}
+  ],
+  guard:[
+    {cmd:'agentstack guard install',out:[['✓ wired pre-tool-use hook into 4 CLIs',G],['   Claude Code · Codex CLI · Gemini CLI · OpenCode',D]]},
+    {cmd:'rm -rf ~/projects',out:[['⛔ agentstack guard: BLOCKED — recursive delete outside the workspace',R],['   the command never executed',D]]},
+    {cmd:'git reset --hard HEAD~5',out:[['⛔ agentstack guard: BLOCKED — history-destroying git command',R]]},
+    {cmd:'cat .env',out:[['⛔ agentstack guard: BLOCKED — read of .env (secret file)',R]]}
+  ],
+  trust:[
+    {cmd:'agentstack gateway connect --all --write',out:[['✓ gateway registered in 4 CLIs’ global MCP config  (once per machine)',G]]},
+    {cmd:'agentstack trust .',out:[['This project declares:',W],['  MCP servers   github  (npx @modelcontextprotocol/server-github)',W],['                 └ contacts: api.github.com · secrets: ${GITHUB_TOKEN}',D],['  Skills        deploy-checklist  (3.1 KB, pinned)',W],['  Instructions  CLAUDE.md fragment  (12 lines)',W],['Trust this exact content? [y/N] y',A],['✓ trusted — consent digest sha256:9f2c…41aa pinned',G]]},
+    {cmd:'agentstack trust --list',out:[['~/work/api-service     ✓ matches pinned digest',G],['~/tmp/cloned-repo      ✗ CHANGED since trust (git pull) — inert again',R]]},
+    {cmd:'agentstack trust --revoke',out:[['✓ trust withdrawn — this repo is inert again',G]]}
+  ],
+  scale:[
+    {cmd:'agentstack search postgres',out:[['[library]   pg-tools        your central library  (~/.agentstack/lib/)',W],['[registry]  postgres-mcp    registry.modelcontextprotocol.io',W],['[catalog]   sql-skill       bundled catalog',W]]},
+    {cmd:'agentstack add from postgres-mcp',out:[['✓ resolved from the official MCP Registry',G],['🔑 secret lifted → ${DATABASE_URL}',A],['✓ rendered to 4 CLIs — one add, every tool',G]]},
+    {cmd:'agentstack use backend --write',out:[['✓ materialized 3 skill(s) for profile "backend"',G],['✓ pruned 2 skill(s) owned by other profiles  (hand-made dirs untouched)',D]]}
+  ],
+  run:[
+    {cmd:'agentstack run claude --locked',out:[['┌ run r-6c19 · claude',W],['│ posture  HOST / PROTECTED',A],['│ gates    trust ✓ · lock ✓ · policy admission ✓ · tool surface frozen',D],['└ launching on host…',W]]},
+    {cmd:'agentstack run claude --lockdown',out:[['┌ run r-7f3a · claude',W],['│ posture  LOCKDOWN / ENFORCED',G],['│ egress   only via audited proxy — no direct route out of the container',D],['│ policy   machine ∩ project · 14 tool rules · 3 egress hosts',D],['└ launching in container…',W]]},
+    {cmd:'agentstack kill r-7f3a',out:[['✓ stopped run r-7f3a and reverted the profile it owned',G]]}
+  ],
+  report:[
+    {cmd:'agentstack report runs',out:[['r-7f3a  claude  LOCKDOWN/ENFORCED  12m   38 calls  ok',W],['r-6c19  claude  HOST/PROTECTED     41m  112 calls  ok',W],['r-51b0  codex   HOST/ADVISORY       8m    9 calls  ok',W]]},
+    {cmd:'agentstack report calls --since 7',out:[['github.create_issue      31 ok   0 denied',G],['postgres.query           64 ok   2 denied  (policy: machine layer)',A],['argument digests only — values are never stored',D]]},
+    {cmd:'agentstack explain github',out:[['origin    official MCP Registry · pinned sha256:2b8e…',W],['policy    tools: 12 allowed, 2 denied · egress: api.github.com only',W],['secrets   may read ${GITHUB_TOKEN} — nothing else',W],['context   ~1.8k tokens per session',D]]},
+    {cmd:'agentstack dashboard',out:[['dashboard: http://127.0.0.1:4173  (read-only — every pane shows the CLI command instead of a button)',G]]}
+  ],
+  undo:[]
+};
+/* lesson 10 terminal reuses its own command set */
+TERM.undo=[
+  {cmd:'agentstack mode zero-files --write',out:[['✓ switched delivery mode — rendered files removed, gateway serves live',G],['trust and policy unchanged',D]]},
+  {cmd:'agentstack sign',out:[['✓ lockfile signed — agentstack.lock.sig (detached ed25519)',G]]},
+  {cmd:'agentstack verify --pubkey team.pub',out:[['✓ signature valid — lockfile matches the maintainer’s key',G]]},
+  {cmd:'agentstack restore --last --write',out:[['reverting write w-4a02  (mode zero-files)…',D],['✓ restored previous delivery mode',G]]}
+];
+
+var state={lesson:0,visited:{0:true},openCard:-1,tgState:'start',wizStep:0,wizSecret:null,wizMode:null,driftPick:null,posturePick:'plain',callPick:null};
+
+function $(id){return document.getElementById(id);}
+
+/* ---------- lesson navigation ---------- */
+function shortPrev(i){return LESSONS[i].split(' — ')[0].split(' · ').pop();}
+function renderNav(){
+  var nav=$('lessonNav');nav.innerHTML='';
+  LESSONS.forEach(function(label,i){
+    var b=document.createElement('button');
+    b.className='navbtn'+(i===state.lesson?' active':(state.visited[i]?' seen':''));
+    b.onclick=function(){go(i);};
+    var n=document.createElement('span');n.className='num';n.textContent=String(i+1);
+    var t=document.createElement('span');t.textContent=label;
+    b.appendChild(n);b.appendChild(t);nav.appendChild(b);
+  });
+  var visited=Object.keys(state.visited).length;
+  $('progressBar').style.width=Math.round(visited/LESSONS.length*100)+'%';
+  $('progressLabel').textContent=visited+' of '+LESSONS.length+' lessons visited';
+  var last=LESSONS.length-1;
+  var prev=$('prevBtn'),next=$('nextBtn');
+  prev.textContent='← '+(state.lesson===0?'Start':shortPrev(state.lesson-1));
+  prev.style.color=state.lesson===0?'var(--faint)':'var(--ink)';
+  next.textContent=(state.lesson===last?'Done — review the ladder':'Next: '+LESSONS[state.lesson+1].split(' — ')[0])+' →';
+}
+function go(n){
+  n=Math.max(0,Math.min(LESSONS.length-1,n));
+  state.lesson=n;state.visited[n]=true;
+  for(var i=0;i<LESSONS.length;i++){
+    var pane=$('lesson-'+i);
+    if(i===n){pane.hidden=false;pane.style.animation='none';void pane.offsetWidth;pane.style.animation='';}
+    else pane.hidden=true;
+  }
+  $('content').scrollTop=0;
+  renderNav();
+}
+
+/* ---------- terminals ---------- */
+function buildTerminals(){
+  document.querySelectorAll('.term[data-term]').forEach(function(box){
+    var id=box.getAttribute('data-term'),title=box.getAttribute('data-title');
+    var minh=box.getAttribute('data-minh')||'150';
+    var hd=document.createElement('div');hd.className='term-hd';
+    [['var(--term-bad)'],['var(--term-warn)'],['var(--term-ok)']].forEach(function(c){
+      var d=document.createElement('span');d.className='term-dot';d.style.background=c[0];hd.appendChild(d);
+    });
+    var tt=document.createElement('span');tt.className='term-title';tt.textContent=title;hd.appendChild(tt);
+    var body=document.createElement('div');body.className='term-body';body.style.minHeight=minh+'px';
+    var lines=document.createElement('div');lines.className='term-lines';
+    var cur=document.createElement('span');cur.className='term-cursor';
+    body.appendChild(lines);body.appendChild(cur);
+    var bar=document.createElement('div');bar.className='term-cmds';
+    TERM[id].forEach(function(spec,i){
+      var b=document.createElement('button');b.className='tbtn';b.textContent='▶ '+spec.cmd;
+      b.onclick=function(){runCmd(lines,id,i);};
+      bar.appendChild(b);
+    });
+    box.appendChild(hd);box.appendChild(body);box.appendChild(bar);
+  });
+}
+function addLine(lines,text,color){
+  var d=document.createElement('div');d.textContent=text;d.style.color=color;lines.appendChild(d);
+}
+function runCmd(lines,id,i){
+  var spec=TERM[id][i];
+  addLine(lines,'$ '+spec.cmd,'var(--term-warn)');
+  var k=0;
+  var t=setInterval(function(){
+    if(k>=spec.out.length){clearInterval(t);return;}
+    var o=spec.out[k++];addLine(lines,o[0],o[1]);
+  },220);
+}
+
+/* ---------- lesson 2: term cards ---------- */
+var TERMS=[
+  ['manifest','the one file you review','One file — .agentstack/agentstack.toml — listing everything your tools may run: MCP servers, skills, instructions, settings, hooks. You edit it; AgentStack renders it into each CLI’s own config. It only ever holds ${REF} secret placeholders, never real values.'],
+  ['lockfile','pins exact bytes','agentstack.lock pins the manifest’s resolved contents — server definitions, skill bytes, instruction bytes — to SHA-256 digests. Same inputs reproduce; any change is visible. It is part of what you consent to when you trust a project.'],
+  ['adapter','per-CLI compiler','AgentStack’s per-CLI compiler: turns one manifest into that CLI’s own config format (.mcp.json for Claude Code, config.toml for Codex, …). There are 13 today; "target" is just an adapter id you name in [targets].'],
+  ['gateway','the broker in the middle','AgentStack’s in-process broker. Instead of each CLI talking to MCP servers directly, calls route through the gateway, where policy is checked and every call is logged. Only gateway-routed ("brokered") calls are policy-checked and audited.'],
+  ['trust','your local approval','Your approval that a project may auto-load on this machine, pinned to a SHA-256 consent digest of manifest + overlay + lockfile. Until you trust, a clone is inert. Change any pinned byte — a git pull, a re-lock — and it drops back to untrusted.'],
+  ['policy','machine ∩ project','Rules fencing tools, egress, secrets, and filesystem paths. Your machine policy is checked before any project’s on every brokered call; the effective policy is the intersection, so a repo can only narrow your rules, never loosen them.'],
+  ['profile','a named subset','A named subset of the manifest ("backend", "design") you activate together with use <profile>. A manifest with no profiles activates its whole inline set — you only name one when you have several.'],
+  ['posture','how strongly it’s enforced','The per-run label printed on the run banner: HOST/ADVISORY, HOST/PROTECTED, SANDBOX/PROXIED, or LOCKDOWN/ENFORCED — what the effective policy is actually enforced by, not just what it says.']
+];
+function renderTermCards(){
+  var wrap=$('termCards');wrap.innerHTML='';
+  TERMS.forEach(function(t,i){
+    var open=state.openCard===i;
+    var card=document.createElement('div');
+    card.style.cssText='background:var(--surface);border:1px solid '+(open?'var(--accent)':'var(--line)')+';border-radius:10px;overflow:hidden';
+    var btn=document.createElement('button');
+    btn.style.cssText='width:100%;display:flex;align-items:center;gap:12px;text-align:left;background:none;border:none;padding:13px 16px';
+    btn.onclick=function(){state.openCard=open?-1:i;renderTermCards();};
+    var name=document.createElement('span');name.className='mono';name.style.cssText='font-size:13.5px;font-weight:700;color:var(--ink)';name.textContent=t[0];
+    var short=document.createElement('span');short.style.cssText='font-size:12.5px;color:var(--muted);flex:1';short.textContent=t[1];
+    var chev=document.createElement('span');chev.className='mono';chev.style.cssText='color:var(--accent);font-size:13px';chev.textContent=open?'−':'+';
+    btn.appendChild(name);btn.appendChild(short);btn.appendChild(chev);
+    card.appendChild(btn);
+    if(open){
+      var def=document.createElement('div');
+      def.style.cssText='padding:12px 16px 14px;font-size:13.5px;line-height:1.6;color:var(--body);border-top:1px dashed var(--line-soft)';
+      def.textContent=t[2];card.appendChild(def);
+    }
+    wrap.appendChild(card);
+  });
+}
+
+/* ---------- lesson 3: wizard ---------- */
+var SEC={keychain:{name:'OS keychain',msg:'value stored in the OS keychain',desc:'default — the value lives in macOS Keychain / Secret Service, resolved per machine at run time'},env:{name:'gitignored .env',msg:'value written to a gitignored .env',desc:'a plain .env next to the manifest, kept out of git by the managed block'},skip:{name:'skip',msg:'skipped — refs stay unresolved until you set them',desc:'--secrets skip: write only the manifest; set values later with agentstack secret set (the CI path)'}};
+var MODE={
+  static:{name:'static',desc:'default — rendered files on disk behind a managed .gitignore; zero moving parts, every CLI works',
+    lines:[['Preview: 1 server → 4 targets  (.mcp.json, .codex/config.toml, .gemini/settings.json, opencode.json)','w'],['Proceed? [Y/n] y','a'],['✓ apply --write — rendered to 4 target(s)','g'],['✓ skills activated · doctor: all green','g']],
+    note:'The render path: preview → confirm → apply --write → activate skills → doctor. Files sit ready on disk the moment a CLI starts.'},
+  clean:{name:'clean-at-rest',desc:'repo stays pristine between sessions — files exist only inside session start / session end',
+    lines:[['✓ agentstack lock — name refs pinned, nothing rendered','g'],['git status → clean','w'],['next: agentstack session start --profile <p>   # renders for one session','d'],['      agentstack session end                  # reverts every file','d']],
+    note:'Nothing is rendered now. The wizard teaches the session rhythm instead: capabilities arrive with session start and revert on session end.'},
+  zero:{name:'zero-files',desc:'nothing on disk — the gateway serves each trusted repo’s stack live (CLI must speak MCP)',
+    lines:[['✓ agentstack lock — pinned, nothing rendered','g'],['Register the gateway in your CLIs? [Y/n] y','a'],['✓ gateway connect --all --write — 4 CLIs registered','g'],['→ finish with:  agentstack trust .','w']],
+    note:'The wizard never runs trust for you — trust is human consent. Until you review and trust the repo, its stack stays inert.'}};
+function wizColor(k){return {w:'var(--term-text)',g:'var(--term-ok)',a:'var(--term-warn)',d:'var(--term-muted)'}[k];}
+function renderWiz(){
+  var names=['scan','secrets','mode','result'];
+  var crumbs=$('wizCrumbs');crumbs.innerHTML='';
+  names.forEach(function(n,i){
+    var s=document.createElement('span');s.className='mono';
+    var bg=i===state.wizStep?'var(--accent)':(i<state.wizStep?'var(--tint)':'var(--code-bg)');
+    var fg=i===state.wizStep?'var(--accent-ink)':(i<state.wizStep?'var(--accent)':'var(--muted)');
+    s.style.cssText='font-size:11px;font-weight:700;padding:4px 12px;border-radius:999px;background:'+bg+';color:'+fg;
+    s.textContent=(i+1)+' '+n;crumbs.appendChild(s);
+  });
+  for(var i=0;i<4;i++)$('wiz-'+i).hidden=state.wizStep!==i;
+  if(state.wizStep===2)$('wizSecretMsg').textContent=SEC[state.wizSecret].msg;
+  if(state.wizStep===3){
+    $('wizSecretName').textContent=SEC[state.wizSecret].name;
+    $('wizModeName').textContent=MODE[state.wizMode].name;
+    var fl=$('wizForkLines');fl.innerHTML='';
+    MODE[state.wizMode].lines.forEach(function(l){addLine(fl,l[0],wizColor(l[1]));});
+    $('wizForkNote').textContent=MODE[state.wizMode].note;
+  }
+}
+function wizReset(){state.wizStep=0;state.wizSecret=null;state.wizMode=null;renderWiz();}
+function wizNext0(){state.wizStep=1;renderWiz();}
+function buildWizOpts(){
+  var so=$('wizSecretOpts');
+  Object.keys(SEC).forEach(function(k){
+    var b=document.createElement('button');b.className='opt';
+    b.innerHTML='<span class="opt-name"></span><span class="opt-desc"></span>';
+    b.children[0].textContent=SEC[k].name;b.children[1].textContent=SEC[k].desc;
+    b.onclick=function(){state.wizSecret=k;state.wizStep=2;renderWiz();};
+    so.appendChild(b);
+  });
+  var mo=$('wizModeOpts');
+  Object.keys(MODE).forEach(function(k){
+    var b=document.createElement('button');b.className='opt';
+    b.innerHTML='<span class="opt-name"></span><span class="opt-desc"></span>';
+    b.children[0].textContent=MODE[k].name;b.children[1].textContent=MODE[k].desc;
+    b.onclick=function(){state.wizMode=k;state.wizStep=3;renderWiz();};
+    mo.appendChild(b);
+  });
+}
+
+/* ---------- lesson 4: drift resolver + checkpoint quiz ---------- */
+var DR={
+  adopt:{lines:[['$ agentstack adopt context7','a'],['✓ pulled "context7" into .agentstack/agentstack.toml','g'],['🔑 lifted inline token → ${CONTEXT7_KEY}','a'],['✓ doctor: drift cleared — manifest now declares what disk has','g']],note:'The hand-edit held the truth: adopt made it official, and the inline token was lifted on the way in.'},
+  apply:{lines:[['$ agentstack apply --write','a'],['Claude Code (.mcp.json)   ✓ re-rendered — stray "context7" entry removed','g'],['✓ doctor: drift cleared — disk now matches the manifest','g']],note:'The manifest held the truth: apply re-rendered over the stray edit. The hand-added server is gone from the config.'},
+  restore:{lines:[['$ agentstack restore --last --write','a'],['reverting write w-31c8…','d'],['✓ restored — the file shows as pending again in doctor','g']],note:'Neither side yet — restore rewound agentstack’s own last write so you can decide with a clean slate.'}};
+var DRIFT_OPTS=[
+  {k:'adopt',label:'my hand-edit is right → adopt',desc:'pull the edit into the manifest'},
+  {k:'apply',label:'the manifest is right → apply --write',desc:'re-render over the stray edit'},
+  {k:'restore',label:'not sure → restore --last',desc:'undo agentstack’s last write first'}];
+function renderDrift(){
+  var wrap=$('driftOpts');wrap.innerHTML='';
+  DRIFT_OPTS.forEach(function(o){
+    var b=document.createElement('button');b.className='opt';b.style.padding='11px 16px';
+    if(state.driftPick===o.k)b.style.borderColor='var(--accent)';
+    b.innerHTML='<span class="opt-name"></span><span class="opt-desc" style="line-height:normal"></span>';
+    b.children[0].textContent=o.label;b.children[1].textContent=o.desc;
+    b.onclick=function(){state.driftPick=o.k;renderDrift();};
+    wrap.appendChild(b);
+  });
+  var res=$('driftResult');
+  if(state.driftPick){
+    res.hidden=false;
+    var dl=$('driftLines');dl.innerHTML='';
+    DR[state.driftPick].lines.forEach(function(l){addLine(dl,l[0],wizColor(l[1]));});
+    $('driftNote').textContent=DR[state.driftPick].note;
+  }else res.hidden=true;
+}
+function driftReset(){state.driftPick=null;renderDrift();}
+
+/* quiz helper — colors options after a pick, shows feedback */
+function buildQuiz(container,fbEl,q){
+  var picked=null;
+  function render(){
+    container.innerHTML='';
+    q.options.forEach(function(label,i){
+      var b=document.createElement('button');b.className='qbtn';
+      if(picked!=null){
+        if(i===q.correct)b.classList.add('correct');
+        else if(i===picked)b.classList.add('wrong');
+      }
+      b.textContent=label;
+      b.onclick=function(){picked=i;render();};
+      container.appendChild(b);
+    });
+    if(picked!=null){
+      fbEl.hidden=false;
+      fbEl.textContent=(picked===q.correct?'✓ Right. ':'✗ Not quite. ')+q.explain;
+      fbEl.style.color=picked===q.correct?'var(--ok)':'var(--bad)';
+    }else fbEl.hidden=true;
+  }
+  render();
+}
+
+/* ---------- lesson 6: trust gate ---------- */
+var TG={
+  start:{msg:'A repo just landed on your machine. Click an action above to see what the gate does.',bg:'var(--code-bg)',fg:'var(--muted)',stage:0},
+  inert:{msg:'INERT — the repo declares an MCP server and a skill, but nothing spawns, nothing is contacted, no secret resolves. An agent here sees control-plane tools only.',bg:'var(--tint)',fg:'var(--accent-deep)',stage:1},
+  trusted:{msg:'TRUSTED ✓ — you reviewed exactly what it runs and contacts; the consent digest sha256:9f2c…41aa is pinned. Declared servers may now load through the gateway — firewalled and audited.',bg:'var(--ok-bg)',fg:'var(--ok)',stage:3},
+  dropped:{msg:'Bytes changed → INERT again. The pull edited the manifest, so the digest no longer matches. Nothing loads until you review and trust the new content.',bg:'var(--bad-bg)',fg:'var(--bad)',stage:1}};
+function renderTG(){
+  var t=TG[state.tgState];
+  var m=$('tgMsg');m.textContent=t.msg;m.style.background=t.bg;m.style.color=t.fg;
+  function set(el,bgOn,fgOn,on){el.style.background=on?bgOn:'var(--code-bg)';el.style.color=on?fgOn:'var(--muted)';}
+  set($('tg-b1'),'var(--strong-bg)','var(--strong-fg)',t.stage===0);
+  set($('tg-b2'),'var(--bad)','#FFFFFF',t.stage===1);
+  set($('tg-b3'),'var(--accent)','#FFFFFF',t.stage===2);
+  set($('tg-b4'),'var(--ok)','#FFFFFF',t.stage===3);
+}
+function tgSet(s){state.tgState=s;renderTG();}
+function tgPull(){state.tgState=state.tgState==='trusted'?'dropped':'inert';renderTG();}
+
+/* ---------- lesson 8: posture builder ---------- */
+var PO={
+  plain:{cmd:'agentstack run claude',label:'HOST / ADVISORY',lc:'var(--term-muted)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','—'],['frozen tool surface','—'],['container','—'],['egress enforced','—']],note:'Tracked and logged, nothing confined. Fine for everyday work you already trust.'},
+  locked:{cmd:'agentstack run claude --locked',label:'HOST / PROTECTED',lc:'var(--term-warn)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','✓ fail-closed'],['frozen tool surface','✓'],['container','—'],['egress enforced','—']],note:'No Docker needed. Gates run before launch and the tool surface freezes — but the agent still runs as you, on the host.'},
+  sandbox:{cmd:'agentstack run claude --sandbox',label:'SANDBOX / PROXIED · DIRECT ROUTE OPEN',lc:'var(--accent)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','✓ fail-closed'],['frozen tool surface','✓'],['container','✓ project mounted as workspace'],['egress enforced','proxied — direct route still open']],note:'HTTPS routes through the host-side proxy, but the container’s bridge network keeps a direct route a proxy-ignoring process could use.'},
+  lockdown:{cmd:'agentstack run claude --sandbox --lockdown',label:'LOCKDOWN / ENFORCED · NO DIRECT ROUTE',lc:'var(--term-ok)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','✓ fail-closed'],['frozen tool surface','✓'],['container','✓ internal-only network'],['egress enforced','✓ sole peer: the audited sidecar']],note:'Topologically confined — no host route, no internet, only the egress sidecar. Preview any tier first with --plan.'}};
+var PO_OPTS=[['plain','plain run'],['locked','--locked'],['sandbox','--sandbox'],['lockdown','--sandbox --lockdown']];
+function renderPosture(){
+  var wrap=$('postureOpts');wrap.innerHTML='';
+  PO_OPTS.forEach(function(p){
+    var b=document.createElement('button');b.className='pill-toggle'+(state.posturePick===p[0]?' on':'');
+    b.textContent=p[1];b.onclick=function(){state.posturePick=p[0];renderPosture();};
+    wrap.appendChild(b);
+  });
+  var po=PO[state.posturePick];
+  $('postureCmd').textContent=po.cmd;
+  var lbl=$('postureLabel');lbl.textContent='posture  '+po.label;lbl.parentElement.style.color=po.lc;
+  var rows=$('postureRows');rows.innerHTML='';
+  po.rows.forEach(function(r){
+    var k=document.createElement('span');k.style.color='var(--muted)';k.textContent=r[0];
+    var v=document.createElement('span');v.className='mono';v.style.color=r[1]==='—'?'var(--faint)':'var(--ok)';v.textContent=r[1];
+    rows.appendChild(k);rows.appendChild(v);
+  });
+  $('postureNote').textContent=po.note;
+}
+
+/* ---------- lesson 9: call simulator ---------- */
+var CALLS=[
+  {label:'github.create_issue',verdict:'ALLOWED',vc:'var(--ok)',vbg:'var(--ok-bg)',why:'tool allowed by both layers · egress api.github.com is on the machine allow-list · ${GITHUB_TOKEN} readable by this server',audit:'audit: github.create_issue · ok · args sha256:83f1… (digests only, never values)'},
+  {label:'postgres.drop_table',verdict:'DENIED — machine layer',vc:'var(--bad)',vbg:'var(--bad-bg)',why:'your machine [policy.tools] denies postgres.drop_* for every project — a repo cannot loosen it',audit:'audit: postgres.drop_table · denied (machine) · the error names the layer'},
+  {label:'fetch → api.unknown-host.io',verdict:'DENIED — egress',vc:'var(--bad)',vbg:'var(--bad-bg)',why:'host not in the effective [policy.egress] allow-list (machine ∩ project)',audit:'audit: egress api.unknown-host.io · blocked · logged with the run id'},
+  {label:'slack.post_message',verdict:'DENIED — project layer',vc:'var(--bad)',vbg:'var(--bad-bg)',why:'the machine allows slack.*, but this repo’s policy narrows it away — intersection means the stricter side wins',audit:'audit: slack.post_message · denied (project)'}];
+function renderCalls(){
+  var wrap=$('callOpts');wrap.innerHTML='';
+  CALLS.forEach(function(c,i){
+    var b=document.createElement('button');b.className='mono opt';
+    b.style.cssText='font-size:12px;padding:8px 14px;border-radius:999px;display:inline-flex;gap:0';
+    if(state.callPick===i)b.style.borderColor='var(--accent)';
+    b.textContent=c.label;
+    b.onclick=function(){state.callPick=i;renderCalls();};
+    wrap.appendChild(b);
+  });
+  var res=$('callResult');
+  if(state.callPick!=null){
+    res.hidden=false;
+    var c=CALLS[state.callPick];
+    var v=$('callVerdict');v.textContent=c.verdict;v.style.background=c.vbg;v.style.color=c.vc;
+    $('callWhy').textContent=c.why;
+    $('callAudit').textContent=c.audit;
+  }else res.hidden=true;
+}
+
+/* ---------- lesson 11: recap quizzes + cheat sheet ---------- */
+var RECAP=[
+  {q:'A freshly cloned repo declares an MCP server. What happens when your agent opens the folder?',
+   options:['The server starts — it’s declared','Nothing — the repo is inert until agentstack trust .','A permission prompt appears in the CLI'],correct:1,
+   explain:'Inert means inert: no server spawns, no skill loads, no secret resolves, until you review and trust the exact bytes.'},
+  {q:'Which posture guarantees the agent’s only network route is the audited proxy?',
+   options:['SANDBOX / PROXIED','HOST / PROTECTED','LOCKDOWN / ENFORCED'],correct:2,
+   explain:'Only --lockdown removes the direct route entirely. --sandbox proxies traffic but the container keeps a direct route a proxy-ignoring process could use.'},
+  {q:'Where does a real secret value live?',
+   options:['Encrypted inside the manifest','In .env / keychain / varlock — the manifest holds only ${REF}','In each CLI’s rendered config'],correct:1,
+   explain:'The manifest never holds values. Refs resolve in memory at run time; an unresolved ref fails the write closed rather than leaking a placeholder.'},
+  {q:'A repo’s policy tries to allow more egress hosts than your machine policy does. What applies?',
+   options:['The repo’s — it’s more specific','Your machine policy — the effective policy is the intersection','Whichever was written last'],correct:1,
+   explain:'Machine ∩ project: a repo can only narrow a machine rule, never loosen it. A machine-layer refusal names its layer in the error and the audit log.'}];
+var CHEATS=[
+  ['init','scan CLIs → write one reviewed manifest; lift inline tokens to ${REF}s'],
+  ['apply --write','render the manifest into every CLI’s native config'],
+  ['status / doctor','health + drift; every warning names its exact fix'],
+  ['diff → adopt | apply','review drift, then keep the edit or keep the manifest'],
+  ['guard install','block rm -rf, git reset --hard, .env reads before they run'],
+  ['gateway connect','register the gateway once per CLI (zero-files mode)'],
+  ['trust . / --list / --revoke','review a repo, pin its digest; any edit re-gates it'],
+  ['search / add from <id>','find in library + catalog + MCP Registry; add to all CLIs at once'],
+  ['use <profile> --write','materialize one named subset of the manifest'],
+  ['run --locked | --sandbox | --lockdown','climb the posture ladder to kernel-enforced'],
+  ['report runs | calls · dashboard · explain','flight recorder, audit log, read-only web view, vet-first'],
+  ['restore --last --write','the one undo verb for every recorded write']];
+function buildRecap(){
+  var wrap=$('recapQuiz');
+  RECAP.forEach(function(q){
+    var card=document.createElement('div');
+    card.style.cssText='background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:16px 18px';
+    var qt=document.createElement('div');qt.style.cssText='font-size:14px;font-weight:600;margin-bottom:11px';qt.textContent=q.q;
+    var opts=document.createElement('div');opts.style.cssText='display:flex;flex-direction:column;gap:7px';
+    var fb=document.createElement('div');fb.hidden=true;fb.style.cssText='margin-top:10px;font-size:12.5px;line-height:1.55';
+    card.appendChild(qt);card.appendChild(opts);card.appendChild(fb);
+    buildQuiz(opts,fb,q);
+    wrap.appendChild(card);
+  });
+  var ch=$('cheats');
+  CHEATS.forEach(function(c){
+    var k=document.createElement('span');k.style.cssText='color:var(--accent);white-space:nowrap';k.textContent=c[0];
+    var d=document.createElement('span');d.style.color='var(--term-muted)';d.textContent=c[1];
+    ch.appendChild(k);ch.appendChild(d);
+  });
+}
+
+/* ---------- theme toggle (sidebar variant with its own label) ---------- */
+function themeLabel(){
+  return document.documentElement.getAttribute('data-theme')==='dark'?'Switch to light mode':'Switch to dark mode';
+}
+$('themeBtn').onclick=function(){window.toggleTheme();$('themeBtn').textContent=themeLabel();};
+$('themeBtn').textContent=themeLabel();
+
+/* ---------- init ---------- */
+buildTerminals();
+renderTermCards();
+buildWizOpts();renderWiz();
+renderDrift();
+buildQuiz($('quizDriftOpts'),$('quizDriftFb'),{
+  q:'',options:['agentstack adopt','agentstack apply --write','agentstack restore --last'],correct:0,
+  explain:'The hand-edit holds the truth, so adopt pulls it into the manifest (lifting any inline secret). apply --write would erase your edit by re-rendering the manifest over it.'});
+renderTG();
+renderPosture();
+renderCalls();
+buildRecap();
+renderNav();
+</script>
+</body>
+</html>

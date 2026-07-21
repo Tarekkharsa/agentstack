@@ -2,9 +2,10 @@
 """Generate the animated terminal SVGs embedded by README.md (docs/*.svg).
 
 GitHub renders README images through its camo proxy as plain <img>, which
-blocks JS but NOT CSS animations inside an SVG — so these give the README the
-same line-by-line terminal replays the docs site gets from term-replay.js,
-with crisp selectable-quality text at any DPI instead of a fuzzy GIF.
+blocks JS but NOT CSS animations inside an SVG — so these give the README
+line-by-line terminal replays with crisp selectable-quality text at any DPI
+instead of a fuzzy GIF. (The docs site's own pages simulate terminals in
+plain JS; these SVGs exist for contexts that only allow an image.)
 
 Design constraints:
 - No SMIL, no JS: one CSS keyframe timeline per row, all sharing one master
@@ -367,13 +368,13 @@ WIZARD_REPLAY = (
 
 if __name__ == "__main__":
     docs = Path(__file__).resolve().parent.parent / "docs"
+    # Only the SVGs still embedded somewhere are rendered: firstrun.svg
+    # (design docs, examples/sandbox) and trust-gate.svg (README). The other
+    # scene specs above are kept as source material but not written out —
+    # the old landing/docs pages that embedded them were replaced by the
+    # design-system site (docs/theme/).
     for name, (title, rows) in {
         "firstrun": FIRSTRUN,
         "trust-gate": TRUST_GATE,
-        "lockdown": LOCKDOWN,
-        "closed-loop": CLOSED_LOOP,
-        "guard": GUARD,
-        "one-manifest": ONE_MANIFEST,
-        "wizard-replay": WIZARD_REPLAY,
     }.items():
         render(title, rows, docs / f"{name}.svg")
