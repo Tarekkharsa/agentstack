@@ -24,12 +24,13 @@ This example also probes a deliberate rough edge: **Cursor**. Cursor's adapter
 supports MCP but has **no instructions and no skills** support. Cursor is a
 declared target, and the house-rules fragment targets `*` (all three CLIs), so
 the honest question is what the user experiences. The disk answer is clean —
-Cursor gets the server and nothing else — but the *communication* is not:
-`agentstack` never warns that the instruction and skill can't reach Cursor, and
-`agentstack explain house-rules` actively claims the fragment is "compiled into
-each one's CLAUDE.md / AGENTS.md managed region" even though Cursor has neither.
-`assert.sh` captures this verbatim and marks it as a documented defect (a `SKIP`,
-not a `FAIL`) — the render is correct; the surfacing is not.
+Cursor gets the server and nothing else — and, as of v0.15.0, the *communication*
+is now honest too: `agentstack` **warns** that the instruction and skill can't
+reach Cursor (issues [#12](https://github.com/Tarekkharsa/agentstack/issues/12)
+and [#13](https://github.com/Tarekkharsa/agentstack/issues/13)). `assert.sh`
+asserts this warning as a `PASS`. In the v0.10.1 baseline this was a documented
+defect (a `SKIP`) — the render was correct but the surfacing was silent; that
+gap is closed.
 
 ## How to run
 
@@ -60,10 +61,10 @@ CLIs correctly and secret-safely:
 - **Secret placement.** The resolved token is present in the three native configs
   (their formats store plaintext) and absent from both the manifest and the
   lockfile.
-
-The single `SKIP` line is the finding, not a failure: Cursor silently receives no
-instruction and no skill, and no `agentstack` surface (`apply`, `doctor`,
-`explain`) warns about it.
+- **Honest surfacing of the Cursor gap.** Cursor receives no instruction and no
+  skill, and `agentstack` now warns about it — the run asserts that some surface
+  (`apply --target cursor` or `explain`) pairs "cursor" with the dropped content
+  instead of dropping it silently.
 
 ## What it does not claim
 

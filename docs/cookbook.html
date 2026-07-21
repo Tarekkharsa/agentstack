@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>AgentStack Cookbook — 25 copy-paste recipes for the CLI</title>
-<meta name="description" content="Twenty-six copy-paste recipes for using the AgentStack CLI, building from a one-line manifest to sandboxed, governed execution. The manifest is the source of truth; generated native configuration is compiled output.">
+<meta name="description" content="Twenty-five copy-paste recipes for using the AgentStack CLI, building from a one-line manifest to sandboxed, governed execution. The manifest is the source of truth; generated native configuration is compiled output.">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/cookbook.html">
 <meta property="og:title" content="AgentStack Cookbook — 25 copy-paste recipes for the CLI">
-<meta property="og:description" content="Twenty-six copy-paste recipes for using the AgentStack CLI, from a one-line manifest to sandboxed, governed execution.">
+<meta property="og:description" content="Twenty-five copy-paste recipes for using the AgentStack CLI, from a one-line manifest to sandboxed, governed execution.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://tarekkharsa.github.io/agentstack/cookbook.html">
 <meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
@@ -58,7 +58,7 @@
   .nav{flex-wrap:wrap !important;row-gap:var(--space-2) !important}
   .nav-actions{flex-wrap:wrap !important}
   .ck-layout{flex-direction:column !important;gap:var(--space-6) !important;padding-left:var(--space-4) !important;padding-right:var(--space-4) !important}
-  .ck-rail{position:static !important;width:auto !important;max-height:none !important}
+  .ck-rail{position:static !important;width:auto !important;max-height:220px !important;overflow-y:auto !important;border-bottom:1px solid var(--color-divider);padding-bottom:var(--space-2)}
 }
 </style>
 </head>
@@ -97,13 +97,13 @@
           <a href="#r6" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">6</span><span>Add skills</span></a>
           <a href="#r7" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">7</span><span>Task-specific profiles</span></a>
           <a href="#r8" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">8</span><span>Share house rules across CLIs</span></a>
-          <a href="#r25" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">26</span><span>Native extensions</span></a>
+          <a href="#r25" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">25</span><span>Native extensions</span></a>
           <a href="#r9" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">9</span><span>The everyday loop</span></a>
           <a href="#r14" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">14</span><span>The central library</span></a>
           <a href="#r15" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">15</span><span>Sync the library across machines</span></a>
           <a href="#r16" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">16</span><span>Versioned vendor packs</span></a>
-          <a href="#r23" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">24</span><span>Extend it</span></a>
-          <a href="#r24" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">25</span><span>The personal layer &amp; app-owned servers</span></a>
+          <a href="#r23" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">23</span><span>Extend it</span></a>
+          <a href="#r24" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">24</span><span>The personal layer &amp; app-owned servers</span></a>
         </div>
       </div>
 
@@ -117,8 +117,8 @@
           <a href="#r11" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">11</span><span>The machine layer</span></a>
           <a href="#r12" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">12</span><span>Governance</span></a>
           <a href="#r13" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">13</span><span>Zero files: the trust gate</span></a>
-          <a href="#r18" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">19</span><span>The other policy dimensions</span></a>
-          <a href="#r22" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">23</span><span>The CI trust gate</span></a>
+          <a href="#r18" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">18</span><span>The other policy dimensions</span></a>
+          <a href="#r22" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">22</span><span>The CI trust gate</span></a>
         </div>
       </div>
 
@@ -128,8 +128,8 @@
           <span style="font-size:0.72rem;font-weight:700;letter-spacing:0.1em;color:var(--color-accent-700);text-transform:uppercase">Run confined</span>
         </div>
         <div style="display:flex;flex-direction:column;border-left:2px solid var(--color-neutral-200);margin-left:3px;padding-left:var(--space-3);gap:2px">
-          <a href="#r17" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">18</span><span>Sandboxed runs with egress policy</span></a>
-          <a href="#r21" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">22</span><span>Experimental: governed TypeScript</span></a>
+          <a href="#r17" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">17</span><span>Sandboxed runs with egress policy</span></a>
+          <a href="#r21" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">21</span><span>Experimental: governed TypeScript</span></a>
         </div>
       </div>
 
@@ -139,8 +139,8 @@
           <span style="font-size:0.72rem;font-weight:700;letter-spacing:0.1em;color:var(--color-accent-700);text-transform:uppercase">Observe</span>
         </div>
         <div style="display:flex;flex-direction:column;border-left:2px solid var(--color-neutral-200);margin-left:3px;padding-left:var(--space-3);gap:2px">
-          <a href="#r19" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">20</span><span>See what happened</span></a>
-          <a href="#r20" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">21</span><span>See what your tools cost</span></a>
+          <a href="#r19" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">19</span><span>See what happened</span></a>
+          <a href="#r20" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">20</span><span>See what your tools cost</span></a>
         </div>
       </div>
 
@@ -148,7 +148,7 @@
 
     <div style="flex:1;min-width:0">
       <h1 style="font-family:var(--font-heading);font-weight:400;font-size:2.6rem;margin:0 0 var(--space-3)">Cookbook — AgentStack, by example</h1>
-      <p style="font-size:1.05rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">Twenty-six copy-paste recipes for <strong>using the CLI</strong>, building from a one-line manifest to sandboxed, governed execution. The manifest is the source of truth; generated native configuration is compiled output. Watching the security claims <em>proven</em> instead? That's the <a href="examples.html">Demos page</a>.</p>
+      <p style="font-size:1.05rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">Twenty-five copy-paste recipes for <strong>using the CLI</strong>, building from a one-line manifest to sandboxed, governed execution. The manifest is the source of truth; generated native configuration is compiled output. Watching the security claims <em>proven</em> instead? That's the <a href="examples.html">Demos page</a>.</p>
       <div class="card" style="background:var(--color-accent-100);margin-bottom:var(--space-6)"><div class="card-body" style="font-size:0.92rem;line-height:1.6"><strong>How to read the evidence:</strong> unless a recipe is marked <em>runnable fixture</em>, treat its code as a focused, CLI-validated recipe rather than a self-asserting end-to-end proof.</div></div>
 
       <!-- ═══════════════ GROUP: Configure ═══════════════ -->
@@ -217,11 +217,11 @@
         </div>
         <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
           <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
-            <button data-copy="default = [&quot;claude-code&quot;, &quot;codex&quot;, &quot;cursor&quot;, &quot;gemini-cli&quot;]" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+            <button data-copy="default = [&quot;claude-code&quot;, &quot;codex&quot;, &quot;cursor&quot;, &quot;gemini&quot;]" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
           </div>
           <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
             <div style="white-space:pre"><span style="color:var(--term-text)">[targets]</span><span style="color:var(--term-muted)"></span></div>
-            <div style="white-space:pre"><span style="color:var(--term-text)">default = ["claude-code", "codex", "cursor", "gemini-cli"]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">default = ["claude-code", "codex", "cursor", "gemini"]</span><span style="color:var(--term-muted)"></span></div>
           </div>
         </div>
         <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Four CLIs, four native config formats, one source of truth. No drift, no copy-paste. 13 CLIs supported — agentstack adapters list.</div>
@@ -437,11 +437,11 @@
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Install a capability once into your machine-wide library (~/.agentstack/lib), then reference it by name from any project — nothing copied, and every add is content-scanned before it lands.</div>
         <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
           <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
-            <button data-copy="agentstack lib add server github" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+            <button data-copy="agentstack lib add-server github --file github.toml --write" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
           </div>
           <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
-            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack lib add server github</span><span style="color:var(--term-muted)">   # once, machine-wide, content-scanned</span></div>
-            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack add github</span><span style="color:var(--term-muted)">   # any project: reference by name</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack lib add-server github --file github.toml --write</span><span style="color:var(--term-muted)">   # once, machine-wide, content-scanned</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">servers = ["github"]</span><span style="color:var(--term-muted)">   # any project: reference it by name in a profile, then agentstack lock</span></div>
           </div>
         </div>
       </div>
@@ -472,10 +472,10 @@
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Install a pinned bundle of MCP servers, skills, and house rules in one shot — policy-gated and content-scanned first, with the lockfile recording exactly what you got. Upgrading is just the next tag.</div>
         <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
           <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
-            <button data-copy="agentstack add pack github.com/acme/agent-pack@v2.1.0" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+            <button data-copy="agentstack add from git:github.com/acme/agent-pack@v2.1.0 --write" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
           </div>
           <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
-            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack add pack github.com/acme/agent-pack@v2.1.0</span><span style="color:var(--term-muted)">   # pinned, scanned, locked</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack add from git:github.com/acme/agent-pack@v2.1.0 --write</span><span style="color:var(--term-muted)">   # pinned, scanned, locked</span></div>
           </div>
         </div>
       </div>
@@ -709,7 +709,7 @@
       <!-- ═══════════════ GROUP: Run confined ═══════════════ -->
       <div style="display:flex;align-items:baseline;gap:var(--space-3);margin:var(--space-7) 0 var(--space-2);padding-top:var(--space-2);border-top:2px solid var(--color-accent)">
         <h2 style="font-family:var(--font-heading);font-weight:400;font-size:1.7rem;margin:0">Run confined</h2>
-        <code style="font-size:0.82rem;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace">$ agentstack run --sandbox [--lockdown]</code>
+        <code style="font-size:0.82rem;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace">$ agentstack run &lt;cli&gt; --sandbox [--lockdown]</code>
       </div>
       <p style="font-size:0.95rem;line-height:1.6;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">Confine the run: containers whose only way out is the audited egress proxy, and governed code execution.</p>
 

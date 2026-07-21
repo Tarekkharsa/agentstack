@@ -69,8 +69,10 @@ each outcome (`PASS`/`FAIL`, exits nonzero on any mismatch):
 It then proves three more things:
 
 1. **Multi-CLI coverage.** The same policy is re-run through Codex's dialect
-   (`--protocol codex`), where a deny is a **stderr reason + exit code 2** (not a
-   JSON body). Claude's dialect answers a deny as a JSON envelope on stdout.
+   (`--protocol codex`), which answers with the **same stdout decision envelope**
+   as Claude: a deny is `hookSpecificOutput.permissionDecision = "deny"` on
+   stdout with **exit 0** (the JSON body is the signal, not the exit code), and
+   an allow exits 0 with no deny envelope.
 2. **Denials are auditable.** Every refusal — reads, writes, and shell commands
    alike — is recorded to `$AGENTSTACK_HOME/audit/calls.jsonl` as a
    `host-guard` / `denied` entry. `guard status` reflects the live config.
@@ -79,28 +81,30 @@ It then proves three more things:
 The script ends with `PASS`/`FAIL` assertions on every outcome and exits nonzero
 if any fails, so it doubles as a CI-grade regression check.
 
-## Known limitation (F1) — why the deny list is mirrored into the machine layer
+## Project-layer deny enforces from both layouts (F1, resolved)
 
-The repo declares its off-limits folders in `.agentstack/agentstack.toml`, the
-documented preferred manifest location. **Today the guard does not enforce a
-deny list from that location.** `agentstack guard check` loads the project
-manifest with a helper that looks for `<repo>/agentstack.toml` (the legacy root
-path) and never consults the `.agentstack/` subdirectory, so a project-layer
-`[policy.filesystem] deny` at `.agentstack/agentstack.toml` is **silently
-ignored** — even after `lock` and `trust`. Only the machine layer enforces.
+> **History (F1 / issue #11), fixed as of v0.15.0.** In the v0.10.1 baseline,
+> `agentstack guard check` loaded the project manifest only from the legacy root
+> `<repo>/agentstack.toml` and never consulted the `.agentstack/` subdirectory,
+> so a project-layer `[policy.filesystem] deny` at the *preferred*
+> `.agentstack/agentstack.toml` was silently ignored — only the machine layer
+> enforced. That contradicted the "a repo can only *add* restrictions (union)"
+> story in `CLAUDE.md` and `examples/guard-demo/README.md`, so the demo mirrored
+> the three folder globs into the machine manifest as a workaround.
 
-That contradicts the "a repo can only *add* restrictions (union)" story in
-`CLAUDE.md` and `examples/guard-demo/README.md`. Until it is fixed, restricted
-folders must be declared in the **machine** manifest
-(`~/.agentstack/agentstack.toml`) to take effect — which is exactly what
-`assert.sh` does (it mirrors the three folder globs there). The demo also
-includes an isolated **probe** that demonstrates F1 directly: a lone
-project-layer deny is checked, prints a loud `SKIP`, and a control assertion
-proves the *same* deny **does** enforce when placed at `<repo>/agentstack.toml`
-— isolating the bug to `.agentstack/` path resolution, not the deny engine.
+That gap is closed. `agentstack guard check` now resolves the project manifest
+through the shared path logic, so a project-layer deny takes effect from **both**
+layouts — the preferred `.agentstack/agentstack.toml` and the legacy root
+`<repo>/agentstack.toml`. The demo's final section proves this directly with an
+isolated sub-sandbox whose machine deny list is **empty**: a lone project-layer
+deny at `.agentstack/agentstack.toml` blocks the read (`union works`), and a
+control asserts the same deny at `<repo>/agentstack.toml` enforces too. Both are
+`PASS`.
 
-Once F1 is fixed, the probe flips from `SKIP` to `PASS` and the repo's own
-declaration will enforce on its own.
+`assert.sh` still mirrors the three folder globs into the machine manifest for
+the main body of the demo — that layer is the user's own machine floor and the
+globs belong there anyway — but a repo no longer *needs* the machine layer for a
+project-declared deny to bite.
 
 ## What this does NOT claim
 

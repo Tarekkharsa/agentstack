@@ -214,7 +214,11 @@ named reference like `${GH_TOKEN}`, never the value. A ref is a strict
 (`${input:key}`) pass through verbatim and are **not** treated as secrets.
 Placeholders resolve in memory at run time; if one can't resolve, the write or
 run fails closed, reporting the unresolved ref rather than blanking or leaking it
-into live config.
+into live config. Where a resolved value lands depends on delivery mode: a
+static render writes it into a native config whose format requires it (behind a
+managed gitignore); gateway-backed and clean-at-rest delivery resolve host-side
+and keep values out of files at rest. The manifest and lockfile never hold
+values in any mode.
 
 **Keychain and varlock** — the two backing stores a `${REF}` resolves from. The
 OS **keychain** (service `agentstack`) holds values locally; **varlock** is an

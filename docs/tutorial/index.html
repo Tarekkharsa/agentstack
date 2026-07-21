@@ -102,6 +102,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 .rowcard{display:flex;gap:14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:13px 16px}
 @media (max-width:760px){
   #app{flex-direction:column;height:auto;overflow:visible}
+  #shell{flex-direction:column;min-height:0}
   #sidebar{width:auto !important;border-right:none !important;border-bottom:1px solid var(--line)}
   #lessonNav{flex-direction:row !important;overflow-x:auto;padding-bottom:12px !important}
   #lessonNav .navbtn span:last-child{white-space:nowrap}
@@ -126,7 +127,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     <span style="font-weight:700;font-size:14px;color:var(--accent)">Tutorial</span>
     <a href="https://github.com/Tarekkharsa/agentstack" style="text-decoration:none;font-weight:600;font-size:14px;color:var(--ink)">GitHub</a>
   </nav>
-  <div style="flex:1;display:flex;min-height:0">
+  <div id="shell" style="flex:1;display:flex;min-height:0">
   <div id="sidebar" style="width:252px;flex:none;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;overflow-y:auto">
     <div style="padding:16px 18px 12px;border-bottom:1px solid var(--line-soft)">
       <div class="mono" style="font-size:11px;color:var(--muted);letter-spacing:0.08em">INTERACTIVE TUTORIAL</div>
@@ -151,7 +152,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
       <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
         <div class="gapcard"><div class="t">Anything a repo declares can run</div><div class="d">A clone stays <strong>inert</strong> until you trust its exact bytes; any edit re-gates it.</div></div>
         <div class="gapcard"><div class="t">Nothing narrows or records agents</div><div class="d">A machine policy no repo can loosen fences tools, secrets, egress — every brokered call is logged.</div></div>
-        <div class="gapcard"><div class="t">Every CLI spells setup differently</div><div class="d">One reviewed manifest renders them all; secrets stay references, never values.</div></div>
+        <div class="gapcard"><div class="t">Every CLI spells setup differently</div><div class="d">One reviewed manifest renders them all; the manifest holds secret references, never values.</div></div>
         <div class="gapcard"><div class="t">Agents wreck trees by accident</div><div class="d"><code>guard</code> blocks <code>rm -rf</code>, <code>git reset --hard</code>, and <code>.env</code> reads before they run.</div></div>
       </div>
     </div>
@@ -301,10 +302,10 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">profiles</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Named subsets of the manifest ("backend", "design"). <code class="sm">use &lt;profile&gt; --write</code> materializes only that profile's skills and prunes the rest it owns.</span></div>
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">library</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Your central home at <code class="sm">~/.agentstack/lib/</code> — skills and server definitions projects reference <em>by name</em> instead of copying. <code class="sm">lib sync</code> carries it across machines.</span></div>
-      <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">search + add</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">One search over your library, the bundled catalog, and the official MCP Registry. <code class="sm">add from &lt;id&gt;</code> lifts its secrets and renders it to <strong>all your CLIs at once</strong>. Skills also install from any repo: <code class="sm">add skill owner/repo</code>.</span></div>
+      <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">search + add</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">One search over your library, the bundled catalog, and the official MCP Registry. <code class="sm">add from &lt;id&gt; --write</code> adds it to the manifest with its secrets lifted to <code class="sm">${REF}</code>s; one <code class="sm">apply --write</code> then renders it to <strong>all your CLIs at once</strong>. Skills also install from any repo: <code class="sm">add skill owner/repo --write</code>.</span></div>
     </div>
     <div class="term" style="margin-bottom:8px" data-term="scale" data-title="your-project — zsh"></div>
-    <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-top:10px">Try before installing: <code class="sm">agentstack try &lt;skill&gt;</code> runs a skill without writing anything.</div>
+    <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-top:10px">Try before installing: <code class="sm">agentstack try owner/repo --skill &lt;name&gt;</code> stages and scans a skill and emits a wrapper prompt for piping into any CLI — no manifest, lock, or config is touched.</div>
   </section>
 
   <section class="lesson-pane" id="lesson-7" hidden>
@@ -337,9 +338,9 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     <h1 class="lesson">Machine ∩ project — and everything on the record</h1>
     <p class="lede">Your <strong>machine policy</strong> (in <code>~/.agentstack/agentstack.toml</code>) sets standing limits checked <em>before</em> any project's on every brokered call. The effective policy is the <strong>intersection</strong> — a repo can only narrow a machine rule, never loosen it.</p>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:20px 22px;margin-bottom:18px">
-      <div class="mono" style="display:flex;align-items:center;justify-content:center;gap:0;font-size:12.5px">
-        <div style="width:170px;height:110px;border:2px solid var(--accent);border-radius:55px;display:flex;align-items:center;justify-content:flex-start;padding-left:24px;font-weight:700;color:var(--accent);background:color-mix(in srgb, var(--accent) 7%, transparent)">machine<br>policy</div>
-        <div style="width:170px;height:110px;border:2px solid var(--muted);border-radius:55px;display:flex;align-items:center;justify-content:flex-end;padding-right:28px;font-weight:700;color:var(--muted);background:color-mix(in srgb, var(--muted) 8%, transparent);margin-left:-58px">project<br>policy</div>
+      <div class="mono" style="display:flex;align-items:center;justify-content:center;gap:0;font-size:12.5px;overflow-x:auto">
+        <div style="width:170px;height:110px;flex:none;border:2px solid var(--accent);border-radius:55px;display:flex;align-items:center;justify-content:flex-start;padding-left:24px;font-weight:700;color:var(--accent);background:color-mix(in srgb, var(--accent) 7%, transparent)">machine<br>policy</div>
+        <div style="width:170px;height:110px;flex:none;border:2px solid var(--muted);border-radius:55px;display:flex;align-items:center;justify-content:flex-end;padding-right:28px;font-weight:700;color:var(--muted);background:color-mix(in srgb, var(--muted) 8%, transparent);margin-left:-58px">project<br>policy</div>
       </div>
       <div style="text-align:center;margin-top:10px;font-size:12.5px;color:var(--muted)">the overlap = <strong style="color:var(--ink)">effective policy</strong> — what a brokered call is actually checked against</div>
       <div class="grid4" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:18px">
@@ -404,16 +405,17 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 
 var LESSONS=['Welcome — the problem','The map — concepts','Step 1 · Unify','Step 2 · Verify','Step 3 · Guard','Step 4 · Trust','Step 5 · Scale','Step 6 · Confine','Policy & audit','Modes, teams & undo','Recap & cheat sheet'];
 var W='var(--term-text)',G='var(--term-ok)',R='var(--term-bad)',A='var(--term-warn)',D='var(--term-muted)';
+var VERSION='0.15.0'; /* one shared value — keep in sync with the released tag */
 var TERM={
   unify:[
-    {cmd:'curl -fsSL …/install.sh | sh',out:[['downloading agentstack v1.4.2…',D],['verifying tarball against checksums.txt… ok',D],['✓ installed to ~/.local/bin/agentstack',G]]},
+    {cmd:'curl -fsSL …/install.sh | sh',out:[['downloading agentstack v'+VERSION+'…',D],['verifying tarball against checksums.txt… ok',D],['✓ installed to ~/.local/bin/agentstack',G]]},
     {cmd:'agentstack init --yes',out:[['🔍  6 CLI binaries on PATH: Claude Code · Codex CLI · Cursor · Gemini CLI · OpenCode · Pi',W],['📥  Imported 1 MCP server(s) from existing configs',W],['🔑  Lifted 1 inline token → ${GITHUB_TOKEN}  (stored in gitignored .env)',A],['✅  Wrote .agentstack/agentstack.toml',G]]},
     {cmd:'agentstack apply --write',out:[['Claude Code (.mcp.json)              ✓ wrote 1 server(s)',G],['Codex CLI (.codex/config.toml)       ✓ wrote 1 server(s)',G],['Gemini CLI (.gemini/settings.json)   ✓ wrote 1 server(s)',G],['OpenCode (opencode.json)             ✓ wrote 1 server(s)',G],['Applied to 4 target(s).',W]]}
   ],
   verify:[
     {cmd:'agentstack doctor',out:[['✓ manifest valid  (.agentstack/agentstack.toml)',G],['✓ secrets — 2/2 ${REF}s resolve on this machine',G],['⚠ drift — .mcp.json edited on disk since last apply',A],['   fix: agentstack diff  →  adopt (keep edit)  or  apply --write (keep manifest)',D],['✓ guard installed in 4 CLIs',G],['3 sections hidden (features you don’t use) — doctor --all shows everything',D]]},
     {cmd:'agentstack diff',out:[['.mcp.json  (Claude Code)',W],['+ "context7": { "command": "npx", "args": ["-y", "context7-mcp"] }',G],['  ← hand-added since last apply; the manifest does not declare "context7"',D]]},
-    {cmd:'agentstack adopt context7',out:[['✓ pulled "context7" into .agentstack/agentstack.toml',G],['🔑 lifted inline token → ${CONTEXT7_KEY}',A],['comments in the live config preserved',D]]},
+    {cmd:'agentstack adopt --write',out:[['✓ pulled "context7" into .agentstack/agentstack.toml',G],['🔑 lifted inline token → ${CONTEXT7_KEY}',A],['comments in the live config preserved',D]]},
     {cmd:'agentstack restore --last --write',out:[['reverting write w-31c8  (adopt context7)…',D],['✓ restored — the file shows as pending again in doctor',G]]}
   ],
   guard:[
@@ -430,16 +432,16 @@ var TERM={
   ],
   scale:[
     {cmd:'agentstack search postgres',out:[['[library]   pg-tools        your central library  (~/.agentstack/lib/)',W],['[registry]  postgres-mcp    registry.modelcontextprotocol.io',W],['[catalog]   sql-skill       bundled catalog',W]]},
-    {cmd:'agentstack add from postgres-mcp',out:[['✓ resolved from the official MCP Registry',G],['🔑 secret lifted → ${DATABASE_URL}',A],['✓ rendered to 4 CLIs — one add, every tool',G]]},
+    {cmd:'agentstack add from postgres-mcp --write',out:[['✓ resolved from the official MCP Registry',G],['🔑 secret lifted → ${DATABASE_URL}',A],['✓ added to .agentstack/agentstack.toml',G],['next: agentstack apply --write renders it to all 4 CLIs at once',D]]},
     {cmd:'agentstack use backend --write',out:[['✓ materialized 3 skill(s) for profile "backend"',G],['✓ pruned 2 skill(s) owned by other profiles  (hand-made dirs untouched)',D]]}
   ],
   run:[
-    {cmd:'agentstack run claude --locked',out:[['┌ run r-6c19 · claude',W],['│ posture  HOST / PROTECTED',A],['│ gates    trust ✓ · lock ✓ · policy admission ✓ · tool surface frozen',D],['└ launching on host…',W]]},
-    {cmd:'agentstack run claude --lockdown',out:[['┌ run r-7f3a · claude',W],['│ posture  LOCKDOWN / ENFORCED',G],['│ egress   only via audited proxy — no direct route out of the container',D],['│ policy   machine ∩ project · 14 tool rules · 3 egress hosts',D],['└ launching in container…',W]]},
+    {cmd:'agentstack run claude-code --locked',out:[['┌ run r-6c19 · claude-code',W],['│ posture  HOST / PROTECTED',A],['│ gates    trust ✓ · lock ✓ · policy admission ✓ · tool surface frozen',D],['└ launching on host…',W]]},
+    {cmd:'agentstack run claude-code --lockdown',out:[['┌ run r-7f3a · claude-code',W],['│ posture  LOCKDOWN / ENFORCED',G],['│ egress   only via audited proxy — no direct route out of the container',D],['│ policy   machine ∩ project · 14 tool rules · 3 egress hosts',D],['└ launching in container…',W]]},
     {cmd:'agentstack kill r-7f3a',out:[['✓ stopped run r-7f3a and reverted the profile it owned',G]]}
   ],
   report:[
-    {cmd:'agentstack report runs',out:[['r-7f3a  claude  LOCKDOWN/ENFORCED  12m   38 calls  ok',W],['r-6c19  claude  HOST/PROTECTED     41m  112 calls  ok',W],['r-51b0  codex   HOST/ADVISORY       8m    9 calls  ok',W]]},
+    {cmd:'agentstack report runs',out:[['r-7f3a  claude-code  LOCKDOWN/ENFORCED  12m   38 calls  ok',W],['r-6c19  claude-code  HOST/PROTECTED     41m  112 calls  ok',W],['r-51b0  codex        HOST/ADVISORY       8m    9 calls  ok',W]]},
     {cmd:'agentstack report calls --since 7',out:[['github.create_issue      31 ok   0 denied',G],['postgres.query           64 ok   2 denied  (policy: machine layer)',A],['argument digests only — values are never stored',D]]},
     {cmd:'agentstack explain github',out:[['origin    official MCP Registry · pinned sha256:2b8e…',W],['policy    tools: 12 allowed, 2 denied · egress: api.github.com only',W],['secrets   may read ${GITHUB_TOKEN} — nothing else',W],['context   ~1.8k tokens per session',D]]},
     {cmd:'agentstack dashboard',out:[['dashboard: http://127.0.0.1:4173  (read-only — every pane shows the CLI command instead of a button)',G]]}
@@ -448,10 +450,11 @@ var TERM={
 };
 /* lesson 10 terminal reuses its own command set */
 TERM.undo=[
-  {cmd:'agentstack mode zero-files --write',out:[['✓ switched delivery mode — rendered files removed, gateway serves live',G],['trust and policy unchanged',D]]},
-  {cmd:'agentstack sign',out:[['✓ lockfile signed — agentstack.lock.sig (detached ed25519)',G]]},
-  {cmd:'agentstack verify --pubkey team.pub',out:[['✓ signature valid — lockfile matches the maintainer’s key',G]]},
-  {cmd:'agentstack restore --last --write',out:[['reverting write w-4a02  (mode zero-files)…',D],['✓ restored previous delivery mode',G]]}
+  {cmd:'agentstack session start backend',out:[['✓ session started — rendered profile "backend" for now',G],['clean-at-rest rhythm: files exist only until session end',D]]},
+  {cmd:'agentstack session end',out:[['✓ session ended — rendered files reverted, repo pristine again',G]]},
+  {cmd:'agentstack sign',out:[['✓ lockfile signed — agentstack.lock.sig (detached ed25519)',G],['public key (64 hex — publish it, e.g. commit as team.pub): 9b1de40c…',D]]},
+  {cmd:'agentstack verify --pubkey $(cat team.pub)',out:[['✓ signature valid — lockfile matches the maintainer’s key',G]]},
+  {cmd:'agentstack restore --last --write',out:[['reverting write w-4a02  (use backend)…',D],['✓ restored — the previous rendered configs are back',G]]}
 ];
 
 var state={lesson:0,visited:{0:true},openCard:-1,tgState:'start',wizStep:0,wizSecret:null,wizMode:null,driftPick:null,posturePick:'plain',callPick:null};
@@ -568,7 +571,7 @@ var MODE={
     lines:[['Preview: 1 server → 4 targets  (.mcp.json, .codex/config.toml, .gemini/settings.json, opencode.json)','w'],['Proceed? [Y/n] y','a'],['✓ apply --write — rendered to 4 target(s)','g'],['✓ skills activated · doctor: all green','g']],
     note:'The render path: preview → confirm → apply --write → activate skills → doctor. Files sit ready on disk the moment a CLI starts.'},
   clean:{name:'clean-at-rest',desc:'repo stays pristine between sessions — files exist only inside session start / session end',
-    lines:[['✓ agentstack lock — name refs pinned, nothing rendered','g'],['git status → clean','w'],['next: agentstack session start --profile <p>   # renders for one session','d'],['      agentstack session end                  # reverts every file','d']],
+    lines:[['✓ agentstack lock — name refs pinned, nothing rendered','g'],['git status → clean','w'],['next: agentstack session start <profile>   # renders for one session','d'],['      agentstack session end             # reverts every file','d']],
     note:'Nothing is rendered now. The wizard teaches the session rhythm instead: capabilities arrive with session start and revert on session end.'},
   zero:{name:'zero-files',desc:'nothing on disk — the gateway serves each trusted repo’s stack live (CLI must speak MCP)',
     lines:[['✓ agentstack lock — pinned, nothing rendered','g'],['Register the gateway in your CLIs? [Y/n] y','a'],['✓ gateway connect --all --write — 4 CLIs registered','g'],['→ finish with:  agentstack trust .','w']],
@@ -617,7 +620,7 @@ function buildWizOpts(){
 
 /* ---------- lesson 4: drift resolver + checkpoint quiz ---------- */
 var DR={
-  adopt:{lines:[['$ agentstack adopt context7','a'],['✓ pulled "context7" into .agentstack/agentstack.toml','g'],['🔑 lifted inline token → ${CONTEXT7_KEY}','a'],['✓ doctor: drift cleared — manifest now declares what disk has','g']],note:'The hand-edit held the truth: adopt made it official, and the inline token was lifted on the way in.'},
+  adopt:{lines:[['$ agentstack adopt --write','a'],['✓ pulled "context7" into .agentstack/agentstack.toml','g'],['🔑 lifted inline token → ${CONTEXT7_KEY}','a'],['✓ doctor: drift cleared — manifest now declares what disk has','g']],note:'The hand-edit held the truth: adopt made it official, and the inline token was lifted on the way in.'},
   apply:{lines:[['$ agentstack apply --write','a'],['Claude Code (.mcp.json)   ✓ re-rendered — stray "context7" entry removed','g'],['✓ doctor: drift cleared — disk now matches the manifest','g']],note:'The manifest held the truth: apply re-rendered over the stray edit. The hand-added server is gone from the config.'},
   restore:{lines:[['$ agentstack restore --last --write','a'],['reverting write w-31c8…','d'],['✓ restored — the file shows as pending again in doctor','g']],note:'Neither side yet — restore rewound agentstack’s own last write so you can decide with a clean slate.'}};
 var DRIFT_OPTS=[
@@ -688,10 +691,10 @@ function tgPull(){state.tgState=state.tgState==='trusted'?'dropped':'inert';rend
 
 /* ---------- lesson 8: posture builder ---------- */
 var PO={
-  plain:{cmd:'agentstack run claude',label:'HOST / ADVISORY',lc:'var(--term-muted)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','—'],['frozen tool surface','—'],['container','—'],['egress enforced','—']],note:'Tracked and logged, nothing confined. Fine for everyday work you already trust.'},
-  locked:{cmd:'agentstack run claude --locked',label:'HOST / PROTECTED',lc:'var(--term-warn)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','✓ fail-closed'],['frozen tool surface','✓'],['container','—'],['egress enforced','—']],note:'No Docker needed. Gates run before launch and the tool surface freezes — but the agent still runs as you, on the host.'},
-  sandbox:{cmd:'agentstack run claude --sandbox',label:'SANDBOX / PROXIED · DIRECT ROUTE OPEN',lc:'var(--accent)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','✓ fail-closed'],['frozen tool surface','✓'],['container','✓ project mounted as workspace'],['egress enforced','proxied — direct route still open']],note:'HTTPS routes through the host-side proxy, but the container’s bridge network keeps a direct route a proxy-ignoring process could use.'},
-  lockdown:{cmd:'agentstack run claude --sandbox --lockdown',label:'LOCKDOWN / ENFORCED · NO DIRECT ROUTE',lc:'var(--term-ok)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','✓ fail-closed'],['frozen tool surface','✓'],['container','✓ internal-only network'],['egress enforced','✓ sole peer: the audited sidecar']],note:'Topologically confined — no host route, no internet, only the egress sidecar. Preview any tier first with --plan.'}};
+  plain:{cmd:'agentstack run claude-code',label:'HOST / ADVISORY',lc:'var(--term-muted)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','—'],['frozen tool surface','—'],['container','—'],['egress enforced','—']],note:'Tracked and logged, nothing confined. Fine for everyday work you already trust.'},
+  locked:{cmd:'agentstack run claude-code --locked',label:'HOST / PROTECTED',lc:'var(--term-warn)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','✓ fail-closed'],['frozen tool surface','✓'],['container','—'],['egress enforced','—']],note:'No Docker needed. Gates run before launch and the tool surface freezes — but the agent still runs as you, on the host.'},
+  sandbox:{cmd:'agentstack run claude-code --sandbox',label:'SANDBOX / PROXIED · DIRECT ROUTE OPEN',lc:'var(--accent)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','✓ fail-closed'],['frozen tool surface','✓'],['container','✓ project mounted as workspace'],['egress enforced','proxied — direct route still open']],note:'HTTPS routes through the host-side proxy, but the container’s bridge network keeps a direct route a proxy-ignoring process could use.'},
+  lockdown:{cmd:'agentstack run claude-code --sandbox --lockdown',label:'LOCKDOWN / ENFORCED · NO DIRECT ROUTE',lc:'var(--term-ok)',rows:[['tracked + logged','✓'],['guard hooks advise','✓'],['pre-launch gates (trust · lock · policy)','✓ fail-closed'],['frozen tool surface','✓'],['container','✓ internal-only network'],['egress enforced','✓ sole peer: the audited sidecar']],note:'Topologically confined — no host route, no internet, only the egress sidecar. Preview any tier first with --plan.'}};
 var PO_OPTS=[['plain','plain run'],['locked','--locked'],['sandbox','--sandbox'],['lockdown','--sandbox --lockdown']];
 function renderPosture(){
   var wrap=$('postureOpts');wrap.innerHTML='';
@@ -746,9 +749,9 @@ var RECAP=[
   {q:'Which posture guarantees the agent’s only network route is the audited proxy?',
    options:['SANDBOX / PROXIED','HOST / PROTECTED','LOCKDOWN / ENFORCED'],correct:2,
    explain:'Only --lockdown removes the direct route entirely. --sandbox proxies traffic but the container keeps a direct route a proxy-ignoring process could use.'},
-  {q:'Where does a real secret value live?',
+  {q:'Where does a real secret value live — the source of truth?',
    options:['Encrypted inside the manifest','In .env / keychain / varlock — the manifest holds only ${REF}','In each CLI’s rendered config'],correct:1,
-   explain:'The manifest never holds values. Refs resolve in memory at run time; an unresolved ref fails the write closed rather than leaking a placeholder.'},
+   explain:'The source of truth is .env / keychain / varlock; the manifest and lockfile hold only ${REF}. A static apply --write may resolve a value into a native config whose format requires it — gateway and clean-at-rest delivery keep values out of project files. An unresolvable ref fails the write closed rather than leaking a placeholder.'},
   {q:'A repo’s policy tries to allow more egress hosts than your machine policy does. What applies?',
    options:['The repo’s — it’s more specific','Your machine policy — the effective policy is the intersection','Whichever was written last'],correct:1,
    explain:'Machine ∩ project: a repo can only narrow a machine rule, never loosen it. A machine-layer refusal names its layer in the error and the audit log.'}];
@@ -760,7 +763,7 @@ var CHEATS=[
   ['guard install','block rm -rf, git reset --hard, .env reads before they run'],
   ['gateway connect','register the gateway once per CLI (zero-files mode)'],
   ['trust . / --list / --revoke','review a repo, pin its digest; any edit re-gates it'],
-  ['search / add from <id>','find in library + catalog + MCP Registry; add to all CLIs at once'],
+  ['search / add from <id> --write','find in library + catalog + MCP Registry; apply --write renders it everywhere'],
   ['use <profile> --write','materialize one named subset of the manifest'],
   ['run --locked | --sandbox | --lockdown','climb the posture ladder to kernel-enforced'],
   ['report runs | calls · dashboard · explain','flight recorder, audit log, read-only web view, vet-first'],

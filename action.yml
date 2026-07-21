@@ -16,7 +16,7 @@ branding:
 
 inputs:
   version:
-    description: agentstack release tag to install (e.g. v0.14.0), or "latest"
+    description: agentstack release tag to install (e.g. v0.15.0), or "latest"
     required: false
     # Pin the default to *this action's* release tag so `uses: …@vX` installs
     # the binary that shipped with vX — never a newer one. This MUST be bumped

@@ -202,14 +202,18 @@ by which side holds the truth:
 
 ### `adopt` and `add`
 
-`adopt` is the keep-side of a [drift decision](#drift-adopt-or-apply) — pull a
-hand-added server from a target config back into the manifest, lifting its inline
-secret and preserving comments; `add` is the flag-driven (scriptable /
-agent-operable) way to add a server or skill, optionally into a profile.
+`adopt` is the keep-side of a [drift decision](#drift-adopt-or-apply) — it
+imports native **server drift** (hand-added servers, hand-edited fields) from
+target configs back into the manifest, lifting inline secrets and preserving
+comments. It takes no positional name: it sweeps the drifted targets, scoped
+with `--target <id>` if you want just one CLI's config. `add` is the
+flag-driven (scriptable / agent-operable) way to add a server or skill,
+optionally into a profile.
 
 ```text
-agentstack adopt <name>   # pull a hand-added server back into the manifest
-agentstack add ...        # flag-driven add of a server or skill
+agentstack adopt --write                  # import hand-added server drift into the manifest
+agentstack adopt --target claude-code --write   # only that CLI's config
+agentstack add ...                        # flag-driven add of a server or skill
 ```
 
 ### Search across providers
@@ -912,8 +916,8 @@ multi-skill repo) installs from a repo subdirectory, staging the fetch so a dry
 run never touches the store, recording truthful `git:<url>@<rev>#<dir>`
 provenance. `lib add-server` stores a reusable definition with its `${REF}`s
 intact. `lib new <name>` scaffolds `./<name>/SKILL.md` from the house template —
-edit it, then adopt with `agentstack add skill ./<name>` (this project) or `lib
-add ./<name>` (every project). Every `lib add` runs the same hidden-unicode /
+edit it, then register it with `agentstack add skill ./<name> --write` (this
+project) or `lib add ./<name> --write` (every project). Every `lib add` runs the same hidden-unicode /
 prompt-injection scan as `install`/`doctor --deep` before the copy becomes
 canonical (high findings block unless `--allow-flagged`) and warns above ~10 MiB.
 

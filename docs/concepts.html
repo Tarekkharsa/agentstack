@@ -81,6 +81,9 @@
   main ul, main ol { padding-left: 1.4rem; }
   pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
   pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Long inline code (paths, digests, command lines) wraps inside its own
+     container instead of widening the page on narrow viewports. */
+  main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }
   .tblwrap { overflow-x: auto; margin: 0.8rem 0; }
   table { border-collapse: collapse; font-size: 0.88rem; min-width: 60%; }
   th, td { text-align: left; padding: 0.45rem 0.8rem; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
@@ -281,7 +284,7 @@
 </tbody></table></div>
 <p>The lease is the zero-file counterpart of a native session, so the two are mutually exclusive: the MCP control plane refuses to place a lease over an active native session, or to start a native session over an active lease. <code>freeze</code> (on either the lease or the session) promotes the observed set into a new manifest profile — a proposal you review, then <code>agentstack lock</code>.</p>
 <h2 id="secrets">Secrets<a class="hlink" href="#secrets" aria-label="Link to this section">#</a></h2>
-<p><strong>Placeholder (<code>${REF}</code>)</strong> — the only form a secret takes in the manifest: a named reference like <code>${GH_TOKEN}</code>, never the value. A ref is a strict <code>${IDENTIFIER}</code>; shell fallback (<code>${VAR:-default}</code>) and prompt-style placeholders (<code>${input:key}</code>) pass through verbatim and are <strong>not</strong> treated as secrets. Placeholders resolve in memory at run time; if one can't resolve, the write or run fails closed, reporting the unresolved ref rather than blanking or leaking it into live config.</p>
+<p><strong>Placeholder (<code>${REF}</code>)</strong> — the only form a secret takes in the manifest: a named reference like <code>${GH_TOKEN}</code>, never the value. A ref is a strict <code>${IDENTIFIER}</code>; shell fallback (<code>${VAR:-default}</code>) and prompt-style placeholders (<code>${input:key}</code>) pass through verbatim and are <strong>not</strong> treated as secrets. Placeholders resolve in memory at run time; if one can't resolve, the write or run fails closed, reporting the unresolved ref rather than blanking or leaking it into live config. Where a resolved value lands depends on delivery mode: a static render writes it into a native config whose format requires it (behind a managed gitignore); gateway-backed and clean-at-rest delivery resolve host-side and keep values out of files at rest. The manifest and lockfile never hold values in any mode.</p>
 <p><strong>Keychain and varlock</strong> — the two backing stores a <code>${REF}</code> resolves from. The OS <strong>keychain</strong> (service <code>agentstack</code>) holds values locally; <strong>varlock</strong> is an optional resolver fronting 1Password, cloud secret managers, and more, active only when a project opts in and the <code>varlock</code> binary is present — otherwise the chain skips it. The full chain is process env → varlock → keychain → project <code>.env</code>. More: <a href="reference.html#secret-resolution">reference.md — secret resolution</a>.</p>
 <h2 id="library-catalog-registry-trust-store">Library, catalog, registry, trust store<a class="hlink" href="#library-catalog-registry-trust-store" aria-label="Link to this section">#</a></h2>
 <p>Four things that skim alike but do different jobs:</p>

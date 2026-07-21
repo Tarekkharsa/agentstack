@@ -21,6 +21,19 @@ claim here conflicts with `ARCHITECTURE.md`, `ENFORCEMENT.md`, `STRATEGY.md`,
 
 ## Dated corrections
 
+### 2026-07-21 — secret-placement wording made delivery-mode-specific
+
+Several published surfaces (landing page, start guide, tutorial, demos page,
+README, `agentstack explain`) carried an unqualified "secrets stay `${REF}`,
+never values" claim beside `apply --write` examples. The accurate claim — now
+stated everywhere and asserted by `crates/cli/tests/explain.rs` and the
+executable `examples/one-manifest-demo/` witness — is: secret values never
+enter the portable manifest or lockfile; a **static** render resolves a value
+into a native config whose format requires it (behind a managed gitignore);
+gateway-backed and clean-at-rest delivery resolve values host-side and keep
+them out of project files at rest. The enforcement behavior did not change,
+only the wording that had overstated it.
+
 ### 2026-07-14 — D4 made the gateway the sole lockdown MCP authority
 
 The lockdown run now resolves and pin-verifies one profile-fenced server set

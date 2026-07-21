@@ -17,7 +17,8 @@
 #        - each file carries exactly one managed region.
 #   3. Editing a fragment + re-locking + re-writing updates the region in place.
 #   4. PROBE: a fragment targeting an adapter with NO instructions file (cursor)
-#      is dropped silently — captured and flagged as a product finding.
+#      is warned about (was silently dropped before v0.15.0), and an unknown
+#      adapter id is rejected outright.
 #
 # Self-contained: isolated temp HOME + AGENTSTACK_HOME, nothing touches your
 # real config. Exits nonzero and prints FAIL on any mismatch.

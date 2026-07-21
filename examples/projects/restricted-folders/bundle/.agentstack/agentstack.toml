@@ -9,12 +9,12 @@ version = 1
 # manifest (~/.agentstack/agentstack.toml) and this project manifest — a repo
 # can only ADD restrictions, never remove the machine's.
 #
-# NOTE (see README "Known limitation" + F1): today `agentstack guard check`
-# enforces deny globs from the MACHINE layer only; a project-layer deny living
-# at `.agentstack/agentstack.toml` is silently ignored. assert.sh therefore
-# mirrors these three globs into the machine manifest so the guard actually
-# blocks them, and includes an isolated probe that demonstrates the defect.
-# Once F1 is fixed, this project declaration alone will enforce.
+# NOTE (F1 / issue #11, resolved as of v0.15.0): `agentstack guard check` now
+# enforces a project-layer deny from BOTH this preferred `.agentstack/` location
+# and the legacy root `<repo>/agentstack.toml`. assert.sh still mirrors these
+# three globs into the machine manifest (that layer is the user's own floor and
+# the globs belong there anyway), and its final section proves a project-only
+# deny enforces on its own from both layouts.
 [policy.filesystem]
 deny = [
   "secrets/**",        # API keys, service-account JSON — never read or written

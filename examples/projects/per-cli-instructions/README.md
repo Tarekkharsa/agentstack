@@ -58,22 +58,25 @@ everything else byte-for-byte intact.
 A `PASS`/`FAIL` line backs every one of these claims; the script exits nonzero if
 any fails, so it doubles as a CI-grade regression check.
 
-## Probes and findings
+## Probes — diagnostics on the edges (both resolved)
 
-The script also probes two edge cases and reports them as `SKIP (defect: …)`
-lines — loud, but non-fatal, because the failure is the product's, not the
-test's:
+The script also probes two edge cases. In the v0.10.1 baseline these were
+`SKIP (defect: …)` lines — content a fragment declared could disappear with no
+diagnostic (issues [#12](https://github.com/Tarekkharsa/agentstack/issues/12)
+and [#14](https://github.com/Tarekkharsa/agentstack/issues/14)). Both are fixed
+as of v0.15.0, so both now assert `PASS`:
 
 - **A fragment targeting `cursor`** (a valid adapter that has **no** instructions
-  file) is dropped **silently**: `instructions` exits 0, writes nothing for
-  cursor, and gives no warning that the content reached nothing.
-- **A misspelled adapter id** (`claude-kode`) in a fragment's `targets` is
-  accepted **silently** — no validation error, the fragment simply targets a
-  harness that does not exist and vanishes.
+  file) is no longer dropped silently: `instructions` still writes nothing for
+  cursor, but now **warns** that the fragment targets a CLI that has no
+  instructions file, so the drop is reported to the user rather than vanishing.
+- **A misspelled adapter id** (`claude-kode`) in a fragment's `targets` is now
+  **rejected** — instruction targets validate like servers' do, so the unknown
+  adapter id is flagged as a validation error instead of silently targeting a
+  harness that does not exist.
 
-Both are surfaced as findings for the maintainer: content that a fragment
-declares can disappear with no diagnostic. The core targeting story — the thing
-this example exists to demonstrate — is fully correct.
+The core targeting story — the thing this example exists to demonstrate — is
+fully correct, and the edges now diagnose rather than swallow.
 
 ## What it does not claim
 

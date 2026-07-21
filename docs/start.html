@@ -474,8 +474,10 @@ pre.cmd .c { color: var(--term-muted); }
           </p>
           <p class="muted">
             <code>apply</code> previews each CLI's changes in its native format and
-            writes them on confirmation; secrets stay <code>${REF}</code>
-            placeholders, so the manifest is safe to commit. Skills activate through
+            writes them on confirmation. The manifest keeps <code>${REF}</code>
+            placeholders (safe to commit); a native config whose format needs the
+            real value receives it resolved at write time — the rendered files sit
+            behind a managed gitignore. Skills activate through
             profiles, not <code>apply</code> — <code>agentstack use &lt;profile&gt;
             --write</code> materializes them (<code>apply</code> reminds you).
           </p>
@@ -620,7 +622,7 @@ agentstack gateway connect --all --write    <span class="c"># write it into each
               <code>agentstack_lease_status</code> inspects it,
               <code>agentstack_lease_close</code> (or ending the process) drops it;
               it's process-local, nothing to restore.
-              <a href="examples.html#e13">Complete example</a>.</p>
+              <a href="examples.html#lease">Complete example</a>.</p>
           </div>
         </li>
 
@@ -735,10 +737,10 @@ agentstack report run &lt;run-id&gt; --json <span class="c"># machine-readable, 
                coarse, or unsupported.</p>
           </div>
           <div class="fcard">
-            <h3><a href="index.html#start">Render config for 13 CLIs</a></h3>
+            <h3><a href="index.html#install">Render config for 13 CLIs</a></h3>
             <p>Prefer native config files over the live gateway?
                <code>init → apply</code> turns one manifest into the native setup for
-               Claude Code, Codex, Cursor, and ten more — secrets stay references.</p>
+               Claude Code, Codex, Cursor, and ten more — the committed manifest holds references, never values.</p>
           </div>
           <div class="fcard">
             <h3><a href="reference.html#the-central-library">Central library</a></h3>

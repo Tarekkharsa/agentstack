@@ -1,5 +1,21 @@
 # Dogfooding findings — pre-launch baseline
 
+> ## 📁 ARCHIVAL — historical snapshot, preserved verbatim
+>
+> **This entire document is a dated archive, not a description of current
+> behavior.** It records the pre-launch dogfooding baseline as of the versions
+> named in each section's header (v0.10.1 on 2026-07-16, v0.11.0 on 2026-07-18).
+> The current release is **v0.15.0**. Marked archival on **2026-07-21**.
+>
+> **Every issue filed here (#11–#22) has since been fixed** — see the same-day
+> update note below and the "ALL FIXED" tables in the later rounds. Any
+> present-tense claim in the sections that follow (the "silent drop"
+> diagnostics, the `guard` project-layer gap, the Deliverable 2/3 matrices,
+> the device-test defects) describes the **v0.10.1/v0.11.0 baseline at the time
+> of writing**, not the shipped tool. The executable authority for current
+> behavior is each project's `assert.sh`; the example READMEs track the fixes.
+> The evidence below is kept intact as the record of what was found and why.
+
 Date: 2026-07-16 · Binary: `agentstack 0.10.1` built from `a1aa7cd` (main) ·
 Method: five runnable example projects (this directory, each with an isolated
 PASS/FAIL `assert.sh`), two sandboxed investigations, and a device test on the

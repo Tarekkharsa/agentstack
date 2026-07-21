@@ -23,7 +23,7 @@ no review gate, no record of what it did. AgentStack closes four gaps:
 
 - **Anything a repo declares can run.** A clone stays *inert* until you trust its exact bytes; any edit re-gates it.
 - **Nothing narrows or records what agents do.** Your machine policy — which no repo can loosen — fences tools, secrets, and egress, and every brokered call lands in an audit log.
-- **Every CLI spells the same setup differently.** One reviewed [manifest](https://tarekkharsa.github.io/agentstack/concepts.html) renders them all; secrets stay references.
+- **Every CLI spells the same setup differently.** One reviewed [manifest](https://tarekkharsa.github.io/agentstack/concepts.html) renders them all; the manifest holds secret references, never values.
 - **An agent can wreck your working tree by accident.** `agentstack guard` blocks `rm -rf`, `git reset --hard`, and `.env` reads before they run.
 
 Using a single agent with one hand-managed server? You may not need this yet. The moment capabilities

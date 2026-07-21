@@ -17,9 +17,10 @@
 #   4. the manifest and lockfile never hold the resolved token.
 #
 # It also probes the Cursor gap: Cursor's adapter supports MCP but NOT
-# instructions and NOT skills. Cursor is a declared target, so the question is
-# whether AgentStack tells the user their instruction/skill can't reach Cursor,
-# or silently drops it. The script captures that verbatim.
+# instructions and NOT skills. Cursor is a declared target, so the probe
+# asserts AgentStack warns that the instruction/skill can't reach Cursor
+# (before v0.15.0 it was silently dropped). The script captures the warning
+# verbatim.
 #
 # Isolated: its own AGENTSTACK_HOME and HOME under a temp dir; nothing touches
 # your real config. Exits nonzero on any FAIL.
