@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>agentstack — build, govern, and run your agent stack</title>
-<meta name="description" content="One local control plane for your coding-agent stack. Define capabilities and configuration once, compile them across 13 agent CLIs, enforce machine-owned policy, run with optional lockdown, and audit what happened.">
+<title>AgentStack — cloning a repo shouldn't hand your agent to a stranger</title>
+<meta name="description" content="One reviewed file defines what your AI coding tools may run. Cloned repos stay inert until you approve them; governed runs are firewalled, recorded, and honestly labelled.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta property="og:title" content="agentstack — build, govern, and run your agent stack">
-<meta property="og:description" content="Define the agent stack once, compile it across 13 CLIs, govern it with machine-owned policy, and run it with an audit trail.">
+<meta property="og:title" content="AgentStack — cloning a repo shouldn't hand your agent to a stranger">
+<meta property="og:description" content="One reviewed file defines what your AI coding tools may run. Cloned repos stay inert until you approve them; governed runs are firewalled, recorded, and honestly labelled.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://tarekkharsa.github.io/agentstack/">
 <meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
@@ -18,8 +18,8 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="agentstack — the local control plane for your AI agent CLIs">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="agentstack — build, govern, and run your agent stack">
-<meta name="twitter:description" content="Define the agent stack once, compile it across 13 CLIs, govern it with machine-owned policy, and run it with an audit trail.">
+<meta name="twitter:title" content="AgentStack — cloning a repo shouldn't hand your agent to a stranger">
+<meta name="twitter:description" content="One reviewed file defines what your AI coding tools may run. Cloned repos stay inert until you approve them; governed runs are firewalled, recorded, and honestly labelled.">
 <meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <style>
   :root {
@@ -316,46 +316,6 @@
   .posture-legend .lab .slug { color: var(--accent); }
   .posture-legend small { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
 
-  /* ---------- docs map: the documentation, grouped by intent ---------- */
-  .docmap { margin: 1rem 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.7rem; }
-  .docmap .dmcmd { display: block; font-family: var(--mono); font-size: 0.66rem; color: var(--accent); background: none; border: none; padding: 0; margin: -0.35rem 0 0.5rem; }
-  .docmap .fcard h3 { font-size: 0.78rem; letter-spacing: 0.13em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.6rem; }
-  .docmap ul { list-style: none; margin: 0; padding: 0; }
-  .docmap li { margin: 0.35rem 0; }
-  .docmap li a { font-family: var(--mono); font-size: 0.82rem; color: var(--ink); }
-  .docmap li a:hover { color: var(--accent); text-decoration: none; }
-  .docmap li small { display: block; color: var(--muted); font-size: 0.76rem; line-height: 1.4; }
-  @media (max-width: 860px) { .docmap { grid-template-columns: 1fr 1fr; } }
-  @media (max-width: 520px) { .docmap { grid-template-columns: 1fr; } }
-
-  .matrix-wrap { margin: 1.6rem 0 0; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
-  table.matrix { border-collapse: collapse; width: 100%; min-width: 34rem; background: var(--surface); font-size: 0.88rem; }
-  table.matrix th, table.matrix td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid var(--line-soft); }
-  table.matrix thead th {
-    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.02em; font-weight: 700;
-    color: var(--ink); vertical-align: bottom; border-bottom: 1px solid var(--line);
-    background: var(--line-soft);
-  }
-  table.matrix thead th .mode { color: var(--accent); }
-  table.matrix thead th small { display: block; font-weight: 600; color: var(--faint); font-size: 0.64rem; letter-spacing: 0.04em; margin-top: 0.15rem; }
-  table.matrix tbody th { font-family: var(--sans); font-weight: 600; color: var(--ink); white-space: nowrap; }
-  table.matrix tbody tr:last-child th, table.matrix tbody tr:last-child td { border-bottom: 0; }
-  table.matrix td { text-align: center; }
-  .cell {
-    font-family: var(--mono); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
-    text-transform: uppercase; display: inline-block; padding: 0.18rem 0.5rem; border-radius: 999px;
-    border: 1px solid transparent;
-  }
-  .cell.e  { color: var(--term-green); background: rgba(124,192,139,0.13); border-color: rgba(124,192,139,0.34); }
-  .cell.co { color: var(--term-amber); background: rgba(224,176,74,0.13); border-color: rgba(224,176,74,0.34); }
-  .cell.un { color: var(--faint); background: color-mix(in srgb, var(--faint) 10%, transparent); border-color: color-mix(in srgb, var(--faint) 26%, transparent); }
-  .matrix-key { margin: 1rem 0 0; display: flex; flex-wrap: wrap; gap: 0.5rem 1.1rem; font-size: 0.84rem; color: var(--muted); }
-  .matrix-key span { display: inline-flex; align-items: center; gap: 0.45rem; }
-  .matrix-key i { width: 0.7rem; height: 0.7rem; border-radius: 3px; flex: none; }
-  .matrix-key i.e { background: var(--term-green); }
-  .matrix-key i.co { background: var(--term-amber); }
-  .matrix-key i.un { background: var(--faint); }
-
   @media (max-width: 620px) { .posture-legend { grid-template-columns: 1fr; } }
 
   /* ---------- feature card grid ---------- */
@@ -441,12 +401,6 @@
   }
 </style>
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/">
-<link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta property="og:url" content="https://tarekkharsa.github.io/agentstack/">
-<meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
-<meta name="twitter:card" content="summary_large_image">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -468,10 +422,11 @@
   <section id="hero" style="margin-top:2.75rem">
     <h1 style="margin:0.7rem 0 0.8rem">Cloning a repo shouldn't hand<br>your agent to a stranger.<span class="cursor" aria-hidden="true"></span></h1>
     <p class="lede">
-      AgentStack is one reviewed manifest for all 13 agent CLIs — servers,
-      skills, instructions, and secrets, defined once. Untrusted repos never
-      auto-activate, and governed runs are firewalled, recorded, and labelled
-      with exactly how strongly that is enforced.
+      One reviewed file defines what your AI coding tools —
+      <strong>Claude Code, Codex, Cursor, and ten more</strong> — may run. A
+      repo you clone can't activate any of it until you approve it. Sensitive
+      runs go in a container whose only way out is an egress firewall — and
+      every call routed through AgentStack lands in the audit log.
     </p>
     <div class="cta" style="margin-top:1.1rem">
       <a class="btn primary" href="start.html">Get started · 10 min →</a>
@@ -564,7 +519,7 @@
             Nothing spawns and no secret resolves until you review what it
             declares and trust it — and any later edit to the pinned surface
             re-gates it.</p>
-          <a class="tag" href="#trust">How consent works</a>
+          <a class="tag" href="howto/trust-a-repo.html">How consent works</a>
         </div>
         <div class="show-visual">
           <div class="term" data-replay style="margin:0">
@@ -590,11 +545,12 @@
         <div class="show-copy">
           <span class="lvl">04 · Some work must not leak</span><code class="cmd">$ agentstack run --lockdown</code>
           <h3>Lockdown: no route out but the proxy</h3>
-          <p>For runs that touch sensitive code or data:
-            <code>--lockdown</code> puts the agent in a container whose only
+          <p>The trust gate decides what an agent <em>may</em> do; lockdown
+            decides what it <em>can</em>. For runs that touch sensitive code or
+            data: <code>--lockdown</code> puts the agent in a container whose only
             network peer is the egress firewall. Ignoring the proxy reaches
             nothing; a denied host is refused — and recorded.</p>
-          <a class="tag" href="#sandbox">The enforcement story</a>
+          <a class="tag" href="enforcement.html">The enforcement story</a>
         </div>
         <div class="show-visual">
           <div class="term" style="margin:0">
@@ -683,142 +639,14 @@
     </p>
   </section>
 
-  <section id="trust" class="reveal">
-    <p class="eyebrow">The trust gate</p>
-    <h2>Repo-declared servers wait for your consent.</h2>
-    <p class="muted">
-      Register the gateway once (<code>agentstack gateway connect --all --write</code>)
-      and every repo brings its own servers — no files copied in. Until you
-      review and <code>trust</code> it, a repo is <strong>inert</strong>: no MCP
-      server spawned or contacted, no secret resolved. Trust pins a consent
-      digest of the manifest, local overlay, <em>and lockfile</em>, so any later
-      edit re-gates it — and every brokered call then passes
-      <strong>two firewall layers</strong> (the repo's <code>[policy.tools]</code>
-      and your machine rules, which no repo can see or loosen) and lands in the
-      call log.
-    </p>
-    <div class="term">
-      <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>clone → inert → review → trust → firewalled → audited</b></div>
-      <pre><code><span class="p">$</span> git clone some-repo &amp;&amp; cd some-repo   <span class="c"># declares servers you've never seen</span>
-<span class="p">$</span> agentstack mcp --auto-project        <span class="c"># an agent asks: which project servers can I use?</span>
-<span class="no">  ✗ untrusted — none of its servers are spawned or contacted</span>
-
-<span class="p">$</span> agentstack trust .
-<span class="c">  ▶ demo: runs `python3 ./server.py`   # you see exactly what it would run</span>
-<span class="ok">  ✓</span> trusted at sha256:945b4b…         <span class="c"># editing the manifest re-gates it</span>
-
-<span class="c">  agent → demo.echo         </span><span class="ok">✓ ok</span><span class="c">       brokered through the gateway, logged</span>
-<span class="c">  agent → demo.secret_read  </span><span class="no">✗ denied</span><span class="c">   repo [policy.tools] firewall</span>
-<span class="c">  agent → demo.delete_all   </span><span class="no">✗ denied</span><span class="c">   YOUR machine policy — "*" = ["!delete_*"]</span>
-<span class="c">  every call → ~/.agentstack/audit/calls.jsonl  (tool · outcome · latency)</span></code></pre>
-    </div>
-    <p class="small muted" style="margin-top:0.8rem">
-      How consent works, and the honest limits it doesn't cover:
-      <a href="howto/trust-a-repo.html">trust a cloned repo</a> ·
-      <a href="enforcement.html#what-trusted-does-and-does-not-mean">what trust does &amp; doesn't</a>.
-      Prefer a drop-in proxy? <code>--transparent</code> advertises every
-      policy-filtered upstream tool straight in <code>tools/list</code> (the
-      default compact mode keeps them behind one search tool) —
-      <a href="reference.html#compact-proxied-surface--code-mode">reference</a>.
-      Reproduce the whole gate:
-      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/trust-gate-demo.sh"><code>docs/trust-gate-demo.sh</code></a>.
-    </p>
-  </section>
-
-  <section id="sandbox" class="reveal">
-    <p class="eyebrow">The sandbox</p>
-    <h2>Don't trust the agent? Take away the network.</h2>
-    <p class="muted">
-      The trust gate decides what an agent <em>may</em> do;
-      <code>agentstack run --sandbox</code> decides what it <em>can</em> do. The
-      harness runs in a container, its egress routes through a proxy enforcing
-      your machine <code>[policy.egress]</code>, and every allow and block lands
-      in a per-run flight recorder you read with <code>agentstack report</code>;
-      the workspace mounts read-only unless your <code>[policy.filesystem]</code>
-      says otherwise, and the kernel — not the harness — enforces the bind.
-      <code>--sandbox</code> leaves an ordinary bridge open, so a proxy-ignoring
-      process still has a direct route; <code>--lockdown</code> removes it — the
-      container's only peer is the egress sidecar, and ignoring the proxy reaches
-      nothing.
-    </p>
-    <div class="term" data-replay style="margin-top:1.6rem">
-      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>no route out · denied host blocked · on the record</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
-      <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">cat ~/.agentstack/agentstack.toml</span><span class="c">   # YOUR machine firewall</span></span>
-<span class="row"><span class="c">  [policy.egress]</span></span>
-<span class="row"><span class="c">  "*" = ["!blocked.invalid"]</span><span class="c">           # no repo can loosen this</span></span>
-<span class="row" data-d="500"> </span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack run --lockdown shtest -- -c 'unset HTTPS_PROXY; curl example.com'</span></span>
-<span class="row"><span class="c">  posture: </span><span class="am">LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span></span>
-<span class="row"><span class="c">  🔒 no host route, no internet — the only peer is the egress sidecar</span></span>
-<span class="row" data-d="700"><span class="no">  BLOCKED</span><span class="c">                               # ignoring the proxy reaches nothing</span></span>
-<span class="row" data-d="500"> </span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack run --lockdown shtest -- -c 'curl https://blocked.invalid/steal'</span></span>
-<span class="row" data-d="700"><span class="no">  ✗ refused at the sidecar</span><span class="c"> — and recorded</span></span>
-<span class="row" data-d="500"> </span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack report run r-0859dcee73</span></span>
-<span class="row"><span class="c">  Posture   </span><span class="am">LOCKDOWN / ENFORCED · NO DIRECT ROUTE</span></span>
-<span class="row"><span class="c">  Egress</span></span>
-<span class="row"><span class="no">    ✗ shtest → blocked.invalid</span><span class="c">  denied by rule "!blocked.invalid" (machine policy)</span></span></code></pre>
-    </div>
-    <p class="small muted" style="margin-top:0.8rem">
-      Condensed from a real run, verified on Docker; the full script is runnable
-      (needs Docker):
-      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/sandbox/demo-lockdown.sh"><code>examples/sandbox/demo-lockdown.sh</code></a>.
-      The proxy is picky on purpose — normalized hostnames, TLS SNI pinned to the
-      CONNECT host, no SSRF to loopback/private/metadata addresses, a per-run
-      credential — and a <a href="security-review-2026-07-11.html">two-reviewer
-      security review</a> closed all five High and all seven Medium findings.
-      Honest scope: hosts you allow stay allowed, so the claim is
-      <em>unapproved egress is blocked</em>, never "exfiltration is impossible."
-      Per-cell reasoning: <a href="enforcement.html">the enforcement matrix</a>.
-    </p>
-  </section>
-
-  <section id="tools-execute" class="reveal">
-    <p class="eyebrow">Experimental execution primitive</p>
-    <h2>Let generated code compose tools—not inherit your machine.</h2>
-    <p class="muted">
-      A sandbox-enabled build can expose <code>tools_execute</code>: one bounded
-      TypeScript program receives JSON input and only the exact MCP tools named
-      in its grant. It runs non-root in a read-only, resource-limited Docker
-      container with no workspace, credentials, package installation, or
-      direct network route. Calls return through the same policy-enforcing
-      gateway and appear beneath the execution in <code>agentstack report</code>.
-    </p>
-    <div class="term" style="margin-top:1.4rem">
-      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>machine-owned opt-in</b></div>
-      <pre><code><span class="row"><span class="c"># ~/.agentstack/agentstack.toml</span></span>
-<span class="row"><span class="c">[experimental]</span></span>
-<span class="row"><span class="ok">tools_execute = true</span></span>
-<span class="row"> </span>
-<span class="row"><span class="c">[experimental.tools_execute_limits]</span></span>
-<span class="row">timeout_ms = 30000</span>
-<span class="row">max_calls = 40</span>
-<span class="row">max_output_bytes = 131072</span>
-<span class="row"> </span>
-<span class="row"><span class="c">allowTools = ["github__get_issue"]</span><span class="c">  # exact names, no wildcards</span></span>
-<span class="row"><span class="ok">✓ x-… → github__get_issue</span><span class="c">      # gateway checked + recorded</span></span></code></pre>
-    </div>
-    <p class="small muted" style="margin-top:0.9rem">
-      Off by default, Docker-only, and never enabled by a repository manifest.
-      A focused implementation review and regression-hardening pass completed
-      on 2026-07-13. It remains experimental while executor-specific
-      SBOM/attestation and longer-running soak evidence are outstanding.
-      Read the <a href="reference.html#experimental-tools_execute">exact contract</a>
-      and <a href="enforcement.html#experimental-tools_execute">enforcement matrix</a>.
-    </p>
-  </section>
-
   <section id="enforced" class="reveal">
     <p class="eyebrow">What's enforced where</p>
     <h2>"Trusted" is not "confined." Here's the difference.</h2>
     <p class="muted">
-      Trusting a project approves its current
-      <strong>manifest, local overlay, and lockfile consent digest</strong> for
-      automatic loading on this machine; lock verification separately catches
-      pinned capability drift. What actually <em>confines</em> a run is its execution mode. Each
-      mode carries a posture label, so a host run and a lockdown run never read
-      the same:
+      Trusting a repo approves what it <em>may</em> load. How strongly a run is
+      <em>confined</em> is a separate choice — how you launch it. Every run
+      prints a posture label that says exactly how strongly its rules are
+      enforced:
     </p>
     <div class="posture-legend">
       <div><div class="lab">host — <span class="slug">HOST / ADVISORY</span></div><small>No container. The gateway still brokers tool calls, but nothing confines the process's own egress or filesystem.</small></div>
@@ -827,59 +655,8 @@
       <div><div class="lab">--lockdown — <span class="slug">ENFORCED · NO DIRECT ROUTE</span></div><small>Container on an internal-only network whose sole peer is the egress sidecar. Enforced <em>and</em> topologically confined.</small></div>
     </div>
 
-    <div class="matrix-wrap">
-      <table class="matrix">
-        <caption class="small muted" style="text-align:left;padding:0.7rem 0.8rem;caption-side:top">Derived from <a href="enforcement.html">docs/ENFORCEMENT.md</a>, which is checked against the source per cell.</caption>
-        <thead>
-          <tr>
-            <th scope="col">Dimension</th>
-            <th scope="col"><span class="mode">host</span><small>ADVISORY</small></th>
-            <th scope="col"><span class="mode">gateway</span><small>BROKERED</small></th>
-            <th scope="col"><span class="mode">--sandbox</span><small>PROXIED</small></th>
-            <th scope="col"><span class="mode">--lockdown</span><small>NO ROUTE</small></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><th scope="row">Tools</th>
-            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;†</span></td><td><span class="cell e">enforced</span></td></tr>
-          <tr><th scope="row">Egress</th>
-            <td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td><td><span class="cell e">enforced&thinsp;*</span></td><td><span class="cell e">enforced</span></td></tr>
-          <tr><th scope="row">Secrets</th>
-            <td><span class="cell e">enforced</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;‡</span></td><td><span class="cell e">enforced</span></td></tr>
-          <tr><th scope="row">Filesystem — write</th>
-            <td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
-          <tr><th scope="row">Filesystem — read</th>
-            <td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">cooperative&thinsp;¶</span></td><td><span class="cell co">coarse</span></td><td><span class="cell co">coarse</span></td></tr>
-          <tr><th scope="row">Audit / recording</th>
-            <td><span class="cell un">unsupported</span></td><td><span class="cell e">enforced</span></td><td><span class="cell e">enforced&thinsp;§</span></td><td><span class="cell e">enforced</span></td></tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="matrix-key">
-      <span><i class="e"></i><strong>enforced</strong>&nbsp;— a runtime mechanism prevents the disallowed action</span>
-      <span><i class="co"></i><strong>coarse</strong>&nbsp;— a real check runs, at coarser granularity than the policy expresses</span>
-      <span><i class="co"></i><strong>cooperative</strong>&nbsp;— a harness hook checks it; this is accident protection, not isolation</span>
-      <span><i class="un"></i><strong>unsupported</strong>&nbsp;— no code path consults the policy here; no check happens</span>
-    </div>
     <p class="small muted" style="margin-top:1.1rem">
-      <strong>enforced&thinsp;*</strong> — for proxied traffic only:
-      <code>--sandbox</code>'s bridge network leaves a direct route a
-      proxy-ignoring process could use; <code>--lockdown</code> removes it.
-    </p>
-    <p class="small muted" style="margin-top:.65rem">
-      <strong>† ‡ §</strong> — for trusted, gateway-routed sandbox runs. If a
-      bundle is untrusted, has no proxied servers, or its adapter cannot host an
-      HTTP MCP entry, these cells degrade as described in the authoritative
-      matrix. <strong>¶</strong> — only when the guard hook is installed.
-    </p>
-    <p class="small muted" style="margin-top:1.1rem">
-      Read every "enforced" as the ceiling it is: the disallowed action is
-      prevented at runtime, never that the <em>allowed</em> one is safe — an
-      egress allowlist blocks unapproved hosts but doesn't inspect payloads, so
-      <strong>agentstack restricts destinations and records decisions; it can't
-      guarantee sensitive content never leaves through an allowed one.</strong>
-      Full per-cell reasoning is in the
-      <a href="enforcement.html">enforcement matrix</a>.
+      Read every <strong>enforced</strong> as a ceiling: the disallowed action is prevented at runtime — never that an <em>allowed</em> one is safe. The full six-dimension matrix, per-cell reasoning checked against the source: <a href="enforcement.html">the enforcement matrix</a>.
     </p>
   </section>
 
@@ -887,9 +664,9 @@
     <p class="eyebrow">Portable config</p>
     <h2>The same reviewed file, rendered into every CLI</h2>
     <p>
-      Everything above runs through the live gateway — zero files copied. When
-      you want native config files instead (or as well), the same manifest
-      renders them. And you don't start from a blank page: <code>init</code>
+      Prefer native config files — instead of, or as well as, the live gateway?
+      The same manifest renders them. And you don't start from a blank page:
+      <code>init</code>
       reads the agent config already on your machine and turns it into a
       manifest you can review, commit, and share. (Nothing installed yet?
       <code>init</code> writes a commented starter manifest instead — no dead
@@ -931,29 +708,6 @@
         <p>Any time something feels off. Every warning names the exact fix command.</p>
       </li>
     </ol>
-    <div class="term" data-replay style="margin-top:1.6rem">
-      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>init → apply → every CLI in sync</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
-      <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack init</span></span>
-<span class="row"><span class="c">  🔍 6 CLI binaries on PATH: Claude Code · Codex · Copilot · Gemini · OpenCode · Pi</span></span>
-<span class="row"><span class="c">  📥 Imported 1 MCP server from existing configs</span></span>
-<span class="row" data-d="600"><span class="ok">  ✅ Wrote .agentstack/agentstack.toml</span></span>
-<span class="row" data-d="500"> </span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack apply</span></span>
-<span class="row"><span class="ok">  ✓</span><span class="c"> manifest validates · 6 adapters installed · no missing secrets</span></span>
-<span class="row" data-d="500"> </span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack apply --write</span></span>
-<span class="row"><span class="c">  Claude Code   </span><span class="ok">✓ up to date</span><span class="c">                    # it already had the server</span></span>
-<span class="row"><span class="c">  Codex CLI     + [mcp_servers.filesystem]      </span><span class="ok">✓ wrote 1 server</span></span>
-<span class="row"><span class="c">  Gemini CLI    + "filesystem": { … }           </span><span class="ok">✓ wrote 1 server</span></span>
-<span class="row" data-d="700"><span class="c">  …Copilot, OpenCode, Pi — the same server, each in its own syntax</span></span>
-<span class="row" data-d="500"> </span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack apply</span></span>
-<span class="row"><span class="ok">  ✓</span><span class="c"> nothing to write — every target in sync</span></span></code></pre>
-    </div>
-    <p class="small muted" style="margin-top:0.8rem">
-      Condensed from a real run. Reproduce it fenced (never touches your real
-      configs): <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/sandbox/demo-firstrun.sh"><code>examples/sandbox/demo-firstrun.sh</code></a>.
-    </p>
   </section>
 
   <section id="manifest" class="reveal">
@@ -1000,7 +754,7 @@ default = ["claude-code", "codex"]</code></pre>
       <div>
         <dt>zero files</dt>
         <dd>Nothing rendered at all; the gateway serves each repo's servers live,
-            behind the <a href="#trust">trust gate</a>.</dd>
+            behind the <a href="howto/trust-a-repo.html">trust gate</a>.</dd>
       </div>
     </dl>
     <p class="small muted">
@@ -1033,38 +787,11 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
     <h2>When you want more than the loop</h2>
     <div class="cards">
       <div class="fcard">
-        <h3><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">Strategy &amp; execution phases</a></h3>
-        <p>The current direction and gated order: protected activation,
-           Workspace Grants, the first hosted adapter, governed workflows,
-           and the team control plane.</p>
-        <a class="tag" href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">Review the strategy</a>
-      </div>
-      <div class="fcard">
-        <h3><a href="architecture.html#operating-model--choose-the-boundary-you-need">Choose the right boundary</a></h3>
-        <p>Our recommendation for composing profiles, delivery, trust, policy,
-           isolation, and evidence—plus the cases where the default should change.</p>
-        <a class="tag" href="architecture.html#operating-model--choose-the-boundary-you-need">Decision guide</a>
-      </div>
-      <div class="fcard">
         <h3><a href="reference.html#the-central-library">Central library</a></h3>
         <p>One managed home for skills and servers; projects select by name and stay
            digest-pinned. Install from a local dir or a git subdirectory, sync across
            machines, and pull ready-made skills from the shipped catalog.</p>
         <a class="tag" href="reference.html#the-central-library">Reference</a>
-      </div>
-      <div class="fcard">
-        <h3>Usage insight</h3>
-        <p><code>agentstack report calls</code> reports what you actually call, from the
-           runtime audit log, and flags library skills and servers you installed but
-           never use — read-only and local, so pruning is data-driven.</p>
-        <span class="tag" style="color:var(--faint)">Read-only &amp; local</span>
-      </div>
-      <div class="fcard">
-        <h3><a href="reference.html">Feature reference</a></h3>
-        <p>The complete tested inventory: vendor packs, MCP firewall, call audit log,
-           <code>optimize</code>, native extensions, live runs, code mode, and the full
-           command list.</p>
-        <a class="tag" href="reference.html">Full reference</a>
       </div>
       <div class="fcard">
         <h3><a href="reference.html#dashboard">The read-only lens</a></h3>
@@ -1087,121 +814,18 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
         <span class="tag" style="color:var(--faint)">Data-driven adapters</span>
       </div>
     </div>
-    <div class="term" data-replay style="margin-top:1.6rem">
-      <div class="term-head"><i class="r"></i><i class="y"></i><i class="g"></i><b>pack @v1.0.0 → every CLI → firewalled → audited → @v1.1.0</b><button class="tr-replay" type="button" aria-label="Replay this terminal session">↻ replay</button></div>
-      <pre><code><span class="row cmd"><span class="p">$</span> <span class="t">agentstack add from git:acme/pack@v1.0.0 --write</span></span>
-<span class="row"><span class="ok">  ✓ installed pack 'acme'</span><span class="c"> — servers + skills, secrets stay ${REF}s</span></span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack apply --write</span></span>
-<span class="row" data-d="700"><span class="ok">  ✓</span><span class="c"> the whole pack spreads to every CLI on this machine</span></span>
-<span class="row" data-d="450"> </span>
-<span class="row"><span class="c">  acme__search_docs     </span><span class="ok">✓ ok</span></span>
-<span class="row" data-d="700"><span class="c">  acme__delete_index    </span><span class="no">✗ refused</span><span class="c">   [policy.tools] rule "!delete_*"</span></span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack report calls</span></span>
-<span class="row" data-d="800"><span class="c">  2 calls · 2 tools · </span><span class="no">1 denied by policy</span><span class="c"> — digests, never values</span></span>
-<span class="row" data-d="450"> </span>
-<span class="row cmd"><span class="p">$</span> <span class="t">agentstack lock --upgrade acme --yes --write</span><span class="c">   # vendor ships v1.1.0</span></span>
-<span class="row"><span class="ok">  ✓ upgraded pack 'acme'</span><span class="c"> — previewed, re-pinned @v1.1.0</span></span></code></pre>
-    </div>
-    <p class="small muted" style="margin-top:0.8rem">
-      The closed loop in under a minute, condensed from a real run:
-      <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/sandbox/demo-closed-loop.sh"><code>examples/sandbox/demo-closed-loop.sh</code></a>.
-    </p>
   </section>
 
   <section id="docs" class="reveal">
-    <p class="eyebrow">All the documentation, by intent</p>
+    <p class="eyebrow">The documentation</p>
     <h2>Where to go next.</h2>
-    <p class="small muted" style="margin:0.4rem 0 0">
-      The full, categorized directory lives at <a href="docs.html">docs</a> —
-      every guide, reference, and demo, organized by what you want to do.
+    <p class="muted">
+      Every guide, how-to, reference, and demo — organized by what you want to
+      do — lives in the <a href="docs.html">docs directory</a>. New to the
+      vocabulary? <a href="concepts.html">Concepts</a> defines every term in
+      plain sentences, and the <a href="start.html">ten-minute start</a> takes
+      you from install to a governed, verified setup.
     </p>
-    <!-- docmap:begin (generated — edit tools/make-docs-sidebar.py) -->
-    <div class="docmap" aria-label="Documentation grouped by what you want to do">
-          <div class="fcard">
-            <h3>Start</h3>
-            <ul>
-              <li><a href="start.html">Get started</a><small>guided setup, ~10 minutes</small></li>
-              <li><a href="index.html#install">Install</a><small>one static binary</small></li>
-              <li><a href="concepts.html">Concepts</a><small>every term, two screens</small></li>
-              <li><a href="choose.html">Which mode do I need?</a><small>protection level &amp; delivery mode</small></li>
-              <li><a href="examples.html">Examples</a><small>25 runnable walkthroughs</small></li>
-            </ul>
-          </div>
-          <div class="fcard">
-            <h3>Everyday</h3>
-            <code class="dmcmd">$ agentstack add · apply · doctor</code>
-            <ul>
-              <li><a href="index.html#manifest">The manifest</a><small>servers, skills, ${REF} secrets</small></li>
-              <li><a href="howto/add-a-server.html">Add a server</a><small>four verbs, one table</small></li>
-              <li><a href="howto/add-a-skill.html">Add a skill</a><small>install, author, or just try one</small></li>
-              <li><a href="howto/undo.html">Undo anything</a><small>restore, plus the rest</small></li>
-              <li><a href="howto/see-what-happened.html">See what happened</a><small>runs, calls, cost, explain</small></li>
-              <li><a href="howto/trust-a-repo.html">Trust a cloned repo</a><small>review, then consent</small></li>
-            </ul>
-          </div>
-          <div class="fcard">
-            <h3>Reference</h3>
-            <ul>
-              <li><a href="reference.html">Every command</a><small>every command, CI-tested</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md">Agent manual (skill)</a><small>ships inside the binary</small></li>
-            </ul>
-          </div>
-          <div class="dm-deeper" role="separator" style="grid-column: 1 / -1; display: flex; align-items: center; gap: 0.7rem; margin: 1.4rem 0 0.2rem; font-family: var(--mono); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted);">Go deeper<span style="flex: 1; height: 1px; background: var(--line);"></span></div>
-          <div class="fcard">
-            <h3>Configure deeper</h3>
-            <code class="dmcmd">$ agentstack use · session</code>
-            <ul>
-              <li><a href="architecture.html">How it works</a><small>activation, leases, policy layers</small></li>
-              <li><a href="reference.html#the-central-library">Central library</a><small>one library, every project</small></li>
-              <li><a href="index.html#modes">Delivery modes</a><small>static, clean-at-rest, or zero files</small></li>
-              <li><a href="reference.html#dashboard">Dashboard</a><small>the same loop, in a web UI</small></li>
-            </ul>
-          </div>
-          <div class="fcard">
-            <h3>Protect</h3>
-            <code class="dmcmd">$ agentstack trust · guard</code>
-            <ul>
-              <li><a href="index.html#trust">The trust gate</a><small>cloned repos stay inert</small></li>
-              <li><a href="enforcement.html#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a><small>the honest limits, code-grounded</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a><small>rm -rf blocked, runnable</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Policy presets</a><small>developer, CI, locked-down</small></li>
-            </ul>
-          </div>
-          <div class="fcard">
-            <h3>Run confined</h3>
-            <code class="dmcmd">$ agentstack run --lockdown</code>
-            <ul>
-              <li><a href="howto/lock-down-a-run.html">Lock down a run</a><small>the escalation ladder</small></li>
-              <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a><small>container + egress firewall</small></li>
-              <li><a href="index.html#enforced">What's enforced</a><small>the honest per-mode matrix</small></li>
-              <li><a href="enforcement.html">Enforcement matrix</a><small>checked against the source</small></li>
-            </ul>
-          </div>
-          <div class="fcard">
-            <h3>Team &amp; CI</h3>
-            <ul>
-              <li><a href="howto/team-setup.html">Team setup</a><small>clone, apply, done</small></li>
-              <li><a href="howto/ci.html">Use in CI</a><small>install --locked + doctor --ci</small></li>
-            </ul>
-          </div>
-          <div class="fcard">
-            <h3>Observe deeper</h3>
-            <code class="dmcmd">$ agentstack report</code>
-            <ul>
-              <li><a href="examples.html#e20">Reports &amp; call audit</a><small>per-run evidence, by example</small></li>
-              <li><a href="examples.html#e21">Wire-cost analysis</a><small>what your tools cost</small></li>
-            </ul>
-          </div>
-          <div class="fcard">
-            <h3>Project</h3>
-            <ul>
-              <li><a href="security-review-2026-07-11.html">Security review</a><small>findings and closures</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">Strategy</a><small>phases, gates, decisions</small></li>
-              <li><a href="history.html">History</a><small>dated corrections</small></li>
-            </ul>
-          </div>
-        </div>
-    <!-- docmap:end -->
   </section>
 
 </main>

@@ -403,7 +403,7 @@
     <b>Everyday</b>
     <code>$ agentstack add · apply · doctor</code>
     <ul>
-      <li><a href="index.html#manifest">The manifest</a>
+      <li><a href="concepts.html#the-manifest-and-the-lockfile">The manifest</a>
       </li>
       <li><a href="howto/add-a-server.html">Add a server</a>
       </li>
@@ -434,7 +434,7 @@
       </li>
       <li><a href="reference.html#the-central-library">Central library</a>
       </li>
-      <li><a href="index.html#modes">Delivery modes</a>
+      <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
       <li><a href="reference.html#dashboard">Dashboard</a>
       </li>
@@ -444,8 +444,6 @@
     <summary>Protect</summary>
     <code>$ agentstack trust · guard</code>
     <ul>
-      <li><a href="index.html#trust">The trust gate</a>
-      </li>
       <li><a href="enforcement.html#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
@@ -459,10 +457,6 @@
     <code>$ agentstack run --lockdown</code>
     <ul>
       <li><a href="howto/lock-down-a-run.html">Lock down a run</a>
-      </li>
-      <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a>
-      </li>
-      <li><a href="index.html#enforced">What's enforced</a>
       </li>
       <li><a href="enforcement.html">Enforcement matrix</a>
       </li>
@@ -1066,7 +1060,7 @@ agentstack report run &lt;run-id&gt; --json # machine-readable, carries the post
         <code>~/.agentstack/audit/calls.jsonl</code>, one line per call (tool ·
         outcome · latency), an argument <em>digest</em> only, never raw values or
         secrets. What each mode records today, and what isn't yet wired in:
-        <a href="index.html#enforced">the enforcement matrix</a>.
+        <a href="enforcement.html">the enforcement matrix</a>.
       </p>
     </li>
 
@@ -1084,7 +1078,7 @@ agentstack report run &lt;run-id&gt; --json # machine-readable, carries the post
            recorded, <code>--plan</code> previews it.</p>
       </div>
       <div class="fcard">
-        <h3><a href="index.html#enforced">What's enforced where</a></h3>
+        <h3><a href="enforcement.html">What's enforced where</a></h3>
         <p>The compact, code-grounded matrix: host / gateway / sandbox / lockdown
            against tools, egress, secrets, filesystem, and audit — enforced,
            coarse, or unsupported.</p>

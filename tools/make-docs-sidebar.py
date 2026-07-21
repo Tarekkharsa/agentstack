@@ -33,7 +33,7 @@ GH = "https://github.com/Tarekkharsa/agentstack"
 # (group, command-or-None, [(label, href, key)], tier)
 # tier is "open" (tier-one — always visible, the everyday path) or "deeper"
 # (rendered collapsed as <details>, the power-user surface). Open groups come
-# first; the "deeper" groups follow so the docmap divider falls cleanly between.
+# first; the "deeper" groups follow, one click away.
 TREE = [
     ("Start", None, [
         ("Get started", "start.html", "start"),
@@ -43,7 +43,7 @@ TREE = [
         ("Examples", "examples.html", "examples"),
     ], "open"),
     ("Everyday", "$ agentstack add · apply · doctor", [
-        ("The manifest", "index.html#manifest", "manifest"),
+        ("The manifest", "concepts.html#the-manifest-and-the-lockfile", "manifest"),
         ("Add a server", "howto/add-a-server.html", "howto-server"),
         ("Add a skill", "howto/add-a-skill.html", "howto-skill"),
         ("Undo anything", "howto/undo.html", "howto-undo"),
@@ -57,19 +57,16 @@ TREE = [
     ("Configure deeper", "$ agentstack use · session", [
         ("How it works", "architecture.html", "how-it-works"),
         ("Central library", "reference.html#the-central-library", "library"),
-        ("Delivery modes", "index.html#modes", "modes"),
+        ("Delivery modes", "concepts.html#delivery-modes", "modes"),
         ("Dashboard", "reference.html#dashboard", "dashboard"),
     ], "deeper"),
     ("Protect", "$ agentstack trust · guard", [
-        ("The trust gate", "index.html#trust", "trust"),
         ("What trust does & doesn't", "enforcement.html#what-trusted-does-and-does-not-mean", "trustlimits"),
         ("Guard demo", f"{GH}/tree/main/examples/guard-demo", "guard"),
         ("Policy presets", f"{GH}/tree/main/examples/policies", "presets"),
     ], "deeper"),
     ("Run confined", "$ agentstack run --lockdown", [
         ("Lock down a run", "howto/lock-down-a-run.html", "howto-lockdown"),
-        ("Sandbox & lockdown", "index.html#sandbox", "sandbox"),
-        ("What's enforced", "index.html#enforced", "enforced"),
         ("Enforcement matrix", "enforcement.html", "matrix"),
     ], "deeper"),
     ("Team & CI", None, [
@@ -115,6 +112,7 @@ EXPANSIONS = {
         ("6", "Add skills", "#e6"),
         ("7", "Task-specific profiles", "#e7"),
         ("8", "Share house rules across CLIs", "#e8"),
+        ("26", "Native extensions", "#e26"),
         ("9", "The everyday loop", "#e9"),
         ("14", "The central library", "#e14"),
         ("15", "Sync across machines", "#e15"),
@@ -207,94 +205,8 @@ def splice(path, aside):
     path.write_text(s)
 
 
-MAP_BEGIN = "<!-- docmap:begin (generated — edit tools/make-docs-sidebar.py) -->"
-MAP_END = "<!-- docmap:end -->"
-
-# Short per-entry hooks for the index docs-map cards (key -> one-liner).
-MAP_HOOKS = {
-    "start": "guided setup, ~10 minutes",
-    "install": "one static binary",
-    "concepts": "every term, two screens",
-    "choose": "protection level & delivery mode",
-    "examples": "25 runnable walkthroughs",
-    "howto-server": "four verbs, one table",
-    "howto-skill": "install, author, or just try one",
-    "howto-trust": "review, then consent",
-    "howto-lockdown": "the escalation ladder",
-    "howto-team": "clone, apply, done",
-    "howto-ci": "install --locked + doctor --ci",
-    "howto-undo": "restore, plus the rest",
-    "howto-audit": "runs, calls, cost, explain",
-    "trustlimits": "the honest limits, code-grounded",
-    "how-it-works": "activation, leases, policy layers",
-    "manifest": "servers, skills, ${REF} secrets",
-    "library": "one library, every project",
-    "modes": "static, clean-at-rest, or zero files",
-    "dashboard": "the same loop, in a web UI",
-    "trust": "cloned repos stay inert",
-    "guard": "rm -rf blocked, runnable",
-    "presets": "developer, CI, locked-down",
-    "sandbox": "container + egress firewall",
-    "enforced": "the honest per-mode matrix",
-    "matrix": "checked against the source",
-    "reports": "per-run evidence, by example",
-    "wirecost": "what your tools cost",
-    "reference": "every command, CI-tested",
-    "manual": "ships inside the binary",
-    "secreview": "findings and closures",
-    "strategy": "phases, gates, decisions",
-    "history": "dated corrections",
-}
-
-
-def render_map():
-    out = ['<div class="docmap" aria-label="Documentation grouped by what you want to do">']
-    deeper_started = False
-    for group, cmd, entries, tier in TREE:
-        # The open tier-one cards come first; a single subtle "Go deeper"
-        # divider separates them from the collapsed power-user groups. Inline
-        # styles reference the site's own CSS variables so the rule stays
-        # self-contained (the docmap region is generated, not hand-edited) and
-        # tracks light/dark automatically.
-        if tier == "deeper" and not deeper_started:
-            deeper_started = True
-            out.append(
-                '      <div class="dm-deeper" role="separator" style="grid-column: 1 / -1; '
-                'display: flex; align-items: center; gap: 0.7rem; margin: 1.4rem 0 0.2rem; '
-                'font-family: var(--mono); font-size: 0.64rem; font-weight: 600; '
-                'letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted);">'
-                'Go deeper<span style="flex: 1; height: 1px; background: var(--line);"></span></div>'
-            )
-        out.append('      <div class="fcard">')
-        out.append(f'        <h3>{esc(group)}</h3>')
-        if cmd:
-            out.append(f'        <code class="dmcmd">{esc(cmd)}</code>')
-        out.append('        <ul>')
-        for label, href, key in entries:
-            hook = MAP_HOOKS.get(key, '')
-            out.append(f'          <li><a href="{href}">{esc(label)}</a><small>{esc(hook)}</small></li>')
-        out.append('        </ul>')
-        out.append('      </div>')
-    out.append('    </div>')
-    return '\n    '.join(out)
-
-
-def splice_map(path):
-    s = path.read_text()
-    block = f'{MAP_BEGIN}\n    {render_map()}\n    {MAP_END}'
-    if MAP_BEGIN in s:
-        s = re.sub(re.escape(MAP_BEGIN) + r'[\s\S]*?' + re.escape(MAP_END), block, s, count=1)
-    else:
-        s, n = re.subn(r'<div class="docmap"[\s\S]*?\n    </div>', block, s, count=1)
-        if n != 1:
-            raise SystemExit(f'{path}: no docmap found to replace')
-    path.write_text(s)
-
-
 if __name__ == '__main__':
     docs = Path(__file__).resolve().parent.parent / 'docs'
     for page, current in PAGES.items():
         splice(docs / page, render(page, current))
         print(f'{page}: sidebar generated (current={current})')
-    splice_map(docs / 'index.html')
-    print('index.html: docs-map generated from the same tree')

@@ -17,12 +17,6 @@ implementation internals — live in
 
 **[Part I — The everyday loop](#part-i--the-everyday-loop)**
 
-- [Core engine](#core-engine)
-  - [The manifest](#the-manifest)
-  - [Data-driven adapters](#data-driven-adapters)
-  - [Rendering and merging](#rendering-and-merging)
-  - [State tracking](#state-tracking)
-  - [Scopes](#scopes)
 - [Secrets and trust](#secrets-and-trust)
   - [Secret resolution](#secret-resolution)
   - [Where lifted secrets go (`init`)](#where-lifted-secrets-go-init)
@@ -38,6 +32,12 @@ implementation internals — live in
 
 **[Part II — The power surface](#part-ii--the-power-surface)**
 
+- [Core engine](#core-engine)
+  - [The manifest](#the-manifest)
+  - [Data-driven adapters](#data-driven-adapters)
+  - [Rendering and merging](#rendering-and-merging)
+  - [State tracking](#state-tracking)
+  - [Scopes](#scopes)
 - [Delivery modes — where rendered files live](#delivery-modes--where-rendered-files-live)
   - [Owned servers (`owner = "codex"`)](#owned-servers-owner--codex)
 - [Agent-operable (`agentstack mcp`)](#agent-operable-agentstack-mcp)
@@ -86,89 +86,6 @@ implementation internals — live in
 ## Part I — The everyday loop
 
 This part is everything `agentstack --help` shows by default: the nine everyday commands — `init`, `status`, `add`, `search`, `apply`, `doctor`, `use`, `run`, `trust` — and the machinery directly behind them. Read only what is here and you can reach a working setup: one manifest rendered into every CLI's native config, credentials kept out of that config, hand-edits caught, and a profile activated. The power surface in Part II is entirely opt-in — nothing in the everyday loop requires it.
-
-## Core engine
-
-The machinery every other section builds on: how one manifest is loaded,
-validated, and rendered into native config for thirteen agent CLIs — and how a
-later hand-edit is caught. Skip it unless you want the internals of how intent
-becomes config.
-
-### The manifest
-
-Layered load: the preferred `.agentstack/agentstack.toml` plus a gitignored
-`agentstack.local.toml` overlay (legacy root `agentstack.toml` remains
-supported), with static validation before anything renders. Relative paths in
-the manifest (skill `path`, instruction sources) anchor at the **manifest's
-own directory** — `.agentstack/` in the preferred layout — so
-`path = "./skills/x"` materializes at `.agentstack/skills/x`; a server's
-`cwd` is the deliberate exception and anchors at the project root. The `version`
-field is checked on load — a manifest (or lockfile, or library index)
-written by a newer schema than the build supports errors with an "upgrade
-agentstack" message instead of being misread silently.
-
-### Data-driven adapters
-
-Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS Code,
-GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro, and Pi — one YAML
-descriptor each, embedded in the binary, with user overrides and additions
-loaded from `~/.agentstack/adapters/`. Each CLI's quirks are encoded in data,
-not code (Claude's `type:"http"`, Codex's `http_headers` subtable, Gemini's
-`httpUrl`, VS Code's `servers` key, Copilot CLI's `type:"local"` stdio tag, …),
-and per-OS config paths (`{config}/…`) resolve on macOS/Linux/Windows.
-`agentstack adapters list` shows their ids.
-
-### Rendering and merging
-
-A generic renderer applies field renames, transport tags, header nesting, and
-secret substitution; its **inverse** powers `init`, importing existing configs
-back into a manifest. Merges are non-destructive — JSON splices only the managed
-section (untouched bytes, floats included, preserved exactly); TOML uses
-`toml_edit` to keep comments and formatting. Nothing drops silently: a server
-whose transport a target can't express, or whose **name** the CLI would refuse at
-startup (Codex validates against `^[a-zA-Z0-9_-]+$`), is skipped with a spoken
-reason rather than written into a config that errors on launch.
-
-Native keys with no transport-neutral equivalent live under a per-target `extra`
-table, passed through verbatim by that one adapter (`${REF}` substitution still
-applies); `init`/`adopt` lift unknown keys back into `extra.<adapter>`, and a
-typo'd adapter id is a validation error. A stdio server can declare a `cwd` for
-servers that only start from their own directory — it renders to each adapter's
-native working-directory key (Codex, Cursor, Gemini CLI, OpenCode, Copilot CLI),
-round-trips through `init`/`adopt`, warns where an adapter has no such key, and
-the gateway honors it too (defaulting to the project root, never the client's cwd).
-
-```toml
-[servers.miro.extra.codex]
-startup_timeout_sec = 20   # npx cold-cache fetch must not block CLI startup
-
-[servers.tldraw]
-cwd = "/path/to/tldraw-mcp-server"   # supports ${REF}/path expansion
-```
-
-A server can also scope which targets it renders to, mirroring instructions and
-hooks: `targets = ["claude-code"]` fans out to that adapter only, `["*"]`
-(default) means every target, `targets = []` opts out of the direct fan-out.
-`apply`, `diff`, and `doctor` share the one filter; a typo'd id is a validation
-error.
-
-### State tracking
-
-`~/.agentstack/state.json` records what agentstack manages per target, so
-`apply` prunes entries we own that left the manifest and `doctor`/`diff`
-detect hand-edits — see [drift: adopt or apply?](#drift-adopt-or-apply) for
-which fix to run.
-
-### Scopes
-
-Writes default to the **manifest's home**: a repo manifest writes **project**
-locations (`.mcp.json`, `.claude/skills/` — repo-local, behind the managed
-`.gitignore` block), while the machine manifest (`~/.agentstack/`) writes
-**global** locations (each CLI's `~/.claude.json`, `~/.claude/skills`).
-`--scope` overrides either way — e.g. `apply --scope global` in a repo puts
-its servers in every project's config on this machine. `doctor` follows the
-scope your writes actually recorded, so a deliberate `--scope` choice is
-honored, not second-guessed.
 
 ## Secrets and trust
 
@@ -357,6 +274,89 @@ the session engine, so one is allowed per directory at a time. Unix only for now
 ## Part II — The power surface
 
 These are the twenty-nine commands `agentstack --help` keeps hidden as progressive disclosure, plus the advanced delivery and enforcement modes the everyday loop only points at. Hidden is not unsupported — every command here is fully maintained and carries its own `--help`, exactly as the [All commands](#all-commands) preamble spells out. Reach in when you need a machine-wide policy ceiling, the zero-files gateway, ephemeral sessions, locked runs, the central library, or the observability tooling.
+
+## Core engine
+
+The machinery every other section builds on: how one manifest is loaded,
+validated, and rendered into native config for thirteen agent CLIs — and how a
+later hand-edit is caught. Skip it unless you want the internals of how intent
+becomes config.
+
+### The manifest
+
+Layered load: the preferred `.agentstack/agentstack.toml` plus a gitignored
+`agentstack.local.toml` overlay (legacy root `agentstack.toml` remains
+supported), with static validation before anything renders. Relative paths in
+the manifest (skill `path`, instruction sources) anchor at the **manifest's
+own directory** — `.agentstack/` in the preferred layout — so
+`path = "./skills/x"` materializes at `.agentstack/skills/x`; a server's
+`cwd` is the deliberate exception and anchors at the project root. The `version`
+field is checked on load — a manifest (or lockfile, or library index)
+written by a newer schema than the build supports errors with an "upgrade
+agentstack" message instead of being misread silently.
+
+### Data-driven adapters
+
+Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS Code,
+GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro, and Pi — one YAML
+descriptor each, embedded in the binary, with user overrides and additions
+loaded from `~/.agentstack/adapters/`. Each CLI's quirks are encoded in data,
+not code (Claude's `type:"http"`, Codex's `http_headers` subtable, Gemini's
+`httpUrl`, VS Code's `servers` key, Copilot CLI's `type:"local"` stdio tag, …),
+and per-OS config paths (`{config}/…`) resolve on macOS/Linux/Windows.
+`agentstack adapters list` shows their ids.
+
+### Rendering and merging
+
+A generic renderer applies field renames, transport tags, header nesting, and
+secret substitution; its **inverse** powers `init`, importing existing configs
+back into a manifest. Merges are non-destructive — JSON splices only the managed
+section (untouched bytes, floats included, preserved exactly); TOML uses
+`toml_edit` to keep comments and formatting. Nothing drops silently: a server
+whose transport a target can't express, or whose **name** the CLI would refuse at
+startup (Codex validates against `^[a-zA-Z0-9_-]+$`), is skipped with a spoken
+reason rather than written into a config that errors on launch.
+
+Native keys with no transport-neutral equivalent live under a per-target `extra`
+table, passed through verbatim by that one adapter (`${REF}` substitution still
+applies); `init`/`adopt` lift unknown keys back into `extra.<adapter>`, and a
+typo'd adapter id is a validation error. A stdio server can declare a `cwd` for
+servers that only start from their own directory — it renders to each adapter's
+native working-directory key (Codex, Cursor, Gemini CLI, OpenCode, Copilot CLI),
+round-trips through `init`/`adopt`, warns where an adapter has no such key, and
+the gateway honors it too (defaulting to the project root, never the client's cwd).
+
+```toml
+[servers.miro.extra.codex]
+startup_timeout_sec = 20   # npx cold-cache fetch must not block CLI startup
+
+[servers.tldraw]
+cwd = "/path/to/tldraw-mcp-server"   # supports ${REF}/path expansion
+```
+
+A server can also scope which targets it renders to, mirroring instructions and
+hooks: `targets = ["claude-code"]` fans out to that adapter only, `["*"]`
+(default) means every target, `targets = []` opts out of the direct fan-out.
+`apply`, `diff`, and `doctor` share the one filter; a typo'd id is a validation
+error.
+
+### State tracking
+
+`~/.agentstack/state.json` records what agentstack manages per target, so
+`apply` prunes entries we own that left the manifest and `doctor`/`diff`
+detect hand-edits — see [drift: adopt or apply?](#drift-adopt-or-apply) for
+which fix to run.
+
+### Scopes
+
+Writes default to the **manifest's home**: a repo manifest writes **project**
+locations (`.mcp.json`, `.claude/skills/` — repo-local, behind the managed
+`.gitignore` block), while the machine manifest (`~/.agentstack/`) writes
+**global** locations (each CLI's `~/.claude.json`, `~/.claude/skills`).
+`--scope` overrides either way — e.g. `apply --scope global` in a repo puts
+its servers in every project's config on this machine. `doctor` follows the
+scope your writes actually recorded, so a deliberate `--scope` choice is
+honored, not second-guessed.
 
 <a id="where-rendered-files-live-three-modes"></a>
 ## Delivery modes — where rendered files live

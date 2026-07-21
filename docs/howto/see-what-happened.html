@@ -116,7 +116,7 @@
     <b>Everyday</b>
     <code>$ agentstack add · apply · doctor</code>
     <ul>
-      <li><a href="../index.html#manifest">The manifest</a>
+      <li><a href="../concepts.html#the-manifest-and-the-lockfile">The manifest</a>
       </li>
       <li><a href="../howto/add-a-server.html">Add a server</a>
       </li>
@@ -147,7 +147,7 @@
       </li>
       <li><a href="../reference.html#the-central-library">Central library</a>
       </li>
-      <li><a href="../index.html#modes">Delivery modes</a>
+      <li><a href="../concepts.html#delivery-modes">Delivery modes</a>
       </li>
       <li><a href="../reference.html#dashboard">Dashboard</a>
       </li>
@@ -157,8 +157,6 @@
     <summary>Protect</summary>
     <code>$ agentstack trust · guard</code>
     <ul>
-      <li><a href="../index.html#trust">The trust gate</a>
-      </li>
       <li><a href="../enforcement.html#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
@@ -172,10 +170,6 @@
     <code>$ agentstack run --lockdown</code>
     <ul>
       <li><a href="../howto/lock-down-a-run.html">Lock down a run</a>
-      </li>
-      <li><a href="../index.html#sandbox">Sandbox &amp; lockdown</a>
-      </li>
-      <li><a href="../index.html#enforced">What's enforced</a>
       </li>
       <li><a href="../enforcement.html">Enforcement matrix</a>
       </li>
@@ -229,6 +223,7 @@
 <pre class="block"><code># What ran, and what one run did
 agentstack report runs                # table of tracked runs (--json to script)
 agentstack report run &lt;id&gt;            # one run's flight recorder + posture label
+agentstack kill &lt;id&gt;                  # stop a tracked run that's gone wrong
 
 # What your capabilities cost and call
 agentstack report usage               # per-capability context cost + activation counts
@@ -242,7 +237,7 @@ agentstack optimize                   # evidence-backed recommendations (--write
 
 # Before you trust or rely on a capability
 agentstack explain &lt;name&gt;             # provenance, effective policy, and context cost, for one capability</code></pre>
-<p><strong>After a run.</strong> <code>report runs</code> lists tracked runs; <code>report run &lt;id&gt;</code> reads that run's <a href="../concepts.html">flight recorder</a> — its full lifecycle, egress, tool-call, and secret-ref record — plus the run's <a href="../concepts.html">posture</a> label. <code>report calls</code> summarizes the global <a href="../concepts.html">call audit log</a> across all runs (argument <em>digests</em> only, never values). The two context lenses differ: <code>report usage --live</code> estimates a server's <code>tools/list</code> footprint, <code>report wire</code> measures what the <code>tools</code> block actually costs on the wire.</p>
+<p><strong>After a run.</strong> <code>report runs</code> lists tracked runs; <code>report run &lt;id&gt;</code> reads that run's <a href="../concepts.html">flight recorder</a> — its full lifecycle, egress, tool-call, and secret-ref record — plus the run's <a href="../concepts.html">posture</a> label. A run that's still going and shouldn't be: <code>agentstack kill &lt;id&gt;</code> stops it and reverts any profile it owned. <code>report calls</code> summarizes the global <a href="../concepts.html">call audit log</a> across all runs (argument <em>digests</em> only, never values). The two context lenses differ: <code>report usage --live</code> estimates a server's <code>tools/list</code> footprint, <code>report wire</code> measures what the <code>tools</code> block actually costs on the wire.</p>
 <p><strong>Dashboard and optimize.</strong> <code>agentstack dashboard</code> opens a read-only local view of everything above — runs, calls, usage, secrets, health — and never writes; where a control would live it shows the CLI command to copy, including the <code>agentstack restore</code> to <a href="../howto/undo.html">undo</a> any write. <code>agentstack optimize</code> turns the same signals into recommendations, each carrying its evidence and the exact command or TOML; <code>--write</code> applies only the provably-inert safe class.</p>
 <p><strong>Before you trust.</strong> <code>agentstack explain &lt;name&gt;</code> is the vet-first command: it shows one server or skill's origin and provenance, whether it has drifted from its pin, its <a href="../reference.html#mcp-firewall-policytools">effective policy</a> (the tool, egress, and secret-access rules that will actually apply), and its per-session context cost. Run it before <code>agentstack trust .</code> (see <a href="../howto/trust-a-repo.html">trust a cloned repo</a>) or before adding a capability to a profile.</p>
 <p><strong>Limits.</strong> <code>report calls</code>, <code>report usage</code>, and <code>optimize</code> only see gateway-brokered calls — a server rendered into a native config is called by the harness directly, so it never appears in the audit log and is never auto-removed on "no calls" evidence alone. These records are best-effort local diagnostics, not tamper-evident forensics. What each mode actually enforces (and records) is the <a href="../enforcement.html#the-matrix">enforcement matrix</a>.</p>

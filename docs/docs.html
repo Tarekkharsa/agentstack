@@ -163,7 +163,7 @@
     <b>Everyday</b>
     <code>$ agentstack add · apply · doctor</code>
     <ul>
-      <li><a href="index.html#manifest">The manifest</a>
+      <li><a href="concepts.html#the-manifest-and-the-lockfile">The manifest</a>
       </li>
       <li><a href="howto/add-a-server.html">Add a server</a>
       </li>
@@ -194,7 +194,7 @@
       </li>
       <li><a href="reference.html#the-central-library">Central library</a>
       </li>
-      <li><a href="index.html#modes">Delivery modes</a>
+      <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
       <li><a href="reference.html#dashboard">Dashboard</a>
       </li>
@@ -204,8 +204,6 @@
     <summary>Protect</summary>
     <code>$ agentstack trust · guard</code>
     <ul>
-      <li><a href="index.html#trust">The trust gate</a>
-      </li>
       <li><a href="enforcement.html#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
@@ -219,10 +217,6 @@
     <code>$ agentstack run --lockdown</code>
     <ul>
       <li><a href="howto/lock-down-a-run.html">Lock down a run</a>
-      </li>
-      <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a>
-      </li>
-      <li><a href="index.html#enforced">What's enforced</a>
       </li>
       <li><a href="enforcement.html">Enforcement matrix</a>
       </li>
@@ -270,15 +264,18 @@
     </p>
 
     <section class="sec" id="d-firstrun">
-      <p class="kick">First run</p>
+      <p class="kick">Start</p>
       <h2>Your first ten minutes</h2>
-      <p class="cmdline">Five steps to a working, guarded setup — in order. The full directory is below.</p>
+      <p class="cmdline">Five steps to a working, guarded setup — then the orientation pages. The full directory is below.</p>
       <ul class="entries">
         <li><a href="index.html#install">1 · Install the binary</a><small>one static binary, no runtime dependencies</small></li>
         <li><a href="start.html#s-import">2 · <code>agentstack init</code></a><small>import the setup your CLIs already use</small></li>
         <li><a href="howto/add-a-server.html">3 · Add a server</a> or <a href="howto/add-a-skill.html">skill</a><small>pull one capability into the manifest</small></li>
         <li><a href="start.html#s-render">4 · Apply</a> + <a href="start.html#s-verify">doctor</a><small>render into every CLI, then confirm it landed</small></li>
         <li><a href="examples.html#e9">5 · Run your CLI</a><small>it now uses your governed setup — that's the everyday loop</small></li>
+        <li><a href="concepts.html">Concepts</a><small>every term, plain sentences</small></li>
+        <li><a href="choose.html">Which mode do I need?</a><small>how much protection, and which delivery mode</small></li>
+        <li><a href="examples.html">Examples</a><small>25 runnable walkthroughs, simplest first</small></li>
       </ul>
     </section>
 
@@ -293,28 +290,15 @@
         <li><a href="reference.html#secrets-and-trust">keep my tokens out of config files</a></li>
         <li><a href="howto/trust-a-repo.html">try a repo I just cloned without trusting it</a></li>
         <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo" class="gh">stop an agent from running <code>rm -rf</code></a></li>
-        <li><a href="index.html#modes">work across many repos with no files on disk</a></li>
+        <li><a href="concepts.html#delivery-modes">work across many repos with no files on disk</a></li>
         <li><a href="howto/lock-down-a-run.html">confine a run so it can't reach the network</a></li>
         <li><a href="examples.html#e10">know what a server can do before I enable it</a></li>
         <li><a href="howto/see-what-happened.html">see what an agent actually did</a></li>
-        <li><a href="index.html#manifest">pin and reproduce my exact setup</a></li>
+        <li><a href="concepts.html#the-manifest-and-the-lockfile">pin and reproduce my exact setup</a></li>
         <li><a href="howto/team-setup.html">share one setup with my team</a></li>
         <li><a href="howto/ci.html">share a reviewed setup with CI</a></li>
         <li><a href="reference.html#the-central-library">add a skill from a git repo</a></li>
         <li><a href="howto/undo.html">undo what agentstack wrote to my configs</a></li>
-      </ul>
-    </section>
-
-    <section class="sec" id="d-start">
-      <p class="kick">Start</p>
-      <h2>First run in about ten minutes</h2>
-      <ul class="entries">
-        <li><a href="start.html">Get started</a><small>guided setup: import what your CLIs already use</small></li>
-        <li><a href="concepts.html">Concepts</a><small>every term, two screens</small></li>
-        <li><a href="choose.html">Which mode do I need?</a><small>how much protection, and which delivery mode</small></li>
-        <li><a href="index.html#install">Install</a><small>one static binary; Docker only for confinement</small></li>
-        <li><a href="examples.html">Examples</a><small>25 runnable walkthroughs, simplest first</small></li>
-        <li><a href="architecture.html#operating-model--choose-the-boundary-you-need">Which primitive?</a><small>every boundary in one table — orientation before you choose</small></li>
       </ul>
     </section>
 
@@ -324,9 +308,9 @@
       <p class="cmdline"><b>$</b> agentstack apply</p>
       <ul class="entries">
         <li><a href="architecture.html">How it works</a><small>activation, sessions, leases, policy layers</small></li>
-        <li><a href="index.html#manifest">The manifest</a><small>servers, skills, instructions, extensions, ${REF} secrets</small></li>
+        <li><a href="concepts.html#the-manifest-and-the-lockfile">The manifest</a><small>servers, skills, instructions, extensions, ${REF} secrets</small></li>
         <li><a href="reference.html#the-central-library">Central library</a><small>one library of capabilities, every project</small></li>
-        <li><a href="index.html#modes">Rendered-file modes</a><small>static, clean-at-rest, or zero files</small></li>
+        <li><a href="concepts.html#delivery-modes">Delivery modes</a><small>static, clean-at-rest, or zero files</small></li>
         <li><a href="reference.html#dashboard">Dashboard</a><small>a read-only view, in a local web UI</small></li>
       </ul>
     </section>
@@ -336,7 +320,7 @@
       <h2>Consent before capability</h2>
       <p class="cmdline"><b>$</b> agentstack trust . &nbsp;·&nbsp; <b>$</b> agentstack guard install</p>
       <ul class="entries">
-        <li><a href="index.html#trust">The trust gate</a><small>cloned repos stay inert until you review</small></li>
+        <li><a href="howto/trust-a-repo.html">The trust gate</a><small>cloned repos stay inert until you review</small></li>
         <li><a class="gh" href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a><small>rm -rf and .env reads blocked, runnable</small></li>
         <li><a class="gh" href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Starter machine policies</a><small>developer, CI, compatible, locked-down</small></li>
         <li><a class="gh" href="https://github.com/Tarekkharsa/agentstack/blob/main/action.yml">GitHub Action</a><small>drop-in CI trust gate — <code>uses: Tarekkharsa/agentstack@v0.14.0</code> then <code>agentstack doctor --ci</code></small></li>
@@ -348,9 +332,8 @@
       <h2>Kernel-enforced when it matters</h2>
       <p class="cmdline"><b>$</b> agentstack run --sandbox [--lockdown]</p>
       <ul class="entries">
-        <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a><small>container + egress proxy; lockdown removes the direct route</small></li>
-        <li><a href="index.html#enforced">What's enforced</a><small>the honest per-mode matrix, on one screen</small></li>
-        <li><a href="enforcement.html">Enforcement matrix</a><small>authoritative, checked against the source</small></li>
+        <li><a href="howto/lock-down-a-run.html">Sandbox &amp; lockdown</a><small>container + egress proxy; lockdown removes the direct route</small></li>
+        <li><a href="enforcement.html">Enforcement matrix</a><small>what's actually enforced, per mode — checked against the source</small></li>
       </ul>
     </section>
 

@@ -116,7 +116,7 @@
     <b>Everyday</b>
     <code>$ agentstack add · apply · doctor</code>
     <ul>
-      <li><a href="index.html#manifest">The manifest</a>
+      <li><a href="concepts.html#the-manifest-and-the-lockfile">The manifest</a>
       </li>
       <li><a href="howto/add-a-server.html">Add a server</a>
       </li>
@@ -147,7 +147,7 @@
       </li>
       <li><a href="#the-central-library">Central library</a>
       </li>
-      <li><a href="index.html#modes">Delivery modes</a>
+      <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
       <li><a href="#dashboard">Dashboard</a>
       </li>
@@ -157,8 +157,6 @@
     <summary>Protect</summary>
     <code>$ agentstack trust · guard</code>
     <ul>
-      <li><a href="index.html#trust">The trust gate</a>
-      </li>
       <li><a href="enforcement.html#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
@@ -172,10 +170,6 @@
     <code>$ agentstack run --lockdown</code>
     <ul>
       <li><a href="howto/lock-down-a-run.html">Lock down a run</a>
-      </li>
-      <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a>
-      </li>
-      <li><a href="index.html#enforced">What's enforced</a>
       </li>
       <li><a href="enforcement.html">Enforcement matrix</a>
       </li>
@@ -219,13 +213,13 @@
 <p><strong>Contents</strong></p>
 <p><strong><a href="#part-i--the-everyday-loop">Part I — The everyday loop</a></strong></p>
 <ul>
-<li><a href="#core-engine">Core engine</a><ul><li><a href="#the-manifest">The manifest</a></li><li><a href="#data-driven-adapters">Data-driven adapters</a></li><li><a href="#rendering-and-merging">Rendering and merging</a></li><li><a href="#state-tracking">State tracking</a></li><li><a href="#scopes">Scopes</a></li></ul></li>
 <li><a href="#secrets-and-trust">Secrets and trust</a><ul><li><a href="#secret-resolution">Secret resolution</a></li><li><a href="#where-lifted-secrets-go-init">Where lifted secrets go (<code>init</code>)</a></li><li><a href="#unresolved-secrets-block-writes">Unresolved secrets block writes</a></li><li><a href="#doctor---live"><code>doctor --live</code></a></li><li><a href="#one-undo-verb-restore">One undo verb: <code>restore</code></a></li><li><a href="#doctor-shows-what-you-use"><code>doctor</code> shows what you use</a></li></ul></li>
 <li><a href="#drift-adopt-or-apply">Drift: adopt or apply?</a><ul><li><a href="#adopt-and-add"><code>adopt</code> and <code>add</code></a></li><li><a href="#search-across-providers">Search across providers</a></li><li><a href="#selective-skills-via-profiles">Selective skills via profiles</a></li></ul></li>
 <li><a href="#live-runs-agentstack-run">Live runs (<code>agentstack run</code>)</a></li>
 </ul>
 <p><strong><a href="#part-ii--the-power-surface">Part II — The power surface</a></strong></p>
 <ul>
+<li><a href="#core-engine">Core engine</a><ul><li><a href="#the-manifest">The manifest</a></li><li><a href="#data-driven-adapters">Data-driven adapters</a></li><li><a href="#rendering-and-merging">Rendering and merging</a></li><li><a href="#state-tracking">State tracking</a></li><li><a href="#scopes">Scopes</a></li></ul></li>
 <li><a href="#delivery-modes--where-rendered-files-live">Delivery modes — where rendered files live</a><ul><li><a href="#owned-servers-owner--codex">Owned servers (<code>owner = "codex"</code>)</a></li></ul></li>
 <li><a href="#agent-operable-agentstack-mcp">Agent-operable (<code>agentstack mcp</code>)</a><ul><li><a href="#transparent-mode---transparent">Transparent mode (<code>--transparent</code>)</a></li><li><a href="#the-zero-files-gateway---auto-project--trust">The zero-files gateway (<code>--auto-project</code> + <code>trust</code>)</a></li><li><a href="#mcp-profile-leases-one-connection-one-capability-fence">MCP profile leases</a></li><li><a href="#compact-proxied-surface--code-mode">Compact proxied surface + code mode</a></li><li><a href="#experimental-tools_execute">Experimental <code>tools_execute</code></a></li></ul></li>
 <li><a href="#governance-policy">Governance (<code>[policy]</code>)</a></li>
@@ -248,25 +242,6 @@
 </ul>
 <h2 id="part-i--the-everyday-loop">Part I — The everyday loop<a class="hlink" href="#part-i--the-everyday-loop" aria-label="Link to this section">#</a></h2>
 <p>This part is everything <code>agentstack --help</code> shows by default: the nine everyday commands — <code>init</code>, <code>status</code>, <code>add</code>, <code>search</code>, <code>apply</code>, <code>doctor</code>, <code>use</code>, <code>run</code>, <code>trust</code> — and the machinery directly behind them. Read only what is here and you can reach a working setup: one manifest rendered into every CLI's native config, credentials kept out of that config, hand-edits caught, and a profile activated. The power surface in Part II is entirely opt-in — nothing in the everyday loop requires it.</p>
-<h2 id="core-engine">Core engine<a class="hlink" href="#core-engine" aria-label="Link to this section">#</a></h2>
-<p>The machinery every other section builds on: how one manifest is loaded, validated, and rendered into native config for thirteen agent CLIs — and how a later hand-edit is caught. Skip it unless you want the internals of how intent becomes config.</p>
-<h3 id="the-manifest">The manifest<a class="hlink" href="#the-manifest" aria-label="Link to this section">#</a></h3>
-<p>Layered load: the preferred <code>.agentstack/agentstack.toml</code> plus a gitignored <code>agentstack.local.toml</code> overlay (legacy root <code>agentstack.toml</code> remains supported), with static validation before anything renders. Relative paths in the manifest (skill <code>path</code>, instruction sources) anchor at the <strong>manifest's own directory</strong> — <code>.agentstack/</code> in the preferred layout — so <code>path = "./skills/x"</code> materializes at <code>.agentstack/skills/x</code>; a server's <code>cwd</code> is the deliberate exception and anchors at the project root. The <code>version</code> field is checked on load — a manifest (or lockfile, or library index) written by a newer schema than the build supports errors with an "upgrade agentstack" message instead of being misread silently.</p>
-<h3 id="data-driven-adapters">Data-driven adapters<a class="hlink" href="#data-driven-adapters" aria-label="Link to this section">#</a></h3>
-<p>Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro, and Pi — one YAML descriptor each, embedded in the binary, with user overrides and additions loaded from <code>~/.agentstack/adapters/</code>. Each CLI's quirks are encoded in data, not code (Claude's <code>type:"http"</code>, Codex's <code>http_headers</code> subtable, Gemini's <code>httpUrl</code>, VS Code's <code>servers</code> key, Copilot CLI's <code>type:"local"</code> stdio tag, …), and per-OS config paths (<code>{config}/…</code>) resolve on macOS/Linux/Windows. <code>agentstack adapters list</code> shows their ids.</p>
-<h3 id="rendering-and-merging">Rendering and merging<a class="hlink" href="#rendering-and-merging" aria-label="Link to this section">#</a></h3>
-<p>A generic renderer applies field renames, transport tags, header nesting, and secret substitution; its <strong>inverse</strong> powers <code>init</code>, importing existing configs back into a manifest. Merges are non-destructive — JSON splices only the managed section (untouched bytes, floats included, preserved exactly); TOML uses <code>toml_edit</code> to keep comments and formatting. Nothing drops silently: a server whose transport a target can't express, or whose <strong>name</strong> the CLI would refuse at startup (Codex validates against <code>^[a-zA-Z0-9_-]+$</code>), is skipped with a spoken reason rather than written into a config that errors on launch.</p>
-<p>Native keys with no transport-neutral equivalent live under a per-target <code>extra</code> table, passed through verbatim by that one adapter (<code>${REF}</code> substitution still applies); <code>init</code>/<code>adopt</code> lift unknown keys back into <code>extra.&lt;adapter&gt;</code>, and a typo'd adapter id is a validation error. A stdio server can declare a <code>cwd</code> for servers that only start from their own directory — it renders to each adapter's native working-directory key (Codex, Cursor, Gemini CLI, OpenCode, Copilot CLI), round-trips through <code>init</code>/<code>adopt</code>, warns where an adapter has no such key, and the gateway honors it too (defaulting to the project root, never the client's cwd).</p>
-<pre class="block"><code>[servers.miro.extra.codex]
-startup_timeout_sec = 20   # npx cold-cache fetch must not block CLI startup
-
-[servers.tldraw]
-cwd = "/path/to/tldraw-mcp-server"   # supports ${REF}/path expansion</code></pre>
-<p>A server can also scope which targets it renders to, mirroring instructions and hooks: <code>targets = ["claude-code"]</code> fans out to that adapter only, <code>["*"]</code> (default) means every target, <code>targets = []</code> opts out of the direct fan-out. <code>apply</code>, <code>diff</code>, and <code>doctor</code> share the one filter; a typo'd id is a validation error.</p>
-<h3 id="state-tracking">State tracking<a class="hlink" href="#state-tracking" aria-label="Link to this section">#</a></h3>
-<p><code>~/.agentstack/state.json</code> records what agentstack manages per target, so <code>apply</code> prunes entries we own that left the manifest and <code>doctor</code>/<code>diff</code> detect hand-edits — see <a href="#drift-adopt-or-apply">drift: adopt or apply?</a> for which fix to run.</p>
-<h3 id="scopes">Scopes<a class="hlink" href="#scopes" aria-label="Link to this section">#</a></h3>
-<p>Writes default to the <strong>manifest's home</strong>: a repo manifest writes <strong>project</strong> locations (<code>.mcp.json</code>, <code>.claude/skills/</code> — repo-local, behind the managed <code>.gitignore</code> block), while the machine manifest (<code>~/.agentstack/</code>) writes <strong>global</strong> locations (each CLI's <code>~/.claude.json</code>, <code>~/.claude/skills</code>). <code>--scope</code> overrides either way — e.g. <code>apply --scope global</code> in a repo puts its servers in every project's config on this machine. <code>doctor</code> follows the scope your writes actually recorded, so a deliberate <code>--scope</code> choice is honored, not second-guessed.</p>
 <h2 id="secrets-and-trust">Secrets and trust<a class="hlink" href="#secrets-and-trust" aria-label="Link to this section">#</a></h2>
 <p>The enforcement core: how a secret resolves, where a policy narrows what a server may do, and what every brokered call records. Read it if you run untrusted repos, resolve credentials on this machine, or want a machine ceiling no project can loosen.</p>
 <h3 id="secret-resolution">Secret resolution<a class="hlink" href="#secret-resolution" aria-label="Link to this section">#</a></h3>
@@ -329,6 +304,25 @@ agentstack kill &lt;id&gt; --force   # SIGKILL immediately</code></pre>
 <p>Launching is a terminal act (the CLIs are interactive TUIs); the dashboard's <strong>Runs</strong> panel is for observing tracked runs. The registry is self-healing: a run whose wrapper died is pruned on the next <code>report runs</code>. A profile-bound run uses the session engine, so one is allowed per directory at a time. Unix only for now.</p>
 <h2 id="part-ii--the-power-surface">Part II — The power surface<a class="hlink" href="#part-ii--the-power-surface" aria-label="Link to this section">#</a></h2>
 <p>These are the twenty-nine commands <code>agentstack --help</code> keeps hidden as progressive disclosure, plus the advanced delivery and enforcement modes the everyday loop only points at. Hidden is not unsupported — every command here is fully maintained and carries its own <code>--help</code>, exactly as the <a href="#all-commands">All commands</a> preamble spells out. Reach in when you need a machine-wide policy ceiling, the zero-files gateway, ephemeral sessions, locked runs, the central library, or the observability tooling.</p>
+<h2 id="core-engine">Core engine<a class="hlink" href="#core-engine" aria-label="Link to this section">#</a></h2>
+<p>The machinery every other section builds on: how one manifest is loaded, validated, and rendered into native config for thirteen agent CLIs — and how a later hand-edit is caught. Skip it unless you want the internals of how intent becomes config.</p>
+<h3 id="the-manifest">The manifest<a class="hlink" href="#the-manifest" aria-label="Link to this section">#</a></h3>
+<p>Layered load: the preferred <code>.agentstack/agentstack.toml</code> plus a gitignored <code>agentstack.local.toml</code> overlay (legacy root <code>agentstack.toml</code> remains supported), with static validation before anything renders. Relative paths in the manifest (skill <code>path</code>, instruction sources) anchor at the <strong>manifest's own directory</strong> — <code>.agentstack/</code> in the preferred layout — so <code>path = "./skills/x"</code> materializes at <code>.agentstack/skills/x</code>; a server's <code>cwd</code> is the deliberate exception and anchors at the project root. The <code>version</code> field is checked on load — a manifest (or lockfile, or library index) written by a newer schema than the build supports errors with an "upgrade agentstack" message instead of being misread silently.</p>
+<h3 id="data-driven-adapters">Data-driven adapters<a class="hlink" href="#data-driven-adapters" aria-label="Link to this section">#</a></h3>
+<p>Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS Code, GitHub Copilot CLI, OpenCode, Antigravity, Junie, Kiro, and Pi — one YAML descriptor each, embedded in the binary, with user overrides and additions loaded from <code>~/.agentstack/adapters/</code>. Each CLI's quirks are encoded in data, not code (Claude's <code>type:"http"</code>, Codex's <code>http_headers</code> subtable, Gemini's <code>httpUrl</code>, VS Code's <code>servers</code> key, Copilot CLI's <code>type:"local"</code> stdio tag, …), and per-OS config paths (<code>{config}/…</code>) resolve on macOS/Linux/Windows. <code>agentstack adapters list</code> shows their ids.</p>
+<h3 id="rendering-and-merging">Rendering and merging<a class="hlink" href="#rendering-and-merging" aria-label="Link to this section">#</a></h3>
+<p>A generic renderer applies field renames, transport tags, header nesting, and secret substitution; its <strong>inverse</strong> powers <code>init</code>, importing existing configs back into a manifest. Merges are non-destructive — JSON splices only the managed section (untouched bytes, floats included, preserved exactly); TOML uses <code>toml_edit</code> to keep comments and formatting. Nothing drops silently: a server whose transport a target can't express, or whose <strong>name</strong> the CLI would refuse at startup (Codex validates against <code>^[a-zA-Z0-9_-]+$</code>), is skipped with a spoken reason rather than written into a config that errors on launch.</p>
+<p>Native keys with no transport-neutral equivalent live under a per-target <code>extra</code> table, passed through verbatim by that one adapter (<code>${REF}</code> substitution still applies); <code>init</code>/<code>adopt</code> lift unknown keys back into <code>extra.&lt;adapter&gt;</code>, and a typo'd adapter id is a validation error. A stdio server can declare a <code>cwd</code> for servers that only start from their own directory — it renders to each adapter's native working-directory key (Codex, Cursor, Gemini CLI, OpenCode, Copilot CLI), round-trips through <code>init</code>/<code>adopt</code>, warns where an adapter has no such key, and the gateway honors it too (defaulting to the project root, never the client's cwd).</p>
+<pre class="block"><code>[servers.miro.extra.codex]
+startup_timeout_sec = 20   # npx cold-cache fetch must not block CLI startup
+
+[servers.tldraw]
+cwd = "/path/to/tldraw-mcp-server"   # supports ${REF}/path expansion</code></pre>
+<p>A server can also scope which targets it renders to, mirroring instructions and hooks: <code>targets = ["claude-code"]</code> fans out to that adapter only, <code>["*"]</code> (default) means every target, <code>targets = []</code> opts out of the direct fan-out. <code>apply</code>, <code>diff</code>, and <code>doctor</code> share the one filter; a typo'd id is a validation error.</p>
+<h3 id="state-tracking">State tracking<a class="hlink" href="#state-tracking" aria-label="Link to this section">#</a></h3>
+<p><code>~/.agentstack/state.json</code> records what agentstack manages per target, so <code>apply</code> prunes entries we own that left the manifest and <code>doctor</code>/<code>diff</code> detect hand-edits — see <a href="#drift-adopt-or-apply">drift: adopt or apply?</a> for which fix to run.</p>
+<h3 id="scopes">Scopes<a class="hlink" href="#scopes" aria-label="Link to this section">#</a></h3>
+<p>Writes default to the <strong>manifest's home</strong>: a repo manifest writes <strong>project</strong> locations (<code>.mcp.json</code>, <code>.claude/skills/</code> — repo-local, behind the managed <code>.gitignore</code> block), while the machine manifest (<code>~/.agentstack/</code>) writes <strong>global</strong> locations (each CLI's <code>~/.claude.json</code>, <code>~/.claude/skills</code>). <code>--scope</code> overrides either way — e.g. <code>apply --scope global</code> in a repo puts its servers in every project's config on this machine. <code>doctor</code> follows the scope your writes actually recorded, so a deliberate <code>--scope</code> choice is honored, not second-guessed.</p>
 <a id="where-rendered-files-live-three-modes"></a>
 <h2 id="delivery-modes--where-rendered-files-live">Delivery modes — where rendered files live<a class="hlink" href="#delivery-modes--where-rendered-files-live" aria-label="Link to this section">#</a></h2>
 <p>You always commit the <em>intent</em> (<code>agentstack.toml</code> + <code>agentstack.lock</code>); the rendered artifacts — <code>.mcp.json</code>, <code>.claude/skills/</code>, the compiled <code>CLAUDE.md</code> / <code>AGENTS.md</code> — are a per-project choice of <strong>static</strong>, <strong>clean-at-rest</strong>, or <strong>zero-files</strong>. What each mode <em>is</em>: <a href="concepts.html#delivery-modes">concepts.md — delivery modes</a>; which to pick: <a href="choose.html">which mode do I need?</a>. The operational levers:</p>

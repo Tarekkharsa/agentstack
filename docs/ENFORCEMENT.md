@@ -9,8 +9,7 @@ execution mode, what does AgentStack actually enforce, and by what mechanism?**
 When any other document and this one disagree, this one is right — it is checked
 against the source, not against intent.
 
-Audience: anyone deciding what a mode actually guarantees. As stated above, this
-file is the ground truth and wins on any disagreement with another doc.
+Audience: anyone deciding what a mode actually guarantees.
 
 **Contents**
 

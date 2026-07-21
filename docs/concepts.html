@@ -116,7 +116,7 @@
     <b>Everyday</b>
     <code>$ agentstack add · apply · doctor</code>
     <ul>
-      <li><a href="index.html#manifest">The manifest</a>
+      <li><a href="#the-manifest-and-the-lockfile">The manifest</a>
       </li>
       <li><a href="howto/add-a-server.html">Add a server</a>
       </li>
@@ -147,7 +147,7 @@
       </li>
       <li><a href="reference.html#the-central-library">Central library</a>
       </li>
-      <li><a href="index.html#modes">Delivery modes</a>
+      <li><a href="#delivery-modes">Delivery modes</a>
       </li>
       <li><a href="reference.html#dashboard">Dashboard</a>
       </li>
@@ -157,8 +157,6 @@
     <summary>Protect</summary>
     <code>$ agentstack trust · guard</code>
     <ul>
-      <li><a href="index.html#trust">The trust gate</a>
-      </li>
       <li><a href="enforcement.html#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
@@ -172,10 +170,6 @@
     <code>$ agentstack run --lockdown</code>
     <ul>
       <li><a href="howto/lock-down-a-run.html">Lock down a run</a>
-      </li>
-      <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a>
-      </li>
-      <li><a href="index.html#enforced">What's enforced</a>
       </li>
       <li><a href="enforcement.html">Enforcement matrix</a>
       </li>
@@ -231,7 +225,7 @@
 <h2 id="mcp-gateway-brokered-call">MCP, gateway, brokered call<a class="hlink" href="#mcp-gateway-brokered-call" aria-label="Link to this section">#</a></h2>
 <p><strong>MCP (Model Context Protocol)</strong> — the plugin standard agent CLIs use to expose tools; an "MCP server" is one such plugin. Spelled out here because the rest of the docs assume it.</p>
 <p><strong>Gateway</strong> — AgentStack's in-process broker. Instead of each CLI talking to MCP servers directly, calls route through the gateway, where policy is checked and every call is logged. It is <em>not</em> the <code>agentstack proxy</code> command — an unrelated, observe-only relay that watches Anthropic-API token usage and enforces nothing.</p>
-<p><strong>Brokered call</strong> — any tool call the gateway routes and records. Only brokered calls are policy-checked and audited; a server rendered straight into a CLI's native config is called directly and is not brokered. More: <a href="reference.html#agent-operable-agentstack-mcp">reference.md — agent-operable <code>mcp</code></a>, <a href="reference.html#wire-proxy-proxy">reference.md — the wire proxy</a>, <a href="reference.html#call-log">reference.md — call log</a>.</p>
+<p><strong>Brokered call</strong> — any tool call the gateway routes and records. Only brokered calls are policy-checked and audited; a server rendered straight into a CLI's native config is called directly and is not brokered. More: <a href="reference.html#agent-operable-agentstack-mcp">reference.md — agent-operable <code>mcp</code></a>, <a href="reference.html#compact-proxied-surface--code-mode">reference.md — code mode</a>, <a href="reference.html#wire-proxy-proxy">reference.md — the wire proxy</a>, <a href="reference.html#call-log">reference.md — call log</a>.</p>
 <h2 id="trust-and-the-consent-digest">Trust and the consent digest<a class="hlink" href="#trust-and-the-consent-digest" aria-label="Link to this section">#</a></h2>
 <p><strong>Trust</strong> — your local approval that a project may auto-load on this machine. Until you run <code>agentstack trust .</code>, a cloned repo is inert: no server spawns, no skill enters context, no secret resolves. Trust says the surface was approved for loading — not that the code is safe, or that a trusted project is safe to run unsandboxed.</p>
 <p><strong>Consent digest</strong> — the SHA-256 fingerprint of your manifest, local overlay, and lockfile that trust is pinned to. Change any of those bytes — a <code>git pull</code>, a re-lock — and the project drops back to untrusted until you re-trust it. More: <a href="enforcement.html#what-trusted-does-and-does-not-mean">ENFORCEMENT.md — what trusted does and does not mean</a>.</p>
@@ -276,9 +270,9 @@
 <li><strong>Central library</strong> — your own managed home (<code>~/.agentstack/lib/</code>) of skills and server definitions that projects reference by name instead of copying.</li>
 <li><strong>Bundled catalog</strong> — ready-made skills shipped inside the AgentStack binary that <code>search</code> can find and add.</li>
 <li><strong>Official MCP Registry</strong> — the public <code>registry.modelcontextprotocol.io</code> index of MCP servers; <code>search</code> queries it and <code>add from &lt;id&gt;</code> installs one.</li>
-<p>Skills also come straight from any skills repo — <code>add skill owner/repo</code> (or a git URL, or a local dir) discovers, scans, and pins them; see <a href="howto/add-a-skill.html">add a skill</a>.</p>
 <li><strong>Trust store</strong> — the machine-local record (under <code>~/.agentstack/</code>) of which projects you have trusted, keyed by path and consent digest. It stores no capabilities — only your approvals. More: <a href="reference.html#the-central-library">reference.md — the central library</a>, <a href="reference.html#search-across-providers">reference.md — search across providers</a>.</li>
 </ul>
+<p>Skills also come straight from any skills repo — <code>add skill owner/repo</code> (or a git URL, or a local dir) discovers, scans, and pins them; see <a href="howto/add-a-skill.html">add a skill</a>.</p>
 <h2 id="egress">Egress<a class="hlink" href="#egress" aria-label="Link to this section">#</a></h2>
 <p><strong>Egress</strong> — outbound network traffic from a run, governed by <code>[policy.egress]</code> host rules. Under <code>--sandbox</code> and <code>--lockdown</code> the egress proxy enforces those rules on proxied traffic: unapproved egress is blocked on the enforced paths. That is the honest limit — it never makes exfiltration impossible, because traffic to a host you <em>did</em> approve (including the model API) is still allowed. More: <a href="enforcement.html#egress">ENFORCEMENT.md — egress</a>.</p>
 <h2 id="flight-recorder-and-the-call-audit-log">Flight recorder and the call audit log<a class="hlink" href="#flight-recorder-and-the-call-audit-log" aria-label="Link to this section">#</a></h2>

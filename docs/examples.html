@@ -321,6 +321,7 @@
           <li><a href="#e6"><span class="n">6</span>Add skills</a></li>
           <li><a href="#e7"><span class="n">7</span>Task-specific profiles</a></li>
           <li><a href="#e8"><span class="n">8</span>Share house rules across CLIs</a></li>
+          <li><a href="#e26"><span class="n">26</span>Native extensions</a></li>
           <li><a href="#e9"><span class="n">9</span>The everyday loop</a></li>
           <li><a href="#e14"><span class="n">14</span>The central library</a></li>
           <li><a href="#e15"><span class="n">15</span>Sync across machines</a></li>
@@ -348,7 +349,7 @@
     <b>Everyday</b>
     <code>$ agentstack add · apply · doctor</code>
     <ul>
-      <li><a href="index.html#manifest">The manifest</a>
+      <li><a href="concepts.html#the-manifest-and-the-lockfile">The manifest</a>
       </li>
       <li><a href="howto/add-a-server.html">Add a server</a>
       </li>
@@ -379,7 +380,7 @@
       </li>
       <li><a href="reference.html#the-central-library">Central library</a>
       </li>
-      <li><a href="index.html#modes">Delivery modes</a>
+      <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
       <li><a href="reference.html#dashboard">Dashboard</a>
       </li>
@@ -389,8 +390,6 @@
     <summary>Protect</summary>
     <code>$ agentstack trust · guard</code>
     <ul>
-      <li><a href="index.html#trust">The trust gate</a>
-      </li>
       <li><a href="enforcement.html#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
@@ -404,10 +403,6 @@
     <code>$ agentstack run --lockdown</code>
     <ul>
       <li><a href="howto/lock-down-a-run.html">Lock down a run</a>
-      </li>
-      <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a>
-      </li>
-      <li><a href="index.html#enforced">What's enforced</a>
       </li>
       <li><a href="enforcement.html">Enforcement matrix</a>
       </li>
@@ -455,14 +450,8 @@
       Twenty-five copy-paste examples, building from a one-line manifest to
       sandboxed, governed execution. The manifest is the source of truth and
       may reference instruction files and skill directories; generated native
-      configuration remains compiled output. Relative paths anchor at the
-      manifest's directory; only <code>cwd</code> anchors at the project root.
+      configuration remains compiled output.
     </p>
-
-    <div class="callout">
-      <b>Our default recommendation</b>
-      <p>For interactive work in an MCP-capable harness: commit the manifest + lock, connect the gateway once, trust each reviewed repo, and open the smallest useful profile as an MCP lease. Choose native rendering only when the harness must read native files; add lockdown when the agent process needs isolation. <a href="#choose">See why and when to choose differently.</a></p>
-    </div>
 
     <div class="callout">
       <b>How to read the evidence</b>
@@ -679,6 +668,7 @@ startup_timeout_sec = 20               <span class="cm"># Codex sees this; the o
 
     <h3 class="ex" id="e6"><span class="num">6</span> Add skills</h3>
     <p class="intent">Skills are reusable instruction/tool bundles. Point at a local directory:</p>
+    <p class="muted small">Relative paths anchor at the manifest's directory (<code>.agentstack/</code>) — only a server's <code>cwd</code> anchors at the project root.</p>
     <pre><code>[skills.sql-review]
 path = "./skills/sql-review"           <span class="cm"># lives at .agentstack/skills/sql-review</span></code></pre>
     <p class="muted small">Skills activate through <strong>profiles</strong> (next), not <code>apply</code>. Materialize one directly with <code>agentstack use &lt;profile&gt; --write</code>.</p>
@@ -801,6 +791,11 @@ owner = "codex"                                 <span class="cm"># codex owns th
     <p class="muted small">When the app rewrites its own entry (a self-update), <code>apply</code> refreshes the manifest and fans the fresh values out to every other CLI instead of reverting the app.</p>
     <p class="muted small">Machine policy is resilient to accidental bad edits: a validated policy continues from a secret-free last-known-good snapshot and reports <strong>DEGRADED</strong>; first-run corruption reports <strong>BLOCKED</strong> and protected activation refuses to continue. Run <code>agentstack doctor</code> for the exact state and repair details.</p>
   </section>
+
+  <div class="callout">
+    <b>Our default recommendation</b>
+    <p>For interactive work in an MCP-capable harness: commit the manifest + lock, connect the gateway once, trust each reviewed repo, and open the smallest useful profile as an MCP lease. Choose native rendering only when the harness must read native files; add lockdown when the agent process needs isolation. <a href="#choose">See why and when to choose differently.</a></p>
+  </div>
 
   <!-- ============ CATEGORY 2 · PROTECT ============ -->
   <div class="cathead" data-cat="protect">
@@ -930,7 +925,7 @@ github = ["GH_*"]                       <span class="cm"># server named github m
 [policy.filesystem]                     <span class="cm"># bundle-global path globs</span>
 read  = ["./src/**", "./docs/**"]
 write = ["./out/**", "!**/.env"]        <span class="cm"># never write a .env, even under an allowed root</span></code></pre>
-    <p class="muted small">Enforcement depends on execution mode: host/gateway filesystem guards are cooperative harness hooks; sandbox/lockdown use coarse workspace mounts. See <a href="index.html#enforced">the enforcement matrix</a> before making a security claim.</p>
+    <p class="muted small">Enforcement depends on execution mode: host/gateway filesystem guards are cooperative harness hooks; sandbox/lockdown use coarse workspace mounts. See <a href="enforcement.html">the enforcement matrix</a> before making a security claim.</p>
 
     <h3 class="ex" id="e23"><span class="num">23</span> The CI trust gate</h3>
     <p class="intent">Two commands make a pipeline fail on drift or unsafe content — or use the pinned Action.</p>
@@ -1059,7 +1054,7 @@ agentstack report wire                        <span class="cm"># ranks tokens/tu
         <p>The guided walkthrough: take an unfamiliar repo from untrusted to a confined, auditable run — with the exact commands and expected output.</p>
       </div>
       <div class="fcard">
-        <h3><a href="index.html#enforced">What's enforced where</a></h3>
+        <h3><a href="enforcement.html">What's enforced where</a></h3>
         <p>The compact, code-grounded matrix: for host, gateway, sandbox, and lockdown, exactly which of tools, egress, secrets, filesystem, and audit are enforced.</p>
       </div>
       <div class="fcard">

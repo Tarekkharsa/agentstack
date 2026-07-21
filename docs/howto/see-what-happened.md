@@ -25,6 +25,7 @@ host run that talks to servers directly leaves nothing to report.
 # What ran, and what one run did
 agentstack report runs                # table of tracked runs (--json to script)
 agentstack report run <id>            # one run's flight recorder + posture label
+agentstack kill <id>                  # stop a tracked run that's gone wrong
 
 # What your capabilities cost and call
 agentstack report usage               # per-capability context cost + activation counts
@@ -42,7 +43,9 @@ agentstack explain <name>             # provenance, effective policy, and contex
 
 **After a run.** `report runs` lists tracked runs; `report run <id>` reads that
 run's [flight recorder](../concepts.md) — its full lifecycle, egress, tool-call,
-and secret-ref record — plus the run's [posture](../concepts.md) label.
+and secret-ref record — plus the run's [posture](../concepts.md) label. A run
+that's still going and shouldn't be: `agentstack kill <id>` stops it and
+reverts any profile it owned.
 `report calls` summarizes the global [call audit log](../concepts.md) across all
 runs (argument *digests* only, never values). The two context lenses differ:
 `report usage --live` estimates a server's `tools/list` footprint, `report wire`
