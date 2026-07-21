@@ -1,0 +1,61 @@
+<!doctype html>
+<!-- Source of docs/og-card.png (1200×630 social card).
+     Re-render: serve docs/, open this page in Chrome at a 1200×630 viewport,
+     screenshot, downscale to 1200×630 if captured at 2x:
+       sips -z 630 1200 docs/og-card.png -->
+<html lang="en" data-palette="slate" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="organic.css">
+<style>
+:root{--paper:#14171B;--surface:#1A1E23;--ink:#E9E7E2;--body:#C3C9CF;--muted:#9AA3AC;
+--accent:#F0975A;--accent-deep:#F5B183;--line:#292E34;--code-bg:#1E2329;--chip-ink:#D7DEE4}
+html,body{margin:0}
+body{width:1200px;height:630px;overflow:hidden;background:var(--paper);color:var(--ink);
+font-family:var(--font-body,Figtree,sans-serif);position:relative}
+.wrap{position:relative;width:100%;height:100%;padding:64px 72px;box-sizing:border-box;
+display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:16px}
+.brand img{width:52px;height:52px}
+.brand span{font-family:var(--font-heading,Caprasimo,serif);font-size:34px}
+.brand .a{color:var(--accent)}
+h1{font-family:var(--font-heading,Caprasimo,serif);font-weight:400;font-size:64px;
+line-height:1.1;margin:52px 0 0;max-width:760px}
+.pipe{display:flex;gap:10px;align-items:center;margin-top:44px;
+font-family:ui-monospace,Menlo,Consolas,monospace;font-size:19px;font-weight:700}
+.pipe span.chip{background:var(--code-bg);border:1.5px solid var(--line);color:var(--chip-ink);
+padding:9px 18px;border-radius:999px}
+.pipe span.chip.last{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.pipe span.arr{color:var(--accent)}
+.foot{margin-top:auto;display:flex;align-items:baseline;gap:24px;
+font-size:21px;color:var(--muted)}
+.foot .url{font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--accent-deep)}
+.deco{position:absolute;top:74px;right:64px;width:300px;height:300px}
+.deco .r{position:absolute;width:180px;height:180px;border-radius:46px}
+.deco .r1{top:0;right:0;border:9px solid #3A2A1C;opacity:.85}
+.deco .r2{top:38px;right:38px;border:9px solid #4A3520}
+.deco .r3{top:76px;right:76px;background:linear-gradient(135deg,#F0975A 0%,#C96F2F 100%);
+box-shadow:0 12px 32px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center}
+.deco .d{width:56px;height:56px;background:#FDF6EE;border-radius:11px;transform:rotate(45deg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><img src="logo-mark.svg" alt=""><span>agent<span class="a">Stack</span></span></div>
+  <h1>Cloning a repo shouldn't hand your agent to a stranger.</h1>
+  <div class="pipe">
+    <span class="chip">manifest</span><span class="arr">→</span>
+    <span class="chip">lockfile</span><span class="arr">→</span>
+    <span class="chip">trust</span><span class="arr">→</span>
+    <span class="chip">policy</span><span class="arr">→</span>
+    <span class="chip">gateway</span><span class="arr">→</span>
+    <span class="chip last">audit log</span>
+  </div>
+  <div class="foot">
+    <span class="url">tarekkharsa.github.io/agentstack</span>
+    <span>open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>
+  </div>
+  <div class="deco"><div class="r r1"></div><div class="r r2"></div><div class="r r3"><div class="d"></div></div></div>
+</div>
+</body>
+</html>
