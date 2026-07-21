@@ -98,7 +98,7 @@ Everything is explained on the website — that is the one place docs live:
 - **[See what your agents did](https://tarekkharsa.github.io/agentstack/howto/see-what-happened.html)** — runs, dashboard, optimize, explain
 - **[Reference](https://tarekkharsa.github.io/agentstack/reference.html)** — the complete feature and command inventory
 
-**Go deeper** — the [enforcement matrix](https://tarekkharsa.github.io/agentstack/enforcement.html) (what each mode actually enforces, checked against the source), the [architecture](https://tarekkharsa.github.io/agentstack/architecture.html) (how it works inside), the power how-tos ([lock down a run](https://tarekkharsa.github.io/agentstack/howto/lock-down-a-run.html), [team setup](https://tarekkharsa.github.io/agentstack/howto/team-setup.html), [CI](https://tarekkharsa.github.io/agentstack/howto/ci.html)), and [25 runnable walkthroughs](https://tarekkharsa.github.io/agentstack/examples.html).
+**Go deeper** — the [enforcement matrix](https://tarekkharsa.github.io/agentstack/enforcement.html) (what each mode actually enforces, checked against the source), the [architecture](https://tarekkharsa.github.io/agentstack/architecture.html) (how it works inside), the power how-tos ([lock down a run](https://tarekkharsa.github.io/agentstack/howto/lock-down-a-run.html), [team setup](https://tarekkharsa.github.io/agentstack/howto/team-setup.html), [CI](https://tarekkharsa.github.io/agentstack/howto/ci.html)), and [18 runnable walkthroughs](https://tarekkharsa.github.io/agentstack/examples.html).
 
 ## Develop
 

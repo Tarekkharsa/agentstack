@@ -237,7 +237,7 @@ agentstack init --secrets skip</code></pre>
 <p>Or use the one-line GitHub Action, which wraps the same gate:</p>
 <pre class="block"><code>steps:
   - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@v0.14.0  # pin a release tag, not @main</code></pre>
+  - uses: Tarekkharsa/agentstack@v0.15.0  # pin a release tag, not @main</code></pre>
 <p><code>install --locked</code> fetches skill sources into the store and <strong>fails if resolving would change the lockfile</strong> — so CI installs the exact pinned bytes or stops. <code>doctor --ci</code> runs every check, prints the full report, and exits nonzero if anything fails: a check <strong>error</strong>, <strong>drift</strong> between the manifest and the rendered config, a <code>[policy]</code> violation (a <code>require</code>/<code>forbid</code> capability or an <code>allowed_sources</code> breach), or <strong>unsafe content</strong> — <code>--ci</code> always runs the deep supply-chain scan, so a high-severity hidden-Unicode or prompt-injection finding fails the gate. <code>init --secrets skip</code> writes only the manifest and <code>${REF}</code> placeholders — no prompts, no token values — for jobs that reverse-engineer a manifest from what's on disk.</p>
 <p><strong>Limits.</strong> <code>doctor --ci</code> gates config health and <em>declared</em> policy, not runtime enforcement — it checks what the manifest declares, not what a server does once it runs. Content scanning catches known hidden-Unicode and injection heuristics, not all malicious content. Pin the Action to a release tag so a change to the Action itself can't slip into your pipeline.</p>
 <ul>
