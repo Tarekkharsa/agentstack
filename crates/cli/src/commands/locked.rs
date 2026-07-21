@@ -60,6 +60,24 @@ pub fn run_locked(manifest_dir: Option<&Path>, args: &RunArgs) -> Result<()> {
     }
 }
 
+/// Launcher banner routing. Under `--prompt`, stdout IS the deliverable — the
+/// child's relayed output is consumed programmatically (piped, captured by a
+/// workflow engine as the `agent()` return value), so every banner this
+/// launcher prints goes to STDERR, keeping stdout byte-clean child output.
+/// Interleaved banners there would corrupt the consumer's result. Interactive
+/// runs keep stdout — the shipped human-facing behavior, untouched.
+/// (Rust note: `macro_rules!` because `println!`/`eprintln!` take a format
+/// string + varargs, which a plain `fn` can't forward.)
+macro_rules! banner {
+    ($headless:expr, $($arg:tt)*) => {
+        if $headless {
+            eprintln!($($arg)*)
+        } else {
+            println!($($arg)*)
+        }
+    };
+}
+
 fn ts() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -297,15 +315,59 @@ fn admission_error(refusals: &[(String, String)]) -> anyhow::Error {
     )
 }
 
+/// The exact argv this run will both COMMIT (into the grant's invocation
+/// identity) and SPAWN — built once, here, so the two can never diverge.
+/// Under `--prompt` it is the adapter's declared headless argv with the
+/// prompt substituted as ONE whole element (settled W2 decision: the prompt
+/// joins argv before the grant freezes, so the evidence binds what the agent
+/// was asked to do) — and NOTHING else: trailing passthrough args are refused
+/// in prompt mode, because the headless argv ends with `-- {prompt}` and
+/// anything appended after it would reach the child as a POSITIONAL, so a
+/// user's `--model opus` would silently misparse instead of selecting a
+/// model. Refusing loudly beats accepting silently-wrong argv. Without
+/// `--prompt`, the passthrough args alone — the shipped behavior, untouched.
+fn launch_argv(desc: &crate::adapter::AdapterDescriptor, args: &RunArgs) -> Result<Vec<String>> {
+    let Some(prompt) = args.prompt.as_deref() else {
+        return Ok(args.args.clone());
+    };
+    if !args.args.is_empty() {
+        anyhow::bail!(
+            "`--prompt` cannot be combined with trailing harness arguments ({}): the \
+             headless invocation ends with an option terminator (`-- <prompt>`), so \
+             anything after the prompt would be parsed by {} as positional text, not as \
+             the flags you meant. Put the instruction in the prompt, or drop `--prompt` \
+             and pass the harness its own headless flags directly.",
+            args.args
+                .iter()
+                .map(|a| format!("{a:?}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            desc.display
+        );
+    }
+    let Some(spec) = desc.headless.as_ref() else {
+        anyhow::bail!(
+            "{} has no headless invocation spec — `--prompt` needs the adapter to declare \
+             how to deliver a prompt non-interactively (a `headless:` block in its \
+             descriptor). Shipped support: claude-code, codex.",
+            desc.display
+        );
+    };
+    Ok(spec.argv(prompt))
+}
+
 /// Assemble and freeze the `AuthorityGrant` from the SAME verified inputs the
 /// gates accepted (contract §6): frozen servers, derived executable pins,
 /// resolved skills/instructions, the compiled ruleset, and the exact
-/// invocation. Never re-resolves; anything that fails here refuses the run.
+/// invocation — `argv` is the caller's single launch-argv construction
+/// (see [`launch_argv`]), never re-derived here. Anything that fails here
+/// refuses the run.
 #[allow(clippy::too_many_arguments)]
 fn freeze_grant(
     ctx: &Context,
     base: &Path,
     args: &RunArgs,
+    argv: &[String],
     inputs: &LockedInputs,
     ruleset: agentstack_policy::CompiledRuleset,
     machine_policy: &crate::manifest::Policy,
@@ -328,7 +390,7 @@ fn freeze_grant(
     let invocation = Invocation::new(
         adapter,
         HarnessExecutable::external(GrantPath::new(bin_path)?),
-        args.args.clone(),
+        argv.to_vec(),
         GrantPath::new(&ctx.dir)?,
         profile_effect,
     );
@@ -691,8 +753,12 @@ fn resolve_bin_path(bin: &str) -> Result<PathBuf> {
         .with_context(|| format!("'{bin}' is not on your PATH"))
 }
 
-fn print_posture_and_limits(desc: Option<&crate::adapter::AdapterDescriptor>, project_dir: &Path) {
-    println!("  posture: {}", "HOST / PROTECTED".green().bold());
+fn print_posture_and_limits(
+    desc: Option<&crate::adapter::AdapterDescriptor>,
+    project_dir: &Path,
+    headless: bool,
+) {
+    banner!(headless, "  posture: {}", "HOST / PROTECTED".green().bold());
     eprintln!(
         "  {} protected host run: content trust, strict lock verification, and policy \
          admission are enforced BEFORE launch, and decisions are recorded. Not kernel \
@@ -829,6 +895,11 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             args.harness
         )
     })?;
+    // Built ONCE, before any gate and before binary resolution: the same
+    // vector the grant commits and the spawn receives. A missing headless
+    // spec is an adapter-capability gap, refused here loudly and by name —
+    // before "is the binary installed" can mask it.
+    let argv = launch_argv(desc, args)?;
     let bin = desc
         .detect
         .bin
@@ -837,17 +908,32 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     let display = desc.display.clone();
     let bin_path = resolve_bin_path(&bin)?;
 
-    println!(
+    // Headless runs route every banner to stderr — see `banner!`: stdout must
+    // carry the relayed child output and nothing else.
+    let headless = args.prompt.is_some();
+    banner!(
+        headless,
         "{} launching {} with --locked…",
         "▶".green(),
         args.harness.bold()
     );
+    if headless {
+        banner!(
+            headless,
+            "  {} headless: prompt delivered as one argv element (no shell); it is committed \
+             verbatim into the frozen grant's invocation; stdout is captured (cap {} KiB), \
+             relayed here, and recorded by digest only",
+            "✓".green(),
+            crate::runs::MAX_PROMPT_OUTPUT_BYTES / 1024
+        );
+    }
     // Pass the PROJECT ROOT (base), not the manifest dir: the harness is
     // spawned at base, and Claude Code keys its per-project global MCP state
     // by that launch dir — the ambient audit must match on it.
-    print_posture_and_limits(Some(desc), base);
+    print_posture_and_limits(Some(desc), base, headless);
     if let Some(p) = args.profile.as_deref() {
-        println!(
+        banner!(
+            headless,
             "  {} profile fence: '{}' — the gates, grant, and bridge see only this profile's \
              servers; no native session state is applied under --locked",
             "✓".green(),
@@ -875,7 +961,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     match trust::check(base) {
         TrustState::Trusted => {
             ev.passed("trust", trust::digest_for(base))?;
-            println!("  {} trust: explicitly trusted", "✓".green());
+            banner!(headless, "  {} trust: explicitly trusted", "✓".green());
         }
         TrustState::Untrusted => {
             return Err(ev.refuse(
@@ -914,7 +1000,8 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         return Err(ev.refuse("locked-verify", e));
     }
     ev.passed("locked-verify", None)?;
-    println!(
+    banner!(
+        headless,
         "  {} locked inputs: {} skill(s), {} instruction(s), {} server(s), {} executable pin(s), {} extension(s) verified",
         "✓".green(),
         inputs.skill_statuses.len(),
@@ -942,7 +1029,8 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         Err(e) => return Err(ev.refuse("rendered-verify", e)),
     };
     ev.passed("rendered-verify", None)?;
-    println!(
+    banner!(
+        headless,
         "  {} rendered extensions: {} verified, {} not rendered",
         "✓".green(),
         rendered.verified.len(),
@@ -961,7 +1049,8 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         return Err(ev.refuse("policy-admission", admission_error(&refusals)));
     }
     ev.passed("policy-admission", None)?;
-    println!(
+    banner!(
+        headless,
         "  {} policy: declared requests fit under the machine ceiling",
         "✓".green()
     );
@@ -980,6 +1069,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         ctx,
         base,
         args,
+        &argv,
         &inputs,
         ruleset,
         &machine_policy,
@@ -996,7 +1086,12 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         ts: ts(),
         grant_digest: digest.to_string(),
     })?;
-    println!("  {} authority grant frozen: {}", "✓".green(), digest);
+    banner!(
+        headless,
+        "  {} authority grant frozen: {}",
+        "✓".green(),
+        digest
+    );
 
     // §6.2: the evidence identity around this frozen grant — the one place
     // the grant digest lives from here on.
@@ -1037,7 +1132,8 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         return Err(ev.refuse("grant-handoff", e));
     }
     crate::util::restrict(&handoff_path, false);
-    println!(
+    banner!(
+        headless,
         "  {} run grant handed to the gateway ({})",
         "✓".green(),
         handoff_path.display()
@@ -1046,7 +1142,8 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     let mut scoped = match ScopedMcpConfig::apply(desc, &ctx.dir, &run_id, &run_dir, &handoff_path)
     {
         Ok(Some(s)) => {
-            println!(
+            banner!(
+                headless,
                 "  {} project MCP config launch-scoped to the gateway ({})",
                 "✓".green(),
                 s.path.display()
@@ -1054,7 +1151,8 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             Some(s)
         }
         Ok(None) => {
-            println!(
+            banner!(
+                headless,
                 "  {} {} has no project-scope MCP config to launch-scope (stated honestly; \
                  the global gateway entry still gates declared servers)",
                 "ℹ".cyan(),
@@ -1070,18 +1168,49 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     // Spawn at the PROJECT root, not the manifest dir — under the preferred
     // layout ctx.dir is `.agentstack/`, and a harness opened there sees no
     // source code (and sits one mistake away from the rendered configs).
-    let status = crate::runs::launch_attached(
-        &bin_path.to_string_lossy(),
-        &args.args,
-        base,
-        &run_id,
-        &args.harness,
-        &display,
-        None,
-        scope,
-    );
+    // Headless (`--prompt`) runs capture bounded stdout; interactive runs stay
+    // terminal-attached. Both spawn the SAME argv the grant committed above.
+    let (status, headless_output) = if args.prompt.is_some() {
+        match crate::runs::launch_captured(
+            &bin_path.to_string_lossy(),
+            &argv,
+            base,
+            &run_id,
+            &args.harness,
+            &display,
+            None,
+            scope,
+        ) {
+            Ok((st, captured)) => (Ok(st), Some(captured)),
+            Err(e) => (Err(e), None),
+        }
+    } else {
+        let st = crate::runs::launch_attached(
+            &bin_path.to_string_lossy(),
+            &argv,
+            base,
+            &run_id,
+            &args.harness,
+            &display,
+            None,
+            scope,
+        );
+        (st, None)
+    };
     if let Some(s) = scoped.as_mut() {
         s.restore();
+    }
+
+    // Output evidence before the terminal outcome: identity only (digest,
+    // byte count, truncation) — never the text (§ settled W2 decision 5).
+    if let Some(captured) = &headless_output {
+        ev.material(&RunEvent::HeadlessOutput {
+            ts: ts(),
+            bytes: captured.bytes,
+            sha256: captured.sha256.clone(),
+            truncated: captured.truncated,
+        })
+        .context("the harness ran, but its output evidence could not be recorded")?;
     }
 
     // §3 step 8: terminal outcome — observed evidence or explicit
@@ -1097,7 +1226,10 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 usage: "unavailable".to_string(),
             })
             .context("the harness ran, but its outcome could not be recorded")?;
-            println!("\nSee what happened: `agentstack report run {run_id}`");
+            banner!(
+                headless,
+                "\nSee what happened: `agentstack report run {run_id}`"
+            );
             Ok(())
         }
         Err(e) => {
@@ -1114,7 +1246,10 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             });
             match record {
                 Ok(()) => {
-                    println!("\nSee what happened: `agentstack report run {run_id}`");
+                    banner!(
+                        headless,
+                        "\nSee what happened: `agentstack report run {run_id}`"
+                    );
                     Err(e)
                 }
                 Err(rec) => Err(e.context(format!(
@@ -1143,7 +1278,9 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     let mut blockers: Vec<(String, String)> = Vec::new();
 
     let desc = ctx.registry.get(&args.harness);
-    print_posture_and_limits(desc, base);
+    // Never headless routing here: --plan launches nothing, so its own report
+    // is the stdout deliverable even when --prompt is being evaluated.
+    print_posture_and_limits(desc, base, false);
     if let Some(p) = args.profile.as_deref() {
         println!(
             "  {} profile fence: '{}' — evaluation runs against this profile's server subset",
@@ -1174,6 +1311,27 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             Some(Ok(p)) => Some(p),
         },
     };
+
+    // The launch argv a live run would commit and spawn — same single
+    // construction as `live` (a `--prompt` without a headless spec is a
+    // blocker here, a refusal there).
+    let argv = desc.and_then(|d| match launch_argv(d, args) {
+        Ok(v) => {
+            if args.prompt.is_some() {
+                println!(
+                    "  {} headless: prompt would be delivered as one argv element (no shell) \
+                     and committed verbatim into the grant's invocation",
+                    "✓".green()
+                );
+            }
+            Some(v)
+        }
+        Err(e) => {
+            println!("  {} headless: no invocation spec", "✗".red());
+            blockers.push(("headless".into(), format!("{e:#}")));
+            None
+        }
+    });
 
     // P22: enumerate EVERY gate with its verdict, exactly as the live path
     // prints them — a ✓ line with the same detail on the happy path, a ✗ line
@@ -1341,7 +1499,7 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     println!(
         "    harness: {} ({} redacted argument(s))",
         args.harness,
-        args.args.len()
+        argv.as_ref().map_or(args.args.len(), Vec::len)
     );
     if let Some(inputs) = &inputs {
         let servers: Vec<&str> = inputs.frozen.iter().map(|(n, _)| n.as_str()).collect();
@@ -1376,7 +1534,8 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             .as_ref()
             .expect("no blockers implies inputs resolved");
         let bin_path = bin_path.expect("no blockers implies harness resolved");
-        let grant = freeze_grant(ctx, base, args, inputs, ruleset, &machine, &bin_path)?;
+        let argv = argv.expect("no blockers implies the launch argv was built");
+        let grant = freeze_grant(ctx, base, args, &argv, inputs, ruleset, &machine, &bin_path)?;
         match key {
             // The key is present: show the exact binding digest a live run
             // would freeze (the "plan matches run" property).
@@ -1478,6 +1637,7 @@ mod tests {
         RunArgs {
             harness: "claude-code".to_string(),
             locked: true,
+            prompt: None,
             profile: None,
             scope: Some(agentstack_core::scope::Scope::Project),
             keep: false,
@@ -1559,6 +1719,7 @@ mod tests {
             let args = RunArgs {
                 harness: "pi".to_string(),
                 locked: true,
+                prompt: None,
                 profile: None,
                 scope: Some(agentstack_core::scope::Scope::Project),
                 keep: false,
@@ -1693,6 +1854,109 @@ mod tests {
                 RunEvent::LockedOutcome { outcome, exit_code: Some(0), grant_digest: Some(d), usage, .. }
                     if outcome == "completed" && *d == digest && usage == "unavailable"
             )), "{events:?}");
+        });
+    }
+
+    /// W2 witness: a hostile prompt — shell metacharacters, newlines, quotes —
+    /// reaches the harness as exactly ONE argv element, byte for byte, with no
+    /// shell in between; the grant freezes (committing that argv); and the
+    /// run's evidence carries the output IDENTITY (sha256 + bytes + truncated)
+    /// but never the output text or the prompt. NEVER delete or weaken this
+    /// test.
+    #[cfg(unix)]
+    #[test]
+    fn hostile_prompt_is_one_argv_element_with_output_evidence() {
+        locked_fixture(|home, proj| {
+            use std::os::unix::fs::PermissionsExt;
+            pinned_and_trusted(proj);
+
+            // Replace the fixture's fake `claude` with one that records its
+            // exact argv shape and emits known stdout. `"$3"` is quoted, so
+            // if the prompt survives as one element the file holds it intact;
+            // if anything re-split it, "$#" changes and "$3" is a fragment.
+            // The claude-code headless argv is [-p, --, {prompt}], so the
+            // prompt is the THIRD positional.
+            let args_out = proj.path().join("seen-args.txt");
+            let fake = home.path().join("fakebin/claude");
+            std::fs::write(
+                &fake,
+                format!(
+                    "#!/bin/sh\n{{ printf '%s\\n' \"$#\"; printf '%s' \"$3\"; }} > '{}'\nprintf 'hello from headless'\n",
+                    args_out.display()
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            // A hostile prompt that also STARTS WITH A DASH: without the `--`
+            // guard, `claude` would parse it as a flag; with it, it is the
+            // positional prompt, one exact element.
+            let hostile = "--dangerously-skip-permissions\n; rm -rf ~ #\n\"$(whoami)\" 'q' `tick`";
+            let mut args = run_args(false);
+            args.prompt = Some(hostile.to_string());
+            run_locked(Some(proj.path()), &args).unwrap();
+
+            // Exactly three argv elements ("-p", "--", prompt); $3 is the
+            // prompt byte for byte — never split, never shell-expanded, never
+            // read as a flag.
+            let seen = std::fs::read_to_string(&args_out).unwrap();
+            let (argc, third) = seen.split_once('\n').unwrap();
+            assert_eq!(argc, "3", "argv is exactly [-p, --, prompt]: {seen:?}");
+            assert_eq!(third, hostile, "prompt survives as one exact element");
+
+            // Evidence: grant froze, and the output identity was recorded —
+            // digest + count + truncation, never the text.
+            let events = recorded_events(home);
+            assert!(events
+                .iter()
+                .any(|e| matches!(e, RunEvent::GrantFrozen { .. })));
+            let expected = agentstack_core::digest::sha256_hex(b"hello from headless");
+            assert!(
+                events.iter().any(|e| matches!(
+                    e,
+                    RunEvent::HeadlessOutput { bytes: 19, sha256, truncated: false, .. }
+                        if *sha256 == expected
+                )),
+                "{events:?}"
+            );
+        });
+    }
+
+    /// W2 witness: a harness whose adapter declares no headless invocation
+    /// spec refuses `--prompt` loudly, by name, before any gate runs — and
+    /// therefore before anything launches.
+    #[cfg(unix)]
+    #[test]
+    fn prompt_for_harness_without_headless_spec_refuses_by_name() {
+        locked_fixture(|_home, proj| {
+            pinned_and_trusted(proj);
+            let mut args = run_args(false);
+            // cursor's descriptor has no `headless:` block.
+            args.harness = "cursor".to_string();
+            args.prompt = Some("hi".to_string());
+            let err = run_locked(Some(proj.path()), &args).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("no headless invocation spec"), "{msg}");
+            assert!(msg.contains("Cursor"), "offender named: {msg}");
+        });
+    }
+
+    /// `--prompt` + trailing harness args refuses loudly: the headless argv
+    /// ends with `-- <prompt>`, so appended args would reach the child as
+    /// positionals — a user's `--model opus` would silently misparse instead
+    /// of selecting a model. The refusal names the offending args.
+    #[cfg(unix)]
+    #[test]
+    fn prompt_with_trailing_args_refuses_instead_of_misparsing() {
+        locked_fixture(|_home, proj| {
+            pinned_and_trusted(proj);
+            let mut args = run_args(false);
+            args.prompt = Some("hi".to_string());
+            args.args = vec!["--model".to_string(), "opus".to_string()];
+            let err = run_locked(Some(proj.path()), &args).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("cannot be combined"), "{msg}");
+            assert!(msg.contains("\"--model\""), "offending args named: {msg}");
         });
     }
 

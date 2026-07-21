@@ -10,6 +10,19 @@ use owo_colors::OwoColorize;
 use crate::cli::{KillArgs, RunArgs, RunsArgs};
 
 pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
+    // `--prompt` exists only as the governed child-run primitive: headless
+    // delivery is defined by the locked contract (grant-committed argv,
+    // bounded output evidence). On a plain host run it would silently skip
+    // every gate the flag's semantics promise — refuse loudly and name the
+    // valid form instead.
+    if args.prompt.is_some() && !args.locked {
+        anyhow::bail!(
+            "--prompt requires --locked — nothing was launched\n\
+             \n  \
+             governed headless run:  agentstack run {h} --locked --prompt \"<text>\"",
+            h = args.harness
+        );
+    }
     // --locked promotes the host run to the Protected tier (fail-closed gates
     // before launch). It owns its combination rules — --locked --sandbox is a
     // named not-yet limitation there, not a silent fall-through.
@@ -120,5 +133,34 @@ fn fmt_uptime(secs: u64) -> String {
         format!("{}m", secs / 60)
     } else {
         format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// W2 witness: `--prompt` without `--locked` refuses loudly — before any
+    /// manifest resolution or launch — and names the one valid form.
+    #[test]
+    fn prompt_without_locked_refuses_and_names_the_valid_form() {
+        let args = RunArgs {
+            harness: "claude-code".to_string(),
+            locked: false,
+            prompt: Some("say hi".to_string()),
+            profile: None,
+            scope: None,
+            keep: false,
+            sandbox: false,
+            lockdown: false,
+            plan: false,
+            args: Vec::new(),
+        };
+        let msg = format!("{:#}", run(&args, None).unwrap_err());
+        assert!(msg.contains("--prompt requires --locked"), "{msg}");
+        assert!(
+            msg.contains("run claude-code --locked --prompt"),
+            "valid form named: {msg}"
+        );
     }
 }

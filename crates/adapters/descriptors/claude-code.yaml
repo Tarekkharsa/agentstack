@@ -33,6 +33,14 @@ skills:
   dir: ~/.claude/skills
   project_dir: .claude/skills
   strategy: symlink
+# Headless (prompt-in/text-out) invocation for `run --locked --prompt`:
+# `claude -p -- "<prompt>"`. "{prompt}" is replaced as a WHOLE argv element —
+# never spliced into another token, never passed through a shell. The literal
+# "--" before it is required: it makes Claude Code treat the prompt as a
+# positional, so a hostile leading-dash prompt (e.g. "--dangerously-skip-
+# permissions") can never be parsed as a flag.
+headless:
+  args: ["-p", "--", "{prompt}"]
 instructions:
   global: ~/.claude/CLAUDE.md
   project: CLAUDE.md

@@ -330,6 +330,25 @@ pub fn report_text(run_id: &str) -> String {
                         grant_digest
                     ));
                 }
+                RunEvent::HeadlessOutput {
+                    bytes,
+                    sha256,
+                    truncated,
+                    ..
+                } => {
+                    let trunc = if *truncated {
+                        " · truncated at cap".to_string()
+                    } else {
+                        String::new()
+                    };
+                    o.push_str(&format!(
+                        "    {} headless output: {} byte(s) · sha256:{}{}\n",
+                        "✓".green(),
+                        bytes,
+                        sha256,
+                        trunc
+                    ));
+                }
                 RunEvent::LockedOutcome {
                     outcome,
                     exit_code,

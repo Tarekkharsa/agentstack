@@ -61,6 +61,11 @@ pub struct AdapterDescriptor {
     /// `~/.pi/agent/extensions`). Discovered read-only.
     #[serde(default)]
     pub extensions: Option<ExtensionsSpec>,
+    /// Headless (prompt-in/text-out) invocation argv, if the CLI supports a
+    /// non-interactive mode (e.g. `claude -p`, `codex exec`). Absent → the CLI
+    /// cannot be driven by `run --locked --prompt`.
+    #[serde(default)]
+    pub headless: Option<HeadlessSpec>,
     /// Where this descriptor was loaded from — set by the registry, not parsed
     /// from the file.
     #[serde(skip)]
@@ -174,6 +179,107 @@ impl AdapterDescriptor {
             .as_ref()
             .and_then(|s| s.project_dir.as_ref())
             .is_some()
+    }
+}
+
+/// How to invoke a CLI headless: an argv template where each element is either
+/// a literal or the exact string `{prompt}`, replaced whole by the prompt text.
+///
+/// Validation lives in deserialization (`try_from`), so EVERY parse path —
+/// embedded descriptors, user drop-ins, direct `serde_yaml::from_str` — rejects
+/// a malformed spec on two counts: (1) the placeholder must be a WHOLE element
+/// (no splicing prompt text into another token), and (2) the placeholder must
+/// be immediately preceded by a literal `--` end-of-options separator. Guard
+/// (2) closes an OPTION-INJECTION hole the OS-level "one argv element" property
+/// does NOT: a prompt like `--dangerously-skip-permissions` is a single argv
+/// element, but the CHILD CLI's own flag parser would read a leading-dash
+/// operand as a flag, not as prompt text. `--` makes the harness treat every
+/// following token as a positional, so hostile prompt text can never reach the
+/// child as a flag (rule 7: prompt is data, not syntax). All shipped agent CLIs
+/// (claude, codex, clap/commander-based tools) honor `--`. (For a TypeScript
+/// reader: `try_from` is serde's version of parsing into a raw shape and
+/// running a validating constructor over it — like `zod.transform` with a
+/// throwing refine.)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(try_from = "RawHeadlessSpec")]
+pub struct HeadlessSpec {
+    args: Vec<String>,
+}
+
+/// The unvalidated wire shape `HeadlessSpec` is parsed through.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawHeadlessSpec {
+    args: Vec<String>,
+}
+
+/// The placeholder a headless argv element may consist of — the WHOLE element,
+/// never a substring of one (rule 7: prompt text is data, not syntax).
+pub const PROMPT_PLACEHOLDER: &str = "{prompt}";
+
+/// The end-of-options separator that MUST immediately precede the placeholder,
+/// so the child CLI parses the prompt as a positional and never as a flag.
+pub const OPTIONS_TERMINATOR: &str = "--";
+
+impl TryFrom<RawHeadlessSpec> for HeadlessSpec {
+    type Error = String;
+
+    fn try_from(raw: RawHeadlessSpec) -> Result<Self, Self::Error> {
+        let mut prompt_at: Option<usize> = None;
+        for (i, a) in raw.args.iter().enumerate() {
+            if a == PROMPT_PLACEHOLDER {
+                if prompt_at.is_some() {
+                    // More than one placeholder has no defined meaning.
+                    return Err(format!(
+                        "headless args must contain exactly one {PROMPT_PLACEHOLDER} element"
+                    ));
+                }
+                prompt_at = Some(i);
+            } else if a.contains(PROMPT_PLACEHOLDER) {
+                // An embedded placeholder ("--flag={prompt}") would splice
+                // hostile prompt text into the middle of another token —
+                // refuse the descriptor at load, not the run at launch.
+                return Err(format!(
+                    "headless arg {a:?} embeds {PROMPT_PLACEHOLDER} inside another token — \
+                     the placeholder must be a whole argv element"
+                ));
+            }
+        }
+        // Zero placeholders would silently drop the prompt from the committed
+        // argv.
+        let Some(i) = prompt_at else {
+            return Err(format!(
+                "headless args must contain exactly one {PROMPT_PLACEHOLDER} element (found none)"
+            ));
+        };
+        // The placeholder must sit directly after a literal `--`, so a hostile
+        // leading-dash prompt cannot be parsed as an option by the child CLI.
+        if i == 0 || raw.args[i - 1] != OPTIONS_TERMINATOR {
+            return Err(format!(
+                "headless {PROMPT_PLACEHOLDER} must be immediately preceded by a literal \
+                 {OPTIONS_TERMINATOR:?} end-of-options separator (so a leading-dash prompt \
+                 cannot be parsed as a flag by the harness) — e.g. [\"exec\", \"--\", \"{{prompt}}\"]"
+            ));
+        }
+        Ok(HeadlessSpec { args: raw.args })
+    }
+}
+
+impl HeadlessSpec {
+    /// Build the concrete argv for one prompt: whole-argument substitution
+    /// only. The prompt string — however hostile — becomes exactly one argv
+    /// element; no shell, no quoting, no splitting is ever involved.
+    pub fn argv(&self, prompt: &str) -> Vec<String> {
+        self.args
+            .iter()
+            .map(|a| {
+                if a == PROMPT_PLACEHOLDER {
+                    prompt.to_string()
+                } else {
+                    a.clone()
+                }
+            })
+            .collect()
     }
 }
 
@@ -453,6 +559,74 @@ pub struct ProjectSpec {
     /// Format if it differs from the global config (else inferred / inherited).
     #[serde(default)]
     pub format: Option<Format>,
+}
+
+#[cfg(test)]
+mod headless_spec_tests {
+    use super::AdapterDescriptor;
+
+    /// Security witness (W2): a hostile prompt — shell metacharacters,
+    /// embedded newlines, quotes, AND a leading dash — lands as exactly ONE
+    /// trailing argv element, byte for byte, after the `--` guard. This is the
+    /// argv the grant commits and the process spawns with; there is no shell in
+    /// between to reinterpret it, and the `--` stops the child's flag parser
+    /// from reading the leading-dash text as an option.
+    #[test]
+    fn hostile_prompt_is_exactly_one_argv_element() {
+        let desc: AdapterDescriptor = serde_yaml::from_str(
+            "id: x\ndisplay: X\nheadless:\n  args: [\"-p\", \"--\", \"{prompt}\"]\n",
+        )
+        .unwrap();
+        let hostile = "--dangerously-skip-permissions\n; rm -rf ~ #\n\"$(whoami)\" 'q' `tick`";
+        let argv = desc.headless.unwrap().argv(hostile);
+        assert_eq!(
+            argv,
+            vec!["-p".to_string(), "--".to_string(), hostile.to_string()]
+        );
+    }
+
+    /// Security witness (W2): every malformed spec is refused at LOAD, on every
+    /// parse path — an embedded placeholder ("--flag={prompt}"), a missing
+    /// placeholder (prompt silently dropped), and — the option-injection guard
+    /// — a placeholder NOT immediately preceded by a literal `--` (a
+    /// leading-dash prompt would otherwise be parsed as a flag by the harness).
+    #[test]
+    fn malformed_headless_specs_are_refused_at_parse() {
+        let embedded = serde_yaml::from_str::<AdapterDescriptor>(
+            "id: x\ndisplay: X\nheadless:\n  args: [\"--\", \"--flag={prompt}\"]\n",
+        );
+        assert!(
+            embedded.is_err(),
+            "embedded placeholder must be refused at load"
+        );
+
+        let missing = serde_yaml::from_str::<AdapterDescriptor>(
+            "id: x\ndisplay: X\nheadless:\n  args: [\"exec\"]\n",
+        );
+        assert!(
+            missing.is_err(),
+            "a spec with no {{prompt}} element must be refused at load"
+        );
+
+        // No `--` before the placeholder: option-injectable, refused.
+        let unguarded = serde_yaml::from_str::<AdapterDescriptor>(
+            "id: x\ndisplay: X\nheadless:\n  args: [\"exec\", \"{prompt}\"]\n",
+        );
+        assert!(
+            unguarded.is_err(),
+            "a placeholder not preceded by `--` must be refused at load"
+        );
+
+        // A `--` present but not immediately before the placeholder does not
+        // count — the terminator only guards what directly follows it.
+        let wrong_place = serde_yaml::from_str::<AdapterDescriptor>(
+            "id: x\ndisplay: X\nheadless:\n  args: [\"--\", \"exec\", \"{prompt}\"]\n",
+        );
+        assert!(
+            wrong_place.is_err(),
+            "`--` must be immediately before the placeholder"
+        );
+    }
 }
 
 #[cfg(test)]

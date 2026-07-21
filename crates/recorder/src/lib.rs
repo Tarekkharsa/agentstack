@@ -423,6 +423,17 @@ pub enum RunEvent {
         grant_digest: Option<String>,
         usage: String,
     },
+    /// Bounded-stdout evidence for a headless (`--locked --prompt`) run:
+    /// content identity only — digest, byte count, and whether the capture
+    /// cap truncated it. The output TEXT is never an event (it is the run's
+    /// product, relayed to the caller's stdout, not evidence).
+    HeadlessOutput {
+        ts: u64,
+        /// Bytes captured (≤ the launcher's cap), the exact input to `sha256`.
+        bytes: u64,
+        sha256: String,
+        truncated: bool,
+    },
 }
 
 /// The append-only event log for one tracked run.

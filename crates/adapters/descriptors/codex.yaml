@@ -43,6 +43,15 @@ skills:
   dir: ~/.agents/skills
   project_dir: .agents/skills
   strategy: symlink
+# Headless (prompt-in/text-out) invocation for `run --locked --prompt`:
+# `codex exec -- "<prompt>"`. "{prompt}" is replaced as a WHOLE argv element —
+# never spliced into another token, never passed through a shell. The literal
+# "--" before it is required: it makes Codex treat the prompt as the positional
+# PROMPT, so a hostile leading-dash prompt (e.g. "-c sandbox_mode=...") can
+# never be parsed as a flag. (Codex hangs on an open stdin in exec mode; the
+# launcher always spawns headless runs with stdin closed.)
+headless:
+  args: ["exec", "--", "{prompt}"]
 instructions:
   global: ~/.codex/AGENTS.md
   project: AGENTS.md

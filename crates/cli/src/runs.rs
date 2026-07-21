@@ -317,6 +317,174 @@ pub(crate) fn launch_attached(
     Ok(status?)
 }
 
+/// Cap on the stdout a headless (`--locked --prompt`) run may hand back as its
+/// captured result. Same figure as the executor's `MAX_RESULT_BYTES` (own
+/// const on purpose — the crates don't share bounds across their boundary).
+/// Output beyond the cap is drained but neither relayed nor hashed, and the
+/// truncation is recorded honestly in the run's evidence.
+pub(crate) const MAX_PROMPT_OUTPUT_BYTES: usize = 1024 * 1024;
+
+/// What a bounded stdout capture observed: identity of the captured bytes,
+/// never the bytes themselves (those were already relayed to our stdout).
+#[derive(Debug, Clone)]
+pub(crate) struct CapturedOutput {
+    /// Bytes captured — the exact input to `sha256` (≤ the cap).
+    pub bytes: u64,
+    /// SHA-256 (hex) over the captured bytes.
+    pub sha256: String,
+    /// True when the recorded bytes may NOT be the child's complete output —
+    /// either because it exceeded the cap OR because a read error cut the
+    /// stream short before EOF. Both mean "do not read completeness into this
+    /// digest"; the flag never claims completeness it cannot back.
+    pub truncated: bool,
+}
+
+/// Relay `from` into `to` up to `cap` bytes, hashing exactly what was
+/// captured; past the cap keep DRAINING (so the child never blocks on a full
+/// pipe) but stop relaying and hashing, and report the truncation. A relay
+/// write failure (e.g. our stdout is a pipe the reader closed) stops relaying
+/// but not draining. A READ error mid-stream also sets `truncated` — the
+/// stream ended abnormally, so the captured bytes cannot be attested as
+/// complete; `bytes`/`sha256` still describe exactly what was captured.
+fn relay_bounded(
+    mut from: impl std::io::Read,
+    mut to: impl std::io::Write,
+    cap: usize,
+) -> CapturedOutput {
+    let mut captured: Vec<u8> = Vec::new();
+    let mut truncated = false;
+    let mut relay_ok = true;
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = match from.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => {
+                // Read error before EOF: the capture is incomplete, and we
+                // must not record it as a clean, complete output.
+                truncated = true;
+                break;
+            }
+        };
+        let room = cap.saturating_sub(captured.len());
+        let take = n.min(room);
+        if take > 0 {
+            captured.extend_from_slice(&buf[..take]);
+            if relay_ok && to.write_all(&buf[..take]).is_err() {
+                relay_ok = false;
+            }
+        }
+        if take < n {
+            truncated = true;
+        }
+    }
+    if relay_ok {
+        let _ = to.flush();
+    }
+    CapturedOutput {
+        bytes: captured.len() as u64,
+        sha256: agentstack_core::digest::sha256_hex(&captured),
+        truncated,
+    }
+}
+
+/// Spawn `bin` headless under an EXISTING run id: stdin closed (codex hangs on
+/// an open stdin in exec mode — no opt-out), stdout piped through a bounded
+/// relay onto OUR stdout (so the command is pipeable), stderr inherited. Track
+/// it in the run registry, block until it exits, and return the exit status
+/// plus the captured-output identity. The prompt-bearing argv is used for the
+/// spawn only — it is deliberately NOT persisted into `runs.json` (the grant
+/// commits argv by keyed digest; a prompt is likelier than flags to carry
+/// sensitive text).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_captured(
+    bin: &str,
+    argv: &[String],
+    dir: &Path,
+    id: &str,
+    harness: &str,
+    display: &str,
+    profile: Option<&str>,
+    scope: Scope,
+) -> Result<(std::process::ExitStatus, CapturedOutput)> {
+    let mut child = spawn_child_captured(bin, argv, dir, id)
+        .with_context(|| format!("launching {display} (headless)"))?;
+    let pid = child.id() as i32;
+    let rec = RunRecord {
+        id: id.to_string(),
+        pid,
+        harness: harness.to_string(),
+        display: display.to_string(),
+        command: bin.to_string(),
+        args: Vec::new(), // never the prompt-bearing argv — see docstring
+        cwd: dir.to_string_lossy().into_owned(),
+        profile: profile.map(String::from),
+        scope: profile.map(|_| scope.as_str().to_string()),
+        started_unix: now_secs(),
+        started_session: false,
+    };
+    {
+        let mut map = load_all();
+        map.insert(id.to_string(), rec);
+        let _ = save_all(&map);
+    }
+
+    // Read stdout on a thread WHILE waiting, or a chatty child fills the pipe
+    // and deadlocks against our `wait()`. (Rust note: `take()` moves the pipe
+    // handle out of `child` so the thread owns it — ownership transfer, like
+    // handing the only reference across a worker boundary.)
+    let stdout = child.stdout.take().expect("piped stdout");
+    let reader = std::thread::spawn(move || {
+        relay_bounded(stdout, std::io::stdout().lock(), MAX_PROMPT_OUTPUT_BYTES)
+    });
+    let status = child.wait();
+    // A panicked relay thread means the output identity is UNKNOWN — error
+    // out rather than fabricate a zero-byte digest (the recorder contract:
+    // observed evidence or an explicit failure, never an invented value).
+    let captured = reader.join();
+
+    {
+        let mut map = load_all();
+        map.remove(id);
+        let _ = save_all(&map);
+    }
+    let captured = captured.map_err(|_| {
+        anyhow::anyhow!("the stdout capture thread failed — output evidence is unavailable")
+    })?;
+    Ok((status?, captured))
+}
+
+#[cfg(unix)]
+fn spawn_child_captured(
+    bin: &str,
+    args: &[String],
+    cwd: &Path,
+    run_id: &str,
+) -> Result<std::process::Child> {
+    let mut cmd = std::process::Command::new(bin);
+    cmd.args(args)
+        .current_dir(cwd)
+        .env(crate::calllog::RUN_ID_ENV, run_id)
+        // ALWAYS closed: codex `exec` hangs forever on an open stdin, and a
+        // headless run has no terminal conversation to inherit anyway.
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit());
+    // Own process group so kill(-pgid) later reaps the child and its tree.
+    crate::sys::spawn_in_new_process_group(&mut cmd);
+    cmd.spawn().map_err(Into::into)
+}
+
+#[cfg(not(unix))]
+fn spawn_child_captured(
+    _bin: &str,
+    _args: &[String],
+    _cwd: &Path,
+    _run_id: &str,
+) -> Result<std::process::Child> {
+    anyhow::bail!("`agentstack run` is not supported on this platform yet")
+}
+
 /// How long to wait for a graceful `SIGTERM` before escalating to `SIGKILL`.
 const GRACE: Duration = Duration::from_millis(2000);
 
@@ -419,6 +587,27 @@ mod tests {
         let id = gen_id();
         assert!(id.starts_with("r-"));
         assert_eq!(id.len(), 12);
+    }
+
+    /// W2 witness: output past the cap truncates honestly — the sink and the
+    /// hash cover exactly the first `cap` bytes, `bytes` says so, and
+    /// `truncated` is true; under the cap nothing is cut and `truncated` is
+    /// false. The evidence never claims more (or less) than was captured.
+    #[test]
+    fn relay_bounded_truncates_at_cap_and_records_it() {
+        let input = vec![b'x'; 20];
+        let mut sink = Vec::new();
+        let out = relay_bounded(&input[..], &mut sink, 8);
+        assert_eq!(sink, vec![b'x'; 8], "relay stops at the cap");
+        assert_eq!(out.bytes, 8);
+        assert_eq!(out.sha256, agentstack_core::digest::sha256_hex(&input[..8]));
+        assert!(out.truncated);
+
+        let mut sink = Vec::new();
+        let out = relay_bounded(&input[..], &mut sink, 64);
+        assert_eq!(sink, input, "under the cap nothing is cut");
+        assert_eq!(out.bytes, 20);
+        assert!(!out.truncated);
     }
 
     #[cfg(unix)]

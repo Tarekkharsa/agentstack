@@ -539,6 +539,19 @@ pub struct RunArgs {
     #[arg(long)]
     pub locked: bool,
 
+    /// Run the harness headless with TEXT as its prompt (requires --locked).
+    /// The prompt is delivered as one whole argv element via the adapter's
+    /// declared headless invocation (e.g. `claude -p`, `codex exec`) — never
+    /// through a shell — and is committed verbatim into the frozen grant's
+    /// argv, so the evidence binds what the agent was asked to do. Stdout is
+    /// captured (bounded), relayed to this process's stdout, and recorded by
+    /// digest + byte count only; all launcher banners go to stderr so stdout
+    /// carries the harness output and nothing else. Cannot be combined with
+    /// trailing harness arguments (they would land after the prompt's `--`
+    /// terminator and silently misparse as positionals).
+    #[arg(long, value_name = "TEXT")]
+    pub prompt: Option<String>,
+
     /// Apply this profile's servers + skills for the life of the run.
     #[arg(long, value_name = "NAME")]
     pub profile: Option<String>,
