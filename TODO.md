@@ -1,10 +1,14 @@
 # AgentStack execution checklist
 
 > **Status:** active work queue<br/>
-> **Updated:** 2026-07-16<br/>
+> **Updated:** 2026-07-21<br/>
 > **Current phase:** Phase 0A **minimum version** (maintainer scope decision
 > 2026-07-16; Phase 0B and everything after the minimum-version cut are
 > deferred)<br/>
+> **Standing exception (2026-07-21):** the saved-governed-workflows lane
+> (D7, listed under Phase 2 below) is opened early by maintainer decision —
+> supervised work, sequenced after the minimum-version cut's unchecked
+> items; see that section for the staging and the restated evidence gate.<br/>
 > **Strategy source:** [`STRATEGY.md`](STRATEGY.md)
 
 This is the only ordered day-to-day plan. Start with the first unchecked item
@@ -550,28 +554,48 @@ ledger entries D8 and D9 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger
 
 ### Saved governed workflows
 
-**Design banked (2026-07-17):**
+**Lane opened — W0 approved 2026-07-21.**
 [`docs/design/workflows-capability.md`](docs/design/workflows-capability.md)
-(ledger D7, W0 review pending). Two directions already settled: no Docker
-dependency — the orchestration script runs on an embedded memory-safe
-interpreter inside the executor domain, never raw on the host; and `agent()`
-takes a `role` (profile) rather than a free-form model/harness, so scripts
-request authority and can never widen it. On W0 approval, its W1–W4 stages
-replace the sketch items below. The evidence gate (first item) still applies
-before W1 starts.
+(ledger D7; W0 rulings in its §11, lane-opening basis in its §9). Settled:
+no Docker — the orchestration script runs on an embedded memory-safe
+interpreter (Boa, rule-6 approval due at W3) inside the executor domain,
+never raw on the host; `agent()` takes a `role` (profile), so scripts
+request authority and can never widen it; the canonical script shape is
+map → reduce → **validation reducer** (independent refute-framed verifiers
+under a narrower role — design §3.1). Supervised sessions only; these items
+queue **after** the Phase 0A minimum-version cut's unchecked items. Roles
+are honest-labelled (MCP surface + sandbox posture + instructions) until
+Phase 1 Workspace Grants deepen them — v1 must not imply folder-level role
+isolation it does not have.
 
-- [ ] Confirm a real repeated task before adding persistence or orchestration.
-- [ ] Import and govern a native workflow format before inventing broad syntax
-  where practical.
-- [ ] Define the restricted, versioned `.agentstack/workflows/*.js` or `*.ts`
-  API that normalizes to the frozen plan.
-- [ ] Ensure workflow files request authority and can never grant or widen it.
-- [ ] Give every role its own profile, folders, tools, secrets, egress,
-  commands, budget, and audit identity.
-- [ ] Digest-pin workflow source and normalized plans; re-gate trust on change.
-- [ ] Never execute arbitrary workflow code on the host.
-- [ ] Require idempotency for retried steps and approval or explicit policy for
-  irreversible effects.
+- [ ] **W2 — child-run primitive (supervised, first).** Headless invocation
+  spec in adapter descriptors; `agentstack run <harness> --locked --prompt`
+  as prompt-in/text-out through the full locked admission path; recorder
+  step events. *Witness:* child grant ≤ its profile's capability set; a
+  hostile prompt string never reaches a shell.
+- [ ] **Evidence period (gates W3; runs alongside W1).** Run at least two
+  real recurring maintainer tasks through the interim path — the native
+  Claude Code Workflow tool with `agent()` steps couriering into
+  `run --locked --prompt`. If the interim path does not get repeated real
+  use, W3 is not built.
+- [ ] **W1 — core + trust (supervised).** `[workflows.*]` manifest kind;
+  `[[workflow]]` pin (strict integrity-root digest + `roles` recorded);
+  retain/prune; trust-preview heading ("orchestration code — spawns agent
+  runs under the declared roles"); validation (roles exist, ceilings within
+  machine policy). *Witness:* a one-byte script edit re-gates review; a
+  lock-time `roles` widening is refused as drift.
+- [ ] **W3 — engine (supervised; gated on evidence period, interpreter
+  witnesses, and Boa dependency approval).** Boa runtime inside the
+  executor domain exposing the design §3 API (`agent`/`pipeline`/
+  `parallel`/`phase`/`log`/`args`/`budget`); ceilings; taint labels on
+  prompts embedding prior step output (report-only); journal-replay resume;
+  `workflow run` / report tree. *Witnesses:* undeclared role refused; no
+  fs/net/env reachable from the runtime; `max_agents` exhaustion stops
+  spawning and records honestly; an infinite loop hits the wall-clock
+  ceiling; an interpreter panic fails closed with a recorded outcome.
+- [ ] **W4 — library + import.** Central library `kind: workflow`; the
+  Claude Code import edit (`model:` → `role:`) documented; docs +
+  enforcement-matrix row.
 - [ ] Add Cloudflare Workflows durability only when retries, waits, recovery,
   schedules, or approval events are proven requirements.
 

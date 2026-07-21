@@ -1,16 +1,23 @@
 # Governed dynamic workflows as a capability kind
 
-> **Status:** draft, banked ahead of its phase (W0 review pending)<br/>
-> **Date:** 2026-07-17<br/>
+> **Status:** approved — W0 settled 2026-07-21 (maintainer review); the lane
+> is opened ahead of Phase 2 as an explicit maintainer scope decision. §11
+> records the rulings; §10 carries the re-sequenced stages (W2 before W1);
+> the evidence gate is restated, not waived — see §9.4.<br/>
+> **Date:** 2026-07-17 · approved 2026-07-21<br/>
 > **Origin:** Claude Code's dynamic `Workflow` tool (an orchestration script
 > spawning subagents with `agent()`/`pipeline()`/`parallel()`) is per-harness
 > only; the maintainer wants the same authoring experience delivered through
 > agentstack so every governed CLI can use it.<br/>
-> **Queue position:** Phase 2 "saved governed workflows"
+> **Queue position:** originally Phase 2 "saved governed workflows"
 > ([strategy](../../STRATEGY.md#phase-2--paid-design-partnerships) ·
-> [`TODO.md`](../../TODO.md#saved-governed-workflows)). This document banks
-> the design; it does **not** open the lane. The strategy's evidence gate —
-> a real repeated task proves the need — still applies before W1 starts.
+> [`TODO.md`](../../TODO.md#saved-governed-workflows)). Lane opened early on
+> 2026-07-21: the Phase 0A keystone (D7 §9.1's blocker) landed and was
+> reviewed 2026-07-17, and the maintainer's own recurring multi-agent tasks
+> are the claimed repeated-task evidence — to be confirmed through the
+> interim path in §9.4 before W3 (the engine) starts. Supervised work only;
+> it does not displace the Phase 0A minimum-version cut, which stays first
+> in the queue.
 
 ## 0. Motivation
 
@@ -146,7 +153,48 @@ The near-compatibility means a Claude Code workflow script imports with a
 mechanical edit (`model:` → `role:`), satisfying the strategy's
 "import and govern a native workflow format before inventing broad syntax."
 
-## 4. Manifest shape
+### 3.1 The canonical shape: map → reduce → verify (added 2026-07-21)
+
+The mental model is MapReduce with governance where Hadoop had cluster
+management: YARN's job (ceilings, admission, scheduling) is the engine +
+policy intersection; the MapReduce programming model is the script API; and
+each mapper is a governed child run instead of a container. The analogy is
+deliberately partial — there is no HDFS analog (results are kilobytes of
+text; the scarce resource is tokens and judgment, not I/O locality), no
+shuffle infrastructure (plain JS over the collected results), and no
+speculative re-execution (agents are non-deterministic, so recovery replays
+journaled results and never recomputes — the reason for the §3 determinism
+rule).
+
+The canonical workflow is three stages, each bound to a different role:
+
+```js
+// Map — fan out cheap workers over the split input.
+const found = await pipeline(
+  args.items,
+  it => agent(`Audit ${it}. Return raw findings.`, { role: 'reader', label: `map:${it}` }),
+)
+// Shuffle — plain JS: group, dedup, filter. No agent spawn, no tokens.
+const grouped = groupByFile(found.filter(Boolean))
+// Reduce — one synthesis step.
+const claims = await agent(`Synthesize and rank:\n${JSON.stringify(grouped)}`,
+                           { role: 'synthesizer' })
+// Verify — the validation reducer: independent refuters under a
+// *narrower* role, majority vote.
+const votes = await parallel(parse(claims).map(c => () =>
+  agent(`Try to REFUTE against the actual code: ${c.summary}`, { role: 'verifier' })))
+return keepUnrefuted(claims, votes)
+```
+
+The **validation reducer** is a first-class pattern, not an afterthought,
+because it is the mitigation for the §7 data-flow caveat: map outputs are
+untrusted model output flowing into later prompts. A prompt-injected mapper
+can mislead the reducer but cannot escalate (roles are a closed set,
+ceilings frozen); an independent verify stage under a *different profile* —
+read-only filesystem, no egress, refute-framed instructions, typically a
+stronger model — is what catches the misleading half. The role separation
+costs nothing extra: it is exactly what profiles already fence. The §11.3
+taint labels make the influence path reviewable in the report.
 
 ```toml
 [workflows.nightly-review]
@@ -228,6 +276,58 @@ Concurrency is engine-owned (a small fixed cap, machine-configurable), never
 script-negotiated. A step that fails resolves to `null` in the script, same
 as Claude Code — the script decides whether that's fatal.
 
+### 6.1 Flow diagram
+
+```mermaid
+flowchart TB
+    subgraph Pinned["Pinned content (trust-gated, rule 3/4)"]
+        SRC["workflow script<br/>.agentstack/workflows/name.js"]
+        MAN["manifest workflows.name<br/>declared roles + ceilings"]
+        LOCK["lock pin<br/>integrity_root_digest + roles"]
+        SRC --- MAN --- LOCK
+    end
+
+    RUN["agentstack workflow run name --args-json ..."]
+    Pinned --> RUN
+
+    subgraph Admission["Admission (existing seams)"]
+        TRUST["trust gate<br/>untrusted = inert"]
+        VERIFY["strict lock verification<br/>byte change re-gates"]
+        POLICY["policy intersection<br/>ceilings can only reduce"]
+        FREEZE["freeze workflow plan<br/>roles resolved, budget, digest"]
+        TRUST --> VERIFY --> POLICY --> FREEZE
+    end
+    RUN --> Admission
+
+    subgraph Engine["Executor domain — embedded interpreter (Boa), zero I/O"]
+        SCRIPT["script control flow<br/>map / shuffle(JS) / reduce / verify<br/>pipeline() parallel() budget"]
+    end
+    FREEZE --> Engine
+
+    subgraph Children["Governed child runs — one per agent(prompt, role)"]
+        MAPS["map steps<br/>role: reader ×N"]
+        RED["reduce step<br/>role: synthesizer"]
+        VER["validation reducer<br/>role: verifier ×K, refute + vote"]
+    end
+    SCRIPT -- "prompt as data, never shell" --> Children
+    Children -- "bounded stdout = agent() result<br/>(untrusted model output)" --> SCRIPT
+
+    GRANT["per-child AuthorityGrant<br/>full locked admission path,<br/>role profile: sandbox posture,<br/>skills, MCP, secrets, egress"]
+    Children -. every step .-> GRANT
+
+    REC["recorder<br/>WorkflowStarted / StepSpawned /<br/>StepCompleted / WorkflowCompleted<br/>= evidence tree = resume journal"]
+    Engine --> REC
+    Children --> REC
+    REC --> REPORT["agentstack report — spawn tree,<br/>per-step posture label, taint marks"]
+```
+
+Reading the diagram in Hadoop terms: the *Pinned content* + *Admission*
+rows are what Hadoop never had (the job itself is hostile input here); the
+*Engine* is YARN's resource manager; the *Children* row is the task
+containers, except each carries its own narrowed `AuthorityGrant`; the
+*recorder* replaces the JobTracker's bookkeeping and doubles as the resume
+journal.
+
 ## 7. Honest posture (labels, not promises)
 
 What agentstack can honestly claim:
@@ -267,55 +367,91 @@ What it must not imply:
 - Doctor: lock drift, roles referencing missing profiles, source resolution,
   ceiling-vs-machine-policy conflicts.
 
-## 9. Dependency chain (why this stays Phase 2)
+## 9. Dependency chain (status revised 2026-07-21 — the lane-opening basis)
 
-Ordered; each is a real blocker, not caution:
+Ordered; each was a real blocker. Where one is discharged or narrowed, the
+basis is recorded here rather than silently dropped:
 
-1. **The Phase 0A keystone** — the locked-run grant handoff must be object-
-   consumed, not content-equivalent, before an engine spawns N of them.
-2. **Phase 1 role grants** — Workspace Grants and profile-bound folder/
-   secret/egress scopes are what makes "role" mean something beyond a server
-   list. Without them a workflow's roles differ only in MCP surface.
-3. **Executor-domain maturity** — the workflow engine reuses the executor's
-   plan-freezing and limit-ceiling model but, per §11.1, **not** the
-   Docker-relay backend, so the relay-specific stabilization items (relay
-   framing fuzz, container soak) do not block it. What does carry over:
-   workflows launch experimental and stay there until the interpreter
-   seam has its own witness set (ceiling enforcement, panic-fails-closed,
-   no host capability reachable) and an independent look at the
-   script-boundary code.
-4. **The Phase 2 evidence gate** — a real repeated task, per strategy.
+1. **The Phase 0A keystone — LANDED.** The locked-run grant handoff
+   (recorder-open → trust → strict lock verification → policy admission →
+   `GrantFrozen` → launch → recorded outcome) shipped and was line-by-line
+   reviewed 2026-07-17. This was the load-bearing blocker; its discharge is
+   the main reason opening the lane early is defensible.
+2. **Phase 1 role grants — narrowed, honestly labelled.** Until Workspace
+   Grants land, roles differ in MCP surface, sandbox posture, and
+   instructions — not yet folder/secret/egress scope. v1 ships with that
+   stated in the trust preview and report ("role = profile capability set as
+   of today"), and the roles deepen automatically when Phase 1 grants bind
+   to profiles. What v1 must NOT do: imply folder-level role isolation it
+   does not have.
+3. **Executor-domain maturity — unchanged, still gates W3.** The engine
+   reuses the executor's plan-freezing and limit-ceiling model but, per
+   §11.1, **not** the Docker-relay backend, so relay-specific stabilization
+   (framing fuzz, container soak) does not block it. What does: the
+   interpreter seam needs its own witness set (ceiling enforcement,
+   panic-fails-closed, no host capability reachable) and an independent look
+   at the script-boundary code before workflows leave experimental.
+4. **The evidence gate — restated, not waived.** The maintainer's own
+   recurring multi-agent tasks (review/audit fan-outs run daily through
+   Claude Code's native Workflow tool) are the claimed repeated task. The
+   witness that converts claim to evidence: **run at least two real
+   recurring tasks through the interim path** — the native orchestrator
+   with each `agent()` step couriering into `agentstack run <harness>
+   --locked --prompt` (W2) — before W3 begins. If the interim path is not
+   actually used repeatedly, the engine is not built; that is the gate
+   doing its job.
 
-## 10. Staged implementation
+## 10. Staged implementation (re-sequenced 2026-07-21: W2 before W1)
 
-- **W0 — approve this design.** Settle: role-not-model in `agent()`, script
-  execution strictly inside the executor domain, the pin's `roles` binding,
-  Claude-Code-compatible API as the import story, and the open questions.
-  On approval: D7 ledger entry in `STRATEGY.md`; TODO items replace the
-  current saved-workflows sketch.
+W2 moved first because it has standalone value today (CI, scripted locked
+runs), it is the substrate of the §9.4 interim evidence path, and its only
+prerequisite — the locked-run keystone — has landed. W1 needs W2's headless
+mode to exist for nothing; they are independent, but W2 pays for itself
+immediately and W1 pays off only once W3 exists.
+
+- **W0 — approve this design. DONE 2026-07-21** (maintainer review; rulings
+  in §11). D7 ledger entry updated in `STRATEGY.md`; TODO items replaced
+  the saved-workflows sketch.
+- **W2 — the child-run primitive (supervised, FIRST).** Headless invocation
+  spec in adapter descriptors; `run` gains a prompt-in/text-out mode that
+  is the full locked admission path with a non-interactive launch; recorder
+  step events. Ships standalone as `agentstack run <harness> --locked
+  --prompt` — independently useful and testable before any engine exists.
+  *Witness:* the child's grant digest is ≤ its profile's capability set; a
+  hostile prompt string never reaches a shell.
+  *Then:* the §9.4 evidence period — real recurring tasks through the
+  interim orchestrator — runs concurrently with W1.
 - **W1 — core + trust (supervised).** `[workflows.*]` manifest kind,
   `[[workflow]]` pinning with `roles`, retain/prune, trust-preview heading,
   validation (roles exist, ceilings within machine policy).
   *Witness:* a one-byte script edit re-gates review; a lock-time `roles`
   widening is refused as drift.
-- **W2 — the child-run primitive (supervised).** Headless invocation spec in
-  adapter descriptors; `run` gains an internal prompt-in/text-out mode that
-  is the full locked admission path with a non-interactive launch; recorder
-  step events. Ships standalone as `agentstack run <harness> --locked
-  --prompt` — independently useful (CI, scripts) and testable before any
-  engine exists.
-  *Witness:* the child's grant digest is ≤ its profile's capability set; a
-  hostile prompt string never reaches a shell.
-- **W3 — the engine (supervised).** Script runtime inside the executor
-  domain exposing the §3 API; budget/ceiling enforcement; journal-replay
-  resume; `workflow run` / `report` tree.
+- **W3 — the engine (supervised; gated on §9.3 witnesses, §9.4 evidence,
+  and rule-6 approval of the Boa dependency).** Script runtime inside the
+  executor domain exposing the §3 API; budget/ceiling enforcement;
+  journal-replay resume; `workflow run` / `report` tree.
   *Witnesses:* a script calling an undeclared role is refused; a script
   cannot reach fs/net/env from inside the runtime; `max_agents` exhaustion
-  stops spawning and records honestly.
+  stops spawning and records honestly; an infinite-loop script hits the
+  wall-clock ceiling and the engine survives; an interpreter panic fails
+  the workflow closed with a recorded outcome.
 - **W4 — library + import.** `kind: workflow`, the Claude Code import edit
-  documented, docs + enforcement-matrix row.
+  documented (`model:` → `role:`), docs + enforcement-matrix row.
 
-## 11. Open questions for W0
+## 11. Open questions for W0 — RESOLVED 2026-07-21 (maintainer review)
+
+Rulings: **(1)** Boa direction confirmed as already settled — the rule-6
+dependency approval itself still happens at W3 with the spike results.
+**(2)** Mid-workflow approvals: deferred as recommended; a step needing
+human approval fails closed and the report records the refusal honestly.
+**(3)** Cross-step taint labels: yes, as recommended — a report-only field
+marking prompts that embed prior step output; no blocking semantics. It is
+the reviewability half of the §3.1 validation-reducer pattern. **(4)**
+`--prompt` pulled forward: **decided yes, reversing the doc's own
+"not recommended"** — an explicit maintainer scope decision (2026-07-21)
+against the 2026-07-16 cut, on two grounds: the keystone it depends on has
+landed, and it is the substrate of the §9.4 evidence path. The original
+questions are preserved below for the record.
 
 1. **Which script sandbox? — direction settled (maintainer ruling +
    recommendation, 2026-07-17): no Docker; embedded pure-Rust interpreter.**
