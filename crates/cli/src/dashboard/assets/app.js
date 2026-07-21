@@ -67,6 +67,11 @@ function cmd(text) {
   });
   return e;
 }
+// `add skill` only accepts spelled paths (./dir, ../dir, /abs, ~/dir) —
+// anything else parses as owner/repo. Discovered-skill sources are paths.
+function spellPath(p) {
+  return /^(\.\.?\/|\/|~\/)/.test(p) ? p : "./" + p;
+}
 // A labelled hint row: "To do X, run: <cmd>".
 function cmdHint(prefix, command) {
   return el("div", { class: "cmd-hint muted" }, [prefix ? prefix + " " : null, cmd(command)]);
@@ -816,14 +821,14 @@ function skills(c) {
         el("span", { class: "row-actions" }, [
           ...where,
           statusBadge,
-          ok ? cmd("agentstack adopt " + d.name) : null,
+          ok ? cmd("agentstack add skill " + spellPath(d.source) + " --write") : null,
         ]),
       ]);
     });
     c.appendChild(el("div", { class: "card", style: "margin-top:16px" }, [
       el("div", { class: "hd", style: "display:flex;align-items:center" }, hd),
       el("div", { class: "bd" }, [
-        el("div", { class: "muted", style: "font-size:12px;margin-bottom:8px" }, ["Register a discovered skill where it is with `agentstack adopt <name>`, or move it into the central library with `agentstack lib add ./<dir> --name <name>`."]),
+        el("div", { class: "muted", style: "font-size:12px;margin-bottom:8px" }, ["Register a discovered skill where it is with `agentstack add skill <path> --write`, or move it into the central library with `agentstack lib add ./<dir> --name <name> --write`."]),
         ...rows,
       ]),
     ]));

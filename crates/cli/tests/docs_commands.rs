@@ -459,6 +459,156 @@ fn every_prose_command_is_real() {
     );
 }
 
+// ── Dynamic-snippet parser gate ────────────────────────────────────────────
+//
+// The prose lint above covers Markdown/HTML code contexts, but the site also
+// carries commands in places no code-span scan reaches: copy-button
+// `data-copy` attributes, the tutorial's JavaScript `{cmd:'…'}` objects, and
+// terminal-simulation line arrays (`['$ agentstack …','g']`). Those are the
+// strings a reader actually copies, so each one must parse against the real
+// clap tree, not just name a real verb.
+
+/// Full commands that are intentionally shown but stop before being
+/// executable (e.g. deliberately partial pipelines). Keep entries rare and
+/// justified — an unrecognized shape should fail the test, not slip in here.
+const DYNAMIC_ALLOWLIST: &[&str] = &[];
+
+/// Scan `content` for every occurrence of `start_pat` and return the text up
+/// to (not including) the next `end` character, with its byte offset.
+fn extract_after(content: &str, start_pat: &str, end: char) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    for (pos, _) in content.match_indices(start_pat) {
+        let start = pos + start_pat.len();
+        if let Some(rel) = content[start..].find(end) {
+            out.push((start, content[start..start + rel].to_string()));
+        }
+    }
+    out
+}
+
+fn html_unescape(s: &str) -> String {
+    s.replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+/// Normalize one extracted snippet into argv tokens, or `None` when it is
+/// out of scope by construction:
+/// - not an `agentstack` invocation (config snippets, `git`/`curl`/guard
+///   demo lines are legitimately copyable but not our parser's business);
+/// - contains an explicit placeholder or shell construct (`<…>`, `…`, `*`,
+///   `[…]` optional groups, `${REF}`, `$(…)`, pipes) — shown to be filled
+///   in by the reader, never executed verbatim.
+fn normalize_dynamic(raw: &str) -> Option<Vec<String>> {
+    let s = html_unescape(raw);
+    let s = s.strip_prefix("$ ").unwrap_or(&s);
+    // Trailing inline comment on a simulated line: `agentstack init   # once`.
+    let s = match s.find(" #") {
+        Some(i) => &s[..i],
+        None => s,
+    };
+    // Transcript annotations: `doctor --ci  →  exit 0` shows an outcome,
+    // `trust . · guard install` decoratively joins two commands in a header.
+    // The text before the separator is the command; the rest is narration.
+    let s = match s.find(" → ") {
+        Some(i) => &s[..i],
+        None => s,
+    };
+    let s = match s.find(" · ") {
+        Some(i) => &s[..i],
+        None => s,
+    }
+    .trim();
+    // The demos page abbreviates the binary as `as` in its transcripts.
+    let s = match s.strip_prefix("as ") {
+        Some(rest) => format!("agentstack {rest}"),
+        None => s.to_string(),
+    };
+    if s != "agentstack" && !s.starts_with("agentstack ") {
+        return None;
+    }
+    if s.contains(['<', '>', '…', '*', '[', ']', '|']) || s.contains("${") || s.contains("$(") {
+        return None;
+    }
+    if DYNAMIC_ALLOWLIST.contains(&s.as_str()) {
+        return None;
+    }
+    Some(s.split_whitespace().map(String::from).collect())
+}
+
+#[test]
+fn every_dynamic_command_parses() {
+    let root = repo_root();
+    // (file, patterns) — each pattern is (start marker, terminator).
+    let sources: &[(&str, &[(&str, char)])] = &[
+        // Copy buttons put the exact copied string in `data-copy`.
+        (
+            "docs/cookbook.html",
+            &[("data-copy=\"", '"'), (">$ agentstack", '<')],
+        ),
+        (
+            "docs/index.html",
+            &[("data-copy=\"", '"'), (">$ agentstack", '<')],
+        ),
+        ("docs/start.html", &[("data-copy=\"", '"')]),
+        // Terminal-simulation arrays: `['$ agentstack …', 'g']` / `['$ as …', 'y']`.
+        (
+            "docs/examples.html",
+            &[("data-copy=\"", '"'), ("['$ ", '\'')],
+        ),
+        // Tutorial: command buttons `{cmd:'…'}` and drift-resolver lines.
+        (
+            "docs/tutorial/index.html",
+            &[("cmd:'", '\''), ("['$ ", '\'')],
+        ),
+    ];
+
+    let mut checked = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    for (rel, patterns) in sources {
+        let path = root.join(rel);
+        let content = std::fs::read_to_string(&path).expect("readable dynamic-snippet source");
+        for (start_pat, end) in *patterns {
+            for (pos, raw) in extract_after(&content, start_pat, *end) {
+                // `>$ agentstack` extraction drops the matched prefix; put the
+                // command head back before normalizing.
+                let raw = if *start_pat == ">$ agentstack" {
+                    format!("agentstack{raw}")
+                } else {
+                    raw
+                };
+                let Some(tokens) = normalize_dynamic(&raw) else {
+                    continue;
+                };
+                checked += 1;
+                if let Err(err) = cli_command().try_get_matches_from(&tokens) {
+                    failures.push(format!(
+                        "  {rel}:{}: `{}` → {}",
+                        line_number(&content, pos),
+                        tokens.join(" "),
+                        err.kind()
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "displayed/copied command(s) that don't parse on the real CLI:\n{}",
+        failures.join("\n")
+    );
+    // Extraction floor: if a markup refactor silently empties the scan, this
+    // trips before the gate quietly stops guarding anything.
+    assert!(
+        checked >= 30,
+        "dynamic-command extraction found only {checked} commands — the \
+         extractor patterns no longer match the site markup"
+    );
+}
+
 #[test]
 fn action_default_binary_matches_this_release() {
     let action = include_str!("../../../action.yml");

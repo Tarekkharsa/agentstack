@@ -44,6 +44,17 @@ fn explain_server_reports_secret_and_safety() {
         "names the layer a resolved secret comes from"
     );
     assert!(out.contains("network egress"));
+    // Delivery-mode honesty: the secrets bullet must not claim static native
+    // configs never receive plaintext (a static render may resolve values into
+    // them); the ${REF} guarantee is scoped to the manifest and lockfile.
+    assert!(
+        !out.contains("never written as plaintext"),
+        "must not overclaim secret placement: {out}"
+    );
+    assert!(
+        out.contains("a static render resolves values into native configs"),
+        "states where a static render may place a value: {out}"
+    );
     std::env::remove_var("ZZ_ENV_ORG");
 
     // Unknown capability → a helpful error, not a panic.

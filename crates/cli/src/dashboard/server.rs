@@ -395,4 +395,19 @@ mod tests {
         let resp = route(&Method::Get, "/api/state", "", false, None);
         assert_eq!(resp.status_code(), tiny_http::StatusCode(401));
     }
+
+    /// The discovered-skills card must offer a real skill command. `adopt`
+    /// imports server drift and takes no positional name — recommending it
+    /// for an on-disk skill was a shipped bug; keep it from regressing.
+    #[test]
+    fn discovered_skill_action_is_a_supported_command() {
+        assert!(
+            APP_JS.contains("agentstack add skill "),
+            "discovered-skills card should copy an `add skill` command"
+        );
+        assert!(
+            !APP_JS.contains("\"agentstack adopt \" + d.name"),
+            "must not recommend the server-only `adopt` verb for a skill"
+        );
+    }
 }
