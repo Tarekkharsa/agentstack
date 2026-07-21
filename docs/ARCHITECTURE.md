@@ -4,7 +4,7 @@
 
 # AgentStack — Architecture
 
-*Current as of agentstack 0.14.x.*
+*Current as of agentstack 0.15.x.*
 
 For contributors and architects. If you just want to use AgentStack, start with
 the [README](../README.md) and the [getting-started walkthrough](start.html).

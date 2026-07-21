@@ -1,6 +1,6 @@
 # agentstack trust gate — use in any repo that commits .agentstack/:
 #
-#   - uses: Tarekkharsa/agentstack@v0.14.0
+#   - uses: Tarekkharsa/agentstack@v0.15.0
 #
 # Proves the checked-in agent setup is reproducible (skill sources still
 # resolve to the pinned lockfile digests) and policy-clean (no forbidden
@@ -22,7 +22,7 @@ inputs:
     # the binary that shipped with vX — never a newer one. This MUST be bumped
     # to the new tag on every release (RELEASING.md § 0 owns the stamp step).
     # Override with `version: latest` to opt into the newest published binary.
-    default: v0.14.0
+    default: v0.15.0
   working-directory:
     description: Directory containing .agentstack/ (or a legacy root manifest)
     required: false

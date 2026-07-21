@@ -4,6 +4,74 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## v0.15.0 — 2026-07-21
+
+**Skills become a governed supply chain.** This release closes the full
+skills loop — find, try, install, author, update — on the ecosystem's own
+conventions, hardens every remote-ingestion path it opens, and finishes the
+docs restructure with a landing page that pitches instead of documenting.
+
+### Added
+
+- **`agentstack add skill <source>`** installs skills from any skills repo —
+  `owner/repo`, a git URL, or a local directory — with one preview and one
+  write. Sources resolve through the ecosystem's discovery conventions,
+  land digest-pinned in the lockfile, and `--write` activates them
+  mode-aware on the spot.
+- **`agentstack try`** runs a skill without installing anything: stage,
+  scan, and emit a wrapper prompt on stdout for piping into any agent CLI.
+  **`agentstack lib new`** scaffolds a library skill, closing the authoring
+  loop, and `lib add` speaks the same source grammar with staged previews.
+- **`lock --update` actually updates**: branch pins refresh, upstream
+  deletions are detected and said out loud, and every skip names its
+  reason.
+- **`finding-skills`** ships in the catalog — the skill that teaches an
+  agent to acquire skills through the governed pipeline instead of around
+  it.
+- **Re-trusting diffs the consent surface**: `trust .` on a changed project
+  shows exactly what changed since your last consent, and always names the
+  enforcement ceiling.
+
+### Security
+
+Remote skill ingestion got a dedicated hardening round before the new
+surface shipped:
+
+- Every git invocation goes through one hardened spawner — profiled
+  arguments, no shell, and a clock on every call.
+- Display sanitizers strip terminal control from every remotely-sourced
+  string, so a skill name or description can neither drive your terminal
+  nor spoof agent context.
+- One skill-name grammar from `pack.toml` to the filesystem; symlinks are
+  rejected at every local boundary; offline reads honor the lock's pinned
+  commit rather than whatever the working tree holds.
+
+### Changed
+
+- The developer-UX review closed out across four rounds: every error names
+  its exact fix command, `status` addresses capabilities by name,
+  `--help --all` prints the real full tree, keychain errors name both
+  stores, `set server` is an idempotent upsert, and the `init` confirm gate
+  is honest — plan first, one undo batch, rollback on failure, Ctrl-C
+  recovery.
+- The docs finished their restructure: one canonical home per concept, a
+  concepts glossary and a choose page, a how-to layer, two-tier navigation
+  — and a round-4 marketing pass that halves the landing page (17 → 10
+  screens), moves its doc content to the pages that own it, and closes the
+  last coverage gaps, so every command has a teaching surface beyond the
+  reference.
+
+### Fixed
+
+- Lockdown evidence lines decode as whole UTF-8 instead of per-byte
+  mojibake.
+- The GitHub Action's pinned default installs this release's binary, and CI
+  guards the stamp.
+- The MCP `add_skill` tool pointed agents at `apply`, which never renders
+  skills; it now names the verb that does.
+- The example demo scripts caught up with `lib add`'s positional source,
+  and the CI abort cascade no longer masks their assertion failures.
+
 ## v0.14.0 — 2026-07-19
 
 **The onboarding loop closes in both directions.** The docs now mirror the
