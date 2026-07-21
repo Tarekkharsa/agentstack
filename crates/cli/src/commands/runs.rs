@@ -37,13 +37,14 @@ pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
     // binary must be the first (and only) thing the user reads — never below a
     // "▶ launching…" line claiming something started.
     let plan = crate::runs::prepare(dir, &args.harness)?;
+    let scope = args.scope.unwrap_or_else(|| plan.default_scope());
     if let Some(p) = &args.profile {
         println!(
             "{} launching {} with profile '{}' ({})…",
             "▶".green(),
             args.harness.bold(),
             p,
-            args.scope
+            scope
         );
     } else {
         println!("{} launching {}…", "▶".green(), args.harness.bold());
@@ -65,7 +66,7 @@ pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
         plan,
         dir,
         args.profile.as_deref(),
-        args.scope,
+        scope,
         &args.args,
         args.keep,
     )

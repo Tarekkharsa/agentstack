@@ -820,6 +820,9 @@ fn relock_guidance() -> &'static str {
 
 fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     let m = &ctx.loaded.manifest;
+    let scope = args
+        .scope
+        .unwrap_or_else(|| crate::scope::Scope::default_for(&ctx.dir));
     let desc = ctx.registry.get(&args.harness).with_context(|| {
         format!(
             "unknown harness '{}' — see `agentstack adapters list`",
@@ -931,7 +934,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         m,
         &ctx.registry,
         &args.harness,
-        args.scope,
+        scope,
         &ctx.dir,
         &inputs.lock,
     ) {
@@ -1075,7 +1078,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         &args.harness,
         &display,
         None,
-        args.scope,
+        scope,
     );
     if let Some(s) = scoped.as_mut() {
         s.restore();
@@ -1094,6 +1097,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 usage: "unavailable".to_string(),
             })
             .context("the harness ran, but its outcome could not be recorded")?;
+            println!("\nSee what happened: `agentstack report run {run_id}`");
             Ok(())
         }
         Err(e) => {
@@ -1109,7 +1113,10 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 usage: "unavailable".to_string(),
             });
             match record {
-                Ok(()) => Err(e),
+                Ok(()) => {
+                    println!("\nSee what happened: `agentstack report run {run_id}`");
+                    Err(e)
+                }
                 Err(rec) => Err(e.context(format!(
                     "ALSO: the launch failure's evidence could not be recorded ({rec:#})"
                 ))),
@@ -1124,6 +1131,9 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
 /// a live launch would be refused.
 fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     let m = &ctx.loaded.manifest;
+    let scope = args
+        .scope
+        .unwrap_or_else(|| crate::scope::Scope::default_for(&ctx.dir));
     println!(
         "{} plan for `run {} --locked` (nothing will be mutated)",
         "→".cyan(),
@@ -1241,7 +1251,7 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             m,
             &ctx.registry,
             &args.harness,
-            args.scope,
+            scope,
             &ctx.dir,
             &inputs.lock,
         ) {
@@ -1469,7 +1479,7 @@ mod tests {
             harness: "claude-code".to_string(),
             locked: true,
             profile: None,
-            scope: agentstack_core::scope::Scope::Project,
+            scope: Some(agentstack_core::scope::Scope::Project),
             keep: false,
             sandbox: false,
             lockdown: false,
@@ -1550,7 +1560,7 @@ mod tests {
                 harness: "pi".to_string(),
                 locked: true,
                 profile: None,
-                scope: agentstack_core::scope::Scope::Project,
+                scope: Some(agentstack_core::scope::Scope::Project),
                 keep: false,
                 sandbox: false,
                 lockdown: false,

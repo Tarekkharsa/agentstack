@@ -96,11 +96,8 @@ fn route(method: &Method, path: &str, query: &str, authed: bool, dir: Option<&Pa
                 return unauthorized();
             }
             let name = query_param(query, "name").unwrap_or_default();
-            match crate::commands::explain::explain_text(&name, dir) {
-                Ok(text) => json(
-                    &serde_json::to_string(&serde_json::json!({ "text": text }))
-                        .unwrap_or_default(),
-                ),
+            match crate::commands::explain::explain_json(&name, dir) {
+                Ok(value) => json(&serde_json::to_string(&value).unwrap_or_default()),
                 Err(e) => json(&format!("{{\"error\":{:?}}}", e.to_string())),
             }
         }

@@ -1,7 +1,7 @@
 #![deny(unsafe_code)]
 
 use anyhow::Result;
-use clap::Parser;
+use clap::FromArgMatches;
 
 use agentstack::cli::{Cli, Command};
 use agentstack::commands;
@@ -43,7 +43,9 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let cli = Cli::parse();
+    let matches = agentstack::cli::runtime_command().get_matches();
+    let cli = Cli::from_arg_matches(&matches)
+        .map_err(|e| anyhow::anyhow!("could not decode parsed CLI arguments: {e}"))?;
     let dir = cli.manifest_dir.as_deref();
     // Bare `agentstack`: a short orientation, not the 30-command help dump.
     let Some(command) = &cli.command else {

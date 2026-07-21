@@ -195,6 +195,7 @@ fn attempt_posture_label(slug: &str) -> String {
 fn attempt_posture_slug(events: &[RunEvent]) -> Option<String> {
     events.iter().find_map(|e| match e {
         RunEvent::AttemptStarted { posture, .. } => Some(posture.clone()),
+        RunEvent::HostStarted { posture, .. } => Some(posture.clone()),
         _ => None,
     })
 }
@@ -203,19 +204,24 @@ fn attempt_posture_slug(events: &[RunEvent]) -> Option<String> {
 /// sandbox lifetime needs both a `SandboxStarted` and a `SandboxExited` to be
 /// known; the in-tool total is the sum of the run's tool-call durations.
 fn wall_time_summary(events: &[RunEvent], rows: &[ToolRow]) -> Option<String> {
+    let lifecycle = events.iter().find_map(|e| match e {
+        RunEvent::SandboxStarted { .. } => Some("sandbox"),
+        RunEvent::HostStarted { .. } => Some("host run"),
+        _ => None,
+    });
     let started = events.iter().find_map(|e| match e {
-        RunEvent::SandboxStarted { ts, .. } => Some(*ts),
+        RunEvent::SandboxStarted { ts, .. } | RunEvent::HostStarted { ts, .. } => Some(*ts),
         _ => None,
     });
     let exited = events.iter().find_map(|e| match e {
-        RunEvent::SandboxExited { ts, .. } => Some(*ts),
+        RunEvent::SandboxExited { ts, .. } | RunEvent::HostExited { ts, .. } => Some(*ts),
         _ => None,
     });
     let mut parts: Vec<String> = Vec::new();
     // `saturating_sub` guards against a clock that went backwards between the
     // two timestamps (epoch seconds are coarse and not monotonic).
-    if let (Some(a), Some(b)) = (started, exited) {
-        parts.push(format!("{}s sandbox", b.saturating_sub(a)));
+    if let (Some(a), Some(b), Some(label)) = (started, exited, lifecycle) {
+        parts.push(format!("{}s {label}", b.saturating_sub(a)));
     }
     if !rows.is_empty() {
         let in_tool: u64 = rows.iter().map(|r| r.ms).sum();
@@ -266,6 +272,20 @@ pub fn report_text(run_id: &str) -> String {
                 "Sandbox", image, workspace
             ));
         }
+    }
+
+    if let Some(RunEvent::HostStarted {
+        harness, posture, ..
+    }) = events
+        .iter()
+        .find(|e| matches!(e, RunEvent::HostStarted { .. }))
+    {
+        o.push_str(&format!(
+            "  {}  {} · {}\n",
+            "Host run".bold(),
+            harness,
+            posture.to_uppercase()
+        ));
     }
 
     // Locked host-run lifecycle (`agentstack run --locked`): the pre-launch gate
@@ -494,12 +514,20 @@ pub fn report_text(run_id: &str) -> String {
 
     // Exit.
     for e in &events {
-        if let RunEvent::SandboxExited { code, .. } = e {
-            let shown = code
+        let shown = match e {
+            RunEvent::SandboxExited { code, .. } => code
                 .map(|c| c.to_string())
-                .unwrap_or_else(|| "killed by signal".to_string());
-            o.push_str(&format!("  {:<9} {}\n", "Exit", shown));
-        }
+                .unwrap_or_else(|| "killed by signal".to_string()),
+            RunEvent::HostExited { outcome, code, .. } => match outcome.as_str() {
+                "launch-failed" => "launch failed".to_string(),
+                "signaled" => "killed by signal".to_string(),
+                _ => code
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| outcome.clone()),
+            },
+            _ => continue,
+        };
+        o.push_str(&format!("  {:<9} {}\n", "Exit", shown));
     }
 
     o
@@ -855,6 +883,58 @@ mod tests {
         with_home(|| {
             let text = report_text("r-nope");
             assert!(text.contains("No record for run 'r-nope'"), "{text}");
+        });
+    }
+
+    #[test]
+    fn renders_ordinary_host_run_lifecycle() {
+        with_home(|| {
+            let log = RunLog::create("r-host").unwrap();
+            log.append(&RunEvent::HostStarted {
+                ts: 10,
+                harness: "codex".into(),
+                posture: "host".into(),
+            });
+            log.append(&RunEvent::HostExited {
+                ts: 12,
+                outcome: "exited".into(),
+                code: Some(0),
+                duration_ms: 2_000,
+            });
+
+            let text = report_text("r-host");
+            assert!(
+                text.contains("Host run") && text.contains("codex"),
+                "{text}"
+            );
+            assert!(text.contains("Exit") && text.contains('0'), "{text}");
+            assert!(text.contains("2s host run"), "{text}");
+            let value: serde_json::Value =
+                serde_json::from_str(&report_json("r-host").unwrap()).unwrap();
+            assert_eq!(value["posture"], "host");
+            assert_eq!(value["events"][0]["event"], "host_started");
+        });
+    }
+
+    #[test]
+    fn host_launch_failure_is_not_mislabeled_as_a_signal() {
+        with_home(|| {
+            let log = RunLog::create("r-host-failed").unwrap();
+            log.append(&RunEvent::HostStarted {
+                ts: 10,
+                harness: "codex".into(),
+                posture: "host".into(),
+            });
+            log.append(&RunEvent::HostExited {
+                ts: 10,
+                outcome: "launch-failed".into(),
+                code: None,
+                duration_ms: 0,
+            });
+
+            let text = report_text("r-host-failed");
+            assert!(text.contains("launch failed"), "{text}");
+            assert!(!text.contains("killed by signal"), "{text}");
         });
     }
 

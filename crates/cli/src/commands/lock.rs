@@ -156,6 +156,34 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     println!(
         "  no configs rendered, no skills materialized — that stays `agentstack use --write`."
     );
+    let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
+    let mode = super::overview::detect_mode(&ctx, &target_ids);
+    let trust = crate::trust::check(&trust_base);
+    match (mode, trust) {
+        (
+            super::overview::Mode::CleanAtRest | super::overview::Mode::ZeroFiles,
+            crate::trust::TrustState::Untrusted | crate::trust::TrustState::Changed,
+        ) => println!("\nNext: `agentstack trust .` to review and consent."),
+        (super::overview::Mode::CleanAtRest, crate::trust::TrustState::Trusted) => {
+            let profile = if manifest.profiles.len() == 1 {
+                manifest
+                    .profiles
+                    .keys()
+                    .next()
+                    .map(String::as_str)
+                    .unwrap_or("<profile>")
+            } else {
+                "<profile>"
+            };
+            println!("\nNext: `agentstack session start {profile}` to load it for this session.");
+        }
+        (super::overview::Mode::ZeroFiles, crate::trust::TrustState::Trusted) => {
+            println!("\nNext: `agentstack doctor` to verify the gateway wiring.");
+        }
+        (super::overview::Mode::Static, _) => {
+            println!("\nNext: `agentstack use --write` to activate the pinned capabilities.");
+        }
+    }
     Ok(())
 }
 

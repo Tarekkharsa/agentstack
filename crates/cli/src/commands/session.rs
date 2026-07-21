@@ -8,11 +8,19 @@ use anyhow::Result;
 use owo_colors::OwoColorize;
 
 use crate::cli::{SessionArgs, SessionCmd};
+use crate::scope::Scope;
 
 pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
     match &args.cmd {
         SessionCmd::Start { profile, scope } => {
-            crate::session::start(dir, profile, *scope)?;
+            let scope = match scope {
+                Some(scope) => *scope,
+                None => {
+                    let ctx = crate::commands::load(dir)?;
+                    Scope::default_for(&ctx.dir)
+                }
+            };
+            crate::session::start(dir, profile, scope)?;
             println!(
                 "{} session '{}' started ({scope})",
                 "✓".green(),

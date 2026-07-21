@@ -15,28 +15,171 @@ use crate::state::{target_key, State};
 use crate::store::{local_source_dir, Store};
 
 pub fn run(args: &ExplainArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    print!("{}", explain_text(&args.name, manifest_dir)?);
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&explain_json(&args.name, manifest_dir)?)?
+        );
+    } else {
+        print!("{}", explain_text(&args.name, manifest_dir)?);
+    }
     Ok(())
 }
 
 /// Render the explanation as plain text (shared by the CLI and the MCP tool).
 pub fn explain_text(name: &str, manifest_dir: Option<&Path>) -> Result<String> {
     let ctx = crate::commands::load(manifest_dir)?;
+    explain_text_with_context(name, &ctx)
+}
+
+fn explain_text_with_context(name: &str, ctx: &crate::commands::Context) -> Result<String> {
     let manifest = &ctx.loaded.manifest;
     let library = crate::library::Library::load_default().unwrap_or_default();
     let in_library_skill = library.get(name).is_some();
     let in_library_server = library.get_server(name).is_some();
     if manifest.servers.contains_key(name) || in_library_server {
-        Ok(explain_server(name, &ctx))
+        Ok(explain_server(name, ctx))
     } else if manifest.skills.contains_key(name) || in_library_skill {
-        Ok(explain_skill(name, &ctx))
+        Ok(explain_skill(name, ctx))
     } else if manifest.instructions.contains_key(name) {
-        Ok(explain_instruction(name, &ctx))
+        Ok(explain_instruction(name, ctx))
     } else {
         anyhow::bail!(
             "no server, skill, or instruction '{name}' in the manifest or central library. Try `agentstack search {name}` to find one to add."
         )
     }
+}
+
+/// Structured counterpart to the human trust lens. The stable top-level
+/// fields let scripts and MCP clients reason about provenance and safety
+/// without scraping the narrative; `text` keeps the full operator-facing
+/// explanation alongside them.
+pub fn explain_json(name: &str, manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
+    use serde_json::json;
+
+    let ctx = crate::commands::load(manifest_dir)?;
+    let manifest = &ctx.loaded.manifest;
+    let library = crate::library::Library::load_default().unwrap_or_default();
+    let text = explain_text_with_context(name, &ctx)?;
+
+    if manifest.servers.contains_key(name) || library.get_server(name).is_some() {
+        let from_manifest = manifest.servers.contains_key(name);
+        let resolved = crate::resolve::resolve_server(
+            manifest,
+            &library,
+            &crate::util::paths::lib_home(),
+            name,
+        )
+        .ok();
+        let server = resolved.as_ref().map(|r| &r.server);
+        let mut refs = Vec::new();
+        if let Some(server) = server {
+            if let Some(url) = &server.url {
+                refs.extend(refs_in(url));
+            }
+            for value in server.headers.values().chain(server.env.values()) {
+                refs.extend(refs_in(value));
+            }
+        }
+        refs.sort();
+        refs.dedup();
+        let sources = crate::secret::SecretSources::detect(&ctx.dir);
+        let secrets: Vec<_> = refs
+            .iter()
+            .map(|reference| {
+                let source = sources.source_of(reference);
+                json!({
+                    "name": reference,
+                    "resolved": source.is_some(),
+                    "source": source,
+                })
+            })
+            .collect();
+        let transport = server.map(|s| match s.server_type {
+            ServerType::Http => "http",
+            ServerType::Stdio => "stdio",
+        });
+        let catalog = crate::provider::resolve(name);
+        return Ok(json!({
+            "name": name,
+            "kind": "server",
+            "resolved": server.is_some(),
+            "transport": transport,
+            "provenance": {
+                "location": if from_manifest { "manifest" } else { "central-library" },
+                "catalogSource": catalog.as_ref().map(|c| c.source),
+                "namespaced": catalog.as_ref().map(|c| c.trust().namespaced).unwrap_or(false),
+            },
+            "safety": {
+                "runsCode": transport == Some("stdio"),
+                "networkEgressDeclared": transport == Some("http"),
+                "needsSecret": !refs.is_empty(),
+            },
+            "secrets": secrets,
+            "policy": {
+                "tools": manifest.policy.tools.get(name),
+                "egress": manifest.policy.egress.get(name),
+                "secrets": manifest.policy.secrets.get(name),
+            },
+            "text": text,
+        }));
+    }
+
+    if manifest.skills.contains_key(name) || library.get(name).is_some() {
+        let from_manifest = manifest.skills.contains_key(name);
+        let source_kind = manifest
+            .skills
+            .get(name)
+            .and_then(|s| s.source().ok())
+            .or_else(|| {
+                library.get(name).and_then(|entry| {
+                    crate::manifest::Skill {
+                        path: entry.path.clone(),
+                        git: entry.git.clone(),
+                        rev: entry.rev.clone(),
+                        subpath: entry.subpath.clone(),
+                    }
+                    .source()
+                    .ok()
+                })
+            })
+            .map(|source| match source {
+                SkillSource::Git { .. } => "git",
+                SkillSource::Path(_) => "path",
+            });
+        return Ok(json!({
+            "name": name,
+            "kind": "skill",
+            "sourceKind": source_kind,
+            "provenance": {
+                "location": if from_manifest { "manifest" } else { "central-library" },
+            },
+            "safety": {
+                "runsCode": false,
+                "networkEgressDeclared": false,
+                "needsSecret": false,
+            },
+            "secrets": [],
+            "text": text,
+        }));
+    }
+
+    let instruction = &manifest.instructions[name];
+    Ok(json!({
+        "name": name,
+        "kind": "instruction",
+        "provenance": {
+            "location": if instruction.from_user_layer { "machine-layer" } else { "manifest" },
+            "path": instruction.path,
+        },
+        "safety": {
+            "runsCode": false,
+            "networkEgressDeclared": false,
+            "needsSecret": false,
+        },
+        "secrets": [],
+        "text": text,
+    }))
 }
 
 /// Instruction fragments are simpler than servers/skills: what matters is

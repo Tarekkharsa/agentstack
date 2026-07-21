@@ -485,6 +485,7 @@ pub fn run_sandboxed(dir: Option<&Path>, args: &RunArgs) -> Result<()> {
 #[cfg(feature = "sandbox")]
 fn run_container_to_completion(
     spec: &SandboxSpec,
+    run_id: &str,
     log: &std::sync::Arc<Option<agentstack_recorder::RunLog>>,
     backend: &agentstack_runtime::docker::DockerSandbox,
 ) -> Result<()> {
@@ -516,14 +517,16 @@ fn run_container_to_completion(
             )
         },
     )?;
-    match exit.code {
+    let result = match exit.code {
         Some(0) => {
             println!("\n{} sandbox exited cleanly.", "✓".green());
             Ok(())
         }
-        Some(c) => anyhow::bail!("sandbox exited with code {c}"),
-        None => anyhow::bail!("sandbox was killed by a signal"),
-    }
+        Some(c) => Err(anyhow::anyhow!("sandbox exited with code {c}")),
+        None => Err(anyhow::anyhow!("sandbox was killed by a signal")),
+    };
+    println!("See what happened: `agentstack report run {run_id}`");
+    result
 }
 
 /// Add the four `HTTPS_PROXY`/`HTTP_PROXY` spellings pointing at `url`, so any
@@ -1167,7 +1170,7 @@ fn execute_plan(plan: ExecutionPlan) -> Result<()> {
     let result = if plan.lockdown {
         execute_lockdown(spec, &plan.run_id, &plan.server, log, token, relay_dest)
     } else {
-        execute_proxy(spec, &plan.server, log, token)
+        execute_proxy(spec, &plan.run_id, &plan.server, log, token)
     };
 
     // `gateway` (if any) drops here, after the run released its mounts — its
@@ -1183,6 +1186,7 @@ fn execute_plan(plan: ExecutionPlan) -> Result<()> {
 #[cfg(feature = "sandbox")]
 fn execute_proxy(
     mut spec: SandboxSpec,
+    run_id: &str,
     server: &str,
     log: std::sync::Arc<Option<agentstack_recorder::RunLog>>,
     proxy_token: String,
@@ -1252,7 +1256,7 @@ fn execute_proxy(
              then re-run the same command"
         )
     })?;
-    let result = run_container_to_completion(&spec, &log, &backend);
+    let result = run_container_to_completion(&spec, run_id, &log, &backend);
     drop(bridge); // stop the proxy now the run is done
     result
 }
@@ -1338,7 +1342,7 @@ fn execute_lockdown(
     };
     set_proxy_env(&mut spec, &lock.proxy_endpoint());
 
-    let result = run_container_to_completion(&spec, &log, &backend);
+    let result = run_container_to_completion(&spec, run_id, &log, &backend);
     drop(lock); // tear down the sidecar + networks first (it holds the mount)
     let _ = std::fs::remove_dir_all(&ruleset_dir); // then drop the staged ruleset
     result
@@ -1692,7 +1696,7 @@ mod tests {
             harness: "claude-code".to_string(),
             locked: false,
             profile: None,
-            scope: agentstack_core::scope::Scope::Project,
+            scope: Some(agentstack_core::scope::Scope::Project),
             keep: false,
             sandbox: true,
             lockdown: false,

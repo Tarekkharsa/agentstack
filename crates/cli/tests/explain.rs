@@ -8,7 +8,7 @@
 
 use std::fs;
 
-use agentstack::commands::explain::explain_text;
+use agentstack::commands::explain::{explain_json, explain_text};
 use agentstack::commands::lib::{add_skill, LibSource};
 
 /// These tests mutate the process-global `HOME`/`AGENTSTACK_HOME`; serialize them.
@@ -55,6 +55,14 @@ fn explain_server_reports_secret_and_safety() {
         out.contains("a static render resolves values into native configs"),
         "states where a static render may place a value: {out}"
     );
+    let structured = explain_json("kibana", Some(&proj)).unwrap();
+    assert_eq!(structured["kind"], "server");
+    assert_eq!(structured["transport"], "http");
+    assert_eq!(structured["safety"]["networkEgressDeclared"], true);
+    assert_eq!(structured["safety"]["needsSecret"], true);
+    assert!(structured["secrets"]
+        .as_array()
+        .is_some_and(|s| s.len() == 2));
     std::env::remove_var("ZZ_ENV_ORG");
 
     // Unknown capability → a helpful error, not a panic.

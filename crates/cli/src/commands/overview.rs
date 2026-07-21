@@ -185,6 +185,33 @@ pub(crate) fn next_step(
     }
 }
 
+/// Delivery-mode override for the normal trust/init/doctor ladder. A trusted,
+/// locked clean-at-rest project is ready to use; teach the session rhythm at
+/// the moment it matters instead of sending it back through another doctor
+/// pass. Active sessions point at their matching close operation.
+pub(crate) fn clean_at_rest_next_step(
+    mode: Mode,
+    trust: crate::trust::TrustState,
+    locked: bool,
+    session_active: bool,
+    profile: &str,
+) -> Option<(String, &'static str)> {
+    if mode != Mode::CleanAtRest || trust != crate::trust::TrustState::Trusted || !locked {
+        return None;
+    }
+    if session_active {
+        Some((
+            "agentstack session end".to_string(),
+            "finish this session and restore the clean-at-rest state",
+        ))
+    } else {
+        Some((
+            format!("agentstack session start {profile}"),
+            "materialize the profile for this session",
+        ))
+    }
+}
+
 /// The one-line explanation of an untrusted (or trust-stale) manifest shown
 /// under the Status line (P16). `None` for a trusted manifest — there is
 /// nothing to teach. A `&'static str` because the sentence never varies. The
@@ -306,7 +333,7 @@ fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
     let next = if !manifest_path.exists() {
         println!("  {}  none in this directory", "Manifest".bold());
         (
-            "agentstack init",
+            "agentstack init".to_string(),
             "guided one-command setup — import, preview, apply",
         )
     } else {
@@ -340,13 +367,13 @@ fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
                 // manifest or a triggered disambiguation error. The active one is
                 // marked only when a live session pins it — the one signal that
                 // *reliably* says which profile is loaded right now.
+                let active_session = crate::session::active(&ctx.dir);
                 if !m.profiles.is_empty() {
                     let names: Vec<String> = m.profiles.keys().cloned().collect();
-                    let active = crate::session::active(&ctx.dir).map(|s| s.profile);
                     println!(
                         "  {}  {}",
                         "Profiles".bold(),
-                        profiles_line(&names, active.as_deref())
+                        profiles_line(&names, active_session.as_ref().map(|s| s.profile.as_str()))
                     );
                 }
 
@@ -411,7 +438,18 @@ fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
                 }
 
                 let has_capabilities = !m.skills.is_empty() || !m.servers.is_empty();
-                next_step(trust, locked, has_capabilities, trust_relevant)
+                let fallback = next_step(trust, locked, has_capabilities, trust_relevant);
+                let profile = if m.profiles.len() == 1 {
+                    m.profiles
+                        .keys()
+                        .next()
+                        .map(String::as_str)
+                        .unwrap_or("<profile>")
+                } else {
+                    "<profile>"
+                };
+                clean_at_rest_next_step(mode, trust, locked, active_session.is_some(), profile)
+                    .unwrap_or_else(|| (fallback.0.to_string(), fallback.1))
             }
             Err(err) => {
                 println!(
@@ -420,7 +458,7 @@ fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
                     manifest_path.display(),
                     format!("failed to load: {err:#}").red()
                 );
-                ("agentstack doctor", "diagnose the manifest")
+                ("agentstack doctor".to_string(), "diagnose the manifest")
             }
         }
     };
@@ -470,6 +508,26 @@ mod tests {
         );
         // bare, never activated → the default (static).
         assert_eq!(mode_from_signals(false, false, false, false), Mode::Static);
+    }
+
+    #[test]
+    fn clean_at_rest_next_step_teaches_the_session_rhythm() {
+        use crate::trust::TrustState;
+
+        let start =
+            clean_at_rest_next_step(Mode::CleanAtRest, TrustState::Trusted, true, false, "dev")
+                .expect("trusted clean-at-rest starts a session");
+        assert_eq!(start.0, "agentstack session start dev");
+
+        let end =
+            clean_at_rest_next_step(Mode::CleanAtRest, TrustState::Trusted, true, true, "dev")
+                .expect("active clean-at-rest session points at its close");
+        assert_eq!(end.0, "agentstack session end");
+
+        assert!(
+            clean_at_rest_next_step(Mode::Static, TrustState::Trusted, true, false, "dev")
+                .is_none()
+        );
     }
 
     // P16 witness (refined): trust is the headline next-step only when trusting

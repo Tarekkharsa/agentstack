@@ -268,6 +268,7 @@ fn diff_args() -> DiffArgs {
         targets: vec![],
         profile: None,
         scope: Some(Scope::Global),
+        json: false,
     }
 }
 
@@ -309,6 +310,9 @@ fn diff_does_not_preview_foreign_prunes() {
     );
     assert_eq!(outcome.kept.len(), 1, "kept names surfaced");
     assert_eq!(outcome.kept[0].1, vec!["kibana_mcp".to_string()]);
+    let json = serde_json::to_value(&outcome).unwrap();
+    assert_eq!(json["scope"], "global");
+    assert_eq!(json["targets"][0]["kept"][0], "kibana_mcp");
 }
 
 /// After a guarded apply, the kept-foreign bookkeeping (not the managed set)

@@ -494,16 +494,11 @@ ledger entries D8 and D9 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger
 - [ ] A3: "protect this device" docs page; optional fourth demo clip. The
   docs must surface the `*.pem` false-positive escape hatch (public certs are
   blocked too; the union means only the machine list can allow them back).
-- [ ] **Pattern-side `~`/`$HOME` expansion in `[policy.filesystem]` deny
-  globs** (unblocks home-anchored entries — A0 §4a). Today `~/.aws/**`
-  compiles, matches nothing, and **fails open** — verified with a witness.
-  Fix: expand `~`/`$HOME` in the deny *pattern* at compile time
-  (`crates/policy/src/compile.rs::fs_deny_layer`, mirroring what
-  `guard.rs::normalize` already does for the *subject* path), or special-case
-  a `~`-prefix in the matcher. Witness: a machine deny `~/.aws/credentials`
-  blocks a read of that exact file and nothing else. Prerequisite for any
-  home-anchored default (e.g. AWS/cloud-credential paths); until it lands the
-  A1 template stays basename/extension-only.
+- [x] **Pattern-side `~`/`$HOME` expansion in `[policy.filesystem]` deny
+  globs.** **Landed 2026-07-21.** `fs_deny_layer` expands `~`, `$HOME`, and
+  `${HOME}` against the machine home before compiling the ruleset, matching
+  the guard's subject-side normalization. The regression witness proves that
+  `~/.aws/credentials` blocks that exact absolute file and not a sibling.
 
 ### Secrets (D9)
 

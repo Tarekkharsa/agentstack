@@ -527,6 +527,66 @@ fn html_unescape(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
+/// Extract every JavaScript string literal and return each `agentstack …`
+/// tail it contains. Dashboard copy is executable documentation too, but it
+/// lives in ordinary quoted strings rather than Markdown/HTML code spans.
+/// This deliberately handles only JavaScript's three string delimiters and
+/// backslash escapes; app.js contains no regex/template-expression trickery
+/// that needs a full parser.
+fn javascript_commands(content: &str) -> Vec<(usize, String)> {
+    let bytes = content.as_bytes();
+    let mut strings: Vec<(usize, usize)> = Vec::new();
+    let mut quote: Option<u8> = None;
+    let mut start = 0usize;
+    let mut escaped = false;
+    for (i, &b) in bytes.iter().enumerate() {
+        match quote {
+            Some(_) if escaped => escaped = false,
+            Some(_) if b == b'\\' => escaped = true,
+            Some(q) if b == q => {
+                strings.push((start, i));
+                quote = None;
+            }
+            Some(_) => {}
+            None if matches!(b, b'\'' | b'"' | b'`') => {
+                quote = Some(b);
+                start = i + 1;
+            }
+            None => {}
+        }
+    }
+
+    let mut commands = Vec::new();
+    for (start, end) in strings {
+        let literal = &content[start..end];
+        for (rel, _) in literal.match_indices("agentstack") {
+            let prefix = &literal[..rel];
+            let command_context = rel == 0
+                || prefix.ends_with('`')
+                || prefix.ends_with(": ")
+                || prefix.ends_with("$ ");
+            if !command_context {
+                continue;
+            }
+            let pos = start + rel;
+            let mut raw = literal[rel..].to_string();
+            // UI prose commonly wraps the command itself in Markdown-style
+            // backticks inside a double-quoted JS string.
+            if let Some(i) = raw.find('`') {
+                raw.truncate(i);
+            }
+            // A literal ending in whitespace is the static prefix of a
+            // concatenated command (`"agentstack remove " + name`). Its
+            // required argument is runtime data, so it cannot be parsed here.
+            if raw.ends_with(char::is_whitespace) {
+                continue;
+            }
+            commands.push((pos, raw));
+        }
+    }
+    commands
+}
+
 /// Normalize one extracted snippet into argv tokens, or `None` when it is
 /// out of scope by construction:
 /// - not an `agentstack` invocation (config snippets, `git`/`curl`/guard
@@ -639,6 +699,44 @@ fn every_dynamic_command_parses() {
         checked >= 30,
         "dynamic-command extraction found only {checked} commands — the \
          extractor patterns no longer match the site markup"
+    );
+}
+
+#[test]
+fn every_dashboard_command_parses() {
+    let root = repo_root();
+    let rel = "crates/cli/src/dashboard/assets/app.js";
+    let content = std::fs::read_to_string(root.join(rel)).expect("dashboard app.js readable");
+    let mut checked = 0usize;
+    let mut failures = Vec::new();
+    for (pos, raw) in javascript_commands(&content) {
+        let Some(tokens) = normalize_dynamic(&raw) else {
+            continue;
+        };
+        checked += 1;
+        if let Err(err) = cli_command().try_get_matches_from(&tokens) {
+            // Dashboard prose may name a command family without fabricating a
+            // placeholder (`use agentstack run`). The command path is real;
+            // it is intentionally not a copy-paste invocation. Unknown verbs,
+            // retired subcommands, and invalid flags still fail this gate.
+            if err.kind() != clap::error::ErrorKind::MissingRequiredArgument {
+                failures.push(format!(
+                    "  {rel}:{}: `{}` → {}",
+                    line_number(&content, pos),
+                    tokens.join(" "),
+                    err.kind()
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "dashboard command(s) that don't parse on the real CLI:\n{}",
+        failures.join("\n")
+    );
+    assert!(
+        checked >= 10,
+        "dashboard command extraction found only {checked} commands"
     );
 }
 

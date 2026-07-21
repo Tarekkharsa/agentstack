@@ -371,6 +371,21 @@ pub enum RunEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         code: Option<i32>,
     },
+    /// An ordinary tracked host run started. Unlike a locked attempt this has
+    /// no pre-launch gates or frozen grant; the posture is advisory host mode.
+    HostStarted {
+        ts: u64,
+        harness: String,
+        posture: String,
+    },
+    /// Terminal lifecycle record for an ordinary tracked host run.
+    HostExited {
+        ts: u64,
+        outcome: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<i32>,
+        duration_ms: u64,
+    },
     /// A locked host-run attempt opened — emitted BEFORE any gate (locked-run
     /// contract §3 step 2), so a refusal is itself recorded evidence. Carries
     /// invocation identity only: never argv (caller-supplied, possibly
@@ -410,7 +425,7 @@ pub enum RunEvent {
     },
 }
 
-/// The append-only event log for one sandboxed run.
+/// The append-only event log for one tracked run.
 ///
 /// Construct once per run with [`RunLog::create`] (which prepares the run's
 /// private directory), hold it for the run's lifetime, and [`append`] events

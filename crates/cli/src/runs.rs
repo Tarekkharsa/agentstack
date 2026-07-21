@@ -133,6 +133,12 @@ pub struct LaunchPlan {
     display: String,
 }
 
+impl LaunchPlan {
+    pub fn default_scope(&self) -> Scope {
+        Scope::default_for(&self.ctx.dir)
+    }
+}
+
 /// Resolve and validate a launch without side effects: load the manifest, look
 /// up `harness` in the adapter registry, and confirm its binary is on PATH.
 pub fn prepare(manifest_dir: Option<&Path>, harness: &str) -> Result<LaunchPlan> {
@@ -206,6 +212,15 @@ pub fn launch(
     // agent makes through `agentstack mcp` land in the audit log attributed
     // to this run.
     let id = gen_id();
+    let started = Instant::now();
+    let log = crate::calllog::RunLog::create(&id);
+    if let Some(log) = &log {
+        log.append(&crate::calllog::RunEvent::HostStarted {
+            ts: crate::calllog::now_epoch(),
+            harness: harness.to_string(),
+            posture: "host".to_string(),
+        });
+    }
     // Spawn at the PROJECT root, not the manifest dir — under the preferred
     // layout `dir` is `.agentstack/`, and a harness session opened there sees
     // no source code. (With the legacy root manifest the two coincide.)
@@ -218,12 +233,34 @@ pub fn launch(
             if started_session && !keep {
                 let _ = crate::session::end(manifest_dir);
             }
+            if let Some(log) = &log {
+                log.append(&crate::calllog::RunEvent::HostExited {
+                    ts: crate::calllog::now_epoch(),
+                    outcome: "launch-failed".to_string(),
+                    code: None,
+                    duration_ms: started.elapsed().as_millis() as u64,
+                });
+            }
+            println!("\nSee what happened: `agentstack report run {id}`");
             return Err(e);
         }
     };
     if started_session && !keep {
         let _ = crate::session::end(manifest_dir);
     }
+    if let Some(log) = &log {
+        log.append(&crate::calllog::RunEvent::HostExited {
+            ts: crate::calllog::now_epoch(),
+            outcome: if status.code().is_some() {
+                "exited".to_string()
+            } else {
+                "signaled".to_string()
+            },
+            code: status.code(),
+            duration_ms: started.elapsed().as_millis() as u64,
+        });
+    }
+    println!("\nSee what happened: `agentstack report run {id}`");
     // As before this was extracted: the harness's own exit code is its
     // business — only a wait/spawn failure is an error here.
     let _ = status;

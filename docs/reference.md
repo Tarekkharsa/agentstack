@@ -273,7 +273,10 @@ agentstack kill <id> --force   # SIGKILL immediately
 Launching is a terminal act (the CLIs are interactive TUIs); the dashboard's
 **Runs** panel is for observing tracked runs. The registry is self-healing: a run
 whose wrapper died is pruned on the next `report runs`. A profile-bound run uses
-the session engine, so one is allowed per directory at a time. Unix only for now.
+the session engine, so one is allowed per directory at a time. Every tracked run
+records a minimal lifecycle and prints `agentstack report run <id>` when it exits;
+gateway-brokered tool calls join that report without recording argument values.
+Unix only for now.
 
 ## Part II — The power surface
 
@@ -349,7 +352,9 @@ error.
 `~/.agentstack/state.json` records what agentstack manages per target, so
 `apply` prunes entries we own that left the manifest and `doctor`/`diff`
 detect hand-edits — see [drift: adopt or apply?](#drift-adopt-or-apply) for
-which fix to run.
+which fix to run. `diff --json` emits the selected scope, profile, per-CLI
+change/diff records, kept foreign entries, owner refreshes, and warnings for CI
+or agent consumers.
 
 ### Scopes
 
@@ -670,6 +675,10 @@ any allow pattern makes the list an allowlist. A denied tool is **invisible**
 (filtered from `tools_search` and code-mode bindings) and refused with the rule
 named if called anyway. `doctor` errors on rules naming unknown servers;
 `explain <server>` shows the effective policy.
+`explain <name> --json` exposes the capability kind, provenance, safety signals,
+secret-resolution metadata, and relevant project policy as structured fields;
+the full human explanation remains available in its `text` field. The MCP
+`agentstack_explain` tool returns this same structured object.
 
 **Machine layer with deny precedence.** The machine manifest may carry its own
 `[policy.tools]`, checked **before** the project's on every brokered call, so a
@@ -1335,8 +1344,8 @@ hidden ones. Reach for it when you need the exact verb, flag, or subcommand.
 - **`gateway`** _(hidden)_ — The zero-files gateway: register it once per CLI (`connect`) and every trusted repo brings its own servers through `agentstack mcp --auto-project` with no per-project files — subcommands `connect/disconnect`
 - **`trust`** — Trust a project's manifest for the zero-files gateway (direnv-style) — flags `--list/--revoke/--yes`
 - **`mcp`** _(hidden)_ — Run agentstack as an MCP server over stdio (for an agent to call) — flags `--auto-project/--transparent`
-- **`diff`** _(hidden)_ — Show drift between the manifest and the on-disk configs — flags `--target/--profile/--scope`
-- **`explain`** _(hidden)_ — Explain a server or skill before you rely on it
+- **`diff`** _(hidden)_ — Show drift between the manifest and the on-disk configs — flags `--target/--profile/--scope/--json`
+- **`explain`** _(hidden)_ — Explain a server, skill, or instruction before you rely on it — flags `--json`
 - **`optimize`** _(hidden)_ — Turn agentstack's collected signals into concrete recommendations — flags `--json/--write/--since`
 - **`proxy`** _(hidden)_ — Start the wire relay: a localhost proxy in front of the Anthropic API — flags `--port/--upstream`
 - **`restore`** _(hidden)_ — Undo a recorded write: revert an apply/use/session history entry (servers, settings, hooks, instructions), or restore one adapter's config from its single-slot backup — flags `--last/--scope/--write`

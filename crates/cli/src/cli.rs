@@ -232,7 +232,7 @@ pub enum Command {
     #[command(hide = true)]
     Diff(DiffArgs),
 
-    /// Explain a server or skill before you rely on it.
+    /// Explain a server, skill, or instruction before you rely on it.
     ///
     /// Shows where it came from, what secrets it needs, which tools get it and
     /// what files get written, and its safety signals.
@@ -544,8 +544,10 @@ pub struct RunArgs {
     pub profile: Option<String>,
 
     /// Scope to apply the profile in (only meaningful with --profile).
-    #[arg(long, value_enum, default_value_t = Scope::Project)]
-    pub scope: Scope,
+    /// Defaults to the manifest home: global for the machine manifest,
+    /// project for a repository manifest.
+    #[arg(long, value_enum)]
+    pub scope: Option<Scope>,
 
     /// Leave the applied profile in place after the run exits (default: revert).
     #[arg(long)]
@@ -741,8 +743,8 @@ pub struct StatusArgs {}
 /// `init` + `apply --write` + `use <profile> --write`.
 #[derive(Args, Debug)]
 pub struct SetupArgs {
-    /// Only configure these target ids (repeatable). Defaults to [targets].default.
-    #[arg(long = "target", value_name = "ID")]
+    /// Only configure these CLIs (repeatable). Defaults to [targets].default.
+    #[arg(long = "target", value_name = "CLI")]
     pub targets: Vec<String>,
 
     /// Configure only the servers in this profile.
@@ -978,8 +980,8 @@ pub enum SecretStore {
 
 #[derive(Args, Debug)]
 pub struct ApplyArgs {
-    /// Only act on these target ids (repeatable). Defaults to [targets].default.
-    #[arg(long = "target", value_name = "ID")]
+    /// Only act on these CLIs (repeatable). Defaults to [targets].default.
+    #[arg(long = "target", value_name = "CLI")]
     pub targets: Vec<String>,
 
     /// Render only the servers in this profile.
@@ -1020,8 +1022,8 @@ pub struct ApplyArgs {
 
 #[derive(Args, Debug)]
 pub struct DiffArgs {
-    /// Only act on these target ids (repeatable). Defaults to [targets].default.
-    #[arg(long = "target", value_name = "ID")]
+    /// Only act on these CLIs (repeatable). Defaults to [targets].default.
+    #[arg(long = "target", value_name = "CLI")]
     pub targets: Vec<String>,
 
     #[arg(long, value_name = "NAME")]
@@ -1031,6 +1033,10 @@ pub struct DiffArgs {
     /// (repo-local). Defaults to the manifest home.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
+
+    /// Emit the drift report as machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1040,8 +1046,8 @@ pub struct UseArgs {
     /// inline skill and server — activates. Several profiles need a name.
     pub profile: Option<String>,
 
-    /// Only act on these target ids (repeatable). Defaults to [targets].default.
-    #[arg(long = "target", value_name = "ID")]
+    /// Only act on these CLIs (repeatable). Defaults to [targets].default.
+    #[arg(long = "target", value_name = "CLI")]
     pub targets: Vec<String>,
 
     /// Where writes land: global (each CLI user-level config) or project
@@ -1072,6 +1078,10 @@ pub struct UseArgs {
 pub struct ExplainArgs {
     /// Name of a server or skill in the manifest.
     pub name: String,
+
+    /// Emit provenance and safety signals as machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1088,8 +1098,8 @@ pub enum SessionCmd {
         profile: String,
         /// Where writes land: global (each CLI user-level config) or project
         /// (repo-local). Defaults to the manifest home.
-        #[arg(long, value_enum, default_value_t = Scope::Project)]
-        scope: Scope,
+        #[arg(long, value_enum)]
+        scope: Option<Scope>,
     },
     /// End the active session here (or everywhere with --all), reverting it.
     End {
@@ -1131,8 +1141,8 @@ pub struct RestoreArgs {
 
 #[derive(Args, Debug)]
 pub struct AdoptArgs {
-    /// Only act on these target ids (repeatable). Defaults to [targets].default.
-    #[arg(long = "target", value_name = "ID")]
+    /// Only act on these CLIs (repeatable). Defaults to [targets].default.
+    #[arg(long = "target", value_name = "CLI")]
     pub targets: Vec<String>,
 
     /// Where writes land: global (each CLI user-level config) or project
@@ -1363,8 +1373,8 @@ pub struct LibAddArgs {
 
 #[derive(Args, Debug)]
 pub struct InstructionsArgs {
-    /// Only act on these target ids (repeatable). Defaults to [targets].default.
-    #[arg(long = "target", value_name = "ID")]
+    /// Only act on these CLIs (repeatable). Defaults to [targets].default.
+    #[arg(long = "target", value_name = "CLI")]
     pub targets: Vec<String>,
 
     /// Where writes land: global (each CLI user-level config) or project
@@ -1608,4 +1618,32 @@ pub fn full_command_inventory() -> String {
     );
     push(&mut out, &cmd, 2);
     out
+}
+
+/// Clap tree used by the real parser. Hidden commands are discoverable from
+/// the top-level task map; once a user reaches one directly, its own help also
+/// points back to the complete inventory. Existing command-specific examples
+/// are preserved and the footer is appended.
+pub fn runtime_command() -> clap::Command {
+    use clap::CommandFactory;
+
+    fn decorate(cmd: clap::Command) -> clap::Command {
+        cmd.mut_subcommands(|sub| {
+            let hidden = sub.is_hide_set();
+            let existing = sub.get_after_help().map(ToString::to_string);
+            let sub = decorate(sub);
+            if hidden {
+                let footer = "Full command list: agentstack --help --all";
+                let help = existing
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|s| format!("{s}\n\n{footer}"))
+                    .unwrap_or_else(|| footer.to_string());
+                sub.after_help(help)
+            } else {
+                sub
+            }
+        })
+    }
+
+    decorate(Cli::command())
 }

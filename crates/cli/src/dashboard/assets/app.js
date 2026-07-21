@@ -522,7 +522,7 @@ function bridgeCard() {
       connected.map((h) => badge(h.display, "solid"))));
   }
   const hint =
-    !connected.length ? "Register the gateway once: agentstack connect --all --write" :
+    !connected.length ? "Register the gateway once: agentstack gateway connect --all --write" :
     b.trust === "trusted" ? "This repo's stack loads automatically in connected harnesses — no per-repo files." :
     b.trust === "changed" ? "Manifest edited since trusted — review it, then: agentstack trust ." :
     "Bridge sessions here get control-plane tools only until: agentstack trust .";
@@ -592,7 +592,7 @@ function callsModal(runId, label) {
         el("div", { class: "mhd" }, [el("span", null, ["Tool calls · " + (label || "all runs")]), btn("✕", closeModal, "icon")]),
         el("div", { class: "mbd" }, [
           bd,
-          el("div", { class: "muted", style: "margin-top:10px;font-size:12px" }, ["Audit log records argument digests only — never values. Full log: ~/.agentstack/audit/calls.jsonl (`agentstack audit --calls`)."]),
+          el("div", { class: "muted", style: "margin-top:10px;font-size:12px" }, ["Audit log records argument digests only — never values. Full log: ~/.agentstack/audit/calls.jsonl (`agentstack report calls`)."]),
         ]),
       ]);
       document.getElementById("modal").appendChild(el("div", { class: "overlay", onclick: (e) => e.target.classList.contains("overlay") && closeModal() }, [modal]));
@@ -714,7 +714,7 @@ function servers(c) {
   head.appendChild(el("th", null, ["type"]));
   head.appendChild(el("th", {
     class: "clickable",
-    title: "Estimated tokens each server's tool list adds to every session (measured by `agentstack stats --live`). Click to sort.",
+    title: "Estimated tokens each server's tool list adds to every session (measured by `agentstack report usage --live`). Click to sort.",
     onclick: () => { SORT_BY_COST = !SORT_BY_COST; show("servers"); },
   }, ["context" + (SORT_BY_COST ? " ↓" : "")]));
 
@@ -735,7 +735,7 @@ function servers(c) {
     tr.appendChild(el("td", null, [badge(s.type, "solid")]));
     tr.appendChild(el("td", null, [s.footprint
       ? el("span", { class: "k", title: s.footprint.tools + " tool(s) — estimated context cost per session" }, [s.footprint.label])
-      : el("span", { class: "empty", title: "unmeasured — run `agentstack stats --live`" }, ["—"])]));
+      : el("span", { class: "empty", title: "unmeasured — run `agentstack report usage --live`" }, ["—"])]));
     body.appendChild(tr);
     if (OPEN_SERVER === s.name) body.appendChild(serverDetail(s, cols.length + 3));
   });
@@ -749,7 +749,7 @@ function serverDetail(s, span) {
   add("type", s.type);
   add("context cost", s.footprint
     ? s.footprint.label + " across " + s.footprint.tools + " tool(s) per session"
-    : "unmeasured — run `agentstack stats --live`");
+    : "unmeasured — run `agentstack report usage --live`");
   if (s.url) add("url", s.url);
   if (s.command) add("command", s.command);
   if (s.args && s.args.length) add("args", s.args.join(" "));
@@ -1035,7 +1035,7 @@ function proxyPanel(c) {
   if (!p.requests) {
     c.appendChild(el("div", { class: "card" }, [el("div", { class: "bd" }, [el("div", { class: "empty" }, [
       "No wire activity observed yet — start ",
-      el("span", { class: "mono" }, ["agentstack proxy start"]),
+      el("span", { class: "mono" }, ["agentstack proxy"]),
       " and point a harness at ",
       el("span", { class: "mono" }, ["ANTHROPIC_BASE_URL=http://127.0.0.1:8787"]),
       ", then reload.",
@@ -1218,7 +1218,7 @@ function statsCard() {
     ]));
   });
   const note = s.anyMeasured ? null : el("div", { class: "muted", style: "font-size:12px;margin-top:8px" }, [
-    "Context cost unmeasured — run `agentstack stats --live` to measure each server's tools/list footprint.",
+    "Context cost unmeasured — run `agentstack report usage --live` to measure each server's tools/list footprint.",
   ]);
   return el("div", { class: "card" }, [el("div", { class: "bd", style: "padding:6px 8px" }, [
     el("div", { class: "table-wrap" }, [el("table", null, [el("thead", null, [head]), body])]),

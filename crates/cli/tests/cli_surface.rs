@@ -7,7 +7,7 @@
 //! the `report` umbrella, `gateway`, `lib pack-init`), retired top-level names
 //! are really gone, and clap's own debug assertions hold for the whole tree.
 
-use agentstack::cli::Cli;
+use agentstack::cli::{Cli, Command, SessionCmd};
 use clap::{CommandFactory, Parser};
 
 #[test]
@@ -103,12 +103,46 @@ fn consolidated_verbs_parse() {
         vec!["agentstack", "gateway", "disconnect", "--all"],
         vec!["agentstack", "lib", "pack-init", "my-pack"],
         vec!["agentstack", "report", "calls", "--since", "7"],
+        vec!["agentstack", "diff", "--json"],
+        vec!["agentstack", "explain", "github", "--json"],
         // The machine-invoked entrypoint written into harness configs must
         // keep parsing exactly as `connect` renders it.
         vec!["agentstack", "mcp", "--auto-project"],
     ] {
         Cli::try_parse_from(&argv).unwrap_or_else(|e| panic!("{argv:?} must parse: {e}"));
     }
+}
+
+#[test]
+fn runtime_defaults_scope_from_the_manifest_and_hidden_help_points_to_inventory() {
+    let run = Cli::try_parse_from(["agentstack", "run", "codex"]).unwrap();
+    let Some(Command::Run(args)) = run.command else {
+        panic!("run parsed as the wrong command");
+    };
+    assert_eq!(
+        args.scope, None,
+        "runtime resolves the manifest-home default"
+    );
+
+    let session = Cli::try_parse_from(["agentstack", "session", "start", "dev"]).unwrap();
+    let Some(Command::Session(args)) = session.command else {
+        panic!("session parsed as the wrong command");
+    };
+    let SessionCmd::Start { scope, .. } = args.cmd else {
+        panic!("session start parsed as the wrong subcommand");
+    };
+    assert_eq!(scope, None, "session resolves the manifest-home default");
+
+    let runtime = agentstack::cli::runtime_command();
+    let adopt = runtime
+        .get_subcommands()
+        .find(|c| c.get_name() == "adopt")
+        .expect("adopt command");
+    assert!(adopt
+        .get_after_help()
+        .expect("hidden footer")
+        .to_string()
+        .contains("agentstack --help --all"));
 }
 
 #[test]

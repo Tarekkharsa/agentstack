@@ -1109,7 +1109,7 @@ fn tool_defs() -> Value {
         },
         {
             "name": "agentstack_explain",
-            "description": "Explain a server or skill in the manifest: where it came from, what secrets it needs (and whether they resolve here), which tools get it and what files get written, and its safety signals (runs code? network egress?). Use before trusting a capability.",
+            "description": "Explain a server, skill, or instruction in the manifest as structured JSON: provenance, secret resolution, policy, safety signals, and the full human-readable trust lens. Use before trusting a capability.",
             "inputSchema": {
                 "type": "object",
                 "required": ["name"],
@@ -1391,7 +1391,9 @@ fn run_tool_with_lease(
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
                 .context("`name` is required")?;
-            crate::commands::explain::explain_text(name, dir)
+            Ok(serde_json::to_string_pretty(
+                &crate::commands::explain::explain_json(name, dir)?,
+            )?)
         }
         "agentstack_diff" => diff_summary(args, dir),
         "agentstack_add_skill" => {

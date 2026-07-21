@@ -48,13 +48,29 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         let Some((config_path, format)) = desc.config_for(scope, &ctx.dir) else {
             continue;
         };
-        let text = fs::read_to_string(&config_path).unwrap_or_default();
+        let text = match fs::read_to_string(&config_path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                return Err(e).with_context(|| {
+                    format!(
+                        "cannot read {} for {} — fix its permissions or omit this CLI with `--target <CLI>`",
+                        config_path.display(),
+                        desc.display
+                    )
+                });
+            }
+        };
         if text.trim().is_empty() {
             continue;
         }
-        let Some(value) = parse_config(&text, format) else {
-            continue;
-        };
+        let value = parse_config(&text, format).with_context(|| {
+            format!(
+                "cannot adopt from {} ({}) — fix the file syntax or move it aside, then rerun `agentstack adopt`",
+                config_path.display(),
+                desc.display
+            )
+        })?;
         // What the manifest would put on this target's disk, read back through
         // the same adapter lens as the on-disk entries — the drift baseline.
         let rendered_by_name: IndexMap<String, Server> = plan_target_with_servers(
@@ -66,7 +82,9 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
             scope,
             &ctx.dir,
         )?
-        .and_then(|plan| parse_config(&plan.proposed, format))
+        .map(|plan| parse_config(&plan.proposed, format))
+        .transpose()
+        .context("the internal adopt baseline did not parse — run `agentstack doctor` and report this as an AgentStack bug")?
         .map(|v| extract_servers(desc, &v).into_iter().collect())
         .unwrap_or_default();
         for (name, server) in extract_servers(desc, &value) {
@@ -134,9 +152,14 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
             (n.clone(), value)
         })
         .collect();
-    let manifest_text = fs::read_to_string(&ctx.loaded.manifest_path)
-        .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
-    let new_text = merge_toml::merge(&manifest_text, "servers", &entries, true)?;
+    let manifest_text = fs::read_to_string(&ctx.loaded.manifest_path).with_context(|| {
+        format!(
+            "cannot read {} — fix its permissions, then rerun `agentstack adopt`",
+            ctx.loaded.manifest_path.display()
+        )
+    })?;
+    let new_text = merge_toml::merge(&manifest_text, "servers", &entries, true)
+        .context("cannot update the manifest — fix its TOML syntax with `agentstack doctor`, then rerun `agentstack adopt`")?;
 
     println!(
         "\n{} {} server(s) to adopt into {}",
@@ -160,7 +183,7 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         if !args.no_keychain {
             for l in &lifted {
                 keychain::set(&l.reference, &l.value)
-                    .with_context(|| format!("storing '{}' in keychain", l.reference))?;
+                    .with_context(|| format!("cannot store '{}' in the keychain — unlock it or rerun with `--no-keychain`", l.reference))?;
             }
         }
         crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
@@ -175,14 +198,16 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-/// Parse a target config's text into a JSON-shaped value tree, `None` when it
-/// doesn't parse (an unreadable config is skipped, never adopted from).
-fn parse_config(text: &str, format: Format) -> Option<Value> {
+/// Parse a target config's text into a JSON-shaped value tree. Existing but
+/// malformed configs are errors: silently treating them as empty would make
+/// `adopt` claim there is nothing to keep.
+fn parse_config(text: &str, format: Format) -> Result<Value> {
     match format {
-        Format::Json => serde_json::from_str(text).ok(),
-        Format::Toml => toml::from_str::<toml::Value>(text)
-            .ok()
-            .and_then(|tv| serde_json::to_value(tv).ok()),
+        Format::Json => serde_json::from_str(text).context("invalid JSON"),
+        Format::Toml => {
+            let value = toml::from_str::<toml::Value>(text).context("invalid TOML")?;
+            serde_json::to_value(value).context("TOML value could not be represented as JSON")
+        }
     }
 }
 
@@ -381,6 +406,14 @@ mod tests {
 
     fn server(toml_str: &str) -> Server {
         toml::from_str(toml_str).unwrap()
+    }
+
+    #[test]
+    fn malformed_target_configs_are_errors_not_empty_states() {
+        let json = parse_config("{not-json", Format::Json).unwrap_err();
+        assert!(format!("{json:#}").contains("invalid JSON"));
+        let toml = parse_config("[broken", Format::Toml).unwrap_err();
+        assert!(format!("{toml:#}").contains("invalid TOML"));
     }
 
     #[test]
