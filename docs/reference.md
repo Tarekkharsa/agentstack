@@ -15,28 +15,47 @@ implementation internals — live in
 
 **Contents**
 
+**[Part I — The everyday loop](#part-i--the-everyday-loop)**
+
 - [Core engine](#core-engine)
   - [The manifest](#the-manifest)
   - [Data-driven adapters](#data-driven-adapters)
   - [Rendering and merging](#rendering-and-merging)
-  - [Owned servers (`owner = "codex"`)](#owned-servers-owner--codex)
   - [State tracking](#state-tracking)
   - [Scopes](#scopes)
-- [Delivery modes — where rendered files live](#delivery-modes--where-rendered-files-live)
 - [Secrets and trust](#secrets-and-trust)
   - [Secret resolution](#secret-resolution)
   - [Where lifted secrets go (`init`)](#where-lifted-secrets-go-init)
   - [Unresolved secrets block writes](#unresolved-secrets-block-writes)
-  - [Governance (`[policy]`)](#governance-policy)
-  - [MCP firewall (`[policy.tools]`)](#mcp-firewall-policytools)
-  - [Egress rules (`[policy.egress]`)](#egress-rules-policyegress)
-  - [Secret access (`[policy.secrets]`)](#secret-access-policysecrets)
-  - [Filesystem scopes (`[policy.filesystem]`)](#filesystem-scopes-policyfilesystem)
-  - [Call log](#call-log)
-  - [Content scanning](#content-scanning)
   - [`doctor --live`](#doctor---live)
   - [One undo verb: `restore`](#one-undo-verb-restore)
   - [`doctor` shows what you use](#doctor-shows-what-you-use)
+- [Drift: adopt or apply?](#drift-adopt-or-apply)
+  - [`adopt` and `add`](#adopt-and-add)
+  - [Search across providers](#search-across-providers)
+  - [Selective skills via profiles](#selective-skills-via-profiles)
+- [Live runs (`agentstack run`)](#live-runs-agentstack-run)
+
+**[Part II — The power surface](#part-ii--the-power-surface)**
+
+- [Delivery modes — where rendered files live](#delivery-modes--where-rendered-files-live)
+  - [Owned servers (`owner = "codex"`)](#owned-servers-owner--codex)
+- [Agent-operable (`agentstack mcp`)](#agent-operable-agentstack-mcp)
+  - [Transparent mode (`--transparent`)](#transparent-mode---transparent)
+  - [The zero-files gateway (`--auto-project` + `trust`)](#the-zero-files-gateway---auto-project--trust)
+  - [MCP profile leases](#mcp-profile-leases-one-connection-one-capability-fence)
+  - [Compact proxied surface + code mode](#compact-proxied-surface--code-mode)
+  - [Experimental `tools_execute`](#experimental-tools_execute)
+- [Governance (`[policy]`)](#governance-policy)
+- [MCP firewall (`[policy.tools]`)](#mcp-firewall-policytools)
+- [Egress rules (`[policy.egress]`)](#egress-rules-policyegress)
+- [Secret access (`[policy.secrets]`)](#secret-access-policysecrets)
+- [Filesystem scopes (`[policy.filesystem]`)](#filesystem-scopes-policyfilesystem)
+- [Call log](#call-log)
+- [Content scanning](#content-scanning)
+- [Ephemeral sessions (`agentstack session`)](#ephemeral-sessions-agentstack-session)
+  - [Execution posture](#execution-posture)
+  - [The Protected tier in detail (`run --locked`)](#the-protected-tier-in-detail-run---locked)
 - [The central library](#the-central-library)
   - [Layout and name resolution](#layout-and-name-resolution)
   - [Pinning and provenance](#pinning-and-provenance)
@@ -45,35 +64,28 @@ implementation internals — live in
   - [The two mental models](#the-two-mental-models)
 - [Capabilities](#capabilities)
   - [Package manager](#package-manager)
-  - [Selective skills via profiles](#selective-skills-via-profiles)
+  - [Git-hosted versioned packs](#git-hosted-versioned-packs)
+  - [`add skill <source>`](#add-skill-source--install-from-any-skills-repo)
+  - [`try` — run a skill without installing anything](#try--run-a-skill-without-installing-anything)
   - [Instruction files](#instruction-files)
   - [The machine layer](#the-machine-layer)
   - [Native settings](#native-settings)
   - [Lifecycle hooks](#lifecycle-hooks)
   - [Native extensions](#native-extensions)
-  - [Search across providers](#search-across-providers)
-  - [Git-hosted versioned packs](#git-hosted-versioned-packs)
-  - [`adopt` and `add`](#adopt-and-add)
-  - [`add skill <source>`](#add-skill-source--install-from-any-skills-repo)
-  - [`try` — run a skill without installing anything](#try--run-a-skill-without-installing-anything)
   - [`report usage` (usage analytics)](#report-usage-usage-analytics)
   - [Wire proxy (`proxy`)](#wire-proxy-proxy)
   - [`export` / `import`](#export--import)
-- [Drift: adopt or apply?](#drift-adopt-or-apply)
-- [Ephemeral sessions (`agentstack session`)](#ephemeral-sessions-agentstack-session)
-- [Live runs (`agentstack run`)](#live-runs-agentstack-run)
-  - [Execution posture](#execution-posture)
-  - [The Protected tier in detail (`run --locked`)](#the-protected-tier-in-detail-run---locked)
-- [Agent-operable (`agentstack mcp`)](#agent-operable-agentstack-mcp)
-  - [Transparent mode (`--transparent`)](#transparent-mode---transparent)
-  - [The zero-files gateway (`--auto-project` + `trust`)](#the-zero-files-gateway---auto-project--trust)
-  - [MCP profile leases](#mcp-profile-leases-one-connection-one-capability-fence)
-  - [Compact proxied surface + code mode](#compact-proxied-surface--code-mode)
-  - [Experimental `tools_execute`](#experimental-tools_execute)
-- [Dashboard](#dashboard)
 - [Optimize (`agentstack optimize`)](#optimize-agentstack-optimize)
+- [Dashboard](#dashboard)
+
+**[Part III — Full command reference](#part-iii--full-command-reference)**
+
 - [All commands](#all-commands)
 - [Everything shipped so far](#everything-shipped-so-far)
+
+## Part I — The everyday loop
+
+This part is everything `agentstack --help` shows by default: the nine everyday commands — `init`, `status`, `add`, `search`, `apply`, `doctor`, `use`, `run`, `trust` — and the machinery directly behind them. Read only what is here and you can reach a working setup: one manifest rendered into every CLI's native config, credentials kept out of that config, hand-edits caught, and a profile activated. The power surface in Part II is entirely opt-in — nothing in the everyday loop requires it.
 
 ## Core engine
 
@@ -140,31 +152,6 @@ hooks: `targets = ["claude-code"]` fans out to that adapter only, `["*"]`
 `apply`, `diff`, and `doctor` share the one filter; a typo'd id is a validation
 error.
 
-### Owned servers (`owner = "codex"`)
-
-Some CLIs rewrite their own server entries — the Codex desktop app refreshes
-`node_repl` env on every self-update. Marking a server `owner = "codex"` flips
-the source of truth to the owner's on-disk config, so a blind `apply` never
-downgrades the app's fresh values:
-
-```toml
-[servers.node_repl]
-type = "stdio"
-command = "node"
-owner = "codex"   # codex's own config is the source of truth
-```
-
-Every plan (`apply`, `diff`, `doctor`, `use`) refreshes the definition from the
-owner's config, fans the fresh values out to every *other* target, and reports
-drift as "refresh + re-fan out: `apply --write`", never a downgrade. Per key, a
-manifest value carrying a `${REF}` stays manifest-canonical (copying the resolved
-disk literal back would leak the secret); everything else follows the owner's
-disk. An `owner` id that isn't a registered adapter is a validation error.
-**Trust interaction:** the auto-refresh changes the manifest digest, so trust
-that was **valid** immediately before the rewrite is re-pinned to the new digest
-(a machine-derived change from a config the owner already executes); trust
-already broken or absent is left untouched — the refresh never mints trust.
-
 ### State tracking
 
 `~/.agentstack/state.json` records what agentstack manages per target, so
@@ -182,51 +169,6 @@ locations (`.mcp.json`, `.claude/skills/` — repo-local, behind the managed
 its servers in every project's config on this machine. `doctor` follows the
 scope your writes actually recorded, so a deliberate `--scope` choice is
 honored, not second-guessed.
-
-<a id="where-rendered-files-live-three-modes"></a>
-## Delivery modes — where rendered files live
-
-You always commit the *intent* (`agentstack.toml` + `agentstack.lock`); the
-rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled
-`CLAUDE.md` / `AGENTS.md` — are a per-project choice of **static**,
-**clean-at-rest**, or **zero-files**. What each mode *is*:
-[concepts.md — delivery modes](concepts.md#delivery-modes); which to pick:
-[which mode do I need?](choose.md). The operational levers:
-
-- **static** (default) — artifacts on disk, kept out of git by a managed
-  `.gitignore` block; pass `--no-gitignore` to commit them instead.
-- **clean-at-rest** — `agentstack lock` pins name refs *without rendering*, so
-  `git status` stays silent; a profile arrives via
-  [`session start`](#ephemeral-sessions-agentstack-session) /
-  [`run`](#live-runs-agentstack-run) and reverts on exit.
-- **zero-files** — `agentstack gateway connect` registers the gateway once per
-  CLI (one write to each CLI's global config) and every **trusted** repo serves
-  its own stack live; `agentstack_lease_open(profile)` fences one MCP connection
-  to a profile without rendering native files. A machine-local
-  `codemode/endpoint.json` coordinate may exist for the connection's duration —
-  see [the zero-files gateway](#the-zero-files-gateway---auto-project--trust).
-
-**Recommendation:** prefer the zero-file lease path for interactive work when the
-CLI supports MCP; use static or clean-at-rest when the CLI must read native
-skill/instruction files. Add `--sandbox --lockdown` when the agent process
-itself needs isolation — a lease is a capability fence, not a sandbox. See
-[the primitives and decision table](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need).
-
-Interactive `init` presents the three as an arrow-key choice **before any
-write**, and the selection **forks** the run: **static** takes the render path
-(preview → confirm → `apply --write` → activate skills → doctor);
-**clean-at-rest** renders nothing and pins the lockfile, teaching the
-`session start`/`session end` rhythm; **zero-files** renders nothing and offers
-to register the gateway (`gateway connect --all --write`), then points at
-`agentstack trust .` (which the wizard never runs for you — trust is human
-consent). Bare `agentstack` reports the project's current mode on its `Mode`
-line, derived from what is on disk.
-
-The managed `.gitignore` block is anchored to **outcomes, not declarations**: an
-entry exists only for a file agentstack actually wrote or still manages, so a
-blocked run (unresolved secrets) hides nothing and a hand-maintained
-`.mcp.json` / `CLAUDE.md` is never ignored. `apply` and `use` derive the block
-from the same records, so alternating them never churns a committed `.gitignore`.
 
 ## Secrets and trust
 
@@ -273,120 +215,6 @@ refused for that target — never a `${TOKEN}` placeholder in live config.
 Override with `--allow-unresolved`. Structural manifest validation errors
 block `--write` too.
 
-### Governance (`[policy]`)
-
-`require`/`forbid` capabilities and an `allowed_sources` glob allowlist (e.g.
-`git:github.com/acme/*`), enforced by `doctor --ci`. Cross-source trust gating
-for executable-intent skills and MCPs.
-
-### MCP firewall (`[policy.tools]`)
-
-Per-server tool rules enforced at the runtime gateway:
-`github = ["get_*", "list_*", "!list_secrets"]` — plain globs allow, `!` denies;
-any allow pattern makes the list an allowlist. A denied tool is **invisible**
-(filtered from `tools_search` and code-mode bindings) and refused with the rule
-named if called anyway. `doctor` errors on rules naming unknown servers;
-`explain <server>` shows the effective policy.
-
-**Machine layer with deny precedence.** The machine manifest may carry its own
-`[policy.tools]`, checked **before** the project's on every brokered call, so a
-repo can never loosen a machine rule (effective policy = machine ∩ project — see
-[concepts.md — machine policy](concepts.md#machine-manifest-and-machine-policy)).
-A machine refusal names its layer in the error and audit log. Policy is keyed on
-the **manifest-chosen server name**, so a machine rule for `github` constrains a
-server *named* `github`, not the GitHub MCP server under any name; use the `"*"`
-wildcard key for rules that must survive renaming:
-
-```toml
-# ~/.agentstack/agentstack.toml — applies to every project on this machine
-[policy.tools]
-"*" = ["!delete_*"]                   # rename-proof: no server may delete_*
-github = ["get_*", "list_*"]          # servers NAMED github are read-only
-```
-
-The layer loads once per gateway launch (tightening mid-session takes effect next
-session). Each valid load stores a secret-free, digest-labelled last-known-good
-snapshot: a later malformed edit is enforced from that snapshot as **DEGRADED**;
-a malformed first load or unusable snapshot makes protected activation
-**BLOCKED** rather than silently falling back to project-only policy; a genuinely
-absent machine manifest is the benign **UNCONFIGURED** state. `doctor`
-distinguishes all three.
-
-### Egress rules (`[policy.egress]`)
-
-Per-server outbound-host rules, keyed and evaluated exactly like `[policy.tools]`
-(globs allow, `!` denies, `"*"` rename-proof, machine layer checked first and no
-repo can loosen it) — the subject is the destination host instead of a tool name.
-A pattern may pin a port with a `:port` suffix (`api.example.com:443`); a bare
-host means any port. The write/spawn-time check matches the host and defers the
-port; the sandbox egress proxy enforces the exact CONNECT port at runtime.
-
-```toml
-[policy.egress]
-"*" = ["!169.254.169.254"]            # rename-proof: no server reaches metadata
-kibana = ["*.example.com:443"]        # this server: only TLS to our domain
-```
-
-An unconstrained server is allow-by-default; a constrained server whose
-declared URL host can't be resolved statically (it hides behind a `${REF}`)
-fails closed at write time.
-
-### Secret access (`[policy.secrets]`)
-
-Per-server allowlists over `${REF}` names, same keyed grammar again (globs, `!`
-denies, `"*"` rename-proof). Enforced **fail-closed at both substitution
-sites**: a ref outside a server's effective set never resolves for it — not
-into a rendered config, not into a gateway upstream.
-
-```toml
-[policy.secrets]
-github = ["GH_*"]                     # this server may only read GH_* refs
-"*" = ["!AWS_*"]                      # no server resolves an AWS_* secret
-```
-
-### Filesystem scopes (`[policy.filesystem]`)
-
-Manifest-global path-glob scopes (not per-server) in three lists. `write` gates
-the `run --sandbox` mount, `read` is informational, and `deny` is a pure
-blocklist unioned across the machine and project layers — a repo can add denies
-but never drop the machine's — matched against the workspace-relative path, the
-absolute path, **and** the bare file name. What each list actually enforces at
-runtime (the read-only mount is coarse/all-or-nothing; `deny` runs through the
-cooperative host guard) is [the enforcement matrix](ENFORCEMENT.md#the-matrix).
-
-```toml
-[policy.filesystem]
-write = ["./**"]                      # sandbox: workspace mounts read-write
-deny  = [".env*", "**/*.pem"]         # no tool call may touch these, ever
-```
-
-### Call log
-
-Every tool call the gateway brokers (MCP proxy and code-mode alike) appends to
-`~/.agentstack/audit/calls.jsonl` (`0600`, dir `0700`): timestamp, run id (under
-`agentstack run`), server, tool, **keyed argument digest** (never values — keyed
-with a per-machine secret so an exfiltrated log can't confirm guessed arguments),
-outcome (`ok`/`error`/`denied`), latency, and a detail that is either the policy
-rule (denials) or a **fixed error class** (failures) — upstream error text is
-never written, so a malicious server can't inject content into the log.
-Summarize with `agentstack report calls [--since <days>] [--json]`; the
-dashboard's Runs panel shows each run's footprint. Best-effort local
-**diagnostics** (logging can never fail a call; size-rotated at ~5 MB × 2), not
-tamper-evident — input to `report calls`/`optimize`, not forensic evidence.
-
-### Content scanning
-
-Every `install` scans skill content for hidden Unicode (zero-width
-characters, bidi overrides, tag characters) and prompt-injection heuristics.
-Hidden-Unicode findings **block the install** (override with
-`--allow-flagged`); injection heuristics warn. `doctor --deep` is the on-demand
-content re-scan of everything materialized (skills and instruction files), and
-`doctor --ci` fails on high-severity findings, so a poisoned skill can't slide
-into CI unnoticed. Everyday `doctor` skips this scan (it reads every skill body);
-`--json` emits the whole report machine-readably, and the dashboard's Doctor pane
-runs it too. Interactive `init` offers the deep scan as an explicit yes/no at its
-closing doctor step, but only when the project actually has skills.
-
 ### `doctor --live`
 
 ```text
@@ -427,416 +255,6 @@ is used or produces a warning/error, which always shows. A closing line counts
 what was hidden; `--all` prints everything, `--ci` always shows the full report,
 and the dashboard's Doctor pane gets every section regardless.
 
-## The central library
-
-One managed home — `~/.agentstack/lib/` — that projects reference **by name**
-instead of copying files between repos.
-
-### Layout and name resolution
-
-Skill dirs (`lib/skills/`) and MCP server definitions (`lib/servers/*.toml`)
-are indexed in `library.toml`. A profile's `skills = ["sql-review"]` /
-`servers = ["kibana"]` resolve from there; an inline `[skills.*]` /
-`[servers.*]` table always overrides the library. Provider folders are never
-owned — only their skills and MCP entries are managed. The runtime gateway
-resolves server name refs through the same inline-first/central-library path as
-rendering, but where rendering hard-fails a run on a broken ref, the gateway
-skips just that server (with a stderr report) and keeps the rest up.
-
-### Pinning and provenance
-
-Name refs are pinned by digest in `agentstack.lock` — servers pin the
-**definition** digest only; secret values stay `${REF}` and resolve at
-render/gateway time, never in the library or the lock. Native extensions pin
-differently: a `[[extension]]` entry records `name`, `target`, and a `checksum`
-from the **strict** integrity-root digest over the whole source tree, so
-retargeting a byte-identical extension is drift and a one-byte source edit
-re-gates trust (see [Native extensions](#native-extensions)). `doctor`/`explain`
-flag drift and show each item's origin. Profile resolution is offline by default
-(dry-run `use`, `doctor`, `explain` never fetch); `use --write` fetches
-git-backed skills when activation needs them. `agentstack lock [--profile <name>]`
-pins every profile's name refs **without** rendering — the lock-only path for
-clean-at-rest repos. The lockfile is part of a project's consent surface, so when
-a currently-trusted project's pins change, `lock` warns that its trust is now
-stale and must be re-granted with `agentstack trust .` — new pins are new consent.
-
-### Adding capabilities
-
-```text
-agentstack lib add ./<dir> --name <name>               # copy a local skill in
-agentstack lib add owner/repo --skill <name>           # from any skills repo
-agentstack lib add owner/repo --subpath <dir>          # from a repo subdirectory
-agentstack lib add-server <name>                        # reusable server definition
-agentstack lib new <name>                               # scaffold a new skill
-```
-
-`lib add ./<dir>` **copies** the source into `lib/skills/<name>` — the library
-copy is canonical from then on (source edits have no effect), provenance records
-the original path, and a temp-dir source gets a dangling-path warning. `lib add
-owner/repo --subpath <dir>` (any git URL, `--skill <name>` selecting from a
-multi-skill repo) installs from a repo subdirectory, staging the fetch so a dry
-run never touches the store, recording truthful `git:<url>@<rev>#<dir>`
-provenance. `lib add-server` stores a reusable definition with its `${REF}`s
-intact. `lib new <name>` scaffolds `./<name>/SKILL.md` from the house template —
-edit it, then adopt with `agentstack add skill ./<name>` (this project) or `lib
-add ./<name>` (every project). Every `lib add` runs the same hidden-unicode /
-prompt-injection scan as `install`/`doctor --deep` before the copy becomes
-canonical (high findings block unless `--allow-flagged`) and warns above ~10 MiB.
-
-### Syncing across machines (`lib sync`)
-
-```text
-agentstack lib sync [--status]
-agentstack lib sync --allow-secrets   # override the fail-closed secret gate
-```
-
-`lib sync` versions the library as a git repo (init/clone/pull/commit/push,
-`--status` to preview); the content-store cache stays local. Its promise —
-**secrets never travel** — is enforced by a gate that fails closed:
-
-- Before any commit, every `lib/servers/*.toml` is scanned for literal
-  (non-`${REF}`) secrets across **every field a credential could hide in** —
-  headers, env, the `url` (userinfo passwords, secretish query params), `args`.
-- A server file that can't be read or parsed **blocks the sync** rather than
-  slipping through unscanned, naming any secret-looking line.
-- Before pushing, the **outgoing commits** are scanned too, so a secret committed
-  once and later edited out can't ride along in history (the message names the
-  commit and file).
-- `--allow-secrets` overrides all three, deliberately and loudly.
-
-Pulled content passes the same supply-chain scan as `lib add` — warn-only (a
-completed pull can't be blocked without stranding the tree) — and incrementally:
-a no-op pull scans nothing, a real pull scans only the skills it changed.
-
-### The two mental models
-
-Three ways a skill or server reaches a profile; the manifest syntax alone picks
-which:
-
-- **By-name library reference** — `skills = ["greet"]` / `servers = ["kibana"]`
-  with **no** matching `[skills.greet]` / `[servers.kibana]` table. Resolved
-  fresh from `~/.agentstack/lib` on every lock, pinned there by `checksum`
-  (skills) or definition digest (servers); nothing is copied into the repo. The
-  cross-repo default.
-- **Vendored pack copy** — installed with `add from git:<host>/<repo>`. Members
-  are copied into the project and digest-pinned, and a `[packs.<name>]` ledger
-  records `source`/`version`/`rev` so `lock --upgrade` re-resolves them — a
-  self-contained snapshot that versions as one unit (see
-  [Git-hosted versioned packs](#git-hosted-versioned-packs)).
-- **Inline manifest** — a `[skills.greet]` / `[servers.*]` table with its own
-  `path`/`git`/`command`. Lives in the repo and **always overrides** a same-named
-  library reference.
-
-The trap: a `[skills.greet]` block with **no** source is read as an inline skill
-*missing* its source — it errors, it does not fall back to a library skill of the
-same name. Drop the block and list `greet` in `skills = […]` to reference the
-library copy; keep the block only for a distinct inline skill. `explain` prints
-each capability's model on its `Model` line.
-
-## Capabilities
-
-The kinds of thing a profile can carry — skills, servers, instructions,
-settings, hooks, extensions, packs — and the commands that add, search, and
-account for them. It is a menu; jump to the capability you need.
-
-### Package manager
-
-Skills declare a source (`path` or `git`); the package manager fetches them into
-`~/.agentstack/store/`, writes a SHA-256 `agentstack.lock`, and reproduces it
-exactly under `--locked`.
-
-```text
-agentstack install            # fetch skill sources, write the lockfile
-agentstack install --locked   # reproducible, CI-safe
-agentstack lock --update      # re-resolve git skills
-agentstack remove <name>      # drop a capability from manifest + lock
-```
-
-Profile-aware: skills a profile references by name (library-resolved, no inline
-`[skills.*]`) keep their lock pins through the reconcile pass — pin or refresh
-with `agentstack lock`. Content digests always hash current bytes; see
-[field notes](design/reference-field-notes.md#orphaned-digest-cache) for the
-harmless orphaned `digest-cache.json` older versions may leave.
-
-### Selective skills via profiles
-
-`use <profile>` materializes only that profile's skills, pruning the rest it
-owns and never clobbering hand-made skill dirs.
-
-```text
-agentstack use <profile> --write   # materialize only that profile's skills
-```
-
-The profile is optional: one declared profile is chosen automatically, and a
-manifest with **no** profiles activates its full inline set — `agentstack use
---write` just works; several profiles need a name. Materialization is
-symlink-with-copy-fallback; when a prune empties the managed skills dir
-(deactivation, `session end`) the dir is removed too, but rmdir semantics spare
-any dir holding user content. Interactive `init` activates through this exact
-`use` code path; plain `apply` never touches skills, it only names which profile
-activates them.
-
-### Instruction files
-
-Compile shared + harness-specific `[instructions.*]` fragments into each CLI's
-`CLAUDE.md` / `AGENTS.md`, inside a managed `<!-- agentstack -->` region that
-preserves surrounding hand-written prose.
-
-```text
-agentstack instructions --write   # compile [instructions.*] into CLAUDE.md / AGENTS.md
-```
-
-Dry-run by default. Part of the mainstream lifecycle: `apply` (so `init` too)
-compiles the region alongside servers/settings/hooks behind the same `--write`
-gate — a manifest with no `[instructions.*]` never touches a region another layer
-owns — and `doctor` flags a stale managed region (warn ↳ `instructions --write`)
-or a missing fragment source (error, gates `--ci`). Installing a pack's house
-rules prints the exact compile command.
-
-### The machine layer
-
-The machine manifest is the personal, cross-project layer (concept:
-[concepts.md](concepts.md#machine-manifest-and-machine-policy)).
-
-```text
-agentstack init --global                            # seed ~/.agentstack/agentstack.toml + instructions/
-agentstack instructions --manifest-dir ~ --write    # compile personal fragments
-```
-
-`init --global` seeds `~/.agentstack/agentstack.toml`, an `instructions/` dir,
-and the machine `[guard]` + `[policy.filesystem]` deny defaults (the same list
-`guard install` writes), and offers to install the host guard into detected CLIs.
-Inherited fragments compile at **global scope only** (personal rules never land
-in a repo's committed `CLAUDE.md`); a same-named project fragment wins.
-Provenance is visible everywhere: `instructions` labels inherited fragments
-`(machine)`, `doctor` counts them, `explain <fragment>` names the layer. The
-bundled **agentstack house rules** fragment (`[instructions.agentstack]`) teaches
-every agent the manifest-first workflow and is offered opt-in by `init --global`
-and the `init` wizard. The zero-files gateway never treats the machine layer as a
-project: it cannot be `trust`ed or activated by `mcp --auto-project`.
-
-### Native settings
-
-Manage each CLI's own settings file (Claude Code `~/.claude/settings.json`, Codex
-`config.toml`) from one `[settings.<cli>]` block; `apply` merges only the keys you
-declare, resolves `${REF}`s, preserves hand-set keys, and prunes keys that leave
-the manifest.
-
-```text
-agentstack settings set <target> <key> <value>
-agentstack settings unset <target> <key>
-```
-
-Dry-run by default, `--write` applies; viewable in the dashboard's Settings tab.
-
-### Lifecycle hooks
-
-Declare `[hooks.*]` once (event + optional matcher + command) and `apply` renders
-them into each harness's native hooks config (Claude Code `settings.json`, Codex
-`config.toml`), resolving secrets and pruning hooks that leave the manifest.
-
-```text
-[hooks.<name>]             # event + optional matcher + command
-agentstack apply --write   # render them into each harness's native hooks config
-```
-
-Listed in the dashboard's Hooks tab.
-
-### Native extensions
-
-`[extensions.<name>]` manages a harness's native executable add-ons — pi's
-TypeScript extensions, OpenCode's JS plugins. It is the **highest-risk**
-capability agentstack delivers: the code runs inside the harness process at full
-user permission, and agentstack governs only *pre-delivery* (provenance and
-content binding), never runtime — see
-[ENFORCEMENT.md](ENFORCEMENT.md#native-extensions).
-
-```text
-[extensions.<name>]                                                # path/git + exactly one target
-agentstack lib add-extension <name> --target <adapter> --path <dir>
-agentstack lock                                                    # pin (strict integrity-root digest)
-```
-
-```toml
-[extensions.checkpoint]
-description = "Git checkpoint on every agent turn"
-path = "./extensions/checkpoint"   # or: git = "…", rev = "…", subpath = "…"
-target = "pi"                      # exactly one adapter id
-```
-
-- **Source** — a local `path` (manifest-anchored), a `git` source (`subpath`
-  required, `rev` optional), or a bare central-library name (`lib add-extension …
-  --path <dir>` or `--git <url> --subpath <dir>`). A declaration with none of
-  these is a validation error.
-- **`target` is singular** — one CLI's API; no `targets` list, no `"*"` fan-out.
-  An unknown target, or `"*"`, is a validation error.
-- **Reserved names** — anything beginning `agentstack-guard` is rejected (those
-  belong to the host guard).
-- **Strict pinning** — each extension gets a `[[extension]]` lock entry
-  (`name`/`target`/`checksum`) via the strict integrity-root digest (symlinks
-  rejected, `.git` included). An unpinned extension blocks; `agentstack lock` pins.
-
-`apply` renders by **copying** (never symlinking) the lock-pinned source into the
-target's extension directory, tracked in a per-directory ownership ledger so a
-re-render prunes exactly what agentstack placed. An untrusted or drifted project
-renders **zero** extension bytes. Two adapters render today — **pi**
-(`~/.pi/agent/extensions`, or `.pi/extensions` at project scope) and **OpenCode**
-(`~/.config/opencode/plugins`, global only); any other target validates but
-**warns and does not render**. Under `run --locked`, a `rendered-verify` gate
-re-checks each delivered copy against its lock pin before launch.
-
-### Search across providers
-
-`search` queries **your central library first** (skill and library-server names,
-labelled `[library]`), then the embedded catalog **and the official MCP
-Registry**; `add from <id>` resolves a registry/catalog server, lifts its secrets
-to `${REF}`s, and renders it to **all your CLIs at once**.
-
-```text
-agentstack search <query>
-agentstack add from <id>
-```
-
-agentstack is the cross-CLI *client* over the registry + marketplaces, not
-another registry.
-
-### Git-hosted versioned packs
-
-Any repo with a `pack.toml` installs as a version-pinned pack from any git host;
-`lock --upgrade` resolves the newest tag (never downgrades), previews the member
-diff, and re-pins.
-
-```text
-agentstack add from git:<host>/<repo>[@<tag>][#subdir]
-agentstack lock --upgrade <pack> --yes --write
-agentstack lib pack-init
-```
-
-No tag → the newest version-shaped tag; a repo with no version tags is an error,
-never a floating install. The ledger records `source`/`version`/`rev`; extracted
-skills are digest-pinned so `install --locked` reproduces. `[policy]
-allowed_sources` is enforced **before** any fetch, and the clone passes the
-install scan gate. `lib pack-init` scaffolds a publishable pack; the dashboard's
-Discover tab browses candidates. (Semver ranges and transitive pack dependencies
-are deliberately out of v1.)
-
-### `adopt` and `add`
-
-`adopt` is the keep-side of a [drift decision](#drift-adopt-or-apply) — pull a
-hand-added server from a target config back into the manifest, lifting its inline
-secret and preserving comments; `add` is the flag-driven (scriptable /
-agent-operable) way to add a server or skill, optionally into a profile.
-
-```text
-agentstack adopt <name>   # pull a hand-added server back into the manifest
-agentstack add ...        # flag-driven add of a server or skill
-```
-
-### `add skill <source>` — install from any skills repo
-
-```text
-agentstack add skill anthropics/skills --skill pdf --write   # owner/repo (GitHub)
-agentstack add skill anthropics/skills --list                # discover, inspect only
-agentstack add skill https://github.com/o/r/tree/main/skills/pdf
-agentstack add skill git@github.com:o/r.git --rev v1.2 --skill pdf
-agentstack add skill ./my-skill --name code-review
-```
-
-Sources: `owner/repo` (always GitHub — a bare shorthand never touches your
-filesystem), full GitHub/GitLab URLs including `/tree/<ref>/<subpath>`, generic
-git remotes (`git@…`, `ssh://`, `file://`, `*.git`), or a spelled local path
-(`./dir`, `../dir`, absolute, `~/dir`). `owner/repo@skill` and `#ref` alias
-`--skill`/`--rev` (a flag disagreeing with its alias is an error);
-credential-bearing URLs are rejected — use a git credential helper. Discovery
-scans the ecosystem's conventional locations (see
-[field notes](design/reference-field-notes.md#add-skill-discovery-and-staging)).
-
-Everything runs preview-first: the dry run fetches into transient staging
-(`~/.agentstack/stage/…`, removed on exit) and never touches the manifest, lock,
-or store. `--write` promotes the staged clone into the store (rename-only — the
-scanned bytes land verbatim), writes one `[skills.<name>]` entry per selected
-skill, and records the lock pins (exact commit + content checksum). Content is
-scan-gated before anything is offered; high-severity findings block unless
-`--allow-flagged`. The manifest `rev` records your branch/tag intent; the lock
-commit is authoritative until `agentstack lock --update` relocks.
-
-**Activation is part of the same write, mode-aware** — detected from pre-write
-disk state:
-
-| Mode | `--write` does |
-|---|---|
-| static, unambiguous profile (none declared, or exactly one) | manifest + lock + **materialize** into the default targets (project scope for a project manifest), per-target `✓`/`⚠`/`✗` reporting |
-| static, several profiles | manifest + lock; activate with `agentstack use <profile> --write` (profile fencing wins — which is live is unknowable) |
-| clean-at-rest | manifest + lock; the next `agentstack session start <profile>` picks it up (an active session won't) |
-| zero-files | manifest + lock, the current lease untouched; **trust re-gates on the edit** — run `agentstack trust .`, or the gateway serves control-plane-only next connection |
-
-Profile membership: no declared profiles → the implicit default; exactly one →
-added automatically; several → `--profile` (or an interactive pick). Naming a
-nonexistent profile is an error, never a silent create.
-
-### `try` — run a skill without installing anything
-
-```text
-agentstack try anthropics/skills --skill pdf | claude
-```
-
-Stages and scans exactly like `add skill`, materializes the one selected
-skill under `~/.agentstack/try/`, and prints a wrapper prompt on stdout —
-pipe it into any agent CLI. Nothing touches the manifest, lock, library, or
-configs; status goes to stderr with a provenance line naming what loaded.
-Skills containing symlinks are refused (the ephemeral copy must not
-dereference one), and `doctor` names leftover try dirs with the remedy.
-
-### `report usage` (usage analytics)
-
-Local usage analytics: activation counts + per-capability footprint (which
-target/scope slots it's live in) + **context cost** — flagging high-cost,
-never-activated servers with the exact `remove` command.
-
-```text
-agentstack report usage
-agentstack report usage --live   # measure each server's tools/list token footprint
-```
-
-`report usage --live` measures each server's `tools/list` token footprint through
-the gateway (HTTP + stdio) and caches it (`~/.agentstack/footprint.json`); `report
-usage`, `explain`, and the dashboard's Servers matrix then show that cost offline.
-
-### Wire proxy (`proxy`)
-
-Where `report usage --live` gives a **static** estimate of a server's
-`tools/list` cost, the wire proxy gives **runtime ground truth**: what the
-`tools` block actually costs, in input tokens, on every real turn your harness
-sends.
-
-```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-agentstack proxy             # loopback relay (default 127.0.0.1:8787; --port/--upstream)
-# …drive Claude Code (or any Anthropic-API harness) as usual…
-agentstack report wire       # --json for the raw aggregate
-```
-
-`agentstack proxy` relays every request **verbatim** to the Anthropic API; point
-the harness's base URL at it and use it normally. Records append to
-`~/.agentstack/proxy/requests.jsonl` (size-rotated, same contract as the call
-log) and are **content-free by construction**: counts, capability/tool names,
-token estimates, the model id, best-effort usage numbers — never prompt/message
-bodies, tool arguments, secrets, or header values. `report wire` aggregates the
-log into a ranked, per-capability table — `tools` (typical per-turn count),
-`avg tokens/turn`, `calls`, and a loaded-vs-called `hint` (`keep` / `drop / lazy`
-/ `watch`) — over the same servers and profiles agentstack manages, closing the
-loop with the static `footprint` / `report usage` / `doctor` lenses. Bucketing
-and SSE internals: [field notes](design/reference-field-notes.md#wire-proxy-internals).
-
-### `export` / `import`
-
-```text
-agentstack export --output <file> [--secrets] [--passphrase <p>]
-agentstack import <file> [--passphrase <p>]
-```
-An age-encrypted archive (manifest + lock + optionally secrets) for moving a
-setup to a new machine; passphrase-protected.
-
 ## Drift: adopt or apply?
 
 ```text
@@ -865,27 +283,50 @@ by which side holds the truth:
   `apply --prune-foreign` (it still works after the guarded write recorded
   its own set), or `adopt` them into the current manifest.
 
-## Ephemeral sessions (`agentstack session`)
+### `adopt` and `add`
 
-A session loads a profile **for now** and reverts it on exit — the clean-at-rest
-mode's native primitive, so nothing generated persists between sessions.
+`adopt` is the keep-side of a [drift decision](#drift-adopt-or-apply) — pull a
+hand-added server from a target config back into the manifest, lifting its inline
+secret and preserving comments; `add` is the flag-driven (scriptable /
+agent-operable) way to add a server or skill, optionally into a profile.
 
-```bash
-agentstack session start backend          # render backend's profile (project scope)
-agentstack session start backend --scope global
-agentstack session list                   # active sessions on this machine
-agentstack session end                    # revert this directory's session
-agentstack session end --all              # revert every active session
-agentstack session freeze --name backend-ci   # pin the resolved set into a new profile
+```text
+agentstack adopt <name>   # pull a hand-added server back into the manifest
+agentstack add ...        # flag-driven add of a server or skill
 ```
 
-`start` renders the profile's servers, skills, instructions, settings, and
-hooks, records the write, and reverts it on `end` (or `end --all`). `freeze`
-captures the session's resolved set — the profile's servers plus the skills
-actually loaded — into a new profile (default `<profile>-frozen`) so CI can
-replay it deterministically; review the manifest edit, then `agentstack lock`.
-The same start/end lifecycle backs the MCP `agentstack_session_*` tools; the
-dashboard shows an active session read-only.
+### Search across providers
+
+`search` queries **your central library first** (skill and library-server names,
+labelled `[library]`), then the embedded catalog **and the official MCP
+Registry**; `add from <id>` resolves a registry/catalog server, lifts its secrets
+to `${REF}`s, and renders it to **all your CLIs at once**.
+
+```text
+agentstack search <query>
+agentstack add from <id>
+```
+
+agentstack is the cross-CLI *client* over the registry + marketplaces, not
+another registry.
+
+### Selective skills via profiles
+
+`use <profile>` materializes only that profile's skills, pruning the rest it
+owns and never clobbering hand-made skill dirs.
+
+```text
+agentstack use <profile> --write   # materialize only that profile's skills
+```
+
+The profile is optional: one declared profile is chosen automatically, and a
+manifest with **no** profiles activates its full inline set — `agentstack use
+--write` just works; several profiles need a name. Materialization is
+symlink-with-copy-fallback; when a prune empties the managed skills dir
+(deactivation, `session end`) the dir is removed too, but rmdir semantics spare
+any dir holding user content. Interactive `init` activates through this exact
+`use` code path; plain `apply` never touches skills, it only names which profile
+activates them.
 
 ## Live runs (`agentstack run`)
 
@@ -913,78 +354,79 @@ Launching is a terminal act (the CLIs are interactive TUIs); the dashboard's
 whose wrapper died is pruned on the next `report runs`. A profile-bound run uses
 the session engine, so one is allowed per directory at a time. Unix only for now.
 
-### Execution posture
+## Part II — The power surface
 
-Every run is labelled with its **enforcement posture** — one of
-`HOST / ADVISORY`, `HOST / PROTECTED`, `SANDBOX / PROXIED`, or
-`LOCKDOWN / ENFORCED` — saying how strongly the effective policy is actually
-enforced at runtime, not merely declared. What each label guarantees is
-[the enforcement matrix](ENFORCEMENT.md#the-matrix); `ENFORCED` is reserved for
-lockdown, and even there the honest claim is *unapproved egress is blocked*, not
-that exfiltration is impossible.
+These are the twenty-nine commands `agentstack --help` keeps hidden as progressive disclosure, plus the advanced delivery and enforcement modes the everyday loop only points at. Hidden is not unsupported — every command here is fully maintained and carries its own `--help`, exactly as the [All commands](#all-commands) preamble spells out. Reach in when you need a machine-wide policy ceiling, the zero-files gateway, ephemeral sessions, locked runs, the central library, or the observability tooling.
 
-The label appears on the run banner, in `agentstack run --sandbox --plan`, and in
-`agentstack report run <id>` (`report --json` carries the `posture` slug); a
-sandbox run records it beside the flight-recorder log, and a `--locked` run
-carries it in its `attempt_started` event. `agentstack doctor` also prints a
-one-word **machine-policy summary** — `open`, `restrictive`, or `mixed` —
-describing the machine policy's shape (`restrictive` means a `"*"` rule or a
-`[policy.filesystem]` scope binds every server, not that the policy is tight).
-Ready-to-use machine policies for common setups live in
-[`examples/policies/`](../examples/policies/) (`compatible`, `developer`,
-`locked-down`, `ci`).
+<a id="where-rendered-files-live-three-modes"></a>
+## Delivery modes — where rendered files live
 
-### The Protected tier in detail (`run --locked`)
+You always commit the *intent* (`agentstack.toml` + `agentstack.lock`); the
+rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled
+`CLAUDE.md` / `AGENTS.md` — are a per-project choice of **static**,
+**clean-at-rest**, or **zero-files**. What each mode *is*:
+[concepts.md — delivery modes](concepts.md#delivery-modes); which to pick:
+[which mode do I need?](choose.md). The operational levers:
 
-```text
-agentstack run <cli> --locked
-agentstack run <cli> --locked --plan   # walk the gate sequence read-only
+- **static** (default) — artifacts on disk, kept out of git by a managed
+  `.gitignore` block; pass `--no-gitignore` to commit them instead.
+- **clean-at-rest** — `agentstack lock` pins name refs *without rendering*, so
+  `git status` stays silent; a profile arrives via
+  [`session start`](#ephemeral-sessions-agentstack-session) /
+  [`run`](#live-runs-agentstack-run) and reverts on exit.
+- **zero-files** — `agentstack gateway connect` registers the gateway once per
+  CLI (one write to each CLI's global config) and every **trusted** repo serves
+  its own stack live; `agentstack_lease_open(profile)` fences one MCP connection
+  to a profile without rendering native files. A machine-local
+  `codemode/endpoint.json` coordinate may exist for the connection's duration —
+  see [the zero-files gateway](#the-zero-files-gateway---auto-project--trust).
+
+**Recommendation:** prefer the zero-file lease path for interactive work when the
+CLI supports MCP; use static or clean-at-rest when the CLI must read native
+skill/instruction files. Add `--sandbox --lockdown` when the agent process
+itself needs isolation — a lease is a capability fence, not a sandbox. See
+[the primitives and decision table](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need).
+
+Interactive `init` presents the three as an arrow-key choice **before any
+write**, and the selection **forks** the run: **static** takes the render path
+(preview → confirm → `apply --write` → activate skills → doctor);
+**clean-at-rest** renders nothing and pins the lockfile, teaching the
+`session start`/`session end` rhythm; **zero-files** renders nothing and offers
+to register the gateway (`gateway connect --all --write`), then points at
+`agentstack trust .` (which the wizard never runs for you — trust is human
+consent). Bare `agentstack` reports the project's current mode on its `Mode`
+line, derived from what is on disk.
+
+The managed `.gitignore` block is anchored to **outcomes, not declarations**: an
+entry exists only for a file agentstack actually wrote or still manages, so a
+blocked run (unresolved secrets) hides nothing and a hand-maintained
+`.mcp.json` / `CLAUDE.md` is never ignored. `apply` and `use` derive the block
+from the same records, so alternating them never churns a committed `.gitignore`.
+
+### Owned servers (`owner = "codex"`)
+
+Some CLIs rewrite their own server entries — the Codex desktop app refreshes
+`node_repl` env on every self-update. Marking a server `owner = "codex"` flips
+the source of truth to the owner's on-disk config, so a blind `apply` never
+downgrades the app's fresh values:
+
+```toml
+[servers.node_repl]
+type = "stdio"
+command = "node"
+owner = "codex"   # codex's own config is the source of truth
 ```
 
-A locked run is a fail-closed **pre-launch gate sequence plus a frozen
-capability surface** — every decision recorded, nothing re-derived mid-run:
-
-1. **Gates, in order** (each records a `gate_decision` event; the first
-   refusal stops the launch): enforced **trust** (explicit consent, current
-   digest), strict **lock verification** including the D3 executable pins
-   (a one-byte edit to a pinned local server executable refuses the run) and
-   the `rendered-verify` re-check of delivered extension copies, then
-   **policy admission** (every declared capability must fit under the machine
-   ceiling — an unclassifiable host, e.g. a `${REF}` in a URL's host portion,
-   refuses because it *cannot* be checked).
-2. **Grant freeze.** The run's entire authority — compiled machine ∩ project
-   ruleset, the resolved `${REF}`-only server set, project root + consent
-   digest, the fencing profile — is frozen into an `AuthorityGrant` whose
-   canonical digest is printed and recorded (`grant_frozen`).
-3. **Bridge handoff.** A reviewed projection of the grant (never argv, never
-   secret values) is sealed under a machine-local HMAC key into the run's
-   private dir, and the **launch-scoped** project MCP config points the
-   harness at `agentstack mcp --grant <artifact>`. The bridge consumes the
-   artifact **verbatim** and fails closed (serving nothing, loudly) on a failed
-   MAC, schema/version skew, a consent digest that no longer matches (any
-   post-freeze manifest edit), lost trust, or a machine ceiling that changed
-   since freeze. It never re-derives authority from disk.
-4. **Frozen control plane.** Under `--grant`, control-plane tools that would
-   swap the surface or mutate state mid-run — lease open/close/freeze,
-   `session_start`, `session_end`/`freeze`, `add_skill`/`add_server`/`add_from`,
-   `create_profile` — are refused for the run's duration. Read-only
-   discovery and trust-gated skill loading still answer.
-5. **`--profile <name>` is a fence**, not a session: gates, grant, artifact,
-   and bridge all see only that profile's server subset; no native session
-   state is applied or reverted.
-6. **Hygiene.** The original project MCP config is parked in the run's
-   private dir (never left in the repo) and restored byte-identical; a
-   sentinel makes overlapping locked runs refuse instead of stacking; a
-   crash leaves the more restrictive state.
-
-`run --locked --plan` walks the whole sequence read-only, printing every decision
-the live path would (plus the grant digest a live run would freeze) and mutating
-nothing. What is and isn't claimed at this tier (pre-launch gating on the HOST
-tier, not kernel isolation) is [ENFORCEMENT.md — the locked run's frozen
-grant](ENFORCEMENT.md#the-locked-runs-frozen-grant-run---locked); the asserted
-walkthrough is [`examples/projects/locked-run/`](../examples/projects/locked-run/)
-and the full contract is
-[`docs/design/locked-run-contract.md`](design/locked-run-contract.md).
+Every plan (`apply`, `diff`, `doctor`, `use`) refreshes the definition from the
+owner's config, fans the fresh values out to every *other* target, and reports
+drift as "refresh + re-fan out: `apply --write`", never a downgrade. Per key, a
+manifest value carrying a `${REF}` stays manifest-canonical (copying the resolved
+disk literal back would leak the secret); everything else follows the owner's
+disk. An `owner` id that isn't a registered adapter is a validation error.
+**Trust interaction:** the auto-refresh changes the manifest digest, so trust
+that was **valid** immediately before the rewrite is re-pinned to the new digest
+(a machine-derived change from a config the owner already executes); trust
+already broken or absent is left untouched — the refresh never mints trust.
 
 ## Agent-operable (`agentstack mcp`)
 
@@ -1210,6 +652,605 @@ experimental (see [field notes](design/reference-field-notes.md#tools_execute-re
 cancellation kills the
 [whole process tree](design/reference-field-notes.md#tools_execute-cancellation).
 
+### Governance (`[policy]`)
+
+`require`/`forbid` capabilities and an `allowed_sources` glob allowlist (e.g.
+`git:github.com/acme/*`), enforced by `doctor --ci`. Cross-source trust gating
+for executable-intent skills and MCPs.
+
+### MCP firewall (`[policy.tools]`)
+
+Per-server tool rules enforced at the runtime gateway:
+`github = ["get_*", "list_*", "!list_secrets"]` — plain globs allow, `!` denies;
+any allow pattern makes the list an allowlist. A denied tool is **invisible**
+(filtered from `tools_search` and code-mode bindings) and refused with the rule
+named if called anyway. `doctor` errors on rules naming unknown servers;
+`explain <server>` shows the effective policy.
+
+**Machine layer with deny precedence.** The machine manifest may carry its own
+`[policy.tools]`, checked **before** the project's on every brokered call, so a
+repo can never loosen a machine rule (effective policy = machine ∩ project — see
+[concepts.md — machine policy](concepts.md#machine-manifest-and-machine-policy)).
+A machine refusal names its layer in the error and audit log. Policy is keyed on
+the **manifest-chosen server name**, so a machine rule for `github` constrains a
+server *named* `github`, not the GitHub MCP server under any name; use the `"*"`
+wildcard key for rules that must survive renaming:
+
+```toml
+# ~/.agentstack/agentstack.toml — applies to every project on this machine
+[policy.tools]
+"*" = ["!delete_*"]                   # rename-proof: no server may delete_*
+github = ["get_*", "list_*"]          # servers NAMED github are read-only
+```
+
+The layer loads once per gateway launch (tightening mid-session takes effect next
+session). Each valid load stores a secret-free, digest-labelled last-known-good
+snapshot: a later malformed edit is enforced from that snapshot as **DEGRADED**;
+a malformed first load or unusable snapshot makes protected activation
+**BLOCKED** rather than silently falling back to project-only policy; a genuinely
+absent machine manifest is the benign **UNCONFIGURED** state. `doctor`
+distinguishes all three.
+
+### Egress rules (`[policy.egress]`)
+
+Per-server outbound-host rules, keyed and evaluated exactly like `[policy.tools]`
+(globs allow, `!` denies, `"*"` rename-proof, machine layer checked first and no
+repo can loosen it) — the subject is the destination host instead of a tool name.
+A pattern may pin a port with a `:port` suffix (`api.example.com:443`); a bare
+host means any port. The write/spawn-time check matches the host and defers the
+port; the sandbox egress proxy enforces the exact CONNECT port at runtime.
+
+```toml
+[policy.egress]
+"*" = ["!169.254.169.254"]            # rename-proof: no server reaches metadata
+kibana = ["*.example.com:443"]        # this server: only TLS to our domain
+```
+
+An unconstrained server is allow-by-default; a constrained server whose
+declared URL host can't be resolved statically (it hides behind a `${REF}`)
+fails closed at write time.
+
+### Secret access (`[policy.secrets]`)
+
+Per-server allowlists over `${REF}` names, same keyed grammar again (globs, `!`
+denies, `"*"` rename-proof). Enforced **fail-closed at both substitution
+sites**: a ref outside a server's effective set never resolves for it — not
+into a rendered config, not into a gateway upstream.
+
+```toml
+[policy.secrets]
+github = ["GH_*"]                     # this server may only read GH_* refs
+"*" = ["!AWS_*"]                      # no server resolves an AWS_* secret
+```
+
+### Filesystem scopes (`[policy.filesystem]`)
+
+Manifest-global path-glob scopes (not per-server) in three lists. `write` gates
+the `run --sandbox` mount, `read` is informational, and `deny` is a pure
+blocklist unioned across the machine and project layers — a repo can add denies
+but never drop the machine's — matched against the workspace-relative path, the
+absolute path, **and** the bare file name. What each list actually enforces at
+runtime (the read-only mount is coarse/all-or-nothing; `deny` runs through the
+cooperative host guard) is [the enforcement matrix](ENFORCEMENT.md#the-matrix).
+
+```toml
+[policy.filesystem]
+write = ["./**"]                      # sandbox: workspace mounts read-write
+deny  = [".env*", "**/*.pem"]         # no tool call may touch these, ever
+```
+
+### Call log
+
+Every tool call the gateway brokers (MCP proxy and code-mode alike) appends to
+`~/.agentstack/audit/calls.jsonl` (`0600`, dir `0700`): timestamp, run id (under
+`agentstack run`), server, tool, **keyed argument digest** (never values — keyed
+with a per-machine secret so an exfiltrated log can't confirm guessed arguments),
+outcome (`ok`/`error`/`denied`), latency, and a detail that is either the policy
+rule (denials) or a **fixed error class** (failures) — upstream error text is
+never written, so a malicious server can't inject content into the log.
+Summarize with `agentstack report calls [--since <days>] [--json]`; the
+dashboard's Runs panel shows each run's footprint. Best-effort local
+**diagnostics** (logging can never fail a call; size-rotated at ~5 MB × 2), not
+tamper-evident — input to `report calls`/`optimize`, not forensic evidence.
+
+### Content scanning
+
+Every `install` scans skill content for hidden Unicode (zero-width
+characters, bidi overrides, tag characters) and prompt-injection heuristics.
+Hidden-Unicode findings **block the install** (override with
+`--allow-flagged`); injection heuristics warn. `doctor --deep` is the on-demand
+content re-scan of everything materialized (skills and instruction files), and
+`doctor --ci` fails on high-severity findings, so a poisoned skill can't slide
+into CI unnoticed. Everyday `doctor` skips this scan (it reads every skill body);
+`--json` emits the whole report machine-readably, and the dashboard's Doctor pane
+runs it too. Interactive `init` offers the deep scan as an explicit yes/no at its
+closing doctor step, but only when the project actually has skills.
+
+## Ephemeral sessions (`agentstack session`)
+
+A session loads a profile **for now** and reverts it on exit — the clean-at-rest
+mode's native primitive, so nothing generated persists between sessions.
+
+```bash
+agentstack session start backend          # render backend's profile (project scope)
+agentstack session start backend --scope global
+agentstack session list                   # active sessions on this machine
+agentstack session end                    # revert this directory's session
+agentstack session end --all              # revert every active session
+agentstack session freeze --name backend-ci   # pin the resolved set into a new profile
+```
+
+`start` renders the profile's servers, skills, instructions, settings, and
+hooks, records the write, and reverts it on `end` (or `end --all`). `freeze`
+captures the session's resolved set — the profile's servers plus the skills
+actually loaded — into a new profile (default `<profile>-frozen`) so CI can
+replay it deterministically; review the manifest edit, then `agentstack lock`.
+The same start/end lifecycle backs the MCP `agentstack_session_*` tools; the
+dashboard shows an active session read-only.
+
+### Execution posture
+
+Every run is labelled with its **enforcement posture** — one of
+`HOST / ADVISORY`, `HOST / PROTECTED`, `SANDBOX / PROXIED`, or
+`LOCKDOWN / ENFORCED` — saying how strongly the effective policy is actually
+enforced at runtime, not merely declared. What each label guarantees is
+[the enforcement matrix](ENFORCEMENT.md#the-matrix); `ENFORCED` is reserved for
+lockdown, and even there the honest claim is *unapproved egress is blocked*, not
+that exfiltration is impossible.
+
+The label appears on the run banner, in `agentstack run --sandbox --plan`, and in
+`agentstack report run <id>` (`report --json` carries the `posture` slug); a
+sandbox run records it beside the flight-recorder log, and a `--locked` run
+carries it in its `attempt_started` event. `agentstack doctor` also prints a
+one-word **machine-policy summary** — `open`, `restrictive`, or `mixed` —
+describing the machine policy's shape (`restrictive` means a `"*"` rule or a
+`[policy.filesystem]` scope binds every server, not that the policy is tight).
+Ready-to-use machine policies for common setups live in
+[`examples/policies/`](../examples/policies/) (`compatible`, `developer`,
+`locked-down`, `ci`).
+
+### The Protected tier in detail (`run --locked`)
+
+```text
+agentstack run <cli> --locked
+agentstack run <cli> --locked --plan   # walk the gate sequence read-only
+```
+
+A locked run is a fail-closed **pre-launch gate sequence plus a frozen
+capability surface** — every decision recorded, nothing re-derived mid-run:
+
+1. **Gates, in order** (each records a `gate_decision` event; the first
+   refusal stops the launch): enforced **trust** (explicit consent, current
+   digest), strict **lock verification** including the D3 executable pins
+   (a one-byte edit to a pinned local server executable refuses the run) and
+   the `rendered-verify` re-check of delivered extension copies, then
+   **policy admission** (every declared capability must fit under the machine
+   ceiling — an unclassifiable host, e.g. a `${REF}` in a URL's host portion,
+   refuses because it *cannot* be checked).
+2. **Grant freeze.** The run's entire authority — compiled machine ∩ project
+   ruleset, the resolved `${REF}`-only server set, project root + consent
+   digest, the fencing profile — is frozen into an `AuthorityGrant` whose
+   canonical digest is printed and recorded (`grant_frozen`).
+3. **Bridge handoff.** A reviewed projection of the grant (never argv, never
+   secret values) is sealed under a machine-local HMAC key into the run's
+   private dir, and the **launch-scoped** project MCP config points the
+   harness at `agentstack mcp --grant <artifact>`. The bridge consumes the
+   artifact **verbatim** and fails closed (serving nothing, loudly) on a failed
+   MAC, schema/version skew, a consent digest that no longer matches (any
+   post-freeze manifest edit), lost trust, or a machine ceiling that changed
+   since freeze. It never re-derives authority from disk.
+4. **Frozen control plane.** Under `--grant`, control-plane tools that would
+   swap the surface or mutate state mid-run — lease open/close/freeze,
+   `session_start`, `session_end`/`freeze`, `add_skill`/`add_server`/`add_from`,
+   `create_profile` — are refused for the run's duration. Read-only
+   discovery and trust-gated skill loading still answer.
+5. **`--profile <name>` is a fence**, not a session: gates, grant, artifact,
+   and bridge all see only that profile's server subset; no native session
+   state is applied or reverted.
+6. **Hygiene.** The original project MCP config is parked in the run's
+   private dir (never left in the repo) and restored byte-identical; a
+   sentinel makes overlapping locked runs refuse instead of stacking; a
+   crash leaves the more restrictive state.
+
+`run --locked --plan` walks the whole sequence read-only, printing every decision
+the live path would (plus the grant digest a live run would freeze) and mutating
+nothing. What is and isn't claimed at this tier (pre-launch gating on the HOST
+tier, not kernel isolation) is [ENFORCEMENT.md — the locked run's frozen
+grant](ENFORCEMENT.md#the-locked-runs-frozen-grant-run---locked); the asserted
+walkthrough is [`examples/projects/locked-run/`](../examples/projects/locked-run/)
+and the full contract is
+[`docs/design/locked-run-contract.md`](design/locked-run-contract.md).
+
+## The central library
+
+One managed home — `~/.agentstack/lib/` — that projects reference **by name**
+instead of copying files between repos.
+
+### Layout and name resolution
+
+Skill dirs (`lib/skills/`) and MCP server definitions (`lib/servers/*.toml`)
+are indexed in `library.toml`. A profile's `skills = ["sql-review"]` /
+`servers = ["kibana"]` resolve from there; an inline `[skills.*]` /
+`[servers.*]` table always overrides the library. Provider folders are never
+owned — only their skills and MCP entries are managed. The runtime gateway
+resolves server name refs through the same inline-first/central-library path as
+rendering, but where rendering hard-fails a run on a broken ref, the gateway
+skips just that server (with a stderr report) and keeps the rest up.
+
+### Pinning and provenance
+
+Name refs are pinned by digest in `agentstack.lock` — servers pin the
+**definition** digest only; secret values stay `${REF}` and resolve at
+render/gateway time, never in the library or the lock. Native extensions pin
+differently: a `[[extension]]` entry records `name`, `target`, and a `checksum`
+from the **strict** integrity-root digest over the whole source tree, so
+retargeting a byte-identical extension is drift and a one-byte source edit
+re-gates trust (see [Native extensions](#native-extensions)). `doctor`/`explain`
+flag drift and show each item's origin. Profile resolution is offline by default
+(dry-run `use`, `doctor`, `explain` never fetch); `use --write` fetches
+git-backed skills when activation needs them. `agentstack lock [--profile <name>]`
+pins every profile's name refs **without** rendering — the lock-only path for
+clean-at-rest repos. The lockfile is part of a project's consent surface, so when
+a currently-trusted project's pins change, `lock` warns that its trust is now
+stale and must be re-granted with `agentstack trust .` — new pins are new consent.
+
+### Adding capabilities
+
+```text
+agentstack lib add ./<dir> --name <name>               # copy a local skill in
+agentstack lib add owner/repo --skill <name>           # from any skills repo
+agentstack lib add owner/repo --subpath <dir>          # from a repo subdirectory
+agentstack lib add-server <name>                        # reusable server definition
+agentstack lib new <name>                               # scaffold a new skill
+```
+
+`lib add ./<dir>` **copies** the source into `lib/skills/<name>` — the library
+copy is canonical from then on (source edits have no effect), provenance records
+the original path, and a temp-dir source gets a dangling-path warning. `lib add
+owner/repo --subpath <dir>` (any git URL, `--skill <name>` selecting from a
+multi-skill repo) installs from a repo subdirectory, staging the fetch so a dry
+run never touches the store, recording truthful `git:<url>@<rev>#<dir>`
+provenance. `lib add-server` stores a reusable definition with its `${REF}`s
+intact. `lib new <name>` scaffolds `./<name>/SKILL.md` from the house template —
+edit it, then adopt with `agentstack add skill ./<name>` (this project) or `lib
+add ./<name>` (every project). Every `lib add` runs the same hidden-unicode /
+prompt-injection scan as `install`/`doctor --deep` before the copy becomes
+canonical (high findings block unless `--allow-flagged`) and warns above ~10 MiB.
+
+### Syncing across machines (`lib sync`)
+
+```text
+agentstack lib sync [--status]
+agentstack lib sync --allow-secrets   # override the fail-closed secret gate
+```
+
+`lib sync` versions the library as a git repo (init/clone/pull/commit/push,
+`--status` to preview); the content-store cache stays local. Its promise —
+**secrets never travel** — is enforced by a gate that fails closed:
+
+- Before any commit, every `lib/servers/*.toml` is scanned for literal
+  (non-`${REF}`) secrets across **every field a credential could hide in** —
+  headers, env, the `url` (userinfo passwords, secretish query params), `args`.
+- A server file that can't be read or parsed **blocks the sync** rather than
+  slipping through unscanned, naming any secret-looking line.
+- Before pushing, the **outgoing commits** are scanned too, so a secret committed
+  once and later edited out can't ride along in history (the message names the
+  commit and file).
+- `--allow-secrets` overrides all three, deliberately and loudly.
+
+Pulled content passes the same supply-chain scan as `lib add` — warn-only (a
+completed pull can't be blocked without stranding the tree) — and incrementally:
+a no-op pull scans nothing, a real pull scans only the skills it changed.
+
+### The two mental models
+
+Three ways a skill or server reaches a profile; the manifest syntax alone picks
+which:
+
+- **By-name library reference** — `skills = ["greet"]` / `servers = ["kibana"]`
+  with **no** matching `[skills.greet]` / `[servers.kibana]` table. Resolved
+  fresh from `~/.agentstack/lib` on every lock, pinned there by `checksum`
+  (skills) or definition digest (servers); nothing is copied into the repo. The
+  cross-repo default.
+- **Vendored pack copy** — installed with `add from git:<host>/<repo>`. Members
+  are copied into the project and digest-pinned, and a `[packs.<name>]` ledger
+  records `source`/`version`/`rev` so `lock --upgrade` re-resolves them — a
+  self-contained snapshot that versions as one unit (see
+  [Git-hosted versioned packs](#git-hosted-versioned-packs)).
+- **Inline manifest** — a `[skills.greet]` / `[servers.*]` table with its own
+  `path`/`git`/`command`. Lives in the repo and **always overrides** a same-named
+  library reference.
+
+The trap: a `[skills.greet]` block with **no** source is read as an inline skill
+*missing* its source — it errors, it does not fall back to a library skill of the
+same name. Drop the block and list `greet` in `skills = […]` to reference the
+library copy; keep the block only for a distinct inline skill. `explain` prints
+each capability's model on its `Model` line.
+
+## Capabilities
+
+The kinds of thing a profile can carry — skills, servers, instructions,
+settings, hooks, extensions, packs — and the commands that add, search, and
+account for them. It is a menu; jump to the capability you need.
+
+### Package manager
+
+Skills declare a source (`path` or `git`); the package manager fetches them into
+`~/.agentstack/store/`, writes a SHA-256 `agentstack.lock`, and reproduces it
+exactly under `--locked`.
+
+```text
+agentstack install            # fetch skill sources, write the lockfile
+agentstack install --locked   # reproducible, CI-safe
+agentstack lock --update      # re-resolve git skills
+agentstack remove <name>      # drop a capability from manifest + lock
+```
+
+Profile-aware: skills a profile references by name (library-resolved, no inline
+`[skills.*]`) keep their lock pins through the reconcile pass — pin or refresh
+with `agentstack lock`. Content digests always hash current bytes; see
+[field notes](design/reference-field-notes.md#orphaned-digest-cache) for the
+harmless orphaned `digest-cache.json` older versions may leave.
+
+### Git-hosted versioned packs
+
+Any repo with a `pack.toml` installs as a version-pinned pack from any git host;
+`lock --upgrade` resolves the newest tag (never downgrades), previews the member
+diff, and re-pins.
+
+```text
+agentstack add from git:<host>/<repo>[@<tag>][#subdir]
+agentstack lock --upgrade <pack> --yes --write
+agentstack lib pack-init
+```
+
+No tag → the newest version-shaped tag; a repo with no version tags is an error,
+never a floating install. The ledger records `source`/`version`/`rev`; extracted
+skills are digest-pinned so `install --locked` reproduces. `[policy]
+allowed_sources` is enforced **before** any fetch, and the clone passes the
+install scan gate. `lib pack-init` scaffolds a publishable pack; the dashboard's
+Discover tab browses candidates. (Semver ranges and transitive pack dependencies
+are deliberately out of v1.)
+
+### `add skill <source>` — install from any skills repo
+
+```text
+agentstack add skill anthropics/skills --skill pdf --write   # owner/repo (GitHub)
+agentstack add skill anthropics/skills --list                # discover, inspect only
+agentstack add skill https://github.com/o/r/tree/main/skills/pdf
+agentstack add skill git@github.com:o/r.git --rev v1.2 --skill pdf
+agentstack add skill ./my-skill --name code-review
+```
+
+Sources: `owner/repo` (always GitHub — a bare shorthand never touches your
+filesystem), full GitHub/GitLab URLs including `/tree/<ref>/<subpath>`, generic
+git remotes (`git@…`, `ssh://`, `file://`, `*.git`), or a spelled local path
+(`./dir`, `../dir`, absolute, `~/dir`). `owner/repo@skill` and `#ref` alias
+`--skill`/`--rev` (a flag disagreeing with its alias is an error);
+credential-bearing URLs are rejected — use a git credential helper. Discovery
+scans the ecosystem's conventional locations (see
+[field notes](design/reference-field-notes.md#add-skill-discovery-and-staging)).
+
+Everything runs preview-first: the dry run fetches into transient staging
+(`~/.agentstack/stage/…`, removed on exit) and never touches the manifest, lock,
+or store. `--write` promotes the staged clone into the store (rename-only — the
+scanned bytes land verbatim), writes one `[skills.<name>]` entry per selected
+skill, and records the lock pins (exact commit + content checksum). Content is
+scan-gated before anything is offered; high-severity findings block unless
+`--allow-flagged`. The manifest `rev` records your branch/tag intent; the lock
+commit is authoritative until `agentstack lock --update` relocks.
+
+**Activation is part of the same write, mode-aware** — detected from pre-write
+disk state:
+
+| Mode | `--write` does |
+|---|---|
+| static, unambiguous profile (none declared, or exactly one) | manifest + lock + **materialize** into the default targets (project scope for a project manifest), per-target `✓`/`⚠`/`✗` reporting |
+| static, several profiles | manifest + lock; activate with `agentstack use <profile> --write` (profile fencing wins — which is live is unknowable) |
+| clean-at-rest | manifest + lock; the next `agentstack session start <profile>` picks it up (an active session won't) |
+| zero-files | manifest + lock, the current lease untouched; **trust re-gates on the edit** — run `agentstack trust .`, or the gateway serves control-plane-only next connection |
+
+Profile membership: no declared profiles → the implicit default; exactly one →
+added automatically; several → `--profile` (or an interactive pick). Naming a
+nonexistent profile is an error, never a silent create.
+
+### `try` — run a skill without installing anything
+
+```text
+agentstack try anthropics/skills --skill pdf | claude
+```
+
+Stages and scans exactly like `add skill`, materializes the one selected
+skill under `~/.agentstack/try/`, and prints a wrapper prompt on stdout —
+pipe it into any agent CLI. Nothing touches the manifest, lock, library, or
+configs; status goes to stderr with a provenance line naming what loaded.
+Skills containing symlinks are refused (the ephemeral copy must not
+dereference one), and `doctor` names leftover try dirs with the remedy.
+
+### Instruction files
+
+Compile shared + harness-specific `[instructions.*]` fragments into each CLI's
+`CLAUDE.md` / `AGENTS.md`, inside a managed `<!-- agentstack -->` region that
+preserves surrounding hand-written prose.
+
+```text
+agentstack instructions --write   # compile [instructions.*] into CLAUDE.md / AGENTS.md
+```
+
+Dry-run by default. Part of the mainstream lifecycle: `apply` (so `init` too)
+compiles the region alongside servers/settings/hooks behind the same `--write`
+gate — a manifest with no `[instructions.*]` never touches a region another layer
+owns — and `doctor` flags a stale managed region (warn ↳ `instructions --write`)
+or a missing fragment source (error, gates `--ci`). Installing a pack's house
+rules prints the exact compile command.
+
+### The machine layer
+
+The machine manifest is the personal, cross-project layer (concept:
+[concepts.md](concepts.md#machine-manifest-and-machine-policy)).
+
+```text
+agentstack init --global                            # seed ~/.agentstack/agentstack.toml + instructions/
+agentstack instructions --manifest-dir ~ --write    # compile personal fragments
+```
+
+`init --global` seeds `~/.agentstack/agentstack.toml`, an `instructions/` dir,
+and the machine `[guard]` + `[policy.filesystem]` deny defaults (the same list
+`guard install` writes), and offers to install the host guard into detected CLIs.
+Inherited fragments compile at **global scope only** (personal rules never land
+in a repo's committed `CLAUDE.md`); a same-named project fragment wins.
+Provenance is visible everywhere: `instructions` labels inherited fragments
+`(machine)`, `doctor` counts them, `explain <fragment>` names the layer. The
+bundled **agentstack house rules** fragment (`[instructions.agentstack]`) teaches
+every agent the manifest-first workflow and is offered opt-in by `init --global`
+and the `init` wizard. The zero-files gateway never treats the machine layer as a
+project: it cannot be `trust`ed or activated by `mcp --auto-project`.
+
+### Native settings
+
+Manage each CLI's own settings file (Claude Code `~/.claude/settings.json`, Codex
+`config.toml`) from one `[settings.<cli>]` block; `apply` merges only the keys you
+declare, resolves `${REF}`s, preserves hand-set keys, and prunes keys that leave
+the manifest.
+
+```text
+agentstack settings set <target> <key> <value>
+agentstack settings unset <target> <key>
+```
+
+Dry-run by default, `--write` applies; viewable in the dashboard's Settings tab.
+
+### Lifecycle hooks
+
+Declare `[hooks.*]` once (event + optional matcher + command) and `apply` renders
+them into each harness's native hooks config (Claude Code `settings.json`, Codex
+`config.toml`), resolving secrets and pruning hooks that leave the manifest.
+
+```text
+[hooks.<name>]             # event + optional matcher + command
+agentstack apply --write   # render them into each harness's native hooks config
+```
+
+Listed in the dashboard's Hooks tab.
+
+### Native extensions
+
+`[extensions.<name>]` manages a harness's native executable add-ons — pi's
+TypeScript extensions, OpenCode's JS plugins. It is the **highest-risk**
+capability agentstack delivers: the code runs inside the harness process at full
+user permission, and agentstack governs only *pre-delivery* (provenance and
+content binding), never runtime — see
+[ENFORCEMENT.md](ENFORCEMENT.md#native-extensions).
+
+```text
+[extensions.<name>]                                                # path/git + exactly one target
+agentstack lib add-extension <name> --target <adapter> --path <dir>
+agentstack lock                                                    # pin (strict integrity-root digest)
+```
+
+```toml
+[extensions.checkpoint]
+description = "Git checkpoint on every agent turn"
+path = "./extensions/checkpoint"   # or: git = "…", rev = "…", subpath = "…"
+target = "pi"                      # exactly one adapter id
+```
+
+- **Source** — a local `path` (manifest-anchored), a `git` source (`subpath`
+  required, `rev` optional), or a bare central-library name (`lib add-extension …
+  --path <dir>` or `--git <url> --subpath <dir>`). A declaration with none of
+  these is a validation error.
+- **`target` is singular** — one CLI's API; no `targets` list, no `"*"` fan-out.
+  An unknown target, or `"*"`, is a validation error.
+- **Reserved names** — anything beginning `agentstack-guard` is rejected (those
+  belong to the host guard).
+- **Strict pinning** — each extension gets a `[[extension]]` lock entry
+  (`name`/`target`/`checksum`) via the strict integrity-root digest (symlinks
+  rejected, `.git` included). An unpinned extension blocks; `agentstack lock` pins.
+
+`apply` renders by **copying** (never symlinking) the lock-pinned source into the
+target's extension directory, tracked in a per-directory ownership ledger so a
+re-render prunes exactly what agentstack placed. An untrusted or drifted project
+renders **zero** extension bytes. Two adapters render today — **pi**
+(`~/.pi/agent/extensions`, or `.pi/extensions` at project scope) and **OpenCode**
+(`~/.config/opencode/plugins`, global only); any other target validates but
+**warns and does not render**. Under `run --locked`, a `rendered-verify` gate
+re-checks each delivered copy against its lock pin before launch.
+
+### `report usage` (usage analytics)
+
+Local usage analytics: activation counts + per-capability footprint (which
+target/scope slots it's live in) + **context cost** — flagging high-cost,
+never-activated servers with the exact `remove` command.
+
+```text
+agentstack report usage
+agentstack report usage --live   # measure each server's tools/list token footprint
+```
+
+`report usage --live` measures each server's `tools/list` token footprint through
+the gateway (HTTP + stdio) and caches it (`~/.agentstack/footprint.json`); `report
+usage`, `explain`, and the dashboard's Servers matrix then show that cost offline.
+
+### Wire proxy (`proxy`)
+
+Where `report usage --live` gives a **static** estimate of a server's
+`tools/list` cost, the wire proxy gives **runtime ground truth**: what the
+`tools` block actually costs, in input tokens, on every real turn your harness
+sends.
+
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+agentstack proxy             # loopback relay (default 127.0.0.1:8787; --port/--upstream)
+# …drive Claude Code (or any Anthropic-API harness) as usual…
+agentstack report wire       # --json for the raw aggregate
+```
+
+`agentstack proxy` relays every request **verbatim** to the Anthropic API; point
+the harness's base URL at it and use it normally. Records append to
+`~/.agentstack/proxy/requests.jsonl` (size-rotated, same contract as the call
+log) and are **content-free by construction**: counts, capability/tool names,
+token estimates, the model id, best-effort usage numbers — never prompt/message
+bodies, tool arguments, secrets, or header values. `report wire` aggregates the
+log into a ranked, per-capability table — `tools` (typical per-turn count),
+`avg tokens/turn`, `calls`, and a loaded-vs-called `hint` (`keep` / `drop / lazy`
+/ `watch`) — over the same servers and profiles agentstack manages, closing the
+loop with the static `footprint` / `report usage` / `doctor` lenses. Bucketing
+and SSE internals: [field notes](design/reference-field-notes.md#wire-proxy-internals).
+
+### `export` / `import`
+
+```text
+agentstack export --output <file> [--secrets] [--passphrase <p>]
+agentstack import <file> [--passphrase <p>]
+```
+An age-encrypted archive (manifest + lock + optionally secrets) for moving a
+setup to a new machine; passphrase-protected.
+
+## Optimize (`agentstack optimize`)
+
+Turns the signals agentstack already collects — activation counts, the gateway
+call audit log, per-server context costs (`report usage --live`), the trust
+ledger — into concrete recommendations: inert servers to remove, `[policy.tools]`
+allowlists to narrow high-cost servers, denied and erroring calls to review,
+stale trust grants to refresh or revoke.
+
+```bash
+agentstack optimize              # read-only report
+agentstack optimize --json       # machine-readable
+agentstack optimize --since 30   # only the last 30 days of runtime evidence
+agentstack optimize --write      # apply ONLY the safe class: provably-inert
+                                 # manifest entries (no calls, no activations,
+                                 # no profile, not rendered anywhere, ≥14d of
+                                 # history) and trust grants for deleted dirs
+```
+
+The contract: **every recommendation carries its evidence** (numbers, window,
+data source), **the exact command or TOML** to act on it, and **why it is safe
+or why it needs review**. One stated limit: the audit log only sees
+gateway-brokered calls — a server rendered into a native config is called
+directly by the harness, so such servers are never auto-removed on "no calls"
+evidence alone.
+
 ## Dashboard
 
 The one place to *see* everything the sections above manage, across every
@@ -1247,30 +1288,9 @@ Anywhere drift exists — the pending bar, an Overview next-action, the Health t
 **Review** opens a real diff of every native config that would change and shows
 the `agentstack apply --write` to reconcile it; the write happens in your terminal.
 
-## Optimize (`agentstack optimize`)
+## Part III — Full command reference
 
-Turns the signals agentstack already collects — activation counts, the gateway
-call audit log, per-server context costs (`report usage --live`), the trust
-ledger — into concrete recommendations: inert servers to remove, `[policy.tools]`
-allowlists to narrow high-cost servers, denied and erroring calls to review,
-stale trust grants to refresh or revoke.
-
-```bash
-agentstack optimize              # read-only report
-agentstack optimize --json       # machine-readable
-agentstack optimize --since 30   # only the last 30 days of runtime evidence
-agentstack optimize --write      # apply ONLY the safe class: provably-inert
-                                 # manifest entries (no calls, no activations,
-                                 # no profile, not rendered anywhere, ≥14d of
-                                 # history) and trust grants for deleted dirs
-```
-
-The contract: **every recommendation carries its evidence** (numbers, window,
-data source), **the exact command or TOML** to act on it, and **why it is safe
-or why it needs review**. One stated limit: the audit log only sees
-gateway-brokered calls — a server rendered into a native config is called
-directly by the harness, so such servers are never auto-removed on "no calls"
-evidence alone.
+The generated command tree and the one-glance census, unchanged. Everything above has a prose home; this is the exhaustive index behind it — the exact verb, flag, and subcommand surface, regenerated from the CLI itself.
 
 ## All commands
 

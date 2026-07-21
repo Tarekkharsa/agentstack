@@ -14,6 +14,10 @@ paragraphs, flat lists, pipe tables, fenced code, bold/italic/inline
 code/links. Anything unrecognized is reported loudly rather than silently
 mangled, so drift in the sources is visible at build time.
 
+The sidebar it splices in is two-tier: everyday groups render inline while the
+advanced ("deeper") groups collapse into <details>, auto-opened on the page
+they contain — so this CSS must style <summary> to match the group label.
+
 Usage: python3 tools/make-docs-pages.py       # rewrites docs/*.html pages
 Run it after editing any source page, and together with make-docs-sidebar.py
 after editing that script's TREE (this script imports the TREE live).
@@ -378,6 +382,10 @@ CSS = """
   aside.side { position: sticky; top: 4.2rem; max-height: calc(100vh - 5rem); overflow-y: auto; padding: 1.6rem 0 2rem; font-size: 0.85rem; }
   aside.side .grp { margin-bottom: 1.15rem; }
   aside.side .grp > b { display: block; font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.35rem; }
+  aside.side details.grp > summary { display: block; font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.35rem; cursor: pointer; list-style: none; }
+  aside.side details.grp > summary::-webkit-details-marker { display: none; }
+  aside.side details.grp > summary::after { content: "\\25B8"; float: right; font-size: 0.85em; opacity: 0.55; font-weight: 400; }
+  aside.side details.grp[open] > summary::after { content: "\\25BE"; }
   aside.side .grp > code { display: block; font-family: var(--mono); font-size: 0.66rem; color: var(--accent); background: none; border: none; padding: 0; margin: -0.25rem 0 0.35rem; }
   aside.side ul { list-style: none; margin: 0; padding: 0; }
   aside.side li a { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.14rem 0.5rem; border-left: 2px solid transparent; border-radius: 0 5px 5px 0; font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }

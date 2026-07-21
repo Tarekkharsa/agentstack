@@ -53,7 +53,7 @@ pins the new set, then `apply --write` to render.
 Store the value with `agentstack secret set GH_PAT` (it stays out of the
 manifest). In the [zero-files delivery mode](trust-a-repo.md), a new server also
 stays inert until you re-run `agentstack trust .`, because the edit changes the
-manifest digest.
+[manifest digest](../concepts.md#trust-and-the-consent-digest).
 
 - [Concepts](../concepts.md) — server, profile, library, secrets
 - [Reference: `adopt` and `add`](../reference.md#adopt-and-add)

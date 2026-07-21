@@ -13,7 +13,7 @@ host run that talks to servers directly leaves nothing to report.
 | To see… | Run |
 | --- | --- |
 | Every tracked run, one line each | `agentstack report runs` |
-| One run in full — lifecycle, egress, tool calls, secret refs, [posture](../concepts.md) | `agentstack report run <id>` |
+| One run in full — lifecycle, [egress](../concepts.md#egress), tool calls, secret refs, [posture](../concepts.md) | `agentstack report run <id>` |
 | What each capability costs you in context | `agentstack report usage` |
 | Every brokered tool call — ok, denied, errored | `agentstack report calls` |
 | What the `tools` block actually costs per turn, on the wire | `agentstack report wire` |

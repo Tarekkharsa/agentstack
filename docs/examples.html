@@ -117,6 +117,10 @@
   aside.side .crumb { display: inline-block; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); margin-bottom: 0.9rem; }
   aside.side .grp { margin-bottom: 1.15rem; }
   aside.side .grp > b { display: block; font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.35rem; }
+  aside.side details.grp > summary { display: block; font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.35rem; cursor: pointer; list-style: none; }
+  aside.side details.grp > summary::-webkit-details-marker { display: none; }
+  aside.side details.grp > summary::after { content: "\25B8"; float: right; font-size: 0.85em; opacity: 0.55; font-weight: 400; }
+  aside.side details.grp[open] > summary::after { content: "\25BE"; }
   aside.side .grp > code { display: block; font-family: var(--mono); font-size: 0.66rem; color: var(--accent); background: none; border: none; padding: 0; margin: -0.25rem 0 0.35rem; }
   aside.side ul { list-style: none; margin: 0; padding: 0; }
   aside.side li a {
@@ -341,75 +345,20 @@
     </ul>
   </div>
   <div class="grp">
-    <b>Configure</b>
-    <code>$ agentstack apply</code>
+    <b>Everyday</b>
+    <code>$ agentstack add · apply · doctor</code>
     <ul>
-      <li><a href="architecture.html">How it works</a>
-      </li>
       <li><a href="index.html#manifest">The manifest</a>
       </li>
-      <li><a href="reference.html#the-central-library">Central library</a>
-      </li>
-      <li><a href="index.html#modes">Delivery modes</a>
-      </li>
-      <li><a href="reference.html#dashboard">Dashboard</a>
-      </li>
-    </ul>
-  </div>
-  <div class="grp">
-    <b>How-to</b>
-    <ul>
       <li><a href="howto/add-a-server.html">Add a server</a>
       </li>
       <li><a href="howto/add-a-skill.html">Add a skill</a>
       </li>
-      <li><a href="howto/trust-a-repo.html">Trust a cloned repo</a>
-      </li>
-      <li><a href="howto/lock-down-a-run.html">Lock down a run</a>
-      </li>
-      <li><a href="howto/team-setup.html">Team setup</a>
-      </li>
-      <li><a href="howto/ci.html">Use in CI</a>
-      </li>
       <li><a href="howto/undo.html">Undo anything</a>
       </li>
-    </ul>
-  </div>
-  <div class="grp">
-    <b>Protect</b>
-    <code>$ agentstack trust · guard</code>
-    <ul>
-      <li><a href="index.html#trust">The trust gate</a>
-      </li>
-      <li><a href="enforcement.html#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
-      </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
-      </li>
-      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Policy presets</a>
-      </li>
-    </ul>
-  </div>
-  <div class="grp">
-    <b>Run confined</b>
-    <code>$ agentstack run --lockdown</code>
-    <ul>
-      <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a>
-      </li>
-      <li><a href="index.html#enforced">What's enforced</a>
-      </li>
-      <li><a href="enforcement.html">Enforcement matrix</a>
-      </li>
-    </ul>
-  </div>
-  <div class="grp">
-    <b>Observe</b>
-    <code>$ agentstack report</code>
-    <ul>
       <li><a href="howto/see-what-happened.html">See what happened</a>
       </li>
-      <li><a href="#e20">Reports &amp; call audit</a>
-      </li>
-      <li><a href="#e21">Wire-cost analysis</a>
+      <li><a href="howto/trust-a-repo.html">Trust a cloned repo</a>
       </li>
     </ul>
   </div>
@@ -422,8 +371,69 @@
       </li>
     </ul>
   </div>
-  <div class="grp">
-    <b>Project</b>
+  <details class="grp">
+    <summary>Configure deeper</summary>
+    <code>$ agentstack use · session</code>
+    <ul>
+      <li><a href="architecture.html">How it works</a>
+      </li>
+      <li><a href="reference.html#the-central-library">Central library</a>
+      </li>
+      <li><a href="index.html#modes">Delivery modes</a>
+      </li>
+      <li><a href="reference.html#dashboard">Dashboard</a>
+      </li>
+    </ul>
+  </details>
+  <details class="grp">
+    <summary>Protect</summary>
+    <code>$ agentstack trust · guard</code>
+    <ul>
+      <li><a href="index.html#trust">The trust gate</a>
+      </li>
+      <li><a href="enforcement.html#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/guard-demo">Guard demo</a>
+      </li>
+      <li><a href="https://github.com/Tarekkharsa/agentstack/tree/main/examples/policies">Policy presets</a>
+      </li>
+    </ul>
+  </details>
+  <details class="grp">
+    <summary>Run confined</summary>
+    <code>$ agentstack run --lockdown</code>
+    <ul>
+      <li><a href="howto/lock-down-a-run.html">Lock down a run</a>
+      </li>
+      <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a>
+      </li>
+      <li><a href="index.html#enforced">What's enforced</a>
+      </li>
+      <li><a href="enforcement.html">Enforcement matrix</a>
+      </li>
+    </ul>
+  </details>
+  <details class="grp">
+    <summary>Team &amp; CI</summary>
+    <ul>
+      <li><a href="howto/team-setup.html">Team setup</a>
+      </li>
+      <li><a href="howto/ci.html">Use in CI</a>
+      </li>
+    </ul>
+  </details>
+  <details class="grp">
+    <summary>Observe deeper</summary>
+    <code>$ agentstack report</code>
+    <ul>
+      <li><a href="#e20">Reports &amp; call audit</a>
+      </li>
+      <li><a href="#e21">Wire-cost analysis</a>
+      </li>
+    </ul>
+  </details>
+  <details class="grp">
+    <summary>Project</summary>
     <ul>
       <li><a href="security-review-2026-07-11.html">Security review</a>
       </li>
@@ -432,7 +442,7 @@
       <li><a href="history.html">History</a>
       </li>
     </ul>
-  </div>
+  </details>
 </aside>
 <!-- sidebar:end -->
 

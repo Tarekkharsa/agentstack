@@ -13,6 +13,10 @@ highlighted and (b) the current page's own sections expand inline beneath its
 entry (the nub-docs pattern). Links that point at the page being generated
 collapse to plain `#anchor`s so in-page navigation doesn't reload.
 
+The tree is split into two tiers: "open" groups render inline for the everyday
+path, while "deeper" groups render as collapsed <details> (auto-opened when
+they hold the current page) so power-user surface stays one click away.
+
 Usage: python3 tools/make-docs-sidebar.py   # rewrites docs/*.html
 
 make-docs-pages.py imports this TREE live to build the generated Markdown
@@ -26,7 +30,10 @@ from pathlib import Path
 GH = "https://github.com/Tarekkharsa/agentstack"
 
 # ---------------------------------------------------------------- the tree --
-# (group, command-or-None, [(label, href, key)])
+# (group, command-or-None, [(label, href, key)], tier)
+# tier is "open" (tier-one — always visible, the everyday path) or "deeper"
+# (rendered collapsed as <details>, the power-user surface). Open groups come
+# first; the "deeper" groups follow so the docmap divider falls cleanly between.
 TREE = [
     ("Start", None, [
         ("Get started", "start.html", "start"),
@@ -34,48 +41,50 @@ TREE = [
         ("Concepts", "concepts.html", "concepts"),
         ("Which mode do I need?", "choose.html", "choose"),
         ("Examples", "examples.html", "examples"),
-    ]),
-    ("Configure", "$ agentstack apply", [
-        ("How it works", "architecture.html", "how-it-works"),
+    ], "open"),
+    ("Everyday", "$ agentstack add · apply · doctor", [
         ("The manifest", "index.html#manifest", "manifest"),
+        ("Add a server", "howto/add-a-server.html", "howto-server"),
+        ("Add a skill", "howto/add-a-skill.html", "howto-skill"),
+        ("Undo anything", "howto/undo.html", "howto-undo"),
+        ("See what happened", "howto/see-what-happened.html", "howto-audit"),
+        ("Trust a cloned repo", "howto/trust-a-repo.html", "howto-trust"),
+    ], "open"),
+    ("Reference", None, [
+        ("Every command", "reference.html", "reference"),
+        ("Agent manual (skill)", f"{GH}/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md", "manual"),
+    ], "open"),
+    ("Configure deeper", "$ agentstack use · session", [
+        ("How it works", "architecture.html", "how-it-works"),
         ("Central library", "reference.html#the-central-library", "library"),
         ("Delivery modes", "index.html#modes", "modes"),
         ("Dashboard", "reference.html#dashboard", "dashboard"),
-    ]),
-    ("How-to", None, [
-        ("Add a server", "howto/add-a-server.html", "howto-server"),
-        ("Add a skill", "howto/add-a-skill.html", "howto-skill"),
-        ("Trust a cloned repo", "howto/trust-a-repo.html", "howto-trust"),
-        ("Lock down a run", "howto/lock-down-a-run.html", "howto-lockdown"),
-        ("Team setup", "howto/team-setup.html", "howto-team"),
-        ("Use in CI", "howto/ci.html", "howto-ci"),
-        ("Undo anything", "howto/undo.html", "howto-undo"),
-    ]),
+    ], "deeper"),
     ("Protect", "$ agentstack trust · guard", [
         ("The trust gate", "index.html#trust", "trust"),
         ("What trust does & doesn't", "enforcement.html#what-trusted-does-and-does-not-mean", "trustlimits"),
         ("Guard demo", f"{GH}/tree/main/examples/guard-demo", "guard"),
         ("Policy presets", f"{GH}/tree/main/examples/policies", "presets"),
-    ]),
+    ], "deeper"),
     ("Run confined", "$ agentstack run --lockdown", [
+        ("Lock down a run", "howto/lock-down-a-run.html", "howto-lockdown"),
         ("Sandbox & lockdown", "index.html#sandbox", "sandbox"),
         ("What's enforced", "index.html#enforced", "enforced"),
         ("Enforcement matrix", "enforcement.html", "matrix"),
-    ]),
-    ("Observe", "$ agentstack report", [
-        ("See what happened", "howto/see-what-happened.html", "howto-audit"),
+    ], "deeper"),
+    ("Team & CI", None, [
+        ("Team setup", "howto/team-setup.html", "howto-team"),
+        ("Use in CI", "howto/ci.html", "howto-ci"),
+    ], "deeper"),
+    ("Observe deeper", "$ agentstack report", [
         ("Reports & call audit", "examples.html#e20", "reports"),
         ("Wire-cost analysis", "examples.html#e21", "wirecost"),
-    ]),
-    ("Reference", None, [
-        ("Every command", "reference.html", "reference"),
-        ("Agent manual (skill)", f"{GH}/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md", "manual"),
-    ]),
+    ], "deeper"),
     ("Project", None, [
         ("Security review", "security-review-2026-07-11.html", "secreview"),
         ("Strategy", f"{GH}/blob/main/STRATEGY.md", "strategy"),
         ("History", "history.html", "history"),
-    ]),
+    ], "deeper"),
 ]
 
 # ------------------------------------------- per-page inline expansions -----
@@ -146,9 +155,18 @@ def esc(s):
 
 def render(page_file, current):
     out = [f'<aside class="side" aria-label="Documentation">']
-    for group, cmd, entries in TREE:
-        out.append('  <div class="grp">')
-        out.append(f'    <b>{esc(group)}</b>')
+    for group, cmd, entries, tier in TREE:
+        # Tier-one groups render inline as a <div>; "deeper" groups collapse
+        # into a <details> that auto-opens when it holds the current page, so
+        # the reader always sees where they are without expanding by hand.
+        collapsed = tier == "deeper"
+        if collapsed:
+            open_attr = ' open' if any(key == current for _, _, key in entries) else ''
+            out.append(f'  <details class="grp"{open_attr}>')
+            out.append(f'    <summary>{esc(group)}</summary>')
+        else:
+            out.append('  <div class="grp">')
+            out.append(f'    <b>{esc(group)}</b>')
         if cmd:
             out.append(f'    <code>{esc(cmd)}</code>')
         out.append('    <ul>')
@@ -171,7 +189,7 @@ def render(page_file, current):
                 out.append('        </ul>')
             out.append('      </li>')
         out.append('    </ul>')
-        out.append('  </div>')
+        out.append('  </details>' if collapsed else '  </div>')
     out.append('</aside>')
     return '\n'.join(out)
 
@@ -231,7 +249,22 @@ MAP_HOOKS = {
 
 def render_map():
     out = ['<div class="docmap" aria-label="Documentation grouped by what you want to do">']
-    for group, cmd, entries in TREE:
+    deeper_started = False
+    for group, cmd, entries, tier in TREE:
+        # The open tier-one cards come first; a single subtle "Go deeper"
+        # divider separates them from the collapsed power-user groups. Inline
+        # styles reference the site's own CSS variables so the rule stays
+        # self-contained (the docmap region is generated, not hand-edited) and
+        # tracks light/dark automatically.
+        if tier == "deeper" and not deeper_started:
+            deeper_started = True
+            out.append(
+                '      <div class="dm-deeper" role="separator" style="grid-column: 1 / -1; '
+                'display: flex; align-items: center; gap: 0.7rem; margin: 1.4rem 0 0.2rem; '
+                'font-family: var(--mono); font-size: 0.64rem; font-weight: 600; '
+                'letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted);">'
+                'Go deeper<span style="flex: 1; height: 1px; background: var(--line);"></span></div>'
+            )
         out.append('      <div class="fcard">')
         out.append(f'        <h3>{esc(group)}</h3>')
         if cmd:

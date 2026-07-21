@@ -475,6 +475,7 @@
     </p>
     <div class="cta" style="margin-top:1.1rem">
       <a class="btn primary" href="start.html">Get started · 10 min →</a>
+      <a class="btn secondary" href="docs.html">Browse the docs</a>
       <a class="btn secondary" href="#install">Install</a>
     </div>
 
@@ -1127,26 +1128,33 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
             </ul>
           </div>
           <div class="fcard">
-            <h3>Configure</h3>
-            <code class="dmcmd">$ agentstack apply</code>
+            <h3>Everyday</h3>
+            <code class="dmcmd">$ agentstack add · apply · doctor</code>
             <ul>
-              <li><a href="architecture.html">How it works</a><small>activation, leases, policy layers</small></li>
               <li><a href="index.html#manifest">The manifest</a><small>servers, skills, ${REF} secrets</small></li>
-              <li><a href="reference.html#the-central-library">Central library</a><small>one library, every project</small></li>
-              <li><a href="index.html#modes">Delivery modes</a><small>static, clean-at-rest, or zero files</small></li>
-              <li><a href="reference.html#dashboard">Dashboard</a><small>the same loop, in a web UI</small></li>
+              <li><a href="howto/add-a-server.html">Add a server</a><small>four verbs, one table</small></li>
+              <li><a href="howto/add-a-skill.html">Add a skill</a><small>install, author, or just try one</small></li>
+              <li><a href="howto/undo.html">Undo anything</a><small>restore, plus the rest</small></li>
+              <li><a href="howto/see-what-happened.html">See what happened</a><small>runs, calls, cost, explain</small></li>
+              <li><a href="howto/trust-a-repo.html">Trust a cloned repo</a><small>review, then consent</small></li>
             </ul>
           </div>
           <div class="fcard">
-            <h3>How-to</h3>
+            <h3>Reference</h3>
             <ul>
-              <li><a href="howto/add-a-server.html">Add a server</a><small>four verbs, one table</small></li>
-              <li><a href="howto/add-a-skill.html">Add a skill</a><small>install, author, or just try one</small></li>
-              <li><a href="howto/trust-a-repo.html">Trust a cloned repo</a><small>review, then consent</small></li>
-              <li><a href="howto/lock-down-a-run.html">Lock down a run</a><small>the escalation ladder</small></li>
-              <li><a href="howto/team-setup.html">Team setup</a><small>clone, apply, done</small></li>
-              <li><a href="howto/ci.html">Use in CI</a><small>install --locked + doctor --ci</small></li>
-              <li><a href="howto/undo.html">Undo anything</a><small>restore, plus the rest</small></li>
+              <li><a href="reference.html">Every command</a><small>every command, CI-tested</small></li>
+              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md">Agent manual (skill)</a><small>ships inside the binary</small></li>
+            </ul>
+          </div>
+          <div class="dm-deeper" role="separator" style="grid-column: 1 / -1; display: flex; align-items: center; gap: 0.7rem; margin: 1.4rem 0 0.2rem; font-family: var(--mono); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted);">Go deeper<span style="flex: 1; height: 1px; background: var(--line);"></span></div>
+          <div class="fcard">
+            <h3>Configure deeper</h3>
+            <code class="dmcmd">$ agentstack use · session</code>
+            <ul>
+              <li><a href="architecture.html">How it works</a><small>activation, leases, policy layers</small></li>
+              <li><a href="reference.html#the-central-library">Central library</a><small>one library, every project</small></li>
+              <li><a href="index.html#modes">Delivery modes</a><small>static, clean-at-rest, or zero files</small></li>
+              <li><a href="reference.html#dashboard">Dashboard</a><small>the same loop, in a web UI</small></li>
             </ul>
           </div>
           <div class="fcard">
@@ -1163,25 +1171,25 @@ agentstack doctor --ci        # fail on errors, drift, policy, unsafe content</c
             <h3>Run confined</h3>
             <code class="dmcmd">$ agentstack run --lockdown</code>
             <ul>
+              <li><a href="howto/lock-down-a-run.html">Lock down a run</a><small>the escalation ladder</small></li>
               <li><a href="index.html#sandbox">Sandbox &amp; lockdown</a><small>container + egress firewall</small></li>
               <li><a href="index.html#enforced">What's enforced</a><small>the honest per-mode matrix</small></li>
               <li><a href="enforcement.html">Enforcement matrix</a><small>checked against the source</small></li>
             </ul>
           </div>
           <div class="fcard">
-            <h3>Observe</h3>
-            <code class="dmcmd">$ agentstack report</code>
+            <h3>Team &amp; CI</h3>
             <ul>
-              <li><a href="howto/see-what-happened.html">See what happened</a><small>runs, calls, cost, explain</small></li>
-              <li><a href="examples.html#e20">Reports &amp; call audit</a><small>per-run evidence, by example</small></li>
-              <li><a href="examples.html#e21">Wire-cost analysis</a><small>what your tools cost</small></li>
+              <li><a href="howto/team-setup.html">Team setup</a><small>clone, apply, done</small></li>
+              <li><a href="howto/ci.html">Use in CI</a><small>install --locked + doctor --ci</small></li>
             </ul>
           </div>
           <div class="fcard">
-            <h3>Reference</h3>
+            <h3>Observe deeper</h3>
+            <code class="dmcmd">$ agentstack report</code>
             <ul>
-              <li><a href="reference.html">Every command</a><small>every command, CI-tested</small></li>
-              <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md">Agent manual (skill)</a><small>ships inside the binary</small></li>
+              <li><a href="examples.html#e20">Reports &amp; call audit</a><small>per-run evidence, by example</small></li>
+              <li><a href="examples.html#e21">Wire-cost analysis</a><small>what your tools cost</small></li>
             </ul>
           </div>
           <div class="fcard">
