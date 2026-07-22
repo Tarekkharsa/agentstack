@@ -57,12 +57,13 @@ use boa_engine::{
 };
 
 use bridge::{
-    activate, install_agent, install_progress, js_to_value, value_to_js, PendingSpawn, SpawnState,
+    activate, install_agent, install_budget, install_progress, js_to_value, value_to_js,
+    PendingSpawn, SpawnState,
 };
 
 pub use bridge::Progress;
 pub use error::{WorkflowError, WorkflowErrorKind};
-pub use meta::Meta;
+pub use meta::{extract_meta, Meta};
 
 /// The verbatim §12.2/§12.3 honesty text, copied byte-for-byte from
 /// `docs/design/workflows-capability.md`. It is the single source of the
@@ -108,9 +109,15 @@ pub const POSTURE_LABEL: &str = concat!(
     "states that in the posture label rather than pretending otherwise.",
 );
 
-/// Interpreter ceilings. All host-side, all set before untrusted code runs. The
-/// CLI computes these under `MachineLimits` discipline (Stage D); Stage B only
-/// consumes them.
+/// Interpreter ceilings. All host-side, all set before untrusted code runs.
+///
+/// §12.4's "interpreter-level limits inside a slice" (per-slice tightening of
+/// these values) is evaluated and DEFERRED, recorded here rather than silently
+/// dropped: the limits below are enforced by the `Context` inside *every*
+/// slice already, so per-slice tightening adds configuration surface without
+/// new containment — and the class no setting can catch (a non-yielding
+/// builtin slice, e.g. the §12.2 ReDoS) ticks no counter at any value; that is
+/// the out-of-thread watchdog's job, already witnessed (witness 5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeLimits {
     /// Boa's default is `u64::MAX`, so this MUST be set for containment — an
@@ -130,6 +137,30 @@ impl Default for RuntimeLimits {
             stack_size_limit: 16 * 1024,
         }
     }
+}
+
+/// What admission granted this run (Stage D). The CLI computes the FINAL
+/// effective ceilings — machine cap ∩ manifest request ∩ script `meta` request
+/// — and hands them here; the engine never sees the wider layers. At
+/// construction the engine re-asserts narrowing as defense in depth (a caller
+/// bypassing the CLI's cross-checks still cannot widen anything):
+/// `meta.roles ⊆ admitted_roles` refuses construction, and the ceilings are
+/// re-clamped against the script's own `meta` request (idempotent when the CLI
+/// did its job; pure narrowing always).
+///
+/// `max_wall_seconds` is INERT here: a number surfaced through `budget`, never
+/// a clock — the engine stays clock-free and wall enforcement lives in the
+/// CLI's drive loop (live-run only, never replayable state).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Grant {
+    pub max_agents: u32,
+    pub max_wall_seconds: u64,
+    /// The ADMITTED role set (`NormalizedWorkflow.roles`). Used ONLY for the
+    /// construction-time `meta.roles ⊆ admitted` re-assertion — the per-call
+    /// bridge check stays `role ∈ meta.roles` (R2, the script's declared
+    /// closed set); replacing it with an admitted-set check would let a script
+    /// call a manifest-authorized role it never declared, a widening.
+    pub admitted_roles: Vec<String>,
 }
 
 /// One brokered child-run request handed to the CLI to execute as a locked run.
@@ -208,12 +239,17 @@ impl WorkflowRun {
     /// it crosses into the interpreter only through the depth-bounded JSON
     /// boundary (A2), so adversarial nesting is refused here, not stacked.
     ///
-    /// Returns `Err` for a parse failure or a meta-rule violation; at that point
-    /// nothing untrusted has executed.
+    /// `grant` is what admission granted (Stage D): the final effective
+    /// ceilings plus the admitted role set. Construction re-asserts narrowing
+    /// (`meta.roles ⊆ admitted`, ceiling re-clamp) before any `Context` exists.
+    ///
+    /// Returns `Err` for a parse failure, a meta-rule violation, or a
+    /// role-admission violation; at that point nothing untrusted has executed.
     pub fn new(
         script: &str,
         limits: RuntimeLimits,
         args: serde_json::Value,
+        grant: Grant,
     ) -> Result<Self, WorkflowError> {
         // AL5: this is a self-contained domain crate that ingests hostile script
         // text, so it must fail closed at EVERY entry — never rely on its caller
@@ -229,9 +265,20 @@ impl WorkflowRun {
             || meta::extract_meta(script),
         )?;
 
+        // Stage D role re-assertion, BEFORE any Context exists: every role the
+        // script declared must be in the admitted set. This is defense in
+        // depth behind the CLI's own cross-check (against a cross-check
+        // bypass), never a replacement for the per-call bridge check — that
+        // one stays `role ∈ meta.roles`.
+        for role in &meta.roles {
+            if !grant.admitted_roles.iter().any(|r| r == role) {
+                return Err(WorkflowError::role_not_admitted(role));
+            }
+        }
+
         contain_panic(
             WorkflowError::internal("workflow interpreter construction panicked"),
-            || Self::build(script, limits, meta, args),
+            || Self::build(script, limits, meta, args, grant),
         )
     }
 
@@ -242,10 +289,27 @@ impl WorkflowRun {
         limits: RuntimeLimits,
         meta: Meta,
         args: serde_json::Value,
+        grant: Grant,
     ) -> Result<Self, WorkflowError> {
+        // Defensive re-clamp of the granted ceilings against the script's own
+        // meta request — idempotent when the CLI computed the grant (it takes
+        // the same min), pure narrowing for any caller that didn't. The
+        // clamped values are stored ONCE (`SpawnState.max_agents`, the budget
+        // statics) and every consumer — the exhaustion check, `budget` — reads
+        // that single source (the ceiling-identity requirement).
+        let max_agents = meta
+            .max_agents
+            .map_or(grant.max_agents, |m| m.min(grant.max_agents));
+        let max_wall_seconds = meta
+            .max_wall_seconds
+            .map_or(grant.max_wall_seconds, |m| m.min(grant.max_wall_seconds));
+
         let compile_denied = Rc::new(Cell::new(false));
         let context = build_context(limits, Rc::clone(&compile_denied))?;
-        let state = Rc::new(RefCell::new(SpawnState::new(meta.roles.clone())));
+        let state = Rc::new(RefCell::new(SpawnState::new(
+            meta.roles.clone(),
+            max_agents,
+        )));
 
         let mut run = Self {
             context,
@@ -258,13 +322,22 @@ impl WorkflowRun {
             done: false,
             poisoned: false,
         };
-        run.install(&args)?;
+        run.install(&args, max_agents, max_wall_seconds)?;
         Ok(run)
     }
 
     /// The validated metadata (roles/ceilings the CLI needs before spawning).
     pub fn meta(&self) -> &Meta {
         &self.meta
+    }
+
+    /// Whether an `agent()` call was refused at the granted `max_agents`
+    /// ceiling during this run. Backed by the non-forgeable host flag the
+    /// bridge sets (the `compile_denied` pattern) — a script that catches and
+    /// absorbs the refusal still cannot hide it from the invoker. The CLI
+    /// reads this for its honesty line; the recorded-report half is Stage E.
+    pub fn exhausted(&self) -> bool {
+        self.state.borrow().exhausted
     }
 
     /// Drain the `phase()`/`log()` progress buffered since the last call.
@@ -314,11 +387,20 @@ impl WorkflowRun {
         }
     }
 
-    fn install(&mut self, args: &serde_json::Value) -> Result<(), WorkflowError> {
+    fn install(
+        &mut self,
+        args: &serde_json::Value,
+        max_agents: u32,
+        max_wall_seconds: u64,
+    ) -> Result<(), WorkflowError> {
         install_agent(&mut self.context)
             .map_err(|_| WorkflowError::internal("failed to install the agent bridge"))?;
         install_progress(&mut self.context)
             .map_err(|_| WorkflowError::internal("failed to install the progress bridge"))?;
+        // The Stage D budget view: granted statics + spawn-derived counts,
+        // deterministic by construction (no clock crosses this boundary).
+        install_budget(&mut self.context, max_agents, max_wall_seconds)
+            .map_err(|_| WorkflowError::internal("failed to install the budget global"))?;
         // The invoker's `args`, crossing the depth-bounded JSON boundary (A2)
         // and installed read-only (`Attribute::empty()`: non-writable,
         // non-enumerable, non-configurable — the script can read it, never
@@ -444,12 +526,19 @@ impl WorkflowRun {
 
     /// Classify an error surfaced directly from `eval` / `run_jobs`. A Boa
     /// `RuntimeLimit` (loop / recursion / stack) is non-catchable and arrives
-    /// here rather than as a promise rejection.
+    /// here rather than as a promise rejection. The `RuntimeLimit` check comes
+    /// first (it names what actually terminated the slice); behind it, the
+    /// non-forgeable exhaustion flag labels a ceiling refusal that surfaced
+    /// synchronously (e.g. an unawaited top-level `agent()` call).
     fn classify_engine_error(&mut self, err: &JsError) -> WorkflowError {
         if let Ok(native) = err.try_native(&mut self.context) {
             if matches!(native.kind, JsNativeErrorKind::RuntimeLimit) {
                 return WorkflowError::iteration_limit("interpreter execution limit exceeded");
             }
+        }
+        if self.state.borrow().exhausted {
+            let granted = self.state.borrow().max_agents;
+            return WorkflowError::agents_exhausted(granted);
         }
         WorkflowError::runtime_error(err.to_string())
     }
@@ -470,6 +559,15 @@ impl WorkflowRun {
     fn classify_rejection(&mut self, reason: &JsValue) -> WorkflowError {
         if self.compile_denied.get() {
             return WorkflowError::compile_denied();
+        }
+        // Stage D: same non-forgeable-flag pattern for exhaustion, same
+        // accepted per-run imprecision as compile_denied above — a script that
+        // catches the refusal and later fails for an unrelated reason is still
+        // labeled AgentsExhausted. Both are Failed, a genuine exhaustion did
+        // occur, and the label can never flip an outcome.
+        if self.state.borrow().exhausted {
+            let granted = self.state.borrow().max_agents;
+            return WorkflowError::agents_exhausted(granted);
         }
         let text = reason
             .to_string(&mut self.context)
@@ -574,8 +672,36 @@ impl WorkflowRun {
 mod tests {
     use super::*;
 
+    /// A grant that never interferes: generous ceilings, and the script's own
+    /// declared roles admitted verbatim (mirroring a CLI whose manifest set
+    /// covers the script) — so the Stage B/C witnesses exercise exactly what
+    /// they did before Stage D existed.
+    fn permissive_grant(script: &str) -> Grant {
+        let meta = extract_meta(script).expect("test script parses");
+        Grant {
+            max_agents: 1000,
+            max_wall_seconds: 1800,
+            admitted_roles: meta.roles,
+        }
+    }
+
     fn new_run(script: &str) -> Result<WorkflowRun, WorkflowError> {
-        WorkflowRun::new(script, RuntimeLimits::default(), serde_json::Value::Null)
+        let grant = permissive_grant(script);
+        WorkflowRun::new(
+            script,
+            RuntimeLimits::default(),
+            serde_json::Value::Null,
+            grant,
+        )
+    }
+
+    fn new_run_with_grant(script: &str, grant: Grant) -> Result<WorkflowRun, WorkflowError> {
+        WorkflowRun::new(
+            script,
+            RuntimeLimits::default(),
+            serde_json::Value::Null,
+            grant,
+        )
     }
 
     fn run_to_done(script: &str) -> serde_json::Value {
@@ -850,6 +976,7 @@ mod tests {
             script,
             RuntimeLimits::default(),
             serde_json::json!({ "items": ["a", "b"] }),
+            permissive_grant(script),
         )
         .unwrap();
         match run.step(Vec::new()) {
@@ -873,10 +1000,12 @@ mod tests {
         for _ in 0..300 {
             adversarial = serde_json::Value::Array(vec![adversarial]);
         }
+        let script = "const meta = { roles: [] };\nreturn 1;";
         let err = match WorkflowRun::new(
-            "const meta = { roles: [] };\nreturn 1;",
+            script,
             RuntimeLimits::default(),
             adversarial,
+            permissive_grant(script),
         ) {
             Err(err) => err,
             Ok(_) => panic!("expected nested args to refuse construction"),
@@ -912,5 +1041,287 @@ mod tests {
         }
         // Drained: a second take returns nothing.
         assert!(run.take_progress().is_empty());
+    }
+
+    #[test]
+    fn exhaustion_fails_pending_calls_closed_partial_batch() {
+        // Witness 3 (§12.4): a parallel batch STRADDLING the granted ceiling
+        // exercises the per-call partial-batch semantics — the first K calls
+        // that fit spawn normally; the excess calls fail closed (a synchronous
+        // catchable throw, so no promise ever exists and R1 holds — through
+        // parallel's catch each becomes that slot's null); spawning stops; and
+        // the outcome states the exhaustion honestly via the non-forgeable
+        // host flag. The recorded-report half of witness 3 is honestly
+        // deferred to Stage E (recorder events + `workflow report`).
+        let script = "const meta = { roles: ['r'] };\n\
+             const outs = await parallel([\n\
+               () => agent('a', { role: 'r' }),\n\
+               () => agent('b', { role: 'r' }),\n\
+               () => agent('c', { role: 'r' }),\n\
+               () => agent('d', { role: 'r' }),\n\
+             ]);\n\
+             return outs;";
+        let grant = Grant {
+            max_agents: 2,
+            max_wall_seconds: 1800,
+            admitted_roles: vec!["r".into()],
+        };
+        let mut run = new_run_with_grant(script, grant).unwrap();
+
+        let batch = match run.step(Vec::new()) {
+            StepOutcome::Batch(batch) => batch,
+            other => panic!("expected Batch, got {other:?}"),
+        };
+        // Partial batch: exactly the 2 granted calls spawned, in call order.
+        let prompts: Vec<&str> = batch.requests.iter().map(|r| r.prompt.as_str()).collect();
+        assert_eq!(prompts, ["a", "b"]);
+        assert!(
+            run.exhausted(),
+            "the ceiling refusal must set the host flag"
+        );
+
+        let results = batch
+            .requests
+            .iter()
+            .map(|r| StepResult {
+                request_id: r.id,
+                output: StepOutput::Completed(serde_json::Value::String(r.prompt.to_uppercase())),
+            })
+            .collect();
+        match run.step(results) {
+            StepOutcome::Done(value) => {
+                assert_eq!(value, serde_json::json!(["A", "B", null, null]))
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+        assert!(run.exhausted(), "the flag survives to the outcome");
+    }
+
+    #[test]
+    fn uncaught_exhaustion_fails_with_distinct_kind() {
+        // A direct uncaught `await agent()` past the ceiling fails the run
+        // with the DISTINCT AgentsExhausted kind — never confusable with a
+        // failed child (null) or a generic RuntimeError.
+        let script = "const meta = { roles: ['r'] };\n\
+             return await agent('p', { role: 'r' });";
+        let grant = Grant {
+            max_agents: 0,
+            max_wall_seconds: 1800,
+            admitted_roles: vec!["r".into()],
+        };
+        let mut run = new_run_with_grant(script, grant).unwrap();
+        match run.step(Vec::new()) {
+            StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::AgentsExhausted),
+            other => panic!("expected Failed(AgentsExhausted), got {other:?}"),
+        }
+        assert!(run.exhausted());
+    }
+
+    #[test]
+    fn forged_exhaustion_is_runtime_error_not_agents_exhausted() {
+        // D1 rests on the exhaustion flag being unforgeable (the same claim
+        // proven for compile_denied): a script that throws a fake exhaustion
+        // message does NOT set the host flag, so it classifies as a plain
+        // RuntimeError — the kind cannot be forged from script text.
+        let script = "const meta = { roles: [] };\n\
+             throw new Error('agent() refused: all 0 granted agent slot(s) are spent');";
+        let mut run = new_run(script).unwrap();
+        match run.step(Vec::new()) {
+            StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::RuntimeError),
+            other => panic!("expected Failed(RuntimeError), got {other:?}"),
+        }
+        assert!(!run.exhausted(), "a forged message must not set the flag");
+    }
+
+    #[test]
+    fn budget_exposes_only_granted_statics_and_spawn_counts() {
+        // Budget-determinism witness: `budget` is a FROZEN object of exactly
+        // four members — granted statics and spawn-derived counts, no clock,
+        // no elapsed time, nothing time-derived — and neither the members,
+        // the shape, nor the global can be changed from script code.
+        let script = "const meta = { roles: [] };\n\
+             const frozen = Object.isFrozen(budget);\n\
+             try { budget.maxAgents = 999; } catch (e) {}\n\
+             try { budget.extra = 1; } catch (e) {}\n\
+             try { budget = null; } catch (e) {}\n\
+             const keys = Object.keys(budget).sort();\n\
+             return { frozen, keys, ma: budget.maxAgents, mw: budget.maxWallSeconds,\n\
+                      s: budget.spawned(), r: budget.remaining(),\n\
+                      fns: [typeof budget.spawned, typeof budget.remaining] };";
+        let grant = Grant {
+            max_agents: 5,
+            max_wall_seconds: 300,
+            admitted_roles: Vec::new(),
+        };
+        let mut run = new_run_with_grant(script, grant).unwrap();
+        match run.step(Vec::new()) {
+            StepOutcome::Done(v) => assert_eq!(
+                v,
+                serde_json::json!({
+                    "frozen": true,
+                    "keys": ["maxAgents", "maxWallSeconds", "remaining", "spawned"],
+                    "ma": 5,
+                    "mw": 300,
+                    "s": 0,
+                    "r": 5,
+                    "fns": ["function", "function"],
+                })
+            ),
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn budget_pacing_never_trips_exhaustion() {
+        // Ceiling-identity witness: `remaining()` and the exhaustion check
+        // derive from the IDENTICAL effective max_agents (one SpawnState
+        // field, not two computations), so a script pacing on `remaining()`
+        // completes cleanly WITHOUT ever tripping exhaustion.
+        let script = "const meta = { roles: ['r'] };\n\
+             const outs = [];\n\
+             while (budget.remaining() > 0) {\n\
+               outs.push(await agent('p' + budget.spawned(), { role: 'r' }));\n\
+             }\n\
+             return { outs, spawned: budget.spawned(), remaining: budget.remaining() };";
+        let grant = Grant {
+            max_agents: 3,
+            max_wall_seconds: 1800,
+            admitted_roles: vec!["r".into()],
+        };
+        let mut run = new_run_with_grant(script, grant).unwrap();
+
+        let mut results: Vec<StepResult> = Vec::new();
+        let value = loop {
+            match run.step(std::mem::take(&mut results)) {
+                StepOutcome::Batch(batch) => {
+                    results = batch
+                        .requests
+                        .iter()
+                        .map(|r| StepResult {
+                            request_id: r.id,
+                            output: StepOutput::Completed(serde_json::Value::String("ok".into())),
+                        })
+                        .collect();
+                }
+                StepOutcome::Done(v) => break v,
+                other => panic!("expected Batch or Done, got {other:?}"),
+            }
+        };
+        assert_eq!(
+            value,
+            serde_json::json!({ "outs": ["ok", "ok", "ok"], "spawned": 3, "remaining": 0 })
+        );
+        assert!(
+            !run.exhausted(),
+            "pacing on budget.remaining() must never trip exhaustion"
+        );
+    }
+
+    #[test]
+    fn meta_narrows_grant_never_widens() {
+        // The ceiling chain at the engine seam: a script meta requesting LESS
+        // than the grant narrows both budget's view and the enforcement; a
+        // meta requesting MORE is clamped to the grant — never widens.
+        let narrow = "const meta = { roles: [], maxAgents: 2, maxWallSeconds: 60 };\n\
+             return [budget.maxAgents, budget.maxWallSeconds];";
+        let mut run = new_run_with_grant(
+            narrow,
+            Grant {
+                max_agents: 100,
+                max_wall_seconds: 1800,
+                admitted_roles: Vec::new(),
+            },
+        )
+        .unwrap();
+        match run.step(Vec::new()) {
+            StepOutcome::Done(v) => assert_eq!(v, serde_json::json!([2, 60])),
+            other => panic!("expected Done, got {other:?}"),
+        }
+
+        let wide = "const meta = { roles: [], maxAgents: 999999, maxWallSeconds: 999999 };\n\
+             return [budget.maxAgents, budget.maxWallSeconds];";
+        let mut run = new_run_with_grant(
+            wide,
+            Grant {
+                max_agents: 5,
+                max_wall_seconds: 300,
+                admitted_roles: Vec::new(),
+            },
+        )
+        .unwrap();
+        match run.step(Vec::new()) {
+            StepOutcome::Done(v) => assert_eq!(v, serde_json::json!([5, 300])),
+            other => panic!("expected Done, got {other:?}"),
+        }
+
+        // The narrowed value is ENFORCED, not just displayed: meta.maxAgents 1
+        // under a grant of 100 refuses the second call.
+        let enforced = "const meta = { roles: ['r'], maxAgents: 1 };\n\
+             const a = await agent('one', { role: 'r' });\n\
+             let denied = false;\n\
+             try { agent('two', { role: 'r' }); } catch (e) { denied = true; }\n\
+             return { a, denied };";
+        let mut run = new_run_with_grant(
+            enforced,
+            Grant {
+                max_agents: 100,
+                max_wall_seconds: 1800,
+                admitted_roles: vec!["r".into()],
+            },
+        )
+        .unwrap();
+        let batch = match run.step(Vec::new()) {
+            StepOutcome::Batch(batch) => batch,
+            other => panic!("expected Batch, got {other:?}"),
+        };
+        assert_eq!(batch.requests.len(), 1);
+        let results = vec![StepResult {
+            request_id: batch.requests[0].id,
+            output: StepOutput::Completed(serde_json::Value::String("ok".into())),
+        }];
+        match run.step(results) {
+            StepOutcome::Done(v) => {
+                assert_eq!(v, serde_json::json!({ "a": "ok", "denied": true }))
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+        assert!(run.exhausted());
+    }
+
+    #[test]
+    fn unadmitted_meta_role_refuses_construction() {
+        // Narrowing-only role hardening (a), driven through the engine API
+        // directly: a meta.roles ⊄ admitted construction is refused before
+        // any Context exists — defense in depth behind the CLI cross-check.
+        let script = "const meta = { roles: ['a', 'b'] };\nreturn 1;";
+        let grant = Grant {
+            max_agents: 10,
+            max_wall_seconds: 60,
+            admitted_roles: vec!["a".into()],
+        };
+        let err = match new_run_with_grant(script, grant) {
+            Err(err) => err,
+            Ok(_) => panic!("expected construction to refuse the unadmitted role"),
+        };
+        assert_eq!(err.kind, WorkflowErrorKind::RoleNotAdmitted);
+    }
+
+    #[test]
+    fn admitted_but_undeclared_role_still_refused_at_bridge() {
+        // Narrowing-only role hardening (b): the admitted set NEVER widens
+        // the per-call check — a call naming an admitted-but-undeclared role
+        // is still refused at the bridge (role ∈ meta.roles, R2 unchanged).
+        let script = "const meta = { roles: ['a'] };\n\
+             return await agent('p', { role: 'b' });";
+        let grant = Grant {
+            max_agents: 10,
+            max_wall_seconds: 60,
+            admitted_roles: vec!["a".into(), "b".into()],
+        };
+        let mut run = new_run_with_grant(script, grant).unwrap();
+        match run.step(Vec::new()) {
+            StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::UndeclaredRole),
+            other => panic!("expected Failed(UndeclaredRole), got {other:?}"),
+        }
     }
 }

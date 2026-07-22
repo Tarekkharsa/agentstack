@@ -26,7 +26,7 @@ const FAKE_CLAUDE: &str = r#"#!/bin/sh
 last=""
 for a in "$@"; do last="$a"; done
 case "$last" in
-  sleep-forever*) sleep 30 ;;
+  sleep-forever*) sleep 300 ;;
   Reply\ CONFIRMED*) echo "CONFIRMED captures all three rules" ;;
   Combine*) echo "AgentStack fails closed: policy only narrows, untrusted content stays inert, secrets never serialize." ;;
   In\ 6\ words*) echo "Nothing runs until it is trusted" ;;
@@ -144,9 +144,14 @@ fn acceptance_bundle_admits_and_runs_end_to_end() {
 /// Witness 5, the Stage C half: a drive stalled on a long-running child is
 /// force-exited by the OUT-OF-THREAD watchdog at the PROCESS level — exit
 /// code 124, an honest stderr line, well before the child's own duration.
-/// The "outcome is recorded" clause of witness 5 completes in Stage E, when
-/// the workflow gains recorder events; this test states that honestly and
-/// asserts only the process-level backstop that Stage C ships.
+/// Stage D arms the watchdog at the EFFECTIVE ceiling plus the fixed grace
+/// (1s + 30s here), so the force-exit lands at ~31s — the cooperative
+/// in-band path cannot fire in this scenario (the drive thread is blocked
+/// joining the batch while the child sleeps), which is precisely the stall
+/// class the watchdog backstop exists for. The "outcome is recorded" clause
+/// of witness 5 completes in Stage E, when the workflow gains recorder
+/// events; this test states that honestly and asserts only the
+/// process-level backstop.
 #[test]
 fn watchdog_force_exits_a_stalled_run_at_the_process_level() {
     let (home, _bins, path) = fixture();
@@ -197,10 +202,10 @@ fn watchdog_force_exits_a_stalled_run_at_the_process_level() {
     );
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(stderr.contains("wall-clock ceiling"), "{stderr}");
-    // Far below the child's 30 s sleep: the exit came from the watchdog
-    // (1 s ceiling), not from the child finishing.
+    // Far below the child's 300 s sleep: the exit came from the watchdog
+    // (1 s effective ceiling + 30 s grace), not from the child finishing.
     assert!(
-        elapsed.as_secs() < 15,
-        "watchdog should fire at ~1s, took {elapsed:?}"
+        elapsed.as_secs() < 60,
+        "watchdog should fire at ~31s (ceiling+grace), took {elapsed:?}"
     );
 }

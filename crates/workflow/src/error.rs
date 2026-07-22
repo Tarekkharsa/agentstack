@@ -17,6 +17,16 @@ pub enum WorkflowErrorKind {
     /// This is *script-internal consistency*, not an authority check — the
     /// manifest/profile authorization gate lives in the CLI (Stage C/D).
     UndeclaredRole,
+    /// The script's `meta.roles` names a role outside the ADMITTED set the
+    /// grant carries (Stage D construction re-assertion — defense in depth
+    /// behind the CLI's own cross-check, never a widening of the per-call
+    /// bridge check, which stays `role ∈ meta.roles`).
+    RoleNotAdmitted,
+    /// An `agent()` call was refused because every granted agent slot is
+    /// spent (the Stage D `max_agents` ceiling). The pending call failed
+    /// closed; spawning stopped. Distinct from a failed child on purpose: a
+    /// ceiling refusal must never masquerade as a flaky worker.
+    AgentsExhausted,
     /// A Boa `RuntimeLimit` (loop / recursion / stack) fired. Non-catchable
     /// from JavaScript, so a script can never swallow its own ceiling.
     IterationLimit,
@@ -53,6 +63,12 @@ impl WorkflowError {
             WorkflowErrorKind::UndeclaredRole => {
                 "the script called a role it did not declare in meta.roles"
             }
+            WorkflowErrorKind::RoleNotAdmitted => {
+                "the script declared a role outside the admitted role set"
+            }
+            WorkflowErrorKind::AgentsExhausted => {
+                "the workflow exhausted its granted agent ceiling"
+            }
             WorkflowErrorKind::IterationLimit => {
                 "the workflow exceeded an interpreter execution limit"
             }
@@ -81,6 +97,27 @@ impl WorkflowError {
         Self {
             kind: WorkflowErrorKind::UndeclaredRole,
             message: format!("agent() named role {role:?}, absent from meta.roles"),
+        }
+    }
+
+    pub(crate) fn role_not_admitted(role: &str) -> Self {
+        Self {
+            kind: WorkflowErrorKind::RoleNotAdmitted,
+            message: format!(
+                "the script's meta.roles names {role:?}, which the admitted role set does not \
+                 include — a grant never widens"
+            ),
+        }
+    }
+
+    pub(crate) fn agents_exhausted(granted: u32) -> Self {
+        Self {
+            kind: WorkflowErrorKind::AgentsExhausted,
+            message: format!(
+                "the workflow exhausted its granted agent ceiling ({granted}): the pending \
+                 agent() call failed closed and spawning stopped — pace with budget.remaining() \
+                 to avoid exhaustion (recording this outcome in the run report lands in Stage E)"
+            ),
         }
     }
 

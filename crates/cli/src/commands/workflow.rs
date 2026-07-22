@@ -36,7 +36,8 @@ use anyhow::{Context as AnyhowContext, Result};
 use owo_colors::OwoColorize;
 
 use agentstack_workflow::{
-    Progress, RuntimeLimits, SpawnRequest, StepOutcome, StepOutput, StepResult, WorkflowRun,
+    extract_meta, Grant, Progress, RuntimeLimits, SpawnRequest, StepOutcome, StepOutput,
+    StepResult, WorkflowRun,
 };
 
 use crate::cli::{RunArgs, WorkflowRunArgs};
@@ -67,6 +68,16 @@ const MAX_SCRIPT_BYTES: u64 = 1024 * 1024;
 /// The watchdog's process exit code on wall-clock overrun — the `timeout(1)`
 /// convention, so CI wrappers recognize it.
 const WATCHDOG_EXIT_CODE: i32 = 124;
+
+/// Grace the watchdog is armed ABOVE the effective wall ceiling: room for an
+/// in-flight batch to reach the next cooperative checkpoint (the CLI is
+/// blocked joining the batch while children run, so the clean in-band refusal
+/// can only fire at batch boundaries); a batch still running past the grace
+/// fail-closes via the watchdog at exit 124. Honest note: the fixed grace is
+/// proportionally huge for a tiny ceiling (a 1s `meta.maxWallSeconds` → 31s
+/// hard kill) — acceptable, since a genuinely stalled run isn't escalating,
+/// just burning CPU, and both paths fail closed.
+const WATCHDOG_GRACE_SECS: u64 = 30;
 
 /// One admitted role: the profile name it fences to, the harness the
 /// profile binds (default claude-code), and how its children schedule.
@@ -148,15 +159,21 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
     // The pinned bytes, digest-sandwiched (see read_pinned_script).
     let script = read_pinned_script(wf)?;
 
-    // 3. Engine construction inside catch_unwind at the CLI edge.
-    let mut run = contained(|| WorkflowRun::new(&script, RuntimeLimits::default(), args_value))?
+    // Parse-only meta extraction at the CLI edge (contained — same belt and
+    // suspenders as construction). The script parses twice, here and inside
+    // the engine's own construction: accepted — parse-only, size-bounded,
+    // deterministic — so the engine stays self-validating while the CLI
+    // computes the grant below.
+    let meta = contained(|| extract_meta(&script))?
         .map_err(|e| anyhow::anyhow!("refusing workflow '{}': {e}", wf.name))?;
 
     // Cross-check (witness 1, normalization side): script meta.roles must be
     // a SUBSET of the manifest's admitted role set. The manifest is the
     // authority (admission resolved and enforces it); meta.roles stays the
-    // script-internal consistency set the bridge checks per call (R2).
-    for role in &run.meta().roles {
+    // script-internal consistency set the bridge checks per call (R2). Moved
+    // BEFORE construction in Stage D; the engine re-asserts the same subset
+    // at construction (defense in depth against a cross-check bypass).
+    for role in &meta.roles {
         anyhow::ensure!(
             wf.roles.contains(role),
             "refusing workflow '{}': the script's meta.roles names '{role}', which the \
@@ -167,6 +184,29 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
         );
     }
 
+    // Stage D ceiling chain, completed: effective = machine cap ∩ manifest
+    // request ∩ script `meta` request. Admission already produced
+    // min(machine, manifest) in `NormalizedWorkflow`; the script's request
+    // may only NARROW that (rule 2 all the way down) — a meta asking for
+    // MORE is clamped by the min, never an error, never a widen. The engine
+    // receives only these final values; it never sees the wider layers.
+    let effective_agents = meta
+        .max_agents
+        .map_or(wf.max_agents, |m| m.min(wf.max_agents));
+    let effective_wall = meta
+        .max_wall_seconds
+        .map_or(wf.max_wall_seconds, |m| m.min(wf.max_wall_seconds));
+
+    // 3. Engine construction inside catch_unwind at the CLI edge.
+    let grant = Grant {
+        max_agents: effective_agents,
+        max_wall_seconds: effective_wall,
+        admitted_roles: wf.roles.clone(),
+    };
+    let mut run =
+        contained(|| WorkflowRun::new(&script, RuntimeLimits::default(), args_value, grant))?
+            .map_err(|e| anyhow::anyhow!("refusing workflow '{}': {e}", wf.name))?;
+
     // Effective concurrency: machine-configurable, engine-owned, never
     // script-visible. `.max(1)` so a machine cap of 0 bounds to serial
     // instead of deadlocking the drive.
@@ -176,33 +216,49 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
         .unwrap_or(DEFAULT_MAX_CONCURRENT)
         .max(1) as usize;
 
+    let narrowed = effective_agents != wf.max_agents || effective_wall != wf.max_wall_seconds;
     eprintln!(
-        "{} workflow '{}' admitted: {} role(s), ceilings max_agents={} max_wall_seconds={}, \
-         concurrency cap {}",
+        "{} workflow '{}' admitted: {} role(s), effective ceilings max_agents={} \
+         max_wall_seconds={}{}, concurrency cap {}",
         "▶".green(),
         wf.name.bold(),
         wf.roles.len(),
-        wf.max_agents,
-        wf.max_wall_seconds,
+        effective_agents,
+        effective_wall,
+        if narrowed {
+            format!(
+                " (script-narrowed from {}/{})",
+                wf.max_agents, wf.max_wall_seconds
+            )
+        } else {
+            String::new()
+        },
         max_concurrent,
     );
 
-    // 4. The out-of-thread watchdog, armed before the first step(). The
-    // deadline is the ADMITTED wall ceiling — already min(manifest request,
-    // machine cap) under the W1 MachineLimits discipline. `done_tx` lives to
-    // the end of this function; every return path drops it, which wakes the
-    // watchdog with Disconnected and retires it.
+    // 4. The out-of-thread watchdog, armed before the first step() at the
+    // EFFECTIVE (possibly script-narrowed) wall ceiling plus a fixed grace —
+    // the hard backstop above the cooperative deadline below. `done_tx` lives
+    // to the end of this function; every return path drops it, which wakes
+    // the watchdog with Disconnected and retires it.
     let pids: crate::runs::ChildPids = Arc::new(Mutex::new(HashSet::new()));
-    let done_tx = spawn_watchdog(
-        wf.name.clone(),
-        Duration::from_secs(wf.max_wall_seconds),
-        Arc::clone(&pids),
-    );
+    let done_tx = spawn_watchdog(wf.name.clone(), effective_wall, Arc::clone(&pids));
+
+    // The cooperative wall deadline (Stage D): checked at every batch
+    // boundary, refusing the NEXT batch once the effective ceiling has
+    // passed and failing the workflow cleanly, in-band, through the CLI's
+    // normal error path (exit 1 — distinct from the watchdog's 124). This is
+    // a LIVE-RUN backstop only: the clock lives here in the CLI, never in
+    // the engine and never in replayable state — Stage F resume must not
+    // spuriously time out replaying a run that originally took its full
+    // wall clock.
+    let deadline = std::time::Instant::now() + Duration::from_secs(effective_wall);
 
     // The drive loop: step → fan out the batch as locked children → feed the
-    // results back — until Done or Failed. The admitted max_agents ceiling is
-    // enforced as a hard stop here (Stage D replaces this with the negotiated
-    // fail-closed-pending-call semantics and the `budget` view).
+    // results back — until Done or Failed. Exhaustion of the granted
+    // max_agents ceiling is enforced INSIDE the engine, per call (Stage D):
+    // the pending agent() call fails closed and the non-forgeable flag makes
+    // it observable here.
     let mut results: Vec<StepResult> = Vec::new();
     let mut spawned_total: u64 = 0;
     let final_value = loop {
@@ -210,16 +266,36 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
         print_progress(run.take_progress());
         match outcome {
             StepOutcome::Batch(batch) => {
+                if std::time::Instant::now() >= deadline {
+                    drop(done_tx);
+                    note_exhaustion(&run, effective_agents);
+                    anyhow::bail!(
+                        "workflow '{}' exceeded its effective wall-clock ceiling ({}s) — \
+                         refusing the next batch and failing cleanly in-band (the out-of-thread \
+                         watchdog at ceiling+{}s remains the stall backstop; recording this \
+                         outcome in the run evidence lands in Stage E)",
+                        wf.name,
+                        effective_wall,
+                        WATCHDOG_GRACE_SECS
+                    );
+                }
                 spawned_total += batch.requests.len() as u64;
-                if spawned_total > u64::from(wf.max_agents) {
+                if spawned_total > u64::from(effective_agents) {
+                    // Unreachable by design — the engine enforces the ceiling
+                    // per call and can never hand out more spawns than the
+                    // grant. Kept as defense in depth at the composition root:
+                    // if it ever fires, an engine defect is voiding a
+                    // negotiated machine limit, and the run fails closed.
+                    // Deliberately witness-free (a test would have to fake an
+                    // engine defect), like the serial-fallback label in C.
                     drop(done_tx);
                     anyhow::bail!(
-                        "workflow '{}' exceeded its admitted max_agents ceiling ({}): {} spawns \
-                         requested in total — the run fails closed (negotiated exhaustion \
-                         semantics are Stage D)",
+                        "workflow '{}': engine-invariant breach — {} spawns handed out against \
+                         a granted ceiling of {} — failing closed (this is an engine defect, \
+                         not a script error; please report it)",
                         wf.name,
-                        wf.max_agents,
-                        spawned_total
+                        spawned_total,
+                        effective_agents
                     );
                 }
                 results = execute_batch(
@@ -233,12 +309,29 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
             StepOutcome::Done(value) => break value,
             StepOutcome::Failed(err) => {
                 drop(done_tx);
+                note_exhaustion(&run, effective_agents);
                 anyhow::bail!("workflow '{}' failed: {err}", wf.name);
             }
         }
     };
     drop(done_tx);
+    note_exhaustion(&run, effective_agents);
     Ok(final_value)
+}
+
+/// The Stage D honesty line: if any `agent()` call was refused at the granted
+/// ceiling (the engine's non-forgeable flag — a script that caught and
+/// absorbed the refusal cannot hide it), say so on stderr regardless of how
+/// the run ended. The recorded-report half of this honesty is Stage E.
+fn note_exhaustion(run: &WorkflowRun, granted: u32) {
+    if run.exhausted() {
+        eprintln!(
+            "{} the granted agent ceiling ({granted}) was exhausted during this run — refused \
+             agent() calls failed closed (the script saw each refusal); recording this in the \
+             run report lands in Stage E",
+            "⚠".yellow()
+        );
+    }
 }
 
 /// The CLI-edge panic containment (belt and suspenders beside the engine's
@@ -341,24 +434,32 @@ fn script_entry_path(anchor: &Path, declared: &str) -> Result<PathBuf> {
     Ok(entry)
 }
 
-/// Arm the out-of-thread watchdog. Returns the completion sender: dropping it
-/// (any normal exit path) retires the watchdog; a wall-clock overrun prints
-/// an honest line, best-effort SIGTERMs the live child process groups, and
-/// force-exits the PROCESS — the §12.2 hard backstop, deliberately not a
-/// cooperative check (a drive thread stuck inside a Boa builtin slice cannot
-/// observe a deadline).
-fn spawn_watchdog(name: String, wall: Duration, pids: crate::runs::ChildPids) -> mpsc::Sender<()> {
+/// Arm the out-of-thread watchdog at `effective_wall` (the effective,
+/// possibly script-narrowed ceiling in seconds) plus [`WATCHDOG_GRACE_SECS`].
+/// Returns the completion sender: dropping it (any normal exit path) retires
+/// the watchdog; a wall-clock overrun prints an honest line — naming the
+/// effective ceiling and the grace SEPARATELY, so the message never
+/// contradicts the admitted ceiling or `budget.maxWallSeconds` — best-effort
+/// SIGTERMs the live child process groups, and force-exits the PROCESS — the
+/// §12.2 hard backstop, deliberately not a cooperative check (a drive thread
+/// stuck inside a Boa builtin slice cannot observe a deadline).
+fn spawn_watchdog(
+    name: String,
+    effective_wall: u64,
+    pids: crate::runs::ChildPids,
+) -> mpsc::Sender<()> {
+    let armed = Duration::from_secs(effective_wall.saturating_add(WATCHDOG_GRACE_SECS));
     let (done_tx, done_rx) = mpsc::channel::<()>();
-    std::thread::spawn(move || match done_rx.recv_timeout(wall) {
+    std::thread::spawn(move || match done_rx.recv_timeout(armed) {
         // Completion (or the sender dropped on any exit path): retire.
         Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
         Err(mpsc::RecvTimeoutError::Timeout) => {
             eprintln!(
-                "✗ workflow '{name}' exceeded its wall-clock ceiling ({}s) — force-exiting \
-                 (out-of-thread watchdog: a stalled engine slice cannot be interrupted \
-                 cooperatively). Live children receive SIGTERM; recording this outcome in the \
-                 run evidence lands in Stage E.",
-                wall.as_secs()
+                "✗ workflow '{name}' ran past its effective wall-clock ceiling ({effective_wall}s) \
+                 plus the {WATCHDOG_GRACE_SECS}s watchdog grace — force-exiting (out-of-thread \
+                 watchdog: a stalled engine slice cannot be interrupted cooperatively). Live \
+                 children receive SIGTERM; recording this outcome in the run evidence lands in \
+                 Stage E.",
             );
             let held: Vec<i32> = pids
                 .lock()
@@ -637,6 +738,7 @@ mod tests {
             "for a in \"$@\"; do last=\"$a\"; done\n",
             "case \"$last\" in\n",
             "  emit-json*) printf '%s' '{\"a\":1,\"b\":[1,2,3]}' ;;\n",
+            "  sleep*) sleep 1.5; printf 'ok' ;;\n",
             "  overlap*)\n",
             "    set -- $last\n",
             "    dir=\"$2\"; name=\"$3\"; peer=\"$4\"\n",
@@ -932,6 +1034,89 @@ mod tests {
                 serde_json::json!(["{\"a\":1,\"b\":[1,2,3]}", null, "{\"a\":1,\"b\":[1,2,3]}"]),
                 "the panicking child resolves to null; siblings and the run survive"
             );
+        });
+    }
+
+    /// Stage D ceiling-chain witness (clamp side): a script `meta` requesting
+    /// MORE than admission granted is CLAMPED to the admitted values — the
+    /// grant never widens — observed through `budget`'s script-visible view
+    /// (admitted here = the built-in defaults 25/1800: no manifest request,
+    /// no machine cap in the isolated home).
+    #[test]
+    fn script_meta_requesting_more_is_clamped() {
+        workflow_fixture(|_home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'], maxAgents: 99999, maxWallSeconds: 99999 };\n\
+                 return [budget.maxAgents, budget.maxWallSeconds];",
+            );
+            let value = run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!([
+                    crate::workflows::DEFAULT_MAX_AGENTS,
+                    crate::workflows::DEFAULT_MAX_WALL_SECONDS
+                ]),
+                "a script request above the admitted ceilings is clamped, never widens"
+            );
+        });
+    }
+
+    /// Stage D ceiling-chain witness (narrow side) + witness 3 end-to-end: a
+    /// script `meta` requesting LESS narrows both `budget`'s view AND the
+    /// enforcement — the second call is refused at the ceiling, fails closed
+    /// (the script catches it and adapts), and the run still completes.
+    #[cfg(unix)]
+    #[test]
+    fn script_meta_narrows_enforcement_and_budget() {
+        workflow_fixture(|_home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'], maxAgents: 1 };\n\
+                 const a = await agent('emit-json', { role: 'w' });\n\
+                 let denied = false;\n\
+                 try { await agent('emit-json', { role: 'w' }); } catch (e) { denied = true; }\n\
+                 return { ma: budget.maxAgents, spawned: budget.spawned(), denied,\n\
+                          got: typeof a === 'string' && a.length > 0 };",
+            );
+            let value = run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!({ "ma": 1, "spawned": 1, "denied": true, "got": true }),
+                "the narrowed ceiling is enforced per call; the refused call fails closed \
+                 while the run completes"
+            );
+        });
+    }
+
+    /// Stage D cooperative wall deadline: once the effective (script-narrowed)
+    /// wall ceiling passes, the NEXT batch is refused and the workflow fails
+    /// cleanly in-band — through the CLI's normal error path, without the
+    /// watchdog (armed at ceiling+grace) firing. The Stage C watchdog stays
+    /// the stall backstop above this path.
+    #[cfg(unix)]
+    #[test]
+    fn cooperative_wall_deadline_refuses_next_batch_in_band() {
+        workflow_fixture(|_home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'], maxWallSeconds: 1 };\n\
+                 const a = await agent('sleep', { role: 'w' });\n\
+                 const b = await agent('sleep', { role: 'w' });\n\
+                 return [a, b];",
+            );
+            // The first batch's child sleeps ~1.5s, past the 1s effective
+            // ceiling; the second batch must be refused cooperatively. If the
+            // watchdog fired instead, the PROCESS would exit 124 and the test
+            // harness would report a crash, not an Err.
+            let err = run_value(Some(proj.path()), &wf_args("t", None))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("wall-clock ceiling"), "{err}");
+            assert!(err.contains("in-band"), "{err}");
         });
     }
 

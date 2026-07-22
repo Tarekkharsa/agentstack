@@ -25,8 +25,8 @@ use std::rc::Rc;
 
 use boa_engine::builtins::promise::ResolvingFunctions;
 use boa_engine::object::builtins::{JsArray, JsPromise};
-use boa_engine::object::JsObject;
-use boa_engine::property::PropertyKey;
+use boa_engine::object::{FunctionObjectBuilder, IntegrityLevel, JsObject, ObjectInitializer};
+use boa_engine::property::{Attribute, PropertyKey};
 use boa_engine::{
     js_string, Context, JsError, JsNativeError, JsResult, JsString, JsValue, JsVariant,
     NativeFunction,
@@ -70,7 +70,21 @@ pub(crate) struct PendingSpawn {
 /// `agent()` only transiently, via the thread-local below.
 pub(crate) struct SpawnState {
     /// Monotonic request id; correlates a `SpawnRequest` with its `StepResult`.
+    /// Because it increments ONLY when a spawn is granted, it doubles as the
+    /// spawned-so-far count — the single source `budget.spawned()`,
+    /// `budget.remaining()`, and the exhaustion check below all derive from
+    /// (the Stage D ceiling-identity requirement: one count, not two).
     pub(crate) next_id: u64,
+    /// The granted effective `max_agents` ceiling (machine ∩ manifest ∩ script
+    /// meta, computed by the CLI and re-clamped at construction). The SAME
+    /// field feeds the exhaustion check and `budget` — pacing on
+    /// `budget.remaining()` provably never trips exhaustion.
+    pub(crate) max_agents: u32,
+    /// Set ONLY by the `agent()` native when a call is refused at the ceiling.
+    /// Host memory a script cannot reach — the non-forgeable exhaustion tag
+    /// (same pattern as `compile_denied`): classification and the CLI's
+    /// honesty line read this flag, never any script-controlled string.
+    pub(crate) exhausted: bool,
     /// Roles the script declared in `meta.roles`, for the consistency check.
     pub(crate) roles: Vec<String>,
     /// Requests issued since the last drain, awaiting fan-out by the CLI.
@@ -88,9 +102,11 @@ pub(crate) struct SpawnState {
 }
 
 impl SpawnState {
-    pub(crate) fn new(roles: Vec<String>) -> Self {
+    pub(crate) fn new(roles: Vec<String>, max_agents: u32) -> Self {
         Self {
             next_id: 0,
+            max_agents,
+            exhausted: false,
             roles,
             pending: Vec::new(),
             awaiting: HashMap::new(),
@@ -219,6 +235,27 @@ pub(crate) fn install_agent(context: &mut Context) -> JsResult<()> {
             ))));
         }
 
+        // Stage D exhaustion, checked PER CALL (partial-batch semantics: in a
+        // batch straddling the ceiling, the first K calls that fit spawn
+        // normally and only the excess fails — a batch-boundary total check is
+        // exactly the Stage C crude stop this replaces). The refused call
+        // fails closed with a SYNCHRONOUS catchable throw — no promise is
+        // ever created, so R1 ("the promise never rejects") holds untouched.
+        // Through `parallel()`/`pipeline()` the throw becomes that slot's
+        // `null`; uncaught, it fails the run as the distinct AgentsExhausted
+        // kind via the non-forgeable `exhausted` flag set here.
+        {
+            let mut s = state.borrow_mut();
+            if s.next_id >= u64::from(s.max_agents) {
+                let granted = s.max_agents;
+                s.exhausted = true;
+                return Err(JsError::from(JsNativeError::error().with_message(format!(
+                    "agent() refused: all {granted} granted agent slot(s) are spent — this call \
+                     fails closed; pace with budget.remaining() to avoid exhaustion"
+                ))));
+            }
+        }
+
         // Hand back a genuinely pending promise; the VM never blocks.
         let (promise, resolvers) = JsPromise::new_pending(context);
         {
@@ -273,6 +310,94 @@ pub(crate) fn install_progress(context: &mut Context) -> JsResult<()> {
     context.register_global_builtin_callable(js_string!("phase"), 1, phase)?;
     let log = NativeFunction::from_copy_closure(progress_native("log", Progress::Log));
     context.register_global_builtin_callable(js_string!("log"), 1, log)
+}
+
+/// Install the global `budget` object (Stage D): the script-visible view of
+/// the granted ceilings and consumption — **deterministic by construction**
+/// (the §3 determinism rule; Stage F journal replay depends on it). It exposes
+/// exactly four members and nothing time-derived:
+///
+/// - `maxAgents` / `maxWallSeconds` — granted static numbers. `maxWallSeconds`
+///   is informational only: no clock exists in the runtime to pace against
+///   (wall enforcement is the CLI's, live-run only).
+/// - `spawned()` / `remaining()` — spawn-derived counts, read from the SAME
+///   `SpawnState` fields the `agent()` exhaustion check enforces (`next_id`,
+///   `max_agents`) — one source, so pacing on `remaining()` reliably never
+///   trips exhaustion.
+///
+/// v1 budget is agent-count, not tokens: child token usage is `"unavailable"`
+/// in the run evidence today, so no token view is faked here.
+///
+/// The object is FROZEN (non-extensible, every member non-writable and
+/// non-configurable) and the `budget` global itself is
+/// non-writable/non-configurable (like `args`) — the four-member shape is the
+/// whole contract, and a script can neither replace it nor grow it.
+pub(crate) fn install_budget(
+    context: &mut Context,
+    max_agents: u32,
+    max_wall_seconds: u64,
+) -> JsResult<()> {
+    let spawned = NativeFunction::from_copy_closure(|_this, _args, _context| {
+        let state = current_state().ok_or_else(|| {
+            JsError::from(
+                JsNativeError::typ()
+                    .with_message("budget.spawned() called outside a workflow drive"),
+            )
+        })?;
+        let n = state.borrow().next_id;
+        Ok(JsValue::from(n as f64))
+    });
+    let remaining = NativeFunction::from_copy_closure(|_this, _args, _context| {
+        let state = current_state().ok_or_else(|| {
+            JsError::from(
+                JsNativeError::typ()
+                    .with_message("budget.remaining() called outside a workflow drive"),
+            )
+        })?;
+        let s = state.borrow();
+        let rem = u64::from(s.max_agents).saturating_sub(s.next_id);
+        Ok(JsValue::from(rem as f64))
+    });
+
+    let realm = context.realm().clone();
+    let spawned_fn = FunctionObjectBuilder::new(&realm, spawned)
+        .name(js_string!("spawned"))
+        .length(0)
+        .build();
+    let remaining_fn = FunctionObjectBuilder::new(&realm, remaining)
+        .name(js_string!("remaining"))
+        .length(0)
+        .build();
+
+    // ENUMERABLE alone = non-writable, non-configurable, visible to
+    // Object.keys — the shape the determinism-probe witness asserts.
+    // The u64→f64 cast is exact for any realistic wall ceiling (meta bounds
+    // script requests at 2^53; machine/manifest values are human-written).
+    let budget = ObjectInitializer::new(context)
+        .property(
+            js_string!("maxAgents"),
+            f64::from(max_agents),
+            Attribute::ENUMERABLE,
+        )
+        .property(
+            js_string!("maxWallSeconds"),
+            max_wall_seconds as f64,
+            Attribute::ENUMERABLE,
+        )
+        .property(js_string!("spawned"), spawned_fn, Attribute::ENUMERABLE)
+        .property(js_string!("remaining"), remaining_fn, Attribute::ENUMERABLE)
+        .build();
+    // Freeze: the attributes above already lock the four members; this also
+    // makes the object non-extensible, so the four-member shape IS the
+    // contract (`Object.isFrozen(budget)` holds — the probe witness asserts
+    // it). Fail closed if the freeze reports false (it cannot for an
+    // ordinary object, but a silent partial freeze must never ship).
+    if !budget.set_integrity_level(IntegrityLevel::Frozen, context)? {
+        return Err(JsError::from(
+            JsNativeError::typ().with_message("failed to freeze the budget object"),
+        ));
+    }
+    context.register_global_property(js_string!("budget"), budget, Attribute::empty())
 }
 
 fn string_arg(args: &[JsValue], index: usize) -> Option<String> {
