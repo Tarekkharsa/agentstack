@@ -761,7 +761,11 @@ with a per-machine secret so an exfiltrated log can't confirm guessed arguments)
 outcome (`ok`/`error`/`denied`), latency, and a detail that is either the policy
 rule (denials) or a **fixed error class** (failures) — upstream error text is
 never written, so a malicious server can't inject content into the log.
-Summarize with `agentstack report calls [--since <days>] [--json]`; the
+Summarize with `agentstack report calls [--since <days>] [--json]`; add
+`--tail <n>` to also list the last n individual calls (`--project <path>`
+scopes everything to one project root). With `--json`, `--tail` adds an
+`events` array of raw records — the stable feed external UIs consume; the
+default JSON shape is unchanged without it. The
 dashboard's Runs panel shows each run's footprint. Best-effort local
 **diagnostics** (logging can never fail a call; size-rotated at ~5 MB × 2), not
 tamper-evident — input to `report calls`/`optimize`, not forensic evidence.

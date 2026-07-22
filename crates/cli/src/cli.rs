@@ -522,6 +522,17 @@ pub struct WorkflowRunArgs {
     /// invoker input: size- and depth-bounded before it reaches the engine.
     #[arg(long = "args-json", value_name = "JSON")]
     pub args_json: Option<String>,
+
+    /// Resume an interrupted workflow run (`w-…`) by replaying its recorded
+    /// step results — no journaled step re-executes. Byte-identical is the
+    /// precondition: the same pinned script, the same effective ceilings and
+    /// roles, and the same `--args-json` bytes as the original invocation;
+    /// any divergence refuses. Only a run with no recorded terminal outcome,
+    /// or one ended by `wall_deadline` / `watchdog_kill`, is resumable — the
+    /// resumed session gets a fresh wall clock. Assumes the original session
+    /// is dead (no cross-process liveness guard).
+    #[arg(long = "resume", value_name = "RUN_ID")]
+    pub resume: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -1506,6 +1517,17 @@ pub struct AnalyzeArgs {
     /// Only count call-log entries from the last N days.
     #[arg(long, value_name = "DAYS")]
     pub since: Option<u64>,
+
+    /// Also list the last N individual calls (after --since / --project
+    /// filtering). With --json this adds an `events` array — the stable
+    /// machine-readable activity feed for external UIs; argument digests
+    /// only, never values.
+    #[arg(long, value_name = "N")]
+    pub tail: Option<usize>,
+
+    /// Only count calls recorded for this project root.
+    #[arg(long, value_name = "PATH")]
+    pub project: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]

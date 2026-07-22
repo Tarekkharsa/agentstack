@@ -5,8 +5,15 @@
 //! activity** from the audit log (`calllog`), and **library-wide dead weight** —
 //! capabilities installed in the central library but never used anywhere. Local:
 //! no network, no writes.
+//!
+//! `--tail N` additionally lists the last N individual calls; with `--json`
+//! they land in an `events` array — the stable activity feed external UIs
+//! consume (each entry is a raw [`CallRecord`]: argument digests only, never
+//! values). The array is only present when `--tail` is asked for, so the
+//! default JSON shape existing consumers parse is unchanged.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use anyhow::Result;
 use owo_colors::OwoColorize;
@@ -24,14 +31,69 @@ pub fn run(args: &AnalyzeArgs) -> Result<()> {
         let cutoff = calllog::now_epoch().saturating_sub(days * 86_400);
         calls.retain(|e| e.ts >= cutoff);
     }
-    let report = collect_with(&calls);
+    if let Some(project) = &args.project {
+        let want = crate::util::paths::expand_tilde(&project.display().to_string());
+        calls.retain(|e| project_matches(e, &want));
+    }
+    let mut report = collect_with(&calls);
+    if let Some(n) = args.tail {
+        report["events"] = tail_events(&calls, n);
+    }
     if args.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         print_human(&report);
         print_tool_table(&calls);
+        if let Some(n) = args.tail {
+            print_recent_calls(&calls, n);
+        }
     }
     Ok(())
+}
+
+/// Component-wise path comparison, so `~/proj`, `/Users/x/proj`, and a
+/// trailing-slash variant all name the same recorded project root.
+fn project_matches(rec: &CallRecord, want: &Path) -> bool {
+    rec.project.as_deref().is_some_and(|p| Path::new(p) == want)
+}
+
+/// The last `n` calls (input is already in append/chronological order),
+/// serialized as raw records — the digest-only wire form of the log itself.
+fn tail_events(calls: &[CallRecord], n: usize) -> Value {
+    let start = calls.len().saturating_sub(n);
+    serde_json::to_value(&calls[start..]).unwrap_or_else(|_| json!([]))
+}
+
+fn print_recent_calls(calls: &[CallRecord], n: usize) {
+    let start = calls.len().saturating_sub(n);
+    let recent = &calls[start..];
+    if recent.is_empty() {
+        return;
+    }
+    println!("\n{}", format!("Last {} call(s)", recent.len()).bold());
+    for e in recent {
+        let age_s = calllog::now_epoch().saturating_sub(e.ts);
+        let age = match age_s {
+            0..=59 => format!("{age_s}s ago"),
+            60..=3_599 => format!("{}m ago", age_s / 60),
+            3_600..=86_399 => format!("{}h ago", age_s / 3_600),
+            _ => format!("{}d ago", age_s / 86_400),
+        };
+        // Pad BEFORE coloring — ANSI escapes would break the column width.
+        let outcome = format!("{:<6}", e.outcome.as_str());
+        let outcome = match e.outcome {
+            calllog::CallOutcome::Ok => outcome.green().to_string(),
+            calllog::CallOutcome::Denied => outcome.yellow().to_string(),
+            calllog::CallOutcome::Error => outcome.red().to_string(),
+        };
+        let run = e.run.as_deref().unwrap_or("-");
+        println!(
+            "  {outcome} {:<40} {:>6}ms  {:<10} {age}",
+            format!("{}__{}", e.server, e.tool),
+            e.ms,
+            run,
+        );
+    }
 }
 
 /// The analytics report as JSON — the shared shape the CLI renders and the
@@ -302,6 +364,37 @@ mod tests {
             detail: None,
             ms: 1,
         }
+    }
+
+    #[test]
+    fn project_filter_and_tail_keep_only_matching_recent_events() {
+        let mut a1 = rec("figma", "figma__get", "ok", 10);
+        a1.project = Some("/tmp/proj-a".into());
+        let mut a2 = rec("github", "github__list", "denied", 20);
+        a2.project = Some("/tmp/proj-a/".into()); // trailing slash — same root
+        let mut b = rec("figma", "figma__get", "ok", 15);
+        b.project = Some("/tmp/proj-b".into());
+        let none = rec("figma", "figma__get", "ok", 30); // no project recorded
+
+        let mut calls = vec![a1, b, a2, none];
+        let want = std::path::PathBuf::from("/tmp/proj-a");
+        calls.retain(|e| project_matches(e, &want));
+        assert_eq!(
+            calls.len(),
+            2,
+            "component-wise match, record without project dropped"
+        );
+
+        // tail keeps the LAST n in log order and serializes digests only.
+        let events = tail_events(&calls, 1);
+        let events = events.as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["tool"], "github__list");
+        assert_eq!(events[0]["outcome"], "denied");
+        assert_eq!(events[0]["args_digest"], "0");
+        assert!(events[0].get("args").is_none(), "raw args never serialize");
+        // Larger n than available degrades to everything, no panic.
+        assert_eq!(tail_events(&calls, 99).as_array().unwrap().len(), 2);
     }
 
     #[test]
