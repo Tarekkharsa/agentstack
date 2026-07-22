@@ -40,6 +40,7 @@ PAGES = [
     ("choose.md", "choose.html", "choose"),
     ("reference.md", "reference.html", "reference"),
     ("ARCHITECTURE.md", "architecture.html", "how-it-works"),
+    ("workflows.md", "workflows.html", "workflows"),
     ("ENFORCEMENT.md", "enforcement.html", "matrix"),
     ("HISTORY.md", "history.html", "history"),
     ("howto/add-a-server.md", "howto/add-a-server.html", "howto-server"),

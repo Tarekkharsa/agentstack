@@ -56,6 +56,7 @@ TREE = [
     ], "open"),
     ("Configure deeper", "$ agentstack use · session", [
         ("How it works", "architecture.html", "how-it-works"),
+        ("Workflows (preview)", "workflows.html", "workflows"),
         ("Central library", "reference.html#the-central-library", "library"),
         ("Delivery modes", "concepts.html#delivery-modes", "modes"),
         ("Dashboard", "reference.html#dashboard", "dashboard"),
