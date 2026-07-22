@@ -12,7 +12,11 @@
 //! address to be **global unicast**: anything loopback / private / link-local /
 //! unique-local / unspecified / multicast / reserved is refused. A literal-IP
 //! CONNECT (e.g. `CONNECT 169.254.169.254:80`) flows through the same check, so
-//! naming an address directly can't dodge it either.
+//! naming an address directly can't dodge it either. For IPv6 "global unicast"
+//! is necessary but not sufficient — the special-purpose prefixes that sit
+//! inside `2000::/3` are refused too, because 6to4 and Teredo embed an IPv4
+//! address and would otherwise smuggle a forbidden v4 target past the v4 arm
+//! (see [`is_forbidden_v6`]).
 //!
 //! Tests and the Docker demo legitimately target loopback / the host gateway
 //! (`host.docker.internal`), so callers may opt into allowing local targets;
@@ -56,15 +60,49 @@ fn is_forbidden_v4(ip: Ipv4Addr) -> bool {
 }
 
 fn is_forbidden_v6(ip: Ipv6Addr) -> bool {
-    // Truly deny-by-exclusion for v6: the ONLY routable public space is global
-    // unicast `2000::/3`, so allow only that and refuse everything else — that
-    // covers ::1, ::, ff00::/8 multicast, fe80::/10 link-local, fc00::/7
-    // unique-local, AND fec0::/10 deprecated site-local (which an earlier
-    // enumerate-the-bad-ranges approach missed) in one stroke.
+    // Deny-by-exclusion, then subtract: the only routable public space is
+    // global unicast `2000::/3`, so refusing everything outside it covers ::1,
+    // ::, ff00::/8 multicast, fe80::/10 link-local, fc00::/7 unique-local, AND
+    // fec0::/10 deprecated site-local in one stroke.
+    //
+    // But `2000::/3` is NOT uniformly safe, so "global unicast" alone is not
+    // the whole test. Several special-purpose prefixes live inside it, and two
+    // of them — 6to4 and Teredo — *embed an IPv4 address*: `2002:a9fe:a9fe::`
+    // is the cloud metadata IP (169.254.169.254) wearing a v6 coat, and a host
+    // with a 6to4/Teredo tunnel will happily decapsulate it. Those would
+    // otherwise sail through this check and hand back the SSRF pivot the v4
+    // arm exists to deny.
+    //
+    // We refuse the transition prefixes OUTRIGHT rather than decoding the
+    // embedded v4 and judging it as v4 (the way `to_ipv4_mapped` does): 6to4
+    // and Teredo are obsolete transition technologies that no legitimate MCP
+    // server needs, so failing closed costs nothing real — and it avoids
+    // trusting our own decoder of a hostile address, which unwrap-and-judge
+    // would require.
     let s = ip.segments();
     let global_unicast = (s[0] & 0xe000) == 0x2000; // 2000::/3
-    let is_documentation = s[0] == 0x2001 && s[1] == 0x0db8; // 2001:db8::/32
-    !global_unicast || is_documentation
+    if !global_unicast {
+        return true;
+    }
+    // Special-purpose prefixes *inside* `2000::/3` (IANA IPv6 Special-Purpose
+    // Address Registry) that are never a legitimate egress target.
+    //
+    // 2002::/16 — 6to4, RFC 3056. Segments 1-2 ARE an embedded IPv4 address.
+    let is_6to4 = s[0] == 0x2002;
+    // 2001::/32 — Teredo, RFC 4380. The client IPv4 is the last 32 bits XOR
+    // 0xffffffff, so this prefix embeds a v4 address too.
+    let is_teredo = s[0] == 0x2001 && s[1] == 0x0000;
+    // 2001:db8::/32 — documentation, RFC 3849.
+    let is_documentation = s[0] == 0x2001 && s[1] == 0x0db8;
+    // 2001:2::/48 — benchmarking, RFC 5180.
+    let is_benchmarking = s[0] == 0x2001 && s[1] == 0x0002 && s[2] == 0x0000;
+    // 2001:10::/28 (ORCHID, RFC 4843, deprecated) and 2001:20::/28 (ORCHIDv2,
+    // RFC 7343) — cryptographic identifiers, non-routable by construction. A
+    // /28 is the 16 bits of s[0] plus the top 12 bits of s[1], hence 0xfff0.
+    // (`matches!(x, a | b)` is an or-pattern match — Rust for "x is one of".)
+    let is_orchid = s[0] == 0x2001 && matches!(s[1] & 0xfff0, 0x0010 | 0x0020);
+
+    is_6to4 || is_teredo || is_documentation || is_benchmarking || is_orchid
 }
 
 /// `::a.b.c.d` (deprecated IPv4-compatible form), which `to_ipv4_mapped` does
@@ -130,5 +168,49 @@ mod tests {
             assert!(!is_forbidden_target(v4(s)), "{s} must be allowed");
         }
         assert!(!is_forbidden_target(v6("2606:4700:4700::1111"))); // public v6
+    }
+
+    /// Global unicast (`2000::/3`) is necessary but NOT sufficient: the
+    /// special-purpose prefixes inside it are refused, and the two that embed
+    /// an IPv4 address are the ones that matter — they smuggle a forbidden v4
+    /// target (the metadata IP) past the v4 arm.
+    #[test]
+    fn blocks_special_purpose_inside_global_unicast() {
+        for s in [
+            // 6to4 (2002::/16) — segments 1-2 are the embedded v4. This exact
+            // address is 169.254.169.254, the cloud metadata endpoint.
+            "2002:a9fe:a9fe::",
+            "2002:7f00:1::", // 6to4 for 127.0.0.1
+            // Teredo (2001:0::/32) — the client v4 is the last 32 bits XOR
+            // 0xffffffff, so 5601:5601 decodes to 169.254.169.254.
+            "2001:0:4136:e378:8000:63bf:5601:5601",
+            "2001::1",             // anything in the Teredo prefix
+            "2001:2::1",           // 2001:2::/48 benchmarking (RFC 5180)
+            "2001:10::1",          // ORCHID, deprecated (RFC 4843)
+            "2001:1f:ffff:ffff::", // last address of the 2001:10::/28 block
+            "2001:20::1",          // ORCHIDv2 (RFC 7343)
+            "2001:2f::1",          // inside 2001:20::/28
+            "2001:db8::1",         // documentation (RFC 3849)
+        ] {
+            assert!(is_forbidden_target(v6(s)), "{s} must be forbidden");
+        }
+    }
+
+    /// The carve-outs must not over-reach: ordinary public v6 that merely
+    /// starts with 0x2001 or sits near the special prefixes stays allowed.
+    #[test]
+    fn special_purpose_carve_outs_do_not_overreach() {
+        for s in [
+            "2600::1",                  // plain global unicast
+            "2001:4860:4860::8888",     // Google DNS — starts 0x2001, not special
+            "2001:1::1",                // 2001:1::/32 is NOT one of the blocked prefixes
+            "2001:3::1",                // adjacent to the 2001:2::/48 benchmarking block
+            "2001:30::1",               // just past ORCHIDv2's 2001:20::/28
+            "2003::1",                  // adjacent to 6to4's 2002::/16
+            "2606:4700:4700::1111",     // Cloudflare DNS
+            "2a00:1450:4001:81b::200e", // a real routable address
+        ] {
+            assert!(!is_forbidden_target(v6(s)), "{s} must be allowed");
+        }
     }
 }
