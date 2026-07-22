@@ -28,6 +28,17 @@ pub enum Install {
         /// Env var names that need a secret.
         secret_env: Vec<String>,
     },
+    /// A complete manifest [`Server`] definition, installed verbatim. The
+    /// central library stores full definitions — plain `env` values, headers,
+    /// `cwd`, `targets`, `owner`, `integrity_roots`, `extra.*` passthrough —
+    /// so `add from` must copy the definition, not reconstruct one from
+    /// secret-name lists like the Http/Stdio discovery shapes do (that
+    /// reconstruction silently dropped every non-secret field).
+    ///
+    /// Boxed because `Server` is much larger than the other variants — the
+    /// Box keeps the enum itself small (one pointer), like storing a
+    /// reference type in a TS union instead of inlining a big object.
+    Definition(Box<Server>),
 }
 
 /// A bundled-skill reference inside a candidate (a pack member, or a standalone
@@ -138,6 +149,17 @@ impl Install {
                 namespaced,
                 runs_code: true,
                 needs_secret: !secret_env.is_empty(),
+            },
+            // A `${REF}` in a header/env value is the only way secrets appear
+            // in a stored definition (same heuristic the library loader used).
+            Install::Definition(server) => Trust {
+                namespaced,
+                runs_code: matches!(server.server_type, ServerType::Stdio),
+                needs_secret: server
+                    .headers
+                    .values()
+                    .chain(server.env.values())
+                    .any(|v| v.contains("${")),
             },
         }
     }
@@ -270,6 +292,10 @@ impl Install {
                     extra: IndexMap::new(),
                 }
             }
+            // Already a full definition — the manifest entry IS the stored
+            // bytes; `name` only picks the `[servers.<name>]` key, which the
+            // caller owns.
+            Install::Definition(server) => (**server).clone(),
         }
     }
 }
@@ -475,37 +501,16 @@ impl LibraryProvider {
     }
 
     /// Load a central-library server definition (`<lib_home>/servers/<name>.toml`)
-    /// and map it to an [`Install`] for display. Best-effort: an unreadable or
-    /// invalid definition yields `None`, so the server is omitted rather than
-    /// failing the whole search.
+    /// as a verbatim [`Install::Definition`], so `add from` copies the whole
+    /// definition into the manifest (plain env, headers, cwd, targets, owner,
+    /// integrity_roots, extra.*) instead of reconstructing a lossy entry from
+    /// secret names. Best-effort: an unreadable or invalid definition yields
+    /// `None`, so the server is omitted rather than failing the whole search.
     fn load_server_install(&self, name: &str) -> Option<Install> {
         let path = self.lib_home.join("servers").join(format!("{name}.toml"));
         let text = std::fs::read_to_string(path).ok()?;
         let server: Server = toml::from_str(&text).ok()?;
-        Some(install_from_server(&server))
-    }
-}
-
-/// Map a stored [`Server`] definition back to an [`Install`] for discovery
-/// display. A header/env is treated as secret-bearing when its value carries a
-/// `${REF}` placeholder — the only way secrets are ever written to a definition.
-fn install_from_server(server: &Server) -> Install {
-    let secret_refs = |map: &IndexMap<String, String>| -> Vec<String> {
-        map.iter()
-            .filter(|(_, v)| v.contains("${"))
-            .map(|(k, _)| k.clone())
-            .collect()
-    };
-    match server.server_type {
-        ServerType::Http => Install::Http {
-            url: server.url.clone().unwrap_or_default(),
-            secret_headers: secret_refs(&server.headers),
-        },
-        ServerType::Stdio => Install::Stdio {
-            command: server.command.clone().unwrap_or_default(),
-            args: server.args.clone(),
-            secret_env: secret_refs(&server.env),
-        },
+        Some(Install::Definition(Box::new(server)))
     }
 }
 
@@ -714,6 +719,78 @@ mod tests {
         // By a unique word in the stored description, and no spurious hits.
         assert_eq!(provider.search("zzquokkaword", 10).len(), 1);
         assert!(provider.search("no-such-token", 10).is_empty());
+    }
+
+    #[test]
+    fn library_server_definition_survives_add_from_verbatim() {
+        use crate::library::{Library, LibraryServer};
+
+        // Every field class a stored definition can carry: plain env (the
+        // original bug — `MCP_TRANSPORT` was silently dropped), secret env,
+        // headers, cwd, integrity_roots, targets, owner, and extra.*.
+        let def = r#"
+type = "stdio"
+command = "node"
+args = ["dist/index.js"]
+cwd = "/opt/gha-search"
+integrity_roots = ["dist"]
+targets = ["claude-code", "codex"]
+owner = "codex"
+
+[headers]
+X-Trace = "on"
+
+[env]
+MCP_TRANSPORT = "stdio"
+GHA_TOKEN = "${GHA_TOKEN}"
+
+[extra.codex]
+startup_timeout_sec = 20
+"#;
+        let dir = assert_fs::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("servers")).unwrap();
+        std::fs::write(dir.path().join("servers/gha-search.toml"), def).unwrap();
+
+        let mut library = Library::default();
+        library.upsert_server(LibraryServer {
+            name: "gha-search".into(),
+            checksum: None,
+            version: None,
+            provenance: Some("manual".into()),
+        });
+        let provider = LibraryProvider {
+            library,
+            lib_home: dir.path().to_path_buf(),
+        };
+
+        let candidate = provider
+            .search("gha-search", 10)
+            .into_iter()
+            .find(|c| c.name == "gha-search")
+            .unwrap();
+        // Trust signals still work on the verbatim shape: stdio runs code, and
+        // the `${GHA_TOKEN}` env value marks it secret-bearing.
+        let t = candidate.trust();
+        assert!(t.runs_code);
+        assert!(t.needs_secret);
+
+        // The candidate carries the definition byte-for-byte...
+        let expected: Server = toml::from_str(def).unwrap();
+        assert_eq!(candidate.to_server(), expected);
+
+        // ...and it survives the real `add from` manifest write path (the
+        // same build_manifest_with call add_from_server makes), nested
+        // env/extra tables included.
+        let text = crate::commands::add::build_manifest_with(
+            "version = 1\n",
+            "servers",
+            "gha-search",
+            &serde_json::to_value(candidate.to_server()).unwrap(),
+            None,
+        )
+        .unwrap();
+        let manifest: crate::manifest::Manifest = toml::from_str(&text).unwrap();
+        assert_eq!(manifest.servers["gha-search"], expected);
     }
 
     #[test]
