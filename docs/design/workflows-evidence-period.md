@@ -20,6 +20,8 @@ Sections: [0. setup](#0-setup--phase-0-smoke) · [1. Task A](#1-task-a--docs-cla
 > **F3** are fixed in `run --locked`; and the §1 doc bugs are corrected at
 > their sources. The findings are left stated as found — this note records what
 > happened to them. **F2 remains open and is the W3 design-gate item.**
+> *(Update 2026-07-22: F2 resolved by design — per-child config injection,
+> spike-proven on the real binaries; see workflows-capability.md §12.1.)*
 
 ## 0. Setup + Phase 0 smoke
 
