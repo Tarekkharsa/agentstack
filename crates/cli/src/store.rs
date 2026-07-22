@@ -727,6 +727,7 @@ mod tests {
                 servers: Vec::new(),
                 instructions: Vec::new(),
                 executables: Vec::new(),
+                workflows: Vec::new(),
             };
 
             let manifest: crate::manifest::Manifest =

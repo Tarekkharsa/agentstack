@@ -49,6 +49,16 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub extensions: IndexMap<String, Extension>,
 
+    /// Governed workflows (D7 W1): orchestration scripts agentstack itself
+    /// will execute inside the governed engine (W3), spawning agent runs under
+    /// the declared role profiles. Declarations here arrive from unreviewed
+    /// repos and are hostile input (rule 7): nothing in this table runs,
+    /// parses as script, or is even invocable by name until the bundle is
+    /// trusted and the source is pinned strictly in the lock
+    /// (docs/design/workflows-capability.md §4–5).
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub workflows: IndexMap<String, Workflow>,
+
     /// Vendor-pack install ledgers, keyed by pack name. Each records the members
     /// a `add from <source>` install added (server, skills, house rules) so
     /// `remove`/`lock --upgrade` can undo or re-resolve the pack. Members ride
@@ -190,6 +200,32 @@ pub struct Policy {
     /// `read` scopes are informational, and host mode enforces neither.
     #[serde(default, skip_serializing_if = "FsPolicy::is_empty")]
     pub filesystem: FsPolicy,
+    /// `[policy.workflows]` — machine-owned ceilings on every workflow run.
+    /// Only the MACHINE manifest's table is consulted as authority (same trust
+    /// posture as the rest of `[policy]`): a workflow's own manifest entry is
+    /// a request, and the effective ceiling is min(request, this cap) — a repo
+    /// can only narrow, never widen (rule 2).
+    #[serde(default, skip_serializing_if = "WorkflowPolicy::is_empty")]
+    pub workflows: WorkflowPolicy,
+}
+
+/// Machine-layer workflow ceilings. New table, so typos are rejected outright
+/// (`deny_unknown_fields`) — the same argument as [`FsPolicy`].
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowPolicy {
+    /// Cap on any workflow's total agent spawns. Absent = no machine cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_agents: Option<u32>,
+    /// Cap on any workflow's wall clock, in seconds. Absent = no machine cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_wall_seconds: Option<u64>,
+}
+
+impl WorkflowPolicy {
+    pub fn is_empty(&self) -> bool {
+        self.max_agents.is_none() && self.max_wall_seconds.is_none()
+    }
 }
 
 /// `[policy.filesystem]` — read/write path-glob scopes. New table, so typos
@@ -286,6 +322,7 @@ impl Policy {
             && self.egress.is_empty()
             && self.secrets.is_empty()
             && self.filesystem.is_empty()
+            && self.workflows.is_empty()
     }
 
     /// Whether `source` is allowed (any source allowed when the list is empty).
@@ -916,6 +953,63 @@ pub struct Extension {
     pub description: Option<String>,
 }
 
+/// A governed workflow declaration (D7 W1): one orchestration script plus the
+/// authority it REQUESTS — the closed set of role profiles its `agent()` calls
+/// may name, and its spawn/wall-clock ceilings. Requests can only reduce what
+/// the machine's `[policy.workflows]` caps grant, never increase it (rule 2).
+/// Unlike an [`Extension`] (delivered into a harness, run there), agentstack
+/// itself executes a workflow — inside the governed engine, gated and
+/// sandboxed — which is exactly why the trust gate stands in front of it.
+///
+/// `deny_unknown_fields`: a brand-new table with no legacy configs to stay
+/// lenient for, so typos (`max_agent`, `role`) are rejected outright — the
+/// same argument as [`FsPolicy`].
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Workflow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Local path source, relative to the manifest dir — pinned by the strict
+    /// integrity-root digest (symlink anywhere = hard error), the same family
+    /// as extensions: workflow source is executable code, never skill content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Git source URL, fetched through the shared store. A git workflow is
+    /// always digested at its `subpath` anchored at the checkout root (a
+    /// clone's `.git` can never be part of a reproducible pin), so validation
+    /// requires `subpath` alongside `git` — mirroring [`Extension`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subpath: Option<String>,
+    /// The profiles the script's `agent()` calls may name — a CLOSED set, the
+    /// workflow's whole authority-request surface. Every entry must exist in
+    /// `[profiles]`; an empty list is valid (pure computation, spawns nothing).
+    #[serde(default)]
+    pub roles: Vec<String>,
+    /// Requested ceiling on total agent spawns. Absent = the built-in default;
+    /// the effective value is always min(request, machine cap).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_agents: Option<u32>,
+    /// Requested wall-clock ceiling in seconds. Same min(request, cap) rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_wall_seconds: Option<u64>,
+}
+
+impl Workflow {
+    /// The declared roles, sorted and de-duplicated — the canonical form the
+    /// lock pin stores and every drift comparison uses, so declaration order
+    /// (which a repo controls) never masks or fakes a roles change.
+    pub fn roles_sorted_unique(&self) -> Vec<String> {
+        let mut roles = self.roles.clone();
+        roles.sort();
+        roles.dedup();
+        roles
+    }
+}
+
 /// A profile selects a subset of servers and skills.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct Profile {
@@ -1453,5 +1547,46 @@ mod tests {
         assert!(!p.source_allowed("git:github.com/evil/x"));
         // Empty policy allows anything.
         assert!(Policy::default().source_allowed("anything"));
+    }
+
+    /// D7 W1 witness: `[workflows.X]` parses with its declared fields, roles
+    /// canonicalize sorted-unique, and — hostile input, brand-new table — an
+    /// unknown key is rejected outright rather than silently ignored.
+    #[test]
+    fn workflow_declaration_parses_and_rejects_unknown_keys() {
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [workflows.nightly-review]
+            description = "review the day's diff"
+            path = "./workflows/nightly-review.js"
+            roles = ["reviewer", "reader", "reviewer"]
+            max_agents = 25
+            max_wall_seconds = 1800
+            "#,
+        )
+        .unwrap();
+        let wf = &m.workflows["nightly-review"];
+        assert_eq!(wf.max_agents, Some(25));
+        assert_eq!(wf.max_wall_seconds, Some(1800));
+        assert_eq!(wf.roles_sorted_unique(), vec!["reader", "reviewer"]);
+
+        // A typo'd field never rides along silently.
+        let err = toml::from_str::<Manifest>(
+            "version = 1\n[workflows.w]\npath = \"./w.js\"\nmax_agent = 5\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("max_agent"), "{err}");
+
+        // Same for the machine ceiling table.
+        assert!(
+            toml::from_str::<Manifest>("version = 1\n[policy.workflows]\nmax_agnets = 5\n")
+                .is_err()
+        );
+        let p: Manifest =
+            toml::from_str("version = 1\n[policy.workflows]\nmax_agents = 10\n").unwrap();
+        assert_eq!(p.policy.workflows.max_agents, Some(10));
+        assert!(!p.policy.is_empty(), "workflow caps count as policy");
     }
 }

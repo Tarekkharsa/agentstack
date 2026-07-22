@@ -933,6 +933,228 @@ pub fn classify_extension(
     }
 }
 
+/// A governed workflow resolved to a concrete source plus the strict
+/// integrity-root digest of its content — the D7 analogue of
+/// [`ResolvedExtension`], minus the library origin: workflow sources are
+/// inline-only in W1 (`path` or `git`); the central-library kind is W4.
+#[derive(Debug, Clone)]
+pub struct ResolvedWorkflow {
+    pub name: String,
+    /// The declared roles, canonicalized sorted-unique — the form the lock
+    /// pin stores and every drift comparison uses.
+    pub roles: Vec<String>,
+    /// `"path"` or `"git"`.
+    pub source_kind: &'static str,
+    /// The declared path a `path` source pinned (lock provenance).
+    pub path: Option<String>,
+    /// The git URL a `git` source pinned (lock provenance).
+    pub git: Option<String>,
+    /// Resolved git commit (git sources only).
+    pub rev: Option<String>,
+    /// Strict integrity-root digest of the content (never the lenient skill
+    /// digest — workflow source is executable code).
+    pub checksum: String,
+    /// The exact `(root, declared)` pair the digest pinned, so anything that
+    /// later reads the script reads the pinned bytes from the same anchor.
+    pub anchor: std::path::PathBuf,
+    /// The declared path under `anchor` the digest walked.
+    pub declared: String,
+}
+
+/// A structured workflow-resolution failure — mirrors [`ExtensionResolveError`].
+#[derive(Debug, thiserror::Error)]
+pub enum WorkflowResolveError {
+    #[error("workflow '{name}' declares no source — a `[workflows.*]` entry needs an inline `path` or `git` source (the central-library workflow kind is not implemented yet)")]
+    Sourceless { name: String },
+    #[error("workflow '{name}' (git {url}) is not available offline — run `agentstack install`")]
+    NotAvailableOffline { name: String, url: String },
+    #[error(transparent)]
+    Source(#[from] anyhow::Error),
+}
+
+/// Resolve one workflow entry to its source location + strict content digest.
+/// Inline sources only (W1): the manifest entry's own `path` (anchored at
+/// `manifest_dir`) or its own `git` (fetched/cached through the store). A
+/// sourceless entry is an error — there is deliberately NO central-library
+/// fallback here; that is the W4 `kind: workflow`, and resolution must not
+/// invent it early.
+///
+/// Git sources follow [`resolve_extension_entry`]'s rules exactly: digested at
+/// their `subpath` anchored at the **checkout root** with the strict
+/// [`agentstack_core::digest::integrity_root_digest`] (a checkout's `.git` can
+/// never be part of a reproducible pin, so `subpath` is required; symlinks are
+/// rejected by the digest itself).
+pub fn resolve_workflow_entry(
+    name: &str,
+    wf: &crate::manifest::Workflow,
+    manifest_dir: &Path,
+    store: &Store,
+    mode: ResolveMode,
+) -> Result<ResolvedWorkflow, WorkflowResolveError> {
+    let roles = wf.roles_sorted_unique();
+    if let Some(path) = wf.path.as_deref() {
+        let checksum = agentstack_core::digest::integrity_root_digest(manifest_dir, path)
+            .map_err(WorkflowResolveError::Source)?
+            .hex()
+            .to_string();
+        return Ok(ResolvedWorkflow {
+            name: name.to_string(),
+            roles,
+            source_kind: "path",
+            path: Some(path.to_string()),
+            git: None,
+            rev: None,
+            checksum,
+            anchor: manifest_dir.to_path_buf(),
+            declared: path.to_string(),
+        });
+    }
+    if let Some(url) = wf.git.as_deref() {
+        // A git workflow is always digested at a subpath: anchoring at the
+        // checkout root and declaring the subpath keeps the clone's own `.git`
+        // (a sibling of the subpath, not under it) out of the pin.
+        let Some(sub) = wf
+            .subpath
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            return Err(WorkflowResolveError::Source(anyhow::anyhow!(
+                "git-source workflow '{name}' requires a `subpath` pointing at the workflow's \
+                 directory — a checkout's `.git` cannot be part of a reproducible workflow pin"
+            )));
+        };
+        let (clone_root, resolved_rev) = match mode {
+            ResolveMode::Fetch => {
+                let (root, head) = crate::store::checkout(store, url, wf.rev.as_deref())
+                    .map_err(WorkflowResolveError::Source)?;
+                (root, Some(head))
+            }
+            // NoFetch and PathOnly never touch the network; an un-cached clone
+            // is reported offline — same as extensions.
+            ResolveMode::NoFetch | ResolveMode::PathOnly => match store.local_git_clone(url) {
+                Some((root, head)) => (root, head),
+                None => {
+                    return Err(WorkflowResolveError::NotAvailableOffline {
+                        name: name.to_string(),
+                        url: url.to_string(),
+                    })
+                }
+            },
+        };
+        let checksum = agentstack_core::digest::integrity_root_digest(&clone_root, sub)
+            .map_err(WorkflowResolveError::Source)?
+            .hex()
+            .to_string();
+        return Ok(ResolvedWorkflow {
+            name: name.to_string(),
+            roles,
+            source_kind: "git",
+            path: None,
+            git: Some(url.to_string()),
+            rev: resolved_rev,
+            checksum,
+            anchor: clone_root,
+            declared: sub.to_string(),
+        });
+    }
+    Err(WorkflowResolveError::Sourceless {
+        name: name.to_string(),
+    })
+}
+
+/// How a workflow's current source + declared roles compare to its
+/// `agentstack.lock` pin (D7 W1). Mirrors [`ExtensionLockStatus`], with
+/// `RolesDrift` in the place of `TargetDrift`: the pin records which role
+/// profiles the reviewed script may spawn under, so widening (or otherwise
+/// changing) `roles` must re-lock even when the bytes are unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkflowLockStatus {
+    /// Current digest, roles, and rev all match the locked pin.
+    Matches,
+    /// The workflow has no entry in the lockfile yet.
+    MissingLockEntry,
+    /// Current source digest differs from the locked checksum.
+    ChecksumDrift { locked: String, current: String },
+    /// The manifest's role set differs from the one the pin was reviewed for
+    /// (compared sorted-unique, so declaration order can't fake or mask it).
+    RolesDrift {
+        locked: Vec<String>,
+        current: Vec<String>,
+    },
+    /// Git rev differs from the locked rev (both sides carry one).
+    RevDrift { locked: String, current: String },
+    /// A git-backed source that is not cached locally, checked under `NoFetch`
+    /// (offline) — reproducibility just can't be verified offline. Not a
+    /// failure for read paths; admission still requires a verified Matches.
+    NotAvailableOffline { source: String },
+    /// The source could not be digested (missing, symlink, sourceless —
+    /// anything the strict digest or the resolver refuses). Never proceed.
+    ResolveFailed { error: String },
+}
+
+/// Resolve one workflow and compare its strict content digest + roles + rev to
+/// the lockfile pin. `mode` controls whether git sources may be fetched; read
+/// commands pass `NoFetch` so an un-cached git source surfaces as
+/// [`WorkflowLockStatus::NotAvailableOffline`] rather than a failure.
+pub fn workflow_lock_status(
+    name: &str,
+    wf: &crate::manifest::Workflow,
+    manifest_dir: &Path,
+    store: &Store,
+    lock: &Lock,
+    mode: ResolveMode,
+) -> WorkflowLockStatus {
+    match resolve_workflow_entry(name, wf, manifest_dir, store, mode) {
+        Err(WorkflowResolveError::NotAvailableOffline { url, .. }) => {
+            WorkflowLockStatus::NotAvailableOffline { source: url }
+        }
+        Err(e) => WorkflowLockStatus::ResolveFailed {
+            error: format!("{e:#}"),
+        },
+        Ok(resolved) => classify_workflow(
+            name,
+            &resolved.checksum,
+            &resolved.roles,
+            resolved.rev.as_deref(),
+            lock,
+        ),
+    }
+}
+
+/// Compare an **already-resolved** workflow (content checksum + sorted-unique
+/// roles + optional git rev) to its lockfile pin. Pure — no filesystem, no
+/// re-resolution. Checksum drift takes precedence over roles drift, which
+/// takes precedence over rev drift (same ordering as [`classify_extension`]).
+pub fn classify_workflow(
+    name: &str,
+    current_checksum: &str,
+    current_roles: &[String],
+    current_rev: Option<&str>,
+    lock: &Lock,
+) -> WorkflowLockStatus {
+    match lock.get_workflow(name) {
+        None => WorkflowLockStatus::MissingLockEntry,
+        Some(entry) if entry.checksum.hex() != current_checksum => {
+            WorkflowLockStatus::ChecksumDrift {
+                locked: entry.checksum.hex().to_string(),
+                current: current_checksum.to_string(),
+            }
+        }
+        Some(entry) if entry.roles != current_roles => WorkflowLockStatus::RolesDrift {
+            locked: entry.roles.clone(),
+            current: current_roles.to_vec(),
+        },
+        Some(entry) => match (entry.rev.as_deref(), current_rev) {
+            (Some(l), Some(c)) if l != c => WorkflowLockStatus::RevDrift {
+                locked: l.to_string(),
+                current: c.to_string(),
+            },
+            _ => WorkflowLockStatus::Matches,
+        },
+    }
+}
+
 /// Compare an **already-resolved** server definition digest to its lockfile
 /// pin. Pure — no filesystem, no re-resolution — so use-time gates can verify
 /// the exact resolved set they are about to act on (no re-resolve between

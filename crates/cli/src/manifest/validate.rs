@@ -84,6 +84,26 @@ pub enum IssueKind {
     /// basename, so a name carrying a separator would escape the extension
     /// directory agentstack owns — rejected before it can ever be rendered.
     InvalidExtensionName,
+    /// A workflow name that is not a plain path component (contains `/`, `\`,
+    /// `..`, or is empty/absolute) — the same containment rule as
+    /// `InvalidExtensionName`: the name is an artifact/run identity, never a
+    /// path escape.
+    InvalidWorkflowName,
+    /// A `[workflows.X]` source that can't be pinned: a git source without the
+    /// required `subpath`, or no source at all. Workflow sources are
+    /// inline-only in W1 — a sourceless entry is NOT a library reference (the
+    /// central-library workflow kind is W4), so it is always an error.
+    InvalidWorkflowSource,
+    /// A `[workflows.X] roles` entry names no `[profiles.*]` table. Roles are
+    /// the workflow's whole authority-request surface; a role that resolves
+    /// to no profile could never be admitted, so it fails at authoring time.
+    UnknownWorkflowRole,
+    /// `[workflows.X]` ceilings outside the sane envelope: more than 32 unique
+    /// roles, `max_agents` outside 1..=1000, or `max_wall_seconds` outside
+    /// 1..=604800 (one week). Zero is refused rather than read as "unlimited"
+    /// — a zero ceiling is always a typo, and misreading it open would be a
+    /// widening (rule 2).
+    InvalidWorkflowBounds,
 }
 
 impl IssueKind {
@@ -109,15 +129,27 @@ impl IssueKind {
                 | IssueKind::InvalidExtensionSource
                 | IssueKind::ReservedExtensionName
                 | IssueKind::InvalidExtensionName
+                | IssueKind::InvalidWorkflowName
+                | IssueKind::InvalidWorkflowSource
+                | IssueKind::UnknownWorkflowRole
+                | IssueKind::InvalidWorkflowBounds
         )
     }
 }
 
-/// An extension name is rendered verbatim as an artifact basename, so it must
-/// be a single plain path component — no separator, no `..`, not empty or
-/// absolute. Mirrors the render sink's `is_safe_artifact_key` so validation and
-/// the renderer agree on exactly which names are containable.
-fn is_safe_extension_name(name: &str) -> bool {
+/// `[workflows.X]` bounds envelope (D7 W1): the maxima requests are validated
+/// against. Public so the admission choke point (`crate::workflows`) and
+/// doctor state the same numbers.
+pub const MAX_WORKFLOW_ROLES: usize = 32;
+pub const MAX_WORKFLOW_AGENTS: u32 = 1000;
+pub const MAX_WORKFLOW_WALL_SECONDS: u64 = 604_800; // one week
+
+/// An extension or workflow name is used verbatim as an artifact basename /
+/// run identity, so it must be a single plain path component — no separator,
+/// no `..`, not empty or absolute. Mirrors the render sink's
+/// `is_safe_artifact_key` so validation and the renderer agree on exactly
+/// which names are containable.
+fn is_safe_component_name(name: &str) -> bool {
     if name.is_empty() || name.contains('/') || name.contains('\\') {
         return false;
     }
@@ -366,7 +398,7 @@ fn run<'a>(
         // The name becomes the rendered artifact's on-disk basename, so it must
         // be a single plain path component: no separator or `..` may smuggle the
         // copy outside the extension directory agentstack owns.
-        if !is_safe_extension_name(name) {
+        if !is_safe_component_name(name) {
             issues.push(Issue::new(
                 IssueKind::InvalidExtensionName,
                 format!("extension '{name}' is not a valid name — an extension name must be a plain path component (no `/`, `\\`, or `..`)"),
@@ -417,6 +449,76 @@ fn run<'a>(
                     ext.target
                 ),
             ));
+        }
+    }
+
+    // Governed workflows (D7 W1): every declaration must be pinnable and its
+    // authority request must be resolvable and bounded. All errors — a
+    // half-declared workflow must never exist, and the admission choke point
+    // (`crate::workflows::normalized_workflows`) refuses on any of these too.
+    for (name, wf) in &manifest.workflows {
+        // The name is the workflow's run identity (and a future artifact
+        // basename) — same containment rule as extensions.
+        if !is_safe_component_name(name) {
+            issues.push(Issue::new(
+                IssueKind::InvalidWorkflowName,
+                format!("workflow '{name}' is not a valid name — a workflow name must be a plain path component (no `/`, `\\`, or `..`)"),
+            ));
+        }
+        if wf.git.is_some() {
+            // Same rule as git extensions: the checkout's `.git` cannot be
+            // part of a reproducible pin, so a subpath must be named.
+            let has_subpath = wf.subpath.as_deref().is_some_and(|s| !s.trim().is_empty());
+            if !has_subpath {
+                issues.push(Issue::new(
+                    IssueKind::InvalidWorkflowSource,
+                    format!("workflow '{name}' has a `git` source but no `subpath` — point `subpath` at the workflow's directory within the repo"),
+                ));
+            }
+        } else if wf.path.is_none() {
+            // Inline-only in W1: no central-library fallback exists for
+            // workflows yet, so sourceless is unconditionally unpinnable.
+            issues.push(Issue::new(
+                IssueKind::InvalidWorkflowSource,
+                format!("workflow '{name}' has no `path` or `git` source — workflow sources are inline-only (a central-library workflow kind is not implemented yet)"),
+            ));
+        }
+        // Roles are the authority-request surface: each must name a declared
+        // profile — a role resolving to no capability set can never be
+        // admitted, so it fails here, at authoring time.
+        for role in &wf.roles {
+            if !manifest.profiles.contains_key(role) {
+                issues.push(Issue::new(
+                    IssueKind::UnknownWorkflowRole,
+                    format!("workflow '{name}' role '{role}' names no `[profiles.{role}]` — every role must be a declared profile"),
+                ));
+            }
+        }
+        if wf.roles_sorted_unique().len() > MAX_WORKFLOW_ROLES {
+            issues.push(Issue::new(
+                IssueKind::InvalidWorkflowBounds,
+                format!("workflow '{name}' declares more than {MAX_WORKFLOW_ROLES} unique roles"),
+            ));
+        }
+        // Zero is refused rather than read as "unlimited": a zero ceiling is
+        // always a typo, and misreading it open would widen (rule 2).
+        if let Some(n) = wf.max_agents {
+            if n == 0 || n > MAX_WORKFLOW_AGENTS {
+                issues.push(Issue::new(
+                    IssueKind::InvalidWorkflowBounds,
+                    format!(
+                        "workflow '{name}' max_agents = {n} is outside 1..={MAX_WORKFLOW_AGENTS}"
+                    ),
+                ));
+            }
+        }
+        if let Some(s) = wf.max_wall_seconds {
+            if s == 0 || s > MAX_WORKFLOW_WALL_SECONDS {
+                issues.push(Issue::new(
+                    IssueKind::InvalidWorkflowBounds,
+                    format!("workflow '{name}' max_wall_seconds = {s} is outside 1..={MAX_WORKFLOW_WALL_SECONDS}"),
+                ));
+            }
         }
     }
 
@@ -1050,5 +1152,64 @@ mod tests {
         assert!(validate_with_context(&missing, ["pi"], &ctx)
             .iter()
             .any(|i| i.kind == IssueKind::InvalidExtensionSource));
+    }
+
+    /// D7 W1 witness (roles half): a role naming no `[profiles.*]` is refused
+    /// as `UnknownWorkflowRole`; the other workflow findings each fire on
+    /// their own trigger, and every one is an error.
+    #[test]
+    fn workflow_declarations_validate_name_source_roles_and_bounds() {
+        let m = parse(
+            r#"
+            version = 1
+            [profiles.reader]
+            [workflows.ok]
+            path = "./workflows/ok.js"
+            roles = ["reader"]
+            [workflows.ghost-role]
+            path = "./workflows/g.js"
+            roles = ["reader", "synthesizer"]
+            [workflows.from-git]
+            git = "https://x/repo.git"
+            [workflows.sourceless]
+            roles = []
+            [workflows.zero]
+            path = "./workflows/z.js"
+            max_agents = 0
+            max_wall_seconds = 700000
+            [workflows."../evil"]
+            path = "./workflows/e.js"
+            "#,
+        );
+        let issues = validate(&m);
+        let count = |kind: IssueKind| issues.iter().filter(|i| i.kind == kind).count();
+        assert_eq!(count(IssueKind::UnknownWorkflowRole), 1);
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.kind == IssueKind::UnknownWorkflowRole
+                    && i.message.contains("synthesizer"))
+        );
+        // git-without-subpath AND sourceless are both source errors.
+        assert_eq!(count(IssueKind::InvalidWorkflowSource), 2);
+        // max_agents = 0 and an over-week wall clock are both bounds errors.
+        assert_eq!(count(IssueKind::InvalidWorkflowBounds), 2);
+        assert_eq!(count(IssueKind::InvalidWorkflowName), 1);
+        assert!(issues.iter().all(|i| i.kind.is_error()));
+
+        // A role list above the unique cap is refused; duplicates don't count.
+        let mut toml = String::from("version = 1\n[workflows.big]\npath = \"./w\"\nroles = [");
+        let mut profiles = String::new();
+        for i in 0..33 {
+            toml.push_str(&format!("\"r{i}\","));
+            profiles.push_str(&format!("[profiles.r{i}]\n"));
+        }
+        toml.push_str("]\n");
+        toml.push_str(&profiles);
+        let issues = validate(&parse(&toml));
+        assert!(issues
+            .iter()
+            .any(|i| i.kind == IssueKind::InvalidWorkflowBounds
+                && i.message.contains("unique roles")));
     }
 }

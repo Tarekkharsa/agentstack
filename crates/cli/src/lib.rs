@@ -60,4 +60,5 @@ pub use sys::reset_sigpipe;
 pub use agentstack_trust as trust;
 pub mod usage;
 pub mod verify;
+pub mod workflows;
 pub use agentstack_core::util;

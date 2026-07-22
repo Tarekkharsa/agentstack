@@ -380,3 +380,111 @@ fn unpinned_first_activation_proceeds_and_pins() {
     let lock = fs::read_to_string(proj.join("agentstack.lock")).unwrap();
     assert!(lock.contains("helper"), "first activation pinned: {lock}");
 }
+
+/// D7 W1 witnesses, the workflow re-gate chain end to end:
+/// - a ONE-BYTE edit to the pinned workflow source surfaces as
+///   `ChecksumDrift`, blocks re-granting trust, and accepting it with
+///   `agentstack lock` flips trust to `Changed` (lock bytes are in the trust
+///   digest) until re-reviewed;
+/// - a ROLES widening with unchanged bytes surfaces as `RolesDrift` and
+///   blocks trust the same way — the pin bound the script to its reviewed
+///   capability sets, not just its bytes.
+#[test]
+fn workflow_drift_and_roles_widening_block_trust_until_relocked() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("workflows/review")).unwrap();
+    const MANIFEST: &str = "version = 1\n[profiles.reader]\n\
+         [workflows.review]\npath = \"./workflows/review\"\nroles = [\"reader\"]\n";
+    fs::write(proj.join("agentstack.toml"), MANIFEST).unwrap();
+    fs::write(
+        proj.join("workflows/review/main.js"),
+        "export const meta = { name: 'review' } // v1",
+    )
+    .unwrap();
+    let grant_args = TrustArgs {
+        path: Some(proj.clone()),
+        list: false,
+        revoke: false,
+        yes: true,
+    };
+
+    // Unpinned workflow → trust refuses, naming it.
+    let err = trust_cmd::run(&grant_args).unwrap_err().to_string();
+    assert!(err.contains("isn't fully pinned"), "{err}");
+    assert!(err.contains("review"), "{err}");
+
+    // Pin → trust grants.
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+    let lock_path = proj.join("agentstack.lock");
+    let lock_before = fs::read_to_string(&lock_path).unwrap();
+    assert!(lock_before.contains("[[workflow]]"), "{lock_before}");
+    trust_cmd::run(&grant_args).unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Trusted);
+
+    // One-byte source edit: manifest + lock untouched → trust digest holds
+    // (the gap), and the status is ChecksumDrift.
+    fs::write(
+        proj.join("workflows/review/main.js"),
+        "export const meta = { name: 'review' } // v2",
+    )
+    .unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Trusted);
+    {
+        let manifest: agentstack::manifest::Manifest = toml::from_str(MANIFEST).unwrap();
+        let lock = agentstack::lock::Lock::load(&proj).unwrap();
+        let store = agentstack::store::Store::default_store();
+        let status = agentstack::resolve::workflow_lock_status(
+            "review",
+            &manifest.workflows["review"],
+            &proj,
+            &store,
+            &lock,
+            agentstack::resolve::ResolveMode::NoFetch,
+        );
+        assert!(
+            matches!(
+                status,
+                agentstack::resolve::WorkflowLockStatus::ChecksumDrift { .. }
+            ),
+            "{status:?}"
+        );
+    }
+    // Drift blocks the re-grant…
+    let err = trust_cmd::run(&grant_args).unwrap_err().to_string();
+    assert!(err.contains("drifted"), "{err}");
+    // …and `agentstack lock` accepts it, which re-gates trust via the lock
+    // bytes. Re-trust restores.
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+    assert_ne!(fs::read_to_string(&lock_path).unwrap(), lock_before);
+    assert_eq!(trust::check(&proj), TrustState::Changed);
+    trust_cmd::run(&grant_args).unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Trusted);
+
+    // Roles widening, bytes unchanged: add a second role to the declaration
+    // only. The manifest edit itself flips the trust digest (manifest bytes
+    // are in it), but the load-bearing check is the PIN: even after the
+    // human re-reviews the manifest, the roles-vs-pin mismatch still blocks
+    // until re-locked.
+    let widened = "version = 1\n[profiles.reader]\n[profiles.writer]\n\
+         [workflows.review]\npath = \"./workflows/review\"\nroles = [\"reader\", \"writer\"]\n";
+    fs::write(proj.join("agentstack.toml"), widened).unwrap();
+    let err = trust_cmd::run(&grant_args).unwrap_err().to_string();
+    assert!(err.contains("roles changed since locked"), "{err}");
+
+    // Re-lock records the widened role set; trust then grants over it.
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+    let relocked = fs::read_to_string(&lock_path).unwrap();
+    assert!(
+        relocked.contains("writer"),
+        "pin records the widened roles: {relocked}"
+    );
+    trust_cmd::run(&grant_args).unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Trusted);
+}

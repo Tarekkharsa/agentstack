@@ -768,6 +768,7 @@ version = 1
         settings,
         hooks: IndexMap::new(),
         extensions: IndexMap::new(),
+        workflows: IndexMap::new(),
         packs: IndexMap::new(),
         targets: Targets {
             default: detected.clone(),

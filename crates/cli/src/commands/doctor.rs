@@ -1270,6 +1270,7 @@ fn run_checks(
     if manifest.profiles.is_empty()
         && manifest.instructions.is_empty()
         && manifest.extensions.is_empty()
+        && manifest.workflows.is_empty()
         && manifest.servers.is_empty()
     {
         report.mark_irrelevant();
@@ -1280,6 +1281,8 @@ fn run_checks(
     check_executable_integrity(manifest, &ctx.dir, report);
     check_extension_reproducibility(manifest, &ctx.dir, report);
     check_rendered_extensions(&ctx.dir, &ctx.registry, report);
+    check_workflow_reproducibility(manifest, &ctx.dir, report);
+    check_workflow_ceilings(manifest, report);
 
     // P9: when any pin drifted above, state the rule once — drift is an error
     // until you re-lock, and re-locking re-gates trust (new pins are new
@@ -1594,6 +1597,91 @@ fn check_extension_reproducibility(manifest: &Manifest, dir: &Path, report: &mut
             ),
             ExtensionLockStatus::Matches => {
                 report.line(Level::Ok, format!("{name:<20} extension · matches lock"));
+            }
+        }
+    }
+}
+
+/// Check that each declared governed workflow (D7 W1) resolves to the content,
+/// role set, and rev its `agentstack.lock` pins. Drift — including a roles
+/// change with unchanged bytes, reported distinctly — and broken sources are
+/// errors (`doctor --ci` gates reproducibility); a declared-but-unlocked
+/// workflow is a warning; an un-cached git source can't be verified offline
+/// (info, not a failure — admission still requires a verified pin).
+fn check_workflow_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Report) {
+    use crate::resolve::WorkflowLockStatus;
+    if manifest.workflows.is_empty() {
+        return;
+    }
+    let lock = crate::lock::Lock::load(dir).unwrap_or_default();
+    let store = crate::store::Store::default_store();
+    for (name, wf) in &manifest.workflows {
+        match crate::resolve::workflow_lock_status(
+            name,
+            wf,
+            dir,
+            &store,
+            &lock,
+            crate::resolve::ResolveMode::NoFetch,
+        ) {
+            WorkflowLockStatus::ResolveFailed { error } => {
+                report.line(Level::Error, format!("{name:<20} broken workflow ref — {error}"));
+            }
+            WorkflowLockStatus::ChecksumDrift { .. } | WorkflowLockStatus::RevDrift { .. } => {
+                report.line(
+                    Level::Error,
+                    format!("{name:<20} workflow drifted from lock ↳ agentstack lock"),
+                );
+            }
+            WorkflowLockStatus::RolesDrift { .. } => report.line(
+                Level::Error,
+                format!("{name:<20} workflow roles changed since locked ↳ agentstack lock"),
+            ),
+            WorkflowLockStatus::MissingLockEntry => report.line(
+                Level::Warn,
+                format!("{name:<20} workflow not locked ↳ agentstack lock"),
+            ),
+            WorkflowLockStatus::NotAvailableOffline { .. } => report.line(
+                Level::Info,
+                format!("{name:<20} git workflow not cached — can't verify offline ↳ agentstack install"),
+            ),
+            WorkflowLockStatus::Matches => {
+                report.line(Level::Ok, format!("{name:<20} workflow · matches lock"));
+            }
+        }
+    }
+}
+
+/// Flag workflow ceiling requests above the machine `[policy.workflows]` cap.
+/// Admission clamps such a request to the cap (it can never take effect as
+/// written — rule 2), so the manifest is stating an authority it will not
+/// get: an error, fixed by lowering the request or raising the machine cap.
+fn check_workflow_ceilings(manifest: &Manifest, report: &mut Report) {
+    if manifest.workflows.is_empty() {
+        return;
+    }
+    let machine = crate::machine_policy::inspect();
+    let Some(machine_policy) = machine.policy else {
+        // Blocked machine policy is reported by the Machine policy section;
+        // nothing to compare against here.
+        return;
+    };
+    let caps = &machine_policy.workflows;
+    for (name, wf) in &manifest.workflows {
+        if let (Some(req), Some(cap)) = (wf.max_agents, caps.max_agents) {
+            if req > cap {
+                report.line(
+                    Level::Error,
+                    format!("{name:<20} requests max_agents = {req} above the machine [policy.workflows] cap {cap} — admission clamps to {cap}; lower the request or raise the cap"),
+                );
+            }
+        }
+        if let (Some(req), Some(cap)) = (wf.max_wall_seconds, caps.max_wall_seconds) {
+            if req > cap {
+                report.line(
+                    Level::Error,
+                    format!("{name:<20} requests max_wall_seconds = {req} above the machine [policy.workflows] cap {cap} — admission clamps to {cap}; lower the request or raise the cap"),
+                );
             }
         }
     }

@@ -396,6 +396,99 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
         }
     }
 
+    // Governed workflows (D7 W1): orchestration code agentstack ITSELF will
+    // execute, spawning agent runs under the declared role profiles. Stronger
+    // than skills (context, not code), different in kind from extensions (a
+    // harness runs those, ungoverned; agentstack runs this, gated and
+    // sandboxed — which is precisely why the gate stands in front of it).
+    // Unpinned, drifted, roles-drifted, and unresolvable all block, like the
+    // extension surface; the diff identity is the sorted role set, so a roles
+    // widening reads as `~ changed` even with unchanged bytes.
+    if !m.workflows.is_empty() {
+        println!(
+            "  workflows (ORCHESTRATION CODE — spawns agent runs under the declared roles; agentstack executes this, gated and sandboxed):"
+        );
+        let store = crate::store::Store::default_store();
+        for (name, wf) in &m.workflows {
+            use crate::resolve::WorkflowLockStatus;
+            let disp = crate::text::sanitize_line(name);
+            let roles = wf.roles_sorted_unique();
+            let roles_joined = roles.join(", ");
+            let dest = format!(
+                "→ roles: {}",
+                if roles.is_empty() {
+                    "(none — spawns nothing)".to_string()
+                } else {
+                    crate::text::sanitize_line(&roles_joined)
+                }
+            );
+            let mk = diff.mark("workflow", name, &roles_joined);
+            // Read-only review: never fetch a git source here. An un-cached
+            // git workflow surfaces as offline, exactly like a skill.
+            let status = crate::resolve::workflow_lock_status(
+                name,
+                wf,
+                &dir,
+                &store,
+                &lock,
+                crate::resolve::ResolveMode::NoFetch,
+            );
+            match status {
+                WorkflowLockStatus::Matches => {
+                    println!("{mk}{} {disp} {dest}   [pinned]", "▶".yellow());
+                }
+                WorkflowLockStatus::MissingLockEntry => {
+                    println!("{mk}{} {disp} {dest}   [{}]", "✗".red(), "unpinned".red());
+                    blockers.push((
+                        name.clone(),
+                        "workflow unpinned — run `agentstack lock`".to_string(),
+                    ));
+                }
+                WorkflowLockStatus::ChecksumDrift { .. } | WorkflowLockStatus::RevDrift { .. } => {
+                    println!(
+                        "{mk}{} {disp} {dest}   [{}]",
+                        "✗".red(),
+                        "DRIFTED from lock".red()
+                    );
+                    blockers.push((
+                        name.clone(),
+                        "workflow content drifted from lock".to_string(),
+                    ));
+                }
+                WorkflowLockStatus::RolesDrift { locked, .. } => {
+                    println!(
+                        "{mk}{} {disp} {dest}   [{}]",
+                        "✗".red(),
+                        format!(
+                            "ROLES CHANGED since locked (was: {})",
+                            crate::text::sanitize_line(&locked.join(", "))
+                        )
+                        .red()
+                    );
+                    blockers.push((
+                        name.clone(),
+                        "workflow roles changed since locked — run `agentstack lock`".to_string(),
+                    ));
+                }
+                // Reproducibility can't be checked offline; not a blocker —
+                // same posture as skills' and extensions' un-cached git sources.
+                WorkflowLockStatus::NotAvailableOffline { .. } => println!(
+                    "{mk}{} {disp} {dest}   [{}]",
+                    "▶".yellow(),
+                    "offline — pin unverified".yellow()
+                ),
+                WorkflowLockStatus::ResolveFailed { error } => {
+                    println!(
+                        "{mk}{} {disp} {dest}: {}",
+                        "✗".red(),
+                        crate::text::sanitize_line(&error).red()
+                    );
+                    blockers.push((name.clone(), error));
+                }
+            }
+        }
+    }
+
     // Skills, reviewed like servers: name + origin + pin status. Their bodies
     // are exactly the bytes the trust digest does NOT cover, so the pin is
     // the only thing binding what the human reviews to what gets served.

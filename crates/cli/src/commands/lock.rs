@@ -105,6 +105,12 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // pruned. Resolution is library-aware and fetches git sources.
     let extensions = record_extension_pins(&ctx.dir, manifest, &library, &lib_home, &store)?;
 
+    // Governed workflows (D7 W1) are manifest-global like extensions: pin them
+    // regardless of the profile selection. Strict — an undigestable or
+    // sourceless entry is an error, stale pins for undeclared names are
+    // pruned. Git sources are fetched through the shared store.
+    let workflows = record_workflow_pins(&ctx.dir, manifest, &store)?;
+
     // Profile selection mirrors activation: named → that one; default → every
     // declared profile; none declared → the implicit default (the full inline
     // set), so a profile-less manifest is fully pinnable.
@@ -144,13 +150,14 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         None => "the implicit default (no profiles declared)".to_string(),
     };
     println!(
-        "{} pinned {} skill(s) + {} server(s) from {from} + {} instruction(s) + {} executable pin(s) + {} extension(s) in {}",
+        "{} pinned {} skill(s) + {} server(s) from {from} + {} instruction(s) + {} executable pin(s) + {} extension(s) + {} workflow(s) in {}",
         "✓".green(),
         skills.len(),
         servers.len(),
         instructions,
         executables,
         extensions,
+        workflows,
         Lock::path(&ctx.dir).display()
     );
     println!(
@@ -331,6 +338,52 @@ pub(crate) fn record_extension_pins(
         pinned += 1;
     }
     lock.retain_extension_names(&declared);
+    // Don't churn the lockfile (or the trust digest) for byte-identical pins.
+    if lock != before {
+        lock.save(dir)?;
+    }
+    Ok(pinned)
+}
+
+/// Pin every declared governed workflow (D7 W1) by the STRICT integrity-root
+/// digest — the executable-content family, same as extensions, never the
+/// lenient skill digest. Sources are inline-only (`path` or `git`; the
+/// central-library workflow kind is W4), and git sources are fetched through
+/// the shared store (`ResolveMode::Fetch`).
+///
+/// Always strict, like the lock command's other manifest-global pins: an
+/// undigestable, sourceless, or unresolvable entry errors, and pins for
+/// undeclared names are pruned. The pin records the sorted-unique `roles` set
+/// alongside the provenance — the review binds this script to these
+/// capability sets, so a later roles change is drift even with unchanged
+/// bytes. Returns how many pinned.
+pub(crate) fn record_workflow_pins(
+    dir: &Path,
+    manifest: &Manifest,
+    store: &crate::store::Store,
+) -> Result<usize> {
+    let mut lock = Lock::load(dir)?;
+    let before = lock.clone();
+    let mut declared: Vec<String> = Vec::new();
+    let mut pinned = 0usize;
+    for (name, wf) in &manifest.workflows {
+        declared.push(name.clone());
+        let resolved =
+            crate::resolve::resolve_workflow_entry(name, wf, dir, store, ResolveMode::Fetch)
+                .with_context(|| format!("pinning workflow '{name}'"))?;
+        lock.upsert_workflow(agentstack_core::lock::LockedWorkflow {
+            name: name.clone(),
+            roles: resolved.roles.clone(),
+            source: resolved.source_kind.to_string(),
+            path: resolved.path.clone(),
+            git: resolved.git.clone(),
+            rev: resolved.rev.clone(),
+            checksum: Sha256Hex::parse(&resolved.checksum)
+                .with_context(|| format!("pinning workflow '{name}'"))?,
+        });
+        pinned += 1;
+    }
+    lock.retain_workflow_names(&declared);
     // Don't churn the lockfile (or the trust digest) for byte-identical pins.
     if lock != before {
         lock.save(dir)?;

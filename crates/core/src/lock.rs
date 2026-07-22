@@ -46,6 +46,14 @@ pub struct Lock {
     /// cannot pass any gate downstream.
     #[serde(default, rename = "extension")]
     pub extensions: Vec<LockedExtension>,
+    /// Workflow pins (D7 W1). Additive `#[serde(default)]` at version 2, on
+    /// the same justification as the executable and extension pins above: an
+    /// older binary that rewrites these pins away changes the lock bytes,
+    /// which flips the trust digest and forces re-review — and both the trust
+    /// gate and workflow admission block unpinned workflows, so silent
+    /// unpinning cannot pass any gate downstream.
+    #[serde(default, rename = "workflow")]
+    pub workflows: Vec<LockedWorkflow>,
 }
 
 impl Default for Lock {
@@ -57,6 +65,7 @@ impl Default for Lock {
             instructions: Vec::new(),
             executables: Vec::new(),
             extensions: Vec::new(),
+            workflows: Vec::new(),
         }
     }
 }
@@ -119,6 +128,42 @@ pub struct LockedExtension {
 /// before E3 was a project-local `path`, so that is the honest default.
 fn locked_extension_source_default() -> String {
     "path".to_string()
+}
+
+/// A pinned governed workflow (D7 W1): its source tree's strict
+/// integrity-root digest (the executable-content digest family, same as
+/// [`LockedExtension`] — symlink anywhere = hard error, never the lenient
+/// skill digest) plus the sorted role set the review bound it to.
+///
+/// The pin records `roles` the way an extension pin records `target`: the
+/// human reviewed THIS script against THESE capability sets, so widening the
+/// roles without re-locking is drift even when the bytes are unchanged.
+/// `roles` is stored sorted and de-duplicated ([`Lock::upsert_workflow`]
+/// canonicalizes) so declaration order never fakes or masks a change.
+///
+/// The source-provenance fields (`source`/`path`/`git`/`rev`) mirror
+/// [`LockedExtension`]. The checksum is the typed [`Sha256Hex`] from day one —
+/// a brand-new pin kind has no legacy entries to stay lenient for, so a
+/// malformed checksum fails the parse loudly instead of riding to a silent
+/// mismatch.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedWorkflow {
+    pub name: String,
+    /// The reviewed role set — sorted, de-duplicated.
+    #[serde(default)]
+    pub roles: Vec<String>,
+    /// `"path"` (project-local) or `"git"` (a fetched checkout).
+    pub source: String,
+    /// The declared path a `path` source pinned (provenance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// The git URL a `git` source pinned (provenance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<String>,
+    /// The resolved git commit a `git` source was pinned at (rev-drift check).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
+    pub checksum: Sha256Hex,
 }
 
 /// A pinned MCP server: the SHA-256 of its **definition** (a `${REF}`-only
@@ -317,6 +362,30 @@ impl Lock {
     /// stale-pin pruning rule as instructions (`retain_instruction_names`).
     pub fn retain_extension_names(&mut self, keep: &[String]) {
         self.extensions.retain(|e| keep.contains(&e.name));
+    }
+
+    pub fn get_workflow(&self, name: &str) -> Option<&LockedWorkflow> {
+        self.workflows.iter().find(|w| w.name == name)
+    }
+
+    /// Insert or replace a workflow pin, keeping entries sorted by name and
+    /// canonicalizing `roles` to sorted-unique — the pin NEVER stores a role
+    /// list in declaration order, so roles drift is a set comparison.
+    pub fn upsert_workflow(&mut self, mut entry: LockedWorkflow) {
+        entry.roles.sort();
+        entry.roles.dedup();
+        if let Some(existing) = self.workflows.iter_mut().find(|w| w.name == entry.name) {
+            *existing = entry;
+        } else {
+            self.workflows.push(entry);
+        }
+        self.workflows.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    /// Drop workflow pins whose name is no longer declared — the same
+    /// stale-pin pruning rule as extensions (`retain_extension_names`).
+    pub fn retain_workflow_names(&mut self, keep: &[String]) {
+        self.workflows.retain(|w| keep.contains(&w.name));
     }
 
     /// Insert or replace a server entry, keeping entries sorted by name.
@@ -610,6 +679,69 @@ mod tests {
         let parsed: Lock =
             toml::from_str(&format!("version = {SUPPORTED_LOCK_VERSION}\n")).unwrap();
         assert!(parsed.extensions.is_empty());
+    }
+
+    /// D7 W1 witness: workflow pins upsert sorted by name, canonicalize roles
+    /// to sorted-unique regardless of declaration order, round-trip through
+    /// the lockfile parser, and prune to the declared set. A v2 lock without
+    /// `[[workflow]]` parses to an empty pin set (additive field, same rule
+    /// as executables/extensions).
+    #[test]
+    fn workflow_upsert_sorts_roles_roundtrips_and_retains() {
+        let mut lock = Lock::default();
+        lock.upsert_workflow(LockedWorkflow {
+            name: "nightly-review".into(),
+            roles: vec!["reviewer".into(), "reader".into(), "reviewer".into()],
+            source: "path".into(),
+            path: Some("./workflows/nightly-review.js".into()),
+            git: None,
+            rev: None,
+            checksum: Sha256Hex::of(b"cafe"),
+        });
+        lock.upsert_workflow(LockedWorkflow {
+            name: "audit".into(),
+            roles: vec!["reader".into()],
+            source: "git".into(),
+            path: None,
+            git: Some("https://example.com/x.git".into()),
+            rev: Some("abc123".into()),
+            checksum: Sha256Hex::of(b"beef"),
+        });
+        assert_eq!(lock.workflows[0].name, "audit", "sorted by name");
+        assert_eq!(
+            lock.get_workflow("nightly-review").unwrap().roles,
+            vec!["reader".to_string(), "reviewer".to_string()],
+            "roles stored sorted-unique, never declaration order"
+        );
+
+        // Upsert replaces in place (a re-lock after an edit updates the pin).
+        lock.upsert_workflow(LockedWorkflow {
+            name: "nightly-review".into(),
+            roles: vec!["reader".into()],
+            source: "path".into(),
+            path: Some("./workflows/nightly-review.js".into()),
+            git: None,
+            rev: None,
+            checksum: Sha256Hex::of(b"f00d"),
+        });
+        assert_eq!(
+            lock.get_workflow("nightly-review").unwrap().checksum,
+            Sha256Hex::of(b"f00d")
+        );
+
+        let text = toml::to_string_pretty(&lock).unwrap();
+        assert!(text.contains("[[workflow]]"));
+        let parsed: Lock = toml::from_str(&text).unwrap();
+        assert_eq!(parsed.workflows, lock.workflows);
+
+        // Prune to the declared set; an existing v2 lock without [[workflow]]
+        // parses to an empty pin set.
+        lock.retain_workflow_names(&["audit".to_string()]);
+        assert!(lock.get_workflow("nightly-review").is_none());
+        assert!(lock.get_workflow("audit").is_some());
+        let parsed: Lock =
+            toml::from_str(&format!("version = {SUPPORTED_LOCK_VERSION}\n")).unwrap();
+        assert!(parsed.workflows.is_empty());
     }
 
     /// An E1-era `[[extension]]` entry — name/target/checksum only, no source
