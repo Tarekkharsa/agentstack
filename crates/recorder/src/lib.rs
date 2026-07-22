@@ -434,6 +434,95 @@ pub enum RunEvent {
         sha256: String,
         truncated: bool,
     },
+    /// A governed workflow run began — the envelope event of the
+    /// workflow-level evidence tree (design doc §6 step 3, §12.4 Stage E):
+    /// the workflow log is the JOIN TABLE over per-child run logs; each
+    /// child's own events stay in its own log. Identity only: the pinned
+    /// script digest admission verified, the deterministic digest of the
+    /// EFFECTIVE grant (machine ∩ manifest ∩ script meta), and the
+    /// invoker-args identity — Stage F's divergence refusals consume these.
+    /// This event stream doubles as the resume journal, but it is written as
+    /// EVIDENCE: `ts` is CLI-stamped wall clock and must never become replay
+    /// input.
+    WorkflowStarted {
+        ts: u64,
+        workflow: String,
+        workflow_digest: String,
+        grant_digest: String,
+        /// Digest over the RAW `--args-json` bytes (length-framed, the
+        /// no-args case pinned distinctly) — the byte-identical resume
+        /// precondition, recorded proactively for Stage F.
+        args_digest: String,
+        max_agents: u32,
+        max_wall_seconds: u64,
+    },
+    /// One `agent()` call became a locked child run. Appended BEFORE the
+    /// child spawns (fail-closed: an unrecordable spawn does not launch).
+    ///
+    /// Deliberate deviation from the §12.4 sketch, which lists
+    /// `child_grant_digest` here: the child's grant exists only after its
+    /// OWN freeze, so a pre-spawn event cannot carry it — and duplicating it
+    /// post-hoc would break the join-table principle the same section
+    /// states. The report joins the child's `GrantFrozen`/`LockedOutcome`
+    /// via `child_run_id` instead; the digest lives in exactly one place.
+    StepSpawned {
+        ts: u64,
+        /// The engine's request id — the step's stable identity.
+        step: u64,
+        role: String,
+        child_run_id: String,
+        /// Length-framed digest over canonical prompt + opts — the per-step
+        /// replay-alignment identity (Stage F), recorded proactively. The
+        /// prompt TEXT itself never enters an event.
+        request_digest: String,
+        /// Script-authored display label: byte-bounded at append, sanitized
+        /// at report render (rule 7 at the terminal seam).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        label: Option<String>,
+        /// Prior step ids whose RESULT text appears in this step's prompt
+        /// (§11 ruling 3: report-only metadata, no blocking semantics).
+        /// Bounded substring detection — false negatives are accepted and
+        /// stated at the detector; a reviewability aid, not DLP.
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        taint: Vec<u64>,
+        /// §12.1 serial (config-swap) fallback scheduling — the one
+        /// deliberate degrade, recorded rather than stderr-only.
+        #[serde(skip_serializing_if = "skip_false", default)]
+        serial: bool,
+        /// The codex connector-layer residual applies to this child
+        /// (§12.1 gate condition 1) — recorded per child.
+        #[serde(skip_serializing_if = "skip_false", default)]
+        codex_residual: bool,
+    },
+    /// A step's child run completed and its result resolved the `agent()`
+    /// promise. Result identity (digest/bytes/truncated) lives in the
+    /// child's own `HeadlessOutput` — joined, never duplicated.
+    StepCompleted { ts: u64, step: u64 },
+    /// A step failed closed (the script saw `null`). `reason` is a
+    /// launcher-authored category — never upstream or script-authored text.
+    StepFailed { ts: u64, step: u64, reason: String },
+    /// Terminal outcome of a workflow run. `outcome` names every Stage B–D
+    /// terminal path distinctly: `done`, `failed:<kind>` (the engine's
+    /// error kinds, e.g. `failed:agents_exhausted`), `wall_deadline` (the
+    /// cooperative in-band refusal), `engine_invariant_breach` (the CLI's
+    /// defense-in-depth assertion), `watchdog_kill` (appended best-effort by
+    /// the dying watchdog before exit 124). `exhausted` is independent of
+    /// `outcome` because a run can exhaust its agent ceiling and still
+    /// complete (`done`) — the non-forgeable engine flag, recorded honestly
+    /// either way.
+    WorkflowCompleted {
+        ts: u64,
+        outcome: String,
+        exhausted: bool,
+        duration_ms: u64,
+    },
+}
+
+/// serde helper: omit a `false` bool field entirely (the event stays lean;
+/// `default` restores it on read).
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn skip_false(b: &bool) -> bool {
+    !*b
 }
 
 /// The append-only event log for one tracked run.
@@ -558,6 +647,45 @@ impl RunLog {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Stage E: the workflow step event serializes lean (empty taint, false
+    /// serial/codex flags, absent label produce NO keys) and round-trips —
+    /// the journal shape stays minimal without losing read-back fidelity.
+    #[test]
+    fn workflow_step_event_is_lean_and_round_trips() {
+        let ev = RunEvent::StepSpawned {
+            ts: 1,
+            step: 0,
+            role: "reader".into(),
+            child_run_id: "r-abc".into(),
+            request_digest: "d".into(),
+            label: None,
+            taint: Vec::new(),
+            serial: false,
+            codex_residual: false,
+        };
+        let line = serde_json::to_string(&ev).unwrap();
+        for absent in ["label", "taint", "serial", "codex_residual"] {
+            assert!(!line.contains(absent), "{absent} should be omitted: {line}");
+        }
+        let back: RunEvent = serde_json::from_str(&line).unwrap();
+        assert_eq!(back, ev);
+
+        let marked = RunEvent::StepSpawned {
+            ts: 1,
+            step: 2,
+            role: "reader".into(),
+            child_run_id: "r-def".into(),
+            request_digest: "d".into(),
+            label: Some("map:a".into()),
+            taint: vec![0, 1],
+            serial: true,
+            codex_residual: true,
+        };
+        let line = serde_json::to_string(&marked).unwrap();
+        let back: RunEvent = serde_json::from_str(&line).unwrap();
+        assert_eq!(back, marked);
+    }
 
     fn with_home<T>(f: impl FnOnce() -> T) -> T {
         let _guard = agentstack_core::util::TEST_ENV_LOCK

@@ -208,4 +208,24 @@ fn watchdog_force_exits_a_stalled_run_at_the_process_level() {
         elapsed.as_secs() < 60,
         "watchdog should fire at ~31s (ceiling+grace), took {elapsed:?}"
     );
+
+    // Stage E, witness 5's recorded half: the dying watchdog appended its
+    // terminal event BEFORE exit(124) — the outcome was recorded by a
+    // process that then died. The workflow run id comes from the admission
+    // banner (printed unstyled for exactly this parse).
+    let run_id = stderr
+        .split("admitted: run ")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .expect("admission banner names the workflow run id")
+        .trim()
+        .to_string();
+    assert!(run_id.starts_with("w-"), "{run_id}");
+    let events =
+        std::fs::read_to_string(home.path().join("runs").join(&run_id).join("events.jsonl"))
+            .expect("workflow events.jsonl exists after the force-exit");
+    assert!(
+        events.contains("\"outcome\":\"watchdog_kill\""),
+        "the terminal event must be recorded by the dying process: {events}"
+    );
 }

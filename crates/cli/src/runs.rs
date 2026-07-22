@@ -154,6 +154,14 @@ pub(crate) fn gen_id() -> String {
     format!("r-{}", &hex[..10])
 }
 
+/// A workflow-envelope run id (`w-<hex>`, Stage E). Same generator and
+/// uniqueness as [`gen_id`]; the distinct prefix lets humans (and
+/// `workflow report`) tell the envelope from its children in the shared
+/// runs directory.
+pub(crate) fn gen_workflow_id() -> String {
+    format!("w-{}", &gen_id()[2..])
+}
+
 /// Drop records whose process has exited. Returns the surviving map and whether
 /// anything was removed (so the caller can persist the cleanup).
 fn prune(mut map: BTreeMap<String, RunRecord>) -> (BTreeMap<String, RunRecord>, bool) {

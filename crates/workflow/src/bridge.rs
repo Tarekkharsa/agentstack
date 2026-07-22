@@ -85,6 +85,13 @@ pub(crate) struct SpawnState {
     /// (same pattern as `compile_denied`): classification and the CLI's
     /// honesty line read this flag, never any script-controlled string.
     pub(crate) exhausted: bool,
+    /// Cross-thread mirror of `exhausted`, set at the SAME refusal site
+    /// (observability only — no engine decision reads it). The CLI hands a
+    /// clone to its out-of-thread watchdog so a kill that fires while the
+    /// drive thread is stuck INSIDE a slice still records the exhaustion
+    /// state truthfully — the drive thread can only re-mirror between steps,
+    /// which is exactly too late for a same-slice stall after a refusal.
+    pub(crate) exhausted_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Roles the script declared in `meta.roles`, for the consistency check.
     pub(crate) roles: Vec<String>,
     /// Requests issued since the last drain, awaiting fan-out by the CLI.
@@ -107,6 +114,7 @@ impl SpawnState {
             next_id: 0,
             max_agents,
             exhausted: false,
+            exhausted_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             roles,
             pending: Vec::new(),
             awaiting: HashMap::new(),
@@ -249,6 +257,8 @@ pub(crate) fn install_agent(context: &mut Context) -> JsResult<()> {
             if s.next_id >= u64::from(s.max_agents) {
                 let granted = s.max_agents;
                 s.exhausted = true;
+                s.exhausted_signal
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
                 return Err(JsError::from(JsNativeError::error().with_message(format!(
                     "agent() refused: all {granted} granted agent slot(s) are spent — this call \
                      fails closed; pace with budget.remaining() to avoid exhaustion"

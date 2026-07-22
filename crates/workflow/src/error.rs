@@ -116,7 +116,7 @@ impl WorkflowError {
             message: format!(
                 "the workflow exhausted its granted agent ceiling ({granted}): the pending \
                  agent() call failed closed and spawning stopped — pace with budget.remaining() \
-                 to avoid exhaustion (recording this outcome in the run report lands in Stage E)"
+                 to avoid exhaustion (the exhaustion is recorded in the workflow run evidence)"
             ),
         }
     }

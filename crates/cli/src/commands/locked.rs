@@ -42,7 +42,15 @@ use super::Context;
 /// by the drive from the RECORDED outcome rather than a `ChildExit` error.
 pub(crate) enum LockedDelivery<'a> {
     Cli,
-    WorkflowChild { pids: &'a crate::runs::ChildPids },
+    WorkflowChild {
+        pids: &'a crate::runs::ChildPids,
+        /// Stage E: the drive loop PRE-generates the child's run id (same
+        /// `gen_id` generator) so `StepSpawned { child_run_id }` can be
+        /// appended fail-closed BEFORE the spawn. A pre-launch refusal
+        /// leaving a partial child log under a pre-announced id is honest
+        /// evidence, not a defect.
+        run_id: &'a str,
+    },
 }
 
 impl LockedDelivery<'_> {
@@ -70,6 +78,7 @@ pub(crate) fn run_locked_child(
     manifest_dir: Option<&Path>,
     args: &RunArgs,
     pids: &crate::runs::ChildPids,
+    run_id: &str,
 ) -> Result<ChildRunReport> {
     anyhow::ensure!(
         args.prompt.is_some() && args.locked && !args.plan,
@@ -77,8 +86,13 @@ pub(crate) fn run_locked_child(
     );
     let ctx = super::load(manifest_dir)?;
     let base = crate::manifest::project_root_of(&ctx.dir);
-    live(&ctx, &base, args, LockedDelivery::WorkflowChild { pids })?
-        .ok_or_else(|| anyhow::anyhow!("child delivery mode must yield a report"))
+    live(
+        &ctx,
+        &base,
+        args,
+        LockedDelivery::WorkflowChild { pids, run_id },
+    )?
+    .ok_or_else(|| anyhow::anyhow!("child delivery mode must yield a report"))
 }
 
 pub fn run_locked(manifest_dir: Option<&Path>, args: &RunArgs) -> Result<()> {
@@ -132,7 +146,10 @@ macro_rules! banner {
     };
 }
 
-fn ts() -> u64 {
+/// Event timestamp (epoch seconds) — shared with the workflow drive loop's
+/// Stage E evidence so both levels stamp the same clock. Evidence-only:
+/// never replay input (Stage F).
+pub(crate) fn ts() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -1271,8 +1288,12 @@ fn live(
     }
 
     // §3 step 2: run identity + recorder BEFORE any gate, so a refusal is
-    // itself recorded evidence. No recorder, no run.
-    let run_id = crate::runs::gen_id();
+    // itself recorded evidence. No recorder, no run. A workflow child uses
+    // the id its drive loop pre-announced in `StepSpawned` (Stage E).
+    let run_id = match &delivery {
+        LockedDelivery::WorkflowChild { run_id, .. } => (*run_id).to_string(),
+        LockedDelivery::Cli => crate::runs::gen_id(),
+    };
     let log = RunLog::create(&run_id)
         .context("could not create the per-run flight recorder — refusing to run unobserved")?;
     let ev = Evidence {
@@ -1552,7 +1573,7 @@ fn live(
     // spawn-path difference between the modes.
     let mut child_stdout: Option<(Vec<u8>, bool)> = None;
     let (status, headless_output) = if args.prompt.is_some() {
-        if let LockedDelivery::WorkflowChild { pids } = &delivery {
+        if let LockedDelivery::WorkflowChild { pids, .. } = &delivery {
             match crate::runs::launch_captured_buffered(
                 &bin_path.to_string_lossy(),
                 &argv,

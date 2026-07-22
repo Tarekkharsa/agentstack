@@ -70,11 +70,11 @@ pub use meta::{extract_meta, Meta};
 /// posture claim, and it is duplicated in the crate's module doc-comment so a
 /// reviewer sees it at the top of the crate.
 ///
-/// Carry-forward: Stage E (`crates/recorder` + `agentstack workflow report`)
-/// renders this verbatim as the per-run posture label; do not fork the wording.
-/// When that report lands, the §12.2 runtime-data ReDoS residual (agent()
-/// results and invoker args flowing through string/regex builtins) belongs in
-/// the same honesty text.
+/// `agentstack workflow report` (Stage E) renders this verbatim as the
+/// per-run posture label — the single source; do not fork the wording. The
+/// §12.2 runtime-data ReDoS residual (agent() results and invoker args
+/// flowing through string/regex builtins) is the second paragraph below, so
+/// the report states it by printing this const.
 ///
 /// **Fallback trigger, recorded:** QuickJS-in-wasmtime becomes the right choice
 /// if any of these become non-negotiable — hard synchronous deadlines (wasmtime
@@ -335,9 +335,21 @@ impl WorkflowRun {
     /// ceiling during this run. Backed by the non-forgeable host flag the
     /// bridge sets (the `compile_denied` pattern) — a script that catches and
     /// absorbs the refusal still cannot hide it from the invoker. The CLI
-    /// reads this for its honesty line; the recorded-report half is Stage E.
+    /// reads this for its honesty line and records it on the terminal
+    /// workflow event (Stage E).
     pub fn exhausted(&self) -> bool {
         self.state.borrow().exhausted
+    }
+
+    /// A cross-thread handle to the same non-forgeable exhaustion flag, set
+    /// at the refusal site itself. Observability ONLY — no engine decision
+    /// reads it, nothing script-visible changes — so an out-of-thread
+    /// watchdog killing a drive thread stuck INSIDE a slice can still record
+    /// the exhaustion state truthfully (Stage E: `exhausted()` is only
+    /// pollable between steps, which is exactly too late for a same-slice
+    /// stall after a refusal).
+    pub fn exhausted_signal(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        std::sync::Arc::clone(&self.state.borrow().exhausted_signal)
     }
 
     /// Drain the `phase()`/`log()` progress buffered since the last call.
@@ -1075,6 +1087,11 @@ mod tests {
         // Partial batch: exactly the 2 granted calls spawned, in call order.
         let prompts: Vec<&str> = batch.requests.iter().map(|r| r.prompt.as_str()).collect();
         assert_eq!(prompts, ["a", "b"]);
+        assert!(
+            run.exhausted_signal()
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "the cross-thread signal is set at the same refusal site"
+        );
         assert!(
             run.exhausted(),
             "the ceiling refusal must set the host flag"

@@ -23,25 +23,32 @@
 //!    Stage C is where scripts first execute, so the liveness backstop exists
 //!    from day one: a SEPARATE thread force-exits the PROCESS on wall-clock
 //!    overrun (a cooperative check cannot fire on a drive thread stuck inside
-//!    Boa). The recorded-outcome half of that story is Stage E.
+//!    Boa). Stage E: the dying watchdog appends its terminal outcome
+//!    best-effort before the exit — the one exception to fail-closed
+//!    recording.
+//! 5. **The workflow log is the join table (Stage E).** Every spawn is
+//!    recorded fail-closed BEFORE its child launches; child grant digests,
+//!    postures, and outcomes live in each child's own log and are JOINED by
+//!    `workflow report`, never duplicated into workflow events.
 
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as AnyhowContext, Result};
 use owo_colors::OwoColorize;
 
 use agentstack_workflow::{
     extract_meta, Grant, Progress, RuntimeLimits, SpawnRequest, StepOutcome, StepOutput,
-    StepResult, WorkflowRun,
+    StepResult, WorkflowErrorKind, WorkflowRun,
 };
 
-use crate::cli::{RunArgs, WorkflowRunArgs};
-use crate::commands::locked::{run_locked_child, supports_injection};
+use crate::calllog::{RunEvent, RunLog};
+use crate::cli::{RunArgs, WorkflowReportArgs, WorkflowRunArgs};
+use crate::commands::locked::{run_locked_child, supports_injection, ts};
 use crate::text::sanitize_line;
 use crate::workflows::NormalizedWorkflow;
 
@@ -78,6 +85,202 @@ const WATCHDOG_EXIT_CODE: i32 = 124;
 /// hard kill) — acceptable, since a genuinely stalled run isn't escalating,
 /// just burning CPU, and both paths fail closed.
 const WATCHDOG_GRACE_SECS: u64 = 30;
+
+/// D3 (Stage E): the script-authored `label` is byte-bounded at append time
+/// (char-boundary truncation, visible ellipsis) and stored as data in the
+/// JSON event; `sanitize_line` runs at REPORT render — the same
+/// bound-at-source / sanitize-at-terminal split Stage C established for
+/// progress lines.
+const MAX_LABEL_BYTES: usize = 120;
+
+/// Rule-7 bounds on the taint detector (D2, §11 ruling 3). Results shorter
+/// than the floor never mark (trivial strings like "ok" would mark
+/// everything); the needle and the scanned prompt are capped so hostile
+/// sizes cannot blow up the scan (`str::contains` is linear two-way search);
+/// and the RETAINED source set is bounded twice — each source keeps only its
+/// needle prefix (detection never uses more), and at most
+/// [`TAINT_MAX_SOURCES`] sources are kept, so the evidence bookkeeping can
+/// never grow past `TAINT_MAX_SOURCES × TAINT_NEEDLE_BYTES` (8 MiB) or make
+/// a large-but-legitimate run's memory/CPU depend on unbounded child output
+/// — Stage E stays evidence-only, never a new liveness hazard.
+/// FALSE NEGATIVES are accepted and stated: transformed, mid-sliced,
+/// sub-floor, or beyond-the-source-cap embeddings go unmarked — this is a
+/// reviewability aid, not DLP.
+const TAINT_MIN_BYTES: usize = 64;
+const TAINT_NEEDLE_BYTES: usize = 64 * 1024;
+const TAINT_SCAN_BYTES: usize = 256 * 1024;
+const TAINT_MAX_SOURCES: usize = 128;
+
+/// The workflow-level evidence channel (Stage E) — the same material-append
+/// discipline as the locked run's `Evidence`: a failure to record is itself
+/// a reason not to proceed ("nothing trusted runs unobserved"). The ONE
+/// exception is the watchdog's already-dying path, which appends
+/// best-effort and exits 124 regardless (see `spawn_watchdog`).
+struct WorkflowEvidence {
+    log: RunLog,
+    run_id: String,
+    started: Instant,
+}
+
+impl WorkflowEvidence {
+    fn material(&self, ev: &RunEvent) -> Result<()> {
+        self.log.append_checked(ev).with_context(|| {
+            format!(
+                "refusing to proceed: workflow evidence for run {} could not be recorded",
+                self.run_id
+            )
+        })
+    }
+
+    /// Append the terminal `WorkflowCompleted` (checked). Every drive exit
+    /// path lands here except the watchdog's best-effort one.
+    fn terminal(&self, outcome: &str, exhausted: bool) -> Result<()> {
+        self.material(&RunEvent::WorkflowCompleted {
+            ts: ts(),
+            outcome: outcome.to_string(),
+            exhausted,
+            duration_ms: self.started.elapsed().as_millis() as u64,
+        })
+    }
+
+    /// Record the terminal outcome for a run failing with `why`. If the
+    /// recording ALSO fails, surface both — the run's failure stays primary.
+    fn fail(&self, outcome: &str, exhausted: bool, why: anyhow::Error) -> anyhow::Error {
+        match self.terminal(outcome, exhausted) {
+            Ok(()) => why,
+            Err(rec) => why.context(format!(
+                "ALSO: this outcome's evidence could not be recorded ({rec:#})"
+            )),
+        }
+    }
+}
+
+/// Stable recorded-outcome slug for each engine error kind — an exhaustive
+/// match, so a future kind cannot ship without naming its outcome string.
+fn kind_slug(kind: WorkflowErrorKind) -> &'static str {
+    use WorkflowErrorKind as K;
+    match kind {
+        K::InvalidScript => "invalid_script",
+        K::MetaViolation => "meta_violation",
+        K::UndeclaredRole => "undeclared_role",
+        K::RoleNotAdmitted => "role_not_admitted",
+        K::IterationLimit => "iteration_limit",
+        K::CompileDenied => "compile_denied",
+        K::Panicked => "panicked",
+        K::RuntimeError => "runtime_error",
+        K::Internal => "internal",
+        K::AgentsExhausted => "agents_exhausted",
+    }
+}
+
+/// D4: deterministic digest of the EFFECTIVE grant (Stage F reuses this
+/// definition verbatim — never a second one). Length-framed throughout:
+/// role names are TOML table keys with no charset guarantee (rule 7), so
+/// the roles segment is count + per-role length framing, never a joined
+/// string two different sets could collide into.
+fn wf_grant_digest(max_agents: u32, max_wall_seconds: u64, roles: &[String]) -> String {
+    let mut pre = format!(
+        "wfgrant-v1\0max_agents={max_agents}\0max_wall_seconds={max_wall_seconds}\0roles={}",
+        roles.len()
+    );
+    for role in roles {
+        pre.push('\0');
+        pre.push_str(&role.len().to_string());
+        pre.push('\0');
+        pre.push_str(role);
+    }
+    agentstack_core::digest::sha256_hex(pre.as_bytes())
+}
+
+/// Identity of the RAW `--args-json` bytes — byte-identical is the Stage F
+/// resume precondition, so no re-serialization. The no-args case is pinned
+/// distinctly; the `some\0` prefix makes collision impossible by framing.
+fn wf_args_digest(args_json: Option<&str>) -> String {
+    let pre: Vec<u8> = match args_json {
+        Some(text) => {
+            let mut v = b"wfargs-v1\0some\0".to_vec();
+            v.extend_from_slice(text.as_bytes());
+            v
+        }
+        None => b"wfargs-v1\0none".to_vec(),
+    };
+    agentstack_core::digest::sha256_hex(&pre)
+}
+
+/// Per-step replay-alignment identity (Stage F consumes it): length-framed
+/// canonical prompt + opts. Opts must be in the identity — they ride the
+/// `SpawnRequest` into the child, so an opts change under an identical
+/// prompt is a different request. The prompt TEXT never enters an event;
+/// only this digest does.
+fn wf_request_digest(request: &SpawnRequest) -> String {
+    let opts = serde_json::to_string(&request.opts).unwrap_or_else(|_| "null".to_string());
+    let mut pre = format!("wfreq-v1\0{}\0", request.prompt.len());
+    pre.push_str(&request.prompt);
+    pre.push_str(&format!("{}\0", opts.len()));
+    pre.push_str(&opts);
+    agentstack_core::digest::sha256_hex(pre.as_bytes())
+}
+
+fn truncate_on_char_boundary(s: &str, cap: usize) -> &str {
+    if s.len() <= cap {
+        return s;
+    }
+    let mut end = cap;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// Prior step ids whose completed RESULT text appears in `prompt` — D2's
+/// bounded detector (see the TAINT_* constants for the bounds and the
+/// stated false negatives).
+fn taint_marks(prompt: &str, prior_results: &[(u64, String)]) -> Vec<u64> {
+    let hay = truncate_on_char_boundary(prompt, TAINT_SCAN_BYTES);
+    prior_results
+        .iter()
+        .filter(|(_, result)| result.len() >= TAINT_MIN_BYTES)
+        .filter(|(_, result)| hay.contains(truncate_on_char_boundary(result, TAINT_NEEDLE_BYTES)))
+        .map(|(id, _)| *id)
+        .collect()
+}
+
+/// Append the pre-spawn `StepSpawned` for one request (fail-closed, gate 2)
+/// and return the pre-generated child run id the child will run under. The
+/// `serial`/`codex_residual` flags are taken from the role's binding —
+/// recorded evidence, not stderr-only (Stage E task 4).
+fn record_step_spawned(
+    wev: &WorkflowEvidence,
+    request: &SpawnRequest,
+    binding: Option<&RoleBinding>,
+    prior_results: &[(u64, String)],
+) -> Result<String> {
+    let child_run_id = crate::runs::gen_id();
+    wev.material(&RunEvent::StepSpawned {
+        ts: ts(),
+        step: request.id,
+        role: request.role.clone(),
+        child_run_id: child_run_id.clone(),
+        request_digest: wf_request_digest(request),
+        label: bound_label(&request.opts),
+        taint: taint_marks(&request.prompt, prior_results),
+        serial: binding.map(|b| !b.injectable).unwrap_or(false),
+        codex_residual: binding.map(|b| b.codex_residual).unwrap_or(false),
+    })?;
+    Ok(child_run_id)
+}
+
+/// The bounded script-authored label for the event (D3), if any.
+fn bound_label(opts: &serde_json::Value) -> Option<String> {
+    let label = opts.get("label")?.as_str()?;
+    if label.len() <= MAX_LABEL_BYTES {
+        return Some(label.to_string());
+    }
+    Some(format!(
+        "{}…",
+        truncate_on_char_boundary(label, MAX_LABEL_BYTES)
+    ))
+}
 
 /// One admitted role: the profile name it fences to, the harness the
 /// profile binds (default claude-code), and how its children schedule.
@@ -197,15 +400,59 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
         .max_wall_seconds
         .map_or(wf.max_wall_seconds, |m| m.min(wf.max_wall_seconds));
 
-    // 3. Engine construction inside catch_unwind at the CLI edge.
+    // Workflow-level evidence (Stage E): identity + recorder BEFORE engine
+    // construction, so a construction refusal is itself recorded. Admission
+    // refusals (trust/lock) and meta extraction happen pre-identity and stay
+    // unrecorded at THIS level — an accepted v1 narrowing, recorded as a
+    // decision (children still record their own attempts and gates; a
+    // pre-gate workflow attempt record is additive later if ever wanted).
+    let run_id = crate::runs::gen_workflow_id();
+    let log = RunLog::create(&run_id).with_context(|| {
+        format!(
+            "could not create the workflow flight recorder for run {run_id} — refusing to run \
+             unobserved"
+        )
+    })?;
+    let wev = WorkflowEvidence {
+        log,
+        run_id: run_id.clone(),
+        started: Instant::now(),
+    };
+    wev.material(&RunEvent::WorkflowStarted {
+        ts: ts(),
+        workflow: wf.name.clone(),
+        workflow_digest: wf.checksum.clone(),
+        grant_digest: wf_grant_digest(effective_agents, effective_wall, &wf.roles),
+        args_digest: wf_args_digest(args.args_json.as_deref()),
+        max_agents: effective_agents,
+        max_wall_seconds: effective_wall,
+    })?;
+
+    // 3. Engine construction inside catch_unwind at the CLI edge. Both
+    // refusal shapes are recorded terminally: an engine refusal under its
+    // kind slug, an escaped panic (past both containments) as `panicked`.
     let grant = Grant {
         max_agents: effective_agents,
         max_wall_seconds: effective_wall,
         admitted_roles: wf.roles.clone(),
     };
-    let mut run =
-        contained(|| WorkflowRun::new(&script, RuntimeLimits::default(), args_value, grant))?
-            .map_err(|e| anyhow::anyhow!("refusing workflow '{}': {e}", wf.name))?;
+    let constructed = match contained(|| {
+        WorkflowRun::new(&script, RuntimeLimits::default(), args_value, grant)
+    }) {
+        Ok(inner) => inner,
+        Err(e) => return Err(wev.fail("failed:panicked", false, e)),
+    };
+    let mut run = match constructed {
+        Ok(run) => run,
+        Err(e) => {
+            let outcome = format!("failed:{}", kind_slug(e.kind));
+            return Err(wev.fail(
+                &outcome,
+                false,
+                anyhow::anyhow!("refusing workflow '{}': {e}", wf.name),
+            ));
+        }
+    };
 
     // Effective concurrency: machine-configurable, engine-owned, never
     // script-visible. `.max(1)` so a machine cap of 0 bounds to serial
@@ -217,11 +464,14 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
         .max(1) as usize;
 
     let narrowed = effective_agents != wf.max_agents || effective_wall != wf.max_wall_seconds;
+    // The run id prints UNSTYLED: it is the `workflow report` entry point and
+    // must be copyable/parseable from stderr without escape sequences.
     eprintln!(
-        "{} workflow '{}' admitted: {} role(s), effective ceilings max_agents={} \
+        "{} workflow '{}' admitted: run {}, {} role(s), effective ceilings max_agents={} \
          max_wall_seconds={}{}, concurrency cap {}",
         "▶".green(),
         wf.name.bold(),
+        run_id,
         wf.roles.len(),
         effective_agents,
         effective_wall,
@@ -240,9 +490,21 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
     // EFFECTIVE (possibly script-narrowed) wall ceiling plus a fixed grace —
     // the hard backstop above the cooperative deadline below. `done_tx` lives
     // to the end of this function; every return path drops it, which wakes
-    // the watchdog with Disconnected and retires it.
+    // the watchdog with Disconnected and retires it. The exhaustion state
+    // reaches the watchdog through the ENGINE's own cross-thread signal —
+    // set at the refusal site itself — so a kill firing while the drive
+    // thread is stuck inside a slice (after a caught refusal in the same
+    // slice) still records the exhaustion truthfully; a drive-side mirror
+    // polled between steps would be stale in exactly that scenario.
     let pids: crate::runs::ChildPids = Arc::new(Mutex::new(HashSet::new()));
-    let done_tx = spawn_watchdog(wf.name.clone(), effective_wall, Arc::clone(&pids));
+    let done_tx = spawn_watchdog(
+        wf.name.clone(),
+        run_id.clone(),
+        effective_wall,
+        Arc::clone(&pids),
+        run.exhausted_signal(),
+        wev.started,
+    );
 
     // The cooperative wall deadline (Stage D): checked at every batch
     // boundary, refusing the NEXT batch once the effective ceiling has
@@ -261,23 +523,32 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
     // it observable here.
     let mut results: Vec<StepResult> = Vec::new();
     let mut spawned_total: u64 = 0;
+    // Completed result strings by step id, kept for the taint detector (D2).
+    // Bounded: at most the effective agent ceiling entries, each at most the
+    // child stdout capture cap.
+    let mut completed_results: Vec<(u64, String)> = Vec::new();
     let final_value = loop {
         let outcome = run.step(std::mem::take(&mut results));
         print_progress(run.take_progress());
         match outcome {
             StepOutcome::Batch(batch) => {
-                if std::time::Instant::now() >= deadline {
+                if Instant::now() >= deadline {
                     drop(done_tx);
                     note_exhaustion(&run, effective_agents);
-                    anyhow::bail!(
-                        "workflow '{}' exceeded its effective wall-clock ceiling ({}s) — \
-                         refusing the next batch and failing cleanly in-band (the out-of-thread \
-                         watchdog at ceiling+{}s remains the stall backstop; recording this \
-                         outcome in the run evidence lands in Stage E)",
-                        wf.name,
-                        effective_wall,
-                        WATCHDOG_GRACE_SECS
-                    );
+                    return Err(wev.fail(
+                        "wall_deadline",
+                        run.exhausted(),
+                        anyhow::anyhow!(
+                            "workflow '{}' exceeded its effective wall-clock ceiling ({}s) — \
+                             refusing the next batch and failing cleanly in-band (the \
+                             out-of-thread watchdog at ceiling+{}s remains the stall backstop; \
+                             outcome recorded — see `agentstack workflow report {}`)",
+                            wf.name,
+                            effective_wall,
+                            WATCHDOG_GRACE_SECS,
+                            run_id
+                        ),
+                    ));
                 }
                 spawned_total += batch.requests.len() as u64;
                 if spawned_total > u64::from(effective_agents) {
@@ -289,46 +560,111 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                     // Deliberately witness-free (a test would have to fake an
                     // engine defect), like the serial-fallback label in C.
                     drop(done_tx);
-                    anyhow::bail!(
-                        "workflow '{}': engine-invariant breach — {} spawns handed out against \
-                         a granted ceiling of {} — failing closed (this is an engine defect, \
-                         not a script error; please report it)",
-                        wf.name,
-                        spawned_total,
-                        effective_agents
-                    );
+                    return Err(wev.fail(
+                        "engine_invariant_breach",
+                        run.exhausted(),
+                        anyhow::anyhow!(
+                            "workflow '{}': engine-invariant breach — {} spawns handed out \
+                             against a granted ceiling of {} — failing closed (this is an \
+                             engine defect, not a script error; please report it)",
+                            wf.name,
+                            spawned_total,
+                            effective_agents
+                        ),
+                    ));
                 }
-                results = execute_batch(
+                // Stage E pre-spawn evidence: one StepSpawned per request,
+                // appended FAIL-CLOSED before any child launches (gate 2:
+                // an unrecordable spawn does not launch). The child run id
+                // is pre-generated here so the event can name it.
+                let mut child_ids: HashMap<u64, String> = HashMap::new();
+                for request in &batch.requests {
+                    let child_run_id = record_step_spawned(
+                        &wev,
+                        request,
+                        bindings.get(&request.role),
+                        &completed_results,
+                    )?;
+                    child_ids.insert(request.id, child_run_id);
+                }
+                let steps = execute_batch(
                     manifest_dir,
                     &bindings,
                     &batch.requests,
                     max_concurrent,
                     &pids,
+                    &child_ids,
                 );
+                // Step completions are material evidence too: an
+                // unrecordable completion fails the run (gate 2) — better an
+                // error than an unrecorded step.
+                results = Vec::with_capacity(steps.len());
+                for step in steps {
+                    match &step.result.output {
+                        StepOutput::Completed(value) => {
+                            wev.material(&RunEvent::StepCompleted {
+                                ts: ts(),
+                                step: step.result.request_id,
+                            })?;
+                            // Bounded taint-source retention: only the first
+                            // TAINT_MAX_SOURCES qualifying results, each kept
+                            // as its needle prefix only — the detector never
+                            // uses more, so the truncation changes no mark.
+                            if let Some(text) = value.as_str() {
+                                if text.len() >= TAINT_MIN_BYTES
+                                    && completed_results.len() < TAINT_MAX_SOURCES
+                                {
+                                    completed_results.push((
+                                        step.result.request_id,
+                                        truncate_on_char_boundary(text, TAINT_NEEDLE_BYTES)
+                                            .to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                        StepOutput::Failed => {
+                            wev.material(&RunEvent::StepFailed {
+                                ts: ts(),
+                                step: step.result.request_id,
+                                reason: step.reason.unwrap_or("failed").to_string(),
+                            })?;
+                        }
+                    }
+                    results.push(step.result);
+                }
             }
             StepOutcome::Done(value) => break value,
             StepOutcome::Failed(err) => {
                 drop(done_tx);
                 note_exhaustion(&run, effective_agents);
-                anyhow::bail!("workflow '{}' failed: {err}", wf.name);
+                let outcome = format!("failed:{}", kind_slug(err.kind));
+                return Err(wev.fail(
+                    &outcome,
+                    run.exhausted(),
+                    anyhow::anyhow!("workflow '{}' failed: {err}", wf.name),
+                ));
             }
         }
     };
     drop(done_tx);
     note_exhaustion(&run, effective_agents);
+    // Done is material too (gate 2): evidence incompleteness fails the run
+    // even after the value exists — an unrecorded success is not a success.
+    wev.terminal("done", run.exhausted())?;
     Ok(final_value)
 }
 
 /// The Stage D honesty line: if any `agent()` call was refused at the granted
 /// ceiling (the engine's non-forgeable flag — a script that caught and
 /// absorbed the refusal cannot hide it), say so on stderr regardless of how
-/// the run ended. The recorded-report half of this honesty is Stage E.
+/// the run ended. The recorded half is the `exhausted` field on the terminal
+/// `WorkflowCompleted` event; `workflow report` states it from the record.
 fn note_exhaustion(run: &WorkflowRun, granted: u32) {
     if run.exhausted() {
         eprintln!(
             "{} the granted agent ceiling ({granted}) was exhausted during this run — refused \
-             agent() calls failed closed (the script saw each refusal); recording this in the \
-             run report lands in Stage E",
+             agent() calls failed closed (the script saw each refusal); the exhaustion is \
+             recorded in the workflow run evidence",
             "⚠".yellow()
         );
     }
@@ -439,14 +775,18 @@ fn script_entry_path(anchor: &Path, declared: &str) -> Result<PathBuf> {
 /// Returns the completion sender: dropping it (any normal exit path) retires
 /// the watchdog; a wall-clock overrun prints an honest line — naming the
 /// effective ceiling and the grace SEPARATELY, so the message never
-/// contradicts the admitted ceiling or `budget.maxWallSeconds` — best-effort
+/// contradicts the admitted ceiling or `budget.maxWallSeconds` — appends the
+/// terminal event BEST-EFFORT (witness 5's recorded half), best-effort
 /// SIGTERMs the live child process groups, and force-exits the PROCESS — the
 /// §12.2 hard backstop, deliberately not a cooperative check (a drive thread
 /// stuck inside a Boa builtin slice cannot observe a deadline).
 fn spawn_watchdog(
     name: String,
+    run_id: String,
     effective_wall: u64,
     pids: crate::runs::ChildPids,
+    exhausted: Arc<AtomicBool>,
+    started: Instant,
 ) -> mpsc::Sender<()> {
     let armed = Duration::from_secs(effective_wall.saturating_add(WATCHDOG_GRACE_SECS));
     let (done_tx, done_rx) = mpsc::channel::<()>();
@@ -458,9 +798,33 @@ fn spawn_watchdog(
                 "✗ workflow '{name}' ran past its effective wall-clock ceiling ({effective_wall}s) \
                  plus the {WATCHDOG_GRACE_SECS}s watchdog grace — force-exiting (out-of-thread \
                  watchdog: a stalled engine slice cannot be interrupted cooperatively). Live \
-                 children receive SIGTERM; recording this outcome in the run evidence lands in \
-                 Stage E.",
+                 children receive SIGTERM; the outcome is recorded best-effort — see \
+                 `agentstack workflow report {run_id}`.",
             );
+            // The ONE exception to the fail-closed recording gate: this
+            // thread is already dying, so the append is BEST-EFFORT (the
+            // unchecked variant) and a failed append still exits 124 —
+            // dying honestly beats not dying; the exit is the hard
+            // guarantee, not this record. `RunLog::create` is idempotent
+            // (a directory handle), and the single O_APPEND write cannot
+            // tear against a concurrent drive-thread append.
+            //
+            // Known boundary race, documented not "fixed": if the drive
+            // completes at the exact deadline instant, `recv_timeout` may
+            // have already selected Timeout, and the log can carry BOTH a
+            // `done` and a `watchdog_kill` terminal (both genuinely
+            // happened; the report shows the last). Narrowing it would mean
+            // re-checking the channel before killing — an enforcement-timing
+            // change, out of scope for evidence-only Stage E; candidate for
+            // a later stage with its own approval.
+            if let Some(log) = RunLog::create(&run_id) {
+                log.append(&RunEvent::WorkflowCompleted {
+                    ts: ts(),
+                    outcome: "watchdog_kill".to_string(),
+                    exhausted: exhausted.load(Ordering::Relaxed),
+                    duration_ms: started.elapsed().as_millis() as u64,
+                });
+            }
             let held: Vec<i32> = pids
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -494,25 +858,36 @@ fn format_progress(event: &Progress) -> String {
     }
 }
 
+/// One executed step: the engine-facing result plus the launcher-authored
+/// failure category the drive loop records in `StepFailed.reason` (Stage E).
+/// The category is OURS, never upstream or script text (redaction gate 3).
+struct ChildStep {
+    result: StepResult,
+    reason: Option<&'static str>,
+}
+
 /// Fan one engine batch out as locked children. Injection-capable children
 /// run concurrently under the cap (each is an independent worker thread
 /// re-running the FULL per-child gate sequence — trust, strict verify,
 /// admission, grant freeze — via `run_locked_child`); park/swap children run
 /// strictly serially afterwards, labeled `serial (config-swap)` (§12.1: the
-/// one deliberate degrade, stated honestly). Results are keyed by request id,
-/// so completion order is irrelevant.
+/// one deliberate degrade, stated honestly and recorded on `StepSpawned`).
+/// Each child runs under the run id the drive loop pre-announced in its
+/// `StepSpawned` event (`child_ids`, keyed by request id). Results are keyed
+/// by request id, so completion order is irrelevant.
 fn execute_batch(
     manifest_dir: Option<&Path>,
     bindings: &HashMap<String, RoleBinding>,
     requests: &[SpawnRequest],
     max_concurrent: usize,
     pids: &crate::runs::ChildPids,
-) -> Vec<StepResult> {
+    child_ids: &HashMap<u64, String>,
+) -> Vec<ChildStep> {
     let (concurrent, serial): (Vec<&SpawnRequest>, Vec<&SpawnRequest>) = requests
         .iter()
         .partition(|r| bindings.get(&r.role).map(|b| b.injectable).unwrap_or(false));
 
-    let results: Mutex<Vec<StepResult>> = Mutex::new(Vec::with_capacity(requests.len()));
+    let results: Mutex<Vec<ChildStep>> = Mutex::new(Vec::with_capacity(requests.len()));
     let next = AtomicUsize::new(0);
     std::thread::scope(|scope| {
         for _ in 0..max_concurrent.min(concurrent.len()) {
@@ -525,7 +900,7 @@ fn execute_batch(
                 let Some(request) = concurrent.get(i) else {
                     break;
                 };
-                let result = run_child(manifest_dir, bindings, request, pids, false);
+                let result = run_child(manifest_dir, bindings, request, pids, false, child_ids);
                 results
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -534,7 +909,7 @@ fn execute_batch(
         }
     });
     for request in serial {
-        let result = run_child(manifest_dir, bindings, request, pids, true);
+        let result = run_child(manifest_dir, bindings, request, pids, true, child_ids);
         results
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -554,10 +929,21 @@ fn run_child(
     request: &SpawnRequest,
     pids: &crate::runs::ChildPids,
     serial: bool,
-) -> StepResult {
-    let failed = |output: StepOutput| StepResult {
-        request_id: request.id,
-        output,
+    child_ids: &HashMap<u64, String>,
+) -> ChildStep {
+    let completed = |value: serde_json::Value| ChildStep {
+        result: StepResult {
+            request_id: request.id,
+            output: StepOutput::Completed(value),
+        },
+        reason: None,
+    };
+    let failed = |reason: &'static str| ChildStep {
+        result: StepResult {
+            request_id: request.id,
+            output: StepOutput::Failed,
+        },
+        reason: Some(reason),
     };
     let Some(binding) = bindings.get(&request.role) else {
         // The bridge + admission cross-check make this unreachable; refusing
@@ -567,7 +953,16 @@ fn run_child(
             request.id,
             sanitize_line(&request.role)
         );
-        return failed(StepOutput::Failed);
+        return failed("unbound_role");
+    };
+    let Some(run_id) = child_ids.get(&request.id) else {
+        // Same class: the drive loop pre-announces every id; a missing one
+        // is a composition bug, and the step fails closed in-band.
+        eprintln!(
+            "  ✗ agent #{} has no pre-announced child run id — failing the step closed",
+            request.id,
+        );
+        return failed("missing_child_id");
     };
 
     // The per-child header line. The label is SCRIPT-controlled → sanitized.
@@ -625,7 +1020,7 @@ fn run_child(
     let spawned = catch_unwind(AssertUnwindSafe(|| {
         #[cfg(test)]
         panic_probe(&request.prompt);
-        run_locked_child(manifest_dir, &child_args, pids)
+        run_locked_child(manifest_dir, &child_args, pids, run_id)
     }));
     let spawned = match spawned {
         Ok(result) => result,
@@ -636,7 +1031,7 @@ fn run_child(
                 "✗".red(),
                 request.id,
             );
-            return failed(StepOutput::Failed);
+            return failed("spawner_panic");
         }
     };
     match spawned {
@@ -656,9 +1051,9 @@ fn run_child(
                             ""
                         },
                     );
-                    failed(StepOutput::Completed(serde_json::Value::String(
+                    completed(serde_json::Value::String(
                         String::from_utf8_lossy(&report.stdout).into_owned(),
-                    )))
+                    ))
                 }
                 recorded => {
                     eprintln!(
@@ -669,7 +1064,7 @@ fn run_child(
                         report.run_id,
                         recorded,
                     );
-                    failed(StepOutput::Failed)
+                    failed("child_failed")
                 }
             }
         }
@@ -678,7 +1073,7 @@ fn run_child(
             // failure: recorded by the child path itself; the step fails
             // closed and the script decides severity (R1).
             eprintln!("  {} agent #{} refused: {:#}", "✗".red(), request.id, e);
-            failed(StepOutput::Failed)
+            failed("refused")
         }
     }
 }
@@ -710,6 +1105,210 @@ fn recorded_outcome(run_id: &str) -> Option<(String, Option<i32>)> {
         })
 }
 
+/// `agentstack workflow report <run-id>` — render the recorded evidence tree.
+pub fn report(args: &WorkflowReportArgs) -> Result<()> {
+    print!("{}", render_workflow_report(&args.run_id)?);
+    Ok(())
+}
+
+/// Everything rendered is FROM THE RECORD: child grant digests, postures,
+/// and outcomes are JOINED from each child's own run log via `child_run_id`
+/// (the §6 step-3 join-table shape — `StepSpawned` structurally does not
+/// carry them), `usage` is the recorded value (`"unavailable"` today, never
+/// a fabricated number), and nothing is reconstructed. Script-authored
+/// strings (labels) are sanitized HERE, at the terminal seam (rule 7 — the
+/// event file stores them as bounded JSON data).
+fn render_workflow_report(run_id: &str) -> Result<String> {
+    use std::fmt::Write as _;
+
+    let events = RunLog::read(run_id);
+    anyhow::ensure!(
+        !events.is_empty(),
+        "no recorded events for run '{run_id}' — workflow run ids (w-…) are printed on the \
+         run's admission banner"
+    );
+    let started = events.iter().find_map(|e| match e {
+        RunEvent::WorkflowStarted {
+            workflow,
+            workflow_digest,
+            grant_digest,
+            args_digest,
+            max_agents,
+            max_wall_seconds,
+            ..
+        } => Some((
+            workflow.clone(),
+            workflow_digest.clone(),
+            grant_digest.clone(),
+            args_digest.clone(),
+            *max_agents,
+            *max_wall_seconds,
+        )),
+        _ => None,
+    });
+    let Some((workflow, workflow_digest, grant_digest, args_digest, max_agents, max_wall_seconds)) =
+        started
+    else {
+        anyhow::bail!(
+            "run '{run_id}' is not a workflow run (no workflow_started event) — for a locked \
+             or sandboxed run, use `agentstack report run {run_id}`"
+        );
+    };
+
+    let mut out = String::new();
+    writeln!(out, "Workflow run {run_id}: '{}'", sanitize_line(&workflow))?;
+    writeln!(out, "  script digest   {workflow_digest}")?;
+    writeln!(out, "  grant digest    {grant_digest}")?;
+    writeln!(out, "  args digest     {args_digest}")?;
+    writeln!(
+        out,
+        "  effective ceilings  max_agents={max_agents} max_wall_seconds={max_wall_seconds}"
+    )?;
+    writeln!(out)?;
+
+    // Step completion states, keyed by step id.
+    let mut step_state: HashMap<u64, String> = HashMap::new();
+    for event in &events {
+        match event {
+            RunEvent::StepCompleted { step, .. } => {
+                step_state.insert(*step, "completed".to_string());
+            }
+            RunEvent::StepFailed { step, reason, .. } => {
+                step_state.insert(*step, format!("failed ({})", sanitize_line(reason)));
+            }
+            _ => {}
+        }
+    }
+
+    writeln!(out, "Steps:")?;
+    let mut any_steps = false;
+    for event in &events {
+        let RunEvent::StepSpawned {
+            step,
+            role,
+            child_run_id,
+            label,
+            taint,
+            serial,
+            codex_residual,
+            ..
+        } = event
+        else {
+            continue;
+        };
+        any_steps = true;
+        let mut line = format!("  #{step} role={}", sanitize_line(role));
+        if let Some(label) = label {
+            line.push_str(&format!(" [{}]", sanitize_line(label)));
+        }
+        line.push_str(&format!(" child={child_run_id}"));
+        if *serial {
+            line.push_str(" — serial (config-swap)");
+        }
+        if *codex_residual {
+            line.push_str(" — codex_apps residual (connector layer unfenced on host tier)");
+        }
+        if !taint.is_empty() {
+            let sources: Vec<String> = taint.iter().map(|t| format!("#{t}")).collect();
+            line.push_str(&format!(
+                " — taint: prompt embeds output of {}",
+                sources.join(", ")
+            ));
+        }
+        writeln!(out, "{line}")?;
+
+        // The JOIN: this child's own recorded evidence, by run id. Absent
+        // pieces are stated absent — evidence or nothing, never assumption.
+        let child_events = RunLog::read(child_run_id);
+        let posture = child_events.iter().find_map(|e| match e {
+            RunEvent::AttemptStarted { posture, .. } => Some(posture.clone()),
+            _ => None,
+        });
+        let child_grant = child_events.iter().find_map(|e| match e {
+            RunEvent::GrantFrozen { grant_digest, .. } => Some(grant_digest.clone()),
+            _ => None,
+        });
+        let child_outcome = child_events.iter().rev().find_map(|e| match e {
+            RunEvent::LockedOutcome {
+                outcome,
+                exit_code,
+                usage,
+                ..
+            } => Some((outcome.clone(), *exit_code, usage.clone())),
+            _ => None,
+        });
+        let (outcome_text, usage_text) = match &child_outcome {
+            Some((outcome, exit_code, usage)) => (
+                match exit_code {
+                    Some(code) => format!("{outcome} (exit {code})"),
+                    None => outcome.clone(),
+                },
+                usage.clone(),
+            ),
+            None => (
+                "no recorded outcome (refused pre-launch or interrupted)".to_string(),
+                "unavailable".to_string(),
+            ),
+        };
+        writeln!(
+            out,
+            "     child: grant={} posture={} outcome={} usage={}",
+            child_grant.as_deref().unwrap_or("not frozen"),
+            posture.as_deref().unwrap_or("unrecorded"),
+            outcome_text,
+            usage_text,
+        )?;
+        writeln!(
+            out,
+            "     step:  {}",
+            step_state
+                .get(step)
+                .map(String::as_str)
+                .unwrap_or("no completion recorded (interrupted)")
+        )?;
+    }
+    if !any_steps {
+        writeln!(out, "  (no steps spawned)")?;
+    }
+    writeln!(out)?;
+
+    let terminal = events.iter().rev().find_map(|e| match e {
+        RunEvent::WorkflowCompleted {
+            outcome,
+            exhausted,
+            duration_ms,
+            ..
+        } => Some((outcome.clone(), *exhausted, *duration_ms)),
+        _ => None,
+    });
+    match terminal {
+        Some((outcome, exhausted, duration_ms)) => {
+            writeln!(out, "Outcome: {outcome} ({duration_ms} ms)")?;
+            if exhausted {
+                writeln!(
+                    out,
+                    "  the granted agent ceiling was EXHAUSTED during this run — refused \
+                     agent() calls failed closed (the script saw each refusal)"
+                )?;
+            }
+        }
+        None => writeln!(
+            out,
+            "Outcome: NO TERMINAL EVENT RECORDED — the run crashed, was killed before the \
+             watchdog could record, is still running, or a recording failure refused it \
+             in-band (evidence stops where recording stopped)"
+        )?,
+    }
+    writeln!(out)?;
+
+    // The honesty block: the exported POSTURE_LABEL, verbatim — the single
+    // source of the §12.2/§12.3 claim, including the runtime-data ReDoS
+    // residual paragraph. Never paraphrased, never forked.
+    writeln!(out, "Honest posture (§12.2, verbatim):")?;
+    writeln!(out, "{}", agentstack_workflow::POSTURE_LABEL)?;
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -739,6 +1338,7 @@ mod tests {
             "case \"$last\" in\n",
             "  emit-json*) printf '%s' '{\"a\":1,\"b\":[1,2,3]}' ;;\n",
             "  sleep*) sleep 1.5; printf 'ok' ;;\n",
+            "  long*) printf '%080d' 7 ;;\n",
             "  overlap*)\n",
             "    set -- $last\n",
             "    dir=\"$2\"; name=\"$3\"; peer=\"$4\"\n",
@@ -1117,6 +1717,240 @@ mod tests {
                 .to_string();
             assert!(err.contains("wall-clock ceiling"), "{err}");
             assert!(err.contains("in-band"), "{err}");
+        });
+    }
+
+    /// The single workflow-envelope run (`w-…`) recorded under the isolated
+    /// home, with its events.
+    fn workflow_run_events(home: &assert_fs::TempDir) -> (String, Vec<RunEvent>) {
+        let runs = home.path().join("runs");
+        let mut ids: Vec<String> = std::fs::read_dir(&runs)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|id| id.starts_with("w-"))
+            .collect();
+        assert_eq!(ids.len(), 1, "expected exactly one workflow run: {ids:?}");
+        let id = ids.remove(0);
+        let events = RunLog::read(&id);
+        (id, events)
+    }
+
+    /// Witness 3, recorded half (Stage E): an exhausting run's workflow log
+    /// carries `exhausted: true` on the terminal event even though the
+    /// outcome is `done` (Stage D's non-fatal semantics), and
+    /// `workflow report` states the exhaustion from the record.
+    #[cfg(unix)]
+    #[test]
+    fn exhaustion_is_recorded_and_reported() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'], maxAgents: 1 };\n\
+                 const a = await agent('emit-json', { role: 'w' });\n\
+                 let denied = false;\n\
+                 try { await agent('emit-json', { role: 'w' }); } catch (e) { denied = true; }\n\
+                 return denied;",
+            );
+            let value = run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            assert_eq!(value, serde_json::json!(true));
+
+            let (id, events) = workflow_run_events(home);
+            let terminal = events
+                .iter()
+                .rev()
+                .find_map(|e| match e {
+                    RunEvent::WorkflowCompleted {
+                        outcome, exhausted, ..
+                    } => Some((outcome.clone(), *exhausted)),
+                    _ => None,
+                })
+                .expect("terminal event recorded");
+            assert_eq!(terminal, ("done".to_string(), true));
+
+            let report = render_workflow_report(&id).unwrap();
+            assert!(report.contains("EXHAUSTED"), "{report}");
+        });
+    }
+
+    /// Join-table witness + report honesty (Stage E): the report resolves
+    /// each step's child grant digest and outcome from the CHILD's own log
+    /// (`StepSpawned` structurally carries neither), and prints the exported
+    /// `POSTURE_LABEL` verbatim — asserted against the const, not a copy.
+    #[cfg(unix)]
+    #[test]
+    fn report_joins_child_evidence_and_prints_posture_verbatim() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const outs = await parallel([\n\
+                   () => agent('emit-json', { role: 'w', label: 'map:a' }),\n\
+                   () => agent('emit-json', { role: 'w', label: 'map:b' }),\n\
+                 ]);\n\
+                 return outs;",
+            );
+            run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+
+            let (id, events) = workflow_run_events(home);
+            let child_ids: Vec<String> = events
+                .iter()
+                .filter_map(|e| match e {
+                    RunEvent::StepSpawned { child_run_id, .. } => Some(child_run_id.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(child_ids.len(), 2);
+
+            let report = render_workflow_report(&id).unwrap();
+            for child in &child_ids {
+                let grant = RunLog::read(child)
+                    .into_iter()
+                    .find_map(|e| match e {
+                        RunEvent::GrantFrozen { grant_digest, .. } => Some(grant_digest),
+                        _ => None,
+                    })
+                    .expect("child froze its grant");
+                assert!(
+                    report.contains(&grant),
+                    "the child's grant digest must be JOINED into the report"
+                );
+                assert!(report.contains(child.as_str()));
+            }
+            assert!(report.contains("outcome=completed (exit 0)"), "{report}");
+            assert!(
+                report.contains(agentstack_workflow::POSTURE_LABEL),
+                "the honesty block is the exported const, verbatim"
+            );
+        });
+    }
+
+    /// Taint witness, both directions (Stage E, §11 ruling 3): a prompt that
+    /// embeds a prior step's (≥ floor) result is marked with the source
+    /// step; an independent prompt is not marked.
+    #[cfg(unix)]
+    #[test]
+    fn taint_marks_embedding_prompts_only() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const seed = await agent('long', { role: 'w' });\n\
+                 const used = await agent('verify this: ' + seed, { role: 'w' });\n\
+                 const indep = await agent('emit-json', { role: 'w' });\n\
+                 return [seed.length, used, indep];",
+            );
+            run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+
+            let (_id, events) = workflow_run_events(home);
+            let taints: HashMap<u64, Vec<u64>> = events
+                .iter()
+                .filter_map(|e| match e {
+                    RunEvent::StepSpawned { step, taint, .. } => Some((*step, taint.clone())),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(taints.get(&0), Some(&vec![]));
+            assert_eq!(
+                taints.get(&1),
+                Some(&vec![0]),
+                "the embedding prompt is marked with its source step"
+            );
+            assert_eq!(
+                taints.get(&2),
+                Some(&vec![]),
+                "the independent prompt is unmarked"
+            );
+        });
+    }
+
+    /// Serial-fallback recorded (Stage E task 4), via the CONSTRUCTED path —
+    /// no shipped headless adapter reaches serial (claude-code and codex
+    /// both inject), so a hand-built non-injectable `RoleBinding` drives the
+    /// same pre-spawn append + execute seam the drive loop uses: the event
+    /// records `serial: true` and the child still completes over the
+    /// config-swap path.
+    #[cfg(unix)]
+    #[test]
+    fn serial_fallback_is_recorded_on_the_spawn_event() {
+        workflow_fixture(|_home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\nreturn 1;",
+            );
+            let run_id = crate::runs::gen_workflow_id();
+            let wev = WorkflowEvidence {
+                log: RunLog::create(&run_id).unwrap(),
+                run_id: run_id.clone(),
+                started: Instant::now(),
+            };
+            let mut bindings = HashMap::new();
+            bindings.insert(
+                "w".to_string(),
+                RoleBinding {
+                    harness: "claude-code".into(),
+                    injectable: false,
+                    codex_residual: false,
+                },
+            );
+            let request = SpawnRequest {
+                id: 0,
+                role: "w".into(),
+                prompt: "hello".into(),
+                opts: serde_json::Value::Null,
+            };
+            let child_id = record_step_spawned(&wev, &request, bindings.get("w"), &[]).unwrap();
+            let mut child_ids = HashMap::new();
+            child_ids.insert(0, child_id);
+            let pids: crate::runs::ChildPids = Arc::new(Mutex::new(HashSet::new()));
+
+            let steps = execute_batch(
+                Some(proj.path()),
+                &bindings,
+                &[request],
+                4,
+                &pids,
+                &child_ids,
+            );
+            assert!(matches!(steps[0].result.output, StepOutput::Completed(_)));
+            let recorded = RunLog::read(&run_id).into_iter().find_map(|e| match e {
+                RunEvent::StepSpawned { serial, .. } => Some(serial),
+                _ => None,
+            });
+            assert_eq!(
+                recorded,
+                Some(true),
+                "the config-swap path is recorded evidence, not stderr-only"
+            );
+        });
+    }
+
+    /// Gate 2 (Stage E): a workflow-log creation failure refuses the run
+    /// BEFORE any child spawns — nothing trusted runs unobserved.
+    #[cfg(unix)]
+    #[test]
+    fn recording_failure_refuses_before_any_child() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 return await agent('emit-json', { role: 'w' });",
+            );
+            // Make the runs root a regular FILE so every RunLog::create fails.
+            let runs = home.path().join("runs");
+            let _ = std::fs::remove_dir_all(&runs);
+            std::fs::write(&runs, b"not a dir").unwrap();
+
+            let err = run_value(Some(proj.path()), &wf_args("t", None))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("refusing to run unobserved"), "{err}");
         });
     }
 

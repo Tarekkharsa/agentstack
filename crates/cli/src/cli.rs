@@ -504,6 +504,12 @@ pub enum WorkflowCmd {
     /// child run under its role profile's fence, with per-child MCP config
     /// injection where the harness supports it.
     Run(WorkflowRunArgs),
+
+    /// Render a workflow run's evidence tree (Stage E): identity and
+    /// effective ceilings, each step joined to its child run's recorded
+    /// grant digest / posture / outcome, taint marks, and the honest
+    /// posture label — evidence as recorded, never reconstructed.
+    Report(WorkflowReportArgs),
 }
 
 #[derive(Args, Debug)]
@@ -516,6 +522,13 @@ pub struct WorkflowRunArgs {
     /// invoker input: size- and depth-bounded before it reaches the engine.
     #[arg(long = "args-json", value_name = "JSON")]
     pub args_json: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct WorkflowReportArgs {
+    /// The workflow run id (`w-…`, printed on the run's admission banner).
+    #[arg(value_name = "RUN_ID")]
+    pub run_id: String,
 }
 
 /// The zero-files gateway lifecycle: `connect` registers it in a harness's
