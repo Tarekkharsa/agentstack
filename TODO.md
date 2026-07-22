@@ -568,23 +568,26 @@ are honest-labelled (MCP surface + sandbox posture + instructions) until
 Phase 1 Workspace Grants deepen them — v1 must not imply folder-level role
 isolation it does not have.
 
-- [ ] **W2 — child-run primitive (supervised, first).** Headless invocation
+- [x] **W2 — child-run primitive (supervised, first).** Headless invocation
   spec in adapter descriptors; `agentstack run <harness> --locked --prompt`
   as prompt-in/text-out through the full locked admission path; recorder
   step events. *Witness:* child grant ≤ its profile's capability set; a
-  hostile prompt string never reaches a shell.
-- [ ] **Evidence period (gates W3; runs alongside W1).** Run at least two
+  hostile prompt string never reaches a shell. **Shipped 2026-07-21
+  (`648d227`), per-child injection retrofit W2.5 `2eaf7ce`.**
+- [x] **Evidence period (gates W3; runs alongside W1).** Run at least two
   real recurring maintainer tasks through the interim path — the native
   Claude Code Workflow tool with `agent()` steps couriering into
   `run --locked --prompt`. If the interim path does not get repeated real
-  use, W3 is not built.
-- [ ] **W1 — core + trust (supervised).** `[workflows.*]` manifest kind;
+  use, W3 is not built. **Completed 2026-07-22 (evidence doc §4; F2/F3/F5/F6
+  fed the W3 design).**
+- [x] **W1 — core + trust (supervised).** `[workflows.*]` manifest kind;
   `[[workflow]]` pin (strict integrity-root digest + `roles` recorded);
   retain/prune; trust-preview heading ("orchestration code — spawns agent
   runs under the declared roles"); validation (roles exist, ceilings within
   machine policy). *Witness:* a one-byte script edit re-gates review; a
-  lock-time `roles` widening is refused as drift.
-- [ ] **W3 — engine (supervised; gated on evidence period, interpreter
+  lock-time `roles` widening is refused as drift. **Shipped 2026-07-22
+  (`afc89f2`).**
+- [x] **W3 — engine (supervised; gated on evidence period, interpreter
   witnesses, and Boa dependency approval).** Boa runtime inside the
   executor domain exposing the design §3 API (`agent`/`pipeline`/
   `parallel`/`phase`/`log`/`args`/`budget`); ceilings; taint labels on
@@ -593,6 +596,9 @@ isolation it does not have.
   fs/net/env reachable from the runtime; `max_agents` exhaustion stops
   spawning and records honestly; an infinite loop hits the wall-clock
   ceiling; an interpreter panic fails closed with a recorded outcome.
+  **Shipped 2026-07-22 across stages B–F (design §12.4: `fa36858`,
+  `ea99660`, `f17205d`, `701b806`, resume closes the lane); command stays
+  preview-hidden pending the §9.3 independent script-boundary review.**
 - [ ] **W4 — library + import.** Central library `kind: workflow`; the
   Claude Code import edit (`model:` → `role:`) documented; docs +
   enforcement-matrix row.

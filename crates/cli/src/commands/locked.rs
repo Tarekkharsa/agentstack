@@ -59,6 +59,12 @@ impl LockedDelivery<'_> {
     }
 }
 
+/// The run-dir artifact holding a workflow child's RAW captured stdout bytes
+/// (Stage F): the exact input to the recorded `HeadlessOutput.sha256`, which
+/// is what a resume verifies before feeding the replayed result. Written only
+/// in `WorkflowChild` delivery.
+pub(crate) const CHILD_STDOUT_FILE: &str = "stdout";
+
 /// What a workflow-child locked run hands back to the drive loop. The drive
 /// consults the child run's RECORDED `LockedOutcome` (via `run_id`) for
 /// success/failure — the F3 discipline — so the report deliberately does NOT
@@ -1621,6 +1627,22 @@ fn live(
     };
     if let Some(s) = scoped.as_mut() {
         s.restore();
+    }
+
+    // Stage F: persist the RAW captured stdout bytes — the exact `sha256`
+    // input, BEFORE the `from_utf8_lossy` transform — as a run-dir artifact,
+    // so a resume can replay this child's result verified against the
+    // `HeadlessOutput` digest recorded just below (the journal itself stays
+    // redacted; the artifact is the result's only persistence). Checked, same
+    // material discipline as that event: an unpersistable result would make
+    // the run silently unresumable, so it fails this child instead.
+    // WorkflowChild only — a CLI `--prompt` run relays stdout to its caller
+    // and has no replay consumer.
+    if let Some((bytes, _)) = &child_stdout {
+        let artifact = run_dir.join(CHILD_STDOUT_FILE);
+        std::fs::write(&artifact, bytes)
+            .context("the harness ran, but its output artifact could not be persisted")?;
+        crate::util::restrict(&artifact, false);
     }
 
     // Output evidence before the terminal outcome: identity only (digest,

@@ -49,6 +49,7 @@ use agentstack_workflow::{
 use crate::calllog::{RunEvent, RunLog};
 use crate::cli::{RunArgs, WorkflowReportArgs, WorkflowRunArgs};
 use crate::commands::locked::{run_locked_child, supports_injection, ts};
+use crate::commands::workflow_replay::{read_verified_result, JournaledTerminal, ReplayJournal};
 use crate::text::sanitize_line;
 use crate::workflows::NormalizedWorkflow;
 
@@ -140,6 +141,18 @@ impl WorkflowEvidence {
             outcome: outcome.to_string(),
             exhausted,
             duration_ms: self.started.elapsed().as_millis() as u64,
+        })
+    }
+
+    /// Stage F: the resume marker — appended AFTER the whole journaled
+    /// prefix replayed cleanly and BEFORE the resumed session's first live
+    /// event, checked (recording failure on resume fails closed before any
+    /// live spawn — the Stage E gate). Everything after the LAST marker in
+    /// a log is the newest session's live tail.
+    fn resumed(&self, replayed_steps: u64) -> Result<()> {
+        self.material(&RunEvent::WorkflowResumed {
+            ts: ts(),
+            replayed_steps,
         })
     }
 
@@ -400,13 +413,47 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
         .max_wall_seconds
         .map_or(wf.max_wall_seconds, |m| m.min(wf.max_wall_seconds));
 
+    // Stage F: gate the resume BEFORE any recorder handle exists. Full
+    // admission already re-ran above exactly as for a fresh run (rule 4:
+    // resume is never an admission bypass); here every identity dimension is
+    // compared against the journaled `WorkflowStarted` using the SAME digest
+    // functions the original session used — never a second definition. An
+    // identity refusal (and every replay refusal below) leaves the journal
+    // byte-untouched, so a corrected re-attempt reads the same journal; the
+    // `WorkflowResumed` marker appends only after the whole journaled prefix
+    // has replayed cleanly.
+    let mut replay = match &args.resume {
+        Some(resume_id) => {
+            let journal = ReplayJournal::load(resume_id)?;
+            journal.verify_identity(
+                &wf.name,
+                &wf.checksum,
+                &wf_grant_digest(effective_agents, effective_wall, &wf.roles),
+                &wf_args_digest(args.args_json.as_deref()),
+                effective_agents,
+                effective_wall,
+            )?;
+            Some(journal)
+        }
+        None => None,
+    };
+
     // Workflow-level evidence (Stage E): identity + recorder BEFORE engine
     // construction, so a construction refusal is itself recorded. Admission
     // refusals (trust/lock) and meta extraction happen pre-identity and stay
     // unrecorded at THIS level — an accepted v1 narrowing, recorded as a
     // decision (children still record their own attempts and gates; a
     // pre-gate workflow attempt record is additive later if ever wanted).
-    let run_id = crate::runs::gen_workflow_id();
+    //
+    // Stage F: a resume reuses the journaled run id — the single log stays
+    // the single journal (one mechanism; `RunLog::create` is idempotent on
+    // an existing run dir) — and does NOT append a second `WorkflowStarted`:
+    // the original identity row was just verified byte-identical, and the
+    // resume marker is the session boundary instead.
+    let run_id = match &args.resume {
+        Some(resume_id) => resume_id.clone(),
+        None => crate::runs::gen_workflow_id(),
+    };
     let log = RunLog::create(&run_id).with_context(|| {
         format!(
             "could not create the workflow flight recorder for run {run_id} — refusing to run \
@@ -418,15 +465,17 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
         run_id: run_id.clone(),
         started: Instant::now(),
     };
-    wev.material(&RunEvent::WorkflowStarted {
-        ts: ts(),
-        workflow: wf.name.clone(),
-        workflow_digest: wf.checksum.clone(),
-        grant_digest: wf_grant_digest(effective_agents, effective_wall, &wf.roles),
-        args_digest: wf_args_digest(args.args_json.as_deref()),
-        max_agents: effective_agents,
-        max_wall_seconds: effective_wall,
-    })?;
+    if replay.is_none() {
+        wev.material(&RunEvent::WorkflowStarted {
+            ts: ts(),
+            workflow: wf.name.clone(),
+            workflow_digest: wf.checksum.clone(),
+            grant_digest: wf_grant_digest(effective_agents, effective_wall, &wf.roles),
+            args_digest: wf_args_digest(args.args_json.as_deref()),
+            max_agents: effective_agents,
+            max_wall_seconds: effective_wall,
+        })?;
+    }
 
     // 3. Engine construction inside catch_unwind at the CLI edge. Both
     // refusal shapes are recorded terminally: an engine refusal under its
@@ -485,6 +534,14 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
         },
         max_concurrent,
     );
+    if let Some(journal) = &replay {
+        eprintln!(
+            "{} resuming: {} journaled step(s) will replay from verified artifacts — no \
+             journaled step re-executes; the wall clock restarts at the full effective ceiling",
+            "↻".cyan(),
+            journal.remaining(),
+        );
+    }
 
     // 4. The out-of-thread watchdog, armed before the first step() at the
     // EFFECTIVE (possibly script-narrowed) wall ceiling plus a fixed grace —
@@ -527,6 +584,8 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
     // Bounded: at most the effective agent ceiling entries, each at most the
     // child stdout capture cap.
     let mut completed_results: Vec<(u64, String)> = Vec::new();
+    // Stage F: steps fed from the journal so far (the marker's count).
+    let mut replayed_count: u64 = 0;
     let final_value = loop {
         let outcome = run.step(std::mem::take(&mut results));
         print_progress(run.take_progress());
@@ -573,12 +632,139 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                         ),
                     ));
                 }
-                // Stage E pre-spawn evidence: one StepSpawned per request,
-                // appended FAIL-CLOSED before any child launches (gate 2:
-                // an unrecordable spawn does not launch). The child run id
-                // is pre-generated here so the event can name it.
+                // Stage F replay consumption: while a journal is active,
+                // every batch member is checked against it BEFORE anything
+                // spawns — a refused resume has spawned nothing and appended
+                // nothing (refusals return in-band, deliberately NOT through
+                // `wev.fail`: a terminal append would mutate the journal a
+                // corrected re-attempt needs to read unchanged). Journaled
+                // members feed as pre-resolved results; the only live spawns
+                // are steps past the journal's end.
+                let mut replay_feed: Vec<StepResult> = Vec::new();
+                let mut live_owned: Vec<SpawnRequest> = Vec::new();
+                let live: &[SpawnRequest] = if let Some(journal) = replay.as_mut() {
+                    let mut taken = Vec::with_capacity(batch.requests.len());
+                    for request in &batch.requests {
+                        taken.push(journal.take(request, &wf_request_digest(request))?);
+                    }
+                    let journaled = taken.iter().filter(|t| t.is_some()).count();
+                    if journaled == 0 {
+                        // Past the journal's end — legal only once the
+                        // journal is fully consumed (leftover entries name
+                        // steps the engine never re-issued).
+                        if journal.remaining() > 0 {
+                            return Err(journal.refuse_leftover("at the first fully-live batch"));
+                        }
+                        wev.resumed(replayed_count)?;
+                        replay = None;
+                        &batch.requests
+                    } else if journaled < batch.requests.len() {
+                        // Never a genuine shape: spawn events are appended
+                        // fail-closed for a WHOLE batch before it executes,
+                        // so a batch mixing journaled and never-spawned
+                        // members means a torn middle line or a doctored
+                        // journal — refuse via the alignment gate.
+                        let missing: Vec<String> = batch
+                            .requests
+                            .iter()
+                            .zip(&taken)
+                            .filter(|(_, t)| t.is_none())
+                            .map(|(r, _)| format!("#{}", r.id))
+                            .collect();
+                        anyhow::bail!(
+                            "refusing resume: the engine's batch mixes journaled steps with \
+                             steps the journal never spawned ({}) — a genuine journal records \
+                             a whole batch's spawns before executing it, so this journal is \
+                             torn mid-line or doctored",
+                            missing.join(", ")
+                        );
+                    } else {
+                        // All members journaled: terminal-bearing ones
+                        // replay; the rest re-execute LIVE (the straddle
+                        // batch — spawned, then crash/kill before their
+                        // terminals). AT-LEAST-ONCE, stated honestly: a
+                        // re-executed member's original child may have run
+                        // to completion (side effects included) without its
+                        // terminal ever appending; salvaging its result from
+                        // the child's own log is partial-result salvage —
+                        // out of scope — so the step runs again.
+                        let mut completed_taken = Vec::new();
+                        for (request, t) in batch.requests.iter().zip(taken) {
+                            let t = t.expect("counted journaled above");
+                            if t.terminal.is_some() {
+                                completed_taken.push(t);
+                            } else {
+                                live_owned.push(request.clone());
+                            }
+                        }
+                        // Feed order = journal terminal order: that order IS
+                        // the settlement order the live drive fed the engine
+                        // (results were pushed in the same iteration that
+                        // appended the events), and promise settlement order
+                        // is script-observable.
+                        completed_taken.sort_by_key(|t| t.terminal.map(|(_, idx)| idx));
+                        for t in completed_taken {
+                            match t.terminal.expect("filtered on Some").0 {
+                                JournaledTerminal::Completed => {
+                                    let text = read_verified_result(t.step, &t.child_run_id)?;
+                                    // Replayed results are taint sources too,
+                                    // same bounds — live-tail StepSpawned
+                                    // events keep faithful marks.
+                                    if text.len() >= TAINT_MIN_BYTES
+                                        && completed_results.len() < TAINT_MAX_SOURCES
+                                    {
+                                        completed_results.push((
+                                            t.step,
+                                            truncate_on_char_boundary(&text, TAINT_NEEDLE_BYTES)
+                                                .to_string(),
+                                        ));
+                                    }
+                                    replay_feed.push(StepResult {
+                                        request_id: t.step,
+                                        output: StepOutput::Completed(serde_json::Value::String(
+                                            text,
+                                        )),
+                                    });
+                                }
+                                // §3.1 / R1: a journaled failure replays as
+                                // null — a failed step is NEVER respawned;
+                                // retrying is a human's re-run decision.
+                                JournaledTerminal::Failed => replay_feed.push(StepResult {
+                                    request_id: t.step,
+                                    output: StepOutput::Failed,
+                                }),
+                            }
+                        }
+                        replayed_count += replay_feed.len() as u64;
+                        if live_owned.is_empty() {
+                            // Fully-journaled batch: nothing spawns; the
+                            // journal (possibly now empty) stays active — the
+                            // marker appends at the live transition or at the
+                            // run's end, whichever comes first.
+                            &live_owned
+                        } else {
+                            // The straddle batch ends the replay: the marker
+                            // precedes its live members' spawn events.
+                            if journal.remaining() > 0 {
+                                return Err(journal.refuse_leftover("at the straddle batch"));
+                            }
+                            wev.resumed(replayed_count)?;
+                            replay = None;
+                            &live_owned
+                        }
+                    }
+                } else {
+                    &batch.requests
+                };
+
+                // Stage E pre-spawn evidence: one StepSpawned per LIVE
+                // request, appended FAIL-CLOSED before any child launches
+                // (gate 2: an unrecordable spawn does not launch). The child
+                // run id is pre-generated here so the event can name it.
+                // Replayed steps emit nothing new — their events already
+                // exist in the journal.
                 let mut child_ids: HashMap<u64, String> = HashMap::new();
-                for request in &batch.requests {
+                for request in live {
                     let child_run_id = record_step_spawned(
                         &wev,
                         request,
@@ -590,15 +776,20 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                 let steps = execute_batch(
                     manifest_dir,
                     &bindings,
-                    &batch.requests,
+                    live,
                     max_concurrent,
                     &pids,
                     &child_ids,
                 );
                 // Step completions are material evidence too: an
                 // unrecordable completion fails the run (gate 2) — better an
-                // error than an unrecorded step.
-                results = Vec::with_capacity(steps.len());
+                // error than an unrecorded step. Replayed results feed FIRST
+                // (their journal order), live results after in completion
+                // order — for a straddle batch nothing was ever fed to the
+                // original engine, so no prior settlement observation exists
+                // to contradict.
+                results = replay_feed;
+                results.reserve(steps.len());
                 for step in steps {
                     match &step.result.output {
                         StepOutput::Completed(value) => {
@@ -633,10 +824,34 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                     results.push(step.result);
                 }
             }
-            StepOutcome::Done(value) => break value,
+            StepOutcome::Done(value) => {
+                // Stage F: the run ended while the journal was still active
+                // (a resume whose live tail was empty, or a journal naming
+                // steps the engine never re-issued). Leftovers refuse
+                // WITHOUT appending; a cleanly-exhausted journal marks the
+                // session before the terminal below.
+                if let Some(journal) = replay.take() {
+                    if journal.remaining() > 0 {
+                        return Err(journal.refuse_leftover("by the run's end"));
+                    }
+                    wev.resumed(replayed_count)?;
+                }
+                break value;
+            }
             StepOutcome::Failed(err) => {
                 drop(done_tx);
                 note_exhaustion(&run, effective_agents);
+                // Stage F, same discipline as Done: leftover journal entries
+                // refuse without appending (the failure here is the REPLAY's
+                // divergence, not a new outcome of the run); a cleanly
+                // replayed prefix that then fails past the journal is a live
+                // outcome of the resumed session — mark it, then record it.
+                if let Some(journal) = replay.take() {
+                    if journal.remaining() > 0 {
+                        return Err(journal.refuse_leftover("at the engine failure"));
+                    }
+                    wev.resumed(replayed_count)?;
+                }
                 let outcome = format!("failed:{}", kind_slug(err.kind));
                 return Err(wev.fail(
                     &outcome,
@@ -1166,15 +1381,46 @@ fn render_workflow_report(run_id: &str) -> Result<String> {
     )?;
     writeln!(out)?;
 
-    // Step completion states, keyed by step id.
+    // Stage F: resume markers segment the log into sessions — everything
+    // after the LAST marker is the newest session's live tail; steps before
+    // it were carried forward by replay (or superseded and re-executed).
+    let markers: Vec<(usize, u64, u64)> = events
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, e)| match e {
+            RunEvent::WorkflowResumed {
+                ts, replayed_steps, ..
+            } => Some((idx, *ts, *replayed_steps)),
+            _ => None,
+        })
+        .collect();
+    let last_marker = markers.last().map(|(idx, _, _)| *idx);
+    if !markers.is_empty() {
+        writeln!(out, "Resumed {} time(s):", markers.len())?;
+        for (_, ts, replayed) in &markers {
+            writeln!(
+                out,
+                "  at ts={ts}: {replayed} step(s) replayed from the journal (no journaled \
+                 step re-executed)"
+            )?;
+        }
+        writeln!(out)?;
+    }
+
+    // Step completion states, keyed by step id (last-wins, so a re-executed
+    // step shows its resumed session's terminal), plus each step's last
+    // terminal POSITION for the replayed/superseded distinction below.
     let mut step_state: HashMap<u64, String> = HashMap::new();
-    for event in &events {
+    let mut step_terminal_idx: HashMap<u64, usize> = HashMap::new();
+    for (idx, event) in events.iter().enumerate() {
         match event {
             RunEvent::StepCompleted { step, .. } => {
                 step_state.insert(*step, "completed".to_string());
+                step_terminal_idx.insert(*step, idx);
             }
             RunEvent::StepFailed { step, reason, .. } => {
                 step_state.insert(*step, format!("failed ({})", sanitize_line(reason)));
+                step_terminal_idx.insert(*step, idx);
             }
             _ => {}
         }
@@ -1182,7 +1428,7 @@ fn render_workflow_report(run_id: &str) -> Result<String> {
 
     writeln!(out, "Steps:")?;
     let mut any_steps = false;
-    for event in &events {
+    for (idx, event) in events.iter().enumerate() {
         let RunEvent::StepSpawned {
             step,
             role,
@@ -1198,6 +1444,20 @@ fn render_workflow_report(run_id: &str) -> Result<String> {
         };
         any_steps = true;
         let mut line = format!("  #{step} role={}", sanitize_line(role));
+        // Stage F session annotation, relative to the LAST resume marker: a
+        // spawn after it ran live in the resumed session; a spawn before it
+        // either replayed (its terminal predates the marker) or was
+        // superseded (spawned, never terminated — re-executed live, and its
+        // later spawn event shows the re-execution).
+        if let Some(marker) = last_marker {
+            if idx > marker {
+                line.push_str(" [live, resumed session]");
+            } else if step_terminal_idx.get(step).is_some_and(|t| *t < marker) {
+                line.push_str(" [replayed on resume]");
+            } else {
+                line.push_str(" [superseded — re-executed live on resume]");
+            }
+        }
         if let Some(label) = label {
             line.push_str(&format!(" [{}]", sanitize_line(label)));
         }
@@ -1272,19 +1532,34 @@ fn render_workflow_report(run_id: &str) -> Result<String> {
     }
     writeln!(out)?;
 
-    let terminal = events.iter().rev().find_map(|e| match e {
-        RunEvent::WorkflowCompleted {
-            outcome,
-            exhausted,
-            duration_ms,
-            ..
-        } => Some((outcome.clone(), *exhausted, *duration_ms)),
-        _ => None,
-    });
-    match terminal {
+    // ALL recorded terminals, oldest first: the last is the run's outcome;
+    // earlier ones are stated too (a log carries more than one after a
+    // resume, or on the documented done/watchdog_kill boundary race).
+    // `outcome` is launcher-authored on a genuine log, but the log is
+    // editable — sanitized at this terminal seam like every other field.
+    let terminals: Vec<(String, bool, u64)> = events
+        .iter()
+        .filter_map(|e| match e {
+            RunEvent::WorkflowCompleted {
+                outcome,
+                exhausted,
+                duration_ms,
+                ..
+            } => Some((sanitize_line(outcome), *exhausted, *duration_ms)),
+            _ => None,
+        })
+        .collect();
+    match terminals.last() {
         Some((outcome, exhausted, duration_ms)) => {
             writeln!(out, "Outcome: {outcome} ({duration_ms} ms)")?;
-            if exhausted {
+            for (earlier, _, earlier_ms) in &terminals[..terminals.len() - 1] {
+                writeln!(
+                    out,
+                    "  earlier terminal: {earlier} ({earlier_ms} ms) — superseded by a later \
+                     session or the recorded boundary race"
+                )?;
+            }
+            if *exhausted {
                 writeln!(
                     out,
                     "  the granted agent ceiling was EXHAUSTED during this run — refused \
@@ -1339,6 +1614,7 @@ mod tests {
             "  emit-json*) printf '%s' '{\"a\":1,\"b\":[1,2,3]}' ;;\n",
             "  sleep*) sleep 1.5; printf 'ok' ;;\n",
             "  long*) printf '%080d' 7 ;;\n",
+            "  fail*) exit 3 ;;\n",
             "  overlap*)\n",
             "    set -- $last\n",
             "    dir=\"$2\"; name=\"$3\"; peer=\"$4\"\n",
@@ -1392,6 +1668,16 @@ mod tests {
         crate::cli::WorkflowRunArgs {
             name: name.to_string(),
             args_json: args_json.map(String::from),
+            resume: None,
+        }
+    }
+
+    /// The Stage F invocation shape: same name/args, resuming `run_id`.
+    fn wf_resume(name: &str, args_json: Option<&str>, run_id: &str) -> crate::cli::WorkflowRunArgs {
+        crate::cli::WorkflowRunArgs {
+            name: name.to_string(),
+            args_json: args_json.map(String::from),
+            resume: Some(run_id.to_string()),
         }
     }
 
@@ -1965,6 +2251,518 @@ mod tests {
         std::panic::set_hook(previous);
         let err = out.unwrap_err().to_string();
         assert!(err.contains("refusing the run"), "{err}");
+    }
+
+    // ───────────────────────── Stage F resume witnesses ─────────────────────────
+
+    /// Rewrite a workflow run's journal to exactly `events` — the test
+    /// scalpel standing in for a crash/kill (the journal is just a file).
+    fn rewrite_journal(home: &assert_fs::TempDir, run_id: &str, events: &[RunEvent]) {
+        let path = home.path().join("runs").join(run_id).join("events.jsonl");
+        let text: String = events
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap() + "\n")
+            .collect();
+        std::fs::write(path, text).unwrap();
+    }
+
+    /// Journal prefix ending at the first event matching `until` (inclusive).
+    fn journal_prefix(events: &[RunEvent], until: impl Fn(&RunEvent) -> bool) -> Vec<RunEvent> {
+        let idx = events.iter().position(until).expect("cut point exists");
+        events[..=idx].to_vec()
+    }
+
+    /// Every child run id (`r-…`) with a run dir under the isolated home —
+    /// the spawn-absence evidence: replayed steps create no new dirs.
+    fn child_run_dirs(home: &assert_fs::TempDir) -> HashSet<String> {
+        std::fs::read_dir(home.path().join("runs"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|id| id.starts_with("r-"))
+            .collect()
+    }
+
+    fn is_completed(step: u64) -> impl Fn(&RunEvent) -> bool {
+        move |e| matches!(e, RunEvent::StepCompleted { step: s, .. } if *s == step)
+    }
+
+    /// The core Stage F witness: a journal cut mid-run resumes — the
+    /// journaled step spawns NO child, the live tail runs, the final value
+    /// equals the uninterrupted run's, and the log carries the marker,
+    /// the replay annotations, and a single `done` terminal.
+    #[cfg(unix)]
+    #[test]
+    fn resume_replays_journal_and_completes_identically() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const a = await agent('emit-json', { role: 'w' });\n\
+                 const b = await agent('long', { role: 'w' });\n\
+                 return [a, b];",
+            );
+            let uninterrupted = run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            let (id, events) = workflow_run_events(home);
+
+            // Simulate the crash: keep everything through step 0's terminal.
+            rewrite_journal(home, &id, &journal_prefix(&events, is_completed(0)));
+            let before = child_run_dirs(home);
+
+            let value = run_value(Some(proj.path()), &wf_resume("t", None, &id)).unwrap();
+            assert_eq!(
+                value, uninterrupted,
+                "the resumed run's final value must equal the uninterrupted run's"
+            );
+            // Step 0 replayed (no child spawned); only step 1 ran live.
+            let new: Vec<String> = child_run_dirs(home).difference(&before).cloned().collect();
+            assert_eq!(new.len(), 1, "exactly one live child: {new:?}");
+
+            let resumed_events = RunLog::read(&id);
+            let marker = resumed_events.iter().find_map(|e| match e {
+                RunEvent::WorkflowResumed { replayed_steps, .. } => Some(*replayed_steps),
+                _ => None,
+            });
+            assert_eq!(marker, Some(1), "the marker records the replayed count");
+            let outcomes: Vec<String> = resumed_events
+                .iter()
+                .filter_map(|e| match e {
+                    RunEvent::WorkflowCompleted { outcome, .. } => Some(outcome.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(outcomes, ["done"], "one terminal, the resumed session's");
+
+            let report = render_workflow_report(&id).unwrap();
+            assert!(report.contains("Resumed 1 time(s)"), "{report}");
+            assert!(report.contains("[replayed on resume]"), "{report}");
+            assert!(report.contains("[live, resumed session]"), "{report}");
+        });
+    }
+
+    /// Never-recompute (§3.1 / R1): a journaled `StepFailed` replays as
+    /// `null` with no respawn — a failed step is a re-run decision for a
+    /// human, never a resume semantic.
+    #[cfg(unix)]
+    #[test]
+    fn resume_replays_failed_step_as_null_without_respawn() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const a = await agent('fail', { role: 'w' });\n\
+                 const b = await agent('emit-json', { role: 'w' });\n\
+                 return [a, b];",
+            );
+            run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            let (id, events) = workflow_run_events(home);
+            rewrite_journal(
+                home,
+                &id,
+                &journal_prefix(&events, |e| {
+                    matches!(e, RunEvent::StepFailed { step: 0, .. })
+                }),
+            );
+            let before = child_run_dirs(home);
+
+            let value = run_value(Some(proj.path()), &wf_resume("t", None, &id)).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!([null, "{\"a\":1,\"b\":[1,2,3]}"]),
+                "the journaled failure replays as null"
+            );
+            let new = child_run_dirs(home).len() - before.len();
+            assert_eq!(
+                new, 1,
+                "the failed step must not respawn; only the tail is live"
+            );
+        });
+    }
+
+    /// Resumability refusals: a `done` run has nothing to resume, and a
+    /// recorded deterministic failure would replay identically — both refuse
+    /// with the reason named.
+    #[cfg(unix)]
+    #[test]
+    fn resume_refuses_done_and_failed_terminals() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 return await agent('emit-json', { role: 'w' });",
+            );
+            run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            let (id, _) = workflow_run_events(home);
+            let err = run_value(Some(proj.path()), &wf_resume("t", None, &id))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("completed"), "{err}");
+            assert!(err.contains("nothing to resume"), "{err}");
+
+            // A deterministic failure: swap the terminal for a failed:* one.
+            let mut events = RunLog::read(&id);
+            if let Some(RunEvent::WorkflowCompleted { outcome, .. }) = events.last_mut() {
+                *outcome = "failed:runtime_error".to_string();
+            } else {
+                panic!("expected a terminal event");
+            }
+            rewrite_journal(home, &id, &events);
+            let err = run_value(Some(proj.path()), &wf_resume("t", None, &id))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("deterministic failure"), "{err}");
+            assert!(err.contains("re-run fresh"), "{err}");
+        });
+    }
+
+    /// Divergence refusal, SCRIPT dimension: a byte-changed (re-pinned,
+    /// re-trusted — admission itself passes) script refuses resume naming
+    /// the script identity.
+    #[cfg(unix)]
+    #[test]
+    fn resume_refuses_script_divergence() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 return await agent('emit-json', { role: 'w' });",
+            );
+            run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            let (id, events) = workflow_run_events(home);
+            rewrite_journal(home, &id, &journal_prefix(&events, is_completed(0)));
+
+            // One changed byte, re-pinned and re-trusted: fresh admission
+            // passes; the resume identity gate must still refuse.
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 return await agent('emit-json2', { role: 'w' });",
+            );
+            let err = run_value(Some(proj.path()), &wf_resume("t", None, &id))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("SCRIPT identity"), "{err}");
+        });
+    }
+
+    /// Divergence refusal, ARGS dimension: --args-json must be byte-identical.
+    #[cfg(unix)]
+    #[test]
+    fn resume_refuses_args_divergence() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 return await agent('emit-json', { role: 'w' });",
+            );
+            run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            let (id, events) = workflow_run_events(home);
+            rewrite_journal(home, &id, &journal_prefix(&events, is_completed(0)));
+
+            let err = run_value(Some(proj.path()), &wf_resume("t", Some("{}"), &id))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("ARGS identity"), "{err}");
+        });
+    }
+
+    /// Divergence refusal, GRANT dimension (ceilings): a manifest ceiling
+    /// change under identical script bytes refuses with the ceiling hint.
+    #[cfg(unix)]
+    #[test]
+    fn resume_refuses_ceiling_divergence() {
+        workflow_fixture(|home, proj| {
+            let script = "export const meta = { roles: ['w'] };\n\
+                 return await agent('emit-json', { role: 'w' });";
+            pin_and_trust(proj, SIMPLE_MANIFEST, script);
+            run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            let (id, events) = workflow_run_events(home);
+            rewrite_journal(home, &id, &journal_prefix(&events, is_completed(0)));
+
+            pin_and_trust(
+                proj,
+                r#"
+                version = 1
+                [profiles.w]
+                [workflows.t]
+                path = "./workflows/main.js"
+                roles = ["w"]
+                max_agents = 5
+                "#,
+                script,
+            );
+            let err = run_value(Some(proj.path()), &wf_resume("t", None, &id))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("GRANT diverged"), "{err}");
+            assert!(err.contains("ceilings moved"), "{err}");
+        });
+    }
+
+    /// Divergence refusal, GRANT dimension (roles): a widened role set under
+    /// identical ceilings refuses with the role-set hint.
+    #[cfg(unix)]
+    #[test]
+    fn resume_refuses_role_set_divergence() {
+        workflow_fixture(|home, proj| {
+            let script = "export const meta = { roles: ['w'] };\n\
+                 return await agent('emit-json', { role: 'w' });";
+            pin_and_trust(proj, SIMPLE_MANIFEST, script);
+            run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            let (id, events) = workflow_run_events(home);
+            rewrite_journal(home, &id, &journal_prefix(&events, is_completed(0)));
+
+            pin_and_trust(
+                proj,
+                r#"
+                version = 1
+                [profiles.w]
+                [profiles.v]
+                [workflows.t]
+                path = "./workflows/main.js"
+                roles = ["w", "v"]
+                "#,
+                script,
+            );
+            let err = run_value(Some(proj.path()), &wf_resume("t", None, &id))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("GRANT diverged"), "{err}");
+            assert!(err.contains("ROLE SET moved"), "{err}");
+        });
+    }
+
+    /// Per-step alignment: a doctored mid-journal `StepSpawned` (edited
+    /// request digest) refuses via the misalignment check — feeding results
+    /// into a misaligned request would be corruption, not recovery.
+    #[cfg(unix)]
+    #[test]
+    fn resume_refuses_doctored_request_digest() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const a = await agent('emit-json', { role: 'w' });\n\
+                 const b = await agent('long', { role: 'w' });\n\
+                 return [a, b];",
+            );
+            run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            let (id, events) = workflow_run_events(home);
+            let mut cut = journal_prefix(&events, is_completed(0));
+            for event in &mut cut {
+                if let RunEvent::StepSpawned { request_digest, .. } = event {
+                    *request_digest = "doctored".to_string();
+                }
+            }
+            rewrite_journal(home, &id, &cut);
+
+            let before = child_run_dirs(home);
+            let err = run_value(Some(proj.path()), &wf_resume("t", None, &id))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("step #0 diverged from the journal"), "{err}");
+            assert_eq!(
+                child_run_dirs(home),
+                before,
+                "a refused resume must spawn nothing"
+            );
+        });
+    }
+
+    /// Tamper-evident feed: an edited stdout artifact no longer matches the
+    /// child's recorded `HeadlessOutput.sha256` and refuses resume, naming
+    /// the step — the evidence digest does double duty as the replay anchor.
+    #[cfg(unix)]
+    #[test]
+    fn resume_refuses_tampered_result_artifact() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const a = await agent('emit-json', { role: 'w' });\n\
+                 const b = await agent('long', { role: 'w' });\n\
+                 return [a, b];",
+            );
+            run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            let (id, events) = workflow_run_events(home);
+            let cut = journal_prefix(&events, is_completed(0));
+            let child0 = cut
+                .iter()
+                .find_map(|e| match e {
+                    RunEvent::StepSpawned { child_run_id, .. } => Some(child_run_id.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            rewrite_journal(home, &id, &cut);
+
+            // Tamper the persisted result bytes.
+            let artifact = home.path().join("runs").join(&child0).join("stdout");
+            let mut bytes = std::fs::read(&artifact).unwrap();
+            bytes.extend_from_slice(b" tampered");
+            std::fs::write(&artifact, &bytes).unwrap();
+
+            let err = run_value(Some(proj.path()), &wf_resume("t", None, &id))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("step #0"), "{err}");
+            assert!(
+                err.contains("does not match the recorded output digest"),
+                "{err}"
+            );
+        });
+    }
+
+    /// Ceiling continuity (rule 2): the engine re-counts replayed spawns
+    /// against the SAME effective ceiling, so replayed + live together stay
+    /// bounded by the original grant — resume never widens.
+    #[cfg(unix)]
+    #[test]
+    fn resume_never_widens_the_agent_ceiling() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'], maxAgents: 2 };\n\
+                 const a = await agent('emit-json', { role: 'w' });\n\
+                 const b = await agent('long', { role: 'w' });\n\
+                 let denied = false;\n\
+                 try { await agent('emit-json', { role: 'w' }); } catch (e) { denied = true; }\n\
+                 return denied;",
+            );
+            let value = run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            assert_eq!(value, serde_json::json!(true));
+            let (id, events) = workflow_run_events(home);
+            rewrite_journal(home, &id, &journal_prefix(&events, is_completed(0)));
+            let before = child_run_dirs(home);
+
+            let value = run_value(Some(proj.path()), &wf_resume("t", None, &id)).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!(true),
+                "the third call is refused on resume too — replayed spawns count"
+            );
+            let new = child_run_dirs(home).len() - before.len();
+            assert_eq!(
+                new, 1,
+                "one live child (step 1); step 0 replayed, step 2 refused"
+            );
+        });
+    }
+
+    /// Fresh wall clock (the Stage D promise): a `wall_deadline` run resumes
+    /// and completes — the resumed session's deadline arms at the FULL
+    /// effective ceiling, not the remainder (a remainder clock would refuse
+    /// the live tail's batch immediately).
+    #[cfg(unix)]
+    #[test]
+    fn resume_arms_a_fresh_wall_clock() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'], maxWallSeconds: 1 };\n\
+                 const a = await agent('sleep', { role: 'w' });\n\
+                 const b = await agent('sleep', { role: 'w' });\n\
+                 return [a, b];",
+            );
+            // The original run burns the whole ceiling and dies at the wall.
+            let err = run_value(Some(proj.path()), &wf_args("t", None))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("wall-clock ceiling"), "{err}");
+            let (id, _) = workflow_run_events(home);
+
+            // wall_deadline is a resumable interruption; the replay is
+            // instant, and the live tail (1.5s child) fits the fresh 1s
+            // deadline check at its batch boundary.
+            let value = run_value(Some(proj.path()), &wf_resume("t", None, &id)).unwrap();
+            assert_eq!(value, serde_json::json!(["ok", "ok"]));
+
+            // The multi-terminal log renders honestly: the resumed session's
+            // `done` is the outcome, the superseded `wall_deadline` stays
+            // stated as an earlier terminal.
+            let report = render_workflow_report(&id).unwrap();
+            assert!(report.contains("Outcome: done"), "{report}");
+            assert!(
+                report.contains("earlier terminal: wall_deadline"),
+                "{report}"
+            );
+        });
+    }
+
+    /// Mid-batch straddle (per-member granularity): a batch with both spawns
+    /// journaled but only one terminal replays the terminal-bearing member
+    /// and re-executes the other live — the at-least-once boundary, recorded
+    /// as a fresh post-marker spawn and rendered honestly.
+    #[cfg(unix)]
+    #[test]
+    fn resume_straddles_a_half_journaled_batch() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const outs = await parallel([\n\
+                   () => agent('emit-json', { role: 'w' }),\n\
+                   () => agent('long', { role: 'w' }),\n\
+                 ]);\n\
+                 return outs;",
+            );
+            let uninterrupted = run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            let (id, events) = workflow_run_events(home);
+            // Keep both spawns but only step 0's terminal: the crash landed
+            // mid-batch (or mid-append-loop).
+            let cut: Vec<RunEvent> = events
+                .iter()
+                .filter(|e| {
+                    !matches!(
+                        e,
+                        RunEvent::StepCompleted { step: 1, .. }
+                            | RunEvent::WorkflowCompleted { .. }
+                    )
+                })
+                .cloned()
+                .collect();
+            rewrite_journal(home, &id, &cut);
+            let before = child_run_dirs(home);
+
+            let value = run_value(Some(proj.path()), &wf_resume("t", None, &id)).unwrap();
+            assert_eq!(value, uninterrupted);
+            let new = child_run_dirs(home).len() - before.len();
+            assert_eq!(new, 1, "only the terminal-less member re-executes");
+
+            // The re-execution is a fresh post-marker spawn; the report says
+            // who replayed, who was superseded, and who ran live.
+            let resumed_events = RunLog::read(&id);
+            let marker_idx = resumed_events
+                .iter()
+                .position(|e| matches!(e, RunEvent::WorkflowResumed { .. }))
+                .expect("marker recorded");
+            let respawn_after_marker = resumed_events.iter().enumerate().any(|(idx, e)| {
+                idx > marker_idx && matches!(e, RunEvent::StepSpawned { step: 1, .. })
+            });
+            assert!(
+                respawn_after_marker,
+                "the live re-execution follows the marker"
+            );
+
+            let report = render_workflow_report(&id).unwrap();
+            assert!(report.contains("[replayed on resume]"), "{report}");
+            assert!(
+                report.contains("[superseded — re-executed live on resume]"),
+                "{report}"
+            );
+            assert!(report.contains("[live, resumed session]"), "{report}");
+        });
     }
 
     /// Progress sanitization witness: a `log()` line carrying terminal

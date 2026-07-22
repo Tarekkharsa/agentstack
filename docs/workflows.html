@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Governed workflows — agentstack</title>
-<meta name="description" content="Status: preview — in development. The pieces that make a workflow safe ship today: you can declare, pin, and trust a workflow, and every agent step already">
+<meta name="description" content="Status: preview. The full path ships today: declare, pin, and trust a workflow, run it end to end with agentstack workflow run, render its evidence tree wi">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/workflows.html">
@@ -232,7 +232,7 @@
 </aside>
   <main>
 <h1 id="governed-workflows">Governed workflows</h1>
-<p><strong>Status: preview — in development.</strong> The pieces that make a workflow <em>safe</em> ship today: you can declare, pin, and trust a workflow, and every agent step already runs as a governed <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.html">locked run</a>. The engine that <em>executes</em> a whole workflow is being built in the open — until it lands, a declared workflow is inert (it parses, pins, and shows in trust review, but nothing runs it yet). This page describes the capability and its security model so the surface you already see in <code>agentstack trust</code> and <code>agentstack doctor</code> isn't a mystery.</p>
+<p><strong>Status: preview.</strong> The full path ships today: declare, pin, and trust a workflow, run it end to end with <code>agentstack workflow run</code>, render its evidence tree with <code>agentstack workflow report</code>, and resume an interrupted run with <code>--resume</code> (replay from the recorded journal — byte-identical script and args, or it refuses). Every agent step runs as a governed <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.html">locked run</a>. The commands stay preview-labelled while the interpreter boundary awaits its independent security review — the posture, not the feature set, is what's provisional.</p>
 <p>A <strong>workflow</strong> is one script that fans a task out to many agent runs and composes their results — the map/reduce shape, but every worker is a governed agent run instead of a bare process. One review chore becomes: run a reader over each file, synthesize the findings, then run an independent verifier to refute the weak ones. Claude Code has an ungoverned version of this today; AgentStack's version pins the orchestration code and gives every step its own reviewed authority.</p>
 <h2 id="why-a-workflow-needs-governing">Why a workflow needs governing<a class="hlink" href="#why-a-workflow-needs-governing" aria-label="Link to this section">#</a></h2>
 <p>A workflow is <strong>authority, multiplied</strong>: one command spawns N agent runs, each with tool access, filesystem reach, and token spend, with the control flow decided at runtime by script code. That is exactly the thing a security tool should not run on trust. So AgentStack treats the orchestration script the same way it treats any other executable content from a repo — as <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/enforcement.html#what-trusted-does-and-does-not-mean">untrusted input</a> until you review and pin it.</p>
@@ -244,6 +244,7 @@
 <li><strong>Every step is a locked run.</strong> Each agent step goes through the full protected-run path — trust gate, lock verification, policy admission, a frozen grant, its own scoped MCP config, and a recorded outcome.</li>
 <li><strong>Per-child isolation.</strong> Concurrent steps in one project each get their own launch-scoped tool config; they never touch your project's <code>.mcp.json</code> or each other's.</li>
 <li><strong>A complete evidence tree.</strong> The run records which orchestration bytes ran, what authority every step had, and the full spawn tree — so you can audit exactly what happened.</li>
+<li><strong>Resume without re-running.</strong> The evidence log doubles as the resume journal: an interrupted run replays its completed steps' results (verified against each step's recorded output digest) and only executes what never finished. Any divergence — script bytes, args, ceilings, roles, or an edited artifact — refuses; a completed step never runs twice, and a failed one is never silently retried.</li>
 </ul>
 <h2 id="honest-limits">Honest limits<a class="hlink" href="#honest-limits" aria-label="Link to this section">#</a></h2>
 <p>What AgentStack can promise here has a sharp edge, and the docs say it plainly:</p>
@@ -272,7 +273,7 @@ const checked = await parallel(
 return keepUnrefuted(report, checked)</code></pre>
 <p>The script runs inside a sandboxed interpreter with no filesystem, network, or environment access — the only thing it can do is request governed agent runs through <code>agent()</code>. Everything else is plain computation.</p>
 <h2 id="where-it-stands">Where it stands<a class="hlink" href="#where-it-stands" aria-label="Link to this section">#</a></h2>
-<p>The full design, security rationale, and staged plan live in the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/workflows-capability.md">workflows capability design doc</a>. Today the manifest kind, pinning, trust review, and the per-step governed-run primitive are in place; the execution engine is the active work. This page will grow a how-to once you can run one end to end.</p>
+<p>The full design, security rationale, and staged plan live in the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/workflows-capability.md">workflows capability design doc</a>. The manifest kind, pinning, trust review, the engine, <code>workflow run</code> / <code>workflow report</code>, negotiated ceilings, and journal-replay resume all ship; what remains before the preview label drops is an independent review of the interpreter boundary (design doc §9.3).</p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/workflows.md">docs/workflows.md</a> — this page is generated from it.</p>
   </main>
 </div>

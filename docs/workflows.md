@@ -4,14 +4,14 @@
 
 # Governed workflows
 
-**Status: preview — in development.** The pieces that make a workflow *safe*
-ship today: you can declare, pin, and trust a workflow, and every agent step
-already runs as a governed [locked run](reference.html). The engine that
-*executes* a whole workflow is being built in the open — until it lands, a
-declared workflow is inert (it parses, pins, and shows in trust review, but
-nothing runs it yet). This page describes the capability and its security
-model so the surface you already see in `agentstack trust` and
-`agentstack doctor` isn't a mystery.
+**Status: preview.** The full path ships today: declare, pin, and trust a
+workflow, run it end to end with `agentstack workflow run`, render its
+evidence tree with `agentstack workflow report`, and resume an interrupted
+run with `--resume` (replay from the recorded journal — byte-identical
+script and args, or it refuses). Every agent step runs as a governed
+[locked run](reference.html). The commands stay preview-labelled while the
+interpreter boundary awaits its independent security review — the posture,
+not the feature set, is what's provisional.
 
 A **workflow** is one script that fans a task out to many agent runs and
 composes their results — the map/reduce shape, but every worker is a
@@ -52,6 +52,12 @@ until you review and pin it.
 - **A complete evidence tree.** The run records which orchestration bytes
   ran, what authority every step had, and the full spawn tree — so you can
   audit exactly what happened.
+- **Resume without re-running.** The evidence log doubles as the resume
+  journal: an interrupted run replays its completed steps' results (verified
+  against each step's recorded output digest) and only executes what never
+  finished. Any divergence — script bytes, args, ceilings, roles, or an
+  edited artifact — refuses; a completed step never runs twice, and a
+  failed one is never silently retried.
 
 ## Honest limits
 
@@ -100,7 +106,8 @@ runs through `agent()`. Everything else is plain computation.
 ## Where it stands
 
 The full design, security rationale, and staged plan live in the
-[workflows capability design doc](design/workflows-capability.md). Today the
-manifest kind, pinning, trust review, and the per-step governed-run primitive
-are in place; the execution engine is the active work. This page will grow a
-how-to once you can run one end to end.
+[workflows capability design doc](design/workflows-capability.md). The
+manifest kind, pinning, trust review, the engine, `workflow run` /
+`workflow report`, negotiated ceilings, and journal-replay resume all ship;
+what remains before the preview label drops is an independent review of the
+interpreter boundary (design doc §9.3).

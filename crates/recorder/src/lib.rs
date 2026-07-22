@@ -498,6 +498,14 @@ pub enum RunEvent {
     /// promise. Result identity (digest/bytes/truncated) lives in the
     /// child's own `HeadlessOutput` — joined, never duplicated.
     StepCompleted { ts: u64, step: u64 },
+    /// A resumed session took over this run's log (Stage F). Appended AFTER
+    /// the journaled steps replayed and BEFORE the first live event of the
+    /// resumed session — so a refused resume leaves the journal
+    /// byte-untouched and re-attemptable, and everything after the LAST
+    /// marker is the newest session's live tail. Identity is NOT restated:
+    /// the original `WorkflowStarted` was verified byte-identical (script,
+    /// grant, args digests) before this could append.
+    WorkflowResumed { ts: u64, replayed_steps: u64 },
     /// A step failed closed (the script saw `null`). `reason` is a
     /// launcher-authored category — never upstream or script-authored text.
     StepFailed { ts: u64, step: u64, reason: String },
@@ -685,6 +693,16 @@ mod tests {
         let line = serde_json::to_string(&marked).unwrap();
         let back: RunEvent = serde_json::from_str(&line).unwrap();
         assert_eq!(back, marked);
+
+        // Stage F: the resume marker round-trips and is self-describing.
+        let resumed = RunEvent::WorkflowResumed {
+            ts: 2,
+            replayed_steps: 3,
+        };
+        let line = serde_json::to_string(&resumed).unwrap();
+        assert!(line.contains("\"event\":\"workflow_resumed\""), "{line}");
+        let back: RunEvent = serde_json::from_str(&line).unwrap();
+        assert_eq!(back, resumed);
     }
 
     fn with_home<T>(f: impl FnOnce() -> T) -> T {

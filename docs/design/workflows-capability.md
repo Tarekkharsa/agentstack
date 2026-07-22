@@ -715,6 +715,13 @@ panicked Contexts, keep all real limits host-side.
 
 ### 12.4 W3 implementation plan (stages, files, witnesses)
 
+> **Status (2026-07-22): all six stages shipped** — A/W2.5 `2eaf7ce`,
+> B `fa36858`, C `ea99660`, D `f17205d`, E `701b806`, F (resume) closes the
+> lane. Each stage was line-by-line reviewed and its witnesses are in the
+> test suite. Remaining follow-ups live outside this plan: the §9.3
+> independent script-boundary review before workflows leave experimental,
+> and the W4 library/import stage.
+
 Prerequisite ordering: **W2.5 and W1 land before the engine runs pinned
 scripts end-to-end.** Stage B can develop against fixture scripts in
 parallel with W1.
