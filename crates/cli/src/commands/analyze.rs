@@ -87,12 +87,13 @@ fn print_recent_calls(calls: &[CallRecord], n: usize) {
             calllog::CallOutcome::Error => outcome.red().to_string(),
         };
         let run = e.run.as_deref().unwrap_or("-");
-        println!(
-            "  {outcome} {:<40} {:>6}ms  {:<10} {age}",
-            format!("{}__{}", e.server, e.tool),
-            e.ms,
-            run,
-        );
+        // Guard entries embed the whole command in `tool` — truncate for the
+        // table (the JSON events keep the full string).
+        let mut name = format!("{}__{}", e.server, e.tool);
+        if name.chars().count() > 60 {
+            name = format!("{}…", name.chars().take(59).collect::<String>());
+        }
+        println!("  {outcome} {name:<60} {:>6}ms  {:<10} {age}", e.ms, run);
     }
 }
 
