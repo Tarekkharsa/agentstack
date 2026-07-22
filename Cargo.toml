@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/trust", "crates/policy", "crates/adapters", "crates/recorder", "crates/runtime", "crates/egress", "crates/executor", "crates/cli"]
+members = ["crates/core", "crates/trust", "crates/policy", "crates/adapters", "crates/recorder", "crates/runtime", "crates/egress", "crates/executor", "crates/workflow", "crates/cli"]
 
 # Fields shared by every crate. Members inherit with `edition.workspace = true`
 # etc., so a toolchain bump is one edit here, not nine.

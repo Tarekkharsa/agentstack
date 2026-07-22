@@ -47,7 +47,7 @@ These are security requirements, not preferences. Never relax them, even if aske
 3. **Untrusted means inert.** Until a bundle's digest is in the trust store, no MCP server is spawned or contacted, no skill content enters any agent context, no secret is resolved. No exceptions for "convenience" or dev mode.
 4. **Any pinned byte changes → bundle re-gates.** Trust is bound to the lockfile digest. Never add caching, fast paths, or partial-trust that weakens this.
 5. **Secrets never serialize.** `${REF}` placeholders resolve only at runtime, in memory, via the OS keychain (`keyring`) or varlock. If a secret cannot resolve, fail closed (block the write/run), never emit a placeholder into live config.
-6. **Minimal dependencies where it counts.** `trust` and `policy` — the crates reviewed line by line — are restricted to: `serde`, `serde_json`, `sha2`, `ed25519-dalek`, `thiserror`, `indexmap` (deterministic ordering is digest-relevant), `proptest` (dev). Everywhere else, the shipped dependency set is blessed (`clap`, `toml`, `toml_edit`, `serde_yaml`, `indexmap`, `keyring`, `rpassword`, `include_dir`, …), with `bollard` confined to the `runtime` crate and `tokio`/`hyper` to the `egress` crate. Adding any **new** dependency anywhere requires explicit maintainer approval — propose it, don't just add it.
+6. **Minimal dependencies where it counts.** `trust` and `policy` — the crates reviewed line by line — are restricted to: `serde`, `serde_json`, `sha2`, `ed25519-dalek`, `thiserror`, `indexmap` (deterministic ordering is digest-relevant), `proptest` (dev). Everywhere else, the shipped dependency set is blessed (`clap`, `toml`, `toml_edit`, `serde_yaml`, `indexmap`, `keyring`, `rpassword`, `include_dir`, …), with `bollard` confined to the `runtime` crate, `tokio`/`hyper` to the `egress` crate, and `boa_engine` (the JS interpreter — the largest single dependency addition in the workspace, +127 transitive packages, and itself not unsafe-free) to the `workflow` crate. This addition carries explicit maintainer approval — granted 2026-07-22 via the W3 engine-gate package (design doc `docs/design/workflows-capability.md` §12.3) — so rule 6's "adding any new dependency anywhere requires explicit maintainer approval" clause is visibly satisfied for `boa_engine` on the line-by-line review. Adding any **new** dependency anywhere requires explicit maintainer approval — propose it, don't just add it.
 7. **Treat all bundle content as hostile input.** Manifests, lockfiles, skill files, and MCP definitions come from unreviewed repos. Parse defensively, bound sizes, never interpolate into shell commands.
 
 ## Workspace layout
@@ -62,6 +62,7 @@ crates/
   runtime/    # sandbox orchestration via bollard (Phase 2)
   egress/     # egress proxy enforcing compiled policy (Phase 2, async)
   executor/   # policy-agnostic governed code-execution domain
+  workflow/   # governed workflow-orchestration engine (Boa JS), self-contained domain
   cli/        # the `agentstack` binary composing everything
 ```
 
@@ -79,6 +80,7 @@ Exact internal dependency edges (nothing else is permitted):
 - `runtime` → `core`, `policy`, `recorder`
 - `egress` → `core`, `policy`, `recorder`
 - `executor` → nothing (the `core`, `runtime`, and `recorder` edges were withdrawn 2026-07-21 — the crate never used them; it is a self-contained, policy-agnostic domain over `serde`/`sha2`/`thiserror`, and the CLI composes it with the runtime and recorder. Granting it any internal edge is an architecture change, not a Cargo.toml edit)
+- `workflow` → nothing (self-contained, policy-agnostic domain over `boa_engine`/`serde_json`/`thiserror` — same precedent as `executor`: hostile script text in, brokered spawn-requests out, step results in, final value out. By construction Boa can never reach `trust`, `policy`, `core`, `adapters`, `recorder`, or any enforcement path; the CLI composes it with the locked-run spawner and the recorder. Granting it any internal edge is an architecture change, not a Cargo.toml edit)
 - `cli` → everything
 
 In particular: `trust` and `policy` depend on `core` only, and nothing depends on `cli`.

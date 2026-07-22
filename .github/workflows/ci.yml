@@ -22,6 +22,16 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # `boa_engine` is the workspace's largest dependency (+127 transitive
+      # packages, itself not unsafe-free). This gate fails CI when the workflow
+      # crate's normal-dependency tree drifts from the blessed snapshot, so a
+      # transitive-dependency change is a reviewed event, not a silent one. When
+      # the tree legitimately changes, re-bless it in the SAME PR:
+      #   cargo tree -p agentstack-workflow --edges normal > crates/workflow/deps.snapshot
+      - name: Workflow crate dependency drift
+        run: |
+          cargo tree -p agentstack-workflow --edges normal > /tmp/workflow-deps.txt
+          diff -u crates/workflow/deps.snapshot /tmp/workflow-deps.txt
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy

@@ -1,0 +1,17 @@
+[package]
+name = "agentstack-workflow"
+version = "0.15.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Governed workflow-orchestration engine (Boa JS) as a self-contained domain"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+boa_engine = "0.21"
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "1"
+
+[lints]
+workspace = true
