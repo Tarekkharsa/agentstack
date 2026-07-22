@@ -595,6 +595,20 @@ impl ScopedMcpConfig {
         // kernel arbitrates this one: exactly one creator wins, the loser
         // refuses naming the holder (or a crash leftover, with instructions).
         let sentinel = path.with_file_name(format!("{file_name}.agentstack-locked.lock"));
+        // F1: the guard lives beside the harness config, whose directory may
+        // not exist yet (`.codex/` on a project that has never run codex) —
+        // `create_new` would then fail with a bare ENOENT that reads like a
+        // permissions bug. We are about to render the config into this same
+        // directory anyway, so creating it now is not a new side effect, just
+        // an earlier one.
+        if let Some(parent) = sentinel.parent() {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "creating {} to hold the launch-scoped harness config",
+                    parent.display()
+                )
+            })?;
+        }
         {
             use std::io::Write;
             let mut opts = std::fs::OpenOptions::new();
@@ -1230,7 +1244,18 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 headless,
                 "\nSee what happened: `agentstack report run {run_id}`"
             );
-            Ok(())
+            // F3: a headless child's exit code is the run's result for whoever
+            // invoked us (CI, a workflow courier), so surface it as our own
+            // exit code rather than reporting success for a failed harness.
+            // AFTER the outcome is recorded and the banner printed — this only
+            // changes the process's exit status, never the evidence. Interactive
+            // runs keep returning Ok: there the human saw the harness's own exit.
+            match st.code() {
+                Some(code) if headless && code != 0 => {
+                    Err(anyhow::Error::new(crate::runs::ChildExit(code)))
+                }
+                _ => Ok(()),
+            }
         }
         Err(e) => {
             // Not a gate refusal: every gate passed and the grant froze; the

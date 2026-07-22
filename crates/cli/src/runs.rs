@@ -25,6 +25,30 @@ use serde::{Deserialize, Serialize};
 use crate::scope::Scope;
 use crate::util::paths;
 
+/// A headless child exited nonzero. Carried as an error so it unwinds the
+/// normal `Result` path (restoring scope guards, recording evidence), but
+/// `main` recognizes it and exits with the child's own code instead of the
+/// generic 1 — a CI consumer of `run --locked --prompt` must be able to tell
+/// "the harness failed" from "agentstack refused", and must see *which* code.
+///
+/// Not an agentstack failure, so `main` prints no `error:` line for it: every
+/// gate passed, the grant froze, and the launcher's stderr banners plus
+/// `agentstack report run <id>` already carry the outcome.
+///
+/// (Rust note: this is the standard `anyhow` escape hatch — a concrete error
+/// type that a caller recovers with `err.downcast_ref::<ChildExit>()`, the way
+/// you'd check `instanceof` on a thrown error in TypeScript.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChildExit(pub i32);
+
+impl std::fmt::Display for ChildExit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the harness exited with status {}", self.0)
+    }
+}
+
+impl std::error::Error for ChildExit {}
+
 /// One tracked harness process. Persisted to `runs.json`; the `pid` is also the
 /// process-group id (the child is made a group leader at spawn).
 #[derive(Debug, Clone, Serialize, Deserialize)]

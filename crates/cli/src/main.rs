@@ -31,6 +31,14 @@ fn main() {
         // above output that explains it (remediation after the refusal).
         use std::io::Write;
         let _ = std::io::stdout().flush();
+        // A headless harness that ran and exited nonzero is not an agentstack
+        // error: every gate passed and the evidence is recorded. Exit with the
+        // child's own code, silently — the launcher's stderr already said what
+        // happened, and inventing an `error:` line here would misreport a
+        // working refusal-free run as a tool failure.
+        if let Some(child) = err.downcast_ref::<agentstack::runs::ChildExit>() {
+            std::process::exit(child.0);
+        }
         // One chokepoint for every CLI error path: a `.with_context()` chain
         // can carry remote text (git stderr, URLs, frontmatter) — strip
         // terminal escapes before it reaches the user's terminal (§A.2 #6).
