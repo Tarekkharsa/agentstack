@@ -1120,7 +1120,7 @@ impl Gateway {
 
     /// Mirror one event into the launching run's flight recorder — but only
     /// when this gateway carries run attribution (inherited from RUN_ID_ENV
-    /// at construction, or passed explicitly by `from_plan`). Best-effort and
+    /// at construction, or passed explicitly by `from_frozen`). Best-effort and
     /// additive: a no-op outside a run, and any failure is swallowed (same
     /// contract as the audit write). `RunLog::create` only prepares/reuses
     /// the run's already-existing directory; it opens no new state a plain

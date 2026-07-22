@@ -140,16 +140,37 @@ there is no direct route at all. Strongest confinement AgentStack ships. More:
 ## Posture and the machine-policy summary
 
 **Posture** — the per-run label for how strongly the effective policy is actually
-enforced, printed on the run banner. The four labels — `HOST / ADVISORY`,
-`HOST / PROTECTED`, `SANDBOX / PROXIED`, and `LOCKDOWN / ENFORCED` — and what
-each guarantees are defined in
-[ENFORCEMENT.md — the matrix](ENFORCEMENT.md#the-matrix). "Posture" always means
-this label.
+enforced, printed on the run banner. The four labels are `HOST / ADVISORY`,
+`HOST / PROTECTED`, `SANDBOX / PROXIED · DIRECT ROUTE OPEN`, and
+`LOCKDOWN / ENFORCED · NO DIRECT ROUTE` — the sandbox and lockdown labels are
+emitted with those suffixes, and the suffix is the honest half: plain
+`--sandbox` proxies egress but leaves a direct route a proxy-ignoring process
+can take. The labels are enumerated in
+[reference.md — execution posture](reference.md#execution-posture); what each
+one actually guarantees is
+[ENFORCEMENT.md — the matrix](ENFORCEMENT.md#the-matrix), which is keyed by mode
+rather than by label. "Posture" always means this label.
 
-**Machine-policy summary** — a separate one-word line `doctor` prints —
-`open`, `restrictive`, or `mixed` — describing your machine policy's shape, not a
-run. `restrictive` flags a rename-proof `"*"` rule, not a verdict that the policy
-is tight. More:
+**Machine-policy summary** — a separate one-word line `doctor` prints,
+describing your machine policy's shape, not a run. It is one of six states:
+
+- `unconfigured` — no `~/.agentstack/agentstack.toml` at all, so projects use
+  their own policy unconstrained. **This is what a fresh machine reports**, and
+  it is the state to fix first if you want a ceiling.
+- `open` — a machine `[policy]` exists but is empty, so nothing in it narrows
+  what a project may do.
+- `restrictive` — a rename-proof `"*"` rule **or** any `[policy.filesystem]`
+  scope constrains every server. Not a verdict that the policy is tight: a
+  `"*"` allowlist can still be broad.
+- `mixed` — some dimensions are constrained and others are not.
+- `degraded` — the machine policy file became unreadable, so enforcement is
+  running from the last-known-good snapshot.
+- `blocked` — the source is unreadable *and* the snapshot is unusable, so
+  protected activation refuses rather than silently falling back to
+  project-only policy.
+
+The last three are the security-relevant ones: `degraded` and `blocked` mean
+the file you think is enforcing is not the file being enforced. More:
 [reference.md — execution posture](reference.md#execution-posture).
 
 ## Machine manifest and machine policy

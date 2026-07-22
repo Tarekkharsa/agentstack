@@ -66,13 +66,23 @@ pub fn commands_block() -> String {
             .join(" ");
         let mut line = format!("- **`{name}`**{hidden} — {summary}");
 
-        // Visible nested subcommands, declaration order. `is_hide_set()` is
-        // clap's runtime read of `#[command(hide = true)]` — the same signal
-        // that keeps a verb out of `--help`.
-        let subs: Vec<&str> = sc
+        // Nested subcommands, declaration order — hidden ones included, for the
+        // same reason hidden top-level commands are: this block claims to be the
+        // full command surface, so silently dropping a real verb (`guard check`,
+        // `self docs`) made it lie. Marked with a trailing `*` — the top level's
+        // inline `_(hidden)_` does not fit inside a slash-joined code span — and
+        // the legend lives in the hand-written prose above the generated region
+        // in docs/reference.md.
+        let subs: Vec<String> = sc
             .get_subcommands()
-            .filter(|s| s.get_name() != "help" && !s.is_hide_set())
-            .map(|s| s.get_name())
+            .filter(|s| s.get_name() != "help")
+            .map(|s| {
+                if s.is_hide_set() {
+                    format!("{}*", s.get_name())
+                } else {
+                    s.get_name().to_string()
+                }
+            })
             .collect();
         if !subs.is_empty() {
             line.push_str(&format!(" — subcommands `{}`", subs.join("/")));

@@ -804,9 +804,12 @@ dashboard shows an active session read-only.
 ### Execution posture
 
 Every run is labelled with its **enforcement posture** — one of
-`HOST / ADVISORY`, `HOST / PROTECTED`, `SANDBOX / PROXIED`, or
-`LOCKDOWN / ENFORCED` — saying how strongly the effective policy is actually
-enforced at runtime, not merely declared. What each label guarantees is
+`HOST / ADVISORY`, `HOST / PROTECTED`,
+`SANDBOX / PROXIED · DIRECT ROUTE OPEN`, or
+`LOCKDOWN / ENFORCED · NO DIRECT ROUTE` — saying how strongly the effective
+policy is actually enforced at runtime, not merely declared. The sandbox and
+lockdown labels are emitted with those suffixes; the suffix is the honest half
+of the claim, so it is quoted here as printed. What each label guarantees is
 [the enforcement matrix](ENFORCEMENT.md#the-matrix); `ENFORCED` is reserved for
 lockdown, and even there the honest claim is *unapproved egress is blocked*, not
 that exfiltration is impossible.
@@ -1314,7 +1317,9 @@ The full command surface, generated from the CLI's own command tree by
 are hidden from `--help` as progressive disclosure but are **fully supported**,
 each with its own `--help`; **hidden does not mean deprecated or unsupported**.
 `agentstack --help --all` prints the entire tree, and each line below marks the
-hidden ones. Reach for it when you need the exact verb, flag, or subcommand.
+hidden ones: a hidden top-level command carries `_(hidden)_`, and a hidden
+subcommand carries a trailing `*` (e.g. `guard`'s `check*`). Reach for it when
+you need the exact verb, flag, or subcommand.
 
 <!-- agentstack:generated commands -->
 - **`setup`** _(hidden)_ — Hidden alias of interactive `init` — same guided wizard, older name — flags `--target/--profile/--scope`
@@ -1340,7 +1345,7 @@ hidden ones. Reach for it when you need the exact verb, flag, or subcommand.
 - **`report`** _(hidden)_ — Every "what happened" view in one place — subcommands `run/runs/usage/calls/wire`
 - **`sign`** _(hidden)_ — Sign this project's agentstack.lock with a fresh ed25519 key (writes a detached agentstack.lock.sig, prints the public key to publish) — flags `--print-key-only`
 - **`verify`** _(hidden)_ — Verify agentstack.lock against a published ed25519 public key and its detached signature — flags `--pubkey/--signature`
-- **`guard`** _(hidden)_ — Machine-level destructive-command guard — subcommands `test/install/uninstall/status`
+- **`guard`** _(hidden)_ — Machine-level destructive-command guard — subcommands `check*/test/install/uninstall/status`
 - **`gateway`** _(hidden)_ — The zero-files gateway: register it once per CLI (`connect`) and every trusted repo brings its own servers through `agentstack mcp --auto-project` with no per-project files — subcommands `connect/disconnect`
 - **`trust`** — Trust a project's manifest for the zero-files gateway (direnv-style) — flags `--list/--revoke/--yes`
 - **`mcp`** _(hidden)_ — Run agentstack as an MCP server over stdio (for an agent to call) — flags `--auto-project/--transparent`
@@ -1354,7 +1359,7 @@ hidden ones. Reach for it when you need the exact verb, flag, or subcommand.
 - **`export`** _(hidden)_ — Export the manifest (+ lock, + optionally secrets) as an encrypted bundle — flags `--output/--secrets/--passphrase`
 - **`import`** _(hidden)_ — Import an encrypted bundle on a new machine — flags `--force/--no-keychain/--passphrase`
 - **`adapters`** _(hidden)_ — Inspect the available CLI adapters — subcommands `list/show/validate`
-- **`self`** _(hidden)_ — Manage this binary's own install: `self link` puts a stable `agentstack` on PATH (a symlink, no installer needed); `self which` shows which binary a bare `agentstack` runs and flags stale links — subcommands `link/which`
+- **`self`** _(hidden)_ — Manage this binary's own install: `self link` puts a stable `agentstack` on PATH (a symlink, no installer needed); `self which` shows which binary a bare `agentstack` runs and flags stale links — subcommands `link/which/docs*`
 <!-- agentstack:end -->
 
 ## Everything shipped so far

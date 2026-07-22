@@ -182,7 +182,7 @@ Docker container behind the egress proxy.
   a denied tool is invisible *and* refused if called anyway. This is the single
   enforcement point. (`Gateway::try_call`, `crates/cli/src/gateway.rs`)
 - **sandbox — enforced for gateway-routed traffic.** A trusted run
-  builds a host-side gateway (`Gateway::from_plan` — hard trust gate: untrusted
+  builds a host-side gateway (`Gateway::from_frozen` — hard trust gate: untrusted
   → empty → unrouted) and a token-gated HTTP MCP endpoint, then renders one
   gateway entry into the harness's user-scope config and shadows any direct
   project config. The container's MCP calls therefore reach `Gateway::try_call`,
@@ -191,7 +191,7 @@ Docker container behind the egress proxy.
   `events.jsonl`. The container reaches the gateway directly through
   `host.docker.internal`. **Ceiling:** the ordinary bridge remains open; an
   agent that opens its own connection to an upstream host the egress policy
-  allows bypasses the gateway. (`Gateway::from_plan`,
+  allows bypasses the gateway. (`Gateway::from_frozen`,
   `crates/cli/src/gateway_http.rs`, `crates/cli/src/commands/sandbox.rs`
   `wire_sandbox_gateway`)
 - **lockdown — enforced.** The container reaches the host gateway only through
@@ -251,7 +251,7 @@ Docker container behind the egress proxy.
   to resolve, and the call is refused outright if any refs remain unresolved for
   that server. Same mechanism as host mode. (`crates/cli/src/gateway.rs`)
 - **sandbox — enforced, for a gateway-routed run.** A trusted run
-  routes MCP through the host-side gateway (`Gateway::from_plan`), which resolves
+  routes MCP through the host-side gateway (`Gateway::from_frozen`), which resolves
   `${REF}`s fail-closed in its own memory via the same per-server `ScopedResolver`
   as gateway mode. Resolved secret *values* stay on the host — the container
   receives only the gateway's endpoint URL and a per-run bearer token. A prior
@@ -342,7 +342,7 @@ Docker container behind the egress proxy.
   host-side gateway, every **tool call** (`ToolCall`: server, tool, outcome,
   argument *digest* only — never values) and every **secret reference** resolved
   (`SecretAccess`: ref *name* only). The gateway mirrors these into the run's own
-  `events.jsonl` because it inherits the run id (`Gateway::from_plan`), so
+  `events.jsonl` because it inherits the run id (`Gateway::from_frozen`), so
   `agentstack report run <id>` reads a self-contained record without the
   cross-project audit log. Still missing from a run's log: trust-store mutations
   (below) and cost/tokens. A run that isn't gateway-routed (untrusted bundle, or

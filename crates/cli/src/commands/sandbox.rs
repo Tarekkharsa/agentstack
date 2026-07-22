@@ -226,7 +226,7 @@ pub struct ExecutionPlan {
     /// Why the workspace mounts read-only, if it does (for the banner/display).
     pub fs_readonly_reason: Option<String>,
     /// The project/manifest dir this run executes — needed to rebuild the
-    /// gateway (`Gateway::from_plan`) that brokers the sandbox's MCP traffic.
+    /// gateway (`Gateway::from_frozen`) that brokers the sandbox's MCP traffic.
     pub manifest_dir: PathBuf,
     /// The harness adapter descriptor, cloned at plan time so the gateway
     /// wiring can render a single MCP entry into the harness's own config
@@ -873,7 +873,7 @@ impl Drop for SandboxGateway {
 ///
 /// Trade-off (accepted at plan time): the gateway resolves `${REF}` secrets
 /// and, for stdio servers, spawns children on the HOST. So it is HARD
-/// trust-gated (`Gateway::from_plan` — an untrusted bundle yields an empty
+/// trust-gated (`Gateway::from_frozen` — an untrusted bundle yields an empty
 /// gateway and this returns `None`, leaving the run exactly as it was before
 /// this milestone), and its endpoint is token-gated per request. Resolved
 /// secrets never enter the container — it sees only the endpoint URL + token.

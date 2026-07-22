@@ -78,7 +78,7 @@ Exact internal dependency edges (nothing else is permitted):
 - `adapters` → `core` (the `policy` edge was withdrawn 2026-07-11 — the crate never used it; secrets are checked fail-closed before render, in the caller. Re-granting it is an architecture change, not a Cargo.toml edit)
 - `runtime` → `core`, `policy`, `recorder`
 - `egress` → `core`, `policy`, `recorder`
-- `executor` → `core`, `runtime`, `recorder`
+- `executor` → nothing (the `core`, `runtime`, and `recorder` edges were withdrawn 2026-07-21 — the crate never used them; it is a self-contained, policy-agnostic domain over `serde`/`sha2`/`thiserror`, and the CLI composes it with the runtime and recorder. Granting it any internal edge is an architecture change, not a Cargo.toml edit)
 - `cli` → everything
 
 In particular: `trust` and `policy` depend on `core` only, and nothing depends on `cli`.

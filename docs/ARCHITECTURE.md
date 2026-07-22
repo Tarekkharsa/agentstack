@@ -267,8 +267,15 @@ calls it, so a repo can't dodge a machine rule by renaming a server):
   runtime proxy enforces the exact CONNECT port (`policy.egress_allowed` /
   `CompiledRuleset::egress_decision`).
 - `[policy.secrets]` — per-server `${REF}` name globs (`policy.secret_allowed`).
-- `[policy.filesystem]` — bundle-global `read`/`write` path globs (`FsPolicy`;
-  no per-server split — a sandbox mount is per-run, not per-server).
+- `[policy.filesystem]` — bundle-global `read`/`write`/`deny` path globs
+  (`FsPolicy`; no per-server split — a sandbox mount is per-run, not
+  per-server). `read`/`write` are allow scopes; `deny` is a pure blocklist that
+  no tool call may touch either way, and it is the one dimension whose layers
+  UNION rather than intersect — a repo can add denies but never drop the
+  machine's. It is matched against the workspace-relative path, the absolute
+  path, and the bare file name, so `".env*"` catches a `.env` anywhere in the
+  tree. Enforced by the host-mode hook guard (`agentstack guard`); sandbox
+  mask-mount enforcement is a later session.
 
 Tools, egress, and secrets are **allow-by-default**: an absent key constrains
 nothing. Filesystem writes are the deliberate exception on sandboxed paths:
@@ -488,9 +495,14 @@ recorder → core
 adapters → core
 runtime  → core, policy, recorder
 egress   → core, policy, recorder
-executor → core, runtime, recorder
+executor → (nothing)
 cli      → everything
 ```
+
+`executor` holds no internal edges: it is a self-contained, policy-agnostic
+domain built on `serde`/`sha2`/`thiserror`, and the `cli` crate is what composes
+it with the runtime and recorder. That is why it "never reads or interprets
+policy" — it structurally cannot.
 
 The experimental execution boundary is specified in the
 [`tools_execute` threat model](design/tools-execute-threat-model.md) and
