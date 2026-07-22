@@ -225,6 +225,7 @@ mod tests {
         let machine = WorkflowPolicy {
             max_agents: Some(10),
             max_wall_seconds: None,
+            max_concurrent: None,
         };
 
         // Untrusted → refuses before anything resolves; no name invocable.

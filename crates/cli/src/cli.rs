@@ -32,7 +32,7 @@ every command (listed or not) has its own --help:
   Edit        add · set · search · remove · install · lib · adopt · export · import
   Render      apply · use · instructions · lock · session · diff · restore
   Protect     trust · explain · secret · guard · sign · verify
-  Run         run · kill · gateway · mcp · try
+  Run         run · kill · workflow · gateway · mcp · try
   Inspect     doctor · report · dashboard · optimize · proxy
 
 Words: a CLI (a.k.a. harness) is the agent tool you run; an adapter compiles
@@ -178,6 +178,13 @@ pub enum Command {
     /// Kill a tracked run by id (and revert its profile if it owned one).
     #[command(hide = true)]
     Kill(KillArgs),
+
+    /// Governed workflows (preview): run a pinned workflow under full
+    /// admission — trust gate, strict lock verification, machine-capped
+    /// ceilings — with every `agent()` call becoming a locked child run.
+    /// Hidden while the lane is preview (Stage E adds `workflow report`).
+    #[command(subcommand, hide = true)]
+    Workflow(WorkflowCmd),
 
     /// Every "what happened" view in one place.
     ///
@@ -485,6 +492,30 @@ pub enum ReportCmd {
     /// called, and a loaded-vs-called hint. On-wire ground truth
     /// complementing `report usage`.
     Wire(WireArgs),
+}
+
+/// Governed workflows (preview, design doc §12.4 Stage C): the drive-loop
+/// composition over the `agentstack-workflow` engine.
+#[derive(Subcommand, Debug)]
+pub enum WorkflowCmd {
+    /// Run a pinned `[workflows.<name>]` entry: admission first (trust,
+    /// strict lock verify, roles resolved to profiles, ceilings intersected),
+    /// then the governed drive loop — each `agent()` call spawns a locked
+    /// child run under its role profile's fence, with per-child MCP config
+    /// injection where the harness supports it.
+    Run(WorkflowRunArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct WorkflowRunArgs {
+    /// The `[workflows.<name>]` entry to run (must be pinned and trusted).
+    #[arg(value_name = "NAME")]
+    pub name: String,
+
+    /// JSON exposed to the script as its read-only `args` global. Untrusted
+    /// invoker input: size- and depth-bounded before it reaches the engine.
+    #[arg(long = "args-json", value_name = "JSON")]
+    pub args_json: Option<String>,
 }
 
 /// The zero-files gateway lifecycle: `connect` registers it in a harness's

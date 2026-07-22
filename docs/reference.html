@@ -682,6 +682,7 @@ agentstack dashboard --no-open  # print the URL, don't open a browser</code></pr
 <li><strong><code>session</code></strong> _(hidden)_ — Manage ephemeral sessions: load a profile for now, then revert it — subcommands <code>start/end/list/freeze</code></li>
 <li><strong><code>run</code></strong> — Launch an agent CLI as a tracked run — flags <code>--locked/--prompt/--profile/--scope/--keep/--sandbox/--lockdown/--plan</code></li>
 <li><strong><code>kill</code></strong> _(hidden)_ — Kill a tracked run by id (and revert its profile if it owned one) — flags <code>--force</code></li>
+<li><strong><code>workflow</code></strong> _(hidden)_ — Governed workflows (preview): run a pinned workflow under full admission — trust gate, strict lock verification, machine-capped ceilings — with every <code>agent()</code> call becoming a locked child run. Hidden while the lane is preview (Stage E adds <code>workflow report</code>) — subcommands <code>run</code></li>
 <li><strong><code>report</code></strong> _(hidden)_ — Every "what happened" view in one place — subcommands <code>run/runs/usage/calls/wire</code></li>
 <li><strong><code>sign</code></strong> _(hidden)_ — Sign this project's agentstack.lock with a fresh ed25519 key (writes a detached agentstack.lock.sig, prints the public key to publish) — flags <code>--print-key-only</code></li>
 <li><strong><code>verify</code></strong> _(hidden)_ — Verify agentstack.lock against a published ed25519 public key and its detached signature — flags <code>--pubkey/--signature</code></li>

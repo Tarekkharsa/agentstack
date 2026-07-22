@@ -86,6 +86,37 @@ fn registry_path() -> PathBuf {
     paths::agentstack_home().join("runs.json")
 }
 
+/// Serializes every read-modify-write of `runs.json` WITHIN this process.
+/// The workflow drive loop runs up to `max_concurrent` children on worker
+/// threads, each inserting/removing its `RunRecord` — an unguarded
+/// load→modify→save would let one child's save clobber another's insert (a
+/// lost record in the live-run registry). Cross-PROCESS races (several
+/// agentstack processes sharing the file) predate this and stay best-effort:
+/// the registry is self-healing observability state (`prune`), not evidence —
+/// per-run evidence lives in each run's own `events.jsonl`.
+static REGISTRY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+    REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Guarded insert: the launch paths' best-effort registration (a failed save
+/// never blocks a launch — the registry is observability, not a gate).
+fn registry_insert(rec: RunRecord) {
+    let _guard = registry_guard();
+    let mut map = load_all();
+    map.insert(rec.id.clone(), rec);
+    let _ = save_all(&map);
+}
+
+/// Guarded remove: the launch paths' best-effort cleanup after `wait()`.
+fn registry_remove(id: &str) {
+    let _guard = registry_guard();
+    let mut map = load_all();
+    map.remove(id);
+    let _ = save_all(&map);
+}
+
 fn load_all() -> BTreeMap<String, RunRecord> {
     fs::read_to_string(registry_path())
         .ok()
@@ -136,6 +167,7 @@ fn prune(mut map: BTreeMap<String, RunRecord>) -> (BTreeMap<String, RunRecord>, 
 /// from an `agentstack run` that was itself killed before it could clean up) are
 /// pruned and the file rewritten.
 pub fn list() -> Vec<RunRecord> {
+    let _guard = registry_guard();
     let (map, changed) = prune(load_all());
     if changed {
         let _ = save_all(&map);
@@ -323,21 +355,13 @@ pub(crate) fn launch_attached(
         started_unix: now_secs(),
         started_session: false,
     };
-    {
-        let mut map = load_all();
-        map.insert(id.to_string(), rec);
-        let _ = save_all(&map);
-    }
+    registry_insert(rec);
 
     // Block until the harness exits (or is killed — from here or the dashboard).
     let status = child.wait();
 
     // Clean up regardless of how it exited: drop the record.
-    {
-        let mut map = load_all();
-        map.remove(id);
-        let _ = save_all(&map);
-    }
+    registry_remove(id);
     Ok(status?)
 }
 
@@ -374,7 +398,7 @@ fn relay_bounded(
     mut from: impl std::io::Read,
     mut to: impl std::io::Write,
     cap: usize,
-) -> CapturedOutput {
+) -> (CapturedOutput, Vec<u8>) {
     let mut captured: Vec<u8> = Vec::new();
     let mut truncated = false;
     let mut relay_ok = true;
@@ -405,11 +429,12 @@ fn relay_bounded(
     if relay_ok {
         let _ = to.flush();
     }
-    CapturedOutput {
+    let identity = CapturedOutput {
         bytes: captured.len() as u64,
         sha256: agentstack_core::digest::sha256_hex(&captured),
         truncated,
-    }
+    };
+    (identity, captured)
 }
 
 /// Spawn `bin` headless under an EXISTING run id: stdin closed (codex hangs on
@@ -431,9 +456,63 @@ pub(crate) fn launch_captured(
     profile: Option<&str>,
     scope: Scope,
 ) -> Result<(std::process::ExitStatus, CapturedOutput)> {
+    let (status, identity, _bytes) = launch_captured_inner(
+        bin, argv, dir, id, harness, display, profile, scope, true, None,
+    )?;
+    Ok((status, identity))
+}
+
+/// Live child PIDs of one workflow run, shared with the out-of-thread
+/// watchdog so a wall-clock overrun can best-effort SIGTERM the process
+/// groups before force-exiting. Children insert themselves at spawn and
+/// remove themselves after `wait()` returns, so the watchdog never signals a
+/// reaped-and-recycled PID through this set (the residual reuse race between
+/// remove and signal is the best-effort it honestly is — the hard guarantee
+/// is `process::exit`, child cleanup is cleanup).
+pub(crate) type ChildPids = std::sync::Arc<std::sync::Mutex<std::collections::HashSet<i32>>>;
+
+/// The workflow-child variant of [`launch_captured`]: identical spawn,
+/// registry, and evidence identity, but stdout is captured to a BUFFER
+/// instead of being relayed to our stdout — a workflow child's output is the
+/// `agent()` promise's resolution value (F5), not terminal text, and relaying
+/// N concurrent children would interleave garbage into the workflow's own
+/// stdout deliverable. Returns the captured bytes alongside the identity.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_captured_buffered(
+    bin: &str,
+    argv: &[String],
+    dir: &Path,
+    id: &str,
+    harness: &str,
+    display: &str,
+    profile: Option<&str>,
+    scope: Scope,
+    pids: Option<&ChildPids>,
+) -> Result<(std::process::ExitStatus, CapturedOutput, Vec<u8>)> {
+    launch_captured_inner(
+        bin, argv, dir, id, harness, display, profile, scope, false, pids,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn launch_captured_inner(
+    bin: &str,
+    argv: &[String],
+    dir: &Path,
+    id: &str,
+    harness: &str,
+    display: &str,
+    profile: Option<&str>,
+    scope: Scope,
+    relay_to_stdout: bool,
+    pids: Option<&ChildPids>,
+) -> Result<(std::process::ExitStatus, CapturedOutput, Vec<u8>)> {
     let mut child = spawn_child_captured(bin, argv, dir, id)
         .with_context(|| format!("launching {display} (headless)"))?;
     let pid = child.id() as i32;
+    if let Some(pids) = pids {
+        pids.lock().unwrap_or_else(|e| e.into_inner()).insert(pid);
+    }
     let rec = RunRecord {
         id: id.to_string(),
         pid,
@@ -447,11 +526,7 @@ pub(crate) fn launch_captured(
         started_unix: now_secs(),
         started_session: false,
     };
-    {
-        let mut map = load_all();
-        map.insert(id.to_string(), rec);
-        let _ = save_all(&map);
-    }
+    registry_insert(rec);
 
     // Read stdout on a thread WHILE waiting, or a chatty child fills the pipe
     // and deadlocks against our `wait()`. (Rust note: `take()` moves the pipe
@@ -459,7 +534,11 @@ pub(crate) fn launch_captured(
     // handing the only reference across a worker boundary.)
     let stdout = child.stdout.take().expect("piped stdout");
     let reader = std::thread::spawn(move || {
-        relay_bounded(stdout, std::io::stdout().lock(), MAX_PROMPT_OUTPUT_BYTES)
+        if relay_to_stdout {
+            relay_bounded(stdout, std::io::stdout().lock(), MAX_PROMPT_OUTPUT_BYTES)
+        } else {
+            relay_bounded(stdout, std::io::sink(), MAX_PROMPT_OUTPUT_BYTES)
+        }
     });
     let status = child.wait();
     // A panicked relay thread means the output identity is UNKNOWN — error
@@ -467,15 +546,14 @@ pub(crate) fn launch_captured(
     // observed evidence or an explicit failure, never an invented value).
     let captured = reader.join();
 
-    {
-        let mut map = load_all();
-        map.remove(id);
-        let _ = save_all(&map);
+    registry_remove(id);
+    if let Some(pids) = pids {
+        pids.lock().unwrap_or_else(|e| e.into_inner()).remove(&pid);
     }
-    let captured = captured.map_err(|_| {
+    let (identity, bytes) = captured.map_err(|_| {
         anyhow::anyhow!("the stdout capture thread failed — output evidence is unavailable")
     })?;
-    Ok((status?, captured))
+    Ok((status?, identity, bytes))
 }
 
 #[cfg(unix)]
@@ -520,6 +598,7 @@ const GRACE: Duration = Duration::from_millis(2000);
 /// give the process [`GRACE`] to leave, then escalate to `SIGKILL` if it's still
 /// alive — so a hung agent actually dies.
 pub fn kill(id: &str, force: bool) -> Result<()> {
+    let _guard = registry_guard();
     let mut map = load_all();
     let rec = map
         .get(id)
@@ -613,6 +692,29 @@ mod tests {
         assert_eq!(id.len(), 12);
     }
 
+    /// Registry-synchronization witness (workflow concurrency): N threads
+    /// inserting records at once lose none — the in-process REGISTRY_LOCK
+    /// serializes the load→modify→save, so one thread's save can no longer
+    /// clobber another's insert (the pre-lock race under concurrent workflow
+    /// children).
+    #[test]
+    fn concurrent_registry_inserts_lose_no_record() {
+        let _env = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        std::thread::scope(|scope| {
+            for pid in 1..=8 {
+                scope.spawn(move || registry_insert(rec(pid)));
+            }
+        });
+        assert_eq!(load_all().len(), 8, "every concurrent insert must survive");
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
     /// W2 witness: output past the cap truncates honestly — the sink and the
     /// hash cover exactly the first `cap` bytes, `bytes` says so, and
     /// `truncated` is true; under the cap nothing is cut and `truncated` is
@@ -621,17 +723,23 @@ mod tests {
     fn relay_bounded_truncates_at_cap_and_records_it() {
         let input = vec![b'x'; 20];
         let mut sink = Vec::new();
-        let out = relay_bounded(&input[..], &mut sink, 8);
+        let (out, bytes) = relay_bounded(&input[..], &mut sink, 8);
         assert_eq!(sink, vec![b'x'; 8], "relay stops at the cap");
         assert_eq!(out.bytes, 8);
         assert_eq!(out.sha256, agentstack_core::digest::sha256_hex(&input[..8]));
         assert!(out.truncated);
+        assert_eq!(
+            bytes,
+            vec![b'x'; 8],
+            "returned capture matches the hash input"
+        );
 
         let mut sink = Vec::new();
-        let out = relay_bounded(&input[..], &mut sink, 64);
+        let (out, bytes) = relay_bounded(&input[..], &mut sink, 64);
         assert_eq!(sink, input, "under the cap nothing is cut");
         assert_eq!(out.bytes, 20);
         assert!(!out.truncated);
+        assert_eq!(bytes, input);
     }
 
     #[cfg(unix)]

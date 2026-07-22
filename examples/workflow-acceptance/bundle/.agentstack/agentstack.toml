@@ -1,0 +1,29 @@
+version = 1
+
+[project]
+name = "workflow-acceptance"
+
+# The day-one acceptance workflow for the governed engine (D7 Stage B/C).
+# Ceilings are requests: the effective value is min(request, machine cap).
+[workflows.mapreduce-acceptance]
+description = "Map three security rules, reduce to one stance, validation-reduce the result"
+path = "./workflows/mapreduce-acceptance.js"
+roles = ["mapper", "reducer", "verifier"]
+max_agents = 6
+max_wall_seconds = 300
+
+# Empty-surface role profiles: no servers, no skills — the children need
+# nothing but a model. Role → harness/model binding fields are whatever
+# Stage C defines on profiles; until then the engine's default harness
+# (claude-code) is assumed.
+[profiles.mapper]
+servers = []
+skills = []
+
+[profiles.reducer]
+servers = []
+skills = []
+
+[profiles.verifier]
+servers = []
+skills = []

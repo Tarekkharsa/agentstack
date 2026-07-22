@@ -32,6 +32,55 @@ use crate::trust::{self, TrustState};
 
 use super::Context;
 
+/// How a locked run delivers its output and outcome. `Cli` is the shipped
+/// `agentstack run --locked` behavior, byte-identical. `WorkflowChild` is the
+/// Stage C workflow drive's mode: the SAME gate sequence in the SAME order —
+/// this enum only routes output and the terminal return, never a gate — with
+/// banners suppressed (the drive prints per-child lines), stdout captured to
+/// a buffer (F5: it becomes the `agent()` resolution value, so it must never
+/// interleave with the workflow's own stdout), and the child's exit consumed
+/// by the drive from the RECORDED outcome rather than a `ChildExit` error.
+pub(crate) enum LockedDelivery<'a> {
+    Cli,
+    WorkflowChild { pids: &'a crate::runs::ChildPids },
+}
+
+impl LockedDelivery<'_> {
+    fn quiet(&self) -> bool {
+        matches!(self, LockedDelivery::WorkflowChild { .. })
+    }
+}
+
+/// What a workflow-child locked run hands back to the drive loop. The drive
+/// consults the child run's RECORDED `LockedOutcome` (via `run_id`) for
+/// success/failure — the F3 discipline — so the report deliberately does NOT
+/// carry the process exit status: offering it would invite exactly the
+/// consume-the-wrong-signal bug F3 names.
+pub(crate) struct ChildRunReport {
+    pub run_id: String,
+    pub grant_digest: String,
+    /// The bounded stdout capture — the `agent()` resolution value (F5).
+    pub stdout: Vec<u8>,
+    pub truncated: bool,
+}
+
+/// Run one locked child for the workflow drive loop: the identical admission
+/// and launch path as `run --locked --prompt`, in child delivery mode.
+pub(crate) fn run_locked_child(
+    manifest_dir: Option<&Path>,
+    args: &RunArgs,
+    pids: &crate::runs::ChildPids,
+) -> Result<ChildRunReport> {
+    anyhow::ensure!(
+        args.prompt.is_some() && args.locked && !args.plan,
+        "workflow children are headless locked runs by construction"
+    );
+    let ctx = super::load(manifest_dir)?;
+    let base = crate::manifest::project_root_of(&ctx.dir);
+    live(&ctx, &base, args, LockedDelivery::WorkflowChild { pids })?
+        .ok_or_else(|| anyhow::anyhow!("child delivery mode must yield a report"))
+}
+
 pub fn run_locked(manifest_dir: Option<&Path>, args: &RunArgs) -> Result<()> {
     // Named limitations, checked before anything resolves. Refusing loudly is
     // honest; silently degrading the contract's semantics is not.
@@ -56,7 +105,7 @@ pub fn run_locked(manifest_dir: Option<&Path>, args: &RunArgs) -> Result<()> {
     if args.plan {
         plan(&ctx, &base, args)
     } else {
-        live(&ctx, &base, args)
+        live(&ctx, &base, args, LockedDelivery::Cli).map(|_| ())
     }
 }
 
@@ -68,9 +117,14 @@ pub fn run_locked(manifest_dir: Option<&Path>, args: &RunArgs) -> Result<()> {
 /// runs keep stdout — the shipped human-facing behavior, untouched.
 /// (Rust note: `macro_rules!` because `println!`/`eprintln!` take a format
 /// string + varargs, which a plain `fn` can't forward.)
+/// Workflow-child delivery suppresses banners entirely (`$quiet`): the drive
+/// loop prints its own per-child lines, and N concurrent children interleaving
+/// full banner sets would be noise, not evidence — the recorder still gets
+/// every gate decision identically.
 macro_rules! banner {
-    ($headless:expr, $($arg:tt)*) => {
-        if $headless {
+    ($quiet:expr, $headless:expr, $($arg:tt)*) => {
+        if $quiet {
+        } else if $headless {
             eprintln!($($arg)*)
         } else {
             println!($($arg)*)
@@ -776,6 +830,24 @@ struct McpInjection {
     config_body: Option<String>,
 }
 
+/// Whether this harness can take the per-child injected MCP config — the
+/// SAME guard clause as [`McpInjection::prepare`]'s let-else, exposed so the
+/// workflow drive loop can schedule children: injectable children fan out
+/// concurrently; the rest fall back to park/swap and MUST run serially per
+/// project (§12.1 serial-only fallback, labeled in the run output). One
+/// residual asymmetry: `prepare` can still return `None` if the bridge entry
+/// is unrepresentable for this harness — then a "concurrently scheduled"
+/// child falls back to park/swap anyway, and the atomic sentinel makes the
+/// overlap a loud per-child refusal, never a corrupted config (fail-closed).
+pub(crate) fn supports_injection(desc: &crate::adapter::AdapterDescriptor) -> bool {
+    desc.headless
+        .as_ref()
+        .and_then(|h| h.mcp_injection())
+        .is_some()
+        && desc.mcp.is_some()
+        && desc.config.is_some()
+}
+
 impl McpInjection {
     /// Prepare the injection for a headless child, or `Ok(None)` when this
     /// harness declared no `mcp_injection` block (or can't represent the stdio
@@ -979,7 +1051,14 @@ fn print_posture_and_limits(
     project_dir: &Path,
     headless: bool,
 ) {
-    banner!(headless, "  posture: {}", "HOST / PROTECTED".green().bold());
+    // Never quiet here: child delivery skips this whole function at the call
+    // site (the drive prints its own per-child posture lines).
+    banner!(
+        false,
+        headless,
+        "  posture: {}",
+        "HOST / PROTECTED".green().bold()
+    );
     eprintln!(
         "  {} protected host run: content trust, strict lock verification, and policy \
          admission are enforced BEFORE launch, and decisions are recorded. Not kernel \
@@ -1121,7 +1200,13 @@ fn relock_guidance() -> &'static str {
     "If you changed pinned inputs, run `agentstack lock` first — new pins re-gate trust."
 }
 
-fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
+fn live(
+    ctx: &Context,
+    base: &Path,
+    args: &RunArgs,
+    delivery: LockedDelivery<'_>,
+) -> Result<Option<ChildRunReport>> {
+    let quiet = delivery.quiet();
     let m = &ctx.loaded.manifest;
     let scope = args
         .scope
@@ -1149,6 +1234,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     // carry the relayed child output and nothing else.
     let headless = args.prompt.is_some();
     banner!(
+        quiet,
         headless,
         "{} launching {} with --locked…",
         "▶".green(),
@@ -1156,6 +1242,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     );
     if headless {
         banner!(
+            quiet,
             headless,
             "  {} headless: prompt delivered as one argv element (no shell); it is committed \
              verbatim into the frozen grant's invocation; stdout is captured (cap {} KiB), \
@@ -1166,10 +1253,15 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     }
     // Pass the PROJECT ROOT (base), not the manifest dir: the harness is
     // spawned at base, and Claude Code keys its per-project global MCP state
-    // by that launch dir — the ambient audit must match on it.
-    print_posture_and_limits(Some(desc), base, headless);
+    // by that launch dir — the ambient audit must match on it. Child delivery
+    // skips the posture block wholesale; the workflow drive prints its own
+    // per-child posture lines (including the codex connector residual).
+    if !quiet {
+        print_posture_and_limits(Some(desc), base, headless);
+    }
     if let Some(p) = args.profile.as_deref() {
         banner!(
+            quiet,
             headless,
             "  {} profile fence: '{}' — the gates, grant, and bridge see only this profile's \
              servers; no native session state is applied under --locked",
@@ -1198,7 +1290,12 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     match trust::check(base) {
         TrustState::Trusted => {
             ev.passed("trust", trust::digest_for(base))?;
-            banner!(headless, "  {} trust: explicitly trusted", "✓".green());
+            banner!(
+                quiet,
+                headless,
+                "  {} trust: explicitly trusted",
+                "✓".green()
+            );
         }
         TrustState::Untrusted => {
             return Err(ev.refuse(
@@ -1237,8 +1334,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         return Err(ev.refuse("locked-verify", e));
     }
     ev.passed("locked-verify", None)?;
-    banner!(
-        headless,
+    banner!(quiet, headless,
         "  {} locked inputs: {} skill(s), {} instruction(s), {} server(s), {} executable pin(s), {} extension(s) verified",
         "✓".green(),
         inputs.skill_statuses.len(),
@@ -1267,6 +1363,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     };
     ev.passed("rendered-verify", None)?;
     banner!(
+        quiet,
         headless,
         "  {} rendered extensions: {} verified, {} not rendered",
         "✓".green(),
@@ -1287,6 +1384,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     }
     ev.passed("policy-admission", None)?;
     banner!(
+        quiet,
         headless,
         "  {} policy: declared requests fit under the machine ceiling",
         "✓".green()
@@ -1361,6 +1459,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         grant_digest: digest.to_string(),
     })?;
     banner!(
+        quiet,
         headless,
         "  {} authority grant frozen: {}",
         "✓".green(),
@@ -1392,6 +1491,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     }
     crate::util::restrict(&handoff_path, false);
     banner!(
+        quiet,
         headless,
         "  {} run grant handed to the gateway ({})",
         "✓".green(),
@@ -1405,39 +1505,41 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     // serialize on the park/swap sentinel. Without injection (interactive
     // runs, or a descriptor with no `mcp_injection` block): the shipped
     // park/swap launch-scoping, serial per project, restore after.
-    let mut scoped = if let Some(inj) = &injection {
-        banner!(
-            headless,
-            "  {} per-run MCP config injected via harness flags ({}); the shared project \
+    let mut scoped =
+        if let Some(inj) = &injection {
+            banner!(
+                quiet,
+                headless,
+                "  {} per-run MCP config injected via harness flags ({}); the shared project \
              config is untouched",
-            "✓".green(),
-            inj.describe()
-        );
-        None
-    } else {
-        match ScopedMcpConfig::apply(desc, &ctx.dir, &run_id, &run_dir, &handoff_path) {
-            Ok(Some(s)) => {
-                banner!(
-                    headless,
-                    "  {} project MCP config launch-scoped to the gateway ({})",
-                    "✓".green(),
-                    s.path.display()
-                );
-                Some(s)
-            }
-            Ok(None) => {
-                banner!(
-                    headless,
+                "✓".green(),
+                inj.describe()
+            );
+            None
+        } else {
+            match ScopedMcpConfig::apply(desc, &ctx.dir, &run_id, &run_dir, &handoff_path) {
+                Ok(Some(s)) => {
+                    banner!(
+                        quiet,
+                        headless,
+                        "  {} project MCP config launch-scoped to the gateway ({})",
+                        "✓".green(),
+                        s.path.display()
+                    );
+                    Some(s)
+                }
+                Ok(None) => {
+                    banner!(quiet, headless,
                     "  {} {} has no project-scope MCP config to launch-scope (stated honestly; \
                      the global gateway entry still gates declared servers)",
                     "ℹ".cyan(),
                     display
                 );
-                None
+                    None
+                }
+                Err(e) => return Err(ev.refuse("launch-scope", e)),
             }
-            Err(e) => return Err(ev.refuse("launch-scope", e)),
-        }
-    };
+        };
 
     // Spawn on the host under the SAME run id the evidence carries, with the
     // run id exported for gateway audit attribution.
@@ -1446,19 +1548,42 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     // source code (and sits one mistake away from the rendered configs).
     // Headless (`--prompt`) runs capture bounded stdout; interactive runs stay
     // terminal-attached. Both spawn the SAME argv the grant committed above.
+    // Child delivery captures to a buffer instead of relaying (F5) — the ONLY
+    // spawn-path difference between the modes.
+    let mut child_stdout: Option<(Vec<u8>, bool)> = None;
     let (status, headless_output) = if args.prompt.is_some() {
-        match crate::runs::launch_captured(
-            &bin_path.to_string_lossy(),
-            &argv,
-            base,
-            &run_id,
-            &args.harness,
-            &display,
-            None,
-            scope,
-        ) {
-            Ok((st, captured)) => (Ok(st), Some(captured)),
-            Err(e) => (Err(e), None),
+        if let LockedDelivery::WorkflowChild { pids } = &delivery {
+            match crate::runs::launch_captured_buffered(
+                &bin_path.to_string_lossy(),
+                &argv,
+                base,
+                &run_id,
+                &args.harness,
+                &display,
+                None,
+                scope,
+                Some(pids),
+            ) {
+                Ok((st, captured, bytes)) => {
+                    child_stdout = Some((bytes, captured.truncated));
+                    (Ok(st), Some(captured))
+                }
+                Err(e) => (Err(e), None),
+            }
+        } else {
+            match crate::runs::launch_captured(
+                &bin_path.to_string_lossy(),
+                &argv,
+                base,
+                &run_id,
+                &args.harness,
+                &display,
+                None,
+                scope,
+            ) {
+                Ok((st, captured)) => (Ok(st), Some(captured)),
+                Err(e) => (Err(e), None),
+            }
         }
     } else {
         let st = crate::runs::launch_attached(
@@ -1503,9 +1628,23 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             })
             .context("the harness ran, but its outcome could not be recorded")?;
             banner!(
+                quiet,
                 headless,
                 "\nSee what happened: `agentstack report run {run_id}`"
             );
+            // Child delivery: the outcome above is RECORDED; the report hands
+            // the drive loop the identity + captured stdout, and the drive
+            // consumes success/failure from the recorded outcome (F3/F5) — a
+            // nonzero child here is data, never this process's exit.
+            if matches!(delivery, LockedDelivery::WorkflowChild { .. }) {
+                let (stdout, truncated) = child_stdout.unwrap_or_default();
+                return Ok(Some(ChildRunReport {
+                    run_id: run_id.clone(),
+                    grant_digest: envelope.grant_digest().to_string(),
+                    stdout,
+                    truncated,
+                }));
+            }
             // F3: a headless child's exit code is the run's result for whoever
             // invoked us (CI, a workflow courier), so surface it as our own
             // exit code rather than reporting success for a failed harness.
@@ -1516,7 +1655,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 Some(code) if headless && code != 0 => {
                     Err(anyhow::Error::new(crate::runs::ChildExit(code)))
                 }
-                _ => Ok(()),
+                _ => Ok(None),
             }
         }
         Err(e) => {
@@ -1534,6 +1673,7 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             match record {
                 Ok(()) => {
                     banner!(
+                        quiet,
                         headless,
                         "\nSee what happened: `agentstack report run {run_id}`"
                     );

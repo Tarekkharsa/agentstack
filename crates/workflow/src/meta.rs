@@ -19,6 +19,14 @@ use boa_engine::parser::{Parser, Source};
 
 use crate::error::WorkflowError;
 
+/// Ceiling on how deep a `meta` value's nested object/array literals may go.
+/// Rule 7 (same discipline as the JSON boundary's `MAX_JSON_DEPTH`): the
+/// nested-literal walk below recurses at most this many frames, so a
+/// pathologically nested `meta` is REFUSED at the bound — never allowed to
+/// overflow the walker. 16 is generous for real metadata (§3's canonical shape
+/// needs 3: object → phases array → phase object).
+const META_MAX_NESTING: usize = 16;
+
 /// Validated, static workflow metadata. Everything here was proven to be a
 /// compile-time literal by [`extract_meta`]; nothing was evaluated.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -297,12 +305,49 @@ fn pure_literal(expr: &Expression, interner: &Interner) -> Result<LiteralValue, 
     }
 }
 
-/// Require `expr` to be a pure literal or an array of pure literals.
+/// Require `expr` to be a pure literal tree: a scalar literal, or an
+/// object/array literal whose values are themselves pure literal trees
+/// (Stage C: §3's canonical `phases: [{ title: '…' }]` shape). Still
+/// parse-only, still refusing any identifier, call, spread, shorthand,
+/// method, or computed member at ANY depth — and DEPTH-BOUNDED at
+/// [`META_MAX_NESTING`], so a pathologically nested `meta` is refused
+/// cleanly, never allowed to overflow the walker (rule 7).
 fn ensure_pure(expr: &Expression, interner: &Interner) -> Result<(), WorkflowError> {
+    ensure_pure_depth(expr, interner, 0)
+}
+
+fn ensure_pure_depth(
+    expr: &Expression,
+    interner: &Interner,
+    depth: usize,
+) -> Result<(), WorkflowError> {
+    if depth > META_MAX_NESTING {
+        return Err(WorkflowError::meta_violation(
+            "meta is nested too deeply — the pure-literal walk is depth-bounded",
+        ));
+    }
     match unparen(expr) {
         Expression::ArrayLiteral(_) => {
             for item in literal_array(expr)? {
-                pure_literal(item, interner)?;
+                ensure_pure_depth(item, interner, depth + 1)?;
+            }
+            Ok(())
+        }
+        Expression::ObjectLiteral(obj) => {
+            for prop in obj.properties() {
+                match prop {
+                    PropertyDefinition::Property(PropertyName::Literal(_), value) => {
+                        ensure_pure_depth(value, interner, depth + 1)?;
+                    }
+                    // Shorthand, methods, spreads, and computed names all
+                    // imply evaluation or reference — reject, same rule as
+                    // the top-level meta object.
+                    _ => {
+                        return Err(WorkflowError::meta_violation(
+                            "meta objects may only contain plain literal properties",
+                        ))
+                    }
+                }
             }
             Ok(())
         }
@@ -383,5 +428,53 @@ mod tests {
         // Missing meta is a violation, not a silent default.
         let missing = extract_meta("return 1;");
         assert_eq!(missing.unwrap_err().kind, WorkflowErrorKind::MetaViolation);
+    }
+
+    #[test]
+    fn canonical_meta_with_nested_literals_parses() {
+        // Stage C: the §3 canonical shape — nested object/array literals of
+        // literals — passes the (still parse-only) pure-literal rule.
+        let script = "export const meta = {\n\
+               name: 'nightly-review',\n\
+               description: 'Review the diff, verify findings',\n\
+               phases: [{ title: 'Review' }, { title: 'Verify', detail: 'refute-framed' }],\n\
+               roles: ['reader', 'reviewer'],\n\
+             };\nreturn 1;";
+        let meta = extract_meta(script).expect("canonical §3 meta should extract");
+        assert_eq!(
+            meta.roles,
+            vec!["reader".to_string(), "reviewer".to_string()]
+        );
+    }
+
+    #[test]
+    fn nested_non_literal_is_still_refused() {
+        // A computed value inside a nested literal is refused at any depth —
+        // the extension covers literals of literals, nothing evaluative.
+        for script in [
+            "const meta = { roles: [], phases: [{ title: pick() }] };\nreturn 1;",
+            "const meta = { roles: [], phases: [{ title: name }] };\nreturn 1;",
+            "const meta = { roles: [], phases: [{ ...spread }] };\nreturn 1;",
+            "const meta = { roles: [], phases: [{ [key]: 'x' }] };\nreturn 1;",
+        ] {
+            let err = extract_meta(script).unwrap_err();
+            assert_eq!(err.kind, WorkflowErrorKind::MetaViolation, "{script}");
+        }
+    }
+
+    #[test]
+    fn pathologically_nested_meta_is_refused_at_the_bound() {
+        // Rule 7: nesting past META_MAX_NESTING refuses cleanly (no walker
+        // overflow), while nesting at a sane depth still parses.
+        let deep = |n: usize| {
+            format!(
+                "const meta = {{ roles: [], x: {}'v'{} }};\nreturn 1;",
+                "[".repeat(n),
+                "]".repeat(n)
+            )
+        };
+        assert!(extract_meta(&deep(4)).is_ok());
+        let err = extract_meta(&deep(META_MAX_NESTING + 1)).unwrap_err();
+        assert_eq!(err.kind, WorkflowErrorKind::MetaViolation);
     }
 }

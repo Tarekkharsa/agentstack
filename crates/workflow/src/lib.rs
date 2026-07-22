@@ -43,18 +43,24 @@ mod bridge;
 mod error;
 mod meta;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::Rc;
 
 use boa_engine::builtins::promise::PromiseState;
 use boa_engine::context::time::FixedClock;
 use boa_engine::context::{ContextBuilder, HostHooks};
+use boa_engine::property::Attribute;
 use boa_engine::realm::Realm;
-use boa_engine::{Context, JsError, JsNativeError, JsNativeErrorKind, JsString, JsValue, Source};
+use boa_engine::{
+    js_string, Context, JsError, JsNativeError, JsNativeErrorKind, JsString, JsValue, Source,
+};
 
-use bridge::{activate, install_agent, js_to_value, value_to_js, PendingSpawn, SpawnState};
+use bridge::{
+    activate, install_agent, install_progress, js_to_value, value_to_js, PendingSpawn, SpawnState,
+};
 
+pub use bridge::Progress;
 pub use error::{WorkflowError, WorkflowErrorKind};
 pub use meta::Meta;
 
@@ -177,6 +183,10 @@ pub struct WorkflowRun {
     meta: Meta,
     /// The script wrapped as an async-IIFE (A1: async function body).
     wrapped_source: String,
+    /// Set ONLY by the compile-strings host hook (host memory a script cannot
+    /// reach), read by `classify_rejection` — the Stage C non-forgeable
+    /// replacement for the old substring sentinel.
+    compile_denied: Rc<Cell<bool>>,
     /// The root promise/value, captured on the first `step`.
     root: Option<JsValue>,
     /// Whether the untrusted script has been evaluated yet.
@@ -193,9 +203,18 @@ impl WorkflowRun {
     /// that is deferred to the first [`step`](Self::step), so a synchronous
     /// `while(true)` fails in `step` (as `IterationLimit`), not here.
     ///
+    /// `args` is the invoker's input, exposed to the script as the read-only
+    /// `args` global. It is UNTRUSTED (the invoker is not the script reviewer):
+    /// it crosses into the interpreter only through the depth-bounded JSON
+    /// boundary (A2), so adversarial nesting is refused here, not stacked.
+    ///
     /// Returns `Err` for a parse failure or a meta-rule violation; at that point
     /// nothing untrusted has executed.
-    pub fn new(script: &str, limits: RuntimeLimits) -> Result<Self, WorkflowError> {
+    pub fn new(
+        script: &str,
+        limits: RuntimeLimits,
+        args: serde_json::Value,
+    ) -> Result<Self, WorkflowError> {
         // AL5: this is a self-contained domain crate that ingests hostile script
         // text, so it must fail closed at EVERY entry — never rely on its caller
         // to catch a panic. Boa's parser is not a trusted-not-to-panic
@@ -212,14 +231,20 @@ impl WorkflowRun {
 
         contain_panic(
             WorkflowError::internal("workflow interpreter construction panicked"),
-            || Self::build(script, limits, meta),
+            || Self::build(script, limits, meta, args),
         )
     }
 
     /// Build the run from already-extracted `meta`. Split out of `new` so the
     /// panic containment (AL5) can wrap it as one unit.
-    fn build(script: &str, limits: RuntimeLimits, meta: Meta) -> Result<Self, WorkflowError> {
-        let context = build_context(limits)?;
+    fn build(
+        script: &str,
+        limits: RuntimeLimits,
+        meta: Meta,
+        args: serde_json::Value,
+    ) -> Result<Self, WorkflowError> {
+        let compile_denied = Rc::new(Cell::new(false));
+        let context = build_context(limits, Rc::clone(&compile_denied))?;
         let state = Rc::new(RefCell::new(SpawnState::new(meta.roles.clone())));
 
         let mut run = Self {
@@ -227,18 +252,36 @@ impl WorkflowRun {
             state,
             meta,
             wrapped_source: wrap_for_eval(script),
+            compile_denied,
             root: None,
             started: false,
             done: false,
             poisoned: false,
         };
-        run.install()?;
+        run.install(&args)?;
         Ok(run)
     }
 
     /// The validated metadata (roles/ceilings the CLI needs before spawning).
     pub fn meta(&self) -> &Meta {
         &self.meta
+    }
+
+    /// Drain the `phase()`/`log()` progress buffered since the last call.
+    /// When the script overflowed the buffer, one host-synthesized trailing
+    /// line states the drop count honestly. The strings are script-controlled
+    /// and size-bounded but NOT terminal-sanitized — the caller must sanitize
+    /// before printing (rule 7).
+    pub fn take_progress(&mut self) -> Vec<Progress> {
+        let mut state = self.state.borrow_mut();
+        let mut out = std::mem::take(&mut state.progress);
+        let dropped = std::mem::take(&mut state.progress_dropped);
+        if dropped > 0 {
+            out.push(Progress::Log(format!(
+                "… {dropped} progress line(s) dropped (buffer cap reached)"
+            )));
+        }
+        out
     }
 
     /// Resolve each prior request's promise, drain the job queue to the next
@@ -271,9 +314,21 @@ impl WorkflowRun {
         }
     }
 
-    fn install(&mut self) -> Result<(), WorkflowError> {
+    fn install(&mut self, args: &serde_json::Value) -> Result<(), WorkflowError> {
         install_agent(&mut self.context)
             .map_err(|_| WorkflowError::internal("failed to install the agent bridge"))?;
+        install_progress(&mut self.context)
+            .map_err(|_| WorkflowError::internal("failed to install the progress bridge"))?;
+        // The invoker's `args`, crossing the depth-bounded JSON boundary (A2)
+        // and installed read-only (`Attribute::empty()`: non-writable,
+        // non-enumerable, non-configurable — the script can read it, never
+        // replace it). Absent args arrive as JSON null → JS null, so
+        // `args && args.x` idioms work unchanged.
+        let args_value = value_to_js(args, &mut self.context)
+            .map_err(|_| WorkflowError::internal("workflow args exceed the JSON nesting bound"))?;
+        self.context
+            .register_global_property(js_string!("args"), args_value, Attribute::empty())
+            .map_err(|_| WorkflowError::internal("failed to install the args global"))?;
         // The prelude is a trusted, pre-parsed host Source; the compile-strings
         // denial does not block it. Poisoning runs before any untrusted code.
         self.context
@@ -399,25 +454,27 @@ impl WorkflowRun {
         WorkflowError::runtime_error(err.to_string())
     }
 
-    /// Classify a root-promise rejection reason. The compile-strings hook tags
-    /// its refusal with a sentinel so a denied `eval`/`Function(string)` is
-    /// reported as `CompileDenied`.
+    /// Classify a root-promise rejection reason. The Stage C hardening: the
+    /// compile-strings refusal is tagged through `compile_denied` — a host-
+    /// memory flag set ONLY by the [`Hooks`] hook, which script code cannot
+    /// reach — so the classification never reads the rejection's message and a
+    /// script cannot forge `CompileDenied` from nothing (AL6 witness: the old
+    /// sentinel string now classifies as `RuntimeError`).
     ///
-    /// AL6: this runs ONLY on an already-rejected root, so a script that forges
-    /// the sentinel string (e.g. `throw new Error("agentstack:compile-denied")`)
-    /// can at worst mislabel the failure's KIND as `CompileDenied` — it can never
-    /// turn a `Failed` into `Done`, because reaching here already means the run
-    /// failed. Stage C hardening: replace this substring match with a structured,
-    /// non-forgeable tag (a distinct native-error marker set only by the host
-    /// hook) so a script cannot even mislabel the kind.
+    /// Accepted imprecision, per-run: a script that ATTEMPTS `eval` (setting
+    /// the flag), catches the denial, and later fails for an unrelated reason
+    /// is still labeled `CompileDenied`. Both are `Failed` — a mislabel can
+    /// never flip an outcome — and a denial genuinely occurred, so the label
+    /// stays honest. Precise kind-tracking for that obscure path isn't worth
+    /// added state.
     fn classify_rejection(&mut self, reason: &JsValue) -> WorkflowError {
+        if self.compile_denied.get() {
+            return WorkflowError::compile_denied();
+        }
         let text = reason
             .to_string(&mut self.context)
             .map(|s| s.to_std_string_lossy())
             .unwrap_or_default();
-        if text.contains(COMPILE_DENIED_SENTINEL) {
-            return WorkflowError::compile_denied();
-        }
         WorkflowError::runtime_error(text)
     }
 }
@@ -440,10 +497,6 @@ fn contain_panic<T>(
     }
 }
 
-/// Sentinel embedded in the compile-strings refusal so a rejection carrying it
-/// can be classified back to [`WorkflowErrorKind::CompileDenied`].
-const COMPILE_DENIED_SENTINEL: &str = "agentstack:compile-denied";
-
 /// Wrap the script as an async-IIFE so top-level `await` / `return` are legal
 /// and the completion value is the root promise (A1: async function body).
 ///
@@ -454,10 +507,13 @@ fn wrap_for_eval(script: &str) -> String {
     format!("(async () => {{\n{}\n}})()", meta::deexport(script))
 }
 
-fn build_context(limits: RuntimeLimits) -> Result<Context, WorkflowError> {
+fn build_context(
+    limits: RuntimeLimits,
+    compile_denied: Rc<Cell<bool>>,
+) -> Result<Context, WorkflowError> {
     let mut context = ContextBuilder::new()
         // Denies `eval(string)` / `new Function(string)` from Context creation.
-        .host_hooks(Rc::new(Hooks))
+        .host_hooks(Rc::new(Hooks { compile_denied }))
         // Host-level deterministic-time backstop behind the JS poisoning.
         .clock(Rc::new(FixedClock::from_millis(0)))
         .build()
@@ -473,9 +529,15 @@ fn build_context(limits: RuntimeLimits) -> Result<Context, WorkflowError> {
 }
 
 /// Host hooks: the whole point of this type is to deny dynamic string
-/// compilation. Every other hook keeps its default.
+/// compilation. Every other hook keeps its default. The `compile_denied`
+/// flag is the Stage C non-forgeable tag: it lives in host memory, is set
+/// ONLY here, and `classify_rejection` reads it instead of any script-
+/// reachable string — a script can throw whatever message it likes and never
+/// touch it.
 #[derive(Debug)]
-struct Hooks;
+struct Hooks {
+    compile_denied: Rc<Cell<bool>>,
+}
 
 impl HostHooks for Hooks {
     fn ensure_can_compile_strings(
@@ -486,9 +548,10 @@ impl HostHooks for Hooks {
         _direct: bool,
         _context: &mut Context,
     ) -> boa_engine::JsResult<()> {
-        Err(JsError::from(JsNativeError::typ().with_message(format!(
-            "{COMPILE_DENIED_SENTINEL}: dynamic string compilation is disabled in workflows"
-        ))))
+        self.compile_denied.set(true);
+        Err(JsError::from(JsNativeError::typ().with_message(
+            "dynamic string compilation is disabled in workflows",
+        )))
     }
 }
 
@@ -511,8 +574,12 @@ impl WorkflowRun {
 mod tests {
     use super::*;
 
+    fn new_run(script: &str) -> Result<WorkflowRun, WorkflowError> {
+        WorkflowRun::new(script, RuntimeLimits::default(), serde_json::Value::Null)
+    }
+
     fn run_to_done(script: &str) -> serde_json::Value {
-        let mut run = WorkflowRun::new(script, RuntimeLimits::default()).expect("script parses");
+        let mut run = new_run(script).expect("script parses");
         match run.step(Vec::new()) {
             StepOutcome::Done(value) => value,
             other => panic!("expected Done, got {other:?}"),
@@ -540,7 +607,7 @@ mod tests {
         let script = "const meta = { roles: [] };\n\
              try { while (true) {} } catch (e) { globalThis.__leaked = true; }\n\
              return 1;";
-        let mut run = WorkflowRun::new(script, RuntimeLimits::default()).unwrap();
+        let mut run = new_run(script).unwrap();
         match run.step(Vec::new()) {
             StepOutcome::Failed(err) => {
                 assert_eq!(err.kind, WorkflowErrorKind::IterationLimit)
@@ -555,11 +622,7 @@ mod tests {
     fn native_panic_fails_closed() {
         // Witness 6: a panicking native fails the run closed; no unwind escapes
         // the crate; the poisoned run refuses reuse; the process continues.
-        let mut run = WorkflowRun::new(
-            "const meta = { roles: [] };\n__panic_probe();\nreturn 1;",
-            RuntimeLimits::default(),
-        )
-        .unwrap();
+        let mut run = new_run("const meta = { roles: [] };\n__panic_probe();\nreturn 1;").unwrap();
         run.install_panic_probe();
 
         // Silence the default panic hook's noise for the expected panic.
@@ -607,11 +670,7 @@ mod tests {
     #[test]
     fn dynamic_compilation_is_denied() {
         // The compile-strings hook turns a script `eval` into CompileDenied.
-        let mut run = WorkflowRun::new(
-            "const meta = { roles: [] };\nreturn eval('1 + 1');",
-            RuntimeLimits::default(),
-        )
-        .unwrap();
+        let mut run = new_run("const meta = { roles: [] };\nreturn eval('1 + 1');").unwrap();
         match run.step(Vec::new()) {
             StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::CompileDenied),
             other => panic!("expected Failed(CompileDenied), got {other:?}"),
@@ -628,7 +687,7 @@ mod tests {
                () => agent('c', { role: 'r' }),\n\
              ]);\n\
              return outs;";
-        let mut run = WorkflowRun::new(script, RuntimeLimits::default()).unwrap();
+        let mut run = new_run(script).unwrap();
 
         let batch = match run.step(Vec::new()) {
             StepOutcome::Batch(batch) => batch,
@@ -662,7 +721,7 @@ mod tests {
         let script = "const meta = { roles: ['r'] };\n\
              const outs = await parallel([() => agent('x', { role: 'other' })]);\n\
              return outs;";
-        let mut run = WorkflowRun::new(script, RuntimeLimits::default()).unwrap();
+        let mut run = new_run(script).unwrap();
         match run.step(Vec::new()) {
             StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::UndeclaredRole),
             other => panic!("expected Failed(UndeclaredRole), got {other:?}"),
@@ -675,7 +734,7 @@ mod tests {
         let script = "const meta = { roles: ['r'] };\n\
              const x = await agent('p', { role: 'r' });\n\
              return x;";
-        let mut run = WorkflowRun::new(script, RuntimeLimits::default()).unwrap();
+        let mut run = new_run(script).unwrap();
         let batch = match run.step(Vec::new()) {
             StepOutcome::Batch(batch) => batch,
             other => panic!("expected Batch, got {other:?}"),
@@ -734,11 +793,8 @@ mod tests {
         let bare = "const meta = { roles: ['r'] };\nreturn 7;";
         let exported = "export const meta = { roles: ['r'] };\nreturn 7;";
 
-        let bare_meta = WorkflowRun::new(bare, RuntimeLimits::default())
-            .expect("bare parses")
-            .meta()
-            .clone();
-        let exported_meta = WorkflowRun::new(exported, RuntimeLimits::default())
+        let bare_meta = new_run(bare).expect("bare parses").meta().clone();
+        let exported_meta = new_run(exported)
             .expect("export form parses")
             .meta()
             .clone();
@@ -764,18 +820,97 @@ mod tests {
     }
 
     #[test]
-    fn forged_sentinel_cannot_flip_failed_to_done() {
-        // AL6: a script that throws an error carrying the compile-denied sentinel
-        // ends in Failed (kind CompileDenied — the accepted mislabel), NEVER Done.
-        // classify_rejection runs only on an already-rejected root, so the forgery
-        // can mislabel the kind but cannot manufacture success.
-        let script = format!(
-            "const meta = {{ roles: [] }};\nthrow new Error(\"{COMPILE_DENIED_SENTINEL} forged\");\n"
-        );
-        let mut run = WorkflowRun::new(&script, RuntimeLimits::default()).unwrap();
+    fn forged_sentinel_is_runtime_error_not_compile_denied() {
+        // AL6, Stage C hardening witness: the compile-denied tag is a host-
+        // memory flag set only by the compile-strings hook, so a script that
+        // emits the OLD sentinel string classifies as a plain RuntimeError —
+        // the kind is unforgeable now, stronger than Stage B's "mislabels the
+        // kind only". (And, as before, it can never flip Failed into Done.)
+        let script = "const meta = { roles: [] };\n\
+             throw new Error(\"agentstack:compile-denied forged\");\n";
+        let mut run = new_run(script).unwrap();
         match run.step(Vec::new()) {
-            StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::CompileDenied),
-            other => panic!("expected Failed(CompileDenied), got {other:?}"),
+            StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::RuntimeError),
+            other => panic!("expected Failed(RuntimeError), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn args_global_is_installed_and_read_only() {
+        // The invoker's args are visible as the read-only `args` global; an
+        // assignment attempt cannot replace them (non-writable — in the
+        // script's sloppy-mode body the write silently no-ops, in strict mode
+        // it throws; either way `args` stays intact), and absent args arrive
+        // as null.
+        let script = "const meta = { roles: [] };\n\
+             const seen = args.items.slice();\n\
+             try { args = 'swapped'; } catch (e) {}\n\
+             return { seen, intact: Array.isArray(args.items) && args.items.length === 2 };";
+        let mut run = WorkflowRun::new(
+            script,
+            RuntimeLimits::default(),
+            serde_json::json!({ "items": ["a", "b"] }),
+        )
+        .unwrap();
+        match run.step(Vec::new()) {
+            StepOutcome::Done(v) => {
+                assert_eq!(v, serde_json::json!({ "seen": ["a", "b"], "intact": true }))
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+
+        assert_eq!(
+            run_to_done("const meta = { roles: [] };\nreturn args === null;"),
+            true
+        );
+    }
+
+    #[test]
+    fn adversarially_nested_args_are_refused_at_construction() {
+        // A2 on the args seam: invoker args are untrusted; nesting past the
+        // JSON boundary refuses construction cleanly, before any script runs.
+        let mut adversarial = serde_json::Value::Null;
+        for _ in 0..300 {
+            adversarial = serde_json::Value::Array(vec![adversarial]);
+        }
+        let err = match WorkflowRun::new(
+            "const meta = { roles: [] };\nreturn 1;",
+            RuntimeLimits::default(),
+            adversarial,
+        ) {
+            Err(err) => err,
+            Ok(_) => panic!("expected nested args to refuse construction"),
+        };
+        assert_eq!(err.kind, WorkflowErrorKind::Internal);
+    }
+
+    #[test]
+    fn phase_and_log_surface_bounded_progress() {
+        // phase()/log() buffer script-controlled progress, drained via
+        // take_progress; an over-long line is truncated at the byte cap
+        // (rule 7 bound; terminal sanitization is the CLI's job).
+        let script = "const meta = { roles: [] };\n\
+             phase('Map');\n\
+             log('hello');\n\
+             log('x'.repeat(5000));\n\
+             return 1;";
+        let mut run = new_run(script).unwrap();
+        match run.step(Vec::new()) {
+            StepOutcome::Done(v) => assert_eq!(v, 1),
+            other => panic!("expected Done, got {other:?}"),
+        }
+        let progress = run.take_progress();
+        assert_eq!(progress.len(), 3);
+        assert_eq!(progress[0], Progress::Phase("Map".into()));
+        assert_eq!(progress[1], Progress::Log("hello".into()));
+        match &progress[2] {
+            Progress::Log(s) => {
+                assert!(s.len() <= bridge::MAX_PROGRESS_LINE_BYTES + '…'.len_utf8());
+                assert!(s.ends_with('…'));
+            }
+            other => panic!("expected a truncated Log, got {other:?}"),
+        }
+        // Drained: a second take returns nothing.
+        assert!(run.take_progress().is_empty());
     }
 }

@@ -40,6 +40,22 @@ use crate::error::WorkflowError;
 /// The recursion below is bounded by this constant, so it is stack-safe.
 pub(crate) const MAX_JSON_DEPTH: usize = 128;
 
+/// Rule-7 bounds on the `phase()` / `log()` progress surface: these strings
+/// are script-controlled text destined for the invoker's terminal, so both
+/// the per-line size and the buffered count are hard-capped. Overflow is
+/// counted honestly, never silently discarded.
+pub(crate) const MAX_PROGRESS_LINE_BYTES: usize = 2048;
+pub(crate) const MAX_PROGRESS_EVENTS: usize = 1000;
+
+/// One `phase(title)` / `log(msg)` call surfaced to the CLI. The strings are
+/// SCRIPT-CONTROLLED and size-bounded here, but not otherwise sanitized — the
+/// CLI must sanitize before printing (terminal escapes are its concern).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Progress {
+    Phase(String),
+    Log(String),
+}
+
 /// One brokered child-run request. Plain Rust — no GC pointers — so it can live
 /// in ordinary heap memory alongside the resolver map.
 #[derive(Debug, Clone)]
@@ -65,6 +81,10 @@ pub(crate) struct SpawnState {
     /// Set when `agent()` named an undeclared role, so the drive loop can
     /// report `UndeclaredRole` after the resulting rejection.
     pub(crate) undeclared: Option<String>,
+    /// Buffered `phase()`/`log()` events since the last drain, capped at
+    /// [`MAX_PROGRESS_EVENTS`]; overflow increments `progress_dropped`.
+    pub(crate) progress: Vec<Progress>,
+    pub(crate) progress_dropped: u64,
 }
 
 impl SpawnState {
@@ -75,6 +95,8 @@ impl SpawnState {
             pending: Vec::new(),
             awaiting: HashMap::new(),
             undeclared: None,
+            progress: Vec::new(),
+            progress_dropped: 0,
         }
     }
 
@@ -82,6 +104,28 @@ impl SpawnState {
     pub(crate) fn take_pending(&mut self) -> Vec<PendingSpawn> {
         std::mem::take(&mut self.pending)
     }
+
+    /// Buffer one progress event under the rule-7 caps.
+    fn push_progress(&mut self, event: Progress) {
+        if self.progress.len() >= MAX_PROGRESS_EVENTS {
+            self.progress_dropped = self.progress_dropped.saturating_add(1);
+            return;
+        }
+        self.progress.push(event);
+    }
+}
+
+/// Truncate to at most [`MAX_PROGRESS_LINE_BYTES`] on a char boundary. A
+/// truncated line gets an ellipsis so the cut is visible, never silent.
+fn bound_progress_line(s: &str) -> String {
+    if s.len() <= MAX_PROGRESS_LINE_BYTES {
+        return s.to_string();
+    }
+    let mut end = MAX_PROGRESS_LINE_BYTES;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &s[..end])
 }
 
 thread_local! {
@@ -192,6 +236,43 @@ pub(crate) fn install_agent(context: &mut Context) -> JsResult<()> {
         Ok(promise.into())
     });
     context.register_global_builtin_callable(js_string!("agent"), 1, agent)
+}
+
+/// Install the global `phase(title)` / `log(msg)` progress functions. Same
+/// capture-free thread-local pattern as `agent()`: each pushes one bounded
+/// [`Progress`] event into the active `SpawnState`, for the CLI to drain via
+/// `WorkflowRun::take_progress` after the drive returns. Strict string
+/// arguments (like `agent`'s prompt): coercion would run script code
+/// (`toString`) inside a host native for no benefit.
+pub(crate) fn install_progress(context: &mut Context) -> JsResult<()> {
+    fn progress_native(
+        name: &'static str,
+        make: fn(String) -> Progress,
+    ) -> impl Fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue> + Copy {
+        move |_this, args, _context| {
+            let state = current_state().ok_or_else(|| {
+                JsError::from(
+                    JsNativeError::typ()
+                        .with_message(format!("{name}() called outside a workflow drive")),
+                )
+            })?;
+            let text = string_arg(args, 0).ok_or_else(|| {
+                JsError::from(
+                    JsNativeError::typ()
+                        .with_message(format!("{name}(text): text must be a string")),
+                )
+            })?;
+            state
+                .borrow_mut()
+                .push_progress(make(bound_progress_line(&text)));
+            Ok(JsValue::undefined())
+        }
+    }
+
+    let phase = NativeFunction::from_copy_closure(progress_native("phase", Progress::Phase));
+    context.register_global_builtin_callable(js_string!("phase"), 1, phase)?;
+    let log = NativeFunction::from_copy_closure(progress_native("log", Progress::Log));
+    context.register_global_builtin_callable(js_string!("log"), 1, log)
 }
 
 fn string_arg(args: &[JsValue], index: usize) -> Option<String> {

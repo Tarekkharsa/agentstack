@@ -33,6 +33,9 @@ agentstack-recorder = { path = "../recorder" }
 # `agentstack run --sandbox` can actually launch a container.
 agentstack-runtime = { path = "../runtime", default-features = false }
 agentstack-executor = { path = "../executor" }
+# The governed workflow engine (Boa) — a self-contained domain crate; the CLI
+# composes it with the locked-run spawner (design doc §12.4 Stage C).
+agentstack-workflow = { path = "../workflow" }
 # The egress proxy — pulled in only with the `sandbox` feature (it brings
 # tokio); the default cli build doesn't compile it.
 agentstack-egress = { path = "../egress", optional = true }

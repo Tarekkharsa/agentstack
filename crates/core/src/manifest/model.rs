@@ -220,11 +220,20 @@ pub struct WorkflowPolicy {
     /// Cap on any workflow's wall clock, in seconds. Absent = no machine cap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_wall_seconds: Option<u64>,
+    /// How many governed children the workflow drive loop may run at once.
+    /// MACHINE-owned and engine-owned: never script-negotiated (Stage D adds
+    /// negotiation of the other ceilings, not this one). Absent = the engine's
+    /// conservative built-in default. A value of 0 is clamped to 1 by the
+    /// consumer — the cap bounds concurrency, it cannot deadlock the drive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_concurrent: Option<u32>,
 }
 
 impl WorkflowPolicy {
     pub fn is_empty(&self) -> bool {
-        self.max_agents.is_none() && self.max_wall_seconds.is_none()
+        self.max_agents.is_none()
+            && self.max_wall_seconds.is_none()
+            && self.max_concurrent.is_none()
     }
 }
 
@@ -1018,6 +1027,15 @@ pub struct Profile {
     /// May contain the wildcard `"*"` meaning "all skills".
     #[serde(default)]
     pub skills: Vec<String>,
+    /// Which harness a workflow-role child bound to this profile launches
+    /// (design doc §3: the harness is a property of the role's profile, never
+    /// of the script). Consulted ONLY by the workflow drive loop, which
+    /// validates it against the adapter registry at admission; interactive
+    /// `run <harness> --profile <p>` keeps its positional harness and never
+    /// reads this field, so it cannot create ambiguity in the existing
+    /// profile paths. Absent = the engine's default harness (claude-code).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]

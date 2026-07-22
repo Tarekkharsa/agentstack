@@ -79,6 +79,7 @@ dependencies = [
  "agentstack-recorder",
  "agentstack-runtime",
  "agentstack-trust",
+ "agentstack-workflow",
  "anyhow",
  "assert_fs",
  "clap",
