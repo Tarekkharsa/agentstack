@@ -2344,12 +2344,15 @@ struct T3codeFindings {
     overrides: Vec<(String, String, &'static str, String)>,
     /// Enabled drivers with no agentstack adapter — nothing observes them.
     ungoverned: Vec<String>,
+    /// `(instance, shim path)` — instances whose binaryPath launches through
+    /// the agentstack shim, so their sessions get per-run evidence.
+    shimmed: Vec<(String, String)>,
 }
 
 /// t3code drivers whose sessions flow through an agentstack adapter.
 const T3CODE_GOVERNED_DRIVERS: &[&str] = &["claudeAgent", "codex", "cursor", "opencode"];
 
-fn t3code_findings(settings_json: &str) -> T3codeFindings {
+fn t3code_findings(settings_json: &str, shims_dir: &Path) -> T3codeFindings {
     let mut out = T3codeFindings::default();
     let Ok(v) = serde_json::from_str::<serde_json::Value>(settings_json) else {
         return out;
@@ -2374,6 +2377,14 @@ fn t3code_findings(settings_json: &str) -> T3codeFindings {
         let Some(cfg) = inst.get("config").and_then(|c| c.as_object()) else {
             continue;
         };
+        // A binaryPath under our shims dir means launches mint a per-run
+        // identity — worth confirming out loud.
+        if let Some(bin) = cfg.get("binaryPath").and_then(|b| b.as_str()) {
+            let expanded = paths::expand_tilde(bin.trim());
+            if !bin.trim().is_empty() && expanded.starts_with(shims_dir) {
+                out.shimmed.push((name.clone(), bin.trim().to_string()));
+            }
+        }
         // homePath moves the CLI's whole config home (CLAUDE_CONFIG_DIR /
         // CODEX_HOME); shadowHomePath is Codex's auth-overlay variant.
         for field in ["homePath", "shadowHomePath"] {
@@ -2473,7 +2484,8 @@ fn check_t3code(report: &mut Report) {
             format!("settings.json unreadable ({e:#}) — provider-instance checks skipped"),
         ),
         Ok(text) => {
-            let findings = t3code_findings(&text);
+            let shims = paths::agentstack_home().join("shims");
+            let findings = t3code_findings(&text, &shims);
             for (instance, driver, field, path) in &findings.overrides {
                 // A shadow home is an auth overlay that symlinks parts of the
                 // real home — config MAY still resolve, so it gets the softer
@@ -2500,11 +2512,27 @@ fn check_t3code(report: &mut Report) {
                     ),
                 );
             }
+            for (instance, path) in &findings.shimmed {
+                report.line(
+                    Level::Ok,
+                    format!(
+                        "instance '{instance}' launches via the agentstack shim ({path}) — \
+                         its sessions record per-run evidence"
+                    ),
+                );
+            }
             if findings.overrides.is_empty() && findings.ungoverned.is_empty() {
                 report.line(
                     Level::Ok,
                     "no provider-instance home overrides — global artifacts apply to \
                      every t3code session",
+                );
+            }
+            if findings.shimmed.is_empty() {
+                report.line(
+                    Level::Info,
+                    "sessions attribute to the global audit only — for per-run evidence: \
+                     agentstack shim make <cli>, then point the instance's binary path at it",
                 );
             }
         }
@@ -2615,13 +2643,14 @@ mod tests {
     fn t3code_findings_flags_overrides_and_ungoverned_defensively() {
         let json = r#"{
           "providerInstances": {
-            "claudeAgent": {"driver":"claudeAgent","enabled":true,"config":{"homePath":"/custom/claude"}},
-            "codex-alt":   {"driver":"codex","enabled":true,"config":{"shadowHomePath":"/overlay/codex"}},
+            "claudeAgent": {"driver":"claudeAgent","enabled":true,"config":{"homePath":"/custom/claude","binaryPath":"/shims/claude"}},
+            "codex-alt":   {"driver":"codex","enabled":true,"config":{"shadowHomePath":"/overlay/codex","binaryPath":"/usr/local/bin/codex"}},
             "cursor":      {"driver":"cursor","enabled":false,"config":{"homePath":"/ignored"}},
             "grok":        {"driver":"grok","enabled":true,"config":{}}
           }
         }"#;
-        let f = t3code_findings(json);
+        let shims = std::path::PathBuf::from("/shims");
+        let f = t3code_findings(json, &shims);
         // Enabled overrides surface with their field; the disabled cursor
         // instance is skipped (it never spawns sessions).
         assert_eq!(f.overrides.len(), 2);
@@ -2636,11 +2665,19 @@ mod tests {
             && p == "/overlay/codex"));
         // An enabled driver with no adapter is reported, not ignored.
         assert_eq!(f.ungoverned, vec!["grok".to_string()]);
-        // Hostile-input rule: garbage never errors, it yields empty findings.
-        assert_eq!(t3code_findings("not json"), T3codeFindings::default());
-        assert_eq!(t3code_findings("{}"), T3codeFindings::default());
+        // A binaryPath under the shims dir is confirmed; an ordinary one is not.
         assert_eq!(
-            t3code_findings(r#"{"providerInstances": 7}"#),
+            f.shimmed,
+            vec![("claudeAgent".to_string(), "/shims/claude".to_string())]
+        );
+        // Hostile-input rule: garbage never errors, it yields empty findings.
+        assert_eq!(
+            t3code_findings("not json", &shims),
+            T3codeFindings::default()
+        );
+        assert_eq!(t3code_findings("{}", &shims), T3codeFindings::default());
+        assert_eq!(
+            t3code_findings(r#"{"providerInstances": 7}"#, &shims),
             T3codeFindings::default()
         );
     }

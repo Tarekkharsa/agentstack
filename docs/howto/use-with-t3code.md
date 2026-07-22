@@ -55,11 +55,24 @@ status panel in the chat header backed by `agentstack doctor --json`, and a
 purpose-built "Blocked by AgentStack Guard" card in the timeline showing the
 rule, the blocked target, and the audit note.
 
-## Limits, honestly
+## Per-run evidence (optional)
 
-- Runs started by t3code hit the **global** call audit; per-run evidence
-  (`events.jsonl`) requires launching through `agentstack run`, which t3code
-  does not do today. A per-instance binary shim is the planned bridge.
+By default t3code sessions land in the machine-global call audit. To give
+each t3code session its own run identity and `events.jsonl`:
+
+```bash
+agentstack shim make claude
+```
+
+This writes an exec-through wrapper at `~/.agentstack/shims/claude`; point
+the t3code provider instance's **Binary path** setting at it (agentstack
+never edits t3code's settings itself). Every session that instance starts
+then mints a run id before becoming the real CLI — same pid, signals, and
+exit code as a direct launch. Inspect with `agentstack report runs` and
+`agentstack report run <id>`; doctor's t3code section confirms shimmed
+instances. One t3code session = one run.
+
+## Limits, honestly
 - t3code injects one MCP endpoint of its own (`t3-code`, for driving its
   in-app browser preview) directly into each session, outside any config file.
   It never appears in a manifest or lockfile; the guard still gates its tool

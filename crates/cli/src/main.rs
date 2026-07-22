@@ -105,6 +105,7 @@ fn run() -> Result<()> {
         Command::SelfCmd(args) => commands::self_cmd::run(args),
         Command::Run(args) => commands::runs::run(args, dir),
         Command::Kill(args) => commands::runs::kill(args),
+        Command::Shim(cmd) => commands::shim::run(cmd),
         Command::Workflow(cmd) => match cmd {
             agentstack::cli::WorkflowCmd::Run(args) => commands::workflow::run(dir, args),
             agentstack::cli::WorkflowCmd::Report(args) => commands::workflow::report(args),

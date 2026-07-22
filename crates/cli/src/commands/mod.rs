@@ -32,6 +32,7 @@ pub mod self_cmd;
 pub mod session;
 pub mod settings;
 pub mod setup;
+pub mod shim;
 pub mod stats;
 pub mod trust;
 pub mod try_skill;

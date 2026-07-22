@@ -246,9 +246,12 @@
 <h2 id="what-a-blocked-call-looks-like">What a blocked call looks like<a class="hlink" href="#what-a-blocked-call-looks-like" aria-label="Link to this section">#</a></h2>
 <p>Nothing extra to set up: guard denials happen inside the session, so t3code's own timeline shows them like any other tool outcome, and every denial lands in the AgentStack <a href="../howto/see-what-happened.html">audit log</a>.</p>
 <p>There is also an optional t3code branch (maintained in this project, pending upstream) that renders AgentStack natively in the t3code UI: a governance status panel in the chat header backed by <code>agentstack doctor --json</code>, and a purpose-built "Blocked by AgentStack Guard" card in the timeline showing the rule, the blocked target, and the audit note.</p>
+<h2 id="per-run-evidence-optional">Per-run evidence (optional)<a class="hlink" href="#per-run-evidence-optional" aria-label="Link to this section">#</a></h2>
+<p>By default t3code sessions land in the machine-global call audit. To give each t3code session its own run identity and <code>events.jsonl</code>:</p>
+<pre class="block"><code>agentstack shim make claude</code></pre>
+<p>This writes an exec-through wrapper at <code>~/.agentstack/shims/claude</code>; point the t3code provider instance's <strong>Binary path</strong> setting at it (agentstack never edits t3code's settings itself). Every session that instance starts then mints a run id before becoming the real CLI — same pid, signals, and exit code as a direct launch. Inspect with <code>agentstack report runs</code> and <code>agentstack report run &lt;id&gt;</code>; doctor's t3code section confirms shimmed instances. One t3code session = one run.</p>
 <h2 id="limits-honestly">Limits, honestly<a class="hlink" href="#limits-honestly" aria-label="Link to this section">#</a></h2>
 <ul>
-<li>Runs started by t3code hit the <strong>global</strong> call audit; per-run evidence (<code>events.jsonl</code>) requires launching through <code>agentstack run</code>, which t3code does not do today. A per-instance binary shim is the planned bridge.</li>
 <li>t3code injects one MCP endpoint of its own (<code>t3-code</code>, for driving its in-app browser preview) directly into each session, outside any config file. It never appears in a manifest or lockfile; the guard still gates its tool calls at runtime.</li>
 <li>Doctor reads t3code's production state (<code>~/.t3/userdata</code>); a t3code built and run from source in dev mode keeps separate state that is not checked.</li>
 </ul>

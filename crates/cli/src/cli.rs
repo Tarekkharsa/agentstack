@@ -179,6 +179,16 @@ pub enum Command {
     #[command(hide = true)]
     Kill(KillArgs),
 
+    /// Exec-through launcher shim for external supervisors (e.g. t3code).
+    ///
+    /// `shim make <cli>` writes a tiny wrapper under `~/.agentstack/shims/`;
+    /// point the supervisor's binary-path setting at it and every session it
+    /// starts gets a per-run identity (`AGENTSTACK_RUN_ID` + `events.jsonl`)
+    /// instead of landing in the global audit only. Read-only toward the
+    /// supervisor: agentstack never edits its settings.
+    #[command(hide = true, subcommand)]
+    Shim(ShimCmd),
+
     /// Governed workflows (preview): run a pinned workflow under full
     /// admission — trust gate, strict lock verification, machine-capped
     /// ceilings — with every `agent()` call becoming a locked child run.
@@ -1528,6 +1538,39 @@ pub struct AnalyzeArgs {
     /// Only count calls recorded for this project root.
     #[arg(long, value_name = "PATH")]
     pub project: Option<PathBuf>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ShimCmd {
+    /// Write the wrapper script for a CLI and print where to point the
+    /// supervisor.
+    Make(ShimMakeArgs),
+
+    /// Internal: what the wrapper script runs. Mints a run id, opens the
+    /// run's event log, then replaces itself with the real binary.
+    #[command(hide = true)]
+    Exec(ShimExecArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ShimMakeArgs {
+    /// The CLI to wrap (the shim file takes this name), e.g. `claude`.
+    pub cli: String,
+
+    /// Path to the real binary. Default: first `<cli>` on PATH that is not
+    /// itself inside the shims directory.
+    #[arg(long, value_name = "PATH")]
+    pub binary: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+pub struct ShimExecArgs {
+    /// The real binary to become.
+    pub binary: PathBuf,
+
+    /// Arguments passed through verbatim.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<std::ffi::OsString>,
 }
 
 #[derive(Args, Debug)]
