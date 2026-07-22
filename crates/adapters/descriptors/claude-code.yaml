@@ -41,6 +41,16 @@ skills:
 # permissions") can never be parsed as a flag.
 headless:
   args: ["-p", "--", "{prompt}"]
+  # Per-child MCP config injection (W2.5): the launcher renders a config file
+  # containing ONLY the agentstack gateway entry into the run's private dir and
+  # substitutes its path for "{mcp_config_path}" (a WHOLE argv element, spliced
+  # into the options region before the "--" guard). --strict-mcp-config is
+  # LOAD-BEARING: without it Claude Code MERGES the injected file with the
+  # project .mcp.json and user-scope servers; with it the child sees the
+  # injected set and nothing else — which is what lets concurrent locked runs
+  # share one project without touching the shared .mcp.json.
+  mcp_injection:
+    args: ["--mcp-config", "{mcp_config_path}", "--strict-mcp-config"]
 instructions:
   global: ~/.claude/CLAUDE.md
   project: CLAUDE.md

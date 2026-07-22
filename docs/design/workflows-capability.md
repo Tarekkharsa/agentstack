@@ -531,13 +531,36 @@ independent of model output:
   Bonus: strict also excludes **user-scope** servers, which the shipped
   park/swap never scoped — injection is strictly stronger isolation than
   what W2 ships today.
-- **(b) codex accepts equivalent `-c` overrides.** With 8+ real servers in
-  `~/.codex/config.toml`, `codex exec -c 'mcp_servers={probe = {…}}'`
-  spawned only the probe (12 s wall — none of the 20 s/120 s user-server
-  startup stalls), and the session rollout recorded zero connections to any
-  user-config server. The **whole-table** form replaces (the strict
-  equivalent); dotted-key `-c mcp_servers.x.y=…` merges and is not what
-  injection should use. `~/.codex/config.toml` hash unchanged.
+- **(b) codex needs `--ignore-user-config` alongside the `-c` override.**
+  **CORRECTION (2026-07-22, W2.5 review):** the original spike concluded a
+  whole-table `-c 'mcp_servers={…}'` REPLACES the user server table; a live
+  decoy-marker test disproved that — the assignment **MERGES** with
+  `~/.codex/config.toml` (a decoy server in the user config still spawns
+  under `-c` alone). The spike's "zero connections in 12 s" was a
+  slow-user-server-startup artifact, not replacement. The correct strict
+  scope is `codex exec --ignore-user-config -c 'mcp_servers={probe}'` —
+  live-witnessed to exclude the user-config decoy (marker absent) while
+  loading only the injected entry; `--ignore-user-config` is codex's
+  equivalent of claude's `--strict-mcp-config`. Caveat: the flag also drops
+  the user's model/approval config (auth still resolves via `CODEX_HOME`) —
+  acceptable for a governed run. `~/.codex/config.toml` hash unchanged
+  either way.
+- **(b′) codex residual — the connector layer is out of scope (witnessed
+  2026-07-22, W2.5 re-run).** A governed codex child forced to enumerate its
+  MCP surface listed the injected bridge AND a second server, `codex_apps` —
+  codex's account/plugin connector layer (mail/repo/tracker/observability
+  connectors from the marketplace-snapshot cache, auth-bound via
+  `CODEX_HOME`). That layer is not config-file MCP state: neither the
+  injected config nor `--ignore-user-config` scopes it, the bridge, grant
+  ruleset, and egress firewall never see it, and codex exposes no per-run
+  off-switch (plugin removal mutates global state). So (b) is real
+  config-file scoping but NOT complete isolation. Severity is
+  posture-dependent (§7): host-tier `--locked` leaves the connectors fully
+  live and network-reaching; only `--lockdown`/egress fences their reach.
+  The launcher posture banner and `codex.yaml` state the residual. **Open W3
+  item (Stage B/C, role wiring):** solve it (spike any connector-disable
+  flag/env) or caveat it (codex roles lockdown-only, or carry the documented
+  residual) before codex is presented as a first-class role harness.
 - **(c) concurrency works.** Two simultaneous children in the same project
   cwd with different injected server sets ran fully overlapped on both
   harnesses (claude: 2×4.6 s in 4.6 s total wall; codex: 16 s/12 s
@@ -559,7 +582,7 @@ headless:
 headless:
   args: ["exec", "--", "{prompt}"]
   mcp_injection:
-    args: ["-c", "{mcp_servers_toml}"]
+    args: ["--ignore-user-config", "-c", "{mcp_servers_toml}"]
 ```
 
 - Two placeholder forms, both substituted as WHOLE argv elements:

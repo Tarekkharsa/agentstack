@@ -33,16 +33,23 @@ Run: `codex exec --skip-git-repo-check -c "mcp_servers={probeC = {command=\"/bin
 args=[…touch marker…], startup_timeout_sec=3}}" "Reply with exactly: ok"` (stdin /dev/null)
 
 - spawned-C marker created; reply `ok`; 12.2 s wall (no 20 s/120 s startup stalls).
-- Whole-table `-c 'mcp_servers={…}'` REPLACES the user server table: the codex session
-  rollout (`~/.codex/sessions/2026/07/22/rollout-…T07-32-43…`) contains zero MCP
-  connections/tool defs for any user-config server (the only textual "figma"/"agentstack"
-  hits are plugin-cache paths and AGENTS.md instruction text). Dotted-key form
-  (`-c mcp_servers.name.key=…`) would merge per-key; the whole-table form is the
-  strict-equivalent and is what per-child injection should use.
+- **CORRECTION (2026-07-22, W2.5 review — supersedes this section's original
+  conclusion):** this spike originally concluded the whole-table
+  `-c 'mcp_servers={…}'` REPLACES the user server table. That was WRONG — it
+  **MERGES**. A later live decoy-marker test (a `touch <marker>` server added to
+  `~/.codex/config.toml`, then `codex exec -c 'mcp_servers={probe}'`) showed the
+  decoy STILL SPAWNS under `-c` alone; the original run's "zero connections in
+  12.2 s" was a slow-user-server-startup artifact (the user servers hadn't
+  connected yet when the short session ended), not replacement. The correct
+  strict scope is **`codex exec --ignore-user-config -c 'mcp_servers={probe}'`**
+  — live-witnessed to exclude the decoy (marker ABSENT) while loading only the
+  injected entry. `--ignore-user-config` is codex's equivalent of claude's
+  `--strict-mcp-config`; it also drops the user's model/approval config (auth
+  still resolves via `CODEX_HOME`) — acceptable for a governed run. Per-child
+  injection uses `["--ignore-user-config", "-c", "{mcp_servers_toml}"]`.
 - `~/.codex/config.toml` sha256 unchanged before/after (b945…b593).
-- One stderr line `rmcp … Auth(AuthorizationRequired)` — plugin-layer noise, no server
-  from the user table connected (rollout evidence above).
-- codex also offers `--ignore-user-config` as a bigger hammer; not needed.
+- One stderr line `rmcp … Auth(AuthorizationRequired)` — plugin-layer noise
+  in the original run.
 
 ## (c) concurrency, same project dir, different server sets
 

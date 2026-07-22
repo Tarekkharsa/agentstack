@@ -757,6 +757,213 @@ impl Drop for ScopedMcpConfig {
     }
 }
 
+/// Per-child MCP config injection (W2.5, workflows design §12.1): the prepared
+/// injection argv for one headless child, plus what it points at (for the
+/// banner). The substituted values are launcher-authored — a run-dir path or a
+/// config body this process rendered — and the config they carry is EXACTLY
+/// the single bridge entry the park/swap path renders, so no secret ever
+/// reaches the child's argv or config: `${REF}`s resolve later, inside the
+/// gateway process, against the sealed handoff.
+struct McpInjection {
+    /// The concrete extra argv elements, ready to splice into the options
+    /// region (see `HeadlessSpec::argv_with_injection`).
+    args: Vec<String>,
+    /// The rendered per-run config file, when the harness takes a file path
+    /// (`{mcp_config_path}`); `None` for inline-override harnesses.
+    config_path: Option<PathBuf>,
+    /// The rendered body for `config_path`, held in memory until
+    /// [`materialize`](Self::materialize) writes it on the live path.
+    config_body: Option<String>,
+}
+
+impl McpInjection {
+    /// Prepare the injection for a headless child, or `Ok(None)` when this
+    /// harness declared no `mcp_injection` block (or can't represent the stdio
+    /// bridge) — the caller then falls back to launch-scoping the shared
+    /// project config (park/swap), which serializes concurrent locked runs.
+    ///
+    /// Pure computation: secret-free by construction (bridge entry only) and
+    /// touches NO disk — `--plan` runs this same construction read-only, so
+    /// the argv it previews (and the redacted-arg count / digest shape) is the
+    /// live one. Only [`materialize`](Self::materialize), called on the live
+    /// path, writes the per-run config file.
+    fn prepare(
+        desc: &crate::adapter::AdapterDescriptor,
+        run_dir: &Path,
+        handoff_path: &Path,
+    ) -> Result<Option<McpInjection>> {
+        use crate::adapter::descriptor::Format;
+        let (Some(spec), Some(mcp), Some(config)) = (
+            desc.headless.as_ref().and_then(|h| h.mcp_injection()),
+            desc.mcp.as_ref(),
+            desc.config.as_ref(),
+        ) else {
+            return Ok(None);
+        };
+        // The SAME single entry the park/swap path renders: the gateway bridge
+        // carrying the grant artifact explicitly (`--grant <path>`), so the
+        // child's only MCP route re-gates over the frozen authority.
+        let bridge = super::connect::bridge_server(
+            &super::connect::bridge_command(None),
+            false,
+            Some(handoff_path),
+        );
+        let rendered =
+            crate::adapter::render_server(desc, &bridge, &crate::secret::MapResolver::default());
+        if !rendered.representable {
+            return Ok(None);
+        }
+        let entries = vec![(super::connect::BRIDGE_ENTRY.to_string(), rendered.value)];
+
+        let (config_path, config_body) = if spec.needs_config_path() {
+            let (body, ext) = match config.format {
+                Format::Json => (
+                    crate::render::merge_json::merge("", &mcp.location, &entries)?,
+                    "json",
+                ),
+                Format::Toml => (
+                    crate::render::merge_toml::merge_with_removals(
+                        "",
+                        &mcp.location,
+                        &entries,
+                        &[],
+                        mcp.headers_as_subtable,
+                    )?,
+                    "toml",
+                ),
+            };
+            (Some(run_dir.join(format!("mcp-config.{ext}"))), Some(body))
+        } else {
+            (None, None)
+        };
+
+        let servers_toml = if spec.needs_servers_toml() {
+            // One inline `location={name = {…}}` override element carrying the
+            // bridge entry. The override only SUPPLIES the child's server set;
+            // excluding the harness's own user-scope config is the job of the
+            // descriptor's strict-scope flag (claude `--strict-mcp-config`,
+            // codex `--ignore-user-config`) — a whole-table `-c
+            // mcp_servers={…}` assignment alone MERGES with the user table
+            // (marker-proven live; see §12.1b).
+            let mut table = toml_edit::InlineTable::new();
+            for (name, value) in &entries {
+                table.insert(name, json_to_inline_toml(value)?);
+            }
+            Some(format!(
+                "{}={}",
+                mcp.location,
+                toml_edit::Value::from(table)
+            ))
+        } else {
+            None
+        };
+
+        let config_path_str = match &config_path {
+            Some(p) => Some(p.to_str().context(
+                "the run dir path is not valid UTF-8 — cannot pass it as an argv element",
+            )?),
+            None => None,
+        };
+        let args = spec
+            .argv(config_path_str, servers_toml.as_deref())
+            .map_err(|e| anyhow::anyhow!("building the MCP injection argv: {e}"))?;
+        Ok(Some(McpInjection {
+            args,
+            config_path,
+            config_body,
+        }))
+    }
+
+    /// Write the per-run config file `prepare` rendered (a no-op for
+    /// inline-override harnesses). Live path only — into the run's private
+    /// 0700 dir, never the project. Secret-free by construction (bridge entry
+    /// only), but restricted anyway.
+    fn materialize(&self) -> Result<()> {
+        if let (Some(path), Some(body)) = (&self.config_path, &self.config_body) {
+            crate::util::atomic::write(path, body)
+                .context("writing the per-run injected MCP config")?;
+            crate::util::restrict(path, false);
+        }
+        Ok(())
+    }
+
+    /// What the banner names as the injection carrier.
+    fn describe(&self) -> String {
+        match &self.config_path {
+            Some(p) => p.display().to_string(),
+            None => "inline config override".to_string(),
+        }
+    }
+}
+
+/// The ONE headless argv construction both `live` and `plan` commit: the
+/// launch argv with the per-child MCP injection spliced into the options
+/// region, when this run is headless and the harness declares an
+/// `mcp_injection` block. Non-headless runs (and harnesses without injection)
+/// pass `base_argv` through untouched. Pure — `prepare` renders in memory;
+/// only live's `materialize` ever writes — which is exactly what lets `--plan`
+/// preview the same argv (and thus the same redacted-arg count and grant
+/// digest, run identity held equal) that a live run freezes.
+fn headless_argv_and_injection(
+    desc: &crate::adapter::AdapterDescriptor,
+    args: &RunArgs,
+    base_argv: Vec<String>,
+    run_dir: &Path,
+    handoff_path: &Path,
+) -> Result<(Vec<String>, Option<McpInjection>)> {
+    let Some(prompt) = args.prompt.as_deref() else {
+        return Ok((base_argv, None));
+    };
+    let Some(injection) = McpInjection::prepare(desc, run_dir, handoff_path)? else {
+        return Ok((base_argv, None));
+    };
+    let argv = desc
+        .headless
+        .as_ref()
+        .expect("a prompt implies a headless spec (launch_argv enforced it)")
+        .argv_with_injection(prompt, &injection.args);
+    Ok((argv, Some(injection)))
+}
+
+/// A rendered server entry (JSON) as an inline TOML value, for the one-element
+/// `-c key=value` override form. Rendered entries are strings, string arrays,
+/// and nested string maps (command/args/env/headers) — anything else is a
+/// render-shape change and errors loudly rather than injecting a mangled
+/// config. (Rust note: `toml_edit::Value: From<&str>/From<bool>/…` does the
+/// leaf conversions; recursion handles the containers.)
+fn json_to_inline_toml(v: &serde_json::Value) -> Result<toml_edit::Value> {
+    use serde_json::Value as J;
+    Ok(match v {
+        J::String(s) => toml_edit::Value::from(s.as_str()),
+        J::Bool(b) => toml_edit::Value::from(*b),
+        J::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                toml_edit::Value::from(i)
+            } else {
+                toml_edit::Value::from(
+                    n.as_f64()
+                        .context("unrepresentable number in a rendered MCP entry")?,
+                )
+            }
+        }
+        J::Array(xs) => {
+            let mut arr = toml_edit::Array::new();
+            for x in xs {
+                arr.push(json_to_inline_toml(x)?);
+            }
+            toml_edit::Value::from(arr)
+        }
+        J::Object(m) => {
+            let mut t = toml_edit::InlineTable::new();
+            for (k, x) in m {
+                t.insert(k, json_to_inline_toml(x)?);
+            }
+            toml_edit::Value::from(t)
+        }
+        J::Null => anyhow::bail!("null value in a rendered MCP entry — refusing to inject it"),
+    })
+}
+
 /// Resolve the harness binary to the full path that would execute — the grant
 /// records the resolved identity, not the bare name (§6.1).
 fn resolve_bin_path(bin: &str) -> Result<PathBuf> {
@@ -810,6 +1017,22 @@ fn print_posture_and_limits(
              (cooperative).",
             "⚠".yellow()
         ),
+    }
+    // Codex honest remainder (W2.5 witness finding, design §12.1): codex's
+    // account/plugin CONNECTOR layer (`codex_apps` — marketplace-cached,
+    // auth-bound connectors) is not config-file MCP state at all, so neither
+    // the injected per-run config nor `--ignore-user-config` scopes it, the
+    // bridge and grant ruleset never see it, and codex exposes no per-run
+    // off-switch. Severity is posture-dependent (§7): the host tier leaves it
+    // fully live; only lockdown/egress fences its network reach.
+    if desc.is_some_and(|d| d.id == "codex") {
+        eprintln!(
+            "  {} codex's account/plugin connector layer (codex_apps) is NOT scoped by the \
+             per-run MCP config or --ignore-user-config — those connectors stay live and \
+             network-reaching around the gateway on the host tier. Use --lockdown for \
+             kernel-level fencing of their network reach.",
+            "⚠".yellow()
+        );
     }
 }
 
@@ -1069,6 +1292,43 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         "✓".green()
     );
 
+    // The run's private dir + the grant-handoff path, derived BEFORE the grant
+    // freezes: the per-child MCP injection below renders a config referencing
+    // the handoff path, and its argv must join the invocation the grant
+    // commits. (The handoff FILE itself is still written after the freeze — it
+    // carries the grant.)
+    let run_dir = ev
+        .log
+        .path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| {
+            crate::util::paths::agentstack_home()
+                .join("runs")
+                .join(&run_id)
+        });
+    let handoff_path = run_dir.join(crate::grant::HANDOFF_FILE);
+
+    // W2.5 (workflows design §12.1): a headless child gets a per-run,
+    // launcher-authored MCP config injected through harness-native flags, so N
+    // concurrent locked children can share one project without touching the
+    // shared project config. SECURITY-SENSITIVE ORDERING: the injection args
+    // join `argv` HERE, before `freeze_grant` below — argv is digest input, so
+    // the grant commits the exact per-child injection the same way it commits
+    // the prompt. Interactive runs (no `--prompt`) keep the park/swap path.
+    let (argv, injection) =
+        match headless_argv_and_injection(desc, args, argv, &run_dir, &handoff_path) {
+            Ok(x) => x,
+            Err(e) => return Err(ev.refuse("mcp-injection", e)),
+        };
+    if let Some(inj) = &injection {
+        // Live only: write the per-run config file the child will read
+        // (`--plan` runs the same `prepare` but never materializes).
+        if let Err(e) = inj.materialize() {
+            return Err(ev.refuse("mcp-injection", e));
+        }
+    }
+
     // §3 step 6 + §4: freeze the grant under the machine-local commitment key.
     // No key, no invocation-binding digest, no launch — never an unkeyed
     // fallback. Provisioning is machine-local key material, not repo content.
@@ -1112,26 +1372,11 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     let envelope =
         crate::grant::RunEnvelope::new(run_id.clone(), ev.log.path().display().to_string(), digest);
 
-    // §3 step 7 (host tier, per ruling): launch-scope the PROJECT MCP config
-    // to the synthetic gateway entry for the run's lifetime; restore after.
-    // Global scope stays honestly labeled (see print_posture_and_limits).
-    let run_dir = ev
-        .log
-        .path()
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| {
-            crate::util::paths::agentstack_home()
-                .join("runs")
-                .join(&run_id)
-        });
-
     // D2 handoff: persist the grant's bridge projection into the run's
     // private dir so the separate `agentstack mcp` process consumes the SAME
     // frozen ruleset + server set verbatim — never a re-derivation from disk.
     // Material: without the artifact the bridge would fail closed mid-run
     // while the launch claims the locked contract, so no artifact, no launch.
-    let handoff_path = run_dir.join(crate::grant::HANDOFF_FILE);
     let handoff = grant.handoff(&envelope);
     // Machine-authenticate the artifact under the SAME commitment key: the
     // bridge only honors an artifact sealed with this machine's key, which
@@ -1153,28 +1398,45 @@ fn live(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         handoff_path.display()
     );
 
-    let mut scoped = match ScopedMcpConfig::apply(desc, &ctx.dir, &run_id, &run_dir, &handoff_path)
-    {
-        Ok(Some(s)) => {
-            banner!(
-                headless,
-                "  {} project MCP config launch-scoped to the gateway ({})",
-                "✓".green(),
-                s.path.display()
-            );
-            Some(s)
+    // §3 step 7 (host tier): with per-child injection active the shared
+    // project MCP config is never touched — the injected config (plus the
+    // strict/whole-table flag semantics in the descriptor) is the child's
+    // entire MCP surface, and concurrent locked runs in this project no longer
+    // serialize on the park/swap sentinel. Without injection (interactive
+    // runs, or a descriptor with no `mcp_injection` block): the shipped
+    // park/swap launch-scoping, serial per project, restore after.
+    let mut scoped = if let Some(inj) = &injection {
+        banner!(
+            headless,
+            "  {} per-run MCP config injected via harness flags ({}); the shared project \
+             config is untouched",
+            "✓".green(),
+            inj.describe()
+        );
+        None
+    } else {
+        match ScopedMcpConfig::apply(desc, &ctx.dir, &run_id, &run_dir, &handoff_path) {
+            Ok(Some(s)) => {
+                banner!(
+                    headless,
+                    "  {} project MCP config launch-scoped to the gateway ({})",
+                    "✓".green(),
+                    s.path.display()
+                );
+                Some(s)
+            }
+            Ok(None) => {
+                banner!(
+                    headless,
+                    "  {} {} has no project-scope MCP config to launch-scope (stated honestly; \
+                     the global gateway entry still gates declared servers)",
+                    "ℹ".cyan(),
+                    display
+                );
+                None
+            }
+            Err(e) => return Err(ev.refuse("launch-scope", e)),
         }
-        Ok(None) => {
-            banner!(
-                headless,
-                "  {} {} has no project-scope MCP config to launch-scope (stated honestly; \
-                 the global gateway entry still gates declared servers)",
-                "ℹ".cyan(),
-                display
-            );
-            None
-        }
-        Err(e) => return Err(ev.refuse("launch-scope", e)),
     };
 
     // Spawn on the host under the SAME run id the evidence carries, with the
@@ -1337,9 +1599,21 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         },
     };
 
-    // The launch argv a live run would commit and spawn — same single
-    // construction as `live` (a `--prompt` without a headless spec is a
-    // blocker here, a refusal there).
+    // The launch argv a live run would commit and spawn — the SAME single
+    // construction as `live` ([`headless_argv_and_injection`]), including the
+    // W2.5 per-child MCP injection splice: `McpInjection::prepare` is
+    // secret-free and writes nothing (only live's `materialize` does), so the
+    // read-only plan runs the live construction verbatim and the previewed
+    // redacted-arg count and digest are built from the argv a live run
+    // commits. The injection embeds the run's private dir, so the plan
+    // previews it under a FIXED preview identity — deterministic across plan
+    // invocations, never collides with live's `r-<hex>` ids, and nothing is
+    // ever created under it.
+    let run_dir = crate::util::paths::agentstack_home()
+        .join("runs")
+        .join("r-plan");
+    let handoff_path = run_dir.join(crate::grant::HANDOFF_FILE);
+    let mut injection_previewed = false;
     let argv = desc.and_then(|d| match launch_argv(d, args) {
         Ok(v) => {
             if args.prompt.is_some() {
@@ -1349,7 +1623,27 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                     "✓".green()
                 );
             }
-            Some(v)
+            match headless_argv_and_injection(d, args, v, &run_dir, &handoff_path) {
+                Ok((argv, Some(inj))) => {
+                    println!(
+                        "  {} headless: per-run MCP config would be injected via harness \
+                         flags ({}); the shared project config stays untouched",
+                        "✓".green(),
+                        inj.describe()
+                    );
+                    injection_previewed = true;
+                    Some(argv)
+                }
+                Ok((argv, None)) => Some(argv),
+                Err(e) => {
+                    println!(
+                        "  {} headless: MCP injection could not be prepared",
+                        "✗".red()
+                    );
+                    blockers.push(("mcp-injection".into(), format!("{e:#}")));
+                    None
+                }
+            }
         }
         Err(e) => {
             println!("  {} headless: no invocation spec", "✗".red());
@@ -1563,8 +1857,22 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         let grant = freeze_grant(ctx, base, args, &argv, inputs, ruleset, &machine, &bin_path)?;
         match key {
             // The key is present: show the exact binding digest a live run
-            // would freeze (the "plan matches run" property).
-            Some(key) => println!("    digest: {}", grant.digest(&key)?),
+            // would freeze (the "plan matches run" property). When the argv
+            // carries the per-run MCP injection, the digest is computed over
+            // this preview's run identity — a live run builds the identical
+            // argv shape but binds its own run dir, so its digest differs in
+            // exactly (and only) those committed per-run path elements.
+            Some(key) => {
+                let digest = grant.digest(&key)?;
+                if injection_previewed {
+                    println!(
+                        "    digest: {digest} (commits this preview's per-run MCP injection; \
+                         a live run re-binds the same construction under its own run dir)"
+                    );
+                } else {
+                    println!("    digest: {digest}");
+                }
+            }
             // The key will be provisioned on first live run; the invocation-
             // binding digest can only be computed once it exists.
             None => {
@@ -1896,17 +2204,17 @@ mod tests {
             pinned_and_trusted(proj);
 
             // Replace the fixture's fake `claude` with one that records its
-            // exact argv shape and emits known stdout. `"$3"` is quoted, so
-            // if the prompt survives as one element the file holds it intact;
-            // if anything re-split it, "$#" changes and "$3" is a fragment.
-            // The claude-code headless argv is [-p, --, {prompt}], so the
-            // prompt is the THIRD positional.
+            // exact argv, NUL-separated — NUL survives the newlines inside the
+            // hostile prompt, so each recorded element is byte-for-byte what
+            // the harness received. If anything re-split or shell-expanded an
+            // element, the element list changes shape and the asserts below
+            // catch it.
             let args_out = proj.path().join("seen-args.txt");
             let fake = home.path().join("fakebin/claude");
             std::fs::write(
                 &fake,
                 format!(
-                    "#!/bin/sh\n{{ printf '%s\\n' \"$#\"; printf '%s' \"$3\"; }} > '{}'\nprintf 'hello from headless'\n",
+                    "#!/bin/sh\nprintf '%s\\0' \"$@\" > '{}'\nprintf 'hello from headless'\n",
                     args_out.display()
                 ),
             )
@@ -1921,13 +2229,42 @@ mod tests {
             args.prompt = Some(hostile.to_string());
             run_locked(Some(proj.path()), &args).unwrap();
 
-            // Exactly three argv elements ("-p", "--", prompt); $3 is the
-            // prompt byte for byte — never split, never shell-expanded, never
-            // read as a flag.
-            let seen = std::fs::read_to_string(&args_out).unwrap();
-            let (argc, third) = seen.split_once('\n').unwrap();
-            assert_eq!(argc, "3", "argv is exactly [-p, --, prompt]: {seen:?}");
-            assert_eq!(third, hostile, "prompt survives as one exact element");
+            // The claude-code headless argv is
+            //   [-p, <mcp injection…>, --, {prompt}]
+            // (W2.5 splices the per-child MCP config injection into the
+            // options region, immediately before the `--` guard). The prompt
+            // is the LAST element, whole and byte for byte — never split,
+            // never shell-expanded, never read as a flag — and everything
+            // injected stays strictly before the `--`.
+            let seen_bytes = std::fs::read(&args_out).unwrap();
+            let argv: Vec<&str> = seen_bytes
+                .split(|b| *b == 0)
+                .filter(|e| !e.is_empty())
+                .map(|e| std::str::from_utf8(e).unwrap())
+                .collect();
+            assert_eq!(argv.last().copied(), Some(hostile), "{argv:?}");
+            let guard = argv.len() - 2;
+            assert_eq!(argv[guard], "--", "prompt is guarded: {argv:?}");
+            let options = &argv[..guard];
+            assert!(
+                !options.contains(&hostile),
+                "prompt never appears in the options region: {argv:?}"
+            );
+            // The W2.5 injection landed in the options region: a per-run
+            // config path after --mcp-config (inside the run dir, not the
+            // project), and the strict flag that excludes every other scope.
+            let mc = options
+                .iter()
+                .position(|a| *a == "--mcp-config")
+                .expect("injected --mcp-config parses as an option");
+            assert!(
+                options[mc + 1].ends_with("mcp-config.json") && !options[mc + 1].starts_with("--"),
+                "config path is one whole element: {argv:?}"
+            );
+            assert!(
+                options.contains(&"--strict-mcp-config"),
+                "strict flag injected: {argv:?}"
+            );
 
             // Evidence: grant froze, and the output identity was recorded —
             // digest + count + truncation, never the text.
@@ -2201,6 +2538,97 @@ mod tests {
                 !home.path().join("runs").exists(),
                 "--plan must not create recorder state"
             );
+        });
+    }
+
+    /// W2.5 (review finding): a GREEN `--plan --prompt` previews the per-child
+    /// MCP injection while still mutating nothing — no recorder state, no run
+    /// dir, and no materialized per-run config file: `prepare` renders in
+    /// memory; only live's `materialize` writes.
+    #[test]
+    fn plan_with_prompt_previews_injection_without_materializing() {
+        locked_fixture(|home, proj| {
+            pinned_and_trusted(proj);
+            let mut args = run_args(true);
+            args.prompt = Some("preview me".to_string());
+            run_locked(Some(proj.path()), &args).unwrap();
+            assert!(
+                !home.path().join("runs").exists(),
+                "--plan must not create run dirs or per-run config files"
+            );
+        });
+    }
+
+    /// W2.5 witness (review finding): `--plan` and `live` build the headless
+    /// argv through ONE construction ([`headless_argv_and_injection`]), so
+    /// with the run identity held equal the previewed grant digest IS the live
+    /// grant digest — same injected elements, same redacted-arg count. Across
+    /// real invocations the two digests differ in exactly the committed
+    /// per-run path elements, because each live run binds its own run dir.
+    #[test]
+    fn plan_and_live_share_one_injected_argv_construction_and_digest() {
+        locked_fixture(|home, proj| {
+            pinned_and_trusted(proj);
+            let ctx = crate::commands::load(Some(proj.path())).unwrap();
+            let base = crate::manifest::project_root_of(&ctx.dir);
+            let desc = ctx.registry.get("claude-code").unwrap();
+            let mut args = run_args(false);
+            args.prompt = Some("preview me".to_string());
+
+            let run_dir = home.path().join("runs").join("r-witness");
+            let handoff = run_dir.join(crate::grant::HANDOFF_FILE);
+            let base_argv = launch_argv(desc, &args).unwrap();
+
+            // The construction `plan` previews…
+            let (plan_argv, inj) =
+                headless_argv_and_injection(desc, &args, base_argv.clone(), &run_dir, &handoff)
+                    .unwrap();
+            // …and the construction `live` commits — the same function.
+            let (live_argv, _) =
+                headless_argv_and_injection(desc, &args, base_argv, &run_dir, &handoff).unwrap();
+            assert_eq!(plan_argv, live_argv);
+            let inj = inj.expect("claude-code declares mcp_injection");
+            assert!(
+                plan_argv.contains(&"--mcp-config".to_string()),
+                "{plan_argv:?}"
+            );
+            assert!(
+                plan_argv.contains(&"--strict-mcp-config".to_string()),
+                "{plan_argv:?}"
+            );
+            // `prepare` is pure: nothing exists under the run dir.
+            assert!(!run_dir.exists(), "prepare must not touch disk");
+
+            // Freeze the SAME verified inputs over both argvs: equal digests.
+            let inputs = resolve_inputs(&ctx, None).unwrap();
+            let machine = crate::machine_policy::load().unwrap();
+            let names: Vec<&str> = ctx
+                .loaded
+                .manifest
+                .servers
+                .keys()
+                .map(String::as_str)
+                .collect();
+            let bin_path = resolve_bin_path("claude").unwrap();
+            crate::grant::provision_commitment_key().unwrap();
+            let key = crate::grant::load_commitment_key().unwrap();
+            let freeze = |argv: &[String]| {
+                let ruleset =
+                    agentstack_policy::compile(&machine, &ctx.loaded.manifest.policy, &names);
+                freeze_grant(
+                    &ctx, &base, &args, argv, &inputs, ruleset, &machine, &bin_path,
+                )
+                .unwrap()
+                .digest(&key)
+                .unwrap()
+            };
+            assert_eq!(freeze(&plan_argv), freeze(&live_argv));
+
+            // The live half: `materialize` writes exactly the per-run config
+            // file `prepare` held in memory.
+            std::fs::create_dir_all(&run_dir).unwrap();
+            inj.materialize().unwrap();
+            assert!(run_dir.join("mcp-config.json").exists());
         });
     }
 

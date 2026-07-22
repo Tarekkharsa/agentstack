@@ -204,6 +204,7 @@ impl AdapterDescriptor {
 #[serde(try_from = "RawHeadlessSpec")]
 pub struct HeadlessSpec {
     args: Vec<String>,
+    mcp_injection: Option<McpInjectionSpec>,
 }
 
 /// The unvalidated wire shape `HeadlessSpec` is parsed through.
@@ -211,6 +212,8 @@ pub struct HeadlessSpec {
 #[serde(deny_unknown_fields)]
 struct RawHeadlessSpec {
     args: Vec<String>,
+    #[serde(default)]
+    mcp_injection: Option<McpInjectionSpec>,
 }
 
 /// The placeholder a headless argv element may consist of — the WHOLE element,
@@ -261,7 +264,26 @@ impl TryFrom<RawHeadlessSpec> for HeadlessSpec {
                  cannot be parsed as a flag by the harness) — e.g. [\"exec\", \"--\", \"{{prompt}}\"]"
             ));
         }
-        Ok(HeadlessSpec { args: raw.args })
+        // And that guard must be the ONLY `--`: an earlier one would end
+        // option parsing first, demoting everything after it — including a
+        // spliced mcp_injection — into the child's positional region, where
+        // strict-scope flags are silently ignored.
+        if raw
+            .args
+            .iter()
+            .enumerate()
+            .any(|(j, a)| a == OPTIONS_TERMINATOR && j != i - 1)
+        {
+            return Err(format!(
+                "headless args may contain {OPTIONS_TERMINATOR:?} exactly once — the guard \
+                 immediately before {PROMPT_PLACEHOLDER}; an additional {OPTIONS_TERMINATOR:?} \
+                 would end option parsing early and demote later options to positionals"
+            ));
+        }
+        Ok(HeadlessSpec {
+            args: raw.args,
+            mcp_injection: raw.mcp_injection,
+        })
     }
 }
 
@@ -270,14 +292,188 @@ impl HeadlessSpec {
     /// only. The prompt string — however hostile — becomes exactly one argv
     /// element; no shell, no quoting, no splitting is ever involved.
     pub fn argv(&self, prompt: &str) -> Vec<String> {
+        self.argv_with_injection(prompt, &[])
+    }
+
+    /// Like [`argv`](Self::argv), with already-substituted MCP-injection
+    /// arguments spliced into the OPTIONS region — immediately before the `--`
+    /// terminator that guards the prompt — so they are parsed as flags while
+    /// the prompt stays a positional. The injection elements are
+    /// launcher-authored trusted data (a path or config text the launcher
+    /// itself rendered — see [`McpInjectionSpec::argv`]), never prompt or repo
+    /// text, and like everything else in this argv they reach the child
+    /// without a shell in between.
+    pub fn argv_with_injection(&self, prompt: &str, injection: &[String]) -> Vec<String> {
+        let mut out: Vec<String> = Vec::with_capacity(self.args.len() + injection.len());
+        for a in &self.args {
+            if a == PROMPT_PLACEHOLDER {
+                // Validation guarantees the element before the placeholder is
+                // the `--` terminator; the injection goes before THAT.
+                let terminator = out.pop().expect("validated: `--` precedes {prompt}");
+                out.extend(injection.iter().cloned());
+                out.push(terminator);
+                out.push(prompt.to_string());
+            } else {
+                out.push(a.clone());
+            }
+        }
+        out
+    }
+
+    /// The per-child MCP config injection block, if this harness declared one.
+    /// `None` → the launcher must fall back to launch-scoping the shared
+    /// project config (park/swap), which serializes concurrent locked runs.
+    pub fn mcp_injection(&self) -> Option<&McpInjectionSpec> {
+        self.mcp_injection.as_ref()
+    }
+}
+
+/// The placeholder for a per-run MCP config FILE the launcher renders into the
+/// run dir (e.g. `claude --mcp-config <path>`). Like [`PROMPT_PLACEHOLDER`],
+/// it may only ever be a WHOLE argv element.
+pub const MCP_CONFIG_PATH_PLACEHOLDER: &str = "{mcp_config_path}";
+
+/// The placeholder for the launcher-rendered MCP server set as ONE inline
+/// `key=value` TOML override element (e.g. `codex -c 'mcp_servers={…}'`).
+/// Whole argv element only.
+pub const MCP_SERVERS_TOML_PLACEHOLDER: &str = "{mcp_servers_toml}";
+
+/// How a harness accepts a per-child MCP config at launch (`headless.mcp_injection`
+/// in the descriptor): extra argv elements spliced into the options region,
+/// where exactly the known placeholders above stand in for launcher-rendered
+/// values. This is what lets N concurrent locked children share one project
+/// without touching (or serializing on) the shared project MCP config.
+///
+/// Same validation discipline as [`HeadlessSpec`], enforced in `try_from` so
+/// every parse path refuses a malformed block at LOAD: only the two known
+/// placeholders are recognized, each must be a WHOLE argv element (never
+/// embedded in another token), each may appear at most once, at least one must
+/// appear (a block that references no per-run value could not inject
+/// anything), and `{prompt}` may not appear here at all — prompt delivery
+/// belongs to `headless.args` behind its `--` guard, never to the options
+/// region.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(try_from = "RawMcpInjectionSpec")]
+pub struct McpInjectionSpec {
+    args: Vec<String>,
+}
+
+/// The unvalidated wire shape `McpInjectionSpec` is parsed through.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMcpInjectionSpec {
+    args: Vec<String>,
+}
+
+impl TryFrom<RawMcpInjectionSpec> for McpInjectionSpec {
+    type Error = String;
+
+    fn try_from(raw: RawMcpInjectionSpec) -> Result<Self, Self::Error> {
+        let mut seen_path = false;
+        let mut seen_toml = false;
+        for a in &raw.args {
+            match a.as_str() {
+                MCP_CONFIG_PATH_PLACEHOLDER => {
+                    if seen_path {
+                        return Err(format!(
+                            "mcp_injection args may contain {MCP_CONFIG_PATH_PLACEHOLDER} at most once"
+                        ));
+                    }
+                    seen_path = true;
+                }
+                MCP_SERVERS_TOML_PLACEHOLDER => {
+                    if seen_toml {
+                        return Err(format!(
+                            "mcp_injection args may contain {MCP_SERVERS_TOML_PLACEHOLDER} at most once"
+                        ));
+                    }
+                    seen_toml = true;
+                }
+                OPTIONS_TERMINATOR => {
+                    // Injection is spliced into the OPTIONS region; a literal
+                    // `--` there would end option parsing early and demote the
+                    // rest of the injection to positional text the harness
+                    // silently ignores.
+                    return Err(format!(
+                        "mcp_injection args may not contain a literal {OPTIONS_TERMINATOR:?} — \
+                         an end-of-options separator inside the options region would demote the \
+                         flags after it to positionals"
+                    ));
+                }
+                other => {
+                    // An embedded placeholder ("--mcp-config={mcp_config_path}")
+                    // would splice a substituted value into the middle of
+                    // another token; an unknown "{...}" placeholder would reach
+                    // the child verbatim as a bogus literal. Both are descriptor
+                    // bugs — refuse at load, not at launch.
+                    for p in [
+                        MCP_CONFIG_PATH_PLACEHOLDER,
+                        MCP_SERVERS_TOML_PLACEHOLDER,
+                        PROMPT_PLACEHOLDER,
+                    ] {
+                        if other.contains(p) {
+                            return Err(format!(
+                                "mcp_injection arg {other:?} embeds {p} inside another token — \
+                                 a placeholder must be a whole argv element (and {PROMPT_PLACEHOLDER} \
+                                 is not valid in mcp_injection at all)"
+                            ));
+                        }
+                    }
+                    if other.starts_with('{') && other.ends_with('}') {
+                        return Err(format!(
+                            "mcp_injection arg {other:?} is not a known placeholder — only \
+                             {MCP_CONFIG_PATH_PLACEHOLDER} and {MCP_SERVERS_TOML_PLACEHOLDER} \
+                             are recognized"
+                        ));
+                    }
+                }
+            }
+        }
+        if !seen_path && !seen_toml {
+            return Err(format!(
+                "mcp_injection args must contain {MCP_CONFIG_PATH_PLACEHOLDER} or \
+                 {MCP_SERVERS_TOML_PLACEHOLDER} — a block that references no per-run \
+                 value cannot inject a per-child config"
+            ));
+        }
+        Ok(McpInjectionSpec { args: raw.args })
+    }
+}
+
+impl McpInjectionSpec {
+    /// Whether this spec needs the launcher to render a per-run config FILE.
+    pub fn needs_config_path(&self) -> bool {
+        self.args.iter().any(|a| a == MCP_CONFIG_PATH_PLACEHOLDER)
+    }
+
+    /// Whether this spec needs the launcher to render the server set as one
+    /// inline TOML override value.
+    pub fn needs_servers_toml(&self) -> bool {
+        self.args.iter().any(|a| a == MCP_SERVERS_TOML_PLACEHOLDER)
+    }
+
+    /// Build the concrete injection argv: whole-element substitution of the
+    /// launcher-rendered values, mirroring [`HeadlessSpec::argv`]. Both values
+    /// are launcher-authored trusted data (a run-dir path / rendered config
+    /// text — never prompt or repo text); a needed value the caller failed to
+    /// supply is an error, never a placeholder leaked into a child's argv.
+    pub fn argv(
+        &self,
+        config_path: Option<&str>,
+        servers_toml: Option<&str>,
+    ) -> Result<Vec<String>, String> {
         self.args
             .iter()
-            .map(|a| {
-                if a == PROMPT_PLACEHOLDER {
-                    prompt.to_string()
-                } else {
-                    a.clone()
-                }
+            .map(|a| match a.as_str() {
+                MCP_CONFIG_PATH_PLACEHOLDER => config_path.map(str::to_string).ok_or_else(|| {
+                    format!("{MCP_CONFIG_PATH_PLACEHOLDER} needed but no config path was rendered")
+                }),
+                MCP_SERVERS_TOML_PLACEHOLDER => servers_toml.map(str::to_string).ok_or_else(|| {
+                    format!(
+                        "{MCP_SERVERS_TOML_PLACEHOLDER} needed but no server table was rendered"
+                    )
+                }),
+                _ => Ok(a.clone()),
             })
             .collect()
     }
@@ -626,6 +822,96 @@ mod headless_spec_tests {
             wrong_place.is_err(),
             "`--` must be immediately before the placeholder"
         );
+    }
+
+    /// Security witness (W2.5 hardening): a SECOND `--` ahead of the guard is
+    /// refused at load — it would end option parsing early, so everything
+    /// spliced after it (the whole mcp_injection, strict-scope flags included)
+    /// would land in the child's positional region and be silently ignored.
+    #[test]
+    fn duplicate_options_terminator_is_refused_at_parse() {
+        let doubled = serde_yaml::from_str::<AdapterDescriptor>(
+            "id: x\ndisplay: X\nheadless:\n  args: [\"exec\", \"--\", \"--\", \"{prompt}\"]\n",
+        );
+        assert!(
+            doubled.is_err(),
+            "a duplicate `--` in headless args must be refused at load"
+        );
+    }
+}
+
+#[cfg(test)]
+mod mcp_injection_spec_tests {
+    use super::AdapterDescriptor;
+
+    fn parse(mcp_injection_args: &str) -> Result<AdapterDescriptor, serde_yaml::Error> {
+        serde_yaml::from_str(&format!(
+            "id: x\ndisplay: X\nheadless:\n  args: [\"-p\", \"--\", \"{{prompt}}\"]\n  \
+             mcp_injection:\n    args: [{mcp_injection_args}]\n"
+        ))
+    }
+
+    /// Security witness (W2.5): injection args splice into the OPTIONS region
+    /// — before the `--` guard — so the harness parses them as flags while the
+    /// prompt stays a guarded positional, and the substituted value is exactly
+    /// one argv element.
+    #[test]
+    fn injection_splices_before_the_terminator_as_whole_elements() {
+        let desc = parse("\"--mcp-config\", \"{mcp_config_path}\", \"--strict-mcp-config\"")
+            .expect("valid spec");
+        let headless = desc.headless.unwrap();
+        let inj = headless
+            .mcp_injection()
+            .unwrap()
+            .argv(Some("/runs/r1/mcp-config.json"), None)
+            .unwrap();
+        let argv = headless.argv_with_injection("do the thing", &inj);
+        assert_eq!(
+            argv,
+            vec![
+                "-p".to_string(),
+                "--mcp-config".to_string(),
+                "/runs/r1/mcp-config.json".to_string(),
+                "--strict-mcp-config".to_string(),
+                "--".to_string(),
+                "do the thing".to_string(),
+            ]
+        );
+    }
+
+    /// Security witness (W2.5): every malformed injection block is refused at
+    /// LOAD on every parse path — unknown placeholder, embedded placeholder,
+    /// duplicate placeholder, `{prompt}` in the options region, and a block
+    /// with no placeholder at all.
+    #[test]
+    fn malformed_injection_specs_are_refused_at_parse() {
+        for (bad, why) in [
+            ("\"--flag\", \"{mcp_config}\"", "unknown placeholder"),
+            ("\"--mcp-config={mcp_config_path}\"", "embedded placeholder"),
+            (
+                "\"{mcp_config_path}\", \"{mcp_config_path}\"",
+                "duplicate placeholder",
+            ),
+            ("\"-c\", \"{prompt}\"", "{prompt} in the options region"),
+            ("\"--strict-mcp-config\"", "no placeholder at all"),
+            (
+                "\"--\", \"--mcp-config\", \"{mcp_config_path}\"",
+                "a literal `--` in the options region",
+            ),
+        ] {
+            assert!(parse(bad).is_err(), "{why} must be refused at load");
+        }
+    }
+
+    /// A needed value the caller failed to supply errors instead of leaking a
+    /// literal placeholder into a child's argv.
+    #[test]
+    fn missing_substitution_value_is_an_error() {
+        let desc = parse("\"-c\", \"{mcp_servers_toml}\"").expect("valid spec");
+        let headless = desc.headless.unwrap();
+        let spec = headless.mcp_injection().unwrap();
+        assert!(spec.needs_servers_toml() && !spec.needs_config_path());
+        assert!(spec.argv(Some("/ignored"), None).is_err());
     }
 }
 

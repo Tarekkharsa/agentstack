@@ -52,6 +52,27 @@ skills:
 # launcher always spawns headless runs with stdin closed.)
 headless:
   args: ["exec", "--", "{prompt}"]
+  # Per-child MCP config injection (W2.5): "{mcp_servers_toml}" is replaced (as
+  # a WHOLE argv element, spliced before the "--" guard) with one inline TOML
+  # override — `mcp_servers={agentstack = {…}}` — carrying ONLY the agentstack
+  # gateway entry. --ignore-user-config is LOAD-BEARING: it is Codex's
+  # strict-scope equivalent of Claude's --strict-mcp-config, and the flag —
+  # NOT the `-c` override — is what excludes the user's ~/.codex/config.toml
+  # servers. A `-c mcp_servers={…}` assignment alone MERGES with the user
+  # table (marker-proven live: a decoy server in config.toml still spawns
+  # without the flag), so dropping the flag would leak user-scope servers into
+  # the child. Note: --ignore-user-config also drops the user's model/approval
+  # config (auth still resolves via CODEX_HOME) — acceptable for a governed run.
+  # Residual surface (honest limit, witnessed live): codex's account/plugin
+  # CONNECTOR layer ("codex_apps" — marketplace-cached, auth-bound connectors)
+  # is NOT config-file MCP state, so neither this injection nor
+  # --ignore-user-config scopes it, and codex has no per-run off-switch. A
+  # governed codex child therefore still carries that un-gated,
+  # network-reaching surface; severity is posture-dependent — host-tier
+  # --locked leaves the connectors fully live, only --lockdown/egress fences
+  # their network reach. The launcher's posture banner states this.
+  mcp_injection:
+    args: ["--ignore-user-config", "-c", "{mcp_servers_toml}"]
 instructions:
   global: ~/.codex/AGENTS.md
   project: AGENTS.md
