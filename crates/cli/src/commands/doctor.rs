@@ -407,6 +407,8 @@ fn run_checks(
         }
     }
 
+    check_t3code(report);
+
     // Zero-files gateway: which harnesses have the global `agentstack mcp
     // --auto-project` gateway registered, and where this project stands with
     // the trust gate. Not being connected is a choice, not a fault — only a
@@ -2308,6 +2310,207 @@ fn codex_project_trusted(root: &Path) -> bool {
         == Some("trusted")
 }
 
+// ── t3code (supervisor GUI) awareness ────────────────────────────────────────
+// t3code (pingdotgg) is deliberately NOT a 14th adapter: it has no MCP config,
+// instructions, skills, or hook surface of its own. It spawns the CLIs
+// agentstack already governs (Claude Code, Codex, Cursor, OpenCode) and
+// delegates config discovery to each CLI's native files, so everything
+// agentstack renders applies to its sessions unchanged. Two things CAN quietly
+// break that chain, and both are invisible from inside t3code: its Full-access
+// default disables the providers' own approval prompts (leaving the guard hook
+// as the only pre-tool-use gate), and a provider instance with a custom home
+// escapes every global-scope artifact. This section states the chain and
+// checks those two — adaptation happens entirely on our side; a t3code user
+// installs or changes nothing.
+
+/// t3code's base dir: `$T3CODE_HOME` (its own override) or `~/.t3`.
+fn t3code_home() -> Option<std::path::PathBuf> {
+    let home = std::env::var("T3CODE_HOME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| paths::expand_tilde("~/.t3"));
+    home.is_dir().then_some(home)
+}
+
+/// What we read out of t3code's `userdata/settings.json`. Parsed defensively
+/// (bundle-content rule: someone else's config is hostile input) — any
+/// unexpected shape yields empty findings, never an error.
+#[derive(Default, PartialEq, Debug)]
+struct T3codeFindings {
+    /// `(instance, driver, field, path)` — a custom home that global
+    /// agentstack artifacts (MCP config, instructions, guard hooks) don't
+    /// reach. `field` is `homePath` or `shadowHomePath`.
+    overrides: Vec<(String, String, &'static str, String)>,
+    /// Enabled drivers with no agentstack adapter — nothing observes them.
+    ungoverned: Vec<String>,
+}
+
+/// t3code drivers whose sessions flow through an agentstack adapter.
+const T3CODE_GOVERNED_DRIVERS: &[&str] = &["claudeAgent", "codex", "cursor", "opencode"];
+
+fn t3code_findings(settings_json: &str) -> T3codeFindings {
+    let mut out = T3codeFindings::default();
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(settings_json) else {
+        return out;
+    };
+    let Some(instances) = v.get("providerInstances").and_then(|p| p.as_object()) else {
+        return out;
+    };
+    for (name, inst) in instances {
+        // Disabled instances never spawn sessions — nothing to warn about.
+        if !inst
+            .get("enabled")
+            .and_then(|e| e.as_bool())
+            .unwrap_or(true)
+        {
+            continue;
+        }
+        let driver = inst.get("driver").and_then(|d| d.as_str()).unwrap_or(name);
+        if !T3CODE_GOVERNED_DRIVERS.contains(&driver) {
+            out.ungoverned.push(driver.to_string());
+            continue;
+        }
+        let Some(cfg) = inst.get("config").and_then(|c| c.as_object()) else {
+            continue;
+        };
+        // homePath moves the CLI's whole config home (CLAUDE_CONFIG_DIR /
+        // CODEX_HOME); shadowHomePath is Codex's auth-overlay variant.
+        for field in ["homePath", "shadowHomePath"] {
+            if let Some(p) = cfg.get(field).and_then(|p| p.as_str()) {
+                if !p.trim().is_empty() {
+                    out.overrides.push((
+                        name.clone(),
+                        driver.to_string(),
+                        field,
+                        p.trim().to_string(),
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn check_t3code(report: &mut Report) {
+    report.section("t3code (supervisor)");
+    let Some(home) = t3code_home() else {
+        report.line(Level::Info, "not detected (ok unless you use it)");
+        report.mark_irrelevant();
+        return;
+    };
+    report.line(
+        Level::Ok,
+        format!(
+            "detected ({}) — t3code sessions run CLIs agentstack already governs \
+             (Claude Code, Codex, Cursor, OpenCode); nothing extra to render",
+            home.display()
+        ),
+    );
+
+    // Guard posture. t3code's Full-access default maps to bypassPermissions /
+    // danger-full-access on the providers, so in those sessions the guard hook
+    // is the only pre-tool-use gate left standing.
+    let guard_enabled = matches!(
+        crate::manifest::machine_guard_health(),
+        Some(Ok(cfg)) if cfg.enabled()
+    );
+    if !guard_enabled {
+        report.line(
+            Level::Warn,
+            "guard not enabled — t3code's Full-access mode disables the providers' own \
+             approval prompts, so those sessions run with no pre-tool-use gate at all \
+             ↳ agentstack guard install",
+        );
+    } else {
+        let coverage = crate::commands::guard::coverage();
+        let mut missing = 0;
+        for (provider, prefix) in [
+            ("Claude Code", "claude-code"),
+            ("Codex", "codex"),
+            ("Cursor", "cursor"),
+            ("OpenCode", "opencode"),
+        ] {
+            let Some((_, detected, installed)) =
+                coverage.iter().find(|(id, _, _)| id.starts_with(prefix))
+            else {
+                continue;
+            };
+            if *detected && !installed {
+                missing += 1;
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{provider}: guard hook missing — t3code Full-access sessions on \
+                         this provider run ungated ↳ agentstack guard install"
+                    ),
+                );
+            }
+        }
+        if missing == 0 {
+            report.line(
+                Level::Ok,
+                "guard hooks cover the detected providers — in t3code's Full-access mode \
+                 the guard is the only remaining pre-tool-use gate",
+            );
+        }
+    }
+
+    // Provider-instance home overrides. A custom home relocates the CLI's
+    // entire config surface, so global agentstack artifacts silently stop
+    // applying to sessions of that instance.
+    let settings = home.join("userdata").join("settings.json");
+    if !settings.exists() {
+        report.line(
+            Level::Info,
+            "no userdata/settings.json — provider-instance checks skipped",
+        );
+        return;
+    }
+    match crate::util::read_to_string_bounded(&settings, crate::util::MAX_CONFIG_BYTES) {
+        Err(e) => report.line(
+            Level::Info,
+            format!("settings.json unreadable ({e:#}) — provider-instance checks skipped"),
+        ),
+        Ok(text) => {
+            let findings = t3code_findings(&text);
+            for (instance, driver, field, path) in &findings.overrides {
+                // A shadow home is an auth overlay that symlinks parts of the
+                // real home — config MAY still resolve, so it gets the softer
+                // "verify" voice instead of a flat "doesn't reach".
+                let consequence = if *field == "shadowHomePath" {
+                    "auth overlay — verify guard hooks and rendered config still resolve there"
+                } else {
+                    "global agentstack artifacts (MCP config, instructions, guard hooks) \
+                     don't reach that home"
+                };
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "instance '{instance}' ({driver}): custom {field} {path} — {consequence}"
+                    ),
+                );
+            }
+            for driver in &findings.ungoverned {
+                report.line(
+                    Level::Info,
+                    format!(
+                        "provider '{driver}' has no agentstack adapter — its t3code \
+                         sessions are unobserved"
+                    ),
+                );
+            }
+            if findings.overrides.is_empty() && findings.ungoverned.is_empty() {
+                report.line(
+                    Level::Ok,
+                    "no provider-instance home overrides — global artifacts apply to \
+                     every t3code session",
+                );
+            }
+        }
+    }
+}
+
 /// A policy-matchable source label for a skill, e.g. `git:github.com/acme/repo`
 /// or `path:./skills/x`.
 fn skill_source_label(skill: &crate::manifest::Skill) -> String {
@@ -2407,6 +2610,40 @@ fn check_quirks(manifest: &Manifest) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t3code_findings_flags_overrides_and_ungoverned_defensively() {
+        let json = r#"{
+          "providerInstances": {
+            "claudeAgent": {"driver":"claudeAgent","enabled":true,"config":{"homePath":"/custom/claude"}},
+            "codex-alt":   {"driver":"codex","enabled":true,"config":{"shadowHomePath":"/overlay/codex"}},
+            "cursor":      {"driver":"cursor","enabled":false,"config":{"homePath":"/ignored"}},
+            "grok":        {"driver":"grok","enabled":true,"config":{}}
+          }
+        }"#;
+        let f = t3code_findings(json);
+        // Enabled overrides surface with their field; the disabled cursor
+        // instance is skipped (it never spawns sessions).
+        assert_eq!(f.overrides.len(), 2);
+        assert!(f.overrides.iter().any(|(i, d, field, p)| {
+            i == "claudeAgent"
+                && d == "claudeAgent"
+                && *field == "homePath"
+                && p == "/custom/claude"
+        }));
+        assert!(f.overrides.iter().any(|(i, _, field, p)| i == "codex-alt"
+            && *field == "shadowHomePath"
+            && p == "/overlay/codex"));
+        // An enabled driver with no adapter is reported, not ignored.
+        assert_eq!(f.ungoverned, vec!["grok".to_string()]);
+        // Hostile-input rule: garbage never errors, it yields empty findings.
+        assert_eq!(t3code_findings("not json"), T3codeFindings::default());
+        assert_eq!(t3code_findings("{}"), T3codeFindings::default());
+        assert_eq!(
+            t3code_findings(r#"{"providerInstances": 7}"#),
+            T3codeFindings::default()
+        );
+    }
     use assert_fs::prelude::*;
 
     /// DX witness for the closing triage line: `first_fix` returns the fix

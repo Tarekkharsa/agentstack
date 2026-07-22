@@ -910,6 +910,19 @@ fn apply_target(t: &Target, exe: &str, add: bool) -> Result<PathBuf> {
     }
 }
 
+/// Read-only per-CLI guard coverage for other surfaces (doctor's t3code
+/// section): `(target id, cli detected, hook installed)`. Same detection
+/// rules as `status()` — nothing here writes.
+pub(crate) fn coverage() -> Vec<(&'static str, bool, bool)> {
+    targets()
+        .iter()
+        .map(|t| {
+            let detected = paths::expand_tilde(t.detect).exists();
+            (t.id, detected, detected && target_installed(t))
+        })
+        .collect()
+}
+
 fn target_installed(t: &Target) -> bool {
     match &t.kind {
         Kind::OwnedFile { path, .. } => paths::expand_tilde(path).exists(),
