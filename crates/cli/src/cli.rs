@@ -520,6 +520,14 @@ pub enum WorkflowCmd {
     /// grant digest / posture / outcome, taint marks, and the honest
     /// posture label — evidence as recorded, never reconstructed.
     Report(WorkflowReportArgs),
+
+    /// List every declared `[workflows.*]` manifest entry with its admission
+    /// status (trust + lock), read-only.
+    ///
+    /// Unlike `run`, this lists EVERY declared entry — including untrusted
+    /// or drifted ones — so it never gates on admission; it reports the
+    /// admission state instead.
+    List(WorkflowListArgs),
 }
 
 #[derive(Args, Debug)]
@@ -550,6 +558,18 @@ pub struct WorkflowReportArgs {
     /// The workflow run id (`w-…`, printed on the run's admission banner).
     #[arg(value_name = "RUN_ID")]
     pub run_id: String,
+
+    /// Emit the evidence tree as JSON instead of the human-readable text
+    /// render — the same recorded join, structured for scripting.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WorkflowListArgs {
+    /// Emit the declared workflow list as JSON instead of a human table.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// The zero-files gateway lifecycle: `connect` registers it in a harness's

@@ -1320,22 +1320,94 @@ fn recorded_outcome(run_id: &str) -> Option<(String, Option<i32>)> {
         })
 }
 
-/// `agentstack workflow report <run-id>` — render the recorded evidence tree.
+/// `agentstack workflow report <run-id>` — render the recorded evidence tree
+/// as text, or as JSON with `--json` (the same join, structured for
+/// scripting instead of a human).
 pub fn report(args: &WorkflowReportArgs) -> Result<()> {
-    print!("{}", render_workflow_report(&args.run_id)?);
+    if args.json {
+        // Stdout is the deliverable here too (same convention as
+        // `report_json` in commands/report.rs): pretty JSON, nothing else.
+        println!("{}", render_workflow_report_json(&args.run_id)?);
+    } else {
+        print!("{}", render_workflow_report(&args.run_id)?);
+    }
     Ok(())
 }
 
-/// Everything rendered is FROM THE RECORD: child grant digests, postures,
-/// and outcomes are JOINED from each child's own run log via `child_run_id`
-/// (the §6 step-3 join-table shape — `StepSpawned` structurally does not
-/// carry them), `usage` is the recorded value (`"unavailable"` today, never
-/// a fabricated number), and nothing is reconstructed. Script-authored
-/// strings (labels) are sanitized HERE, at the terminal seam (rule 7 — the
-/// event file stores them as bounded JSON data).
-fn render_workflow_report(run_id: &str) -> Result<String> {
-    use std::fmt::Write as _;
+/// One `StepSpawned` OCCURRENCE (not deduplicated by step id — a resumed run
+/// that re-executes a straddling member appends a FRESH spawn event for the
+/// same step id, and both the superseded and the live occurrence render, each
+/// annotated) joined with its child run's own recorded evidence.
+struct StepEvidence {
+    step: u64,
+    role: String,
+    child_run_id: String,
+    label: Option<String>,
+    taint: Vec<u64>,
+    serial: bool,
+    codex_residual: bool,
+    /// This occurrence's position in the workflow log — the session-relative
+    /// annotation is computed from it against `last_marker_idx`.
+    spawn_idx: usize,
+    /// The step id's LAST recorded completion in the workflow log (last-wins
+    /// across a resumed session) — shared by every occurrence of that step
+    /// id, matching the pre-refactor behavior exactly.
+    step_completed: bool,
+    step_failed_reason: Option<String>,
+    step_terminal_idx: Option<usize>,
+    /// Whether this specific child run has ANY recorded evidence at all —
+    /// the "spawned" (nothing yet) vs "running" (attempt started, no
+    /// terminal) distinction below.
+    child_log_present: bool,
+    posture: Option<String>,
+    child_grant_digest: Option<String>,
+    outcome: Option<String>,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+    usage: Option<String>,
+    /// Count of `ToolCall`-kind events in the child's OWN log — never the
+    /// machine-global `calls.jsonl` (that dedup is `report_json`'s concern
+    /// for a gateway-routed run; a workflow child's own log is the join
+    /// source here, per the child's `RunLog` alone).
+    tool_calls: usize,
+}
 
+/// The full evidence join for one workflow run — computed ONCE from the
+/// recorded events (RunLog::read is the only read), then rendered as text
+/// ([`render_workflow_report`]) or JSON ([`render_workflow_report_json`]).
+/// Every field traces to a specific recorded event; nothing here is
+/// reconstructed.
+struct WorkflowReportEvidence {
+    run_id: String,
+    workflow: String,
+    workflow_digest: String,
+    grant_digest: String,
+    args_digest: String,
+    max_agents: u32,
+    max_wall_seconds: u64,
+    /// Resume markers in log order: `(ts, replayed_steps)`.
+    resumes: Vec<(u64, u64)>,
+    last_marker_idx: Option<usize>,
+    steps: Vec<StepEvidence>,
+    /// ALL recorded `WorkflowCompleted` terminals, oldest first (unsanitized
+    /// — sanitization is a rendering concern, done at each renderer's own
+    /// terminal seam).
+    terminals: Vec<(String, bool, u64)>,
+}
+
+/// A step's log-recorded completion, if any — `None` means neither
+/// `StepCompleted` nor `StepFailed` has been recorded for that step id yet.
+enum StepTerminal {
+    Completed,
+    Failed(String),
+}
+
+/// Read a workflow run's log and JOIN every step's evidence from its child's
+/// own log via `child_run_id` (the §6 step-3 join-table shape — `StepSpawned`
+/// structurally carries neither grant digest nor posture nor outcome).
+/// Refuses (bails) when the run is not a workflow run at all — same refusal
+/// both renderers surface identically.
+fn collect_workflow_report(run_id: &str) -> Result<WorkflowReportEvidence> {
     let events = RunLog::read(run_id);
     anyhow::ensure!(
         !events.is_empty(),
@@ -1370,17 +1442,6 @@ fn render_workflow_report(run_id: &str) -> Result<String> {
         );
     };
 
-    let mut out = String::new();
-    writeln!(out, "Workflow run {run_id}: '{}'", sanitize_line(&workflow))?;
-    writeln!(out, "  script digest   {workflow_digest}")?;
-    writeln!(out, "  grant digest    {grant_digest}")?;
-    writeln!(out, "  args digest     {args_digest}")?;
-    writeln!(
-        out,
-        "  effective ceilings  max_agents={max_agents} max_wall_seconds={max_wall_seconds}"
-    )?;
-    writeln!(out)?;
-
     // Stage F: resume markers segment the log into sessions — everything
     // after the LAST marker is the newest session's live tail; steps before
     // it were carried forward by replay (or superseded and re-executed).
@@ -1394,40 +1455,32 @@ fn render_workflow_report(run_id: &str) -> Result<String> {
             _ => None,
         })
         .collect();
-    let last_marker = markers.last().map(|(idx, _, _)| *idx);
-    if !markers.is_empty() {
-        writeln!(out, "Resumed {} time(s):", markers.len())?;
-        for (_, ts, replayed) in &markers {
-            writeln!(
-                out,
-                "  at ts={ts}: {replayed} step(s) replayed from the journal (no journaled \
-                 step re-executed)"
-            )?;
-        }
-        writeln!(out)?;
-    }
+    let last_marker_idx = markers.last().map(|(idx, _, _)| *idx);
+    let resumes = markers
+        .iter()
+        .map(|(_, ts, replayed)| (*ts, *replayed))
+        .collect();
 
     // Step completion states, keyed by step id (last-wins, so a re-executed
     // step shows its resumed session's terminal), plus each step's last
     // terminal POSITION for the replayed/superseded distinction below.
-    let mut step_state: HashMap<u64, String> = HashMap::new();
+    let mut step_terminal: HashMap<u64, StepTerminal> = HashMap::new();
     let mut step_terminal_idx: HashMap<u64, usize> = HashMap::new();
     for (idx, event) in events.iter().enumerate() {
         match event {
             RunEvent::StepCompleted { step, .. } => {
-                step_state.insert(*step, "completed".to_string());
+                step_terminal.insert(*step, StepTerminal::Completed);
                 step_terminal_idx.insert(*step, idx);
             }
             RunEvent::StepFailed { step, reason, .. } => {
-                step_state.insert(*step, format!("failed ({})", sanitize_line(reason)));
+                step_terminal.insert(*step, StepTerminal::Failed(reason.clone()));
                 step_terminal_idx.insert(*step, idx);
             }
             _ => {}
         }
     }
 
-    writeln!(out, "Steps:")?;
-    let mut any_steps = false;
+    let mut steps = Vec::new();
     for (idx, event) in events.iter().enumerate() {
         let RunEvent::StepSpawned {
             step,
@@ -1442,101 +1495,72 @@ fn render_workflow_report(run_id: &str) -> Result<String> {
         else {
             continue;
         };
-        any_steps = true;
-        let mut line = format!("  #{step} role={}", sanitize_line(role));
-        // Stage F session annotation, relative to the LAST resume marker: a
-        // spawn after it ran live in the resumed session; a spawn before it
-        // either replayed (its terminal predates the marker) or was
-        // superseded (spawned, never terminated — re-executed live, and its
-        // later spawn event shows the re-execution).
-        if let Some(marker) = last_marker {
-            if idx > marker {
-                line.push_str(" [live, resumed session]");
-            } else if step_terminal_idx.get(step).is_some_and(|t| *t < marker) {
-                line.push_str(" [replayed on resume]");
-            } else {
-                line.push_str(" [superseded — re-executed live on resume]");
-            }
-        }
-        if let Some(label) = label {
-            line.push_str(&format!(" [{}]", sanitize_line(label)));
-        }
-        line.push_str(&format!(" child={child_run_id}"));
-        if *serial {
-            line.push_str(" — serial (config-swap)");
-        }
-        if *codex_residual {
-            line.push_str(" — codex_apps residual (connector layer unfenced on host tier)");
-        }
-        if !taint.is_empty() {
-            let sources: Vec<String> = taint.iter().map(|t| format!("#{t}")).collect();
-            line.push_str(&format!(
-                " — taint: prompt embeds output of {}",
-                sources.join(", ")
-            ));
-        }
-        writeln!(out, "{line}")?;
 
         // The JOIN: this child's own recorded evidence, by run id. Absent
         // pieces are stated absent — evidence or nothing, never assumption.
         let child_events = RunLog::read(child_run_id);
+        let child_log_present = !child_events.is_empty();
         let posture = child_events.iter().find_map(|e| match e {
             RunEvent::AttemptStarted { posture, .. } => Some(posture.clone()),
             _ => None,
         });
-        let child_grant = child_events.iter().find_map(|e| match e {
+        let child_grant_digest = child_events.iter().find_map(|e| match e {
             RunEvent::GrantFrozen { grant_digest, .. } => Some(grant_digest.clone()),
             _ => None,
         });
-        let child_outcome = child_events.iter().rev().find_map(|e| match e {
+        let terminal = child_events.iter().rev().find_map(|e| match e {
             RunEvent::LockedOutcome {
                 outcome,
                 exit_code,
+                duration_ms,
                 usage,
                 ..
-            } => Some((outcome.clone(), *exit_code, usage.clone())),
+            } => Some((outcome.clone(), *exit_code, *duration_ms, usage.clone())),
             _ => None,
         });
-        let (outcome_text, usage_text) = match &child_outcome {
-            Some((outcome, exit_code, usage)) => (
-                match exit_code {
-                    Some(code) => format!("{outcome} (exit {code})"),
-                    None => outcome.clone(),
-                },
-                usage.clone(),
-            ),
-            None => (
-                "no recorded outcome (refused pre-launch or interrupted)".to_string(),
-                "unavailable".to_string(),
-            ),
+        let tool_calls = child_events
+            .iter()
+            .filter(|e| matches!(e, RunEvent::ToolCall { .. }))
+            .count();
+
+        let (step_completed, step_failed_reason) = match step_terminal.get(step) {
+            Some(StepTerminal::Completed) => (true, None),
+            Some(StepTerminal::Failed(reason)) => (false, Some(reason.clone())),
+            None => (false, None),
         };
-        writeln!(
-            out,
-            "     child: grant={} posture={} outcome={} usage={}",
-            child_grant.as_deref().unwrap_or("not frozen"),
-            posture.as_deref().unwrap_or("unrecorded"),
-            outcome_text,
-            usage_text,
-        )?;
-        writeln!(
-            out,
-            "     step:  {}",
-            step_state
-                .get(step)
-                .map(String::as_str)
-                .unwrap_or("no completion recorded (interrupted)")
-        )?;
+        let (outcome, exit_code, duration_ms, usage) = match terminal {
+            Some((outcome, exit_code, duration_ms, usage)) => {
+                (Some(outcome), exit_code, Some(duration_ms), Some(usage))
+            }
+            None => (None, None, None, None),
+        };
+
+        steps.push(StepEvidence {
+            step: *step,
+            role: role.clone(),
+            child_run_id: child_run_id.clone(),
+            label: label.clone(),
+            taint: taint.clone(),
+            serial: *serial,
+            codex_residual: *codex_residual,
+            spawn_idx: idx,
+            step_completed,
+            step_failed_reason,
+            step_terminal_idx: step_terminal_idx.get(step).copied(),
+            child_log_present,
+            posture,
+            child_grant_digest,
+            outcome,
+            exit_code,
+            duration_ms,
+            usage,
+            tool_calls,
+        });
     }
-    if !any_steps {
-        writeln!(out, "  (no steps spawned)")?;
-    }
-    writeln!(out)?;
 
     // ALL recorded terminals, oldest first: the last is the run's outcome;
     // earlier ones are stated too (a log carries more than one after a
     // resume, or on the documented done/watchdog_kill boundary race).
-    // `outcome` is launcher-authored on a genuine log, but the log is
-    // editable — sanitized at this terminal seam like every other field.
     let terminals: Vec<(String, bool, u64)> = events
         .iter()
         .filter_map(|e| match e {
@@ -1545,18 +1569,156 @@ fn render_workflow_report(run_id: &str) -> Result<String> {
                 exhausted,
                 duration_ms,
                 ..
-            } => Some((sanitize_line(outcome), *exhausted, *duration_ms)),
+            } => Some((outcome.clone(), *exhausted, *duration_ms)),
             _ => None,
         })
         .collect();
-    match terminals.last() {
+
+    Ok(WorkflowReportEvidence {
+        run_id: run_id.to_string(),
+        workflow,
+        workflow_digest,
+        grant_digest,
+        args_digest,
+        max_agents,
+        max_wall_seconds,
+        resumes,
+        last_marker_idx,
+        steps,
+        terminals,
+    })
+}
+
+/// Everything rendered is FROM THE RECORD (see [`collect_workflow_report`]):
+/// child grant digests, postures, and outcomes are JOINED from each child's
+/// own run log via `child_run_id`, `usage` is the recorded value
+/// (`"unavailable"` today, never a fabricated number), and nothing is
+/// reconstructed. Script-authored strings (labels) are sanitized HERE, at
+/// the terminal seam (rule 7 — the event file stores them as bounded JSON
+/// data).
+fn render_workflow_report(run_id: &str) -> Result<String> {
+    use std::fmt::Write as _;
+
+    let ev = collect_workflow_report(run_id)?;
+
+    let mut out = String::new();
+    writeln!(
+        out,
+        "Workflow run {}: '{}'",
+        ev.run_id,
+        sanitize_line(&ev.workflow)
+    )?;
+    writeln!(out, "  script digest   {}", ev.workflow_digest)?;
+    writeln!(out, "  grant digest    {}", ev.grant_digest)?;
+    writeln!(out, "  args digest     {}", ev.args_digest)?;
+    writeln!(
+        out,
+        "  effective ceilings  max_agents={} max_wall_seconds={}",
+        ev.max_agents, ev.max_wall_seconds
+    )?;
+    writeln!(out)?;
+
+    if !ev.resumes.is_empty() {
+        writeln!(out, "Resumed {} time(s):", ev.resumes.len())?;
+        for (ts, replayed) in &ev.resumes {
+            writeln!(
+                out,
+                "  at ts={ts}: {replayed} step(s) replayed from the journal (no journaled \
+                 step re-executed)"
+            )?;
+        }
+        writeln!(out)?;
+    }
+
+    writeln!(out, "Steps:")?;
+    if ev.steps.is_empty() {
+        writeln!(out, "  (no steps spawned)")?;
+    }
+    for step in &ev.steps {
+        let mut line = format!("  #{} role={}", step.step, sanitize_line(&step.role));
+        // Stage F session annotation, relative to the LAST resume marker: a
+        // spawn after it ran live in the resumed session; a spawn before it
+        // either replayed (its terminal predates the marker) or was
+        // superseded (spawned, never terminated — re-executed live, and its
+        // later spawn event shows the re-execution).
+        if let Some(marker) = ev.last_marker_idx {
+            if step.spawn_idx > marker {
+                line.push_str(" [live, resumed session]");
+            } else if step.step_terminal_idx.is_some_and(|t| t < marker) {
+                line.push_str(" [replayed on resume]");
+            } else {
+                line.push_str(" [superseded — re-executed live on resume]");
+            }
+        }
+        if let Some(label) = &step.label {
+            line.push_str(&format!(" [{}]", sanitize_line(label)));
+        }
+        line.push_str(&format!(" child={}", step.child_run_id));
+        if step.serial {
+            line.push_str(" — serial (config-swap)");
+        }
+        if step.codex_residual {
+            line.push_str(" — codex_apps residual (connector layer unfenced on host tier)");
+        }
+        if !step.taint.is_empty() {
+            let sources: Vec<String> = step.taint.iter().map(|t| format!("#{t}")).collect();
+            line.push_str(&format!(
+                " — taint: prompt embeds output of {}",
+                sources.join(", ")
+            ));
+        }
+        writeln!(out, "{line}")?;
+
+        let (outcome_text, usage_text) = match (&step.outcome, &step.usage) {
+            (Some(outcome), Some(usage)) => (
+                match step.exit_code {
+                    Some(code) => format!("{outcome} (exit {code})"),
+                    None => outcome.clone(),
+                },
+                usage.clone(),
+            ),
+            _ => (
+                "no recorded outcome (refused pre-launch or interrupted)".to_string(),
+                "unavailable".to_string(),
+            ),
+        };
+        writeln!(
+            out,
+            "     child: grant={} posture={} outcome={} usage={}",
+            step.child_grant_digest.as_deref().unwrap_or("not frozen"),
+            step.posture.as_deref().unwrap_or("unrecorded"),
+            outcome_text,
+            usage_text,
+        )?;
+        writeln!(
+            out,
+            "     step:  {}",
+            if step.step_completed {
+                "completed".to_string()
+            } else if let Some(reason) = &step.step_failed_reason {
+                format!("failed ({})", sanitize_line(reason))
+            } else {
+                "no completion recorded (interrupted)".to_string()
+            }
+        )?;
+    }
+    writeln!(out)?;
+
+    // `outcome` is launcher-authored on a genuine log, but the log is
+    // editable — sanitized at this terminal seam like every other field.
+    match ev.terminals.last() {
         Some((outcome, exhausted, duration_ms)) => {
-            writeln!(out, "Outcome: {outcome} ({duration_ms} ms)")?;
-            for (earlier, _, earlier_ms) in &terminals[..terminals.len() - 1] {
+            writeln!(
+                out,
+                "Outcome: {} ({duration_ms} ms)",
+                sanitize_line(outcome)
+            )?;
+            for (earlier, _, earlier_ms) in &ev.terminals[..ev.terminals.len() - 1] {
                 writeln!(
                     out,
-                    "  earlier terminal: {earlier} ({earlier_ms} ms) — superseded by a later \
-                     session or the recorded boundary race"
+                    "  earlier terminal: {} ({earlier_ms} ms) — superseded by a later \
+                     session or the recorded boundary race",
+                    sanitize_line(earlier)
                 )?;
             }
             if *exhausted {
@@ -1582,6 +1744,280 @@ fn render_workflow_report(run_id: &str) -> Result<String> {
     writeln!(out, "Honest posture (§12.2, verbatim):")?;
     writeln!(out, "{}", agentstack_workflow::POSTURE_LABEL)?;
     Ok(out)
+}
+
+/// The JSON twin of [`render_workflow_report`] — the SAME join
+/// ([`collect_workflow_report`]), reshaped for scripting rather than a
+/// human. Deliberately narrower than the text render: it carries the fields
+/// a caller would script against (identity, ceilings, per-step outcome
+/// evidence) and omits text-only presentation (resume-marker prose, the
+/// superseded/replayed/live session annotation, the verbatim honesty
+/// block) — additive later if a scripting need for those ever appears.
+fn render_workflow_report_json(run_id: &str) -> Result<String> {
+    let ev = collect_workflow_report(run_id)?;
+
+    // Top-level `outcome` is a normalized 3-way slug, distinct from the raw
+    // recorded strings ("done", "failed:<kind>", "wall_deadline",
+    // "engine_invariant_breach", "watchdog_kill"): "completed" only for the
+    // literal "done" terminal, "failed" for every other terminal shape, and
+    // "running" when no `WorkflowCompleted` has been recorded yet (in which
+    // case `duration_ms` is also null — there is no terminal to read it
+    // from).
+    let (outcome, exhausted, duration_ms): (&str, bool, Option<u64>) = match ev.terminals.last() {
+        Some((raw, exhausted, duration_ms)) => (
+            if raw == "done" { "completed" } else { "failed" },
+            *exhausted,
+            Some(*duration_ms),
+        ),
+        None => ("running", false, None),
+    };
+
+    let steps: Vec<serde_json::Value> = ev
+        .steps
+        .iter()
+        .map(|step| {
+            // "completed"/"failed" come from the WORKFLOW log's own
+            // completion record for this step id (authoritative — it is
+            // what resolved or rejected the `agent()` promise); absent
+            // that, "running" vs "spawned" is read from whether THIS
+            // occurrence's child has any recorded evidence at all yet.
+            let state = if step.step_completed {
+                "completed"
+            } else if step.step_failed_reason.is_some() {
+                "failed"
+            } else if step.child_log_present {
+                "running"
+            } else {
+                "spawned"
+            };
+            serde_json::json!({
+                "step": step.step,
+                "role": sanitize_line(&step.role),
+                "label": step.label.as_deref().map(sanitize_line),
+                "child_run_id": step.child_run_id,
+                "state": state,
+                "serial": step.serial,
+                "taint": step.taint,
+                "posture": step.posture,
+                "grant_digest": step.child_grant_digest,
+                "outcome": step.outcome,
+                "exit_code": step.exit_code,
+                "tool_calls": step.tool_calls,
+                "duration_ms": step.duration_ms,
+            })
+        })
+        .collect();
+
+    Ok(serde_json::to_string_pretty(&serde_json::json!({
+        "run": ev.run_id,
+        "workflow": sanitize_line(&ev.workflow),
+        "workflow_digest": ev.workflow_digest,
+        "grant_digest": ev.grant_digest,
+        "args_digest": ev.args_digest,
+        // No top-level "posture" concept is recorded for a workflow run
+        // (only a LOCKED CHILD carries `AttemptStarted.posture`) — always
+        // null; the per-step `posture` field above is where this signal
+        // actually lives, once per child.
+        "posture": None::<String>,
+        "outcome": outcome,
+        "exhausted": exhausted,
+        "duration_ms": duration_ms,
+        "max_agents": ev.max_agents,
+        "max_wall_seconds": ev.max_wall_seconds,
+        "steps": steps,
+    }))?)
+}
+
+/// One `[workflows.*]` manifest entry's admission status — the row `list`
+/// prints or emits.
+struct WorkflowListRow {
+    name: String,
+    /// Always `true`: every row in this list comes from an entry that IS
+    /// declared in the manifest — `list` never invents undeclared entries.
+    declared: bool,
+    trusted: bool,
+    lock_status: &'static str,
+    roles: Vec<String>,
+    max_agents: u32,
+    max_wall_seconds: u64,
+    checksum: Option<String>,
+}
+
+/// `agentstack workflow list` — every declared `[workflows.*]` entry with its
+/// admission status, READ-ONLY and refusal-free: unlike `run` (which gates
+/// the named workflow through the full W1 admission choke point,
+/// [`crate::workflows::normalized_workflows`], and refuses the WHOLE call on
+/// the first untrusted or drifted entry), `list` must surface every declared
+/// name regardless of admission state — so it does not call that choke
+/// point. Trust is checked once (bundle-wide, rule 3's gate), and each
+/// entry's lock status is resolved independently via
+/// [`crate::resolve::workflow_lock_status`]'s per-entry building blocks, so
+/// one entry's drift or unresolvable source never hides its siblings.
+///
+/// Untrusted/drifted entries ARE listed (with `trusted: false` and/or a
+/// non-`"matches"` `lock_status`) — nothing here makes such an entry
+/// runnable; `run` still re-gates independently through the choke point.
+pub fn list(manifest_dir: Option<&Path>, args: &crate::cli::WorkflowListArgs) -> Result<()> {
+    let rows = collect_workflow_list_rows(manifest_dir)?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&workflow_list_json(&rows))?
+        );
+    } else {
+        print_workflow_list_table(&rows);
+    }
+    Ok(())
+}
+
+/// The row-gathering half of `list` (the testable seam): every declared
+/// `[workflows.*]` entry, admission state annotated, never gated on it.
+fn collect_workflow_list_rows(manifest_dir: Option<&Path>) -> Result<Vec<WorkflowListRow>> {
+    let ctx = super::load(manifest_dir)?;
+    let base = crate::manifest::project_root_of(&ctx.dir);
+    let machine_policy = crate::machine_policy::load()?;
+    let lock = crate::lock::Lock::load(&ctx.dir)?;
+    let store = crate::store::Store::default_store();
+
+    // Trust is a bundle-wide grant (rule 3), not per-workflow — one check
+    // covers every declared entry. `Changed` (trusted, then edited) is NOT
+    // currently trusted for running, same as `Untrusted`.
+    let trusted = matches!(
+        crate::trust::check(&base),
+        crate::trust::TrustState::Trusted
+    );
+
+    let mut rows = Vec::new();
+    for (name, wf) in &ctx.loaded.manifest.workflows {
+        let resolved = crate::resolve::resolve_workflow_entry(
+            name,
+            wf,
+            &ctx.dir,
+            &store,
+            crate::resolve::ResolveMode::NoFetch,
+        );
+        let (roles, checksum, lock_status) = match &resolved {
+            Ok(r) => {
+                let status = crate::resolve::classify_workflow(
+                    name,
+                    &r.checksum,
+                    &r.roles,
+                    r.rev.as_deref(),
+                    &lock,
+                );
+                (
+                    r.roles.clone(),
+                    Some(r.checksum.clone()),
+                    lock_status_slug(&status),
+                )
+            }
+            // Unresolvable (offline git, missing/symlinked path, sourceless):
+            // never a failure for a read path — state it and move on, the
+            // declared roles are the only thing left to report.
+            Err(crate::resolve::WorkflowResolveError::NotAvailableOffline { .. }) => {
+                (wf.roles_sorted_unique(), None, "unavailable")
+            }
+            Err(_) => (wf.roles_sorted_unique(), None, "resolve_failed"),
+        };
+
+        // Effective ceilings: same min(request, machine cap) rule as
+        // `normalized_workflows` (rule 2) — a request can only narrow the
+        // machine cap, never raise it. Computed independently of admission:
+        // an untrusted/drifted entry still has a well-defined effective
+        // ceiling, it just can't run yet.
+        let requested_agents = wf
+            .max_agents
+            .unwrap_or(crate::workflows::DEFAULT_MAX_AGENTS);
+        let max_agents = machine_policy
+            .workflows
+            .max_agents
+            .map_or(requested_agents, |cap| requested_agents.min(cap));
+        let requested_wall = wf
+            .max_wall_seconds
+            .unwrap_or(crate::workflows::DEFAULT_MAX_WALL_SECONDS);
+        let max_wall_seconds = machine_policy
+            .workflows
+            .max_wall_seconds
+            .map_or(requested_wall, |cap| requested_wall.min(cap));
+
+        rows.push(WorkflowListRow {
+            name: name.clone(),
+            declared: true,
+            trusted,
+            lock_status,
+            roles,
+            max_agents,
+            max_wall_seconds,
+            checksum,
+        });
+    }
+    Ok(rows)
+}
+
+/// The JSON shape for `workflow list --json`: `{"workflows": [...]}`.
+/// Manifest content is untrusted input (rule 7) even when listing an
+/// untrusted bundle by design — sanitized the same as any other
+/// terminal-bound field, though JSON's own control-character escaping
+/// already makes this belt and suspenders.
+fn workflow_list_json(rows: &[WorkflowListRow]) -> serde_json::Value {
+    let json_rows: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "name": sanitize_line(&r.name),
+                "declared": r.declared,
+                "trusted": r.trusted,
+                "lock_status": r.lock_status,
+                "roles": r.roles.iter().map(|s| sanitize_line(s)).collect::<Vec<_>>(),
+                "max_agents": r.max_agents,
+                "max_wall_seconds": r.max_wall_seconds,
+                "checksum": r.checksum,
+            })
+        })
+        .collect();
+    serde_json::json!({ "workflows": json_rows })
+}
+
+/// Map a per-entry [`crate::resolve::WorkflowLockStatus`] to the `list`
+/// surface's three-way slug: the fine-grained drift REASON (checksum vs
+/// roles vs rev) is deliberately collapsed to `"drifted"` here — `list` is a
+/// status overview, and `agentstack lock`/`doctor` already report the
+/// specific drift reason for a caller who needs it.
+fn lock_status_slug(status: &crate::resolve::WorkflowLockStatus) -> &'static str {
+    use crate::resolve::WorkflowLockStatus::*;
+    match status {
+        Matches => "matches",
+        MissingLockEntry => "missing",
+        ChecksumDrift { .. } | RolesDrift { .. } | RevDrift { .. } => "drifted",
+        NotAvailableOffline { .. } => "unavailable",
+        ResolveFailed { .. } => "resolve_failed",
+    }
+}
+
+fn print_workflow_list_table(rows: &[WorkflowListRow]) {
+    if rows.is_empty() {
+        println!("(no workflows declared)");
+        return;
+    }
+    println!(
+        "{:<24} {:<8} {:<14} {:<8} {:<10} ROLES",
+        "NAME", "TRUSTED", "LOCK", "AGENTS", "WALL(s)"
+    );
+    for r in rows {
+        println!(
+            "{:<24} {:<8} {:<14} {:<8} {:<10} {}",
+            sanitize_line(&r.name),
+            r.trusted,
+            r.lock_status,
+            r.max_agents,
+            r.max_wall_seconds,
+            r.roles
+                .iter()
+                .map(|s| sanitize_line(s))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2111,6 +2547,74 @@ mod tests {
                 report.contains(agentstack_workflow::POSTURE_LABEL),
                 "the honesty block is the exported const, verbatim"
             );
+        });
+    }
+
+    /// `workflow report --json`: the SAME join as the text render, shaped
+    /// for scripting — top-level identity/ceilings/outcome, and each step's
+    /// grant digest joined from the child's own log, with the recorded exit
+    /// code and a completed state.
+    #[cfg(unix)]
+    #[test]
+    fn report_json_matches_recorded_join_shape() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const outs = await parallel([\n\
+                   () => agent('emit-json', { role: 'w', label: 'map:a' }),\n\
+                   () => agent('emit-json', { role: 'w', label: 'map:b' }),\n\
+                 ]);\n\
+                 return outs;",
+            );
+            run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+
+            let (id, events) = workflow_run_events(home);
+            let child_ids: Vec<String> = events
+                .iter()
+                .filter_map(|e| match e {
+                    RunEvent::StepSpawned { child_run_id, .. } => Some(child_run_id.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(child_ids.len(), 2);
+
+            let json = render_workflow_report_json(&id).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(value["run"], id);
+            assert_eq!(value["workflow"], "t");
+            assert!(value["workflow_digest"].is_string());
+            assert!(value["grant_digest"].is_string());
+            assert!(value["args_digest"].is_string());
+            assert_eq!(value["posture"], serde_json::Value::Null);
+            assert_eq!(value["outcome"], "completed");
+            assert_eq!(value["exhausted"], false);
+            assert!(value["duration_ms"].is_u64());
+            assert_eq!(value["max_agents"], 25); // SIMPLE_MANIFEST requests none: the built-in default
+            assert_eq!(value["max_wall_seconds"], 1800);
+
+            let steps = value["steps"].as_array().unwrap();
+            assert_eq!(steps.len(), 2);
+            for step in steps {
+                let child = step["child_run_id"].as_str().unwrap();
+                let grant = RunLog::read(child)
+                    .into_iter()
+                    .find_map(|e| match e {
+                        RunEvent::GrantFrozen { grant_digest, .. } => Some(grant_digest),
+                        _ => None,
+                    })
+                    .expect("child froze its grant");
+                assert_eq!(step["grant_digest"], grant);
+                assert_eq!(step["state"], "completed");
+                assert_eq!(step["outcome"], "completed");
+                assert_eq!(step["exit_code"], 0);
+                assert_eq!(step["role"], "w");
+                assert_eq!(step["serial"], false);
+                assert_eq!(step["tool_calls"], 0);
+                assert!(step["label"].as_str().unwrap().starts_with("map:"));
+            }
         });
     }
 
@@ -2776,5 +3280,49 @@ mod tests {
         assert!(!line.contains("[2J"), "script CSI survived: {line:?}");
         assert!(!line.contains('\u{7}'), "script bell survived: {line:?}");
         assert!(line.contains("evilpayload"), "{line:?}");
+    }
+
+    /// `workflow list --json`: a pinned-but-not-yet-trusted entry is STILL
+    /// listed (`trusted: false`) rather than refused — the whole point of
+    /// this surface versus `run`'s `normalized_workflows` choke point, which
+    /// bails the entire call on the first untrusted entry. Trusting the same
+    /// bundle flips `trusted` to `true` with the lock status unchanged.
+    #[test]
+    fn list_json_surfaces_untrusted_and_trusted_states() {
+        workflow_fixture(|_home, proj| {
+            proj.child("workflows/main.js")
+                .write_str("export const meta = { roles: ['w'] };\nreturn 1;")
+                .unwrap();
+            proj.child("agentstack.toml")
+                .write_str(SIMPLE_MANIFEST)
+                .unwrap();
+            let manifest: crate::manifest::Manifest = toml::from_str(SIMPLE_MANIFEST).unwrap();
+            let store = crate::store::Store::default_store();
+            crate::commands::lock::record_workflow_pins(proj.path(), &manifest, &store).unwrap();
+
+            let rows = collect_workflow_list_rows(Some(proj.path())).unwrap();
+            assert_eq!(rows.len(), 1);
+            let json = workflow_list_json(&rows);
+            let entry = &json["workflows"][0];
+            assert_eq!(entry["name"], "t");
+            assert_eq!(entry["declared"], true);
+            assert_eq!(
+                entry["trusted"], false,
+                "pinned but not yet trusted — still listed, not refused"
+            );
+            assert_eq!(entry["lock_status"], "matches");
+            assert_eq!(entry["roles"], serde_json::json!(["w"]));
+            assert_eq!(entry["max_agents"], 25);
+            assert_eq!(entry["max_wall_seconds"], 1800);
+            assert!(entry["checksum"].is_string());
+
+            // Trust the same bundle: the entry flips to trusted, lock
+            // status untouched (the pinned bytes never moved).
+            crate::trust::trust(proj.path()).unwrap();
+            let rows = collect_workflow_list_rows(Some(proj.path())).unwrap();
+            let json = workflow_list_json(&rows);
+            assert_eq!(json["workflows"][0]["trusted"], true);
+            assert_eq!(json["workflows"][0]["lock_status"], "matches");
+        });
     }
 }
