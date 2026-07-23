@@ -226,20 +226,43 @@ This is the primary graphical path, not an optional dashboard.
 
 ### 1.4 Progressive-disclosure acceptance
 
-- [ ] Use only Setup, Toolset, Status, and Undo as beginner navigation concepts.
-- [ ] Replace unexplained internal nouns in first-run UI with outcome language.
-- [ ] Verify ordinary local import/apply does not require Docker, policy,
-  gateway, confinement, or workflow decisions.
-- [ ] When unfamiliar repository content triggers review, show the exact
-  content surface and why review is required.
-- [ ] For every surfaced denial, render:
-  - what action was blocked;
-  - what boundary blocked it;
-  - what is being protected;
-  - one exact safe next action;
-  - a details link for the matching rule and enforcement limits.
-- [ ] Put stronger execution modes behind “More protection” after normal setup,
-  with honest cost/coverage labels.
+- [x] Use only Setup, Toolset, Status, and Undo as beginner navigation concepts
+  (2026-07-23, t3code panel restructure): the tab bar is gone — the Overview is
+  the single beginner surface (status chip, manifest/checkup/secrets/library
+  outcomes, Toolsets card, Undo), and Workflow/Activity/Policy became
+  back-navigable advanced views one tap deeper.
+- [x] Replace unexplained internal nouns in first-run UI with outcome language
+  (2026-07-23): the wizard's delivery-mode picker and orientation drop
+  "gateway"/"trust-gated" for outcome phrasing ("nothing on disk — served live
+  to your CLIs after review"); the panel's "Doctor" row reads "Checkup", the
+  "Gateway" row became "Live serving" inside More protection, and guard/
+  sandbox/workflow facts left the first-run overview.
+- [x] Verify ordinary local import/apply does not require Docker, policy,
+  gateway, confinement, or workflow decisions (2026-07-23:
+  `ordinary_journey_vocab` witnesses the scripted init → apply --write →
+  doctor journey completing prompt-free with zero advanced vocabulary; the
+  unconfigured machine-policy doctor line joined the hidden-by-default
+  sections to make that true).
+- [x] When unfamiliar repository content triggers review, show the exact
+  content surface and why review is required (already shipped in the t3code
+  trust review: named servers with their run/contact targets, secret names,
+  named skills/workflows/extensions/instructions, and the state sentence
+  explaining inertness; `agentstack trust` prints the same surface in the
+  terminal).
+- [x] For every surfaced denial, render what was blocked, the boundary, what is
+  protected, one exact safe next action, and a details link (2026-07-23:
+  AgentstackDenialCard now renders all five — blocked command, matching
+  rule/source sentence, a derived "protecting" line, the safe next step, and a
+  Details disclosure with the rule, dimension, source, and honest coverage
+  limits). CLI-side refusals continue to carry what/why/next in their message
+  text; a structured JSON denial envelope for UI rendering remains the Slice 3
+  design in `docs/design/ui-control-plane.md`.
+- [x] Put stronger execution modes behind “More protection” after normal setup,
+  with honest cost/coverage labels (2026-07-23: the panel's More protection
+  view lists guard, machine policy, live serving, locked runs, and
+  sandbox/lockdown — each with live state where readable, what it covers, and
+  what it costs, e.g. "host process — not kernel isolation", "needs Docker ·
+  slower start").
 - [ ] Test the first-run copy with users who have not read the security docs.
 
 ### 1.5 First-value proof

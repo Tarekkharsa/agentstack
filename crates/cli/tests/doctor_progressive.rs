@@ -47,7 +47,10 @@ fn unused_feature_sections_are_tagged_irrelevant_but_still_reported() {
     let report = doctor::collect(Some(&proj)).unwrap();
 
     // Unused features are tagged irrelevant — but their sections still exist
-    // in the JSON: checks ran, nothing was skipped.
+    // in the JSON: checks ran, nothing was skipped. "Machine policy" joins
+    // them only in the fully-unused case: no machine policy file AND no
+    // project [policy] (Stage 1.4 — the ordinary journey shows no policy
+    // vocabulary until the feature exists).
     for title in [
         "Zero-files gateway",
         "Secrets",
@@ -57,6 +60,7 @@ fn unused_feature_sections_are_tagged_irrelevant_but_still_reported() {
         "Skills",
         "Content scan",
         "Reproducibility",
+        "Machine policy",
     ] {
         assert!(
             !relevant(&report, title),
@@ -64,8 +68,36 @@ fn unused_feature_sections_are_tagged_irrelevant_but_still_reported() {
         );
     }
 
-    // The baseline and the machine-policy summary stay relevant always.
+    // The baseline stays relevant always.
     assert!(relevant(&report, "Adapters & CLIs"));
+}
+
+#[test]
+fn machine_policy_stays_relevant_once_a_machine_policy_exists() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join(".agentstack")).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    // A machine manifest with a policy layer: the one-word summary is now a
+    // real fact about this machine and must never be hidden as noise.
+    fs::write(
+        home.join(".agentstack/agentstack.toml"),
+        "version = 1\n[policy.egress]\n\"*\" = [\"!*\"]\n",
+    )
+    .unwrap();
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
+    )
+    .unwrap();
+
+    let report = doctor::collect(Some(&proj)).unwrap();
     assert!(relevant(&report, "Machine policy"));
 }
 

@@ -38,19 +38,21 @@ impl Mode {
     /// A terse descriptor for the one-line orientation display.
     pub(crate) fn short(self) -> &'static str {
         match self {
-            Mode::Static => "rendered configs on disk, kept out of git",
-            Mode::CleanAtRest => "materialized only during a session",
-            Mode::ZeroFiles => "served live over the gateway, trust-gated",
+            Mode::Static => "config files on disk, kept out of git",
+            Mode::CleanAtRest => "active only while you work, then restored",
+            Mode::ZeroFiles => "nothing on disk — served live to your CLIs after review",
         }
     }
 
     /// The full one-line help (docs/design P4 wording), shown when setup
-    /// presents the three modes as a choice.
+    /// presents the three modes as a choice. Outcome language first (Stage 1.4):
+    /// the gateway/trust mechanics stay in the docs and the commands themselves,
+    /// not in the first-run copy.
     pub(crate) fn help(self) -> &'static str {
         match self {
-            Mode::Static => "Rendered configs stay on disk, kept out of git. Works with every CLI, zero moving parts. This is what you have now.",
-            Mode::CleanAtRest => "Nothing generated exists between sessions; `agentstack session start` materializes your profile and `session end` reverts it. Your repo stays pristine for git.",
-            Mode::ZeroFiles => "Nothing is ever written; the gateway serves servers and skills live over MCP, trust-gated per repo. Best when you work across many repos.",
+            Mode::Static => "Config files stay on disk, kept out of git. Works with every CLI, zero moving parts. This is what you have now.",
+            Mode::CleanAtRest => "Use a toolset temporarily: `agentstack session start` activates it and `session end` puts every file back exactly as it was. Nothing stays in your repo between sessions.",
+            Mode::ZeroFiles => "Nothing is ever written; your CLIs fetch servers and skills live from agentstack, and each repo stays inert until you review it once. Best when you work across many repos.",
         }
     }
 }

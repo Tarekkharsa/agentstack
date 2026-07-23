@@ -376,9 +376,14 @@ so the bridge is **not** being built against the current surface.
 
 ### Slice 3 — contextual safety
 
-- Review unfamiliar project content.
-- Structured denial cards.
-- More protection entry point.
+- Review unfamiliar project content (shipped: the trust review names the
+  declared servers/targets, secrets, skills, workflows, extensions, and
+  instructions, with the consequence sentence).
+- Structured denial cards (partially shipped, Stage 1.4: guard denials render
+  the full five-field card by parsing the guard's stable reason string; the
+  CLI-emitted JSON denial envelope above remains unimplemented design).
+- More protection entry point (shipped, Stage 1.4: honest cost/coverage rows
+  for guard, machine policy, live serving, locked runs, sandbox/lockdown).
 - Honest enforcement/posture detail.
 
 ### Deferred

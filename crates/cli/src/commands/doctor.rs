@@ -1376,15 +1376,21 @@ fn run_checks(
     // "Policy" section shows whenever EITHER has something to report.
     let machine_policy = crate::machine_policy::inspect();
     // Machine-policy summary: one honest word (open / mixed / restrictive) for
-    // how locked-down THIS machine's own firewall layer is — shown even when
-    // there's no machine policy at all, because "open" is the case most worth
-    // stating out loud. ("posture" is reserved for the per-run enforcement
-    // label — HOST / ADVISORY etc. — so this section deliberately avoids it.)
+    // how locked-down THIS machine's own firewall layer is. A machine that
+    // HAS a policy file always sees this — "open" is the case most worth
+    // stating out loud. A machine with no file at all ("unconfigured") and a
+    // project declaring no [policy] hasn't used the feature, so the line joins
+    // the hidden-by-default sections (progressive disclosure; `--all` shows
+    // it). ("posture" is reserved for the per-run enforcement label — HOST /
+    // ADVISORY etc. — so this section deliberately avoids it.)
     // Borrows `machine_policy`; the Policy section below still
     // moves it into `check_machine_policy`.
     report.section("Machine policy");
     let (posture, why) = classify_machine_posture(&machine_policy);
     report.line(Level::Ok, format!("{posture} — {why}"));
+    if posture == "unconfigured" && manifest.policy.is_empty() {
+        report.mark_irrelevant();
+    }
     if !manifest.policy.is_empty() || machine_policy_reports(&machine_policy) {
         report.section("Policy");
         if !manifest.policy.is_empty() {

@@ -417,8 +417,8 @@ fn run_zero_files() -> Result<()> {
 
     println!("\n{}", "Zero-files".bold());
     println!(
-        "  {} nothing is written to disk; the gateway serves servers and skills\n\
-         \x20   live over MCP, trust-gated per repo.",
+        "  {} nothing is written to disk; your CLIs fetch servers and skills\n\
+         \x20   live from agentstack — each repo stays inert until you review it.",
         "·".dimmed()
     );
 
@@ -804,7 +804,7 @@ fn mode_switch_plan(
                 "agentstack gateway connect --all".into(),
                 "agentstack trust .".into(),
             ],
-            "Register the gateway once per harness, then trust this repo so it serves capabilities live.",
+            "Connect your CLIs to agentstack once, then review this repo so its capabilities serve live.",
         ),
     }
 }
