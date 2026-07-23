@@ -136,10 +136,22 @@ with the pending §9.3 re-run in the experimental workflow lane.
 - [x] Make the README lead with “one agent setup across every coding CLI.”
 - [x] Align the website hero and contributor orientation with the new product
   definition.
-- [ ] Review the remaining public documentation for security-first opening copy
-  and move deep security material to the point where it becomes relevant.
-- [ ] Keep the enforcement matrix, architecture, and security documentation
-  intact as the authoritative deeper layer.
+- [x] Review the remaining public documentation for security-first opening copy
+  and move deep security material to the point where it becomes relevant
+  (2026-07-23, full public-page sweep): the tutorial's first lesson now opens
+  with the portability promise (the threat framing moved after it and into the
+  Guard/Trust lessons where it belongs); the demos page leads with "the
+  promises, proven" and the first-value demo ahead of the malicious-repo one;
+  workflows.md defines what a workflow does before its preview/governance
+  status; choose.md asks "where do files live" before "how much protection";
+  the docs-hub and cookbook openings lead with the outcome instead of
+  checksum/sandbox clauses. Task-titled security how-tos (trust-a-repo,
+  lock-down-a-run) keep their topic-appropriate openings.
+- [x] Keep the enforcement matrix, architecture, and security documentation
+  intact as the authoritative deeper layer (verified in the same sweep:
+  ENFORCEMENT.md and ARCHITECTURE.md are untouched, the retired-page redirect
+  stubs route to them, and every simplified opening links there for the
+  precise version).
 
 ### 1.2 One recommended onboarding journey
 

@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Governed workflows — agentstack</title>
-<meta name="description" content="Status: preview. The full path ships today: declare, pin, and trust a workflow, run it end to end with agentstack workflow run, render its evidence tree wi">
+<meta name="description" content="A workflow is one script that fans a task out to many agent runs and composes their results — the map/reduce shape, but every worker is a governed agent ru">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/workflows.html">
@@ -230,8 +230,8 @@
 </aside>
   <main>
 <h1 id="governed-workflows">Governed workflows</h1>
-<p><strong>Status: preview.</strong> The full path ships today: declare, pin, and trust a workflow, run it end to end with <code>agentstack workflow run</code>, render its evidence tree with <code>agentstack workflow report</code>, and resume an interrupted run with <code>--resume</code> (replay from the recorded journal — byte-identical script and args, or it refuses). Every agent step runs as a governed <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.html">locked run</a>. The commands stay preview-labelled while the interpreter boundary awaits its independent security review — the posture, not the feature set, is what's provisional.</p>
 <p>A <strong>workflow</strong> is one script that fans a task out to many agent runs and composes their results — the map/reduce shape, but every worker is a governed agent run instead of a bare process. One review chore becomes: run a reader over each file, synthesize the findings, then run an independent verifier to refute the weak ones. Claude Code has an ungoverned version of this today; AgentStack's version pins the orchestration code and gives every step its own reviewed authority.</p>
+<p><strong>Status: preview.</strong> The full path ships today: declare, pin, and trust a workflow, run it end to end with <code>agentstack workflow run</code>, render its evidence tree with <code>agentstack workflow report</code>, and resume an interrupted run with <code>--resume</code> (replay from the recorded journal — byte-identical script and args, or it refuses). Every agent step runs as a governed <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.html">locked run</a>. The commands stay preview-labelled while the interpreter boundary awaits its independent security review — the posture, not the feature set, is what's provisional.</p>
 <h2 id="why-a-workflow-needs-governing">Why a workflow needs governing<a class="hlink" href="#why-a-workflow-needs-governing" aria-label="Link to this section">#</a></h2>
 <p>A workflow is <strong>authority, multiplied</strong>: one command spawns N agent runs, each with tool access, filesystem reach, and token spend, with the control flow decided at runtime by script code. That is exactly the thing a security tool should not run on trust. So AgentStack treats the orchestration script the same way it treats any other executable content from a repo — as <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/enforcement.html#what-trusted-does-and-does-not-mean">untrusted input</a> until you review and pin it.</p>
 <h2 id="the-security-model">The security model<a class="hlink" href="#the-security-model" aria-label="Link to this section">#</a></h2>

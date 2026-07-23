@@ -4,6 +4,14 @@
 
 # Governed workflows
 
+A **workflow** is one script that fans a task out to many agent runs and
+composes their results — the map/reduce shape, but every worker is a
+governed agent run instead of a bare process. One review chore becomes: run
+a reader over each file, synthesize the findings, then run an independent
+verifier to refute the weak ones. Claude Code has an ungoverned version of
+this today; AgentStack's version pins the orchestration code and gives every
+step its own reviewed authority.
+
 **Status: preview.** The full path ships today: declare, pin, and trust a
 workflow, run it end to end with `agentstack workflow run`, render its
 evidence tree with `agentstack workflow report`, and resume an interrupted
@@ -12,14 +20,6 @@ script and args, or it refuses). Every agent step runs as a governed
 [locked run](reference.html). The commands stay preview-labelled while the
 interpreter boundary awaits its independent security review — the posture,
 not the feature set, is what's provisional.
-
-A **workflow** is one script that fans a task out to many agent runs and
-composes their results — the map/reduce shape, but every worker is a
-governed agent run instead of a bare process. One review chore becomes: run
-a reader over each file, synthesize the findings, then run an independent
-verifier to refute the weak ones. Claude Code has an ungoverned version of
-this today; AgentStack's version pins the orchestration code and gives every
-step its own reviewed authority.
 
 ## Why a workflow needs governing
 

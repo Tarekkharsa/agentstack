@@ -145,15 +145,15 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 
   <section class="lesson-pane" id="lesson-0">
     <div class="kicker">LESSON 1 · WELCOME</div>
-    <h1 class="lesson" style="font-size:33px">Cloning a repo shouldn't hand your agent to a stranger.</h1>
-    <p class="lede" style="font-size:15.5px;margin-bottom:22px">Your AI coding tools — Claude Code, Codex, Cursor — run <strong>unreviewed code plus instructions</strong> from every skill, MCP server, and agent config you adopt. That code is wired into a process holding your credentials, shell, and network. Adopting one is <code>npm install</code> with an agent attached — no lockfile, no review gate, no record of what it did.</p>
+    <h1 class="lesson" style="font-size:33px">One agent setup. Every coding CLI.</h1>
+    <p class="lede" style="font-size:15.5px;margin-bottom:22px">Your AI coding tools — Claude Code, Codex, Cursor — each spell the same setup differently: the same MCP servers, skills, and instructions copied into incompatible files that drift apart. AgentStack imports what you already have into <strong>one portable manifest</strong> and renders every CLI's native format from it — switch by task, diagnose drift, undo any change. There's a quieter problem underneath: adopting repo-supplied agent config is <code>npm install</code> with an agent attached — no lockfile, no review gate. The same manifest is where that gets fixed, one lesson at a time.</p>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:22px 24px;margin-bottom:22px">
       <div class="mono" style="font-size:11px;font-weight:600;letter-spacing:0.12em;color:var(--muted);margin-bottom:16px">THE FOUR GAPS AGENTSTACK CLOSES</div>
       <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-        <div class="gapcard"><div class="t">Anything a repo declares can run</div><div class="d">A clone stays <strong>inert</strong> until you trust its exact bytes; any edit re-gates it.</div></div>
-        <div class="gapcard"><div class="t">Nothing narrows or records agents</div><div class="d">A machine policy no repo can loosen fences tools, secrets, egress — every brokered call is logged.</div></div>
         <div class="gapcard"><div class="t">Every CLI spells setup differently</div><div class="d">One reviewed manifest renders them all; the manifest holds secret references, never values.</div></div>
         <div class="gapcard"><div class="t">Agents wreck trees by accident</div><div class="d"><code>guard</code> blocks <code>rm -rf</code>, <code>git reset --hard</code>, and <code>.env</code> reads before they run.</div></div>
+        <div class="gapcard"><div class="t">Anything a repo declares can run</div><div class="d">A clone stays <strong>inert</strong> until you trust its exact bytes; any edit re-gates it.</div></div>
+        <div class="gapcard"><div class="t">Nothing narrows or records agents</div><div class="d">A machine policy no repo can loosen fences tools, secrets, egress — every brokered call is logged.</div></div>
       </div>
     </div>
     <div style="background:var(--term-bg);border:1px solid var(--strong-bd);border-radius:var(--radius-md,16px);padding:20px 24px;margin-bottom:8px">

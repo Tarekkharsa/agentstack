@@ -4,8 +4,8 @@
 
 # Which mode do I need?
 
-AgentStack has two decisions to make: how much protection you want, and where
-the rendered files should live. This page picks both from what you are trying
+AgentStack has two decisions to make: where the rendered files should live,
+and how much protection you want. This page picks both from what you are trying
 to do. New to a word below? Every term is defined in [concepts](concepts.md).
 For the architect-grade version of these same two decisions, see
 [ARCHITECTURE — operating model](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need).
@@ -13,7 +13,24 @@ For the architect-grade version of these same two decisions, see
 Your *CLIs* are the agent tools you run — Claude Code, Codex, Cursor, and the
 rest.
 
-## First: how much protection?
+## First: where do the rendered files live?
+
+This is your *delivery mode* — how your chosen capabilities reach each CLI.
+
+| Delivery mode | Pick it when | Where capabilities live |
+|---|---|---|
+| **static** (default) | you want zero setup, and it must work with every CLI | Rendered files sit on disk, ready the moment a CLI starts. Zero moving parts. |
+| **clean-at-rest** | the repo must stay pristine between sessions | Files exist only between `session start` and `session end`. Nothing is left behind at rest. |
+| **zero-files** | you juggle many repos and your CLI speaks MCP (Model Context Protocol) | Nothing on disk. The gateway serves each trusted repo's capabilities live. |
+
+The wizard defaults to **static**, and you can switch delivery mode any time —
+switching changes only how files are delivered, never what you trust or what
+your policy allows. Not sure? Stay on static. See
+[delivery modes in concepts](concepts.md) for the fuller definitions, and
+[ARCHITECTURE — operating model](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need)
+for how delivery sits beside selection and isolation.
+
+## Then: how much protection?
 
 Find the row that sounds like you. The last column says how strongly each
 option is *actually* enforced, in the [enforcement matrix's](ENFORCEMENT.md)
@@ -34,19 +51,3 @@ defined once in the [enforcement matrix](ENFORCEMENT.md), which spells out
 exactly what each mode does and does not stop. `--lockdown` needs Docker;
 `--locked` does not.
 
-## Then: where do the rendered files live?
-
-This is your *delivery mode* — how your chosen capabilities reach each CLI.
-
-| Delivery mode | Pick it when | Where capabilities live |
-|---|---|---|
-| **static** (default) | you want zero setup, and it must work with every CLI | Rendered files sit on disk, ready the moment a CLI starts. Zero moving parts. |
-| **clean-at-rest** | the repo must stay pristine between sessions | Files exist only between `session start` and `session end`. Nothing is left behind at rest. |
-| **zero-files** | you juggle many repos and your CLI speaks MCP (Model Context Protocol) | Nothing on disk. The gateway serves each trusted repo's capabilities live. |
-
-The wizard defaults to **static**, and you can switch delivery mode any time —
-switching changes only how files are delivered, never what you trust or what
-your policy allows. Not sure? Stay on static. See
-[delivery modes in concepts](concepts.md) for the fuller definitions, and
-[ARCHITECTURE — operating model](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need)
-for how delivery sits beside selection and isolation.
