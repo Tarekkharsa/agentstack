@@ -15,8 +15,10 @@ Branch commits (each self-contained; can be reordered/split):
    governed-action **write** RPC
 4. `c3506ad8a` richer denial card (policy chip, code block, audit-log
    deep-link)
+5. `0999089b7` trust badge reads the CLI's structured trust state
+6. `d848f3f73` trust-from-UI: a review dialog with grant/revoke
 
-Diffstat: 22 files, ~2370 insertions, 7 deletions. New code is namespaced
+Diffstat: ~25 files, ~2700 insertions, 7 deletions. New code is namespaced
 under `agentstack/` directories; touch points in shared files are small
 (one import + handler in `ws.ts`, one RPC registration, one prop through
 `ChatView → ChatHeader`, and the `failureText`/denial-card hook in
@@ -91,9 +93,19 @@ hook-blocked call arrives as a *completed* tool call whose result carries
 error flag (test uses the observed payload verbatim). This helps any tool
 whose failure lives in the result, not just AgentStack's.
 
-**Governed CLI control (the one write path).** An `agentstack.action` RPC lets
-the panel trigger a *closed enum* of vetted commands — `apply --write` (fix
-drift) and `guard install` (enable guard) — each behind a confirmation dialog.
+**Governed CLI control (the write paths).** An `agentstack.action` RPC lets the
+panel trigger a *closed enum* of vetted commands — `apply --write` (fix drift),
+`guard install` (enable guard), and `trust --yes` / `trust --revoke` — each
+behind a review or confirmation step.
+
+**Trust from the UI.** The header trust badge (trusted / inert / drifted, read
+from `doctor --json`'s structured `trust` field) opens a review dialog: it
+fetches `agentstack trust <path> --preview` — a read-only surface (servers with
+what they run/contact, secrets, category counts) that grants nothing — and only
+from there, after the surface is shown, offers Trust / Revoke. The grant runs
+`trust --yes`; the click is the consent that replaces the terminal keystroke,
+and the CLI still self-refuses an unpinned surface (surfaced as the result).
+The authoritative line-by-line review stays in the CLI, one command away.
 
 ### When AgentStack is not installed / is older
 
