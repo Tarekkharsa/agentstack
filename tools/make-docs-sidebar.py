@@ -73,6 +73,7 @@ TREE = [
     ("Team & CI", None, [
         ("Team setup", "howto/team-setup.html", "howto-team"),
         ("Use in CI", "howto/ci.html", "howto-ci"),
+        ("Use with t3code", "howto/use-with-t3code.html", "howto-t3code"),
     ], "deeper"),
     ("Observe deeper", "$ agentstack report", [
         ("Reports & call audit", "examples.html#e20", "reports"),
