@@ -42,6 +42,11 @@ struct Report {
     errors: usize,
     warnings: usize,
     sections: Vec<Section>,
+    /// The project's machine-readable trust state (`trusted` / `drifted` /
+    /// `untrusted`), set when a project context is checked. `None` when doctor
+    /// ran with no project. Exposed in the JSON so consumers don't have to
+    /// parse the gateway section's prose.
+    trust: Option<&'static str>,
 }
 
 struct Section {
@@ -60,6 +65,7 @@ impl Report {
             errors: 0,
             warnings: 0,
             sections: Vec::new(),
+            trust: None,
         }
     }
 
@@ -174,6 +180,7 @@ impl Report {
         serde_json::json!({
             "errors": self.errors,
             "warnings": self.warnings,
+            "trust": self.trust,
             "sections": self.sections.iter().map(|s| serde_json::json!({
                 "title": s.title,
                 "relevant": s.relevant,
@@ -443,6 +450,11 @@ fn run_checks(
     }
     let base = crate::manifest::project_root_of(&ctx.dir);
     let trust_state = crate::trust::check(&base);
+    report.trust = Some(match trust_state {
+        crate::trust::TrustState::Trusted => "trusted",
+        crate::trust::TrustState::Changed => "drifted",
+        crate::trust::TrustState::Untrusted => "untrusted",
+    });
     match trust_state {
         crate::trust::TrustState::Trusted => {
             report.line(Level::Ok, "this project is trusted for auto mode")
