@@ -175,17 +175,21 @@ Compatibility rules:
 
 ### Setup plan
 
-Backed by `agentstack init --plan`. It returns:
+Backed by `agentstack init --plan` (implemented). It returns:
 
-- coding tools found;
-- importable servers, skills, and instructions;
-- source/origin for each imported item;
+- coding tools found, each with its evidence: whether the binary is on PATH
+  and the exact native config files detection read (`detected[].bin_on_path`,
+  `detected[].configs`);
+- importable servers by name, kind, and run/contact target (the import covers
+  MCP servers and recognized settings; skills and instructions are not part of
+  the init import);
+- source/origin for each lifted secret;
 - proposed manifest location;
-- proposed native destinations;
+- proposed native destinations (`destinations[]`: CLI display name, plain
+  scope, full path, and what renders there — "MCP servers" / "settings");
 - secret reference names, never values;
-- unsupported or lossy fields;
-- warnings and blockers;
-- a stable plan identity if a later write needs content binding.
+- unsupported or lossy entries with a plain-language reason;
+- a stable plan identity (`plan_digest`) the consented write binds to.
 
 The UI groups this as Tools found, Capabilities found, Files AgentStack will
 manage, and Values still needed.

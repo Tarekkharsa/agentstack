@@ -309,7 +309,7 @@ fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) ->
     }
     // Any explicit flag (or --yes) proceeds promptlessly as the scriptable
     // primitive: import, write, no prompts beyond what flags allow.
-    run_impl(args, manifest_dir, true)
+    run_impl(args, manifest_dir, true, false).map(|_| ())
 }
 
 /// `init --plan` — Lane A's read primitive (UI control-plane §4): run init's
@@ -356,19 +356,7 @@ pub fn plan_json(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_j
         .servers
         .iter()
         .map(|(name, s)| {
-            let (kind, target) = match s.server_type {
-                crate::manifest::ServerType::Stdio => (
-                    "stdio",
-                    format!(
-                        "{} {}",
-                        s.command.as_deref().unwrap_or("?"),
-                        s.args.join(" ")
-                    )
-                    .trim()
-                    .to_string(),
-                ),
-                crate::manifest::ServerType::Http => ("http", s.url.clone().unwrap_or_default()),
-            };
+            let (kind, target) = server_kind_target(s);
             let mut entry = serde_json::json!({
                 "name": crate::text::sanitize_line(name),
                 "kind": kind,
@@ -398,11 +386,36 @@ pub fn plan_json(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_j
         "path": base.display().to_string(),
         "manifest_path": manifest_path.display().to_string(),
         "already_initialized": already_initialized,
+        // Stage 1.2: each detected CLI carries its evidence — binary on PATH
+        // and the exact native config files found — so the first screen can
+        // state what was found, not just that something was.
         "detected": det
-            .detected_ids
+            .detected
             .iter()
-            .zip(&det.display_names)
-            .map(|(id, display)| serde_json::json!({ "id": id, "display": display }))
+            .map(|c| serde_json::json!({
+                "id": c.id,
+                "display": c.display,
+                "bin_on_path": c.bin_on_path,
+                "configs": c
+                    .configs
+                    .iter()
+                    .map(|p| crate::text::sanitize_line(&p.display().to_string()))
+                    .collect::<Vec<_>>(),
+            }))
+            .collect::<Vec<_>>(),
+        // Stage 1.2: where a follow-up `apply --write` renders this import —
+        // per CLI, with the scope in plain terms — so destination files are
+        // reviewable without adapter knowledge.
+        "destinations": det
+            .destinations
+            .iter()
+            .map(|d| serde_json::json!({
+                "id": d.id,
+                "display": d.display,
+                "scope": d.scope.as_str(),
+                "path": crate::text::sanitize_line(&d.path.display().to_string()),
+                "writes": d.writes,
+            }))
             .collect::<Vec<_>>(),
         "servers": servers_json,
         "settings_from": det.settings.keys().collect::<Vec<_>>(),
@@ -440,14 +453,37 @@ pub fn plan_json(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_j
     }))
 }
 
+/// One detected CLI, with the facts the first screen states (Stage 1.2):
+/// whether its binary is on PATH and which native config files detection
+/// actually found on disk — never just "detected" with the evidence hidden.
+struct DetectedCli {
+    id: String,
+    display: String,
+    bin_on_path: bool,
+    /// Native config files of this CLI that exist on disk (global MCP config
+    /// and settings file), deduped — the exact files the import reads.
+    configs: Vec<PathBuf>,
+}
+
+/// One native file the recommended `apply --write` will manage after this
+/// import, in user terms — which CLI, which file, which scope, and what lands
+/// there — so destinations are visible without adapter knowledge (Stage 1.2).
+struct PlanDestination {
+    id: String,
+    display: String,
+    scope: crate::scope::Scope,
+    path: PathBuf,
+    /// What renders into this file: "MCP servers" and/or "settings".
+    writes: Vec<&'static str>,
+}
+
 /// Everything one detection pass finds — computed ONCE and consumed by both
 /// the plan (display + digest) and the consented write, so the plan a user
 /// reviewed and the import the write performs are the same in-memory objects,
 /// never two detections that could observe different disk states
 /// (independent review, 2026-07-23).
 struct DetectedImport {
-    detected_ids: Vec<String>,
-    display_names: Vec<String>,
+    detected: Vec<DetectedCli>,
     /// Display names of the CLIs that actually contributed servers or
     /// settings — the honest "imported from" list (a detected CLI with an
     /// empty config is not a source).
@@ -463,12 +499,32 @@ struct DetectedImport {
     /// as `(cli display name, skip)` — surfaced in the plan and the write
     /// output so a lossy import is explained, never silent.
     skipped: Vec<(String, crate::adapter::SkippedImport)>,
+    /// The native files a follow-up `apply --write` (at the default scope for
+    /// this manifest) would manage — derived from the same detection, so the
+    /// plan and the terminal review state identical destinations.
+    destinations: Vec<PlanDestination>,
+}
+
+impl DetectedImport {
+    /// The detected CLI ids, in detection order — the manifest's default
+    /// targets and the digest's `detected` binding.
+    fn detected_ids(&self) -> Vec<String> {
+        self.detected.iter().map(|c| c.id.clone()).collect()
+    }
+}
+
+/// Display name for a detected CLI id (falls back to the id itself).
+fn det_display(detected: &[DetectedCli], id: &str) -> String {
+    detected
+        .iter()
+        .find(|c| c.id == id)
+        .map(|c| c.display.clone())
+        .unwrap_or_else(|| id.to_string())
 }
 
 fn detect_import(dir: &Path) -> Result<DetectedImport> {
     let registry = Registry::load()?;
-    let mut detected_ids: Vec<String> = Vec::new();
-    let mut display_names: Vec<String> = Vec::new();
+    let mut detected: Vec<DetectedCli> = Vec::new();
     let mut contributing: Vec<String> = Vec::new();
     let mut servers: IndexMap<String, Server> = IndexMap::new();
     let mut settings: IndexMap<String, serde_json::Value> = IndexMap::new();
@@ -478,8 +534,26 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
         if !desc.detected() {
             continue;
         }
-        detected_ids.push(desc.id.clone());
-        display_names.push(desc.display.clone());
+        // The evidence behind "detected": which files exist. The settings file
+        // can be the same file as the MCP config (Codex) — dedup.
+        let mut configs: Vec<PathBuf> = Vec::new();
+        if let Some(config) = desc.config.as_ref() {
+            let path = crate::util::paths::expand_tilde(&config.path);
+            if path.exists() {
+                configs.push(path);
+            }
+        }
+        if let Some((path, _)) = desc.settings_for(crate::scope::Scope::Global, dir) {
+            if path.exists() && !configs.contains(&path) {
+                configs.push(path);
+            }
+        }
+        detected.push(DetectedCli {
+            id: desc.id.clone(),
+            display: desc.display.clone(),
+            bin_on_path: desc.is_installed(),
+            configs,
+        });
         let mut contributed = false;
         if let Some(value) = desc.read_config_value()? {
             let (imported, skips) = extract_servers_with_skips(desc, &value);
@@ -503,16 +577,73 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
     // Lifting rewrites the in-memory servers to `${REF}` placeholders and
     // returns the values; only reference + origin ever serialize.
     let lifted = lift_secrets(&mut servers);
+
+    // Proposed destinations: the files `apply --write` at this manifest's
+    // default scope would manage, per detected CLI, merged when servers and
+    // settings share one file (Codex). Derived from the same pass, so the
+    // reviewed destinations can't disagree with a later apply.
+    let scope = crate::scope::Scope::default_for(dir);
+    let mut destinations: Vec<PlanDestination> = Vec::new();
+    for cli in &detected {
+        let Some(desc) = registry.get(&cli.id) else {
+            continue;
+        };
+        let mut files: Vec<(PathBuf, Vec<&'static str>)> = Vec::new();
+        if !servers.is_empty() && desc.mcp.is_some() {
+            if let Some((path, _)) = desc.config_for(scope, dir) {
+                files.push((path, vec!["MCP servers"]));
+            }
+        }
+        if settings.contains_key(&cli.id) {
+            if let Some((path, _)) = desc.settings_for(scope, dir) {
+                if let Some(existing) = files.iter_mut().find(|(p, _)| *p == path) {
+                    existing.1.push("settings");
+                } else {
+                    files.push((path, vec!["settings"]));
+                }
+            }
+        }
+        for (path, writes) in files {
+            destinations.push(PlanDestination {
+                id: cli.id.clone(),
+                display: cli.display.clone(),
+                scope,
+                path,
+                writes,
+            });
+        }
+    }
+
     Ok(DetectedImport {
-        detected_ids,
-        display_names,
+        detected,
         contributing,
         servers,
         settings,
         conflict_counts,
         lifted,
         skipped,
+        destinations,
     })
+}
+
+/// One server's user-facing shape: its transport kind and what it runs
+/// (stdio: command + argv joined for display) or contacts (http: URL). Shared
+/// by the plan JSON and the terminal review so both describe a server
+/// identically. Display-only — the digest binds the full `Server` object.
+fn server_kind_target(s: &Server) -> (&'static str, String) {
+    match s.server_type {
+        crate::manifest::ServerType::Stdio => (
+            "stdio",
+            format!(
+                "{} {}",
+                s.command.as_deref().unwrap_or("?"),
+                s.args.join(" ")
+            )
+            .trim()
+            .to_string(),
+        ),
+        crate::manifest::ServerType::Http => ("http", s.url.clone().unwrap_or_default()),
+    }
 }
 
 fn store_label(store: SecretStore) -> &'static str {
@@ -540,7 +671,7 @@ fn plan_digest(
     let full = serde_json::json!({
         "path": base.display().to_string(),
         "already_initialized": already_initialized,
-        "detected": det.detected_ids,
+        "detected": det.detected_ids(),
         "servers": serde_json::to_value(&det.servers)
             .expect("derive(Serialize) manifest types always serialize"),
         "settings": det.settings,
@@ -775,9 +906,12 @@ pub(crate) fn instructions_hint(home: &Path) -> String {
 
 /// The import step as `setup` drives it: `setup` prints its own guidance and
 /// continues automatically, so the standalone "run bootstrap next" tail is
-/// suppressed to avoid contradicting the wizard's flow.
-pub(crate) fn run_for_setup(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    run_impl(args, manifest_dir, false)
+/// suppressed. The wizard path gates the write on a confirm shown AFTER the
+/// review — the user sees which CLIs/configs were found, which servers and
+/// secret names import, and the destination files BEFORE saying yes (Stage
+/// 1.2). Returns whether the import actually wrote (false = declined).
+pub(crate) fn run_for_setup(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<bool> {
+    run_impl(args, manifest_dir, false, true)
 }
 
 /// The manifest this invocation would collide with, if one already exists:
@@ -833,7 +967,17 @@ fn refuse_nested_init(cwd: &Path) -> Result<()> {
     Ok(())
 }
 
-fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Result<()> {
+/// The import itself. `gate_write` (the wizard path) inserts one confirm
+/// between the printed review — CLIs/configs found, servers by name, lifted
+/// secret references, destination files — and the first write, so consent
+/// follows the evidence (Stage 1.2). Returns whether the import proceeded
+/// (`false` only when that gate was declined; nothing was written).
+fn run_impl(
+    args: &InitArgs,
+    manifest_dir: Option<&Path>,
+    show_next: bool,
+    gate_write: bool,
+) -> Result<bool> {
     let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
         None => {
@@ -891,15 +1035,17 @@ fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Re
         );
     }
     let DetectedImport {
-        detected_ids: detected,
-        display_names,
+        detected,
         contributing,
         servers,
         settings,
         conflict_counts,
         lifted,
         skipped,
+        destinations,
     } = det;
+    let detected_ids: Vec<String> = detected.iter().map(|c| c.id.clone()).collect();
+    let display_names: Vec<String> = detected.iter().map(|c| c.display.clone()).collect();
     for (name, extra) in &conflict_counts {
         println!(
             "{} server '{name}' is defined differently by {} other CLI(s) — kept the first \
@@ -934,7 +1080,16 @@ version = 1
 ";
         if args.dry_run {
             println!("No supported CLIs detected — would write a starter manifest:\n\n{STARTER}");
-            return Ok(());
+            return Ok(true);
+        }
+        // The wizard's consent gate applies to the starter write too: nothing
+        // lands without a yes that follows the stated plan.
+        if gate_write {
+            println!("No supported CLIs detected to import — the next step writes a starter manifest at {}.", manifest_path.display());
+            if !crate::util::confirm::confirm("\nWrite the starter manifest now?")? {
+                println!("\n{} Nothing written.", "·".dimmed());
+                return Ok(false);
+            }
         }
         // Capture the pre-write state (the file is absent → `before: None`, so
         // undo deletes it) BEFORE writing, then record one undoable entry — the
@@ -957,25 +1112,21 @@ version = 1
             "✅".dimmed(),
             manifest_path.display()
         );
-        return Ok(());
+        return Ok(true);
     }
 
-    println!(
-        "{}  {} CLI {} on PATH: {}",
-        "🔍".dimmed(),
-        detected.len(),
-        if detected.len() == 1 {
-            "binary"
-        } else {
-            "binaries"
-        },
-        display_names.join(" · ")
-    );
-    println!(
-        "{}  Imported {} MCP server(s) from existing configs",
-        "📥".dimmed(),
-        servers.len()
-    );
+    // ── The pre-write review (Stage 1.2): what was found, what imports, and
+    // where it lands — every fact stated BEFORE anything is written.
+    let project_root = crate::manifest::project_root_of(&dir);
+    print!("{}", render_found_clis(&detected, &project_root));
+    if servers.is_empty() {
+        println!(
+            "{}  No MCP servers found in those configs — importing settings only",
+            "📥".dimmed()
+        );
+    } else {
+        print!("{}", render_import_servers(&servers));
+    }
     // Lossy imports are explained, never silent: name each entry the import
     // left behind, why, and that nothing was deleted. Names come from other
     // CLIs' config files — hostile input; sanitize before display.
@@ -989,10 +1140,14 @@ version = 1
         );
     }
     if !settings.is_empty() {
+        let from: Vec<String> = settings
+            .keys()
+            .map(|id| det_display(&detected, id))
+            .collect();
         println!(
-            "{}  Imported settings from {} CLI(s)",
+            "{}  Importing settings from {}",
             "⚙".dimmed(),
-            settings.len()
+            from.join(" · ")
         );
         println!(
             "      {}",
@@ -1029,6 +1184,14 @@ version = 1
         );
     }
 
+    // Where it all lands: the manifest this import writes, and each CLI's
+    // native destination a follow-up `apply --write` manages — scope spelled
+    // out, printed before any write or consent question (Stage 1.2).
+    print!(
+        "{}",
+        render_managed_files(&manifest_path, &destinations, &project_root)
+    );
+
     // Counts for the closing summary — `servers`/`settings` move into the
     // manifest below.
     let server_count = servers.len();
@@ -1048,7 +1211,7 @@ version = 1
         workflows: IndexMap::new(),
         packs: IndexMap::new(),
         targets: Targets {
-            default: detected.clone(),
+            default: detected_ids.clone(),
         },
         policy: Default::default(),
         guard: Default::default(),
@@ -1075,7 +1238,20 @@ version = 1
                 ),
             }
         }
-        return Ok(());
+        return Ok(true);
+    }
+
+    // The wizard's consent gate: the review above is the evidence; this is
+    // the one question. Declining writes nothing (the caller closes the run).
+    if gate_write
+        && !crate::util::confirm::confirm(
+            "\nImport this into one manifest now? Only the manifest and any lifted token \
+             values are written — your CLIs' own configs stay untouched until the later \
+             apply confirm.",
+        )?
+    {
+        println!("\n{} Nothing written.", "·".dimmed());
+        return Ok(false);
     }
 
     // Every file init writes is captured (pre-write) into `backups`, then
@@ -1171,7 +1347,7 @@ version = 1
     // The history record is part of the commit contract. If it cannot be made,
     // restore the files and temporary keychain changes instead of claiming an
     // undo that does not exist.
-    if let Err(err) = crate::history::record("project", detected.clone(), backups.clone()) {
+    if let Err(err) = crate::history::record("project", detected_ids.clone(), backups.clone()) {
         let file_rollback = crate::history::rollback(&backups);
         let keychain_rollback = rollback_keychain(&keychain_changes);
         if let Err(rollback_err) = file_rollback.and(keychain_rollback) {
@@ -1210,7 +1386,7 @@ version = 1
             )
         );
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Pure formatter for the scripted-import success summary, so its shape is
@@ -1250,6 +1426,119 @@ fn render_import_summary(
     out
 }
 
+/// Compact an absolute path for display: inside the project → relative to the
+/// project root; under `$HOME` → `~/…`; otherwise unchanged. Display-only —
+/// JSON contracts always carry the full path.
+fn display_path(path: &Path, project_root: &Path) -> String {
+    if let Ok(rel) = path.strip_prefix(project_root) {
+        return rel.display().to_string();
+    }
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(rel) = path.strip_prefix(&home) {
+            return format!("~/{}", rel.display());
+        }
+    }
+    path.display().to_string()
+}
+
+/// Stage 1.2 first screen: every detected CLI with the evidence — the exact
+/// native config files found on disk, or the honest "binary only" fact. Pure
+/// (no color), so the shape is unit-testable.
+fn render_found_clis(detected: &[DetectedCli], project_root: &Path) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "🔍  Found {} coding tool(s) and their native configs:\n",
+        detected.len()
+    ));
+    let width = detected.iter().map(|c| c.display.len()).max().unwrap_or(0);
+    for c in detected {
+        let facts = if c.configs.is_empty() {
+            if c.bin_on_path {
+                "binary on PATH — no config files found".to_string()
+            } else {
+                "no config files found".to_string()
+            }
+        } else {
+            c.configs
+                .iter()
+                .map(|p| display_path(p, project_root))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        };
+        out.push_str(&format!("      {:width$}   {facts}\n", c.display));
+    }
+    out
+}
+
+/// Stage 1.2: the servers this import brings in, BY NAME with what each runs
+/// or contacts — shown before anything is written. Names/targets come from
+/// other CLIs' config files (hostile input): sanitized and bounded.
+fn render_import_servers(servers: &IndexMap<String, Server>) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "📥  Importing {} MCP server(s) from those configs:\n",
+        servers.len()
+    ));
+    let width = servers
+        .keys()
+        .map(|n| crate::text::sanitize_line(n).len())
+        .max()
+        .unwrap_or(0)
+        .min(30);
+    for (name, s) in servers {
+        let (kind, target) = server_kind_target(s);
+        let verb = if kind == "http" { "contacts" } else { "runs" };
+        out.push_str(&format!(
+            "      {:width$}   {verb} {}\n",
+            crate::text::sanitize_line(name),
+            crate::text::truncate_chars(&crate::text::sanitize_line(&target), 64),
+        ));
+    }
+    out
+}
+
+/// Stage 1.2: the files this setup will manage, in user terms — the manifest
+/// (written by the import itself) and each CLI's native destination with its
+/// scope spelled out ("this project" / "machine-wide"), no adapter vocabulary.
+fn render_managed_files(
+    manifest_path: &Path,
+    destinations: &[PlanDestination],
+    project_root: &Path,
+) -> String {
+    let mut out = String::new();
+    out.push_str("📦  Files agentstack will manage:\n");
+    let manifest_display = display_path(manifest_path, project_root);
+    let width = std::iter::once(manifest_display.len())
+        .chain(
+            destinations
+                .iter()
+                .map(|d| display_path(&d.path, project_root).len()),
+        )
+        .max()
+        .unwrap_or(0);
+    out.push_str(&format!(
+        "      {manifest_display:width$}   the manifest — written by this import\n"
+    ));
+    for d in destinations {
+        let scope = match d.scope {
+            crate::scope::Scope::Project => "this project",
+            crate::scope::Scope::Global => "machine-wide",
+        };
+        out.push_str(&format!(
+            "      {:width$}   {} · {} ({scope})\n",
+            display_path(&d.path, project_root),
+            d.display,
+            d.writes.join(" + "),
+        ));
+    }
+    if !destinations.is_empty() {
+        out.push_str(
+            "      Native files are written by the next `agentstack apply --write`, not now.\n",
+        );
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1273,14 +1562,19 @@ mod tests {
             .expect("valid server literal");
             servers.insert("srv".into(), s);
             DetectedImport {
-                detected_ids: vec!["claude-code".into()],
-                display_names: vec!["Claude Code".into()],
+                detected: vec![DetectedCli {
+                    id: "claude-code".into(),
+                    display: "Claude Code".into(),
+                    bin_on_path: true,
+                    configs: Vec::new(),
+                }],
                 contributing: vec!["Claude Code".into()],
                 servers,
                 settings: IndexMap::new(),
                 conflict_counts: IndexMap::new(),
                 lifted: Vec::new(),
                 skipped: Vec::new(),
+                destinations: Vec::new(),
             }
         };
 
@@ -1299,6 +1593,99 @@ mod tests {
             baseline,
             plan_digest(&mk(&["a", "b"], "safe"), base, false, "keychain")
         );
+    }
+
+    /// Stage 1.2: the first screen states WHICH CLIs and WHICH native config
+    /// files detection found — the evidence, not just a count — and stays
+    /// honest for a binary-only CLI with no config files.
+    #[test]
+    fn found_clis_names_each_cli_and_its_config_files() {
+        let root = Path::new("/repo");
+        let detected = vec![
+            DetectedCli {
+                id: "claude-code".into(),
+                display: "Claude Code".into(),
+                bin_on_path: true,
+                configs: vec![
+                    PathBuf::from("/somewhere/.claude.json"),
+                    PathBuf::from("/somewhere/.claude/settings.json"),
+                ],
+            },
+            DetectedCli {
+                id: "cursor".into(),
+                display: "Cursor".into(),
+                bin_on_path: true,
+                configs: Vec::new(),
+            },
+        ];
+        let out = render_found_clis(&detected, root);
+        assert!(out.contains("Found 2 coding tool(s)"));
+        assert!(out.contains("Claude Code"));
+        assert!(out.contains("/somewhere/.claude.json · /somewhere/.claude/settings.json"));
+        assert!(
+            out.contains("binary on PATH — no config files found"),
+            "a binary-only CLI states the honest fact:\n{out}"
+        );
+    }
+
+    /// Stage 1.2: imported servers are listed BY NAME with what each runs or
+    /// contacts, before anything is written. Hostile names/targets are
+    /// sanitized and bounded.
+    #[test]
+    fn import_servers_lists_names_and_targets() {
+        let mut servers: IndexMap<String, Server> = IndexMap::new();
+        let stdio: Server = serde_json::from_value(serde_json::json!({
+            "type": "stdio", "command": "npx", "args": ["-y", "github-mcp"],
+        }))
+        .unwrap();
+        let http: Server = serde_json::from_value(serde_json::json!({
+            "type": "http", "url": "https://mcp.example.com/sse",
+        }))
+        .unwrap();
+        servers.insert("github".into(), stdio);
+        servers.insert("ctx".into(), http);
+        let out = render_import_servers(&servers);
+        assert!(out.contains("Importing 2 MCP server(s)"));
+        assert!(out.contains("github"));
+        assert!(out.contains("runs npx -y github-mcp"));
+        assert!(out.contains("contacts https://mcp.example.com/sse"));
+    }
+
+    /// Stage 1.2: destinations are visible in user terms — each native file
+    /// with its CLI, what lands there, and the scope in plain words ("this
+    /// project"), plus the manifest the import itself writes. No adapter
+    /// vocabulary required.
+    #[test]
+    fn managed_files_name_manifest_and_native_destinations_with_scope() {
+        let root = Path::new("/repo");
+        let dests = vec![
+            PlanDestination {
+                id: "claude-code".into(),
+                display: "Claude Code".into(),
+                scope: crate::scope::Scope::Project,
+                path: PathBuf::from("/repo/.mcp.json"),
+                writes: vec!["MCP servers"],
+            },
+            PlanDestination {
+                id: "codex".into(),
+                display: "Codex CLI".into(),
+                scope: crate::scope::Scope::Project,
+                path: PathBuf::from("/repo/.codex/config.toml"),
+                writes: vec!["MCP servers", "settings"],
+            },
+        ];
+        let out =
+            render_managed_files(Path::new("/repo/.agentstack/agentstack.toml"), &dests, root);
+        assert!(out.contains("Files agentstack will manage"));
+        assert!(out.contains(".agentstack/agentstack.toml"));
+        assert!(out.contains("the manifest — written by this import"));
+        // Project-scope paths render relative to the repo root (alignment
+        // padding between path and facts is not part of the contract).
+        assert!(out.contains(".mcp.json"));
+        assert!(out.contains("Claude Code · MCP servers (this project)"));
+        assert!(out.contains(".codex/config.toml"));
+        assert!(out.contains("Codex CLI · MCP servers + settings (this project)"));
+        assert!(out.contains("written by the next `agentstack apply --write`"));
     }
 
     /// Stage 1.2: the scripted import ends with ONE concise summary carrying

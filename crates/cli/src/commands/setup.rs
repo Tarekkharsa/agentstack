@@ -70,21 +70,13 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             return Ok(());
         }
         println!("\nNo manifest here yet — importing the setup already on this machine.");
-        // P30: the plan promised nothing is written until you confirm — honor
-        // it with ONE explicit gate before the importer runs. This is the write
-        // the wizard performs up front; everything downstream still has its own
-        // confirm.
-        if !crate::util::confirm::confirm(
-            "\nImport now? The manifest and any lifted token values will be written — everything else still waits for its own confirm.",
-        )? {
-            println!(
-                "\n{} Nothing written. Re-run when you're ready to import.",
-                "·".dimmed()
-            );
-            return Ok(());
-        }
         println!();
-        super::init::run_for_setup(
+        // P30/Stage 1.2: review first, then ONE explicit gate. The importer
+        // prints what detection found — CLIs and their config files, servers
+        // by name, lifted secret references, destination files — and asks its
+        // confirm AFTER that evidence, before any write. Everything further
+        // downstream still has its own confirm.
+        let proceeded = super::init::run_for_setup(
             &InitArgs {
                 global: false,
                 force: false,
@@ -94,14 +86,18 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // and the shell is interactive (P2); setup is interactive.
                 secrets: None,
                 no_keychain: false,
-                // The wizard already gated the import with its own confirm
-                // above and calls `run_for_setup` (which never re-checks the
-                // TTY gate), so this field is irrelevant here.
+                // The wizard's write gate lives inside `run_for_setup` (which
+                // never re-checks the TTY gate), so this field is irrelevant
+                // here.
                 yes: false,
                 consented_plan: None,
             },
             manifest_dir,
         )?;
+        if !proceeded {
+            println!("\n{} Re-run when you're ready to import.", "·".dimmed());
+            return Ok(());
+        }
         imported = true;
         manifest_path = crate::manifest::resolve_manifest_dir(&base).join(MANIFEST_FILE);
     }

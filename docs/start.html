@@ -314,15 +314,25 @@ pre.cmd .c { color: var(--term-muted); }
 <span class="c">  2. import their existing configs</span>
 <span class="c">  3. lift any inline tokens to ${REF} placeholders</span>
 <span class="c">  4. write one agentstack manifest</span>
-<span class="c">  · Nothing is written until you confirm. Your CLIs are not touched yet.</span>
+<span class="c">  · The import step writes only the manifest and lifted token values — and only after you confirm it.</span>
 
 <span class="c">No manifest here yet — importing the setup already on this machine.</span>
 
-<span class="c">  🔍 6 CLI binaries on PATH: Claude Code · Codex CLI · GitHub Copilot CLI · Gemini CLI · OpenCode · Pi</span>
-<span class="c">  📥 Imported 1 MCP server(s) from existing configs</span>
-<span class="am">  🔐 Found 1 plaintext token(s) in your live CLI configs</span><span class="c"> — lifted to secure references:</span>
+<span class="c">🔍  Found 2 coding tool(s) and their native configs:</span>
+<span class="c">      Claude Code   ~/.claude.json · ~/.claude/settings.json</span>
+<span class="c">      Codex CLI     ~/.codex/config.toml</span>
+<span class="c">📥  Importing 1 MCP server(s) from those configs:</span>
+<span class="c">      github   runs npx -y github-mcp</span>
+<span class="am">🔐  Found 1 plaintext token(s) in your live CLI configs</span><span class="c"> — lifted to secure references:</span>
 <span class="ok">      ${GITHUB_TOKEN}</span><span class="c">   server 'github' (env GITHUB_TOKEN)</span>
 <span class="c">      The manifest stays commit-safe; real values resolve locally at apply time.</span>
+<span class="c">📦  Files agentstack will manage:</span>
+<span class="c">      .agentstack/agentstack.toml   the manifest — written by this import</span>
+<span class="c">      .mcp.json                     Claude Code · MCP servers (this project)</span>
+<span class="c">      .codex/config.toml            Codex CLI · MCP servers (this project)</span>
+<span class="c">      Native files are written by the next `agentstack apply --write`, not now.</span>
+
+<span class="p">Import this into one manifest now? Only the manifest and any lifted token values are written — your CLIs' own configs stay untouched until the later apply confirm. [y/N]</span> <span class="ok">y</span>
 
 <span class="p">? Where should these token values live? ›</span>
 <span class="ok">❯ Project .env  (default) — plaintext file next to the manifest, gitignored, guard-blocked</span>
