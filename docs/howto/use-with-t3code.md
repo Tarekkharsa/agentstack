@@ -35,16 +35,26 @@ Point the matching t3code provider's binary-path setting at the generated shim.
 Each launched session then appears in `agentstack report runs` and receives its
 own run report.
 
-## What is being built
+## The panel journey
 
-The native t3code panel is an active integration, not yet a complete shipped
-contract. The target experience is:
+The native t3code panel implements the first launch slice end to end:
 
-1. **Setup** — show detected coding tools and importable capabilities from
-   `agentstack init --plan`.
-2. **Toolset** — choose a named profile and use it temporarily.
-3. **Status** — show readiness and one recommended next action.
-4. **Undo** — restore the last AgentStack-managed write.
+1. **Setup** — an uninitialized project shows the coding tools and importable
+   capabilities detected by `agentstack init --plan`, and one action applies
+   that reviewed plan. The apply is bound to the exact plan shown: if a CLI
+   config changes in between, the CLI refuses and asks for a fresh review.
+2. **Status** — one state (Ready, Needs attention, or Needs setup) with the
+   single recommended next action; the full doctor report stays available as
+   the detail layer.
+3. **Undo** — the panel shows this project's most recent AgentStack-managed
+   write and can revert it, by identity, without touching other projects.
+4. **Toolset** — choosing a named profile and using it temporarily is the next
+   slice; today profiles remain a CLI flow (`agentstack use --list --json` is
+   already stable for external pickers).
+
+Reads and actions are version-negotiated: each CLI response names its schema
+version and usable contracts, and a mismatched pair disables the affected
+action with upgrade guidance instead of guessing.
 
 Safety appears progressively:
 
@@ -71,11 +81,12 @@ t3code owns presentation. The AgentStack CLI owns decisions and authority.
 Trust is the clearest example. A preview returns a digest of the immutable
 content snapshot that produced it. A grant action must return that digest, and
 the CLI refuses stale or missing consent. The digest proves content
-consistency, not human attention; t3code's dedicated administrative
-authorization is the separate human-authority boundary.
-
-Until both halves are complete, trust writes stay disabled or fail closed in
-the panel. The terminal trust flow remains the authoritative path.
+consistency, not human attention; t3code's dedicated `agentstack:admin`
+authorization — required for every authority-changing action, granted only to
+administrative sessions, never implied by an open browser tab — is the
+separate human-authority boundary. Both halves are enforced independently:
+read-only status and planning need no administrative authority, and a
+frontend bug can break the panel but cannot mint a grant.
 
 ## Limits
 

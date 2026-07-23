@@ -146,18 +146,21 @@ Every write remains:
 
 ## Versioned contracts
 
-Every read response begins with:
+Every UI-facing read response carries (implemented — `crates/cli/src/ui_contract.rs`):
 
 ```json
 {
   "schema_version": 1,
-  "features": ["init-plan", "profiles-v1", "status-v1", "restore-last"]
+  "features": ["init-plan", "apply-setup", "trust-preview", "trust-consent",
+               "status-v1", "profiles-v1", "diff-v1", "restore-last"]
 }
 ```
 
 Feature names describe usable end-to-end contracts, not the presence of one
 field. t3code must disable an action and show the required upgrade when its
-contract is absent.
+contract is absent. A CLI predating the envelope decodes as "no negotiated
+features": existing reads still render, feature-gated actions disable with
+upgrade guidance.
 
 Compatibility rules:
 
@@ -203,13 +206,15 @@ The UI says Toolset. Details may say that the stored object is a profile.
 
 ### Status
 
-Backed by a stable status/doctor JSON contract. The primary response is:
+Backed by `agentstack doctor --json` (implemented). The primary response is:
 
-- overall state: `needs_setup`, `needs_attention`, `ready`, or `active`;
-- selected toolset;
-- concise findings;
-- exactly one recommended next action;
-- optional deeper sections.
+- overall `state`: `needs_setup`, `needs_attention`, or `ready` (`active`
+  arrives with the Slice 2 session picker);
+- exactly one recommended `next_action` (or null);
+- `protection` facts (`guard`, `machine_policy`) — booleans about what is
+  active, never an enforcement claim; a UI may render "Protected" only over
+  these facts with honest coverage details;
+- the full `sections` report as the deeper layer.
 
 The first panel view must not dump every doctor section. Advanced and
 informational checks stay collapsed unless they block the current action.
@@ -228,17 +233,28 @@ paths were observed.
 
 ## Action contract
 
-The first slice permits only:
+The implemented closed enum (t3code `AgentstackActionKind`, server-owned fixed
+argv in `AgentstackCli.actionArgv`):
 
 ```text
-apply_reviewed_setup
-check_status
-start_toolset
-end_toolset
-restore_last_write
-grant_reviewed_project
-revoke_project_grant
+setup-apply     → init --yes --consented-plan <plan_digest from init --plan>
+apply-project   → apply --scope project --write
+apply-global    → apply --scope global --write
+adopt-project   → adopt --scope project --write
+adopt-global    → adopt --scope global --write
+guard-install   → guard install
+trust-grant     → trust <root> --yes --consented-digest <surface_digest>
+trust-revoke    → trust <root> --revoke
+restore-write   → restore <id> --write --json
 ```
+
+`setup-apply` and `trust-grant` are consent-bound: the digest must come from
+the exact preview (`init --plan` / `trust --preview`) the user reviewed, and
+the CLI refuses when the underlying content changed in between. `restore-write`
+takes an id from the `restore --json` inventory because the undo ledger is
+machine-global — a project panel must undo the newest entry that touches its
+own project (`touches_project`), never a blind machine-wide `--last`.
+Start/end-toolset actions belong to Slice 2 and are not yet in the enum.
 
 Each action has a server-owned mapping to a fixed AgentStack command. Adding an
 action requires:
@@ -338,6 +354,12 @@ This is not part of the launch experience. It requires capability negotiation,
 fails closed when unavailable or incompatible, and keeps direct CLI child
 launch as the reference implementation and fallback. The research and witness
 tests are tracked in [`../../TODO.md`](../../TODO.md#t3code-mcp-harness-bridge--research-only).
+
+The 2026-07-23 surface inventory is recorded in
+[`t3code-mcp-bridge-research.md`](t3code-mcp-bridge-research.md): today's MCP
+endpoint is browser-preview only, and the session protocol offers no per-call
+argv admission, process identity, process-level result, or version handshake —
+so the bridge is **not** being built against the current surface.
 
 ### Slice 3 — contextual safety
 

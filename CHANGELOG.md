@@ -6,6 +6,35 @@ binaries, checksums, and provenance attestations for each entry.
 
 ## Unreleased
 
+### Added
+
+- **Versioned UI contract.** Every machine-readable read for external panels
+  (`init --plan`, `trust --preview`, `doctor --json`, `use --list --json`,
+  `diff --json`, `restore --json`) now carries `schema_version` and a
+  `features` list naming usable end-to-end contracts, so a UI negotiates
+  instead of guessing and mismatched CLI/UI pairs fail closed with upgrade
+  guidance.
+- **Consent-bound setup.** `init --plan` emits a `plan_digest` identifying
+  the exact reviewed import plan; `init --yes --consented-plan <digest>`
+  refuses to write when detection no longer produces that plan — the same
+  reviewed-bytes binding trust grants already enforce.
+- **Complete trust preview.** `trust --preview` lists the full named surface
+  (skills, workflows with roles, extensions with targets, instructions), not
+  just counts, so an external consent screen shows everything the
+  interactive review shows.
+- **Status contract.** `doctor --json` now leads with one `state`
+  (`needs_setup` / `needs_attention` / `ready`), one recommended
+  `next_action`, and factual `protection` booleans; an uninitialized
+  directory is a state, not an error (outside `--ci`).
+- **Machine-readable undo.** `restore --json` lists the undo ledger with
+  per-project attribution (`touches_project`) and id-addressed
+  preview/result output, so a project-scoped Undo reverts its own newest
+  write — never another project's — while `restore --last` keeps its
+  machine-wide meaning.
+- Witnesses: end-to-end preview→edit→apply race tests for both consent
+  bindings, and a parity test proving the t3code panel's fixed argv and the
+  direct CLI journey produce byte-identical files.
+
 ### Changed
 
 - AgentStack now positions portability, toolsets, lifecycle diagnosis, and

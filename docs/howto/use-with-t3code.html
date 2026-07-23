@@ -239,14 +239,15 @@
 <p>For per-session run identity, create a transparent launcher:</p>
 <pre class="block"><code>agentstack shim make claude</code></pre>
 <p>Point the matching t3code provider's binary-path setting at the generated shim. Each launched session then appears in <code>agentstack report runs</code> and receives its own run report.</p>
-<h2 id="what-is-being-built">What is being built<a class="hlink" href="#what-is-being-built" aria-label="Link to this section">#</a></h2>
-<p>The native t3code panel is an active integration, not yet a complete shipped contract. The target experience is:</p>
+<h2 id="the-panel-journey">The panel journey<a class="hlink" href="#the-panel-journey" aria-label="Link to this section">#</a></h2>
+<p>The native t3code panel implements the first launch slice end to end:</p>
 <ol>
-<li><strong>Setup</strong> — show detected coding tools and importable capabilities from <code>agentstack init --plan</code>.</li>
-<li><strong>Toolset</strong> — choose a named profile and use it temporarily.</li>
-<li><strong>Status</strong> — show readiness and one recommended next action.</li>
-<li><strong>Undo</strong> — restore the last AgentStack-managed write.</li>
+<li><strong>Setup</strong> — an uninitialized project shows the coding tools and importable capabilities detected by <code>agentstack init --plan</code>, and one action applies that reviewed plan. The apply is bound to the exact plan shown: if a CLI config changes in between, the CLI refuses and asks for a fresh review.</li>
+<li><strong>Status</strong> — one state (Ready, Needs attention, or Needs setup) with the single recommended next action; the full doctor report stays available as the detail layer.</li>
+<li><strong>Undo</strong> — the panel shows this project's most recent AgentStack-managed write and can revert it, by identity, without touching other projects.</li>
+<li><strong>Toolset</strong> — choosing a named profile and using it temporarily is the next slice; today profiles remain a CLI flow (<code>agentstack use --list --json</code> is already stable for external pickers).</li>
 </ol>
+<p>Reads and actions are version-negotiated: each CLI response names its schema version and usable contracts, and a mismatched pair disables the affected action with upgrade guidance instead of guessing.</p>
 <p>Safety appears progressively:</p>
 <ul>
 <li>Normal local setup does not start with policy or sandbox configuration.</li>
@@ -264,8 +265,7 @@
 <li>Secret values never enter the browser payload.</li>
 <li>A frontend bug may break the UI, but it cannot grant more authority.</li>
 </ul>
-<p>Trust is the clearest example. A preview returns a digest of the immutable content snapshot that produced it. A grant action must return that digest, and the CLI refuses stale or missing consent. The digest proves content consistency, not human attention; t3code's dedicated administrative authorization is the separate human-authority boundary.</p>
-<p>Until both halves are complete, trust writes stay disabled or fail closed in the panel. The terminal trust flow remains the authoritative path.</p>
+<p>Trust is the clearest example. A preview returns a digest of the immutable content snapshot that produced it. A grant action must return that digest, and the CLI refuses stale or missing consent. The digest proves content consistency, not human attention; t3code's dedicated <code>agentstack:admin</code> authorization — required for every authority-changing action, granted only to administrative sessions, never implied by an open browser tab — is the separate human-authority boundary. Both halves are enforced independently: read-only status and planning need no administrative authority, and a frontend bug can break the panel but cannot mint a grant.</p>
 <h2 id="limits">Limits<a class="hlink" href="#limits" aria-label="Link to this section">#</a></h2>
 <ul>
 <li>t3code injects its own browser-preview MCP endpoint directly into sessions, outside native CLI configuration. AgentStack can gate calls on governed paths, but the endpoint is not declared in the project manifest or lockfile. That endpoint is not currently treated as a governed cross-harness workflow launcher. Using t3code MCP for child launch and supervision is a separate research item and must preserve AgentStack's admitted execution plan, authority, cancellation, and evidence path.</li>

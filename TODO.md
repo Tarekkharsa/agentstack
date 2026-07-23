@@ -76,17 +76,21 @@ existing boundary. Finish and review them before enabling new UI writes.
   consent digests (`e1c8000`).
 - [ ] Complete the independent line-by-line review of the consent snapshot and
   grant path.
-- [ ] Complete the t3code half of the contract:
-  - Add `surface_digest` to the decoded preview schema.
-  - Carry it in the trust-grant request.
-  - Map the closed action to fixed argv containing
-    `--yes --consented-digest <digest>`.
-  - Refuse a grant when the preview is absent or stale.
-- [ ] Introduce or explicitly approve the dedicated `agentstack:admin`
-  authorization boundary before enabling trust, machine guard, or workflow
-  control writes in t3code.
-- [ ] Verify that older CLI/newer UI and newer CLI/older UI combinations fail
-  closed with a useful message.
+- [x] Complete the t3code half of the contract (t3code `f0196e536`,
+  `d98b5080d`): `surface_digest` decoded, carried in the grant request,
+  mapped to fixed `--yes --consented-digest` argv, and a grant with an
+  absent/malformed digest is refused before anything spawns (stale refusal
+  is CLI-enforced).
+- [x] Introduce the dedicated `agentstack:admin` authorization boundary
+  (t3code `f0196e536`): required for every `agentstackAction` write, granted
+  only to administrative sessions, checked server-side against the
+  authenticated session's scopes; RPC-level fail-closed witness added in
+  `d98b5080d`. Reads stay on `orchestration:read`.
+- [x] Verify that older CLI/newer UI and newer CLI/older UI combinations fail
+  closed with a useful message (`717f29d` envelope + t3code `d98b5080d`
+  negotiation: newer CLI schema → one "update needed" state, actions
+  disabled; older CLI without a feature → that action disabled with upgrade
+  guidance).
 
 ### Stage 0 gate
 
@@ -148,28 +152,37 @@ write, and status paths.
 
 This is the primary graphical path, not an optional dashboard.
 
-- [ ] Replace the current t3code integration copy with the product contract:
-  t3code owns presentation; AgentStack CLI owns decisions and writes.
-- [ ] Add capability negotiation so the panel detects supported CLI schema and
-  action versions and gives a useful upgrade message when they differ.
-- [ ] Add a setup RPC backed by `init --plan`; never duplicate import logic in
-  TypeScript.
-- [ ] Present the plan in four user-facing groups:
-  - coding tools found;
-  - capabilities found;
-  - files AgentStack proposes to manage;
-  - secret names that still need local values.
-- [ ] Add only fixed, closed actions for the first slice: apply the reviewed
-  setup, check status, and restore the last AgentStack write.
-- [ ] Resolve workspace identity on the t3code server. Never accept an
-  arbitrary project path or argv from the browser.
-- [ ] Show one recommended next action rather than exposing the whole CLI.
-- [ ] Keep trust, policy, guard, gateway, and workflow controls out of the
-  initial setup screen. Surface them only when the current state requires one.
-- [ ] Add parity tests proving the t3code flow and direct CLI flow produce the
-  same plan and resulting files.
-- [ ] Remove or rewrite old t3code copy that claims the integration is complete
-  before the consent/admin contract actually works.
+- [x] Replace the current t3code integration copy with the product contract
+  (`docs/howto/use-with-t3code.md`, `docs/design/ui-control-plane.md`
+  updated to the shipped action enum and journey).
+- [x] Add capability negotiation (`717f29d` CLI envelope; t3code
+  `d98b5080d`): every UI-facing read carries `schema_version` + `features`,
+  the panel disables with an upgrade message on mismatch.
+- [x] Add a setup RPC backed by `init --plan` (t3code `agentstackSetupPlan`
+  → fixed `init --plan` argv; no import logic in TypeScript).
+- [x] Present the plan in four user-facing groups (setup card: coding tools
+  found / what will be imported / files AgentStack will manage / values
+  still needed).
+- [x] Add only fixed, closed actions for the first slice: `setup-apply`
+  (consent-bound to `plan_digest`), status via `doctor --json`, and
+  `restore-write` (id-addressed undo; the ledger is machine-global, so the
+  panel undoes the newest entry touching its own project, never `--last`).
+- [x] Resolve workspace identity on the t3code server (server-side
+  `resolveAgentstackWorkspaceRoot`; the browser sends only project/thread
+  ids, never a path or argv).
+- [x] Show one recommended next action (`doctor --json` `state` +
+  `next_action`; the panel leads with them).
+- [x] Keep trust, policy, guard, gateway, and workflow controls out of the
+  initial setup screen (the setup card uses plain language only; digests
+  live behind a Details disclosure).
+- [x] Add parity tests proving the t3code flow and direct CLI flow produce
+  the same plan and resulting files
+  (`crates/cli/tests/t3code_parity.rs`, `717f29d`: the panel's fixed argv
+  and the direct scripted journey yield byte-identical files, the same
+  doctor state, and project-isolated undo).
+- [x] Remove or rewrite old t3code copy that claimed completeness before the
+  consent/admin contract worked (`docs/howto/use-with-t3code.md` now
+  describes the enforced contract).
 
 ### 1.4 Progressive-disclosure acceptance
 
@@ -440,9 +453,15 @@ per-harness process plumbing and make multi-agent workflows visible in the
 primary UI. It is not an authorization mechanism and must not become a second
 spawn path.
 
-- [ ] Inventory the actual t3code MCP tools, authentication, lifecycle,
-  cancellation, result, and compatibility behavior. Distinguish today's
-  browser-preview endpoint from any harness-launch capability.
+- [x] Inventory the actual t3code MCP tools, authentication, lifecycle,
+  cancellation, result, and compatibility behavior
+  (`docs/design/t3code-mcp-bridge-research.md`, 2026-07-23): the MCP
+  endpoint is browser-preview only (13 `preview_*` tools, per-thread bearer,
+  inward-facing); the `/ws` session protocol launches only pre-configured
+  provider instances with no per-call argv, process identity, process-level
+  result, or version handshake. Decision: the bridge is NOT buildable on
+  today's surface; the remaining items below stay open pending the upstream
+  changes named in that document.
 - [ ] Map every proposed MCP operation to the existing workflow child-run
   contract: strict lock, trust, machine policy, frozen `ExecutionPlan`,
   `AuthorityGrant`, scoped MCP configuration, and recorded outcome.
