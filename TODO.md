@@ -349,16 +349,30 @@ This is the primary graphical path, not an optional dashboard.
   - pin/readiness state;
   - project trust state;
   - active state when applicable.
-- [ ] Give incomplete profiles one actionable explanation rather than several
-  low-level lock errors.
+- [x] Give incomplete profiles one actionable explanation rather than several
+  low-level lock errors (2026-07-23): the session-start gate — the one place
+  that piled a repeated per-item lock line under a "changed since lock was
+  written" lead-in false for never-pinned content — now names the unpinned
+  items on one line with one fix (lock → review → re-trust → retry); genuine
+  drift keeps the accurate story. Gate unchanged, message-shape witness added.
+  (`use --list --json` already carries one actionable reason per blocked row.)
 - [ ] Document one simple way to create a second profile from an existing setup.
 
 ### 2.2 Make temporary switching dependable
 
 - [x] Land the fail-closed session-start readiness gate (`e1c8000`).
-- [ ] Make `session start` state which profile and native files it activates.
-- [ ] Make current session/profile visible in the default status surface.
-- [ ] Ensure `session end` reports exactly what it restored.
+- [x] Make `session start` state which profile and native files it activates
+  (2026-07-23): the start report names the profile, every native config file
+  the session now manages (the exact set `end` restores), the skills it
+  materialized where, and the one command that reverts it.
+- [x] Make current session/profile visible in the default status surface
+  (2026-07-23): bare `agentstack` shows an active session as its own line —
+  profile, humanized age, and the end command (the toolsets/doctor JSON
+  already carried it via `sessions-v1`).
+- [x] Ensure `session end` reports exactly what it restored (2026-07-23):
+  the end report lists the files put back to their pre-session bytes (from
+  the session's own history entry) and the skills removed; an end with
+  nothing to revert says so instead of implying a restore.
 - [ ] Detect abandoned sessions and offer the safe recovery command.
 - [ ] Test overlapping projects and interrupted processes without silently
   clobbering user files.
