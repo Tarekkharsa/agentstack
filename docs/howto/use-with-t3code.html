@@ -248,6 +248,7 @@
 <h2 id="what-a-blocked-call-looks-like">What a blocked call looks like<a class="hlink" href="#what-a-blocked-call-looks-like" aria-label="Link to this section">#</a></h2>
 <p>Nothing extra to set up: guard denials happen inside the session, so t3code's own timeline shows them like any other tool outcome, and every denial lands in the AgentStack <a href="../howto/see-what-happened.html">audit log</a>.</p>
 <p>There is also an optional t3code branch (maintained in this project, pending upstream) that renders AgentStack natively in the t3code UI: a governance status panel in the chat header backed by <code>agentstack doctor --json</code>, and a purpose-built "Blocked by AgentStack Guard" card in the timeline showing the rule, the blocked target, and the audit note.</p>
+<p>One prompt that panel does <strong>not</strong> cause: the macOS keychain dialog some people see on first launch of a packaged t3code build ("… wants to use your confidential information stored in <strong>t3code Safe Storage</strong>") is t3code's own Electron <code>safeStorage</code>, not AgentStack. An unsigned or ad-hoc-signed local build re-prompts because its signature changes on every rebuild; a signed build asks once.</p>
 <h2 id="per-run-evidence-optional">Per-run evidence (optional)<a class="hlink" href="#per-run-evidence-optional" aria-label="Link to this section">#</a></h2>
 <p>By default t3code sessions land in the machine-global call audit. To give each t3code session its own run identity and <code>events.jsonl</code>:</p>
 <pre class="block"><code>agentstack shim make claude</code></pre>
@@ -256,6 +257,7 @@
 <ul>
 <li>t3code injects one MCP endpoint of its own (<code>t3-code</code>, for driving its in-app browser preview) directly into each session, outside any config file. It never appears in a manifest or lockfile; the guard still gates its tool calls at runtime.</li>
 <li>Doctor reads t3code's production state (<code>~/.t3/userdata</code>); a t3code built and run from source in dev mode keeps separate state that is not checked.</li>
+<li><code>agentstack doctor</code> and <code>agentstack diff</code> render a project's servers to compare against the on-disk configs, and rendering resolves that project's secrets — so a project whose secrets live in the <strong>OS keychain</strong> can raise a keychain prompt when a UI refreshes those reads. Projects that keep secrets in <code>.env</code> or leave them as unresolved <code>${REF}</code> placeholders (<code>agentstack init --secrets env</code> / <code>--secrets skip</code>) never touch the keychain on these read paths. The audit, run, workflow-list, and trust-preview reads never resolve secrets at all.</li>
 </ul>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/use-with-t3code.md">docs/howto/use-with-t3code.md</a> — this page is generated from it.</p>
   </main>

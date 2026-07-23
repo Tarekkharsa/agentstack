@@ -55,6 +55,13 @@ status panel in the chat header backed by `agentstack doctor --json`, and a
 purpose-built "Blocked by AgentStack Guard" card in the timeline showing the
 rule, the blocked target, and the audit note.
 
+One prompt that panel does **not** cause: the macOS keychain dialog some people
+see on first launch of a packaged t3code build ("… wants to use your
+confidential information stored in **t3code Safe Storage**") is t3code's own
+Electron `safeStorage`, not AgentStack. An unsigned or ad-hoc-signed local build
+re-prompts because its signature changes on every rebuild; a signed build asks
+once.
+
 ## Per-run evidence (optional)
 
 By default t3code sessions land in the machine-global call audit. To give
@@ -79,3 +86,11 @@ instances. One t3code session = one run.
   calls at runtime.
 - Doctor reads t3code's production state (`~/.t3/userdata`); a t3code built
   and run from source in dev mode keeps separate state that is not checked.
+- `agentstack doctor` and `agentstack diff` render a project's servers to
+  compare against the on-disk configs, and rendering resolves that project's
+  secrets — so a project whose secrets live in the **OS keychain** can raise a
+  keychain prompt when a UI refreshes those reads. Projects that keep secrets in
+  `.env` or leave them as unresolved `${REF}` placeholders (`agentstack init
+  --secrets env` / `--secrets skip`) never touch the keychain on these read
+  paths. The audit, run, workflow-list, and trust-preview reads never resolve
+  secrets at all.
