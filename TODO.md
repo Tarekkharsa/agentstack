@@ -175,17 +175,31 @@ write, and status paths.
   proposed destinations without writing or prompting (`e1c8000`).
 - [x] Add its witness that no manifest, secret store, native config, or restore
   entry changes during planning (`e1c8000`).
-- [ ] Ensure the first screen says which CLIs and native configurations were
-  found.
-- [ ] Show imported servers, skills, instructions, and secret reference names
-  before writing.
+- [x] Ensure the first screen says which CLIs and native configurations were
+  found (2026-07-23, both surfaces): scripted init and the wizard open with
+  each detected CLI and the exact native config files detection read (or the
+  honest "binary on PATH — no config files found"); `init --plan` carries the
+  same evidence (`detected[].bin_on_path`, `detected[].configs`) and the
+  t3code setup card renders it under "Coding tools found".
+- [x] Show imported servers, skills, instructions, and secret reference names
+  before writing (2026-07-23): servers are listed by name with what each runs
+  or contacts, settings imports name their source CLIs, and lifted secret
+  references print with their origins — all before any write; the wizard's
+  import confirm moved AFTER that review (`run_for_setup` gates the write).
+  Skills and instructions are not part of the init import (nothing to show);
+  the plan and terminal state exactly what is imported.
 - [x] Explain unsupported or lossy imports in plain language (2026-07-23):
   entries the import cannot map are named with a reason and the assurance
   nothing was deleted, both in `init` output and `init --plan` (`unsupported`);
   the settings import states that unrecognized settings stay in each CLI's own
   file.
-- [ ] Make the destination scopes and files visible without requiring knowledge
-  of adapter internals.
+- [x] Make the destination scopes and files visible without requiring knowledge
+  of adapter internals (2026-07-23, both surfaces): "Files agentstack will
+  manage" names the manifest (written by the import) and each CLI's native
+  destination with its scope in plain words ("this project" / "machine-wide"),
+  labeled as written by the next `apply --write`, not now; `init --plan`'s
+  additive `destinations[]` feeds the identical rows in the t3code setup card.
+  Witnessed by `init_review.rs` against the real binary.
 - [x] End the flow with one concise success summary (2026-07-23): scripted
   `init` closes with manifest path / source CLIs / imported counts / secrets
   still needing values / next commands (`render_import_summary`); the wizard
