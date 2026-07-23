@@ -1291,7 +1291,7 @@ you need the exact verb, flag, or subcommand.
 
 <!-- agentstack:generated commands -->
 - **`setup`** _(hidden)_ — Hidden alias of interactive `init` — same guided wizard, older name — flags `--target/--profile/--scope`
-- **`init`** — Set up everything in one command: detect, import, choose, apply, verify — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--yes`
+- **`init`** — Set up everything in one command: detect, import, choose, apply, verify — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--yes/--consented-plan`
 - **`status`** — Where this project stands, on one screen: detected CLIs, manifest, trust, secrets, and the one next step
 - **`add`** — Add a server or skill to the manifest — subcommands `from/server/skill`
 - **`set`** _(hidden)_ — Create or update a manifest entry in place (idempotent `add`) — subcommands `server`
@@ -1322,7 +1322,7 @@ you need the exact verb, flag, or subcommand.
 - **`explain`** _(hidden)_ — Explain a server, skill, or instruction before you rely on it — flags `--json`
 - **`optimize`** _(hidden)_ — Turn agentstack's collected signals into concrete recommendations — flags `--json/--write/--since`
 - **`proxy`** _(hidden)_ — Start the wire relay: a localhost proxy in front of the Anthropic API — flags `--port/--upstream`
-- **`restore`** _(hidden)_ — Undo a recorded write: revert an apply/use/session history entry (servers, settings, hooks, instructions), or restore one adapter's config from its single-slot backup — flags `--last/--scope/--write`
+- **`restore`** _(hidden)_ — Undo a recorded write: revert an apply/use/session history entry (servers, settings, hooks, instructions), or restore one adapter's config from its single-slot backup — flags `--last/--scope/--write/--json`
 - **`secret`** _(hidden)_ — Manage secrets in the OS keychain — subcommands `set/get/rm/list`
 - **`settings`** _(hidden)_ — Edit a target's native `[settings.<target>]` entries — subcommands `set/unset`
 - **`export`** _(hidden)_ — Export the manifest (+ lock, + optionally secrets) as an encrypted bundle — flags `--output/--secrets/--passphrase`
