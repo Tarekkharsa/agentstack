@@ -259,6 +259,18 @@ pub(crate) fn profiles_line(names: &[String], active: Option<&str>) -> String {
     }
 }
 
+/// Humanize how long a session has been running, for the Session status line.
+/// Pure so the buckets are unit-testable.
+pub(crate) fn session_age(secs: u64) -> String {
+    if secs < 60 {
+        "started just now".to_string()
+    } else if secs < 3600 {
+        format!("started {}m ago", secs / 60)
+    } else {
+        format!("started {}h {}m ago", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
 /// `agentstack status` — the orientation screen by name, plus the cheap health
 /// signals a glance wants (secrets resolving?) and the pointer to the deep
 /// check. Everything expensive (drift rendering, content scans) stays in
@@ -376,6 +388,24 @@ fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
                         "  {}  {}",
                         "Profiles".bold(),
                         profiles_line(&names, active_session.as_ref().map(|s| s.profile.as_str()))
+                    );
+                }
+
+                // Stage 2.2: an active temporary session is a first-class fact
+                // of the default status surface — its own line, not just the
+                // (active) marker inside the profiles list, with the one
+                // command that reverts it.
+                if let Some(sess) = &active_session {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    println!(
+                        "  {}  '{}' active temporarily ({}) — {}",
+                        "Session ".bold(),
+                        sess.profile,
+                        session_age(now.saturating_sub(sess.started_unix)),
+                        "`agentstack session end` restores your files".dimmed()
                     );
                 }
 
@@ -636,5 +666,13 @@ mod tests {
             profiles_line(&five, Some("b")),
             "5 profiles: a, b (active), c, …"
         );
+    }
+
+    // Stage 2.2: the Session status line humanizes the session's age.
+    #[test]
+    fn session_age_buckets() {
+        assert_eq!(session_age(5), "started just now");
+        assert_eq!(session_age(240), "started 4m ago");
+        assert_eq!(session_age(3900), "started 1h 5m ago");
     }
 }

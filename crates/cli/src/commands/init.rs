@@ -1428,8 +1428,9 @@ fn render_import_summary(
 
 /// Compact an absolute path for display: inside the project → relative to the
 /// project root; under `$HOME` → `~/…`; otherwise unchanged. Display-only —
-/// JSON contracts always carry the full path.
-fn display_path(path: &Path, project_root: &Path) -> String {
+/// JSON contracts always carry the full path. Shared with the session
+/// start/end reports, which state the same kinds of native paths.
+pub(crate) fn display_path(path: &Path, project_root: &Path) -> String {
     if let Ok(rel) = path.strip_prefix(project_root) {
         return rel.display().to_string();
     }

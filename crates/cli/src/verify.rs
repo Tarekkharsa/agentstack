@@ -168,26 +168,47 @@ pub fn ensure_session_startable(
     skills: &[(String, SkillLockStatus)],
     servers: &[(String, ServerLockStatus)],
 ) -> anyhow::Result<()> {
+    let mut unpinned: Vec<String> = Vec::new();
     let mut blocked: Vec<(String, String)> = Vec::new();
-    let unpinned = || {
-        "unpinned — run `agentstack lock`, review, and re-trust before starting a session"
-            .to_string()
-    };
     for (name, status) in skills {
         match skill_verdict(status) {
             Verdict::Ok => {}
-            Verdict::Unpinned => blocked.push((name.clone(), unpinned())),
+            Verdict::Unpinned => unpinned.push(name.clone()),
             Verdict::Block(why) => blocked.push((name.clone(), why)),
         }
     }
     for (name, status) in servers {
         match server_verdict(status) {
             Verdict::Ok => {}
-            Verdict::Unpinned => blocked.push((name.clone(), unpinned())),
+            Verdict::Unpinned => unpinned.push(name.clone()),
             Verdict::Block(why) => blocked.push((name.clone(), why)),
         }
     }
-    bail_blocked(&format!("start a session with {what}"), blocked)
+    if unpinned.is_empty() {
+        // Only genuine drift/breakage: the shared "changed since lock" bail
+        // is the accurate story.
+        return bail_blocked(&format!("start a session with {what}"), blocked);
+    }
+    // Stage 2.1: an incomplete profile gets ONE actionable explanation — not
+    // a repeated low-level line per item and not a "changed since lock"
+    // lead-in for content that was never pinned in the first place. The gate
+    // itself is unchanged: unpinned still refuses (never first-pin here).
+    let mut lines = format!(
+        "refusing to start a session with {what} — it isn't ready yet:\n  {} item(s) unpinned (not in agentstack.lock): {}\n",
+        unpinned.len(),
+        unpinned.join(", ")
+    );
+    if !blocked.is_empty() {
+        lines.push_str(&format!(
+            "  {} item(s) changed since they were pinned:\n{}",
+            blocked.len(),
+            offender_lines(&blocked)
+        ));
+    }
+    lines.push_str(
+        "Make it ready once: run `agentstack lock` (pins the new items and accepts reviewed changes), re-trust the project, then retry.",
+    );
+    anyhow::bail!(lines)
 }
 
 /// The instruction-compile gate (`apply --write`, `instructions --write`):
@@ -331,6 +352,46 @@ mod tests {
             locked: "aaaaaaaaaaaaaaaa".into(),
             current: "bbbbbbbbbbbbbbbb".into(),
         }
+    }
+
+    /// Stage 2.1: an incomplete (unpinned) profile refuses with ONE
+    /// actionable explanation — the unpinned names on one line and one fix —
+    /// not a repeated low-level lock error per item, and never the "changed
+    /// since lock was written" story for content that was never pinned. The
+    /// gate itself stays fail-closed (this is a message-shape witness, not a
+    /// gate change).
+    #[test]
+    fn session_gate_gives_one_explanation_for_unpinned_profiles() {
+        let unpinned = SkillLockStatus::MissingLockEntry;
+        let err = ensure_session_startable(
+            "profile 'dev'",
+            &[
+                ("a".into(), unpinned.clone()),
+                ("b".into(), unpinned.clone()),
+            ],
+            &[],
+        )
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("isn't ready yet"), "{msg}");
+        assert!(msg.contains("2 item(s) unpinned"), "{msg}");
+        assert!(msg.contains("a, b"), "{msg}");
+        assert!(msg.contains("agentstack lock"), "{msg}");
+        assert!(
+            !msg.contains("changed since agentstack.lock was written"),
+            "never the drift story for never-pinned content: {msg}"
+        );
+        // The fix appears once, not once per item.
+        assert_eq!(msg.matches("agentstack lock").count(), 1, "{msg}");
+
+        // Genuine drift alone keeps the accurate "changed since lock" story.
+        let err =
+            ensure_session_startable("profile 'dev'", &[("a".into(), drift())], &[]).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("changed since agentstack.lock was written"),
+            "{msg}"
+        );
     }
 
     fn ok_server(name: &str) -> FrozenServer {

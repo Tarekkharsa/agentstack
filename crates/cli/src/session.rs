@@ -181,6 +181,32 @@ fn dir_entries(dir: &Path) -> BTreeSet<String> {
         .collect()
 }
 
+/// What `start` activated, so the caller can state the facts instead of a
+/// bare "started" (Stage 2.2): which profile, which native files the session
+/// now manages, and which skills it materialized where.
+#[derive(Debug)]
+pub struct StartReport {
+    pub profile: String,
+    pub scope: Scope,
+    /// (CLI display name, native config file) for each target whose server
+    /// config this session manages — the exact files `end` restores.
+    pub server_files: Vec<(String, PathBuf)>,
+    /// (skills dir, skill names) the activation added — removed again at end.
+    pub skill_adds: Vec<(String, Vec<String>)>,
+}
+
+/// What `end` reverted, so the caller can report an exact restore instead of
+/// a bare "ended" (Stage 2.2).
+#[derive(Debug)]
+pub struct EndReport {
+    pub profile: String,
+    /// Files put back to their pre-session bytes, as (path, label) from the
+    /// history entry the session recorded at start.
+    pub restored: Vec<(String, String)>,
+    /// (skills dir, skill names) removed again.
+    pub removed_skills: Vec<(String, Vec<String>)>,
+}
+
 /// Start a session: snapshot, activate `profile` in `scope`, and remember what
 /// to revert.
 ///
@@ -189,7 +215,7 @@ fn dir_entries(dir: &Path) -> BTreeSet<String> {
 /// `session start` is the verb external UIs drive headlessly, so it refuses
 /// an untrusted project and any unpinned/drifted surface outright, routing to
 /// the review instead of silently loading content nobody consented to.
-pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result<()> {
+pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result<StartReport> {
     let ctx = crate::commands::load(manifest_dir)?;
     let key_dir = dir_key(&ctx.dir);
     if load_all().contains_key(&key_dir) {
@@ -269,6 +295,7 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
     let ruleset = crate::render::ruleset_for(manifest)?;
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
     let mut touched: BTreeSet<String> = BTreeSet::new();
+    let mut server_files: Vec<(String, PathBuf)> = Vec::new();
     let mut skill_before: Vec<(PathBuf, bool, BTreeSet<String>)> = Vec::new();
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -289,6 +316,7 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
                 format!("{} · servers", desc.display),
             ));
             touched.insert(desc.display.clone());
+            server_files.push((desc.display.clone(), plan.config_path.clone()));
         }
         if let Some(sd) = desc.skills_dir_for(scope, &ctx.dir) {
             skill_before.push((sd.clone(), sd.exists(), dir_entries(&sd)));
@@ -324,16 +352,25 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
             scope: scope.as_str().to_string(),
             started_unix: now_secs(),
             history_id,
-            skill_adds,
+            skill_adds: skill_adds.clone(),
             loads: Vec::new(),
         },
     );
-    save_all(&map)
+    save_all(&map)?;
+    Ok(StartReport {
+        profile: profile.to_string(),
+        scope,
+        server_files,
+        skill_adds: skill_adds
+            .into_iter()
+            .map(|sa| (sa.dir, sa.names))
+            .collect(),
+    })
 }
 
 /// End the active session for `dir`: restore server files and remove the skills
-/// it added.
-pub fn end(manifest_dir: Option<&Path>) -> Result<()> {
+/// it added. Returns exactly what was reverted (Stage 2.2).
+pub fn end(manifest_dir: Option<&Path>) -> Result<EndReport> {
     // Walk up like `start` does (via commands::load), or a session started at
     // the project root could never be ended from a subdirectory.
     let dir = crate::commands::project_base(manifest_dir)?;
@@ -344,9 +381,20 @@ pub fn end(manifest_dir: Option<&Path>) -> Result<()> {
         .cloned()
         .context("no active session in this directory")?;
 
-    // 1. Restore server config files to their pre-session content.
+    // 1. Restore server config files to their pre-session content. The
+    //    history entry names the files, so the report can state exactly what
+    //    went back; a failed/already-done undo reports an empty restore
+    //    honestly instead of claiming one.
+    let mut restored: Vec<(String, String)> = Vec::new();
     if let Some(hid) = &sess.history_id {
-        let _ = crate::history::undo(hid);
+        let files: Vec<(String, String)> = crate::history::list()
+            .into_iter()
+            .find(|e| &e.id == hid)
+            .map(|e| e.files.into_iter().map(|f| (f.path, f.label)).collect())
+            .unwrap_or_default();
+        if crate::history::undo(hid).is_ok() {
+            restored = files;
+        }
     }
     // 2. Remove the skills the session materialized. A dir the session itself
     //    created is cleared too when emptied (rmdir semantics: refuses
@@ -361,7 +409,16 @@ pub fn end(manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
     map.remove(&key);
-    save_all(&map)
+    save_all(&map)?;
+    Ok(EndReport {
+        profile: sess.profile,
+        restored,
+        removed_skills: sess
+            .skill_adds
+            .into_iter()
+            .map(|sa| (sa.dir, sa.names))
+            .collect(),
+    })
 }
 
 /// Remove a skill entry whether it's a symlink, file, or directory.
