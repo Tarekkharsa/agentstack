@@ -25,7 +25,7 @@ use agentstack_core::lock::LOCK_FILE;
 use agentstack_core::manifest::load::{LOCAL_FILE, MANIFEST_FILE};
 use agentstack_core::util::paths;
 
-const TRUST_DIGEST_DOMAIN: &[u8] = b"agentstack-trust-digest-v2\0";
+const TRUST_DIGEST_DOMAIN: &[u8] = b"agentstack-trust-digest-v3\0";
 
 /// The reviewed crate gets a closed error enum instead of `anyhow` (rule 6):
 /// every failure a caller can see is named here, nothing is stringly ad-hoc.
@@ -82,7 +82,7 @@ pub struct TrustEntry {
     /// The reviewed loadable surface at trust time, for re-trust diffing (P14).
     ///
     /// Additive and optional: entries written before this field simply
-    /// deserialize to `None` (`serde(default)`), and a `trust()` that records no
+    /// deserialize to `None` (`serde(default)`), and a grant that records no
     /// snapshot serializes nothing extra (`skip_serializing_if`), so older
     /// stores round-trip byte-for-byte. It is *display metadata only* — never
     /// folded into [`digest_for`], so it cannot change what re-gates a project.
@@ -164,8 +164,8 @@ pub fn key_for(base: &Path) -> String {
 /// overlay, and the lockfile. A caller that must both *display* the surface
 /// (parse) and *identify* it (digest) derives both from one snapshot, closing
 /// the read–reread window in which a mid-preview edit could pair an old
-/// display with a new digest (UI control-plane §7.2). `None` for an absent
-/// overlay/lock digests as empty, exactly as [`digest_for`] always has — and
+/// display with a new digest (UI control-plane §7.2). Absent overlay/lock
+/// files are framed distinctly from present-but-empty ones (v3) — and
 /// `digest_for` IS this snapshot's digest, so the two can never diverge.
 #[derive(Debug)]
 pub struct ConsentSnapshot {
@@ -195,15 +195,24 @@ impl ConsentSnapshot {
         let mut hasher = Sha256::new();
         hasher.update(TRUST_DIGEST_DOMAIN);
         for segment in [
-            self.manifest.as_slice(),
-            self.local.as_deref().unwrap_or_default(),
-            self.lock.as_deref().unwrap_or_default(),
+            Some(self.manifest.as_slice()),
+            self.local.as_deref(),
+            self.lock.as_deref(),
         ] {
-            // Length prefixes make each file boundary unambiguous, like
-            // framing three byte buffers before concatenating them in
-            // TypeScript.
-            hasher.update((segment.len() as u64).to_le_bytes());
-            hasher.update(segment);
+            // Each segment is framed as presence byte + length + bytes: the
+            // length prefix makes file boundaries unambiguous, and the
+            // presence byte distinguishes an ABSENT overlay/lock from a
+            // present zero-byte file (v3) — creating an empty
+            // `agentstack.lock` after consent must re-gate like any other
+            // byte change, not collide with "no lock at all".
+            match segment {
+                Some(bytes) => {
+                    hasher.update([1u8]);
+                    hasher.update((bytes.len() as u64).to_le_bytes());
+                    hasher.update(bytes);
+                }
+                None => hasher.update([0u8]),
+            }
         }
         format!("sha256:{:x}", hasher.finalize())
     }
@@ -241,18 +250,49 @@ pub fn check_digest(base: &Path, digest: Option<&str>) -> TrustState {
     }
 }
 
-/// Record trust for `base` at its current manifest digest, without a reviewed
-/// surface snapshot. Errors when there is no manifest to pin.
-pub fn trust(base: &Path) -> Result<String> {
-    record_trust(base, None)
+/// Test-fixture grant: record trust for `base` at whatever its manifest
+/// digests to RIGHT NOW, with no review and no consent binding. This exists
+/// so integration tests can put a temp project into the trusted state in one
+/// line. Production command paths must never call it — they go through
+/// [`trust_reviewed`] (a digest the caller's rendered review derived) or
+/// [`trust_with_consent`] (a digest a previewing human presented back); the
+/// name is deliberately greppable so a review catches any new caller.
+pub fn trust_unreviewed(base: &Path) -> Result<String> {
+    let digest = digest_for(base).ok_or_else(|| TrustError::NoManifest {
+        base: base.to_path_buf(),
+    })?;
+    store_entry(base, digest.clone(), None)?;
+    Ok(digest)
 }
 
-/// Like [`trust`], but also persists the reviewed surface so a future re-trust
-/// can diff against it (P14). The caller (the CLI review) builds the surface
-/// as it renders the consent list; this crate only stores it. The snapshot is
-/// display metadata — it does not participate in [`digest_for`].
-pub fn trust_with_snapshot(base: &Path, surface: Vec<SurfaceItem>) -> Result<String> {
-    record_trust(base, Some(surface))
+/// Record trust at `digest` — the digest of the exact byte snapshot whose
+/// review the caller just rendered — plus the reviewed surface for re-trust
+/// diffing (P14). No disk re-read happens here: if the files changed after
+/// the caller's snapshot, the store holds the SNAPSHOT digest, the project
+/// immediately reads as `Changed`, and every use site fails closed — the
+/// same fail-closed shape as [`trust_with_consent`], closing the window in
+/// which an interactive review could bless bytes the human never saw.
+pub fn trust_reviewed(base: &Path, digest: String, surface: Vec<SurfaceItem>) -> Result<()> {
+    store_entry(base, digest, Some(surface))
+}
+
+/// Re-pin an EXISTING trust entry to `digest` — the digest of bytes the
+/// caller itself just wrote (an owned-manifest refresh), computed from the
+/// written content, never from a disk re-read. Preserves the recorded
+/// reviewed surface so re-trust diffing keeps its baseline. Returns `false`
+/// (writing nothing) when no entry exists: re-pinning must never CREATE
+/// trust, only carry valid trust across agentstack's own rewrite.
+pub fn repin(base: &Path, digest: String) -> Result<bool> {
+    with_store_lock(|| {
+        let mut store = TrustStore::load();
+        let Some(entry) = store.trusted.get_mut(&key_for(base)) else {
+            return Ok(false);
+        };
+        entry.digest = digest;
+        entry.trusted_at = now_secs();
+        store.save()?;
+        Ok(true)
+    })
 }
 
 /// Consent-bound grant (UI control-plane §7.2): record trust only if the
@@ -299,38 +339,83 @@ pub fn prior_surface(base: &Path) -> PriorSurface {
     }
 }
 
-fn record_trust(base: &Path, surface: Option<Vec<SurfaceItem>>) -> Result<String> {
-    let digest = digest_for(base).ok_or_else(|| TrustError::NoManifest {
-        base: base.to_path_buf(),
-    })?;
-    store_entry(base, digest.clone(), surface)?;
-    Ok(digest)
-}
-
 /// The single store-write for a grant: pin `base` at exactly `digest`. Split
 /// out so the consent path can record the digest it verified rather than
 /// re-reading disk (see [`trust_with_consent`]).
 fn store_entry(base: &Path, digest: String, surface: Option<Vec<SurfaceItem>>) -> Result<()> {
-    let mut store = TrustStore::load();
-    store.trusted.insert(
-        key_for(base),
-        TrustEntry {
-            digest,
-            trusted_at: now_secs(),
-            surface,
-        },
-    );
-    store.save()
+    with_store_lock(|| {
+        let mut store = TrustStore::load();
+        store.trusted.insert(
+            key_for(base),
+            TrustEntry {
+                digest,
+                trusted_at: now_secs(),
+                surface,
+            },
+        );
+        store.save()
+    })
 }
 
 /// Remove trust for `base`. Returns whether an entry existed.
 pub fn revoke(base: &Path) -> Result<bool> {
-    let mut store = TrustStore::load();
-    let existed = store.trusted.shift_remove(&key_for(base)).is_some();
-    if existed {
-        store.save()?;
+    with_store_lock(|| {
+        let mut store = TrustStore::load();
+        let existed = store.trusted.shift_remove(&key_for(base)).is_some();
+        if existed {
+            store.save()?;
+        }
+        Ok(existed)
+    })
+}
+
+/// Serialize every load→modify→save of the whole-file trust store across
+/// processes, so a concurrent grant can never resurrect an entry a racing
+/// revoke just removed (each writer would otherwise save its own stale copy
+/// of the entire map). `create_dir` is the atomic primitive — it either
+/// creates the sentinel or fails because it exists — giving mutual exclusion
+/// from the standard library alone, no new dependency. A sentinel older than
+/// [`STORE_LOCK_STALE`] is treated as a crashed writer and broken; a healthy
+/// writer holds it for the few milliseconds one read+write takes, so the
+/// bounded wait fails (closed, no store write) only under real contention.
+fn with_store_lock<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
+    const STORE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+    const STORE_LOCK_STALE: std::time::Duration = std::time::Duration::from_secs(30);
+    let lock_dir = paths::agentstack_home().join("trust.lock.d");
+    let deadline = std::time::Instant::now() + STORE_LOCK_WAIT;
+    loop {
+        match std::fs::create_dir(&lock_dir) {
+            Ok(()) => break,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                let stale = std::fs::metadata(&lock_dir)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age > STORE_LOCK_STALE);
+                if stale {
+                    // Best-effort: losing this race just means retrying.
+                    let _ = std::fs::remove_dir(&lock_dir);
+                    continue;
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(TrustError::Store(format!(
+                        "trust store is locked by another agentstack process ({} exists) — retry, or remove it if no other process is running",
+                        lock_dir.display()
+                    )));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // First write on this machine: the home dir itself is missing.
+                std::fs::create_dir_all(paths::agentstack_home())
+                    .map_err(|err| TrustError::Store(err.to_string()))?;
+            }
+            Err(e) => return Err(TrustError::Store(e.to_string())),
+        }
     }
-    Ok(existed)
+    let out = f();
+    let _ = std::fs::remove_dir(&lock_dir);
+    out
 }
 
 fn now_secs() -> u64 {
@@ -390,7 +475,7 @@ mod tests {
             let proj = project_with_manifest();
             assert_eq!(check(proj.path()), TrustState::Untrusted);
 
-            trust(proj.path()).unwrap();
+            trust_unreviewed(proj.path()).unwrap();
             assert_eq!(check(proj.path()), TrustState::Trusted);
 
             // Any manifest edit invalidates trust (direnv semantics).
@@ -400,7 +485,7 @@ mod tests {
             assert_eq!(check(proj.path()), TrustState::Changed);
 
             // Re-trusting the new content restores it; revoking clears it.
-            trust(proj.path()).unwrap();
+            trust_unreviewed(proj.path()).unwrap();
             assert_eq!(check(proj.path()), TrustState::Trusted);
             assert!(revoke(proj.path()).unwrap());
             assert_eq!(check(proj.path()), TrustState::Untrusted);
@@ -411,7 +496,7 @@ mod tests {
     fn local_overlay_participates_in_the_digest() {
         with_home(|_| {
             let proj = project_with_manifest();
-            trust(proj.path()).unwrap();
+            trust_unreviewed(proj.path()).unwrap();
             // The gitignored overlay also declares servers — adding one must
             // invalidate trust too.
             proj.child(".agentstack/agentstack.local.toml")
@@ -425,7 +510,7 @@ mod tests {
     fn lockfile_participates_in_the_digest() {
         with_home(|_| {
             let proj = project_with_manifest();
-            trust(proj.path()).unwrap();
+            trust_unreviewed(proj.path()).unwrap();
             // The lock pins the library server definitions the gateway will
             // run — re-pinning changes the runtime surface, so it re-gates
             // exactly like a manifest edit.
@@ -446,7 +531,7 @@ mod tests {
         with_home(|_| {
             let proj = project_with_manifest();
             // First trust with no snapshot (an "older" entry) reads as Untracked.
-            trust(proj.path()).unwrap();
+            trust_unreviewed(proj.path()).unwrap();
             assert_eq!(prior_surface(proj.path()), PriorSurface::Untracked);
             let digest_flat = check_digest(proj.path());
 
@@ -463,7 +548,8 @@ mod tests {
                     identity: "library".into(),
                 },
             ];
-            trust_with_snapshot(proj.path(), surface.clone()).unwrap();
+            let reviewed = digest_for(proj.path()).unwrap();
+            trust_reviewed(proj.path(), reviewed, surface.clone()).unwrap();
             assert_eq!(prior_surface(proj.path()), PriorSurface::Recorded(surface));
             // …and the digest is unchanged — the snapshot is display-only, so
             // the project stays Trusted rather than re-gating.
@@ -553,12 +639,83 @@ mod tests {
         assert_ne!(digest_for(first.path()), digest_for(second.path()));
     }
 
+    /// v3 presence framing: an ABSENT lockfile and a present ZERO-BYTE
+    /// lockfile are different consent surfaces — creating an empty
+    /// `agentstack.lock` after a grant must re-gate the project (review
+    /// finding: absent and empty previously collided). NEVER weaken this.
+    #[test]
+    fn absent_and_empty_pinned_files_digest_differently() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let before = digest_for(proj.path()).unwrap();
+            trust_unreviewed(proj.path()).unwrap();
+            assert_eq!(check(proj.path()), TrustState::Trusted);
+
+            proj.child(".agentstack/agentstack.lock")
+                .write_binary(b"")
+                .unwrap();
+            let after = digest_for(proj.path()).unwrap();
+            assert_ne!(before, after, "empty lock must change the digest");
+            assert_eq!(check(proj.path()), TrustState::Changed);
+        });
+    }
+
+    /// `trust_reviewed` stores the CALLER's digest with no disk re-read: when
+    /// disk changed after the caller's snapshot, the store holds the snapshot
+    /// digest and the project reads Changed — the interactive-grant race
+    /// fails closed instead of blessing unseen bytes. NEVER weaken this.
+    #[test]
+    fn trust_reviewed_pins_the_snapshot_digest_not_current_disk() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let reviewed = digest_for(proj.path()).unwrap();
+            // The mid-review edit: bytes change AFTER the review rendered.
+            proj.child(".agentstack/agentstack.toml")
+                .write_str(
+                    "version = 1\n[servers.evil]\ntype = \"http\"\nurl = \"https://evil/mcp\"\n",
+                )
+                .unwrap();
+            trust_reviewed(proj.path(), reviewed, Vec::new()).unwrap();
+            // The swapped-in bytes are NOT blessed.
+            assert_eq!(check(proj.path()), TrustState::Changed);
+        });
+    }
+
+    /// `repin` carries valid trust across agentstack's own rewrite: it never
+    /// creates an entry, and it preserves the recorded reviewed surface.
+    #[test]
+    fn repin_updates_existing_entry_only_and_preserves_surface() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            // No entry: repin refuses to create one.
+            assert!(!repin(proj.path(), "sha256:beef".into()).unwrap());
+            assert_eq!(check(proj.path()), TrustState::Untrusted);
+
+            let surface = vec![SurfaceItem {
+                kind: "server".into(),
+                name: "x".into(),
+                identity: "https://x/mcp".into(),
+            }];
+            let reviewed = digest_for(proj.path()).unwrap();
+            trust_reviewed(proj.path(), reviewed, surface.clone()).unwrap();
+
+            proj.child(".agentstack/agentstack.toml")
+                .write_str("version = 1\n")
+                .unwrap();
+            let refreshed = digest_for(proj.path()).unwrap();
+            assert!(repin(proj.path(), refreshed).unwrap());
+            assert_eq!(check(proj.path()), TrustState::Trusted);
+            // P14 baseline survives the re-pin.
+            assert_eq!(prior_surface(proj.path()), PriorSurface::Recorded(surface));
+        });
+    }
+
     #[test]
     fn no_manifest_means_no_digest_and_trust_errors() {
         with_home(|_| {
             let empty = assert_fs::TempDir::new().unwrap();
             assert!(digest_for(empty.path()).is_none());
-            assert!(trust(empty.path()).is_err());
+            assert!(trust_unreviewed(empty.path()).is_err());
             assert_eq!(check(empty.path()), TrustState::Untrusted);
         });
     }
@@ -622,7 +779,7 @@ mod tests {
                 proj.child(".agentstack/agentstack.local.toml").write_binary(&local).unwrap();
                 proj.child(".agentstack/agentstack.lock").write_binary(&lock).unwrap();
 
-                trust(proj.path()).unwrap();
+                trust_unreviewed(proj.path()).unwrap();
                 prop_assert_eq!(check(proj.path()), TrustState::Trusted);
 
                 let (name, bytes) = match which {

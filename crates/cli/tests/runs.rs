@@ -193,7 +193,7 @@ fn profile_run_applies_then_reverts_on_exit() {
     // closed on an untrusted or unpinned surface (UI control-plane §5) — so
     // pin and trust the project first, like a human would have.
     agentstack::commands::lock::run(&agentstack::cli::LockArgs::default(), Some(&proj)).unwrap();
-    agentstack::trust::trust(&proj).unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     let proj2 = proj.clone();
     let handle = thread::spawn(move || {

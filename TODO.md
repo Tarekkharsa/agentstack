@@ -51,17 +51,22 @@ existing boundary. Finish and review them before enabling new UI writes.
 
 ### Workflow module boundary
 
-- [ ] Review and land the explicit Boa `IdleModuleLoader`.
-  - The default Boa context installs a filesystem-backed module loader rooted
-    at the process working directory.
-  - A pinned workflow could therefore execute unpinned JavaScript through
-    dynamic `import()`.
-  - Required witness: a real on-disk module exists, dynamic import is refused,
-    and its body never executes.
-- [ ] Run the focused workflow tests and independently review all context
-  construction defaults for other ambient host capabilities.
+- [x] Review and land the explicit Boa `IdleModuleLoader` (landed `b05fd26`;
+  required witness `dynamic_import_of_real_on_disk_module_is_refused` green;
+  independent review 2026-07-23 confirmed the loader refuses every import
+  and Boa 0.21.1's default globals expose no filesystem, network,
+  environment, or process API).
+- [x] Run the focused workflow tests and independently review all context
+  construction defaults for other ambient host capabilities (2026-07-23,
+  fable + gpt-5.6 Sol independently). Two findings, both fixed with
+  witnesses: Boa's default host hook leaked the OS timezone through
+  explicit-argument `Date` methods (now pinned to UTC in `Hooks`), and
+  `WeakRef` exposed GC-schedule nondeterminism (now poisoned in the prelude
+  alongside `FinalizationRegistry`). Dynamic-compilation denial and runtime
+  limits verified sound.
 - [ ] Keep workflows preview-hidden until the script-boundary review is
-  recorded complete.
+  recorded complete (the §9.3 re-run is still pending; its kickoff prompt is
+  saved and it gates the preview-label drop).
 
 ### Consent snapshot and UI authorization
 
@@ -74,8 +79,20 @@ existing boundary. Finish and review them before enabling new UI writes.
     silently bless different bytes.
 - [x] Add focused trust and CLI witnesses for absent, wrong, stale, and matching
   consent digests (`e1c8000`).
-- [ ] Complete the independent line-by-line review of the consent snapshot and
-  grant path.
+- [x] Complete the independent line-by-line review of the consent snapshot and
+  grant path (2026-07-23, fable + gpt-5.6 Sol independently; nine findings,
+  all closed in the same-day hardening commit): interactive grants now record
+  the reviewed snapshot's digest instead of a disk re-read; the preview
+  refuses to display a library definition that does not match the snapshot's
+  lock pin; `apply`'s owned-refresh re-pin digests the bytes it wrote and can
+  no longer create or blank a trust entry; the consent digest distinguishes
+  absent from empty pinned files (v3 — existing entries re-gate); the
+  whole-store load-modify-save is serialized so a grant cannot resurrect a
+  concurrent revoke; init's plan digest covers the full import (v2) and the
+  consented write consumes the exact verified detection; review/blocker/
+  policy lines sanitize hostile text; and the `isatty` consent probe's limits
+  are documented honestly in `docs/ENFORCEMENT.md` (a same-user PTY equals
+  the same-user store-file boundary, no stronger claim made).
 - [x] Complete the t3code half of the contract (t3code `f0196e536`,
   `d98b5080d`): `surface_digest` decoded, carried in the grant request,
   mapped to fixed `--yes --consented-digest` argv, and a grant with an
@@ -94,10 +111,21 @@ existing boundary. Finish and review them before enabling new UI writes.
 
 ### Stage 0 gate
 
-- [ ] Security-sensitive diffs receive line-by-line review.
-- [ ] Focused tests pass.
-- [ ] The t3code trust flow works end-to-end with a matching digest.
-- [ ] No frontend condition is the only enforcement of a write guarantee.
+- [x] Security-sensitive diffs receive line-by-line review (consent path and
+  interpreter ambient defaults reviewed independently 2026-07-23; findings
+  fixed same day, each with a witness).
+- [x] Focused tests pass (trust, workflow, command-module, and integration
+  suites green; `cargo fmt --check` and clippy clean).
+- [x] The t3code trust flow works end-to-end with a matching digest
+  (t3code `d04757e38`: the panel's service drives the real binary through
+  preview → grant → drift → stale-digest refusal → re-grant → revoke).
+- [x] No frontend condition is the only enforcement of a write guarantee
+  (the CLI independently verifies consent digests, plan digests, and
+  non-interactive gates; t3code refusals are pre-spawn hygiene on top,
+  witnessed by the e2e test refusing at the CLI layer).
+
+Stage 0 is closed except the workflow preview-label item above, which stays
+with the pending §9.3 re-run in the experimental workflow lane.
 
 ## Stage 1 — first value in under five minutes
 

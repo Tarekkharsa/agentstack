@@ -58,6 +58,21 @@
   });
   Object.freeze(Math);
 
+  // WeakRef.deref() (and FinalizationRegistry callbacks) observe the GC
+  // schedule: the same script and inputs could return different results
+  // depending on whether a collection ran between agent() slices — breaking
+  // the determinism the resume journal replays against (§9.3 review
+  // follow-up, 2026-07-23). Poisoned like Date.now, hardened the same way.
+  for (const name of ["WeakRef", "FinalizationRegistry"]) {
+    if (name in globalThis) {
+      Object.defineProperty(globalThis, name, {
+        value: denied(name),
+        writable: false,
+        configurable: false,
+      });
+    }
+  }
+
   // --- Phase 2: orchestration helpers -------------------------------------
   // AL3: parallel never rejects. A throwing thunk resolves that slot to null
   // (Claude Code null-on-failure, the same rule as a failed child run), so one

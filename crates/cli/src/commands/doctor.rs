@@ -2833,7 +2833,7 @@ mod tests {
             &crate::store::Store::default_store(),
         )
         .unwrap();
-        crate::trust::trust(proj.path()).unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
         crate::render::extensions::render(&manifest, &registry, Scope::Project, proj.path(), true)
             .unwrap();
         let ext_dir = proj.path().join(".pi/extensions");

@@ -198,7 +198,7 @@ fn trust_is_repinned_only_when_it_was_valid_before_the_refresh() {
     // Trusted project: the auto-refresh is machine-derived from the owner's
     // own config, so trust follows the rewrite instead of breaking.
     let proj = project_with_stale_manifest(tmp.path());
-    trust::trust(&proj).unwrap();
+    trust::trust_unreviewed(&proj).unwrap();
     assert_eq!(trust::check(&proj), trust::TrustState::Trusted);
     apply::run(&apply_write(), Some(&proj)).unwrap();
     assert_eq!(
@@ -221,7 +221,7 @@ fn trust_is_repinned_only_when_it_was_valid_before_the_refresh() {
     let proj3 = tmp.path().join("proj3");
     fs::create_dir_all(&proj3).unwrap();
     fs::write(proj3.join("agentstack.toml"), STALE_MANIFEST).unwrap();
-    trust::trust(&proj3).unwrap();
+    trust::trust_unreviewed(&proj3).unwrap();
     fs::write(
         proj3.join("agentstack.toml"),
         format!("{STALE_MANIFEST}\n# human edit after trust\n"),

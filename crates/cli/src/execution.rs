@@ -789,7 +789,7 @@ mod tests {
         proj.child(".agentstack/agentstack.toml")
             .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
             .unwrap();
-        crate::trust::trust(proj.path()).unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
         let ruleset = || {
             agentstack_policy::compile(
                 &crate::manifest::Policy::default(),
@@ -916,7 +916,7 @@ done
             .unwrap();
         std::env::set_var("AGENTSTACK_HOME", home.path());
         std::env::set_var("AGENTSTACK_EGRESS_IMAGE", "agentstack/egress-proxy:test");
-        agentstack_trust::trust(project.path()).unwrap();
+        agentstack_trust::trust_unreviewed(project.path()).unwrap();
         let gateway = Arc::new(crate::gateway::Gateway::from_manifest(Some(project.path())));
         let request: ExecuteRequest = serde_json::from_value(json!({
             "code": "import { tools, input } from 'agentstack:runtime'; import fs from 'node:fs'; import net from 'node:net'; let fsDenied = false; try { fs.readFileSync('/etc/passwd'); } catch { fsDenied = true; } let policyHidden = false; try { fs.readFileSync('/app/ruleset.json'); } catch { policyHidden = true; } const directBlocked = await new Promise(resolve => { const socket = net.createConnection({ host: '1.1.1.1', port: 443 }); socket.setTimeout(500); socket.on('connect', () => { socket.destroy(); resolve(false); }); socket.on('error', () => resolve(true)); socket.on('timeout', () => { socket.destroy(); resolve(true); }); }); const proxyBlocked = await new Promise(resolve => { let data = ''; const socket = net.createConnection({ host: 'egress-proxy', port: 18080 }); socket.setTimeout(1000); socket.on('connect', () => socket.write('CONNECT 1.1.1.1:443 HTTP/1.1\\r\\nHost: 1.1.1.1:443\\r\\n\\r\\n')); socket.on('data', chunk => { data += chunk.toString(); if (data.includes('\\r\\n\\r\\n')) { socket.destroy(); resolve(data.includes(' 407 ')); } }); socket.on('error', () => resolve(true)); socket.on('timeout', () => { socket.destroy(); resolve(true); }); }); const reply = await tools.demo.echo({ msg: input.msg }); export default { text: reply.content[0].text, fsDenied, policyHidden, directBlocked, proxyBlocked };",

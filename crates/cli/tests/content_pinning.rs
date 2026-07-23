@@ -86,7 +86,7 @@ fn inline_skill_drift_blocks_activation_until_relocked() {
     let lock_path = proj.join("agentstack.lock");
     let lock_before = fs::read_to_string(&lock_path).unwrap();
     assert!(lock_before.contains("helper"), "lock pinned the skill");
-    trust::trust(&proj).unwrap();
+    trust::trust_unreviewed(&proj).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 
     // Drift the skill body. Manifest and lock bytes are untouched, so the
@@ -126,7 +126,7 @@ fn inline_skill_drift_blocks_activation_until_relocked() {
     );
 
     // After human review: re-trust, and activation flows again.
-    trust::trust(&proj).unwrap();
+    trust::trust_unreviewed(&proj).unwrap();
     use_profile::run(&use_args(true), Some(&proj)).unwrap();
 }
 

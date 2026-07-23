@@ -33,7 +33,7 @@ fn setup_project(tmp: &Path) -> PathBuf {
     // exercise restore behavior, so establish its real pin + trust
     // preconditions instead of bypassing the readiness gate.
     agentstack::commands::lock::run(&Default::default(), Some(&proj)).unwrap();
-    agentstack::trust::trust(&proj).unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
     proj
 }
 

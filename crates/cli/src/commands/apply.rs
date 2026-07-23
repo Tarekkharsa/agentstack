@@ -700,8 +700,18 @@ fn render(
         // nothing new is being authorized — so trust that was VALID before the
         // rewrite is re-pinned to the new digest. Trust that was already
         // Changed/Untrusted is left alone: pending human review stays pending.
+        // The was-trusted judgement and the re-pin digest both derive from one
+        // pre-write snapshot with OUR new bytes spliced in — never a disk
+        // re-read after writing (independent review, 2026-07-23): a hostile
+        // edit racing this write would otherwise be silently blessed. If a
+        // concurrent edit lands anyway, the store holds the digest of what WE
+        // wrote, the project reads Changed, and review stays pending.
         let base = crate::manifest::project_root_of(&ctx.dir);
-        let was_trusted = crate::trust::check(&base) == crate::trust::TrustState::Trusted;
+        let pre_snapshot = crate::trust::ConsentSnapshot::read(&base);
+        let was_trusted = pre_snapshot.as_ref().is_some_and(|s| {
+            crate::trust::check_digest(&base, Some(&s.digest()))
+                == crate::trust::TrustState::Trusted
+        });
         backups.push(crate::history::capture(
             path,
             "manifest · owned-server refresh",
@@ -715,11 +725,30 @@ fn render(
             path.display()
         );
         if was_trusted {
-            crate::trust::trust(&base)?;
-            println!(
-                "  {} trust re-pinned — the refreshed values came from the owner's own config",
-                "·".dimmed()
-            );
+            let mut snap = pre_snapshot.expect("was_trusted implies a snapshot existed");
+            let manifest_dir = crate::manifest::resolve_manifest_dir(&base);
+            // `repin` only ever UPDATES an existing entry; an unrecognized
+            // layer path re-pins nothing and leaves the project re-gated.
+            let repinned = if *path == manifest_dir.join(crate::manifest::MANIFEST_FILE) {
+                snap.manifest = new_text.clone().into_bytes();
+                crate::trust::repin(&base, snap.digest())?
+            } else if *path == manifest_dir.join(crate::manifest::LOCAL_FILE) {
+                snap.local = Some(new_text.clone().into_bytes());
+                crate::trust::repin(&base, snap.digest())?
+            } else {
+                false
+            };
+            if repinned {
+                println!(
+                    "  {} trust re-pinned — the refreshed values came from the owner's own config",
+                    "·".dimmed()
+                );
+            } else {
+                println!(
+                    "  {} manifest changed — review and re-run `agentstack trust`",
+                    "·".dimmed()
+                );
+            }
         }
     }
 

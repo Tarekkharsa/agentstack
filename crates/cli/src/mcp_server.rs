@@ -2892,7 +2892,7 @@ mod tests {
         assert!(note.contains("agentstack trust"), "got: {note}");
 
         // Trusted: the same discovery now builds a live gateway.
-        crate::trust::trust(proj.path()).unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
         let mut auto = AutoProject::new(None);
         auto.roots.push(proj.path().to_path_buf());
         auto.ensure_gateway();
@@ -2938,7 +2938,7 @@ mod tests {
         assert!(text.contains("Trust (auto mode): not trusted"), "{text}");
         assert!(text.contains("agentstack trust"), "{text}");
 
-        crate::trust::trust(proj.path()).unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
         let text = doctor_summary(Some(proj.path())).unwrap();
         assert!(text.contains("Trust (auto mode): trusted"), "{text}");
 

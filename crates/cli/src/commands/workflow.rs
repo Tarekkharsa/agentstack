@@ -2273,7 +2273,7 @@ mod tests {
         let manifest: crate::manifest::Manifest = toml::from_str(manifest_toml).unwrap();
         let store = crate::store::Store::default_store();
         crate::commands::lock::record_workflow_pins(proj.path(), &manifest, &store).unwrap();
-        crate::trust::trust(proj.path()).unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
     }
 
     fn wf_args(name: &str, args_json: Option<&str>) -> crate::cli::WorkflowRunArgs {
@@ -2463,7 +2463,7 @@ mod tests {
                 lock.upsert_executable(pin);
             }
             lock.save(proj.path()).unwrap();
-            crate::trust::trust(proj.path()).unwrap();
+            crate::trust::trust_unreviewed(proj.path()).unwrap();
 
             // Tamper the pinned executable AFTER trust: trust (manifest+lock)
             // still passes; only per-child strict verification can catch it.
@@ -3560,7 +3560,7 @@ mod tests {
 
             // Trust the same bundle: the entry flips to trusted, lock
             // status untouched (the pinned bytes never moved).
-            crate::trust::trust(proj.path()).unwrap();
+            crate::trust::trust_unreviewed(proj.path()).unwrap();
             let rows = collect_workflow_list_rows(Some(proj.path())).unwrap();
             let json = workflow_list_json(&rows);
             assert_eq!(json["workflows"][0]["trusted"], true);

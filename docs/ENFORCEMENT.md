@@ -60,9 +60,15 @@ Trusted does **not** mean:
   does not vouch for what the referenced code does.
 - **Tamper-proof against a compromised host agent.** In host mode the agent CLI
   runs as you, so it can in principle reach the user-writable trust store under
-  `~/.agentstack/` and self-trust a bundle. Only the sandbox removes this. (A
-  recorder-backed tamper log for trust-store mutations is *intended* but not yet
-  wired — see the audit/recording row.)
+  `~/.agentstack/` and self-trust a bundle. Only the sandbox removes this. The
+  interactive consent probe is part of the same honest limit: `agentstack
+  trust` treats a terminal on stdin as attended consent, and a same-user
+  process that allocates a pseudo-terminal (`script`, `expect`, a `pty`
+  wrapper) reads as interactive — no stronger than the store-file boundary
+  above, and not claimed to be. What the gate does enforce is that headless
+  callers (pipes, RPC servers) cannot grant without `--yes` plus the reviewed
+  `--consented-digest`. (A recorder-backed tamper log for trust-store
+  mutations is *intended* but not yet wired — see the audit/recording row.)
 
 Conversely, **untrusted project declarations are inert on automatic and
 experimental execution paths**: the auto-project gateway does not spawn or

@@ -832,7 +832,7 @@ target = "pi"
     /// state a render should accept.
     fn lock_and_trust(proj: &assert_fs::TempDir, manifest: &Manifest) {
         pin_extensions(proj, manifest);
-        crate::trust::trust(proj.path()).unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
     }
 
     fn ext_dir(proj: &assert_fs::TempDir) -> PathBuf {
@@ -876,7 +876,7 @@ target = "pi"
                 .write_str(CHECKPOINT_TOML)
                 .unwrap();
             pin_extensions(proj, &only_checkpoint);
-            crate::trust::trust(proj.path()).unwrap();
+            crate::trust::trust_unreviewed(proj.path()).unwrap();
 
             // Now drift checkpoint's bytes and declare the unpinned `late`.
             proj.child("extensions/checkpoint/index.ts")
@@ -952,7 +952,7 @@ target = "pi"
                 &crate::store::Store::default_store(),
             )
             .unwrap();
-            crate::trust::trust(proj.path()).unwrap();
+            crate::trust::trust_unreviewed(proj.path()).unwrap();
 
             render(&manifest, &registry(), Scope::Project, proj.path(), true).unwrap();
             let artifact = ext_dir(proj).join("checkpoint/index.ts");

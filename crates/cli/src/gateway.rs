@@ -1578,7 +1578,7 @@ mod tests {
         assert!(gw.is_empty(), "untrusted bundle must serve nothing");
 
         // Trusted → the same call proxies the frozen set, attributed to the run.
-        crate::trust::trust(proj.path()).unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
         let gw = Gateway::from_frozen(Some(proj.path()), compile(), frozen(), "r-plan");
         assert!(!gw.is_empty(), "trusted bundle must be proxied");
         assert_eq!(

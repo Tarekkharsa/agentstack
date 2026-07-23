@@ -6,6 +6,43 @@ binaries, checksums, and provenance attestations for each entry.
 
 ## Unreleased
 
+### Security
+
+An independent line-by-line review (2026-07-23) of the consent/grant path and
+the workflow interpreter's ambient capabilities produced nine consent-path
+findings and two interpreter findings. All are closed:
+
+- **Interactive grants bind to the reviewed bytes.** The whole review renders
+  from one immutable snapshot and the grant records that snapshot's digest —
+  a manifest swapped mid-review is no longer silently blessed; the project
+  reads Changed and every use site fails closed.
+- **The trust preview shows only pinned library content.** A library-backed
+  server whose live definition does not match the lockfile pin renders as
+  unverified instead of displaying content the consent digest does not cover.
+- **`apply`'s owned-manifest refresh re-pin** now digests the exact bytes it
+  wrote (never a disk re-read), only ever updates an existing entry, and
+  preserves the recorded review surface.
+- **Consent digest v3** distinguishes absent pinned files from present empty
+  ones. **Existing trust entries re-gate: each trusted project reads as
+  Changed once after upgrading — re-review with `agentstack trust`.**
+- **Trust-store writes are serialized across processes**, so a concurrent
+  grant can no longer resurrect an entry a racing revoke removed.
+- **Init plan digest v2** covers the complete import — full server objects
+  (env, cwd, argv boundaries), settings values, and the secret destination —
+  and a consented `init` writes exactly the detection it verified, closing a
+  verify-then-redetect window. Plan digests from older builds no longer
+  match; re-run `init --plan`.
+- **Review output sanitizes** policy, blocker, and secret-reference text
+  (terminal control sequences from hostile manifests).
+- **The `isatty` consent probe's limits are documented honestly** in
+  `docs/ENFORCEMENT.md`: a same-user PTY wrapper reads as interactive, which
+  is exactly as strong as the same-user-writable store file — the enforced
+  claim is that headless callers need `--yes --consented-digest`.
+- **Workflow scripts run in UTC** (Boa's default host hook leaked the OS
+  timezone through explicit-argument `Date` methods) and **`WeakRef` /
+  `FinalizationRegistry` are poisoned** (GC-schedule nondeterminism that the
+  resume journal could not replay).
+
 ### Added
 
 - **Versioned UI contract.** Every machine-readable read for external panels

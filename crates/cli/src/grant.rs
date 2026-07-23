@@ -2844,7 +2844,7 @@ mod tests {
             proj.child(".agentstack/agentstack.toml")
                 .write_str("version = 1\n")
                 .unwrap();
-            agentstack_trust::trust(proj.path()).unwrap();
+            agentstack_trust::trust_unreviewed(proj.path()).unwrap();
             let consent = crate::trust::digest_for(proj.path()).unwrap();
             let mut handoff = GrantHandoff {
                 schema: HANDOFF_SCHEMA,
@@ -2904,7 +2904,7 @@ mod tests {
             proj.child(".agentstack/agentstack.toml")
                 .write_str("version = 1\n\n[servers.gh]\ntype = \"stdio\"\ncommand = \"gh\"\n")
                 .unwrap();
-            agentstack_trust::trust(proj.path()).unwrap();
+            agentstack_trust::trust_unreviewed(proj.path()).unwrap();
 
             // Freeze the ruleset under an ABSENT machine policy (home has none).
             let ctx = crate::commands::load(Some(proj.path())).unwrap();

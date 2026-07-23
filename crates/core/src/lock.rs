@@ -237,26 +237,32 @@ impl Lock {
         let path = Self::path(dir);
         // Bounded: a cloned repo's lockfile is hostile input (rule 7).
         match crate::util::read_to_string_bounded(&path, crate::util::MAX_CONFIG_BYTES) {
-            Ok(text) => {
-                let lock: Lock =
-                    toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-                crate::util::check_schema_version(
-                    lock.version,
-                    SUPPORTED_LOCK_VERSION,
-                    "lockfile",
-                    &path,
-                )?;
-                // Normalize the in-memory version so struct equality (and the
-                // callers' "no-op if unchanged" save checks) stays honest: an
-                // untouched older lock is never rewritten just to bump its
-                // version, but any genuine write upgrades the file.
-                let mut lock = lock;
-                lock.version = SUPPORTED_LOCK_VERSION;
-                Ok(lock)
-            }
+            Ok(text) => Self::parse(&text, &path),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Lock::default()),
             Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
         }
+    }
+
+    /// Parse lockfile TEXT a caller already captured — the seam that lets a
+    /// consent snapshot holder interpret the exact lock bytes it digested,
+    /// instead of a second disk read that could see different content.
+    /// `origin` names the file in errors. Same version handling as [`load`].
+    pub fn parse(text: &str, origin: &Path) -> Result<Self> {
+        let lock: Lock =
+            toml::from_str(text).with_context(|| format!("parsing {}", origin.display()))?;
+        crate::util::check_schema_version(
+            lock.version,
+            SUPPORTED_LOCK_VERSION,
+            "lockfile",
+            origin,
+        )?;
+        // Normalize the in-memory version so struct equality (and the
+        // callers' "no-op if unchanged" save checks) stays honest: an
+        // untouched older lock is never rewritten just to bump its
+        // version, but any genuine write upgrades the file.
+        let mut lock = lock;
+        lock.version = SUPPORTED_LOCK_VERSION;
+        Ok(lock)
     }
 
     pub fn save(&self, dir: &Path) -> Result<()> {

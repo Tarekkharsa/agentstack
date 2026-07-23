@@ -237,7 +237,7 @@ mod tests {
 
         // Trust the project (the low-level grant; the human review path is
         // exercised by the trust-command tests).
-        crate::trust::trust(proj.path()).unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
 
         let admitted =
             normalized_workflows(proj.path(), &manifest, proj.path(), &store, &lock, &machine)
@@ -294,7 +294,7 @@ mod tests {
             "#;
         let (manifest, store) = pinned_project(&proj, toml_text);
         let lock = Lock::load(proj.path()).unwrap();
-        crate::trust::trust(proj.path()).unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
 
         let err = normalized_workflows(
             proj.path(),

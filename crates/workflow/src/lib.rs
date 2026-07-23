@@ -669,6 +669,16 @@ impl HostHooks for Hooks {
             "dynamic string compilation is disabled in workflows",
         )))
     }
+
+    /// Scripts run in UTC everywhere: Boa's default asks the OS for the local
+    /// timezone, so explicit-argument dates (`new Date(0).toString()`,
+    /// `getTimezoneOffset()`) would return machine-dependent results — a
+    /// determinism leak the prelude's Date poisoning cannot reach because
+    /// explicit-argument construction is deliberately allowed (§9.3 review
+    /// follow-up, 2026-07-23).
+    fn local_timezone_offset_seconds(&self, _unix_time_seconds: i64) -> i32 {
+        0
+    }
 }
 
 #[cfg(test)]
@@ -852,6 +862,45 @@ mod tests {
             "import was not refused by the idle loader: {msg}"
         );
         assert_eq!(entries[1], "undefined", "the on-disk module body executed");
+    }
+
+    #[test]
+    fn explicit_dates_are_utc_regardless_of_host_timezone() {
+        // §9.3 follow-up witness: Boa's default host hook reports the OS
+        // timezone, so `new Date(0).getTimezoneOffset()` would differ between
+        // machines. The Hooks override pins it to UTC.
+        let script = "const meta = { roles: [] };\n\
+             return [new Date(0).getTimezoneOffset(), new Date(0).getHours()];";
+        let value = run_to_done(script);
+        let entries = value.as_array().expect("array result");
+        assert_eq!(entries[0], 0, "getTimezoneOffset must be 0 (UTC)");
+        assert_eq!(entries[1], 0, "local hours of epoch must be UTC hours");
+    }
+
+    #[test]
+    fn weakref_and_finalization_registry_are_denied() {
+        // §9.3 follow-up witness: WeakRef.deref() observes the GC schedule —
+        // nondeterminism the resume journal cannot replay. The prelude
+        // poisons both constructors, hardened like Date.now.
+        let script = "const meta = { roles: [] };\n\
+             const out = [];\n\
+             for (const ctor of [\"WeakRef\", \"FinalizationRegistry\"]) {\n\
+               if (typeof globalThis[ctor] === \"undefined\") { out.push(\"absent\"); continue; }\n\
+               try { new globalThis[ctor]({}); out.push(\"LEAK: \" + ctor); }\n\
+               catch (e) { out.push(String(e)); }\n\
+             }\n\
+             return out;";
+        let value = run_to_done(script);
+        let entries = value.as_array().expect("array result");
+        for (i, name) in ["WeakRef", "FinalizationRegistry"].iter().enumerate() {
+            let msg = entries[i].as_str().expect("result string");
+            // Absent is as safe as denied (Boa 0.21.1 ships WeakRef but not
+            // FinalizationRegistry); a LEAK marker means it constructed.
+            assert!(
+                msg == "absent" || msg.contains(&format!("{name} is disabled")),
+                "{name} was not denied: {msg}"
+            );
+        }
     }
 
     #[test]

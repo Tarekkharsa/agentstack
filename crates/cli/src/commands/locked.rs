@@ -2146,7 +2146,7 @@ mod tests {
             lock.upsert_executable(pin);
         }
         lock.save(proj.path()).unwrap();
-        trust::trust(proj.path()).unwrap();
+        trust::trust_unreviewed(proj.path()).unwrap();
     }
 
     fn run_args(plan: bool) -> RunArgs {
@@ -2213,7 +2213,7 @@ mod tests {
                 &crate::store::Store::default_store(),
             )
             .unwrap();
-            trust::trust(proj.path()).unwrap();
+            trust::trust_unreviewed(proj.path()).unwrap();
             let registry = crate::adapter::registry::Registry::load().unwrap();
             crate::render::extensions::render(
                 &manifest,
@@ -2517,7 +2517,7 @@ mod tests {
                     "version = 1\n\n[servers.api]\ntype = \"http\"\nurl = \"https://${API_HOST}/mcp\"\n",
                 )
                 .unwrap();
-            trust::trust(proj.path()).unwrap();
+            trust::trust_unreviewed(proj.path()).unwrap();
 
             let err = run_locked(Some(proj.path()), &run_args(false)).unwrap_err();
             let msg = format!("{err:#}");
@@ -2653,7 +2653,7 @@ mod tests {
                 lock.upsert_executable(pin);
             }
             lock.save(proj.child(".agentstack").path()).unwrap();
-            trust::trust(proj.path()).unwrap();
+            trust::trust_unreviewed(proj.path()).unwrap();
 
             // The fake harness records the directory it was launched from.
             let fake = home.path().join("fakebin/claude");

@@ -417,7 +417,7 @@ mod tests {
 
         // (b) Trusted but UNPINNED: the skill has no lock entry, so the
         // strict gate refuses — session start never records a first pin.
-        crate::trust::trust(proj.path()).unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
         let err = start(Some(proj.path()), "dev", Scope::Project).unwrap_err();
         assert!(
             format!("{err:#}").contains("unpinned"),

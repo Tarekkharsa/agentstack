@@ -339,98 +339,21 @@ fn run_plan(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
 /// Public read API so integrations and the race witnesses exercise the exact
 /// production plan/digest pair instead of re-deriving one.
 pub fn plan_json(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
-    let body = plan_body(args, manifest_dir)?;
-    let digest = plan_digest(&body);
-    let mut out = body;
-    if let serde_json::Value::Object(map) = &mut out {
-        map.insert("plan_digest".into(), digest.into());
-    }
-    Ok(out)
-}
-
-/// The stable identity of a computed plan: a domain-separated digest over its
-/// canonical JSON serialization (everything the user reviews — detected CLIs,
-/// servers, conflicts, secret reference names, destination). Deterministic
-/// for the same on-disk inputs and flags; any change to what detection finds
-/// changes the digest.
-fn plan_digest(body: &serde_json::Value) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(b"agentstack:init-plan:v1\n");
-    hasher.update(body.to_string().as_bytes());
-    format!("sha256:{:x}", hasher.finalize())
-}
-
-/// When `--consented-plan` was given, recompute the plan from today's disk
-/// state and refuse the write unless it still digests to what the caller
-/// reviewed. Fail closed: a CLI config that changed between `init --plan` and
-/// the apply means the user would import something they never saw — the fix
-/// is a fresh plan, never a silent proceed.
-fn check_consented_plan(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    let Some(consented) = args.consented_plan.as_deref() else {
-        return Ok(());
-    };
-    let actual = plan_digest(&plan_body(args, manifest_dir)?);
-    anyhow::ensure!(
-        consented == actual,
-        "refusing to apply: the detected setup changed since this plan was reviewed \
-         (consented {consented}, current {actual}) — re-run `agentstack init --plan`, \
-         review the new plan, and apply with its plan_digest"
-    );
-    Ok(())
-}
-
-/// The plan JSON body (everything except `plan_digest` and the envelope) —
-/// shared verbatim between `--plan` (emit) and `--consented-plan` (recompute
-/// and compare), so the digest can only ever describe what this function
-/// reports.
-fn plan_body(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
     let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
     };
     let dir = crate::manifest::new_manifest_dir(&base);
     let manifest_path = dir.join(MANIFEST_FILE);
-    let already_initialized = existing_manifest(manifest_dir)?;
-
-    let registry = Registry::load()?;
-    let mut detected: Vec<serde_json::Value> = Vec::new();
-    let mut servers: IndexMap<String, Server> = IndexMap::new();
-    let mut settings_from: Vec<String> = Vec::new();
-    let mut conflict_counts: IndexMap<String, usize> = IndexMap::new();
-    for desc in registry.iter() {
-        if !desc.detected() {
-            continue;
-        }
-        detected.push(serde_json::json!({
-            "id": desc.id,
-            "display": desc.display,
-        }));
-        if let Some(value) = desc.read_config_value()? {
-            let imported = extract_servers(desc, &value);
-            for c in merge_servers(&mut servers, imported) {
-                *conflict_counts.entry(c).or_insert(0usize) += 1;
-            }
-        }
-        if let Some(value) = desc.read_settings_value(&dir)? {
-            if !extract_settings(desc, &value).is_empty() {
-                settings_from.push(desc.id.clone());
-            }
-        }
-    }
-
-    // Lifting rewrites the in-memory servers to `${REF}` placeholders and
-    // returns the values; the plan serializes reference + origin only.
-    let lifted = lift_secrets(&mut servers);
-    let destination = match resolve_secret_store(args, false)? {
-        SecretStore::Env => "env",
-        SecretStore::Keychain => "keychain",
-        SecretStore::Skip => "skip",
-    };
+    let already_initialized = existing_manifest(manifest_dir)?.is_some();
+    let det = detect_import(&dir)?;
+    let destination = store_label(resolve_secret_store(args, false)?);
+    let digest = plan_digest(&det, &base, already_initialized, destination);
 
     // Imported names/targets come from other CLIs' config files — hostile
     // input; sanitize display strings exactly like the trust preview.
-    let servers_json: Vec<serde_json::Value> = servers
+    let servers_json: Vec<serde_json::Value> = det
+        .servers
         .iter()
         .map(|(name, s)| {
             let (kind, target) = match s.server_type {
@@ -446,29 +369,53 @@ fn plan_body(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_json:
                 ),
                 crate::manifest::ServerType::Http => ("http", s.url.clone().unwrap_or_default()),
             };
-            serde_json::json!({
+            let mut entry = serde_json::json!({
                 "name": crate::text::sanitize_line(name),
                 "kind": kind,
                 "target": crate::text::sanitize_line(&target),
-            })
+            });
+            // Operational context the digest binds — surfaced so a reviewer
+            // sees what distinguishes two otherwise identical-looking plans.
+            // Env VAR NAMES only: values may hold non-lifted plaintext.
+            if let serde_json::Value::Object(map) = &mut entry {
+                if !s.env.is_empty() {
+                    let names: Vec<String> = s
+                        .env
+                        .keys()
+                        .map(|k| crate::text::sanitize_line(k))
+                        .collect();
+                    map.insert("env".into(), names.into());
+                }
+                if let Some(cwd) = &s.cwd {
+                    map.insert("cwd".into(), crate::text::sanitize_line(cwd).into());
+                }
+            }
+            entry
         })
         .collect();
 
     Ok(serde_json::json!({
         "path": base.display().to_string(),
         "manifest_path": manifest_path.display().to_string(),
-        "already_initialized": already_initialized.is_some(),
-        "detected": detected,
+        "already_initialized": already_initialized,
+        "detected": det
+            .detected_ids
+            .iter()
+            .zip(&det.display_names)
+            .map(|(id, display)| serde_json::json!({ "id": id, "display": display }))
+            .collect::<Vec<_>>(),
         "servers": servers_json,
-        "settings_from": settings_from,
-        "conflicts": conflict_counts
+        "settings_from": det.settings.keys().collect::<Vec<_>>(),
+        "conflicts": det
+            .conflict_counts
             .iter()
             .map(|(name, extra)| serde_json::json!({
                 "name": crate::text::sanitize_line(name),
                 "other_definitions": extra,
             }))
             .collect::<Vec<_>>(),
-        "secrets": lifted
+        "secrets": det
+            .lifted
             .iter()
             .map(|l| serde_json::json!({
                 "reference": l.reference,
@@ -476,7 +423,107 @@ fn plan_body(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_json:
             }))
             .collect::<Vec<_>>(),
         "secrets_destination": destination,
+        "plan_digest": digest,
     }))
+}
+
+/// Everything one detection pass finds — computed ONCE and consumed by both
+/// the plan (display + digest) and the consented write, so the plan a user
+/// reviewed and the import the write performs are the same in-memory objects,
+/// never two detections that could observe different disk states
+/// (independent review, 2026-07-23).
+struct DetectedImport {
+    detected_ids: Vec<String>,
+    display_names: Vec<String>,
+    /// Post-lift: inline token values already rewritten to `${REF}`.
+    servers: IndexMap<String, Server>,
+    /// Full imported settings values per contributing CLI id — exactly what
+    /// the written manifest will hold.
+    settings: IndexMap<String, serde_json::Value>,
+    conflict_counts: IndexMap<String, usize>,
+    lifted: Vec<crate::discover::Lifted>,
+}
+
+fn detect_import(dir: &Path) -> Result<DetectedImport> {
+    let registry = Registry::load()?;
+    let mut detected_ids: Vec<String> = Vec::new();
+    let mut display_names: Vec<String> = Vec::new();
+    let mut servers: IndexMap<String, Server> = IndexMap::new();
+    let mut settings: IndexMap<String, serde_json::Value> = IndexMap::new();
+    let mut conflict_counts: IndexMap<String, usize> = IndexMap::new();
+    for desc in registry.iter() {
+        if !desc.detected() {
+            continue;
+        }
+        detected_ids.push(desc.id.clone());
+        display_names.push(desc.display.clone());
+        if let Some(value) = desc.read_config_value()? {
+            let imported = extract_servers(desc, &value);
+            for c in merge_servers(&mut servers, imported) {
+                *conflict_counts.entry(c).or_insert(0usize) += 1;
+            }
+        }
+        if let Some(value) = desc.read_settings_value(dir)? {
+            let imported = extract_settings(desc, &value);
+            if !imported.is_empty() {
+                settings.insert(desc.id.clone(), serde_json::Value::Object(imported));
+            }
+        }
+    }
+    // Lifting rewrites the in-memory servers to `${REF}` placeholders and
+    // returns the values; only reference + origin ever serialize.
+    let lifted = lift_secrets(&mut servers);
+    Ok(DetectedImport {
+        detected_ids,
+        display_names,
+        servers,
+        settings,
+        conflict_counts,
+        lifted,
+    })
+}
+
+fn store_label(store: SecretStore) -> &'static str {
+    match store {
+        SecretStore::Env => "env",
+        SecretStore::Keychain => "keychain",
+        SecretStore::Skip => "skip",
+    }
+}
+
+/// The stable identity of a computed plan (v2): a domain-separated digest
+/// over the COMPLETE import — full `Server` objects (env, cwd, headers, argv
+/// as arrays), imported settings values, conflicts, secret reference names
+/// and origins (never values), and the destination store. v1 hashed the
+/// sanitized display summary, which omitted operational fields and flattened
+/// argv with spaces, so two plans that would write different manifests could
+/// share a digest (independent review, 2026-07-23).
+fn plan_digest(
+    det: &DetectedImport,
+    base: &Path,
+    already_initialized: bool,
+    destination: &str,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let full = serde_json::json!({
+        "path": base.display().to_string(),
+        "already_initialized": already_initialized,
+        "detected": det.detected_ids,
+        "servers": serde_json::to_value(&det.servers)
+            .expect("derive(Serialize) manifest types always serialize"),
+        "settings": det.settings,
+        "conflicts": det.conflict_counts,
+        "secrets": det
+            .lifted
+            .iter()
+            .map(|l| serde_json::json!({ "reference": l.reference, "origin": l.origin }))
+            .collect::<Vec<_>>(),
+        "secrets_destination": destination,
+    });
+    let mut hasher = Sha256::new();
+    hasher.update(b"agentstack:init-plan:v2\n");
+    hasher.update(full.to_string().as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
 }
 
 /// Template for the machine-level manifest. Deliberately NOT an import: the
@@ -755,10 +802,6 @@ fn refuse_nested_init(cwd: &Path) -> Result<()> {
 }
 
 fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Result<()> {
-    // Reviewed-plan binding first: nothing below runs (and nothing is ever
-    // written) when the plan the caller consented to no longer matches what
-    // detection would import today.
-    check_consented_plan(args, manifest_dir)?;
     let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
         None => {
@@ -789,41 +832,40 @@ fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Re
         );
     }
 
-    let registry = Registry::load()?;
-
-    // Discover + import.
-    let mut detected: Vec<String> = Vec::new();
-    let mut servers: IndexMap<String, Server> = IndexMap::new();
-    let mut settings: IndexMap<String, serde_json::Value> = IndexMap::new();
-    let mut display_names: Vec<String> = Vec::new();
-    // name → how many later CLIs defined it differently (IndexMap keeps
-    // first-seen order so the warnings print in import order).
-    let mut conflict_counts: IndexMap<String, usize> = IndexMap::new();
-
-    for desc in registry.iter() {
-        if !desc.detected() {
-            continue;
-        }
-        detected.push(desc.id.clone());
-        display_names.push(desc.display.clone());
-
-        if let Some(value) = desc.read_config_value()? {
-            let imported = extract_servers(desc, &value);
-            // Collect conflicts across ALL CLIs and report each name once at
-            // the end of the loop — a server defined differently in 4 CLIs used
-            // to print the same warning 3 times.
-            for c in merge_servers(&mut servers, imported) {
-                *conflict_counts.entry(c).or_insert(0usize) += 1;
-            }
-        }
-        // Import this CLI's existing native settings (catalog keys only).
-        if let Some(value) = desc.read_settings_value(&dir)? {
-            let imported = extract_settings(desc, &value);
-            if !imported.is_empty() {
-                settings.insert(desc.id.clone(), serde_json::Value::Object(imported));
-            }
-        }
+    // ONE detection pass: the consent check below and the writes both consume
+    // this same instance. A verify-then-redetect sequence would let a CLI
+    // config that changed between the two reads be imported (and its token
+    // stored) without ever being compared against the reviewed plan
+    // (independent review, 2026-07-23).
+    let det = detect_import(&dir)?;
+    // Reviewed-plan binding: refuse before ANY print or mutation when this
+    // detection no longer digests to the reviewed plan. The destination is
+    // resolved non-interactively exactly as `--plan` resolved it, so both
+    // digests describe the same store choice; the write path below reuses
+    // this resolution instead of prompting to a different one.
+    let preresolved_store = match args.consented_plan {
+        Some(_) => Some(resolve_secret_store(args, false)?),
+        None => None,
+    };
+    if let Some(consented) = args.consented_plan.as_deref() {
+        let already = existing_manifest(manifest_dir)?.is_some();
+        let store = preresolved_store.expect("resolved right above for Some(consented)");
+        let actual = plan_digest(&det, &base, already, store_label(store));
+        anyhow::ensure!(
+            consented == actual,
+            "refusing to apply: the detected setup changed since this plan was reviewed \
+             (consented {consented}, current {actual}) — re-run `agentstack init --plan`, \
+             review the new plan, and apply with its plan_digest"
+        );
     }
+    let DetectedImport {
+        detected_ids: detected,
+        display_names,
+        servers,
+        settings,
+        conflict_counts,
+        lifted,
+    } = det;
     for (name, extra) in &conflict_counts {
         println!(
             "{} server '{name}' is defined differently by {} other CLI(s) — kept the first \
@@ -908,9 +950,9 @@ version = 1
         );
     }
 
-    // Lift inline secrets. This is the moment that matters: plaintext tokens
-    // were sitting in live CLI configs — show exactly where each one was.
-    let lifted = lift_secrets(&mut servers);
+    // Inline secrets were lifted during detection. This is the moment that
+    // matters: plaintext tokens were sitting in live CLI configs — show
+    // exactly where each one was.
     if !lifted.is_empty() {
         println!(
             "{}  {} — lifted to secure references:",
@@ -964,7 +1006,7 @@ version = 1
         println!("{toml_text}");
         if !lifted.is_empty() {
             // A preview never prompts, so resolve the store non-interactively.
-            match resolve_secret_store(args, false)? {
+            match preresolved_store.map_or_else(|| resolve_secret_store(args, false), Ok)? {
                 SecretStore::Env => println!(
                     "Would store {} secret(s) in .env (gitignored).",
                     lifted.len()
@@ -995,7 +1037,9 @@ version = 1
         // keychain snapshots make every pre-commit mutation reversible if a
         // later write or the history record fails.
         if !lifted.is_empty() {
-            match resolve_secret_store(args, true)? {
+            // A consented apply must store into the digested destination —
+            // never re-prompt into a different one.
+            match preresolved_store.map_or_else(|| resolve_secret_store(args, true), Ok)? {
                 SecretStore::Keychain => {
                     let (unstored, changes) = store_lifted_reversibly(&lifted);
                     let stored = changes.len();
@@ -1094,6 +1138,51 @@ version = 1
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Consent-fidelity witness (independent review, 2026-07-23): the plan
+    /// digest must cover the FULL import the write performs, not the display
+    /// summary. v1 flattened argv with spaces and omitted env/cwd, so plans
+    /// that would write operationally different manifests shared a digest.
+    /// NEVER weaken this to a display-derived digest.
+    #[test]
+    fn plan_digest_binds_operational_fields_the_display_summary_hides() {
+        let base = Path::new("/tmp/proj");
+        let mk = |args: &[&str], env_val: &str| {
+            let mut servers: IndexMap<String, Server> = IndexMap::new();
+            let s: Server = serde_json::from_value(serde_json::json!({
+                "type": "stdio",
+                "command": "npx",
+                "args": args,
+                "env": { "MODE": env_val },
+            }))
+            .expect("valid server literal");
+            servers.insert("srv".into(), s);
+            DetectedImport {
+                detected_ids: vec!["claude-code".into()],
+                display_names: vec!["Claude Code".into()],
+                servers,
+                settings: IndexMap::new(),
+                conflict_counts: IndexMap::new(),
+                lifted: Vec::new(),
+            }
+        };
+
+        let baseline = plan_digest(&mk(&["a", "b"], "safe"), base, false, "keychain");
+        // Same display target ("npx a b"), different argv boundaries.
+        let joined_argv = plan_digest(&mk(&["a b"], "safe"), base, false, "keychain");
+        assert_ne!(baseline, joined_argv, "argv boundaries must be bound");
+        // Same display target, different env VALUE.
+        let env_changed = plan_digest(&mk(&["a", "b"], "unsafe"), base, false, "keychain");
+        assert_ne!(baseline, env_changed, "env values must be bound");
+        // Destination participates too.
+        let dest_changed = plan_digest(&mk(&["a", "b"], "safe"), base, false, "env");
+        assert_ne!(baseline, dest_changed, "secret destination must be bound");
+        // And the digest is stable for identical inputs.
+        assert_eq!(
+            baseline,
+            plan_digest(&mk(&["a", "b"], "safe"), base, false, "keychain")
+        );
+    }
 
     /// S1 witness (init-secrets design §7): a failing credential store must
     /// not abort init or silently drop values — failed refs are reported by

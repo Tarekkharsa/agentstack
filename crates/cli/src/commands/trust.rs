@@ -131,25 +131,11 @@ fn preview(base: &Path) -> Result<()> {
         crate::manifest::load_from_dir(&dir)?;
         anyhow::bail!("manifest disappeared while previewing {}", base.display());
     };
-    let manifest_text = std::str::from_utf8(&snapshot.manifest).with_context(|| {
-        format!(
-            "{} is not valid UTF-8",
-            dir.join("agentstack.toml").display()
-        )
-    })?;
-    let local_text = snapshot
-        .local
-        .as_deref()
-        .map(std::str::from_utf8)
-        .transpose()
-        .with_context(|| {
-            format!(
-                "{} is not valid UTF-8",
-                dir.join("agentstack.local.toml").display()
-            )
-        })?;
-    let loaded = crate::manifest::load_from_contents(&dir, manifest_text, local_text)?;
+    let loaded = load_snapshot_manifest(&snapshot, &dir)?;
     let m = &loaded.manifest;
+    // The lock pins are part of the consented surface: parse them from the
+    // SAME snapshot bytes the digest covers, never a second disk read.
+    let lock = lock_from_snapshot(&snapshot, &dir)?;
 
     // State is judged against the SNAPSHOT digest, not a fresh disk read, so
     // the state chip describes the same bytes as the display and the digest.
@@ -173,6 +159,27 @@ fn preview(base: &Path) -> Result<()> {
             .into_iter()
             .map(|(name, resolved)| match resolved {
                 Ok(r) => {
+                    // A library-backed definition resolves from the LIVE
+                    // central library, but the digest binds only the lock
+                    // pin. Displaying a definition that doesn't match the
+                    // pin would show the consenting human content the digest
+                    // does not cover (an external UI would then bind consent
+                    // to bytes nobody is granting) — so an unpinned or
+                    // drifted library server renders as unverified instead
+                    // of leaking the live definition into the surface.
+                    let pinned_ok = match r.origin {
+                        crate::resolve::ServerOrigin::Inline => true,
+                        crate::resolve::ServerOrigin::Library => lock
+                            .get_server(&name)
+                            .is_some_and(|entry| entry.checksum.hex() == r.checksum),
+                    };
+                    if !pinned_ok {
+                        return serde_json::json!({
+                            "name": crate::text::sanitize_line(&name),
+                            "kind": "unverified",
+                            "target": "library definition does not match the lockfile pin — run `agentstack lock`, review the change, and re-run the preview",
+                        });
+                    }
                     let (kind, target) = match r.server.server_type {
                         crate::manifest::ServerType::Stdio => (
                             "stdio",
@@ -287,6 +294,48 @@ fn resolve_base(path: Option<&Path>) -> Result<PathBuf> {
     })
 }
 
+/// Parse the manifest layers out of a [`trust::ConsentSnapshot`]'s captured
+/// bytes — the only way the review may load them, so what the human reads and
+/// what the digest identifies are always the same bytes.
+fn load_snapshot_manifest(
+    snapshot: &trust::ConsentSnapshot,
+    dir: &Path,
+) -> Result<crate::manifest::LoadedManifest> {
+    let manifest_text = std::str::from_utf8(&snapshot.manifest).with_context(|| {
+        format!(
+            "{} is not valid UTF-8",
+            dir.join("agentstack.toml").display()
+        )
+    })?;
+    let local_text = snapshot
+        .local
+        .as_deref()
+        .map(std::str::from_utf8)
+        .transpose()
+        .with_context(|| {
+            format!(
+                "{} is not valid UTF-8",
+                dir.join("agentstack.local.toml").display()
+            )
+        })?;
+    crate::manifest::load_from_contents(dir, manifest_text, local_text)
+}
+
+/// Parse the lockfile from the same snapshot (absent → empty default lock),
+/// mirroring [`load_snapshot_manifest`]: the pins the review verifies against
+/// are exactly the pin bytes the consent digest covers.
+fn lock_from_snapshot(snapshot: &trust::ConsentSnapshot, dir: &Path) -> Result<crate::lock::Lock> {
+    let path = crate::lock::Lock::path(dir);
+    match snapshot.lock.as_deref() {
+        None => Ok(crate::lock::Lock::default()),
+        Some(bytes) => {
+            let text = std::str::from_utf8(bytes)
+                .with_context(|| format!("{} is not valid UTF-8", path.display()))?;
+            crate::lock::Lock::parse(text, &path)
+        }
+    }
+}
+
 fn grant(base: &Path, yes: bool, consented: Option<&str>) -> Result<()> {
     grant_gated(base, yes, consented, std::io::stdin().is_terminal())
 }
@@ -302,10 +351,33 @@ fn grant(base: &Path, yes: bool, consented: Option<&str>) -> Result<()> {
 /// binds that acknowledgement to the exact previewed bytes (§7.2): `--yes`
 /// alone would let any RPC caller grant without anyone having seen the
 /// surface, which is precisely the UI-enforcement gap this closes.
+///
+/// Honesty about the probe (independent review, 2026-07-23): `isatty(stdin)`
+/// proves stdin is a terminal DEVICE, not that a human is attending it — a
+/// process that allocates a PTY (`script`, `expect`, Python's `pty`) reads as
+/// interactive. That is accepted, not overlooked: the trust store is a plain
+/// file under the user's own account, so any same-user process able to stage
+/// a PTY could equally write `trust.json` directly. The gate's enforceable
+/// job is narrower and holds — headless callers (RPC servers, plain shell
+/// pipes) cannot grant without presenting the reviewed digest — and the real
+/// boundary against a hostile same-user process is the OS user account, as
+/// `docs/ENFORCEMENT.md` states.
+///
+/// The entire review below renders from ONE [`trust::ConsentSnapshot`], and
+/// the no-digest grant records that snapshot's digest — never a re-read — so
+/// bytes swapped in mid-review are not blessed: the store then holds the
+/// reviewed digest, the project reads `Changed`, and use sites fail closed.
 fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: bool) -> Result<()> {
     let dir = crate::manifest::resolve_manifest_dir(base);
-    let loaded = crate::manifest::load_from_dir(&dir)?;
+    let Some(snapshot) = trust::ConsentSnapshot::read(base) else {
+        // No readable manifest: surface the same friendly first-contact error
+        // the disk load path gives.
+        crate::manifest::load_from_dir(&dir)?;
+        anyhow::bail!("manifest disappeared while reviewing {}", base.display());
+    };
+    let loaded = load_snapshot_manifest(&snapshot, &dir)?;
     let m = &loaded.manifest;
+    let surface_digest = snapshot.digest();
 
     println!(
         "Trusting {} for the zero-files gateway.\n",
@@ -339,8 +411,9 @@ fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: boo
     let lib_home = crate::util::paths::lib_home();
     // A broken lockfile must fail the trust review loudly: its pins are part
     // of what the human is consenting to, and the gateway will refuse
-    // library-backed servers under an unreadable lock anyway.
-    let lock = crate::lock::Lock::load(&dir)?;
+    // library-backed servers under an unreadable lock anyway. Parsed from the
+    // snapshot bytes, so the pins reviewed are the pins the digest covers.
+    let lock = lock_from_snapshot(&snapshot, &dir)?;
     let servers = crate::resolve::effective_runtime_servers(m, &library, &lib_home, None);
     println!("This project declares — review what auto-mode may run/contact:");
     if servers.is_empty() {
@@ -425,7 +498,10 @@ fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: boo
         // whole line to `~ changed`.
         let joined = refs.join(", ");
         let mk = diff.mark("secrets", "", &joined);
-        println!("{mk}secrets referenced: {joined}");
+        println!(
+            "{mk}secrets referenced: {}",
+            crate::text::sanitize_line(&joined)
+        );
     }
 
     // D3 (contract §8): the repository-local executable surface, pinned by
@@ -803,6 +879,17 @@ fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: boo
     }
 
     if !blockers.is_empty() {
+        // Names and reasons carry manifest/resolver text — hostile input, so
+        // the summary sanitizes exactly like the per-line review above.
+        let blockers: Vec<(String, String)> = blockers
+            .iter()
+            .map(|(name, why)| {
+                (
+                    crate::text::sanitize_line(name),
+                    crate::text::sanitize_line(why),
+                )
+            })
+            .collect();
         let width = blockers.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
         let lines: Vec<String> = blockers
             .iter()
@@ -843,10 +930,15 @@ fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: boo
     // trust digest, so recording it never re-gates the project. When a
     // consented digest was presented (any mode), the grant is bound to it:
     // the trust crate refuses at the store-write point unless it still
-    // matches the bytes on disk.
+    // matches the bytes on disk. Without one, the grant records the digest
+    // of the SNAPSHOT this review rendered — never a fresh disk read — so a
+    // mid-review byte swap leaves the project `Changed`, not blessed.
     let digest = match consented {
         Some(consented) => trust::trust_with_consent(base, diff.current, consented)?,
-        None => trust::trust_with_snapshot(base, diff.current)?,
+        None => {
+            trust::trust_reviewed(base, surface_digest.clone(), diff.current)?;
+            surface_digest
+        }
     };
     println!(
         "\n{} trusted at {digest}.\nEditing the manifest or lockfile invalidates this — re-run `agentstack trust` after reviewing changes.\nPinned skill/server content that drifts is blocked at use time until re-locked.\nWithdraw anytime with `agentstack trust --revoke`.",
@@ -892,19 +984,25 @@ pub fn policy_requested_lines(p: &crate::manifest::Policy) -> Vec<String> {
     ];
     for (label, map) in dims {
         for (server, rules) in map {
-            lines.push(format!("  · {label:<7} {server}: {}", rules.join(", ")));
+            // Server names and rule strings are manifest content — hostile
+            // input; sanitize like every other review line.
+            lines.push(format!(
+                "  · {label:<7} {}: {}",
+                crate::text::sanitize_line(server),
+                crate::text::sanitize_line(&rules.join(", "))
+            ));
         }
     }
     if !p.filesystem.read.is_empty() {
         lines.push(format!(
             "  · filesystem read {} (informational — the sandbox mounts one whole workspace)",
-            p.filesystem.read.join(", ")
+            crate::text::sanitize_line(&p.filesystem.read.join(", "))
         ));
     }
     if !p.filesystem.write.is_empty() {
         lines.push(format!(
             "  · filesystem write {} (sandbox mode mounts the workspace read-only unless this covers it; advisory in host mode)",
-            p.filesystem.write.join(", ")
+            crate::text::sanitize_line(&p.filesystem.write.join(", "))
         ));
     }
     if !p.filesystem.deny.is_empty() {
