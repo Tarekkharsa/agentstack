@@ -455,15 +455,24 @@ Start only after the CLI JSON contract is reviewed and stable.
 
 ### 3.1 Connect diagnosis to action
 
-- [ ] Inventory every actionable `doctor` finding.
-- [ ] Map each finding to one recommended next action:
+- [x] Inventory every actionable `doctor` finding. (~110 templates across 15
+  sections; sources: doctor.rs + manifest/validate.rs + scan.rs.)
+- [x] Map each finding to one recommended next action:
   - inspect with `diff`;
   - keep with `adopt --write`;
   - reconcile with `apply --write`;
   - recover with `restore`;
   - re-lock or re-trust when content changed.
-- [ ] Remove findings that only restate internal state without helping the user.
-- [ ] Keep informational findings visually separate from blockers.
+  - (2026-07-23: closed the biggest remaining gap — every manifest-validation
+    error kind now carries a concrete `.with_fix()` naming a real `agentstack`
+    command or a precise manifest edit, feeding doctor's `↳` line and its single
+    `start with:` triage. Drift/secrets/trust findings already carried fixes.)
+- [x] Remove findings that only restate internal state without helping the user.
+  (2026-07-23: dropped four Ok/informational restatements — extension
+  matches-pin, named-policy rule-count, machine-dimension rule-count, healthy
+  machine-policy digest line; kept every error/warn sibling.)
+- [x] Keep informational findings visually separate from blockers. (Dimmed `·`
+  vs ✓/⚠/✗ convention preserved; empty sections now print no bare header.)
 
 ### 3.2 Make writes predictable
 

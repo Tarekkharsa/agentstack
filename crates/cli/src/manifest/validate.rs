@@ -215,13 +215,18 @@ fn run<'a>(
     for (server, patterns) in &manifest.policy.egress {
         for pattern in patterns {
             if agentstack_core::manifest::egress_pattern_is_malformed(pattern) {
-                issues.push(Issue::new(
-                    IssueKind::MalformedEgressPattern,
-                    format!(
-                        "[policy.egress] {server} pattern \"{pattern}\" is malformed \
-                         (expected `host`, `host:port`, `host:*`, or a bracketed IPv6 form)"
-                    ),
-                ));
+                issues.push(
+                    Issue::new(
+                        IssueKind::MalformedEgressPattern,
+                        format!(
+                            "[policy.egress] {server} pattern \"{pattern}\" is malformed \
+                             (expected `host`, `host:port`, `host:*`, or a bracketed IPv6 form)"
+                        ),
+                    )
+                    .with_fix(format!(
+                        "edit [policy.egress] {server} and rewrite \"{pattern}\" as host, host:port, host:*, or [ipv6]:port"
+                    )),
+                );
             }
         }
     }
@@ -259,10 +264,15 @@ fn run<'a>(
         if !targets.is_empty() {
             for target in server.extra.keys() {
                 if !targets.contains(target) {
-                    issues.push(Issue::new(
-                        IssueKind::UnknownExtraTarget,
-                        format!("server '{name}' has `extra.{target}` but no adapter '{target}' is registered"),
-                    ));
+                    issues.push(
+                        Issue::new(
+                            IssueKind::UnknownExtraTarget,
+                            format!("server '{name}' has `extra.{target}` but no adapter '{target}' is registered"),
+                        )
+                        .with_fix(format!(
+                            "rename [servers.{name}.extra.{target}] to a registered adapter id (see: agentstack adapters list)"
+                        )),
+                    );
                 }
             }
             // Same for the fan-out scoping itself: a typo'd id in `targets`
@@ -270,20 +280,30 @@ fn run<'a>(
             // (An explicit empty list is deliberate — recipe-owned servers.)
             for target in &server.targets {
                 if target != "*" && !targets.contains(target) {
-                    issues.push(Issue::new(
-                        IssueKind::UnknownServerTarget,
-                        format!("server '{name}' references unknown target '{target}'"),
-                    ));
+                    issues.push(
+                        Issue::new(
+                            IssueKind::UnknownServerTarget,
+                            format!("server '{name}' references unknown target '{target}'"),
+                        )
+                        .with_fix(format!(
+                            "edit [servers.{name}] targets — remove '{target}' or replace it with a registered adapter id (see: agentstack adapters list)"
+                        )),
+                    );
                 }
             }
             // An owner that resolves to no adapter means the refresh-from-disk
             // silently never runs — stale values would fan out again.
             if let Some(owner) = &server.owner {
                 if !targets.contains(owner) {
-                    issues.push(Issue::new(
-                        IssueKind::UnknownServerOwner,
-                        format!("server '{name}' has `owner = \"{owner}\"` but no adapter '{owner}' is registered"),
-                    ));
+                    issues.push(
+                        Issue::new(
+                            IssueKind::UnknownServerOwner,
+                            format!("server '{name}' has `owner = \"{owner}\"` but no adapter '{owner}' is registered"),
+                        )
+                        .with_fix(format!(
+                            "edit [servers.{name}] owner — set a registered adapter id or remove it (see: agentstack adapters list)"
+                        )),
+                    );
                 }
             }
         }
@@ -300,19 +320,34 @@ fn run<'a>(
             match ctx {
                 Some(cx) => match resolve_server(manifest, cx.library, cx.lib_home, sref) {
                     Ok(_) => {}
-                    Err(ServerResolveError::Unresolved { .. }) => issues.push(Issue::new(
+                    Err(ServerResolveError::Unresolved { .. }) => issues.push(
+                        Issue::new(
+                            IssueKind::UnknownServerRef,
+                            format!("profile '{pname}' references unknown server '{sref}'"),
+                        )
+                        .with_fix(format!(
+                            "define it (agentstack add server {sref} …) or remove '{sref}' from [profiles.{pname}] servers"
+                        )),
+                    ),
+                    Err(ServerResolveError::Source(e)) => issues.push(
+                        Issue::new(
+                            IssueKind::UnresolvableServerRef,
+                            format!("profile '{pname}' server '{sref}' failed to resolve: {e}"),
+                        )
+                        .with_fix(format!(
+                            "re-add its source (agentstack add server {sref} …) or remove '{sref}' from [profiles.{pname}] servers"
+                        )),
+                    ),
+                },
+                None => issues.push(
+                    Issue::new(
                         IssueKind::UnknownServerRef,
                         format!("profile '{pname}' references unknown server '{sref}'"),
+                    )
+                    .with_fix(format!(
+                        "define it (agentstack add server {sref} …) or remove '{sref}' from [profiles.{pname}] servers"
                     )),
-                    Err(ServerResolveError::Source(e)) => issues.push(Issue::new(
-                        IssueKind::UnresolvableServerRef,
-                        format!("profile '{pname}' server '{sref}' failed to resolve: {e}"),
-                    )),
-                },
-                None => issues.push(Issue::new(
-                    IssueKind::UnknownServerRef,
-                    format!("profile '{pname}' references unknown server '{sref}'"),
-                )),
+                ),
             }
         }
         for kref in &profile.skills {
@@ -338,31 +373,51 @@ fn run<'a>(
                         ResolveMode::NoFetch,
                     ) {
                         Ok(_) | Err(ResolveError::NotAvailableOffline { .. }) => {}
-                        Err(ResolveError::Unresolved { .. }) => issues.push(Issue::new(
-                            IssueKind::UnknownSkillRef,
-                            format!("profile '{pname}' references unknown skill '{kref}'"),
-                        )),
+                        Err(ResolveError::Unresolved { .. }) => issues.push(
+                            Issue::new(
+                                IssueKind::UnknownSkillRef,
+                                format!("profile '{pname}' references unknown skill '{kref}'"),
+                            )
+                            .with_fix(format!(
+                                "define it (agentstack add skill <source> --name {kref}) or remove '{kref}' from [profiles.{pname}] skills"
+                            )),
+                        ),
                         // Unreachable in practice — an inline `[skills.<name>]`
                         // block short-circuits above at `contains_key`, so the
                         // resolver only sees non-inline names here — but the P19
                         // variant carries a real fix, so surface it rather than
                         // panic if the path ever changes.
                         Err(e @ ResolveError::InlineNoSourceShadowsLibrary { .. }) => {
-                            issues.push(Issue::new(
-                                IssueKind::UnresolvableSkillRef,
-                                format!("profile '{pname}' skill '{kref}': {e}"),
-                            ))
+                            issues.push(
+                                Issue::new(
+                                    IssueKind::UnresolvableSkillRef,
+                                    format!("profile '{pname}' skill '{kref}': {e}"),
+                                )
+                                .with_fix(format!(
+                                    "drop the [skills.{kref}] block so the library copy resolves"
+                                )),
+                            )
                         }
-                        Err(ResolveError::Source(e)) => issues.push(Issue::new(
-                            IssueKind::UnresolvableSkillRef,
-                            format!("profile '{pname}' skill '{kref}' failed to resolve: {e}"),
-                        )),
+                        Err(ResolveError::Source(e)) => issues.push(
+                            Issue::new(
+                                IssueKind::UnresolvableSkillRef,
+                                format!("profile '{pname}' skill '{kref}' failed to resolve: {e}"),
+                            )
+                            .with_fix(format!(
+                                "re-add its source (agentstack add skill <source> --name {kref}) or remove '{kref}' from [profiles.{pname}] skills"
+                            )),
+                        ),
                     }
                 }
-                None => issues.push(Issue::new(
-                    IssueKind::UnknownSkillRef,
-                    format!("profile '{pname}' references unknown skill '{kref}'"),
-                )),
+                None => issues.push(
+                    Issue::new(
+                        IssueKind::UnknownSkillRef,
+                        format!("profile '{pname}' references unknown skill '{kref}'"),
+                    )
+                    .with_fix(format!(
+                        "define it (agentstack add skill <source> --name {kref}) or remove '{kref}' from [profiles.{pname}] skills"
+                    )),
+                ),
             }
         }
     }
@@ -377,12 +432,18 @@ fn run<'a>(
         for (name, instr) in &manifest.instructions {
             for target in &instr.targets {
                 if target != "*" && !targets.contains(target) {
-                    let msg = if instr.from_user_layer {
-                        format!("machine-layer instruction '{name}' references unknown target '{target}'")
+                    let (msg, fix) = if instr.from_user_layer {
+                        (
+                            format!("machine-layer instruction '{name}' references unknown target '{target}'"),
+                            format!("edit the machine manifest's [instructions.{name}] targets — remove '{target}' or use a registered adapter id (see: agentstack adapters list)"),
+                        )
                     } else {
-                        format!("instruction '{name}' references unknown target '{target}'")
+                        (
+                            format!("instruction '{name}' references unknown target '{target}'"),
+                            format!("edit [instructions.{name}] targets — remove '{target}' or replace it with a registered adapter id (see: agentstack adapters list)"),
+                        )
                     };
-                    issues.push(Issue::new(IssueKind::UnknownInstructionTarget, msg));
+                    issues.push(Issue::new(IssueKind::UnknownInstructionTarget, msg).with_fix(fix));
                 }
             }
         }
@@ -399,16 +460,26 @@ fn run<'a>(
         // be a single plain path component: no separator or `..` may smuggle the
         // copy outside the extension directory agentstack owns.
         if !is_safe_component_name(name) {
-            issues.push(Issue::new(
-                IssueKind::InvalidExtensionName,
-                format!("extension '{name}' is not a valid name — an extension name must be a plain path component (no `/`, `\\`, or `..`)"),
-            ));
+            issues.push(
+                Issue::new(
+                    IssueKind::InvalidExtensionName,
+                    format!("extension '{name}' is not a valid name — an extension name must be a plain path component (no `/`, `\\`, or `..`)"),
+                )
+                .with_fix(format!(
+                    "rename [extensions.\"{name}\"] to a plain name — no /, \\, or .."
+                )),
+            );
         }
         if name.starts_with("agentstack-guard") {
-            issues.push(Issue::new(
-                IssueKind::ReservedExtensionName,
-                format!("extension '{name}' uses a reserved name — `agentstack-guard*` belongs to the host guard"),
-            ));
+            issues.push(
+                Issue::new(
+                    IssueKind::ReservedExtensionName,
+                    format!("extension '{name}' uses a reserved name — `agentstack-guard*` belongs to the host guard"),
+                )
+                .with_fix(format!(
+                    "rename [extensions.{name}] — the agentstack-guard* prefix is reserved for the host guard"
+                )),
+            );
         }
         if ext.git.is_some() {
             // Git sources are supported (E3), but a git extension is always
@@ -416,10 +487,15 @@ fn run<'a>(
             // reproducible pin, so an in-repo directory must be named.
             let has_subpath = ext.subpath.as_deref().is_some_and(|s| !s.trim().is_empty());
             if !has_subpath {
-                issues.push(Issue::new(
-                    IssueKind::InvalidExtensionSource,
-                    format!("extension '{name}' has a `git` source but no `subpath` — point `subpath` at the extension's directory within the repo"),
-                ));
+                issues.push(
+                    Issue::new(
+                        IssueKind::InvalidExtensionSource,
+                        format!("extension '{name}' has a `git` source but no `subpath` — point `subpath` at the extension's directory within the repo"),
+                    )
+                    .with_fix(format!(
+                        "add `subpath = \"<dir-in-repo>\"` to [extensions.{name}]"
+                    )),
+                );
             }
         } else if ext.path.is_none() {
             // Sourceless: valid only as a central-library reference (and only
@@ -430,25 +506,40 @@ fn run<'a>(
                 .map(|cx| cx.library.get_extension(name).is_some())
                 .unwrap_or(false);
             if !in_library {
-                issues.push(Issue::new(
-                    IssueKind::InvalidExtensionSource,
-                    format!("extension '{name}' has no `path` or `git` source and is not in the central library"),
-                ));
+                issues.push(
+                    Issue::new(
+                        IssueKind::InvalidExtensionSource,
+                        format!("extension '{name}' has no `path` or `git` source and is not in the central library"),
+                    )
+                    .with_fix(format!(
+                        "add a `path = \"…\"` or `git = \"…\"` source to [extensions.{name}]"
+                    )),
+                );
             }
         }
         if ext.target == "*" {
-            issues.push(Issue::new(
-                IssueKind::UnknownExtensionTarget,
-                format!("extension '{name}' must target exactly one adapter — extension code is harness-specific, `\"*\"` cannot apply"),
-            ));
+            issues.push(
+                Issue::new(
+                    IssueKind::UnknownExtensionTarget,
+                    format!("extension '{name}' must target exactly one adapter — extension code is harness-specific, `\"*\"` cannot apply"),
+                )
+                .with_fix(format!(
+                    "set [extensions.{name}] target to exactly one registered adapter id (see: agentstack adapters list)"
+                )),
+            );
         } else if !targets.is_empty() && !targets.contains(&ext.target) {
-            issues.push(Issue::new(
-                IssueKind::UnknownExtensionTarget,
-                format!(
-                    "extension '{name}' references unknown target '{}'",
-                    ext.target
-                ),
-            ));
+            issues.push(
+                Issue::new(
+                    IssueKind::UnknownExtensionTarget,
+                    format!(
+                        "extension '{name}' references unknown target '{}'",
+                        ext.target
+                    ),
+                )
+                .with_fix(format!(
+                    "edit [extensions.{name}] target to a registered adapter id (see: agentstack adapters list)"
+                )),
+            );
         }
     }
 
@@ -460,64 +551,101 @@ fn run<'a>(
         // The name is the workflow's run identity (and a future artifact
         // basename) — same containment rule as extensions.
         if !is_safe_component_name(name) {
-            issues.push(Issue::new(
-                IssueKind::InvalidWorkflowName,
-                format!("workflow '{name}' is not a valid name — a workflow name must be a plain path component (no `/`, `\\`, or `..`)"),
-            ));
+            issues.push(
+                Issue::new(
+                    IssueKind::InvalidWorkflowName,
+                    format!("workflow '{name}' is not a valid name — a workflow name must be a plain path component (no `/`, `\\`, or `..`)"),
+                )
+                .with_fix(format!(
+                    "rename [workflows.\"{name}\"] to a plain name — no /, \\, or .."
+                )),
+            );
         }
         if wf.git.is_some() {
             // Same rule as git extensions: the checkout's `.git` cannot be
             // part of a reproducible pin, so a subpath must be named.
             let has_subpath = wf.subpath.as_deref().is_some_and(|s| !s.trim().is_empty());
             if !has_subpath {
-                issues.push(Issue::new(
-                    IssueKind::InvalidWorkflowSource,
-                    format!("workflow '{name}' has a `git` source but no `subpath` — point `subpath` at the workflow's directory within the repo"),
-                ));
+                issues.push(
+                    Issue::new(
+                        IssueKind::InvalidWorkflowSource,
+                        format!("workflow '{name}' has a `git` source but no `subpath` — point `subpath` at the workflow's directory within the repo"),
+                    )
+                    .with_fix(format!(
+                        "add `subpath = \"<dir-in-repo>\"` to [workflows.{name}]"
+                    )),
+                );
             }
         } else if wf.path.is_none() {
             // Inline-only in W1: no central-library fallback exists for
             // workflows yet, so sourceless is unconditionally unpinnable.
-            issues.push(Issue::new(
-                IssueKind::InvalidWorkflowSource,
-                format!("workflow '{name}' has no `path` or `git` source — workflow sources are inline-only (a central-library workflow kind is not implemented yet)"),
-            ));
+            issues.push(
+                Issue::new(
+                    IssueKind::InvalidWorkflowSource,
+                    format!("workflow '{name}' has no `path` or `git` source — workflow sources are inline-only (a central-library workflow kind is not implemented yet)"),
+                )
+                .with_fix(format!(
+                    "add a `path = \"…\"` or `git = \"…\"` source to [workflows.{name}]"
+                )),
+            );
         }
         // Roles are the authority-request surface: each must name a declared
         // profile — a role resolving to no capability set can never be
         // admitted, so it fails here, at authoring time.
         for role in &wf.roles {
             if !manifest.profiles.contains_key(role) {
-                issues.push(Issue::new(
-                    IssueKind::UnknownWorkflowRole,
-                    format!("workflow '{name}' role '{role}' names no `[profiles.{role}]` — every role must be a declared profile"),
-                ));
+                issues.push(
+                    Issue::new(
+                        IssueKind::UnknownWorkflowRole,
+                        format!("workflow '{name}' role '{role}' names no `[profiles.{role}]` — every role must be a declared profile"),
+                    )
+                    .with_fix(format!(
+                        "add a [profiles.{role}] table, or remove '{role}' from [workflows.{name}] roles"
+                    )),
+                );
             }
         }
         if wf.roles_sorted_unique().len() > MAX_WORKFLOW_ROLES {
-            issues.push(Issue::new(
-                IssueKind::InvalidWorkflowBounds,
-                format!("workflow '{name}' declares more than {MAX_WORKFLOW_ROLES} unique roles"),
-            ));
+            issues.push(
+                Issue::new(
+                    IssueKind::InvalidWorkflowBounds,
+                    format!(
+                        "workflow '{name}' declares more than {MAX_WORKFLOW_ROLES} unique roles"
+                    ),
+                )
+                .with_fix(format!(
+                    "reduce [workflows.{name}] roles to at most {MAX_WORKFLOW_ROLES} unique"
+                )),
+            );
         }
         // Zero is refused rather than read as "unlimited": a zero ceiling is
         // always a typo, and misreading it open would widen (rule 2).
         if let Some(n) = wf.max_agents {
             if n == 0 || n > MAX_WORKFLOW_AGENTS {
-                issues.push(Issue::new(
-                    IssueKind::InvalidWorkflowBounds,
-                    format!(
-                        "workflow '{name}' max_agents = {n} is outside 1..={MAX_WORKFLOW_AGENTS}"
-                    ),
-                ));
+                issues.push(
+                    Issue::new(
+                        IssueKind::InvalidWorkflowBounds,
+                        format!(
+                            "workflow '{name}' max_agents = {n} is outside 1..={MAX_WORKFLOW_AGENTS}"
+                        ),
+                    )
+                    .with_fix(format!(
+                        "set [workflows.{name}] max_agents within 1..={MAX_WORKFLOW_AGENTS}"
+                    )),
+                );
             }
         }
         if let Some(s) = wf.max_wall_seconds {
             if s == 0 || s > MAX_WORKFLOW_WALL_SECONDS {
-                issues.push(Issue::new(
-                    IssueKind::InvalidWorkflowBounds,
-                    format!("workflow '{name}' max_wall_seconds = {s} is outside 1..={MAX_WORKFLOW_WALL_SECONDS}"),
-                ));
+                issues.push(
+                    Issue::new(
+                        IssueKind::InvalidWorkflowBounds,
+                        format!("workflow '{name}' max_wall_seconds = {s} is outside 1..={MAX_WORKFLOW_WALL_SECONDS}"),
+                    )
+                    .with_fix(format!(
+                        "set [workflows.{name}] max_wall_seconds within 1..={MAX_WORKFLOW_WALL_SECONDS}"
+                    )),
+                );
             }
         }
     }
@@ -587,6 +715,65 @@ mod tests {
         assert!(validate(&m)
             .iter()
             .all(|i| i.kind != IssueKind::MalformedEgressPattern));
+    }
+
+    /// Stage 3.1: every actionable validation error carries a concrete next
+    /// action in its `fix`, so doctor can print `↳ <fix>` and lead its triage
+    /// with it. A representative spread across the manifest surfaces; the point
+    /// is that none of these error kinds are left with `fix: None`.
+    #[test]
+    fn actionable_errors_carry_a_fix() {
+        let m = parse(
+            r#"
+            version = 1
+            [policy.egress]
+            api = ["!evil.example:443junk"]
+            [servers.s]
+            type = "http"
+            url = "https://x"
+            owner = "codx"
+            targets = ["codx"]
+            [servers.s.extra.codx]
+            startup_timeout_sec = 20
+            [profiles.p]
+            servers = ["ghost"]
+            skills = ["nope"]
+            [instructions.i]
+            path = "./i.md"
+            targets = ["claude-kode"]
+            [extensions.e]
+            target = "poi"
+            [workflows.w]
+            roles = ["ghost-role"]
+            max_agents = 0
+            "#,
+        );
+        let issues = validate_with_targets(&m, ["codex", "claude-code"]);
+        // Each of these kinds must now name a next action.
+        for kind in [
+            IssueKind::MalformedEgressPattern,
+            IssueKind::UnknownServerOwner,
+            IssueKind::UnknownServerTarget,
+            IssueKind::UnknownExtraTarget,
+            IssueKind::UnknownServerRef,
+            IssueKind::UnknownSkillRef,
+            IssueKind::UnknownInstructionTarget,
+            IssueKind::InvalidExtensionSource,
+            IssueKind::UnknownExtensionTarget,
+            IssueKind::UnknownWorkflowRole,
+            IssueKind::InvalidWorkflowSource,
+            IssueKind::InvalidWorkflowBounds,
+        ] {
+            let issue = issues
+                .iter()
+                .find(|i| i.kind == kind)
+                .unwrap_or_else(|| panic!("expected a {kind:?} issue"));
+            let fix = issue
+                .fix
+                .as_deref()
+                .unwrap_or_else(|| panic!("{kind:?} must carry a fix, got none"));
+            assert!(!fix.trim().is_empty(), "{kind:?} fix must be non-empty");
+        }
     }
 
     #[test]
