@@ -105,9 +105,9 @@ runs through `agent()`. Everything else is plain computation.
 
 ## Where it stands
 
-The full design, security rationale, and staged plan live in the
+The full technical contract and security rationale live in the
 [workflows capability design doc](design/workflows-capability.md). The
 manifest kind, pinning, trust review, the engine, `workflow run` /
 `workflow report`, negotiated ceilings, and journal-replay resume all ship;
-what remains before the preview label drops is an independent review of the
-interpreter boundary (design doc §9.3).
+what remains before the preview label drops is the promotion-gate work in
+`TODO.md`, including independent review of the interpreter boundary.

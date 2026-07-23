@@ -97,17 +97,15 @@ Two harnesses are simulated: **Claude Code** (has project scope) and **Codex**
 
 ```sh
 ./as --manifest-dir projects/web-app doctor          # detect harnesses, show drift
-./as --manifest-dir projects/web-app dashboard       # open the web UI for this project
 ./as --manifest-dir projects/web-app session start review   # load a profile for now…
 ./as --manifest-dir projects/web-app session end            # …then revert it
 ```
 
-### See global vs project in the dashboard
-Open the dashboard for `web-app`, go to **Servers**, and flip the **Global /
-Project** switch up top:
-- **Global** — `github` is on for every project; `figma` shows a `project` tag
-  (set only in this repo).
-- **Project** — `figma` is ✓; `github` shows a faded ✓ ("inherited from global").
+### See global versus project state
+
+Use `status`, `doctor`, and `diff --scope project` for the repository view.
+Run the corresponding command with `--scope global` where supported to inspect
+the machine layer.
 
 ### Drive it as an agent (MCP)
 ```sh

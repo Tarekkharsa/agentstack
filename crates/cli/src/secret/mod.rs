@@ -161,7 +161,7 @@ impl Resolver for ScopedResolver<'_> {
 
 /// Like [`Chain::default_for_dir`], but keeps each layer separate so it can
 /// report *where* a `${REF}` resolves — shared by `secret list`, `explain`, and
-/// the dashboard. Priority matches the chain: env → varlock → keychain → `.env`.
+/// t3code. Priority matches the chain: env → varlock → keychain → `.env`.
 pub struct SecretSources {
     env: EnvResolver,
     varlock: Option<VarlockResolver>,

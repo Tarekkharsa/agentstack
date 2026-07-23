@@ -98,7 +98,7 @@ fn print_recent_calls(calls: &[CallRecord], n: usize) {
 }
 
 /// The analytics report as JSON — the shared shape the CLI renders and the
-/// dashboard can consume. Every source is best-effort: a missing/corrupt file
+/// external UIs can consume. Every source is best-effort: a missing/corrupt file
 /// degrades to empty rather than failing.
 pub fn collect() -> Value {
     collect_with(&calllog::read_all())

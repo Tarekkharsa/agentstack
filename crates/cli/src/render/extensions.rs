@@ -7,7 +7,7 @@
 //! Extensions are the highest-risk capability agentstack manages — the code
 //! runs INSIDE the harness process at full user permission, outside every
 //! policy ceiling. agentstack pins and delivers the bytes; it never executes
-//! or governs them (docs/design/extensions-capability.md). So this renderer
+//! or governs them. So this renderer
 //! makes exactly two promises: the bytes are copies of a lock-pinned source,
 //! and the project was trusted at render time. Both are checked before a single
 //! byte is written.
@@ -38,7 +38,7 @@ use crate::verify::{extension_verdict, Verdict};
 /// NEVER created, overwritten, or pruned by this renderer — even if a
 /// hand-forged ledger entry claims one. A hard deny-list, checked at BOTH prune
 /// and render. `pub` so read-only surfaces (doctor's rendered-artifact audit,
-/// the dashboard) skip guard artifacts the same way this renderer does.
+/// t3code) skip guard artifacts the same way this renderer does.
 pub const GUARD_PREFIX: &str = "agentstack-guard";
 
 /// Ownership ledger dropped inside each rendered extension directory. Hidden
@@ -457,7 +457,7 @@ pub fn verify_rendered(
 
 /// One artifact agentstack's ownership ledger records in a governed extension
 /// directory — surfaced read-only to doctor (the rendered-artifact audit) and
-/// the dashboard ("managed by agentstack" labelling). A directory may hold
+/// t3code ("managed by agentstack" labelling). A directory may hold
 /// artifacts from several projects (a shared global dir); each carries the pin
 /// checksum it was rendered from.
 pub struct ManagedArtifact {

@@ -45,7 +45,7 @@ pub struct Manifest {
 
     /// Native harness extensions (executable add-on code, e.g. pi's `.ts`
     /// extensions), keyed by name. Each targets exactly ONE adapter and is
-    /// pinned strictly in the lock (D6; docs/design/extensions-capability.md).
+    /// pinned strictly in the lock.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub extensions: IndexMap<String, Extension>,
 
@@ -934,7 +934,7 @@ impl Skill {
 /// directory. The highest-risk capability kind agentstack manages: the code
 /// executes INSIDE the harness process with full user permissions, outside
 /// the policy ceiling — agentstack pins and delivers the bytes, it never runs
-/// or governs them at runtime (D6; docs/design/extensions-capability.md).
+/// or governs them at runtime.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Extension {
     /// Local path source, relative to the manifest dir (same anchoring as

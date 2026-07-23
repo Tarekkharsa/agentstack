@@ -1,6 +1,5 @@
 //! The `add skill <source>` grammar — one parser for every way the skills
-//! ecosystem spells "where a skill lives" (design:
-//! `docs/design/add-skill-source-grammar.md` §1).
+//! ecosystem spells "where a skill lives".
 //!
 //! Rules that are policy, not convenience:
 //! - A local path must be SPELLED (`./x`, `../x`, absolute, `~/…`) — a bare

@@ -18,9 +18,9 @@ agentstack restore claude-code     # fallback: restore one adapter's config from
 servers, settings, hooks, instructions, even the owned-server manifest refresh —
 is recorded before it lands, and `restore` reverts one; `restore <adapter>` is a
 fallback that restores one adapter's config from its single-slot backup.
-Reverted files simply show up as pending again — the dashboard's Activity tab
-lists the same recorded writes, each with the `restore` to roll it back (see
-[see what your agents did](see-what-happened.md)). Five other actions are undone
+Reverted files simply show up as pending again; `restore` lists the recorded
+writes and the identifier needed to roll each one back (see [see what your
+agents did](see-what-happened.md)). Five other actions are undone
 by their own verb, because they are not file writes:
 
 | To undo… | Run | What it reverts |

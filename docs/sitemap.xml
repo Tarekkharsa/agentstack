@@ -11,7 +11,7 @@
   <url><loc>https://tarekkharsa.github.io/agentstack/reference.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/architecture.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/enforcement.html</loc></url>
-  <url><loc>https://tarekkharsa.github.io/agentstack/history.html</loc></url>
+  <url><loc>https://tarekkharsa.github.io/agentstack/workflows.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/add-a-server.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/add-a-skill.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/trust-a-repo.html</loc></url>
@@ -20,5 +20,6 @@
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/ci.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/undo.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/see-what-happened.html</loc></url>
+  <url><loc>https://tarekkharsa.github.io/agentstack/howto/use-with-t3code.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/security-review-2026-07-11.html</loc></url>
 </urlset>

@@ -20,7 +20,7 @@ the [README](../README.md) and the [getting-started walkthrough](start.html).
 - [Layer 3 — Policy engine](#layer-3--policy-engine-cratespolicy)
 - [Layer 4 — Runtime](#layer-4--runtime-cratesadapters-cratesruntime-cratesegress)
 - [Layer 5 — Flight recorder](#layer-5--flight-recorder-cratesrecorder)
-- [Layer 6 — Registry](#layer-6--registry-future-phase-4)
+- [Layer 6 — Registry](#layer-6--registry-evidence-gated-future)
 - [Crate dependency rules](#crate-dependency-rules)
 
 ## Vision
@@ -253,7 +253,7 @@ see the host-mode limitation in Layer 2: it is still a user-writable file.
 
 Output: effective policy = **intersection**. Bundles can narrow, never widen.
 (The shipped machine-first `[policy.tools]` check is the v0 of this rule;
-Phase 1 generalized it into a real intersection engine with more dimensions.)
+It is now a general intersection engine with multiple dimensions.)
 
 Four dimensions ship, each a top-level, name-keyed map — **not** nested under
 each MCP server entry in the manifest — every one sharing the same glob
@@ -347,7 +347,8 @@ keeps the renderer from ever authoring, overwriting, or pruning the host
 guard's reserved `agentstack-guard*` artifacts. `run --locked` re-verifies each
 delivered copy against its pin before launch. What this buys is provenance and
 content binding, not runtime enforcement; the trade-offs and staging are in
-[`docs/design/extensions-capability.md`](design/extensions-capability.md).
+The enforcement limits are recorded in
+[`ENFORCEMENT.md`](ENFORCEMENT.md#native-extensions).
 
 The four runtime modes (host, gateway, sandbox, lockdown) enforce different
 dimensions to different depths; [`ENFORCEMENT.md`](ENFORCEMENT.md) is the
@@ -476,7 +477,7 @@ JSONL is append-only by convention, not cryptographically tamper-evident.
 
 Scope discipline: a log with a good viewer, not an observability platform.
 
-## Layer 6 — Registry (future, Phase 4)
+## Layer 6 — Registry (evidence-gated future)
 
 Push/pull of signed bundles. The trust gate verifies signatures against
 publisher keys; content-pinning and review flow are inherited unchanged.
@@ -512,8 +513,7 @@ in [`ENFORCEMENT.md`](ENFORCEMENT.md#experimental-tools_execute).
 
 `adapters` deliberately does **not** depend on `policy`: the fail-closed secret
 check happens *before* render, in the caller. Re-granting that edge is a
-deliberate architecture change, not a Cargo.toml edit. (This edge was once
-listed and withdrawn — see [`HISTORY.md`](HISTORY.md).)
+deliberate architecture change, not a Cargo.toml edit.
 
 `core` depends on nothing internal; nothing depends on `cli`. `trust` and
 `policy` are the security-critical crates: they depend on `core` only, stay

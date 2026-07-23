@@ -2,7 +2,7 @@
 """Render the source-of-truth Markdown docs pages into styled site pages.
 
 The Markdown stays canonical — concepts.md, choose.md, reference.md,
-ARCHITECTURE.md, ENFORCEMENT.md, HISTORY.md, and howto/*.md are what you edit,
+ARCHITECTURE.md, ENFORCEMENT.md, and howto/*.md are what you edit,
 review, and read on GitHub. This script compiles each of them (see PAGES
 below) into a docs-site HTML page carrying the same shell (header, sidebar,
 footer, CSS variables) as docs.html, so site visitors never leave the site for
@@ -42,7 +42,6 @@ PAGES = [
     ("ARCHITECTURE.md", "architecture.html", "how-it-works"),
     ("workflows.md", "workflows.html", "workflows"),
     ("ENFORCEMENT.md", "enforcement.html", "matrix"),
-    ("HISTORY.md", "history.html", "history"),
     ("howto/add-a-server.md", "howto/add-a-server.html", "howto-server"),
     ("howto/add-a-skill.md", "howto/add-a-skill.html", "howto-skill"),
     ("howto/trust-a-repo.md", "howto/trust-a-repo.html", "howto-trust"),

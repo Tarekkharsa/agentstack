@@ -1,6 +1,6 @@
 //! Loopback runtime endpoint for code mode (PLAN code-mode Phase 2, transport
 //! option "loopback HTTP, token-gated, project-scoped"). It mirrors the
-//! dashboard server's localhost+token pattern: binds `127.0.0.1` only, gates
+//! local control endpoint's localhost-plus-token pattern: binds `127.0.0.1` only, gates
 //! every call behind a one-time token, and forwards `{ name, arguments }`
 //! straight through the gateway's existing `try_call` path. Secrets are resolved
 //! by the gateway, never by the generated client.

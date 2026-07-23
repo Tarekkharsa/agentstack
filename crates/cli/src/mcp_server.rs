@@ -249,7 +249,7 @@ pub fn serve(
             .to_string();
         let tool_name = req.pointer("/params/name").and_then(Value::as_str);
         // Trust is refreshed before content-loading calls (stale-window fix,
-        // design: add-skill-activation.md §4) — and refresh_trust's
+        // Activation and refresh_trust's
         // trust-flip branch tears the runtime down and swaps the gateway, so
         // those calls need the same worker barrier lease mutations get.
         let refreshes_trust = matches!(
@@ -1368,7 +1368,7 @@ fn run_tool_with_lease(
             args.get("query").and_then(Value::as_str).unwrap_or(""),
         )),
         "agentstack_list" => {
-            let v = crate::dashboard::snapshot::build(dir)?;
+            let v = crate::snapshot::build(dir)?;
             Ok(serde_json::to_string_pretty(&v)?)
         }
         "agentstack_doctor" => doctor_summary(dir),
@@ -1819,7 +1819,7 @@ fn scope_arg(args: &Value) -> crate::scope::Scope {
 
 fn diff_summary(args: &Value, dir: Option<&Path>) -> Result<String> {
     let scope = scope_arg(args);
-    let v = crate::dashboard::snapshot::diffs(dir, scope, false)?;
+    let v = crate::snapshot::diffs(dir, scope, false)?;
     let targets = v
         .get("targets")
         .and_then(Value::as_array)

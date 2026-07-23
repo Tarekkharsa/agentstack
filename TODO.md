@@ -1,673 +1,501 @@
-# AgentStack execution checklist
-
-> **Status:** active work queue<br/>
-> **Updated:** 2026-07-21<br/>
-> **Current phase:** Phase 0A **minimum version** (maintainer scope decision
-> 2026-07-16; Phase 0B and everything after the minimum-version cut are
-> deferred)<br/>
-> **Standing exception (2026-07-21):** the saved-governed-workflows lane
-> (D7, listed under Phase 2 below) is opened early by maintainer decision —
-> supervised work, sequenced after the minimum-version cut's unchecked
-> items; see that section for the staging and the restated evidence gate.<br/>
-> **Strategy source:** [`STRATEGY.md`](STRATEGY.md)
-
-This is the only ordered day-to-day plan. Start with the first unchecked item
-in the current phase. Do not begin a later phase until the current phase's exit
-gate is satisfied. `STRATEGY.md` explains why and defines the gates;
-`docs/ARCHITECTURE.md` and `docs/ENFORCEMENT.md` define the technical boundaries.
-
-**Minimum-version decision (2026-07-16):** the maintainer is scoping the
-project to a minimum version: solve the configuration problem (shipped) and
-finish the trust machinery already implemented, then stop. Success criterion
-for the cut is "trustworthy for the maintainer's own daily repositories" —
-external activation metrics and distribution are deferred with Phase 0B, not
-abandoned. Deferred items remain listed so resuming one is a deliberate scope
-decision, never an accident.
-
-## How to work from this file
-
-1. Select the first unchecked item in the Phase 0A **minimum version** cut;
-   deferred sections are not work sources until the cut ships.
-2. Read the linked strategy section and relevant technical contract before coding.
-3. For trust, policy, secret, digest, or enforcement semantics, work in a short
-   supervised session and require line-by-line review.
-4. Add or update an executable witness for every changed security claim.
-5. Mark the item complete only after implementation, tests, and documentation agree.
-6. Record historical detail in git history or `docs/HISTORY.md`, not in another plan.
-
-## Completed foundation
-
-- [x] Split the implementation into the nine-crate workspace.
-- [x] Add content-bound trust, machine-first policy, and lock verification.
-- [x] Fail closed when machine policy is corrupt and no valid snapshot exists.
-- [x] Add Docker sandbox, lockdown networking, egress enforcement, and recording.
-- [x] Build official release binaries with the sandbox backend included.
-- [x] Make the gateway the sole MCP authority for declared endpoints under lockdown.
-- [x] Add the experimental bounded TypeScript `tools_execute` primitive.
-- [x] Publish the current security review and enforcement matrix.
-
-## Phase 0A — prove the canonical protected run
-
-**Details:** [strategy phase 0A](STRATEGY.md#phase-0a--prove-the-canonical-no-docker-activation-path)
-
-**Technical boundaries:** [architecture](docs/ARCHITECTURE.md) · [enforcement matrix](docs/ENFORCEMENT.md)
-
-### Contract
-
-All contract items are satisfied by the approved
-[`docs/design/locked-run-contract.md`](docs/design/locked-run-contract.md)
-(revision 4, approved 2026-07-15).
-
-- [x] Write the reviewed behavioral contract for
-  `agentstack run <harness> --locked` using the current working directory as
-  the project.
-- [x] Define how `--locked` composes with `--profile`, `--plan`, the required
-  harness positional, and trailing harness arguments. (Contract §2.)
-- [x] Define the exact no-Docker guarantee: explicit trust, locked-input and
-  drift checks, machine-policy ceiling, cooperative host guard, evidence, and
-  honest non-isolation limits. (Contract §3, §3.1.)
-- [x] Define the maximum-assurance guarantee separately for `--sandbox` and
-  `--lockdown`. (Contract §5.)
-- [x] Freeze the minimum backend-neutral fields needed later by Workspace
-  Grants and hosted adapters without implementing those later phases now.
-  (Contract §6: `AuthorityGrant` / `RunEnvelope`.)
-- [x] D2: specify how the existing `ExecutionPlan` / `Gateway::from_frozen`
-  seam extends across native render and profile leases without a parallel
-  authority abstraction. (Contract §7; `from_plan` never existed in code —
-  contract §0.)
-- [x] D3: decide which stdio scripts and local executables are declared
-  integrity inputs for `--locked`; if the first release excludes them, write
-  the limitation into the contract and trust preview. (Contract §8: Option A
-  with declared integrity roots — implementation pending below.)
-
-### Minimum version — the current cut (2026-07-16)
-
-One keystone increment plus three small closures, plus the marketing surface
-(vision decision, later on 2026-07-16: a visitor must see the value
-immediately — demos and docs quality are in the cut; outreach stays deferred).
-The keystone is the last engineering prerequisite for everything staged on
-`feat/d3-local-executable-integrity` (D3 pins, strict verifier, sealed
-`AuthorityGrant`, KAT-frozen digest) to become an enforced claim instead of
-unwired machinery.
-
-- [x] Implement the canonical `run <harness> --locked` flow as **one
-  supervised increment** (contract §3 sequence): recorder-open
-  (`AttemptStarted`) → enforced trust → strict lock verification including D3
-  executables (`ensure_locked_inputs`) → policy admission → freeze
-  `AuthorityGrant` (`GrantFrozen`) → fallible gateway (zero-server-valid) →
-  launch-scoped MCP config with cooperative host guards → recorded outcome.
-  Lands `RunEnvelope` (contract §6.2) and the material checked-append recorder
-  events (contract §9); consumes the staged `grant.rs`/`verify.rs` surface.
-  - **Landed (line-by-line reviewed 2026-07-17):** everything through GrantFrozen +
-    launch + recorded outcome, the checked-append recorder events, `--plan`
-    (aggregates all blockers, mutates nothing, digest equals the live run's
-    once the commitment key exists; a never-provisioned key is informational
-    — "will be created on first live run" — while a present-but-broken key
-    still blocks), and loud named-limitation errors for `--locked --profile`
-    / `--sandbox`. Verified live: drift refusal, trust re-gate, admission
-    (unclassifiable host), clean run with real harness.
-  - **Also landed (2026-07-16, rulings: config-scope now / honest global
-    label):** launch-scoped PROJECT MCP config (gateway-only during the run,
-    parked original restored byte-identical, overlapping runs refuse instead
-    of stacking parks, crash leaves the more restrictive state) and
-    `RunEnvelope` as the sealed §6.2 evidence identity.
-  - **Also landed (2026-07-16, pre-dogfooding round):** five asserted
-    use-case example projects (`examples/projects/` + `FINDINGS.md` — the
-    skill-indexing report, the CLI-differences matrix, the locked-run device
-    test), and the twelve issues that round filed, all fixed the same day
-    (#11–#22): guard honors the project `[policy.filesystem]` deny from the
-    preferred `.agentstack/` layout; `run` (plain and `--locked`) spawns the
-    harness at the project root; `--plan`/live commitment-key parity;
-    `report` renders the locked lifecycle and carries the posture slug in
-    `--json`; silent drops to instruction-/skills-less adapters warn on every
-    surface and instruction `targets` validate like servers'; `agentstack
-    search` covers the central library (name + frontmatter description);
-    `agentstack_list_loadable` takes a `query`; `lib list` shows
-    descriptions.
-  - **Also landed (2026-07-17, line-by-line reviewed same day — the three
-    remainders):** (a) the run-grant artifact handoff: `live()` writes a
-    reviewed `GrantHandoff` projection (ruleset + `${REF}`-only frozen
-    servers + project/consent identity; never argv or secret values) into
-    the run's private dir, and the launch-scoped bridge entry becomes
-    `agentstack mcp --grant <path>` — the bridge consumes it verbatim via
-    `Gateway::from_frozen`, fail-closed on schema/ruleset-version skew,
-    wrong project, consent staleness (a post-freeze manifest edit refuses),
-    and lost trust, never falling back to disk re-derivation; lease
-    transitions under a frozen grant are refused honestly (leases-consume-
-    the-grant stays with the deferred D2 unification). (b) `--locked
-    --profile` as a fence: one-time resolution, gates, grant, artifact, and
-    bridge all see the profile's subset (`ProfileEffect::Fenced`, additive
-    digest tag, KAT unchanged); no native session state is applied — skills
-    render under a locked profile stays with the D2 render unification.
-    (c) the user/global-scope warning is now content-derived: it names the
-    harness's actual ambient global MCP entries (including Claude Code's
-    nested `projects[<dir>].mcpServers`) or reports the scope clean.
-    Witnesses: the three `handoff_*` tests in `grant.rs`; verified live
-    end-to-end including the staleness refusal.
-  - **Adversarial review pass (2026-07-17, 4-lens × 2-refuter workflow):**
-    three confirmed findings fixed the same session (commit after the
-    keystone): (1) HIGH rule-2 hole — the bridge served the frozen ruleset
-    without re-checking the CURRENT machine ceiling, so a post-freeze machine
-    tightening was silently defeated; now `verify_handoff_for` re-derives
-    machine∩project and refuses on any difference. (2) forge/replay — the
-    artifact's authority fields were bound to nothing machine-authenticated;
-    now sealed with an HMAC under the machine commitment key
-    (`SignedHandoff`), verified before any field is trusted. (3) the ambient
-    audit matched the manifest dir not the project root (false "clean").
-    Witnesses added; all verified live (forged + stale-ceiling both refuse).
-  - **Keystone line-by-line review (2026-07-17, closes the review debt):**
-    full read of `grant.rs`/`locked.rs`/`mcp_server.rs` plus an independent
-    opus refuter and a codex second-perspective review, converging. Verified
-    sound: MAC round-trip determinism (`CompiledRuleset`/`Server` are all
-    BTreeMap/IndexMap/scalars — serialize∘deserialize is byte-identical, so
-    the MAC never false-rejects); the rule-2 re-check compiles over the full
-    `manifest.servers` set on BOTH freeze and consumption, so the `--profile`
-    fence narrows only the served subset and `--locked --profile` cannot
-    falsely refuse; untrusted-inert, consent re-gate, and no-secret-
-    serialization all hold. Two findings fixed the same day: (1) the
-    grant-mode bridge still served mutating/secret-resolving control-plane
-    tools — `agentstack_session_start` resolves secrets into native configs
-    mid-run, a secret-broker-boundary breach; now the whole mutating set
-    (lease open/close/freeze, session start/end/freeze, add_skill/add_server/
-    add_from, create_profile) is refused fail-closed under `--grant` (with a
-    classification witness), and `--auto-project --grant` refuses at startup
-    instead of computing the grant and silently serving disk re-derivation.
-    (2) doc honesty on the handoff HMAC: the docstrings claimed "a same-user
-    agent cannot forge a grant.json", but a same-user unconfined agent can
-    read the 0600 commitment key and seal a valid MAC; the docs now state
-    what the MAC actually provides (cross-machine replay + tamper +
-    confined-attacker forgery resistance — see residual iii).
-  - **Post-review dogfooding catch (2026-07-17, found by the new
-    `examples/projects/locked-run` asserted example):** in the preferred
-    `.agentstack/` layout, D3 executable pins were derived against the
-    MANIFEST dir instead of the project root — `./tool.sh` resolved against
-    `.agentstack/`, matched nothing, `lock` silently pinned NOTHING, the
-    locked/trust gates passed vacuously, and the trust preview never labeled
-    the unpinned code (flat root-manifest projects were unaffected, which is
-    why the existing witnesses stayed green). Fixed by normalizing to the
-    project root inside `derive_executable_pins` — the one function every
-    pin producer and verifier funnels through, so record and verify can't
-    diverge — with a layout-equivalence unit witness; the example's
-    one-byte-edit step is the end-to-end witness. Full example suite re-run
-    green.
-  - **Remaining (honest limits, not blockers):** (i) actual NEUTRALIZATION
-    of ambient global-scope entries on the host tier stays out deliberately —
-    the global config is one shared file harness apps rewrite mid-run, so
-    park/swap races clobber user state; the sound routes are `--lockdown`
-    (kernel fence, shipped) or per-CLI isolation flags (evidence-driven, not
-    yet designed). (ii) a valid same-machine/same-project artifact from a
-    BROADER `--profile` run is still replayable by an agent with run-dir
-    write access — but its servers are all from the same trusted manifest and
-    the ruleset is capped at the current machine ceiling, so effective
-    authority is ≤ what `agentstack mcp --auto-project` already grants that
-    trusted project. Per-run artifact identity is follow-up. (iii) the
-    handoff MAC key is same-user-readable, so an UNCONFINED same-user agent
-    can seal a forged artifact whose server definitions reach the secret
-    broker under trusted names — on the host tier that agent already executes
-    arbitrary commands, so this adds no command authority, but the recorded
-    hardening (have `verify_handoff_for` re-resolve the fenced
-    `(name, checksum)` set from the trusted manifest and refuse any artifact
-    definition that differs, instead of consuming definitions verbatim)
-    becomes load-bearing the moment a sandbox/lockdown posture confines the
-    agent away from the key file — land it with those postures. Relatedly,
-    the bridge path derives its root FROM the artifact, so the root-equality
-    check in `verify_handoff_for` is satisfied by construction there; the MAC
-    binds the root field, and same-machine cross-project replay stays bounded
-    by the (ii) analysis.
-  - The wiring must assert a `GrantedServer`'s definition digest was honestly
-    derived from its stored `Server` bytes (carried 3b-ii review note).
-    (Done: `GrantedServer::from_resolved` is the only wiring constructor.)
-- [x] Call `Lock::retain_executables` so a removed server or integrity root
-  prunes its `[[executable]]` pins (stale-pin gap; mirror
-  `retain_instruction_names`). (In the strict manifest-global
-  `record_executable_pins` — the profile-scoped `record_lock` first-pin path
-  sees only a subset of servers and must never prune; pruning also skips when
-  any server ref fails to resolve, so an incomplete picture can't drop live
-  pins.)
-- [x] Witness: a one-byte D3 executable edit fails locked verification before
-  launch and re-gates review; intentionally unpinned code is labelled
-  honestly. (`one_byte_executable_edit_refuses_before_launch_and_is_recorded`
-  + the digest/verifier/lock-cmd layer witnesses; unbound surface labelled in
-  the trust preview and locked posture output.)
-- [x] README restructure: pain-led hero, 60-second start, three proof blocks
-  (guard, trust gate, one-manifest-everywhere), experimental features moved
-  out of the beginner path. Includes the honesty pass — every claim matches
-  the shipped tier; `--locked` is pre-launch gating, not isolation; D2
-  standalone-command unification is a labelled known limit. (Commit bf879ea;
-  new guard section with embedded demo gif.)
-- [x] Docs site reorganization: index leads with a simple→advanced "See it
-  work" ladder (manifest → guard → trust gate → lockdown); pages consolidated
-  and status-labelled; stale claims fixed against the code (commit bf879ea).
-  Design pass on top: one-row sticky header across all six pages with
-  responsive link-hiding, enforcement-matrix cells matched to ENFORCEMENT.md,
-  hero proof visible above the fold, tightened section rhythm.
-- [x] Three recorded demo clips (asciinema + agg, 100x30, DEMO_PAUSE=2.5):
-  guard blocks destructive commands (28s); trust gate (39s); one manifest →
-  3 CLIs (33s). docs/demos/*.gif + .cast, guard gif embedded in README.
-  (Commit bf879ea. Still deferred: the locked-run demo trio recordings.)
-
-Landed toward this cut:
-
-- [x] D3 end to end short of the locked flow: symlink-rejecting root digests
-  (core); auto-detected command/args pins + declared roots recorded by
-  `agentstack lock`/`use --write`; strict verifier dimension; trust review
-  blocks unpinned/drifted executables; doctor errors on drift/underivable and
-  warns on unpinned.
-- [x] Canonical V1 `AuthorityGrant` digest, KAT-frozen, keyed argv commitment
-  with no unkeyed fallback (contract §4, §6.1).
-- [x] Regression witness that authoritative trust/lock verification hashes
-  current bytes and never uses the stat-fingerprint digest cache.
-  (Landed with the skill-cache bypass fix; contract §3 step 4, ruling 3.)
-
-### Deferred beyond the minimum version
-
-Explicitly deferred, not silently dropped. Each keeps its contract reference;
-picking one up again is a deliberate scope decision.
-
-- [ ] D2 standalone-command unification: plain `apply` / `session` / MCP lease
-  invoked outside a locked run keep today's behavior. (Contract §7 requires
-  this before the full Phase 0A exit gate — that gate is deferred with it.
-  The README honesty pass above labels the limit.)
-- [ ] Extend the D2 frozen grant across render, gateway, and profile leases,
-  and prove every delivery path consumes the same grant and cannot widen
-  authority.
-- [ ] Remaining recorder events: trust-store mutations and per-run token/cost
-  evidence. (The locked flow records its material events; these two dimensions
-  stay honestly `unavailable`, which the contract permits.)
-- [ ] `agentstack_lease_freeze` → `agentstack_lease_capture` naming decision
-  (only matters before external compatibility, which is deferred).
-- [ ] Remaining demos beyond the three in-cut clips: the locked-run trio
-  (safe repo, policy violation, drift — their substance ships with the
-  wiring; recording waits for it) and the Docker maximum-assurance recording.
-- [ ] Documentation tooling (the automated kind): claim-consistency tests for
-  the enforcement matrix and event list, strategy-page sync, claim tests over
-  CLI examples. (The status-label *convention* moved into the in-cut docs
-  reorganization; only its test enforcement stays deferred.)
-- [ ] Activation measurement: five unassisted strangers, sub-15-minute median
-  — deferred with Phase 0B distribution.
-- [ ] UI control plane (governance from t3code): guided `init`, session-profile
-  select/define, and workflow authoring + a controllable map-reduce master —
-  each write flow terminating in the trust review gate. Design draft:
-  [`docs/design/ui-control-plane.md`](docs/design/ui-control-plane.md). Blocked
-  on the §7 cross-cutting decision (dedicated `agentstack:admin` scope +
-  consent bound to the previewed surface digest), and not to jump ahead of the
-  workflows §9.3 blocker. Read-only slices are independently landable.
-
-### Phase 0A exit gate (deferred with distribution)
-
-Unchanged as the bar for calling Phase 0A *complete*; the minimum version
-deliberately ships without it.
-
-- [ ] All three no-Docker demos and the separate Docker demo pass.
-- [ ] Five unassisted users complete the flow.
-- [ ] Median activation is below 15 minutes.
-- [ ] Documentation and enforcement claims agree.
-
-## Phase 0B — validate the problem and distribution
-
-**Deferred (maintainer decision 2026-07-16).** The minimum version ships
-without outreach or validation work; this lane resumes when there is time or
-a reason to seek external users. Two of this lane's assets — the demo
-recordings and the README/homepage rewrite — moved into the minimum-version
-cut later the same day (users must see the value immediately); interviews,
-publishing, and outreach stay here. The items stay listed so resuming is
-deliberate.
-
-**Details:** [strategy phase 0B](STRATEGY.md#phase-0b--validate-the-problem-and-build-distribution)
-
-- [ ] Conduct 20 problem interviews with multi-agent developers, platform
-  teams, repository maintainers, or security owners.
-- [ ] Record which folders real tasks should read, edit, or never see.
-- [ ] Record which agent tasks repeat often enough to become saved workflows.
-- [ ] Test willingness to run remotely when the sandbox receives no long-lived
-  repository or model credential and returns a patch plus receipt.
-- [ ] Reach five interviews that end with “can I try it?”
-- [ ] Publish the clone-as-consent technical article.
-- [ ] Publish the malicious-repository demo and short recording.
-- [ ] Publish the compromised-MCP-server demo and short recording.
-- [ ] Publish the changed-pinned-byte demo and short recording.
-- [ ] Document the existing GitHub Action with a copyable workflow and visible failures.
-- [ ] Rewrite the homepage and README lead around repository consent.
-- [ ] Start targeted outreach before a broad launch.
-- [ ] Publish a Show HN only after the quickstart works unassisted.
-
-### Phase 0B exit gate
-
-- [ ] Twenty interviews completed.
-- [ ] Five qualified people ask to try AgentStack.
-- [ ] At least one repeatable acquisition channel produces unassisted activation.
-
-## Phase 1 — productize the wedge and exact Workspace Grants
-
-**Start only after both Phase 0 gates.**
-
-**Details:** [strategy phase 1](STRATEGY.md#phase-1--productize-the-wedge)
-
-- [ ] Make the canonical protected run predictable, documented, and fast.
-- [ ] Implement exact directory-root Workspace Grants in the maximum-assurance
-  local path, beginning with safely mountable `path/**` roots.
-- [ ] Keep the repository root read-only and add nested read-write mounts only
-  for approved roots.
-- [ ] Reject path traversal, symlink escapes, missing roots, ambiguous write
-  globs, and overlaps with deny rules.
-- [ ] Implement honest fine-grained read isolation with an empty/sparse
-  workspace or deny-mask mounts before claiming scoped reads.
-- [ ] Give untrusted bundles no writable submounts.
-- [ ] Show the effective read/write/deny grant in `--plan`, trust review, and
-  the run report.
-- [ ] Bind grants to profiles and future roles such as researcher,
-  implementer, reviewer, and deployer.
-- [ ] Freeze and version the backend-neutral execution plan: project/workflow
-  digests, folders, tools, secrets, egress, commands, approvals, budgets, and
-  audit identity.
-- [ ] Add conformance tests proving a backend can only preserve or narrow the plan.
-- [ ] Resolve D5 after compatibility evidence: decide whether ordinary
-  `--sandbox` becomes topologically confined by default and give the weaker
-  bridge/proxy-only mode an explicitly weaker name if retained.
-- [ ] Add a report-only sequence-anomaly heuristic after recorder completion:
-  flag `secret_access` followed shortly by egress inconsistent with that
-  secret's constrained server. Never block; label it metadata correlation, not
-  DLP or payload inspection.
-- [ ] Improve provenance, signature, migration, policy-example, export, install,
-  upgrade, and cross-platform UX.
-
-### Phase 1 exit gate
-
-- [ ] Ten independent repositories activated.
-- [ ] Five weekly active external users for four consecutive weeks.
-- [ ] Three repositories use the GitHub Action.
-- [ ] One external team relies on AgentStack for real work.
-- [ ] At least one external run proves writes outside its directory grant fail.
-- [ ] The frozen plan passes local backend conformance tests.
-
-## Cross-cutting experimental executor stabilization
-
-**Does not displace the active phase. Required before `tools_execute` can leave
-experimental status.**
-
-**Security checklist:** [threat model](docs/design/tools-execute-threat-model.md) ·
-[enforcement status](docs/ENFORCEMENT.md#experimental-tools_execute)
-
-- [ ] Build a current invariant-to-witness index that links every executor
-  security claim to an implemented test and marks unproven cases explicitly.
-- [ ] Commission an independent source-to-sink security review.
-- [ ] Fuzz relay framing plus request, result, and limit normalization.
-- [ ] Soak repeated executions, cancellation, client disconnects, upstream
-  hangs, output limits, relay failure, and concurrent clients; prove no
-  container, network, process, or thread leaks remain.
-- [ ] Cover relay-token reuse, fork/child teardown, direct DNS/UDP/proxy bypass,
-  fake-secret and protocol-shaped log data, and post-plan TOCTOU mutation.
-- [ ] Publish supported-architecture runtime provenance, executor SBOM,
-  independent image scan, digest-update policy, and attestation.
-- [ ] Revisit mutating-tool approval only through explicit tool metadata; never
-  infer side effects from a tool name.
-- [ ] Leave experimental status only after there are no open critical/high
-  findings, cleanup is demonstrated, supply-chain evidence is published, and
-  `ENFORCEMENT.md` matches every fail-closed behavior and residual limit.
-
-## Native extensions capability lane (added 2026-07-16, post-cut)
-
-**Maintainer scope addition (2026-07-16): govern native harness extensions
-(pi extensions, OpenCode plugins) as a first-class capability kind.** Queued
-behind the minimum-version keystone — it does not displace the active Phase 0A
-item; starting it earlier is a deliberate scope decision. Extensions are
-pinned executable content: the strictest kind agentstack manages, and honest
-about being provenance-only at runtime (the code runs inside the harness
-process, outside the policy ceiling).
-
-**Details:** [`docs/design/extensions-capability.md`](docs/design/extensions-capability.md) ·
-ledger entry D6 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
-
-- [x] E0: review and approve the design doc (settle `target` singular,
-  copy-render, strict root digest, guard-name reservation, pi + OpenCode
-  first, the three open questions).
-- [x] E1 (supervised): `[extensions.*]` manifest kind, `[[extension]]` lock
-  pinning via the strict `integrity_root_digest`, retain/prune rules,
-  distinct trust-preview labelling. Witness: a one-byte extension source edit
-  fails locked verification and re-gates review.
-  - **Landed + reviewed, commit 3b293c1:** the manifest kind
-    (path sources only; git rejected at validation until E3), strict pinning
-    + pruning in `agentstack lock`, trust preview blocks unpinned/drifted/
-    retargeted extensions, `run --locked` verifies them via
-    `ensure_locked_inputs`, and the pin records its `target` so retargeting
-    re-gates like drift. Witnesses:
-    `one_byte_extension_edit_refuses_locked_and_relock_regates`,
-    `extension_verdicts_fail_closed_and_locked_gate_names_them`, plus the
-    validation and lock round-trip tests.
-- [x] E2 (supervised): render for pi + OpenCode — `ExtensionsSpec` gains a
-  write path, ownership ledger, prune path, rendered-copy verification in the
-  locked flow, `--plan`/report/posture surfaces. Witnesses: an untrusted
-  bundle renders no extension bytes; pruning never touches unmanaged files or
-  `agentstack-guard.*`.
-  - **Landed + reviewed, commit 3b293c1:** copy-render (never
-    symlink) via the strict walk exposed as `integrity_root_files`;
-    per-directory ownership ledger keyed by project (multi-project-safe
-    global dirs); prune limited to this project's ledger artifacts with the
-    guard deny-list enforced at render AND prune; a `rendered-verify` gate in
-    `run --locked` (+ `--plan`) that refuses a tampered rendered copy against
-    the lock pin. Adversarial review found and fixed two path-traversal
-    vulns (forged ledger keys; extension names as paths) — both now have
-    witnesses, plus name validation (`InvalidExtensionName`). All four
-    E2 witnesses green.
-- [x] E3: library `kind: extension` (resolver, `lib` verbs, search, doctor),
-  docs + enforcement-matrix row with honest provenance-only runtime cells;
-  close the adjacent library `hooks` gap noted in `crates/cli/src/library.rs`.
-  - **Landed + reviewed, commit 3b293c1:** `LibraryExtension` +
-    git sources through the shared store (strict digest at the checkout
-    subpath; offline blocks `--locked`, yellow at trust; rev-drift checked),
-    inline-first-then-library resolution with origin labels, lock provenance
-    fields (E1-era entries still parse), doctor source+rendered audits,
-    search coverage, zero-files exclusion witness, dashboard managed labels,
-    docs (reference/ENFORCEMENT/ARCHITECTURE) with provenance-only runtime
-    cells, and the library hooks gap closed via the server pattern
-    (`lib/hooks/<name>.toml`, `lib add-hook`, `agentstack add <hook>`).
-    Renderer delivers all three source kinds from the digest's own anchor
-    (`ResolvedExtension::{anchor,declared}`) — witness:
-    `library_origin_extension_renders_and_verifies`.
-- [ ] E4 (deferred until evidence): unify Claude Code/Codex plugin recipes
-  and the guard payloads under the same render engine; Gemini extensions;
-  static analysis or capability declarations for extension code.
-
-## Init experience lanes (added 2026-07-17, post-keystone)
-
-**Maintainer scope addition (2026-07-17): make the shipped protection and
-secrets machinery visible at first run.** Both lanes are UX over existing
-enforcement — no new policy or resolution semantics. Queued behind the
-minimum-version keystone review; starting either earlier is a deliberate
-scope decision, except S1, which is bugfix-grade and in-cut-sized.
-
-**Details:** [`docs/design/init-access-control.md`](docs/design/init-access-control.md) ·
-[`docs/design/init-secrets-experience.md`](docs/design/init-secrets-experience.md) ·
-ledger entries D8 and D9 in [`STRATEGY.md`](STRATEGY.md#security-decision-ledger)
-
-### Access control (D8)
-
-- [x] A0: review and approve the design doc. **Approved 2026-07-17** — deny
-  list, guard-offer wording, and no-new-verb settled; the home-anchored-glob
-  question verified with a witness and found **broken** (globs fail open on
-  `~`), corrected in the design (§4a). A1 carries two conditions: single
-  source of truth for the default list (shared with `guard install`'s
-  `DEFAULT_DENY`), and no home-anchored entries until the `~`-expansion task
-  lands (see below).
-- [x] A1: extend the `init --global` template with `[guard]` +
-  `[policy.filesystem]` defaults; post-write guard-install offer; dashboard
-  parity (report, never auto-install). **Landed 2026-07-18.** One canonical
-  seeder (`guard::seed_machine_toml`, pure) shared by `guard install` and
-  `init --global`; `DEFAULT_DENY` + `{id_ecdsa, .netrc}` with
-  `credentials.json` as a commented opt-in; the offer is default-No and
-  auto-declines non-interactively (the dashboard/CI contract). All §7
-  witnesses green: dry-run previews the blocks and writes nothing; no
-  overwrite without `--force`; an explicitly-empty user deny list is never
-  refilled; declining performs zero guard writes; seeded entries deny
-  through the compiled ruleset and live `guard test`.
-- [ ] A2: commented `[policy.filesystem]` block in project init output;
-  protection-status line; the two doctor informational findings.
-- [ ] A3: "protect this device" docs page; optional fourth demo clip. The
-  docs must surface the `*.pem` false-positive escape hatch (public certs are
-  blocked too; the union means only the machine list can allow them back).
-- [x] **Pattern-side `~`/`$HOME` expansion in `[policy.filesystem]` deny
-  globs.** **Landed 2026-07-21.** `fs_deny_layer` expands `~`, `$HOME`, and
-  `${HOME}` against the machine home before compiling the ruleset, matching
-  the guard's subject-side normalization. The regression witness proves that
-  `~/.aws/credentials` blocks that exact absolute file and not a sibling.
-
-### Secrets (D9)
-
-- [x] S0: review and approve the design doc. **Approved 2026-07-17** — the
-  three-option prompt, `--secrets`, `[secrets] default_store`, `secret lift`,
-  and all four open questions settled (design §8). Verified the chain,
-  `source_of`, rule-5 fail-closed, and two-write-path invariant against
-  source. S2 gains one net-new item the review surfaced: the store
-  reachability probe (S1 landed as attempt-then-catch, not a pre-probe).
-- [x] S1 (bugfix-grade, landed in-cut 2026-07-17): interactive init stops
-  aborting on an unreachable keychain (stores what it can, reports failed
-  refs by name, continues); dashboard init reports unstored refs by name
-  instead of dropping silently. Witness:
-  `store_lifted_reports_failures_by_name_and_keeps_storing`.
-- [ ] S2: the store-choice prompt at the lifting moment, `--secrets`,
-  `.env` write path with managed-gitignore verification,
-  `[secrets] default_store`.
-- [ ] S3: `secret list` plaintext labels, doctor informational finding,
-  `agentstack secret lift`, the "Where do secrets live?" docs page.
-
-## Phase 2 — paid design partners, Cloudflare runner, saved workflows
-
-**Start only after Phase 1. Execute the experiments in this order.**
-
-**Details:** [strategy phase 2](STRATEGY.md#phase-2--paid-design-partnerships)
-
-### Design partnerships
-
-- [ ] Sell a limited outcome: governed rollout, policy baseline, or evidence export.
-- [ ] Sign the first paying design partner.
-- [ ] Turn repeated manual work into product candidates, not bespoke consulting.
-- [ ] Sign a second partner with the same core coordination problem.
-
-### Cloudflare one-shot runner
-
-- [ ] Define the hosted adapter contract from the frozen Phase 1 plan.
-- [ ] Build one Worker entry point for authentication, policy, approvals, and
-  credential brokering.
-- [ ] Use one isolated Cloudflare Sandbox for one repository, harness, task,
-  frozen grant, returned patch, and receipt.
-- [ ] Keep GitHub, model, and long-lived credentials outside the sandbox.
-- [ ] Stage only approved read material and validate every returned path,
-  symlink, traversal, and write against the grant.
-- [ ] Require approval before creating a branch or pull request.
-- [ ] Start with bring-your-own Cloudflare and model credentials.
-- [ ] Do not add Cloudflare-specific fields to the portable plan or build a
-  multi-tenant dashboard in this phase.
-- [ ] Prove local and Cloudflare receipts describe the same effective grant.
-
-### Saved governed workflows
-
-**Lane opened — W0 approved 2026-07-21.**
-[`docs/design/workflows-capability.md`](docs/design/workflows-capability.md)
-(ledger D7; W0 rulings in its §11, lane-opening basis in its §9). Settled:
-no Docker — the orchestration script runs on an embedded memory-safe
-interpreter (Boa, rule-6 approval due at W3) inside the executor domain,
-never raw on the host; `agent()` takes a `role` (profile), so scripts
-request authority and can never widen it; the canonical script shape is
-map → reduce → **validation reducer** (independent refute-framed verifiers
-under a narrower role — design §3.1). Supervised sessions only; these items
-queue **after** the Phase 0A minimum-version cut's unchecked items. Roles
-are honest-labelled (MCP surface + sandbox posture + instructions) until
-Phase 1 Workspace Grants deepen them — v1 must not imply folder-level role
-isolation it does not have.
-
-- [x] **W2 — child-run primitive (supervised, first).** Headless invocation
-  spec in adapter descriptors; `agentstack run <harness> --locked --prompt`
-  as prompt-in/text-out through the full locked admission path; recorder
-  step events. *Witness:* child grant ≤ its profile's capability set; a
-  hostile prompt string never reaches a shell. **Shipped 2026-07-21
-  (`648d227`), per-child injection retrofit W2.5 `2eaf7ce`.**
-- [x] **Evidence period (gates W3; runs alongside W1).** Run at least two
-  real recurring maintainer tasks through the interim path — the native
-  Claude Code Workflow tool with `agent()` steps couriering into
-  `run --locked --prompt`. If the interim path does not get repeated real
-  use, W3 is not built. **Completed 2026-07-22 (evidence doc §4; F2/F3/F5/F6
-  fed the W3 design).**
-- [x] **W1 — core + trust (supervised).** `[workflows.*]` manifest kind;
-  `[[workflow]]` pin (strict integrity-root digest + `roles` recorded);
-  retain/prune; trust-preview heading ("orchestration code — spawns agent
-  runs under the declared roles"); validation (roles exist, ceilings within
-  machine policy). *Witness:* a one-byte script edit re-gates review; a
-  lock-time `roles` widening is refused as drift. **Shipped 2026-07-22
-  (`afc89f2`).**
-- [x] **W3 — engine (supervised; gated on evidence period, interpreter
-  witnesses, and Boa dependency approval).** Boa runtime inside the
-  executor domain exposing the design §3 API (`agent`/`pipeline`/
-  `parallel`/`phase`/`log`/`args`/`budget`); ceilings; taint labels on
-  prompts embedding prior step output (report-only); journal-replay resume;
-  `workflow run` / report tree. *Witnesses:* undeclared role refused; no
-  fs/net/env reachable from the runtime; `max_agents` exhaustion stops
-  spawning and records honestly; an infinite loop hits the wall-clock
-  ceiling; an interpreter panic fails closed with a recorded outcome.
-  **Shipped 2026-07-22 across stages B–F (design §12.4: `fa36858`,
-  `ea99660`, `f17205d`, `701b806`, resume closes the lane); command stays
-  preview-hidden pending the §9.3 independent script-boundary review.**
-- [ ] **W4 — library + import.** Central library `kind: workflow`; the
-  Claude Code import edit (`model:` → `role:`) documented; docs +
-  enforcement-matrix row.
-- [ ] Add Cloudflare Workflows durability only when retries, waits, recovery,
-  schedules, or approval events are proven requirements.
-
-### Phase 2 exit gate
-
-- [ ] Two paying partners share the same core coordination need.
-- [ ] One partner completes a Cloudflare run matching the local grant contract.
-- [ ] One saved role-scoped workflow runs repeatedly without permission widening.
-- [ ] Buyer, user, and security stakeholder agree on the value.
-
-## Phase 3 — team control plane
-
-**Details:** [strategy phase 3](STRATEGY.md#phase-3--team-control-plane)
-
-- [ ] Build organization and project inventory.
-- [ ] Distribute signed organization policy and Workspace Grants.
-- [ ] Add identity, groups, roles, and approval records.
-- [ ] Add shared signed workflow distribution.
-- [ ] Add fleet health and lock-drift status.
-- [ ] Add searchable audit evidence, retention, and export.
-- [ ] Integrate existing secret and identity providers.
-- [ ] Offer optional metered Cloudflare execution while preserving local and
-  bring-your-own-cloud operation.
-- [ ] Keep local enforcement functional when the control plane is unavailable.
-
-### Phase 3 exit gate
-
-- [ ] Three organizations use shared policy or audit coordination weekly.
-- [ ] One organization expands beyond its pilot team.
-- [ ] Support load and infrastructure cost fit a repeatable model.
-
-## Phase 4 — enterprise assurance
-
-**Build only from proven procurement needs.**
-
-**Details:** [strategy phase 4](STRATEGY.md#phase-4--enterprise-assurance)
-
-- [ ] Add SSO, directory synchronization, and delegated administration.
-- [ ] Add private networking, regional storage, and deployment choices.
-- [ ] Add longer evidence retention and SIEM export.
-- [ ] Add formal policy change control and exception workflows.
-- [ ] Add requested compliance mappings and audit-ready evidence packages.
-- [ ] Define support and reliability commitments.
-
-### Strategic plan completion gate
-
-- [ ] Enterprise sales repeat around the same product and buyer problem.
-- [ ] Revenue no longer depends on unrelated custom consulting.
-- [ ] Local open-source enforcement and the portable contract remain useful
-  without the hosted control plane.
-
-## Deferred until evidence earns them
-
-- Public marketplace or a new MCP directory.
-- Broad fleet-management platform.
-- Compliance features without a requesting buyer.
-- Additional runtime backends without a real deployment requirement.
-- Additional agent/client adapters unless requested by real users.
-- Repository splits before a component passes the strategy's five-part split test.
-- Async proxy event-sink optimization unless measured latency justifies moving
-  the current synchronous append off the async path; this is tracked debt, not
-  a correctness gap.
+# AgentStack execution roadmap
+
+> **Purpose:** the only ordered product-wide work queue
+>
+> **Strategy:** [`STRATEGY.md`](STRATEGY.md)
+>
+> **Updated:** 2026-07-23
+>
+> **Rule:** finish the current stage gate before starting a later product stage
+
+## How to use this file
+
+- Work from top to bottom.
+- Keep one item in implementation or review at a time when it touches a
+  security boundary.
+- A checked item means implemented and verified, not merely designed.
+- Security findings can interrupt the product sequence; speculative features
+  cannot.
+- Closed implementation history belongs in `CHANGELOG.md` or commit history,
+  not in this queue.
+- Design documents explain decisions. They do not independently authorize
+  roadmap work.
+
+## Current objective
+
+Make AgentStack’s everyday value obvious:
+
+> **Import one agent setup, use it across every coding CLI, switch it by task,
+> and recover safely when configuration changes.**
+
+The current sequence is:
+
+```text
+confirmed fixes
+      ↓
+first-value journey in t3code + CLI
+      ↓
+profiles and sessions
+      ↓
+lifecycle confidence
+      ↓
+sharing evidence
+      ↓
+advanced expansion only if earned
+```
+
+## Stage 0 — close confirmed correctness gaps
+
+These items block broader product work because they violate or weaken an
+existing boundary. Finish and review them before enabling new UI writes.
+
+### Workflow module boundary
+
+- [ ] Review and land the explicit Boa `IdleModuleLoader`.
+  - The default Boa context installs a filesystem-backed module loader rooted
+    at the process working directory.
+  - A pinned workflow could therefore execute unpinned JavaScript through
+    dynamic `import()`.
+  - Required witness: a real on-disk module exists, dynamic import is refused,
+    and its body never executes.
+- [ ] Run the focused workflow tests and independently review all context
+  construction defaults for other ambient host capabilities.
+- [ ] Keep workflows preview-hidden until the script-boundary review is
+  recorded complete.
+
+### Consent snapshot and UI authorization
+
+- [x] Land the immutable `ConsentSnapshot` implementation (`e1c8000`).
+  - Manifest, local overlay, and lockfile must be read once.
+  - The displayed preview and `surface_digest` must derive from those same
+    captured bytes.
+  - A grant must record only the digest it verified.
+  - An edit before grant must refuse or leave the project in `Changed`, never
+    silently bless different bytes.
+- [x] Add focused trust and CLI witnesses for absent, wrong, stale, and matching
+  consent digests (`e1c8000`).
+- [ ] Complete the independent line-by-line review of the consent snapshot and
+  grant path.
+- [ ] Complete the t3code half of the contract:
+  - Add `surface_digest` to the decoded preview schema.
+  - Carry it in the trust-grant request.
+  - Map the closed action to fixed argv containing
+    `--yes --consented-digest <digest>`.
+  - Refuse a grant when the preview is absent or stale.
+- [ ] Introduce or explicitly approve the dedicated `agentstack:admin`
+  authorization boundary before enabling trust, machine guard, or workflow
+  control writes in t3code.
+- [ ] Verify that older CLI/newer UI and newer CLI/older UI combinations fail
+  closed with a useful message.
+
+### Stage 0 gate
+
+- [ ] Security-sensitive diffs receive line-by-line review.
+- [ ] Focused tests pass.
+- [ ] The t3code trust flow works end-to-end with a matching digest.
+- [ ] No frontend condition is the only enforcement of a write guarantee.
+
+## Stage 1 — first value in under five minutes
+
+### 1.1 Positioning reset
+
+- [x] Replace the security-first strategy with the cross-CLI environment
+  manager strategy.
+- [x] Make the README lead with “one agent setup across every coding CLI.”
+- [x] Align the website hero and contributor orientation with the new product
+  definition.
+- [ ] Review the remaining public documentation for security-first opening copy
+  and move deep security material to the point where it becomes relevant.
+- [ ] Keep the enforcement matrix, architecture, and security documentation
+  intact as the authoritative deeper layer.
+
+### 1.2 One recommended onboarding journey
+
+The default journey is:
+
+```text
+install → init → review import → apply → doctor
+```
+
+t3code presents this as a guided graphical flow; the terminal presents the
+same sequence directly. Both must call the same CLI-owned planning, validation,
+write, and status paths.
+
+- [ ] Audit `agentstack init` from a clean machine/user perspective.
+- [x] Land `init --plan` as the stable, read-only JSON contract for
+  detecting CLIs, importable capabilities, secret reference names, origins, and
+  proposed destinations without writing or prompting (`e1c8000`).
+- [x] Add its witness that no manifest, secret store, native config, or restore
+  entry changes during planning (`e1c8000`).
+- [ ] Ensure the first screen says which CLIs and native configurations were
+  found.
+- [ ] Show imported servers, skills, instructions, and secret reference names
+  before writing.
+- [ ] Explain unsupported or lossy imports in plain language.
+- [ ] Make the destination scopes and files visible without requiring knowledge
+  of adapter internals.
+- [ ] End the flow with one concise success summary:
+  - source manifest path;
+  - CLIs updated;
+  - capabilities imported;
+  - secrets requiring values;
+  - next command: `agentstack doctor`.
+- [ ] Ensure a failed target does not hide successful targets or leave ownership
+  state ambiguous.
+- [ ] Confirm `agentstack restore` can undo the onboarding write set.
+
+### 1.3 t3code launch experience
+
+This is the primary graphical path, not an optional dashboard.
+
+- [ ] Replace the current t3code integration copy with the product contract:
+  t3code owns presentation; AgentStack CLI owns decisions and writes.
+- [ ] Add capability negotiation so the panel detects supported CLI schema and
+  action versions and gives a useful upgrade message when they differ.
+- [ ] Add a setup RPC backed by `init --plan`; never duplicate import logic in
+  TypeScript.
+- [ ] Present the plan in four user-facing groups:
+  - coding tools found;
+  - capabilities found;
+  - files AgentStack proposes to manage;
+  - secret names that still need local values.
+- [ ] Add only fixed, closed actions for the first slice: apply the reviewed
+  setup, check status, and restore the last AgentStack write.
+- [ ] Resolve workspace identity on the t3code server. Never accept an
+  arbitrary project path or argv from the browser.
+- [ ] Show one recommended next action rather than exposing the whole CLI.
+- [ ] Keep trust, policy, guard, gateway, and workflow controls out of the
+  initial setup screen. Surface them only when the current state requires one.
+- [ ] Add parity tests proving the t3code flow and direct CLI flow produce the
+  same plan and resulting files.
+- [ ] Remove or rewrite old t3code copy that claims the integration is complete
+  before the consent/admin contract actually works.
+
+### 1.4 Progressive-disclosure acceptance
+
+- [ ] Use only Setup, Toolset, Status, and Undo as beginner navigation concepts.
+- [ ] Replace unexplained internal nouns in first-run UI with outcome language.
+- [ ] Verify ordinary local import/apply does not require Docker, policy,
+  gateway, confinement, or workflow decisions.
+- [ ] When unfamiliar repository content triggers review, show the exact
+  content surface and why review is required.
+- [ ] For every surfaced denial, render:
+  - what action was blocked;
+  - what boundary blocked it;
+  - what is being protected;
+  - one exact safe next action;
+  - a details link for the matching rule and enforcement limits.
+- [ ] Put stronger execution modes behind “More protection” after normal setup,
+  with honest cost/coverage labels.
+- [ ] Test the first-run copy with users who have not read the security docs.
+
+### 1.5 First-value proof
+
+- [ ] Build one fenced, reproducible demonstration that:
+  - starts with two real native CLI configurations;
+  - imports an MCP server;
+  - writes one manifest;
+  - renders at least two target formats;
+  - ends with a clean doctor result;
+  - shows the original state can be restored.
+- [ ] Record a short demo focused on portability, not threat prevention.
+- [ ] Put the same proof sequence in the README, website, and getting-started
+  guide.
+- [ ] Make expected output accurate against the current binary.
+
+### 1.6 Activation study
+
+- [ ] Recruit five developers who use at least two supported agent CLIs and did
+  not build AgentStack.
+- [ ] Observe them without guiding individual commands.
+- [ ] Record:
+  - install success;
+  - time to understand the product;
+  - time to first manifest;
+  - time to first successful apply;
+  - time to clean doctor;
+  - confusing terms and abandoned steps.
+- [ ] Fix the three most common blockers before adding features.
+
+### Stage 1 gate
+
+- [ ] Four of five users finish without maintainer intervention.
+- [ ] Median install-to-clean-doctor time is below five minutes.
+- [ ] At least four describe the product as one setup across their coding CLIs.
+- [ ] No participant needs Docker, policy authoring, gateway setup, or workflow
+  concepts to receive first value.
+- [ ] At least four participants understand every block they encounter and can
+  choose the safe next action without maintainer explanation.
+
+## Stage 2 — profiles and reversible sessions
+
+### 2.1 Stabilize the profile contract
+
+- [x] Land `use --list --json` as the machine-readable profile inventory
+  (`e1c8000`).
+- [x] Report the initial machine-readable profile surface (`e1c8000`):
+  - name;
+  - harness;
+  - selected servers and skills;
+  - pin/readiness state;
+  - project trust state;
+  - active state when applicable.
+- [ ] Give incomplete profiles one actionable explanation rather than several
+  low-level lock errors.
+- [ ] Document one simple way to create a second profile from an existing setup.
+
+### 2.2 Make temporary switching dependable
+
+- [x] Land the fail-closed session-start readiness gate (`e1c8000`).
+- [ ] Make `session start` state which profile and native files it activates.
+- [ ] Make current session/profile visible in the default status surface.
+- [ ] Ensure `session end` reports exactly what it restored.
+- [ ] Detect abandoned sessions and offer the safe recovery command.
+- [ ] Test overlapping projects and interrupted processes without silently
+  clobbering user files.
+
+### 2.3 Present profiles through user tasks
+
+- [ ] Add two concrete examples:
+  - backend development versus incident response;
+  - minimal project profile versus broad personal profile.
+- [ ] Explain profiles as “named toolsets,” not as policy or workflow roles.
+- [ ] Recommend temporary sessions in the beginner path and keep static apply as
+  the stable/offline path.
+
+### 2.4 t3code toolset picker
+
+Start only after the CLI JSON contract is reviewed and stable.
+
+- [ ] Add read-only profiles RPC using server-resolved workspace identity.
+- [ ] Add fixed actions for session start and end.
+- [ ] Label profiles as toolsets in the UI; keep the profile identifier in
+  details and machine-readable contracts.
+- [ ] Show readiness and the effective selected surface.
+- [ ] Keep editing/creating profiles out of this slice.
+- [ ] Demonstrate recovery when the panel closes during an active session.
+
+### Stage 2 gate
+
+- [ ] Three users successfully use two different profiles.
+- [ ] They start and end sessions without manually editing native files.
+- [ ] At least two users return and use profiles in a later session.
+- [ ] Interrupted-session recovery works in a user-facing scenario.
+
+## Stage 3 — lifecycle confidence
+
+### 3.1 Connect diagnosis to action
+
+- [ ] Inventory every actionable `doctor` finding.
+- [ ] Map each finding to one recommended next action:
+  - inspect with `diff`;
+  - keep with `adopt --write`;
+  - reconcile with `apply --write`;
+  - recover with `restore`;
+  - re-lock or re-trust when content changed.
+- [ ] Remove findings that only restate internal state without helping the user.
+- [ ] Keep informational findings visually separate from blockers.
+
+### 3.2 Make writes predictable
+
+- [ ] Standardize dry-run and diff summaries across apply, adopt, init, session,
+  and restore.
+- [ ] Always distinguish managed, foreign, and hand-edited entries.
+- [ ] State whether a write is project-local, user-global, or machine-global.
+- [ ] Show the undo path before a material write.
+- [ ] Preserve foreign entries unless the user explicitly selects a reviewed
+  pruning operation.
+
+### 3.3 Adapter reliability
+
+- [ ] Rank adapters by observed user demand rather than treating all thirteen as
+  equally important.
+- [ ] Create shared conformance fixtures for the top adapters:
+  - import;
+  - render;
+  - idempotent reapply;
+  - hand-edit drift;
+  - adopt;
+  - restore;
+  - secret placeholder behavior.
+- [ ] Label lossy adapter fields in import/diff output.
+- [ ] Publish the tested behavior matrix.
+
+### 3.4 Recovery scenarios
+
+- [ ] Exercise five end-to-end scenarios:
+  - accidental manifest edit;
+  - intentional native hand edit;
+  - foreign server written by another tool;
+  - interrupted temporary session;
+  - failed multi-target apply.
+- [ ] Ensure each scenario produces a correct diagnosis and safe recovery path.
+
+### Stage 3 gate
+
+- [ ] Five lifecycle scenarios pass without inspecting internal state files.
+- [ ] Five users can choose correctly between adopt, apply, and restore from the
+  command output alone.
+- [ ] Top adapters pass the published lifecycle matrix.
+
+## Stage 4 — sharing and reuse evidence
+
+### 4.1 Team handoff
+
+- [ ] Write a minimal teammate journey:
+  clone → inspect → provide local secret values → apply/select profile → doctor.
+- [ ] Prove the same manifest and lockfile on two machines.
+- [ ] Verify no secret value enters committed files or diagnostic output.
+- [ ] Make platform-specific differences visible and actionable.
+
+### 4.2 Library/package reuse
+
+- [ ] Select one real server package and one real skill package used by the
+  maintainer.
+- [ ] Reuse each across two projects without copying definitions.
+- [ ] Measure whether source, lock, trust, and update behavior is understandable.
+- [ ] Simplify library terminology or commands based on that exercise.
+- [ ] Do not build a public catalog until local reuse succeeds repeatedly.
+
+### 4.3 Team discovery
+
+- [ ] Complete three independent project handoffs.
+- [ ] Interview participants about repeated coordination pain.
+- [ ] Determine whether the next need is:
+  - signed sources;
+  - organization policy distribution;
+  - hosted profile/package coordination;
+  - evidence export;
+  - none of the above.
+
+### Stage 4 gate
+
+- [ ] Three project handoffs succeed without credential sharing.
+- [ ] One reusable package is used in at least two projects.
+- [ ] A repeated team problem—not architectural possibility—selects the next
+  expansion.
+
+## Engineering foundation track
+
+This track supports the product stages. It does not authorize unrelated feature
+work.
+
+### Extract the authority data path
+
+- [ ] Write a short extraction contract covering:
+  `AuthorityGrant → ExecutionPlan → Gateway::try_call → secret resolution /
+  upstream transport`.
+- [ ] Identify the existing single constructors and dispatch points that must
+  remain unique.
+- [ ] Move existing code; do not reimplement it.
+- [ ] Keep `CompiledRuleset` and `GrantHandoff` as explicit boundary types.
+- [ ] Add `#![forbid(unsafe_code)]` to every extracted crate from its first
+  commit.
+- [ ] Keep the narrowing, trust, pin, secret, and gateway witnesses green.
+- [ ] Add a structural check or review rule preventing a second upstream
+  transport path.
+- [ ] Stop when the CLI is an orchestration caller of the kernel; do not extract
+  unrelated library, formatting, or command code merely to improve
+  line-count statistics.
+
+### Maintainability
+
+- [ ] Split oversized command modules only when a stable domain seam exists.
+- [ ] Keep product terminology consistent across CLI output, docs, JSON, and UI.
+- [ ] Generate or verify command reference data where practical to reduce drift.
+- [ ] Keep closed work in `CHANGELOG.md` or commit history, not new roadmap or
+  memory documents.
+
+### Security and enforcement maintenance
+
+- [ ] Preserve the policy-narrowing property tests.
+- [ ] Preserve byte-change trust witnesses.
+- [ ] Preserve the single gateway dispatch seam.
+- [ ] Keep the enforcement matrix synchronized with shipped behavior.
+- [ ] Give the gateway, relay, external harness launch, and workflow interpreter
+  comparable adversarial review.
+- [ ] Propose new dependencies before adding them.
+
+## Experimental workflows
+
+Workflows remain available for supervised testing but are not part of the
+beginner promise.
+
+Before promoting them:
+
+- [ ] Complete the module-loader fix and independent script-boundary review.
+- [ ] Review heap-growth and hostile string/regex behavior.
+- [ ] Preserve the out-of-thread watchdog and honest posture label.
+- [ ] Run at least three recurring tasks on separate occasions.
+- [ ] Confirm each task is easier to repeat than the equivalent native/manual
+  orchestration.
+- [ ] Confirm roles never widen their selected profile or machine ceiling.
+- [ ] Decide whether library distribution is necessary from demonstrated reuse.
+
+### t3code MCP harness bridge — research only
+
+t3code already exposes an MCP surface and may be able to launch or supervise
+other coding harnesses for a workflow. This could remove duplicated
+per-harness process plumbing and make multi-agent workflows visible in the
+primary UI. It is not an authorization mechanism and must not become a second
+spawn path.
+
+- [ ] Inventory the actual t3code MCP tools, authentication, lifecycle,
+  cancellation, result, and compatibility behavior. Distinguish today's
+  browser-preview endpoint from any harness-launch capability.
+- [ ] Map every proposed MCP operation to the existing workflow child-run
+  contract: strict lock, trust, machine policy, frozen `ExecutionPlan`,
+  `AuthorityGrant`, scoped MCP configuration, and recorded outcome.
+- [ ] Define an optional child-launch backend that accepts only an already
+  admitted frozen plan or a narrow launch reference. It must not accept
+  arbitrary argv, workspace paths, policy, secrets, or authority from t3code.
+- [ ] Add capability negotiation and fail closed when the t3code MCP is absent,
+  incompatible, or returns an unrecognized child identity.
+- [ ] Prototype one workflow that launches two different harnesses through the
+  backend and compare it with direct CLI launch for complexity, portability,
+  cancellation, and evidence quality.
+- [ ] Add witnesses proving the backend cannot bypass the single child-launch
+  dispatch, widen a grant, omit evidence, or leave a child running after
+  cancellation.
+- [ ] Keep direct CLI child launch as the baseline and fallback. Promote the
+  t3code backend only if repeated use shows less integration work without
+  weaker authority or evidence.
+
+Deferred until these conditions are met:
+
+- Visual workflow authoring.
+- Approval/pause controls.
+- Scheduling and durable jobs.
+- Cloud workflow execution.
+- A generic workflow marketplace.
+
+## Evidence-gated future ideas
+
+The following are deliberately removed from the active roadmap:
+
+- Cloudflare runner.
+- Hosted multi-tenant control plane.
+- Enterprise assurance program.
+- Public registry or marketplace.
+- Background jobs and schedules.
+- Additional capability categories.
+- Separate component repositories.
+
+An idea returns only when:
+
+1. At least three users report the same repeated problem.
+2. The smallest useful outcome is defined.
+3. Existing features cannot solve it more simply.
+4. Success and exit criteria are measurable.
+5. It does not displace an unfinished earlier-stage gate.
+
+## Completion definition
+
+The current product strategy is validated when:
+
+- New users reach a clean cross-CLI setup in under five minutes.
+- Profiles create repeated use.
+- Doctor/diff/adopt/apply/restore provide understandable lifecycle confidence.
+- Projects can be handed to another person without sharing secrets.
+- Security remains a trusted foundation without being the only visible reason
+  to adopt AgentStack.

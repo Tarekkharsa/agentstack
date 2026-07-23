@@ -173,8 +173,6 @@
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
-      <li><a href="reference.html#dashboard">Dashboard</a>
-      </li>
     </ul>
   </details>
   <details class="grp">
@@ -227,8 +225,6 @@
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">Strategy</a>
       </li>
-      <li><a href="history.html">History</a>
-      </li>
     </ul>
   </details>
 </aside>
@@ -247,7 +243,7 @@
 <li><a href="#layer-3--policy-engine-cratespolicy">Layer 3 — Policy engine</a></li>
 <li><a href="#layer-4--runtime-cratesadapters-cratesruntime-cratesegress">Layer 4 — Runtime</a></li>
 <li><a href="#layer-5--flight-recorder-cratesrecorder">Layer 5 — Flight recorder</a></li>
-<li><a href="#layer-6--registry-future-phase-4">Layer 6 — Registry</a></li>
+<li><a href="#layer-6--registry-evidence-gated-future">Layer 6 — Registry</a></li>
 <li><a href="#crate-dependency-rules">Crate dependency rules</a></li>
 </ul>
 <h2 id="vision">Vision<a class="hlink" href="#vision" aria-label="Link to this section">#</a></h2>
@@ -339,7 +335,7 @@ web-search = ["*", "!*_delete"]</code></pre>
 <p>This layer must work standalone — valuable with no sandbox, no registry.</p>
 <h2 id="layer-3--policy-engine-cratespolicy">Layer 3 — Policy engine (<code>crates/policy</code>)<a class="hlink" href="#layer-3--policy-engine-cratespolicy" aria-label="Link to this section">#</a></h2>
 <p>Two inputs: the bundle's requested policy (<code>[policy.*]</code> in its manifest) and the machine policy — the <code>[policy.*]</code> tables of the machine-local <code>~/.agentstack/agentstack.toml</code> manifest (TOML, loaded by <code>manifest::machine_policy()</code>; not a separate <code>policy.yaml</code>). The machine policy lives outside every repo's tree, so no repo content can alter it — but see the host-mode limitation in Layer 2: it is still a user-writable file.</p>
-<p>Output: effective policy = <strong>intersection</strong>. Bundles can narrow, never widen. (The shipped machine-first <code>[policy.tools]</code> check is the v0 of this rule; Phase 1 generalized it into a real intersection engine with more dimensions.)</p>
+<p>Output: effective policy = <strong>intersection</strong>. Bundles can narrow, never widen. (The shipped machine-first <code>[policy.tools]</code> check is the v0 of this rule; It is now a general intersection engine with multiple dimensions.)</p>
 <p>Four dimensions ship, each a top-level, name-keyed map — <strong>not</strong> nested under each MCP server entry in the manifest — every one sharing the same glob grammar: a plain pattern allows, a <code>!</code>-prefixed pattern denies, and the <code>"*"</code> key is rename-proof (it constrains every server regardless of what a manifest calls it, so a repo can't dodge a machine rule by renaming a server):</p>
 <ul>
 <li><code>[policy.tools]</code> — per-server tool allow/deny globs (<code>policy.tool_allowed</code>).</li>
@@ -359,7 +355,7 @@ web-search = ["*", "!*_delete"]</code></pre>
 <p>Invariant (property-tested): for all bundle policies B and machine policies M, <code>effective(B, M) ⊆ M</code>, across every dimension. This test is never deleted or weakened.</p>
 <h2 id="layer-4--runtime-cratesadapters-cratesruntime-cratesegress">Layer 4 — Runtime (<code>crates/adapters</code>, <code>crates/runtime</code>, <code>crates/egress</code>)<a class="hlink" href="#layer-4--runtime-cratesadapters-cratesruntime-cratesegress" aria-label="Link to this section">#</a></h2>
 <p><strong>Adapters</strong> render a bundle into native config for each supported agent CLI (Claude Code, Cursor, Codex, …). Normal rendering is one-way and non-destructive; explicit <code>init</code>, <code>adopt</code>, and owned-server workflows can read native state back into the manifest. The 13 adapters are data-driven YAML descriptors, and writes stay blocked while any <code>${REF}</code> is unresolved. Resolution completes <em>before</em> the renderer runs: render receives a concrete server and a resolver, never a library or store to consult — which is what lets a sandbox runtime materialize configs from core + adapters alone. One trust note, stated plainly: user drop-in adapter descriptors (<code>~/.agentstack/adapters/</code>) are part of the trusted computing base — they alter how configs render and are trusted <em>because the user placed them</em>, unlike bundle content, which is hostile. Inside a container that dir is simply absent, which is expected and correct.</p>
-<p><strong>Native extensions</strong> are the one capability agentstack delivers but does not govern at runtime: <code>[extensions.*]</code> code (pi <code>.ts</code>, OpenCode <code>.js</code>) executes inside the harness process at full user permission, outside every ceiling below. The design draws the honest line at <em>delivery</em>. The source is pinned in <code>agentstack.lock</code> with the strict integrity-root digest, so a byte change re-gates trust; <code>apply</code> renders fail-closed (an untrusted or drifted project writes nothing) by <strong>copying</strong> — never symlinking — the pinned bytes into the target harness's extension directory, so the harness loads exactly the reviewed bytes rather than whatever a later source edit leaves behind. A per-directory ownership ledger scopes pruning to what agentstack placed, and a hard deny-list keeps the renderer from ever authoring, overwriting, or pruning the host guard's reserved <code>agentstack-guard*</code> artifacts. <code>run --locked</code> re-verifies each delivered copy against its pin before launch. What this buys is provenance and content binding, not runtime enforcement; the trade-offs and staging are in <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/extensions-capability.md"><code>docs/design/extensions-capability.md</code></a>.</p>
+<p><strong>Native extensions</strong> are the one capability agentstack delivers but does not govern at runtime: <code>[extensions.*]</code> code (pi <code>.ts</code>, OpenCode <code>.js</code>) executes inside the harness process at full user permission, outside every ceiling below. The design draws the honest line at <em>delivery</em>. The source is pinned in <code>agentstack.lock</code> with the strict integrity-root digest, so a byte change re-gates trust; <code>apply</code> renders fail-closed (an untrusted or drifted project writes nothing) by <strong>copying</strong> — never symlinking — the pinned bytes into the target harness's extension directory, so the harness loads exactly the reviewed bytes rather than whatever a later source edit leaves behind. A per-directory ownership ledger scopes pruning to what agentstack placed, and a hard deny-list keeps the renderer from ever authoring, overwriting, or pruning the host guard's reserved <code>agentstack-guard*</code> artifacts. <code>run --locked</code> re-verifies each delivered copy against its pin before launch. What this buys is provenance and content binding, not runtime enforcement; the trade-offs and staging are in The enforcement limits are recorded in <a href="enforcement.html#native-extensions"><code>ENFORCEMENT.md</code></a>.</p>
 <p>The four runtime modes (host, gateway, sandbox, lockdown) enforce different dimensions to different depths; <a href="enforcement.html"><code>ENFORCEMENT.md</code></a> is the authoritative per-cell matrix. This section describes the mechanisms behind it.</p>
 <p><strong>Host mode:</strong> adapters write configs onto the bare machine. Honest framing: advisory enforcement — static apply is user-invoked rather than trust-gated, while render-time policy and fail-closed secret checks govern what gets written. A CLI on the host can still bypass that config and could in principle tamper with the trust store itself (Layer 2). What each dimension actually enforces on this path is in <a href="enforcement.html#the-matrix"><code>ENFORCEMENT.md</code></a>.</p>
 <p><strong>Single enforcement point (declared, not just observed):</strong> every MCP tool call agentstack itself brokers — the gateway serve loop, the <code>agentstack mcp</code> bridge, code mode — dispatches through one function, <code>Gateway::try_call</code>, which consults the policy engine before any upstream I/O; the upstream transport is private to it, so no other module <em>can</em> reach a server directly. Any new brokered path must route through it — adding a second dispatch path is a security-review event, not a refactor. (Rendered-config modes hand the transport to the harness itself and are governed at write time — the advisory framing above.)</p>
@@ -385,7 +381,7 @@ web-search = ["*", "!*_delete"]</code></pre>
 <p>Append-only, per-run JSONL records execution start/finish/limits, sandbox lifecycle, egress decisions, brokered tool calls (with argument digests), and secret-reference access (reference names, never values). <code>agentstack report run &lt;id&gt;</code> renders that evidence for humans or JSON consumers and can supplement older runs from the separate global call audit log.</p>
 <p>Trust-store mutations and per-run token/cost events are not yet wired. The JSONL is append-only by convention, not cryptographically tamper-evident.</p>
 <p>Scope discipline: a log with a good viewer, not an observability platform.</p>
-<h2 id="layer-6--registry-future-phase-4">Layer 6 — Registry (future, Phase 4)<a class="hlink" href="#layer-6--registry-future-phase-4" aria-label="Link to this section">#</a></h2>
+<h2 id="layer-6--registry-evidence-gated-future">Layer 6 — Registry (evidence-gated future)<a class="hlink" href="#layer-6--registry-evidence-gated-future" aria-label="Link to this section">#</a></h2>
 <p>Push/pull of signed bundles. The trust gate verifies signatures against publisher keys; content-pinning and review flow are inherited unchanged. Starts life as a curated Git repository of signed bundles — no infrastructure until demand proves it.</p>
 <h2 id="crate-dependency-rules">Crate dependency rules<a class="hlink" href="#crate-dependency-rules" aria-label="Link to this section">#</a></h2>
 <p>Exact internal edges (anything not listed is forbidden):</p>
@@ -400,7 +396,7 @@ executor → (nothing)
 cli      → everything</code></pre>
 <p><code>executor</code> holds no internal edges: it is a self-contained, policy-agnostic domain built on <code>serde</code>/<code>sha2</code>/<code>thiserror</code>, and the <code>cli</code> crate is what composes it with the runtime and recorder. That is why it "never reads or interprets policy" — it structurally cannot.</p>
 <p>The experimental execution boundary is specified in the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/tools-execute-threat-model.md"><code>tools_execute</code> threat model</a> and <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/adr-tools-execute-runtime.md">runtime/ownership ADR</a>. Its user-visible claims are intentionally narrower than this architecture description and live in <a href="enforcement.html#experimental-tools_execute"><code>ENFORCEMENT.md</code></a>.</p>
-<p><code>adapters</code> deliberately does <strong>not</strong> depend on <code>policy</code>: the fail-closed secret check happens <em>before</em> render, in the caller. Re-granting that edge is a deliberate architecture change, not a Cargo.toml edit. (This edge was once listed and withdrawn — see <a href="history.html"><code>HISTORY.md</code></a>.)</p>
+<p><code>adapters</code> deliberately does <strong>not</strong> depend on <code>policy</code>: the fail-closed secret check happens <em>before</em> render, in the caller. Re-granting that edge is a deliberate architecture change, not a Cargo.toml edit.</p>
 <p><code>core</code> depends on nothing internal; nothing depends on <code>cli</code>. <code>trust</code> and <code>policy</code> are the security-critical crates: they depend on <code>core</code> only, stay as small as possible, carry <code>#![forbid(unsafe_code)]</code>, keep the restricted dependency list (see CLAUDE.md rule 6), and their property-tested invariants are human-reviewed line by line.</p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/ARCHITECTURE.md">docs/ARCHITECTURE.md</a> — this page is generated from it.</p>
   </main>

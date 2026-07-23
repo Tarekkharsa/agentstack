@@ -1,5 +1,5 @@
 //! `agentstack session` — CLI control for ephemeral sessions, mirroring the
-//! dashboard's Start/End. A safety hatch: if the dashboard dies mid-session,
+//! t3code's Start/End. A safety hatch: if t3code dies mid-session,
 //! `agentstack session end` (or `--all`) still reverts it.
 
 use std::path::Path;

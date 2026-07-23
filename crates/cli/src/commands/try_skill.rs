@@ -15,7 +15,7 @@
 //! the ephemeral copy must not dereference a hostile link into the prompt's
 //! support dir. The human explicitly piping content into their own agent is
 //! the consent; the stderr provenance line makes what loaded visible.
-//! (Design lineage: skills-sh-learnings §8, their `skills use … | claude`.)
+//! This follows the familiar `skills use … | <agent>` interaction pattern.
 
 use std::path::{Path, PathBuf};
 

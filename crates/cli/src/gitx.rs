@@ -1,8 +1,8 @@
-//! The one place agentstack spawns git — hardened environment, transport
-//! allowlist, LFS suppression, and a timeout (design §B of
-//! `docs/design/hardening-remote-ingestion.md`). Like `sys` concentrates
-//! unsafe and `text` concentrates hostile-string rules, `gitx` concentrates
-//! git-spawn policy: no other module may call `Command::new("git")`.
+//! The one place AgentStack spawns git — hardened environment, transport
+//! allowlist, LFS suppression, and a timeout. Remote operations use bounded,
+//! argument-vector process calls. Like `sys` concentrates unsafe and `text`
+//! concentrates hostile-string rules, `gitx` concentrates git-spawn policy:
+//! no other module may call `Command::new("git")`.
 //!
 //! Two profiles, because not every git target is hostile:
 //!

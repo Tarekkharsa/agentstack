@@ -76,7 +76,6 @@ implementation internals — live in
   - [Wire proxy (`proxy`)](#wire-proxy-proxy)
   - [`export` / `import`](#export--import)
 - [Optimize (`agentstack optimize`)](#optimize-agentstack-optimize)
-- [Dashboard](#dashboard)
 
 **[Part III — Full command reference](#part-iii--full-command-reference)**
 
@@ -154,8 +153,8 @@ agentstack restore --last --write  # revert the most recent
 agentstack restore <adapter>       # single-slot config restore (fallback)
 ```
 
-Reverted files show up as pending again; the dashboard's Activity tab lists the
-same recorded writes, each with its `restore`.
+Reverted files show up as pending again; `agentstack restore` lists the same
+recorded writes and the identifier needed to roll each one back.
 
 ### `doctor` shows what you use
 
@@ -169,8 +168,8 @@ Every check always runs, but the default report prints only the sections
 relevant to this project — a feature you've never touched (the zero-files
 gateway, native extensions, reproducibility pins…) stays out of the way until it
 is used or produces a warning/error, which always shows. A closing line counts
-what was hidden; `--all` prints everything, `--ci` always shows the full report,
-and the dashboard's Doctor pane gets every section regardless.
+what was hidden; `--all` and `--ci` print the full report, while `--json`
+provides the complete machine-readable view for t3code and automation.
 
 ## Drift: adopt or apply?
 
@@ -254,8 +253,8 @@ activates them.
 Launch an agent CLI as a **tracked run** and control it without leaving
 agentstack. A run is a real OS process agentstack owns: spawned in its own
 process group (so a kill takes down the whole tree), recorded in
-`~/.agentstack/runs.json`, and visible to any other agentstack process — so the
-dashboard can see runs it didn't start.
+`~/.agentstack/runs.json`, and visible to any other AgentStack process or
+integrated supervisor.
 
 ```bash
 # Launch a harness, attached to your terminal, with a profile applied for the
@@ -264,14 +263,14 @@ agentstack run claude-code --profile design
 agentstack run codex --profile backend --scope project
 agentstack run claude-code --keep        # leave the profile applied after exit
 
-# See runs (also in the dashboard's Runs panel) and stop them here.
+# See runs and stop them here.
 agentstack report runs         # table; add --json for scripting
 agentstack kill <id>           # SIGTERM, then SIGKILL if it won't go
 agentstack kill <id> --force   # SIGKILL immediately
 ```
 
-Launching is a terminal act (the CLIs are interactive TUIs); the dashboard's
-**Runs** panel is for observing tracked runs. The registry is self-healing: a run
+Launching is a terminal act (the CLIs are interactive TUIs). The registry is
+self-healing: a run
 whose wrapper died is pruned on the next `report runs`. A profile-bound run uses
 the session engine, so one is allowed per directory at a time. Every tracked run
 records a minimal lifecycle and prints `agentstack report run <id>` when it exits;
@@ -765,8 +764,7 @@ Summarize with `agentstack report calls [--since <days>] [--json]`; add
 `--tail <n>` to also list the last n individual calls (`--project <path>`
 scopes everything to one project root). With `--json`, `--tail` adds an
 `events` array of raw records — the stable feed external UIs consume; the
-default JSON shape is unchanged without it. The
-dashboard's Runs panel shows each run's footprint. Best-effort local
+default JSON shape is unchanged without it. Best-effort local
 **diagnostics** (logging can never fail a call; size-rotated at ~5 MB × 2), not
 tamper-evident — input to `report calls`/`optimize`, not forensic evidence.
 
@@ -779,8 +777,8 @@ Hidden-Unicode findings **block the install** (override with
 content re-scan of everything materialized (skills and instruction files), and
 `doctor --ci` fails on high-severity findings, so a poisoned skill can't slide
 into CI unnoticed. Everyday `doctor` skips this scan (it reads every skill body);
-`--json` emits the whole report machine-readably, and the dashboard's Doctor pane
-runs it too. Interactive `init` offers the deep scan as an explicit yes/no at its
+`--json` emits the whole report machine-readably for t3code and automation.
+Interactive `init` offers the deep scan as an explicit yes/no at its
 closing doctor step, but only when the project actually has skills.
 
 ## Ephemeral sessions (`agentstack session`)
@@ -802,8 +800,8 @@ hooks, records the write, and reverts it on `end` (or `end --all`). `freeze`
 captures the session's resolved set — the profile's servers plus the skills
 actually loaded — into a new profile (default `<profile>-frozen`) so CI can
 replay it deterministically; review the manifest edit, then `agentstack lock`.
-The same start/end lifecycle backs the MCP `agentstack_session_*` tools; the
-dashboard shows an active session read-only.
+The same start/end lifecycle backs the MCP `agentstack_session_*` tools and
+t3code's toolset picker.
 
 ### Execution posture
 
@@ -879,7 +877,7 @@ tier, not kernel isolation) is [ENFORCEMENT.md — the locked run's frozen
 grant](ENFORCEMENT.md#the-locked-runs-frozen-grant-run---locked); the asserted
 walkthrough is [`examples/projects/locked-run/`](../examples/projects/locked-run/)
 and the full contract is
-[`docs/design/locked-run-contract.md`](design/locked-run-contract.md).
+the [locked-run enforcement contract](ENFORCEMENT.md#the-locked-runs-frozen-grant-run---locked).
 
 ## The central library
 
@@ -1028,9 +1026,8 @@ No tag → the newest version-shaped tag; a repo with no version tags is an erro
 never a floating install. The ledger records `source`/`version`/`rev`; extracted
 skills are digest-pinned so `install --locked` reproduces. `[policy]
 allowed_sources` is enforced **before** any fetch, and the clone passes the
-install scan gate. `lib pack-init` scaffolds a publishable pack; the dashboard's
-Discover tab browses candidates. (Semver ranges and transitive pack dependencies
-are deliberately out of v1.)
+install scan gate. `lib pack-init` scaffolds a publishable pack. (Semver ranges
+and transitive pack dependencies are deliberately out of v1.)
 
 ### `add skill <source>` — install from any skills repo
 
@@ -1138,7 +1135,7 @@ agentstack settings set <target> <key> <value>
 agentstack settings unset <target> <key>
 ```
 
-Dry-run by default, `--write` applies; viewable in the dashboard's Settings tab.
+Dry-run by default; `--write` applies.
 
 ### Lifecycle hooks
 
@@ -1151,7 +1148,7 @@ them into each harness's native hooks config (Claude Code `settings.json`, Codex
 agentstack apply --write   # render them into each harness's native hooks config
 ```
 
-Listed in the dashboard's Hooks tab.
+`doctor` verifies the rendered hooks.
 
 ### Native extensions
 
@@ -1209,7 +1206,7 @@ agentstack report usage --live   # measure each server's tools/list token footpr
 
 `report usage --live` measures each server's `tools/list` token footprint through
 the gateway (HTTP + stdio) and caches it (`~/.agentstack/footprint.json`); `report
-usage`, `explain`, and the dashboard's Servers matrix then show that cost offline.
+usage` and `explain` then show that cost offline.
 
 ### Wire proxy (`proxy`)
 
@@ -1271,42 +1268,9 @@ gateway-brokered calls — a server rendered into a native config is called
 directly by the harness, so such servers are never auto-removed on "no calls"
 evidence alone.
 
-## Dashboard
+## t3code integration
 
-The one place to *see* everything the sections above manage, across every
-harness, without running a write — an embedded localhost server + self-contained
-UI (no Node, no framework, still one `cargo build`):
-
-```sh
-agentstack dashboard            # token-gated, localhost-only view
-agentstack dashboard --no-open  # print the URL, don't open a browser
-```
-
-**Read-only by construction:** bound to 127.0.0.1 and token-gated, the server
-exposes GET routes only, so a POST to any path 404s (a route-matrix test pins
-this — the property is the router's, not the UI's). Secret values never reach the
-browser; every change happens through the CLI, and where a control would live the
-dashboard shows the command to copy. With no `agentstack.toml` it opens a welcome
-screen instead — detected CLIs, the MCP servers already in their configs, where
-those disagree, and the `agentstack init` to reverse-engineer a manifest.
-
-| Tab | Shows (read-only; each change is a CLI command to copy) |
-|---|---|
-| **Overview** | stat tiles, next-actions, stack summary, the zero-files gateway (connected CLIs + this repo's trust state), profiles, usage; each next-action links to a tab or a read-only diff |
-| **Runs** | live `agentstack run` processes — uptime, profile, reachable capabilities, per-run **Calls** (audited footprint, digests only); stop with the shown `agentstack kill <id>` |
-| **Discover** | search the embedded catalog + official MCP Registry; each result shows trust signals and its `agentstack add from <id>` |
-| **Servers** / **Skills** | the cross-harness matrix — where each capability is enabled per CLI and scope; click a server for its config, the trust lens (**Explain trust ⓘ**), and the **context** token cost. Skills also lists on-disk dirs not in the manifest, each with its `agentstack add skill <path> --write` |
-| **Settings** | each tool's current settings (from its real config file) and which keys agentstack manages; edit `[settings.<tool>]`, then `agentstack apply --write` |
-| **Hooks / Instructions / Extensions** | read-only inventories of lifecycle hooks, CLAUDE.md/AGENTS.md fragments, and content-pinned native add-ons |
-| **Secrets** | every `${REF}` the manifest mentions, whether it resolves and from which layer (env / varlock / keychain / .env); missing ones show `agentstack secret set <REF>`, values never shown |
-| **Activity** | every apply and the files it touched; roll back with the shown `agentstack restore` |
-| **Health** | the standing summary plus **Run doctor** — the same `agentstack doctor` checks as a ✓/⚠/✗ report |
-| **Proxy** | the wire lens, the same ranked report as `agentstack report wire`; observe-only |
-| **Insights** | **Optimize**, **Analyze**, **Stats** as three read-only reports, each recommendation carrying its evidence and the exact command/TOML |
-
-Anywhere drift exists — the pending bar, an Overview next-action, the Health tab —
-**Review** opens a real diff of every native config that would change and shows
-the `agentstack apply --write` to reconcile it; the write happens in your terminal.
+t3code is AgentStack’s primary graphical surface. It consumes the same read-only JSON reports and invokes a closed set of CLI-owned actions; see [Use with t3code](howto/use-with-t3code.md). The AgentStack CLI remains the complete standalone and automation interface.
 
 ## Part III — Full command reference
 
@@ -1335,7 +1299,6 @@ you need the exact verb, flag, or subcommand.
 - **`apply`** — Render the manifest into each target's native config — flags `--target/--profile/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore`
 - **`instructions`** _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags `--target/--scope/--write`
 - **`doctor`** — Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details — flags `--ci/--live/--fix/--deep/--all/--json`
-- **`dashboard`** _(hidden)_ — Open the local web dashboard — a read-only view of your stack — flags `--port/--no-open`
 - **`remove`** _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags `--write`
 - **`install`** _(hidden)_ — Fetch skill sources into the store and write the lockfile — flags `--locked/--allow-flagged`
 - **`lock`** _(hidden)_ — Resolve each profile's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`
@@ -1382,9 +1345,9 @@ content scanning on install + `doctor --deep` · official MCP Registry provider 
 `search`/`add from` · `[policy]` trust gate · native per-CLI settings
 (`[settings.*]` → settings.json) · native extensions (`[extensions.*]` →
 content-pinned harness add-ons, re-verified at `run --locked`) · atomic writes + backups ·
-`export`/`import` · portable lifecycle hooks · agent-operable `mcp` server · local read-only dashboard
-(server/skill matrices, Discover, Doctor, Runs; GET-only, copies the CLI command for every change) · live runs
-(`run`/`report runs`/`kill` + dashboard Runs panel) · GitHub Action trust gate ·
+`export`/`import` · portable lifecycle hooks · agent-operable `mcp` server ·
+t3code integration contracts · live runs (`run`/`report runs`/`kill`) ·
+GitHub Action trust gate ·
 nightly adapter-conformance CI · zero-files gateway (`gateway connect` + `mcp
 --auto-project` + digest-pinned `trust`) · `optimize` (evidence-backed
 recommendations from usage/audit/cost signals, safe-class `--write`) ·

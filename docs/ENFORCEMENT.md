@@ -441,8 +441,6 @@ feature and has no host fallback.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the layer model this matrix concretizes,
   especially Layer 3 (policy dimensions) and Layer 4 (runtime modes).
-- [`../TODO.md`](../TODO.md) — the ordered remaining work, including recorder
-  completion and later gated distribution.
-- [`../STRATEGY.md`](../STRATEGY.md) — the product phases and exit gates.
-- [`HISTORY.md`](HISTORY.md) — dated corrections and the closed security-review
-  ledger.
+- [`../TODO.md`](../TODO.md) — the ordered current work and evidence gates.
+- [`../STRATEGY.md`](../STRATEGY.md) — the product direction and outcome gates.
+- [`../CHANGELOG.md`](../CHANGELOG.md) — release history.

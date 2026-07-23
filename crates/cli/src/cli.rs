@@ -32,8 +32,8 @@ every command (listed or not) has its own --help:
   Edit        add · set · search · remove · install · lib · adopt · export · import
   Render      apply · use · instructions · lock · session · diff · restore
   Protect     trust · explain · secret · guard · sign · verify
-  Run         run · kill · workflow · gateway · mcp · try
-  Inspect     doctor · report · dashboard · optimize · proxy
+  Run         run · kill · shim · workflow · gateway · mcp · try
+  Inspect     doctor · report · optimize · proxy
 
 Words: a CLI (a.k.a. harness) is the agent tool you run; an adapter compiles
 its native config; [targets] in the manifest lists which CLIs commands act on.
@@ -113,13 +113,6 @@ pub enum Command {
     /// Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details.
     Doctor(DoctorArgs),
 
-    /// Open the local web dashboard — a read-only view of your stack.
-    ///
-    /// Shows state, diffs, doctor, runs, and audited calls. Every change
-    /// happens through the CLI.
-    #[command(hide = true)]
-    Dashboard(DashboardArgs),
-
     // ── Capabilities & library ───────────────────────────────────────────
     /// Remove a server or skill from the manifest (and lockfile).
     #[command(hide = true)]
@@ -172,7 +165,7 @@ pub enum Command {
     /// Launch an agent CLI as a tracked run.
     ///
     /// Optionally apply a profile for its lifetime, then observe/kill it
-    /// here or from the dashboard.
+    /// here or through an integrated supervisor such as t3code.
     Run(RunArgs),
 
     /// Kill a tracked run by id (and revert its profile if it owned one).
@@ -1596,7 +1589,7 @@ pub struct StatsArgs {
 
 #[derive(Args, Debug)]
 pub struct AnalyzeArgs {
-    /// Emit the report as JSON (for the dashboard or further processing).
+    /// Emit the report as JSON (for t3code or further processing).
     #[arg(long)]
     pub json: bool,
 
@@ -1681,17 +1674,6 @@ pub struct OptimizeArgs {
     /// Only consider audit-log records from the last N days.
     #[arg(long, value_name = "DAYS")]
     pub since: Option<u64>,
-}
-
-#[derive(Args, Debug)]
-pub struct DashboardArgs {
-    /// Port to bind (default: an OS-assigned free port).
-    #[arg(long)]
-    pub port: Option<u16>,
-
-    /// Don't open the browser automatically.
-    #[arg(long)]
-    pub no_open: bool,
 }
 
 #[derive(Args, Debug)]

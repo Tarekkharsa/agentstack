@@ -44,7 +44,7 @@ pub fn render(before: &str, after: &str) -> String {
 }
 
 /// Render a plain (uncolored) diff with `+`/`-`/` ` line prefixes — for the
-/// web dashboard, which colorizes by prefix in CSS.
+/// web t3code, which colorizes by prefix in CSS.
 pub fn render_plain(before: &str, after: &str) -> String {
     build(before, after, false)
 }

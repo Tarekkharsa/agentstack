@@ -6,12 +6,12 @@
 //! by directory). A run is a real OS process that agentstack owns: we spawn the
 //! harness binary in its own process group so we can tree-kill it later, and we
 //! record it in `~/.agentstack/runs.json` so a *separate* agentstack process (the
-//! read-only dashboard) can see it. When launched with a profile we reuse the
+//! read-only t3code) can see it. When launched with a profile we reuse the
 //! session machinery to apply it before launch and revert it on exit.
 //!
 //! Control split: launching is a terminal act (`agentstack run <harness>` runs the
 //! TUI attached to your terminal, with agentstack as its parent); observing is
-//! also possible from the dashboard, while killing is a terminal act
+//! also possible from t3code, while killing is a terminal act
 //! (`agentstack kill <id>`) that signals the recorded process group.
 
 use std::collections::BTreeMap;
@@ -137,7 +137,7 @@ fn save_all(map: &BTreeMap<String, RunRecord>) -> Result<()> {
 }
 
 /// A short, unique-enough run id (`r-<hex>`). Derived from the wall clock and
-/// pid via FNV-1a — same dependency-free trick as `state::hash` / the dashboard
+/// pid via FNV-1a — same dependency-free trick as `state::hash` / t3code
 /// token; not security-sensitive.
 pub(crate) fn gen_id() -> String {
     let nanos = SystemTime::now()
@@ -414,7 +414,7 @@ pub(crate) fn launch_attached(
     };
     registry_insert(rec);
 
-    // Block until the harness exits (or is killed — from here or the dashboard).
+    // Block until the harness exits (or is killed — from here or t3code).
     let status = child.wait();
 
     // Clean up regardless of how it exited: drop the record.

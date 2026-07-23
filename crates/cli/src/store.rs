@@ -367,7 +367,7 @@ impl Store {
     /// (`.git` and symlinks included). There is deliberately no copy
     /// fallback — the shipped copy helpers strip `.git` and dereference
     /// symlinks, either of which corrupts a promoted clone (design §3 of
-    /// add-skill-source-grammar.md). `Ok(None)` = slot taken or rename
+    /// normalized source grammar). `Ok(None)` = slot taken or rename
     /// refused; the caller falls back to a commit-pinned re-resolve.
     pub fn adopt_clone(&self, url: &str, staged_clone: &Path) -> Result<Option<PathBuf>> {
         let dest = self.git_dir(url);
@@ -396,7 +396,7 @@ impl Store {
 }
 
 /// Transient staging for previewing remote sources without touching the
-/// persistent store (design §3 of add-skill-source-grammar.md). Lives under
+/// persistent store. Lives under
 /// the agentstack home — the store's own filesystem by construction, so
 /// promotion is a rename, never a copy. Random id (never reused: a crashed
 /// run's leftovers must not skip re-fetch/re-scan), 0700, best-effort

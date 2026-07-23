@@ -124,7 +124,7 @@ grep -q "agentstack secret set" <<<"$OUT" && ok "--no-keychain prints the store 
 "$AS" apply --write >/dev/null 2>&1 && bad "apply exited 0 despite unresolved ref" || ok "apply --write blocks the unresolved ref (nonzero exit)"
 REF=$(grep -o '\${[A-Z0-9_]*}' "$M" | head -1 | tr -d '${}')
 env "$REF=fake-value" "$AS" apply --write >/dev/null 2>&1 && ok "apply succeeds once the ref resolves via env" || bad "resolved apply failed"
-# Default scope is project inside a repo manifest (docs/design/default-scope.md),
+# Default scope is project inside a repo manifest,
 # so the fan-out lands in the repo's .mcp.json — never in ~/.claude.json.
 grep -q 'linear' .mcp.json && ok "codex-imported server fanned out to the project claude config" || bad "cross-CLI fan-out missing"
 grep -q 'linear' "$H/.claude.json" && bad "repo apply leaked into the global claude config" || ok "global claude config untouched by the repo apply"

@@ -4,23 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="theme/theme.js"></script>
-<title>AgentStack — cloning a repo shouldn't hand your agent to a stranger</title>
-<meta name="description" content="One reviewed file defines what your AI coding tools may run. Cloned repos stay inert until you approve them; governed runs are firewalled, recorded, and honestly labelled.">
+<title>AgentStack — one agent setup for every coding CLI</title>
+<meta name="description" content="Import your MCP servers, skills and instructions once. AgentStack renders every coding CLI's native configuration, switches toolsets by task, diagnoses drift and restores changes safely.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta property="og:title" content="AgentStack — cloning a repo shouldn't hand your agent to a stranger">
-<meta property="og:description" content="One reviewed file defines what your AI coding tools may run. Cloned repos stay inert until you approve them; governed runs are firewalled, recorded, and honestly labelled.">
+<meta property="og:title" content="AgentStack — one agent setup for every coding CLI">
+<meta property="og:description" content="Import once, render everywhere, switch by task, diagnose drift and restore safely.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://tarekkharsa.github.io/agentstack/">
 <meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="agentstack — the local control plane for your AI agent CLIs">
+<meta property="og:image:alt" content="AgentStack — one portable setup across AI coding CLIs">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="AgentStack — cloning a repo shouldn't hand your agent to a stranger">
-<meta name="twitter:description" content="One reviewed file defines what your AI coding tools may run. Cloned repos stay inert until you approve them; governed runs are firewalled, recorded, and honestly labelled.">
+<meta name="twitter:title" content="AgentStack — one agent setup for every coding CLI">
+<meta name="twitter:description" content="Import once, render everywhere, switch by task, diagnose drift and restore safely.">
 <meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <link rel="stylesheet" href="theme/organic.css">
 <style>
@@ -86,102 +86,117 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
     </div>
     <div style="max-width:720px;position:relative">
       <span class="tag tag-accent-2">open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>
-      <h1 style="font-family:var(--font-heading);font-weight:400;font-size:3.4rem;line-height:1.08;margin:var(--space-4) 0 var(--space-4)">Cloning a repo shouldn't hand your agent to a stranger.</h1>
-      <p style="font-size:1.15rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:600px">AgentStack puts everything your AI coding tools are allowed to run into one reviewed file. A cloned repo can't auto-activate any of it until you approve it — and what runs through the gateway is firewalled and logged, with every run labelled by how strongly that is actually enforced.</p>
+      <h1 style="font-family:var(--font-heading);font-weight:400;font-size:3.4rem;line-height:1.08;margin:var(--space-4) 0 var(--space-4)">One agent setup. Every coding CLI.</h1>
+      <p style="font-size:1.15rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:600px">Import the MCP servers, skills and instructions you already use. AgentStack keeps them in one portable manifest, renders each CLI's native format, switches toolsets by project or task, and makes every change understandable and recoverable.</p>
       <div style="display:flex;gap:var(--space-3);flex-wrap:wrap">
-        <a href="tutorial/" class="btn btn-primary">Start the interactive tutorial</a>
+        <a href="tutorial/" class="btn btn-primary">Unify my setup</a>
         <a href="docs.html" class="btn btn-secondary">Read the documentation</a>
       </div>
     </div>
 
+    <div class="card elev-md" style="margin-top:calc(var(--space-8) * 1.2);border-radius:var(--radius-md);display:grid;grid-template-columns:minmax(0,1.4fr) minmax(260px,0.8fr);gap:var(--space-6);align-items:center">
+      <div>
+        <div class="card-kicker">primary graphical integration · in progress</div>
+        <div class="card-title" style="font-size:1.45rem;margin-bottom:var(--space-2)">Use AgentStack where you already launch agents: t3code</div>
+        <div class="card-body" style="font-size:1rem;line-height:1.65">The native t3code experience is organized around four jobs — <strong>Setup, Toolset, Status and Undo</strong>. t3code presents the flow; the AgentStack CLI still owns every plan, write and safety decision. The current supervisor integration works today, while the guided panel and consent boundary remain active, fail-closed work.</div>
+        <a href="howto/use-with-t3code.html" class="btn btn-secondary" style="margin-top:var(--space-4)">See the current integration →</a>
+      </div>
+      <div style="background:var(--color-neutral-100);border-radius:var(--radius-md);padding:var(--space-4);display:grid;gap:var(--space-2)">
+        <div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;padding:12px 14px;font-weight:700">1 · Setup</div>
+        <div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;padding:12px 14px;font-weight:700">2 · Toolset</div>
+        <div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;padding:12px 14px;font-weight:700">3 · Status</div>
+        <div style="background:var(--color-text);color:var(--color-bg);border-radius:12px;padding:12px 14px;font-weight:700">4 · Undo</div>
+      </div>
+    </div>
+
     <div style="margin-top:calc(var(--space-8) * 1.5)">
-      <h2 style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">Four gaps in how agents adopt code</h2>
-      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:560px">Each one is real today in every agent CLI — and each has one command that closes it.</p>
+      <h2 style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">Your tools should share one setup</h2>
+      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:620px">AgentStack manages the complete lifecycle: import, activate, switch, diagnose, recover and share — with safety built underneath.</p>
       <div class="grid-gaps" style="display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-4)">
         <div class="card elev-sm" style="gap:var(--space-2)">
           <div style="display:flex;align-items:center;gap:var(--space-3)">
             <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Anything a repo declares can run</div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Every CLI spells setup differently</div>
           </div>
-          <div class="card-body" style="font-size:0.95rem;line-height:1.6">A clone stays inert until you approve its exact bytes. Any edit — even a git pull — drops it back to untrusted.</div>
+          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Import your existing configuration once. One manifest then renders the correct native format for every supported client.</div>
           <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
             <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700);font-weight:700">closed by</span>
-            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack trust .</code>
+            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack init</code>
           </div>
         </div>
         <div class="card elev-sm" style="gap:var(--space-2)">
           <div style="display:flex;align-items:center;gap:var(--space-3)">
             <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Nothing narrows or records agents</div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Switching tasks pollutes shared files</div>
           </div>
-          <div class="card-body" style="font-size:0.95rem;line-height:1.6">A machine policy no repo can loosen fences tools, secrets and egress — and every brokered call lands in the audit log.</div>
+          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Profiles select a task-specific toolset. Temporary sessions activate it and restore the previous native configuration afterward.</div>
           <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
             <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-2-700);font-weight:700">closed by</span>
-            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">gateway connect --all</code>
+            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack session start</code>
           </div>
         </div>
         <div class="card elev-sm" style="gap:var(--space-2)">
           <div style="display:flex;align-items:center;gap:var(--space-3)">
             <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Every CLI spells setup differently</div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Native configuration drifts</div>
           </div>
-          <div class="card-body" style="font-size:0.95rem;line-height:1.6">One reviewed manifest renders into every CLI's native config. The manifest and lockfile hold only ${REF} placeholders — values resolve at render time, only into native configs whose format requires them.</div>
+          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Doctor finds the problem, diff shows what would change, adopt keeps an intentional hand edit, and restore undoes a bad write.</div>
           <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
             <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-2-700);font-weight:700">closed by</span>
-            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack apply --write</code>
+            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack doctor</code>
           </div>
         </div>
         <div class="card elev-sm" style="gap:var(--space-2)">
           <div style="display:flex;align-items:center;gap:var(--space-3)">
             <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Agents wreck trees by accident</div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Portable must not mean automatic</div>
           </div>
-          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Hooks block rm -rf, git reset --hard and .env reads before they execute — the command never runs.</div>
+          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Unfamiliar repository configuration stays inert until reviewed. Any pinned change re-gates it, and machine policy always remains the ceiling.</div>
           <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
             <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700);font-weight:700">closed by</span>
-            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack guard install</code>
+            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack trust .</code>
           </div>
         </div>
       </div>
     </div>
 
     <div style="margin-top:calc(var(--space-8) * 1.5)">
-      <h2 style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">One pipeline, six words</h2>
-      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:560px">You write a manifest, the lockfile pins it, you trust the result, policy narrows what may run, the gateway carries it — and every call lands in the audit log.</p>
+      <h2 style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">One lifecycle, one source of truth</h2>
+      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:620px">Bring in what you already use, organize it into profiles, activate the right toolset, diagnose changes and recover without rebuilding native files by hand.</p>
       <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-8)">
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">import</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
         <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">manifest</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">lockfile</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">trust</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">policy</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">gateway</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-text);color:var(--color-bg);border:1.5px solid var(--color-text)">audit log</span><span style="color:var(--color-accent);font-weight:700"></span></span>
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">profile</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">activate</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">doctor</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-text);color:var(--color-bg);border:1.5px solid var(--color-text)">restore</span><span style="color:var(--color-accent);font-weight:700"></span></span>
       </div>
       <h2 style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">Climb in six steps</h2>
       <p style="color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:560px">Each step pays off on its own — nothing later is required to keep the earlier wins.</p>
       <div class="grid-steps" style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-4)">
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
           <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">1</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Unify</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">init → apply: one reviewed manifest for every CLI; inline tokens lifted to ${REF}s, so secret values never enter the manifest or lockfile.</div></div>
+          <div><div style="font-weight:700;margin-bottom:2px">Unify</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Import the setup you already have and render one manifest into every CLI.</div></div>
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
           <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">2</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Verify</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">doctor catches drift early; every warning names its exact fix.</div></div>
+          <div><div style="font-weight:700;margin-bottom:2px">Switch</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Use profiles and temporary sessions for different projects and tasks.</div></div>
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
           <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">3</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Guard</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Pre-tool-use hooks block destructive commands before they run.</div></div>
+          <div><div style="font-weight:700;margin-bottom:2px">Diagnose</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Doctor and diff explain drift before anything changes.</div></div>
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
           <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">4</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Trust</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Cloned repos stay inert until you approve their exact bytes.</div></div>
+          <div><div style="font-weight:700;margin-bottom:2px">Recover</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Adopt a hand edit, reapply the source of truth, or restore the prior state.</div></div>
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
           <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">5</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Scale</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Profiles, the central library and packs: one governed stack across projects, machines and teammates.</div></div>
+          <div><div style="font-weight:700;margin-bottom:2px">Share</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Reuse secret-free, locked setups across projects, machines and teammates.</div></div>
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
           <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">6</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Confine</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">run --sandbox --lockdown: kernel-enforced confinement; the agent's only route out is the audited proxy.</div></div>
+          <div><div style="font-weight:700;margin-bottom:2px">Govern</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Add trust, policy, evidence and stronger confinement when the work needs it.</div></div>
         </div>
       </div>
     </div>
@@ -190,7 +205,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
       <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3)">
         <div>
           <div class="card-kicker">quick start</div>
-          <div class="card-title">Ten minutes to first value</div>
+          <div class="card-title">Five minutes to first value</div>
         </div>
         <div style="flex:1"></div>
         <a href="tutorial/" style="font-weight:600;font-size:0.95rem">Prefer guided? Take the tutorial →</a>
@@ -206,7 +221,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
   <div style="border-top:1px solid var(--color-neutral-200);margin-top:var(--space-8)">
     <div style="max-width:1060px;margin:0 auto;padding:var(--space-6);display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap">
       <span style="font-family:var(--font-heading)">agent<span style="color:var(--color-accent)">Stack</span></span>
-      <span style="color:var(--color-neutral-700);font-size:0.9rem">Unify · Verify · Guard · Trust · Scale · Confine — dual-licensed MIT / Apache-2.0</span>
+      <span style="color:var(--color-neutral-700);font-size:0.9rem">Unify · Switch · Diagnose · Recover · Share · Govern — dual-licensed MIT / Apache-2.0</span>
       <div style="flex:1"></div>
       <a href="docs.html" style="font-size:0.92rem">Documentation</a>
       <a href="cookbook.html" style="font-size:0.92rem">Cookbook</a>

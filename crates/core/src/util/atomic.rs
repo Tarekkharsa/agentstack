@@ -73,7 +73,7 @@ static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn tmp_path(path: &Path) -> PathBuf {
     // The temp name must be unique per writer, not just per target: two
-    // processes (or threads) replacing the same file at once — e.g. a dashboard
+    // processes (or threads) replacing the same file at once — e.g. an external UI
     // `kill` and the foreground run wrapper both updating runs.json — would
     // otherwise share one temp path, and the loser's rename fails with ENOENT
     // after the winner renames it away.

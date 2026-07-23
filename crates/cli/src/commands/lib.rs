@@ -505,7 +505,7 @@ fn add(args: &LibAddArgs) -> Result<()> {
 }
 
 /// `agentstack lib new <name>` — scaffold `./<name>/SKILL.md` with the house
-/// template, closing the authoring loop (skills-sh-learnings §8). Writes
+/// template, closing the authoring loop. Writes
 /// directly like `lib pack-init`: creating a template is the command's whole
 /// point, it refuses an existing path, and adoption stays a separate,
 /// gated step (`add skill` / `lib add`).

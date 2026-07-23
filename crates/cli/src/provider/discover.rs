@@ -1,6 +1,5 @@
 //! SKILL.md discovery inside a fetched repo — the ecosystem's conventional
-//! locations with OUR policies (design:
-//! `docs/design/add-skill-source-grammar.md` §2).
+//! locations with AgentStack's policies.
 //!
 //! The location list and depth discipline are the de-facto interop spec
 //! established by vercel-labs/skills (MIT): root-as-skill, `skills/` and its

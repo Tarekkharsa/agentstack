@@ -140,7 +140,7 @@ pub fn scan_tree(root: &Path) -> Result<Vec<Finding>> {
 /// (unless `allow_flagged`), everything found is appended to `warnings` for
 /// the caller to print. One home for the shape `lib add`, `add skill`, and
 /// `install` all need (extracted from `commands/lib.rs` per the
-/// add-skill-source-grammar design §3).
+/// normalized skill-source grammar).
 pub fn gate(name: &str, dir: &Path, allow_flagged: bool, warnings: &mut Vec<String>) -> Result<()> {
     use anyhow::Context;
     // Reject symlinks BEFORE reading a byte: a link is never part of the

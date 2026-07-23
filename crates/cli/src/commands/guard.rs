@@ -32,8 +32,7 @@ use crate::util::paths;
 /// Default `[policy.filesystem] deny` seeded into the machine manifest on
 /// first install (explicit and user-editable — never a hidden built-in).
 /// THE one canonical list — `guard install` and `init --global` both seed
-/// through it (A1 condition: reconcile, don't fork). Reviewed at A0
-/// (docs/design/init-access-control.md §4); `credentials.json` deliberately
+/// through it (reconcile, don't fork). `credentials.json` deliberately
 /// ships as a commented opt-in (see `default_deny_array`), and home-anchored
 /// entries (`~/...`) are forbidden here until pattern-side `~` expansion
 /// lands — today they would match nothing and fail open.

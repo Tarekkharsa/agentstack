@@ -173,8 +173,6 @@
       </li>
       <li><a href="../concepts.html#delivery-modes">Delivery modes</a>
       </li>
-      <li><a href="../reference.html#dashboard">Dashboard</a>
-      </li>
     </ul>
   </details>
   <details class="grp">
@@ -227,8 +225,6 @@
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">Strategy</a>
       </li>
-      <li><a href="../history.html">History</a>
-      </li>
     </ul>
   </details>
 </aside>
@@ -239,7 +235,7 @@
 agentstack restore --last --write  # undo the most recent write
 agentstack restore a1b2 --write    # undo one write by its id prefix
 agentstack restore claude-code     # fallback: restore one adapter's config from its backup</code></pre>
-<p><code>restore</code> is the single undo verb for <strong>writes</strong>. Every write agentstack makes — servers, settings, hooks, instructions, even the owned-server manifest refresh — is recorded before it lands, and <code>restore</code> reverts one; <code>restore &lt;adapter&gt;</code> is a fallback that restores one adapter's config from its single-slot backup. Reverted files simply show up as pending again — the dashboard's Activity tab lists the same recorded writes, each with the <code>restore</code> to roll it back (see <a href="../howto/see-what-happened.html">see what your agents did</a>). Five other actions are undone by their own verb, because they are not file writes:</p>
+<p><code>restore</code> is the single undo verb for <strong>writes</strong>. Every write agentstack makes — servers, settings, hooks, instructions, even the owned-server manifest refresh — is recorded before it lands, and <code>restore</code> reverts one; <code>restore &lt;adapter&gt;</code> is a fallback that restores one adapter's config from its single-slot backup. Reverted files simply show up as pending again; <code>restore</code> lists the recorded writes and the identifier needed to roll each one back (see <a href="../howto/see-what-happened.html">see what your agents did</a>). Five other actions are undone by their own verb, because they are not file writes:</p>
 <div class="tblwrap"><table>
 <thead><tr><th>To undo…</th><th>Run</th><th>What it reverts</th></tr></thead><tbody>
 <tr><td>a recorded write (<code>apply</code> / <code>use</code> / <code>session</code> / settings / hooks / instructions)</td><td><code>agentstack restore &lt;id&gt; --write</code></td><td>puts the changed native config back and marks it pending</td></tr>

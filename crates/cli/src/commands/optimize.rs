@@ -89,7 +89,7 @@ struct CallStats {
 
 /// Every on-disk signal `analyze` reads, owned so the borrow in [`Inputs`] is
 /// trivial to construct. Loaded once and shared by the CLI `run`, `--json`, and
-/// the dashboard snapshot so the gathering logic lives in exactly one place.
+/// read-only snapshot so the gathering logic lives in exactly one place.
 struct Signals {
     usage: Usage,
     footprints: Footprints,
@@ -154,7 +154,7 @@ impl Signals {
 }
 
 /// Assemble the machine-readable report (project + window + recommendations)
-/// from gathered inputs. Pure over `inputs` so `--json`, the dashboard, and the
+/// from gathered inputs. Pure over `inputs` so `--json`, external UIs, and the
 /// unit tests all produce the identical shape.
 fn report_json(project: &str, inputs: &Inputs, since: Option<u64>) -> Value {
     json!({
@@ -166,8 +166,8 @@ fn report_json(project: &str, inputs: &Inputs, since: Option<u64>) -> Value {
     })
 }
 
-/// The optimize report as JSON — the shape the dashboard's Insights panel
-/// embeds. Resilient: a manifest that won't load degrades to an empty report
+/// The optimize report as JSON for external integrations. Resilient: a
+/// manifest that won't load degrades to an empty report
 /// rather than failing the whole snapshot.
 pub fn collect(manifest_dir: Option<&Path>) -> Value {
     let Ok(ctx) = super::load(manifest_dir) else {

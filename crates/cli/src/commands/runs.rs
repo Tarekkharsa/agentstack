@@ -1,6 +1,6 @@
 //! `agentstack run` / `runs` / `kill` — the CLI layer over [`crate::runs`].
 //! Launching is a foreground, terminal-attached act; listing and killing also
-//! work from the dashboard.
+//! work from external supervisors.
 
 use std::path::Path;
 

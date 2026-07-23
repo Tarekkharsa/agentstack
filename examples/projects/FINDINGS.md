@@ -228,7 +228,7 @@ on the release binary (Round 5).
 | Manifest discovery didn't walk up from a subdirectory | **fixed** — `fix(cli)`: shared resolution funnels through `discover_project_base`, so `doctor`/`apply`/overview from `src/deep` act on the root manifest, and `init` refuses to silently nest. Asserted D1. |
 | `adopt` ignored hand-*edited* values of manifest-known servers | **fixed** — `fix(adopt)`: adopt diffs rendered-vs-on-disk per server and pulls changed fields into the manifest (comments preserved, secrets re-lifted), so the next `apply` no longer reverts the edit. Asserted D2. |
 | Project-scope pending removals warned nowhere | **fixed** — `fix(doctor)` + the default-scope change: drift now checks every scope a write recorded state at, so a project-scope "would REMOVE" surfaces before the delete. |
-| Bare `apply` wrote global scope; the quickstart read as project | **fixed** — `feat(scope)`: default scope follows the manifest's home (project for a repo, global for `~/.agentstack`), per `docs/design/default-scope.md`. Asserted A3. |
+| Bare `apply` wrote global scope; the quickstart read as project | **fixed** — `feat(scope)`: default scope follows the manifest's home (project for a repo, global for `~/.agentstack`). Asserted A3. |
 
 Plus one gap a spawned session found and fixed independently:
 

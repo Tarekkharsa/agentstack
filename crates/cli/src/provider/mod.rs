@@ -1,7 +1,7 @@
 //! Capability **providers** — the meta-layer (PLAN §9h). agentstack doesn't run
 //! a registry; it *consumes* them. A `Provider` searches some source (our
 //! embedded catalog, the official MCP Registry, later git marketplaces) and
-//! returns normalized [`Candidate`]s that `add`/`search`/the dashboard render
+//! returns normalized [`Candidate`]s that `add`/`search`/t3code render
 //! into any CLI.
 
 pub mod discover;

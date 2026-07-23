@@ -50,6 +50,7 @@ use std::rc::Rc;
 use boa_engine::builtins::promise::PromiseState;
 use boa_engine::context::time::FixedClock;
 use boa_engine::context::{ContextBuilder, HostHooks};
+use boa_engine::module::IdleModuleLoader;
 use boa_engine::property::Attribute;
 use boa_engine::realm::Realm;
 use boa_engine::{
@@ -626,6 +627,11 @@ fn build_context(
         .host_hooks(Rc::new(Hooks { compile_denied }))
         // Host-level deterministic-time backstop behind the JS poisoning.
         .clock(Rc::new(FixedClock::from_millis(0)))
+        // Refuses ALL module resolution. Without this, Boa defaults to
+        // `SimpleModuleLoader` rooted at the process cwd — a filesystem reach
+        // that would let the pinned script execute UNPINNED JavaScript via
+        // `import()`, breaking the trusted-script premise (§9.3 blocker).
+        .module_loader(Rc::new(IdleModuleLoader))
         .build()
         .map_err(|_| WorkflowError::internal("failed to build the interpreter context"))?;
 
@@ -813,6 +819,39 @@ mod tests {
             StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::CompileDenied),
             other => panic!("expected Failed(CompileDenied), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn dynamic_import_of_real_on_disk_module_is_refused() {
+        // §9.3 witness: Boa's default loader (`SimpleModuleLoader` rooted at
+        // the process cwd) opens and executes JavaScript files, so a pinned
+        // script could pull in UNPINNED code via `import()`. The context
+        // installs `IdleModuleLoader`; a module that genuinely exists on disk
+        // must still be refused, and its body must never run.
+        let path = std::env::temp_dir().join(format!(
+            "agentstack-workflow-import-witness-{}.mjs",
+            std::process::id()
+        ));
+        std::fs::write(&path, "globalThis.__module_ran = true; export default 1;")
+            .expect("write witness module");
+        // JSON string encoding doubles as a JS string literal for the path.
+        let specifier =
+            serde_json::to_string(&path.display().to_string()).expect("encode path literal");
+        let script = format!(
+            "const meta = {{ roles: [] }};\n\
+             let msg = 'LEAK: import resolved';\n\
+             try {{ await import({specifier}); }} catch (e) {{ msg = String(e); }}\n\
+             return [msg, typeof globalThis.__module_ran];"
+        );
+        let value = run_to_done(&script);
+        std::fs::remove_file(&path).ok();
+        let entries = value.as_array().expect("array result");
+        let msg = entries[0].as_str().expect("error message string");
+        assert!(
+            msg.contains("module resolution is disabled"),
+            "import was not refused by the idle loader: {msg}"
+        );
+        assert_eq!(entries[1], "undefined", "the on-disk module body executed");
     }
 
     #[test]

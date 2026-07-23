@@ -9,7 +9,7 @@
 //! argv. This is dictionary-attack resistance for shipped/exfiltrated evidence,
 //! NOT authenticity — the harness runs as the same user who can read the key, so
 //! it is a cooperative local commitment, not tamper-proof attestation (see
-//! `docs/design/locked-run-contract.md` §3.1). Portable, independently
+//! the locked-run contract). Portable, independently
 //! verifiable authenticity would require asymmetric signing and durable key
 //! management, which is out of scope here.
 //!

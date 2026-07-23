@@ -4,8 +4,8 @@
 //! upstream MCP metadata) supplies strings that become manifest keys,
 //! filesystem path components, and terminal/agent-context text. This module
 //! is the one place their rules live — the way `sys` concentrates unsafe and
-//! (soon) `gitx` concentrates git-spawn policy. Design:
-//! `docs/design/hardening-remote-ingestion.md`.
+//! `gitx` concentrates git-spawn policy. All remote text is normalized at the
+//! ingestion boundary.
 //!
 //! Holds the name contract (design §C) and the display/context sanitizers
 //! (design §A). The sanitizers *neutralize* hostile bytes in passing display

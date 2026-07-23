@@ -29,7 +29,7 @@ use crate::secret::{env_file, keychain};
 /// holds `${REF}`s either way; an unstored value simply stays unresolved and
 /// every use site fails closed on it by name (rule 5) — so the honest behavior
 /// is to finish init and report the gap, never abort halfway (the old
-/// interactive path) or pretend it stored (the old dashboard path).
+/// interactive path) or pretend it stored (a non-interactive UI path).
 #[cfg(test)]
 fn store_lifted(lifted: &[Lifted], mut store: impl FnMut(&str, &str) -> Result<()>) -> Vec<String> {
     let mut unstored = Vec::new();
@@ -496,7 +496,7 @@ fn run_global(args: &InitArgs) -> Result<()> {
     // The guard-install offer (A1). Never silent: installing edits other
     // CLIs' config files, so it happens only on an explicit yes — and
     // `confirm` returns false without prompting when non-interactive, which
-    // is exactly the dashboard/CI contract (report the pending offer, never
+    // is exactly t3code/CI contract (report the pending offer, never
     // auto-install).
     println!(
         "\nThe host guard enforces that deny list inside each CLI's own hook system —\n\

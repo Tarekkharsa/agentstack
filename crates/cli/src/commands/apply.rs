@@ -119,7 +119,7 @@ fn render(
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
     // Default scope follows the manifest's home: project for a repo manifest,
-    // global only for the machine manifest (see docs/design/default-scope.md).
+    // global only for the machine manifest.
     let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
 
     let selection = match &args.profile {

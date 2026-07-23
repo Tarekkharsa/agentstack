@@ -29,6 +29,11 @@ fn setup_project(tmp: &Path) -> PathBuf {
          [profiles.p]\nskills = [\"local-notes\"]\n",
     )
     .unwrap();
+    // `session start` is intentionally headless and fail-closed. These tests
+    // exercise restore behavior, so establish its real pin + trust
+    // preconditions instead of bypassing the readiness gate.
+    agentstack::commands::lock::run(&Default::default(), Some(&proj)).unwrap();
+    agentstack::trust::trust(&proj).unwrap();
     proj
 }
 

@@ -173,8 +173,6 @@
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
-      <li><a href="reference.html#dashboard">Dashboard</a>
-      </li>
     </ul>
   </details>
   <details class="grp">
@@ -227,8 +225,6 @@
       </li>
       <li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md">Strategy</a>
       </li>
-      <li><a href="history.html">History</a>
-      </li>
     </ul>
   </details>
 </aside>
@@ -275,7 +271,7 @@ const checked = await parallel(
 return keepUnrefuted(report, checked)</code></pre>
 <p>The script runs inside a sandboxed interpreter with no filesystem, network, or environment access — the only thing it can do is request governed agent runs through <code>agent()</code>. Everything else is plain computation.</p>
 <h2 id="where-it-stands">Where it stands<a class="hlink" href="#where-it-stands" aria-label="Link to this section">#</a></h2>
-<p>The full design, security rationale, and staged plan live in the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/workflows-capability.md">workflows capability design doc</a>. The manifest kind, pinning, trust review, the engine, <code>workflow run</code> / <code>workflow report</code>, negotiated ceilings, and journal-replay resume all ship; what remains before the preview label drops is an independent review of the interpreter boundary (design doc §9.3).</p>
+<p>The full technical contract and security rationale live in the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/workflows-capability.md">workflows capability design doc</a>. The manifest kind, pinning, trust review, the engine, <code>workflow run</code> / <code>workflow report</code>, negotiated ceilings, and journal-replay resume all ship; what remains before the preview label drops is the promotion-gate work in <code>TODO.md</code>, including independent review of the interpreter boundary.</p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/workflows.md">docs/workflows.md</a> — this page is generated from it.</p>
   </main>
 </div>

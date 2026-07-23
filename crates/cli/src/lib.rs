@@ -20,7 +20,6 @@ pub mod catalog;
 pub mod cli;
 pub mod codemode;
 pub mod commands;
-pub mod dashboard;
 pub mod discover;
 pub mod executable;
 pub mod execution;
@@ -48,6 +47,7 @@ pub mod scan;
 pub use agentstack_core::scope;
 pub mod secret;
 pub mod session;
+pub mod snapshot;
 pub mod state;
 pub mod store;
 #[allow(unsafe_code)]

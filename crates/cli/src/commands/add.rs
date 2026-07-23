@@ -109,7 +109,7 @@ fn add_git_pack(
 }
 
 /// Gate `[policy] allowed_sources` (before any network), then clone + parse +
-/// content-scan the pack. Shared by the CLI, dashboard, and MCP install paths.
+/// content-scan the pack. Shared by the CLI, t3code, and MCP install paths.
 pub(crate) fn resolve_git_pack_gated(
     ctx: &super::Context,
     git_ref: &crate::provider::gitpack::GitPackRef,
@@ -813,8 +813,8 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
     )
 }
 
-/// `agentstack add skill <source>` — the ecosystem-grammar acquisition verb
-/// (designs: add-skill-source-grammar.md, add-skill-activation.md). Parse →
+/// `agentstack add skill <source>` — the ecosystem-grammar acquisition verb.
+/// Parse →
 /// stage (git) → discover → select → scan → preview; `--write` promotes the
 /// staged clone, writes the manifest entries, records the lock pins, and —
 /// when the delivery mode is static and the active profile is unambiguous —
@@ -1353,8 +1353,8 @@ fn print_selection(
 }
 
 /// The one preview + one write: manifest diff (always), then on `--write`
-/// the atomic manifest write, the lock pins, and — mode-aware — activation
-/// (design: docs/design/add-skill-activation.md). The activation context is
+/// the atomic manifest write, the lock pins, and — mode-aware — activation.
+/// The activation context is
 /// captured HERE, before any write, so this command's own lock.save can
 /// never flip the detected mode.
 fn preview_and_commit(
@@ -1577,7 +1577,7 @@ fn write_manifest(
 }
 
 /// The manifest members an install added, by section. Shared return shape so the
-/// dashboard/MCP reach server, skill, and pack installs through the same door.
+/// t3code/MCP reach server, skill, and pack installs through the same door.
 #[derive(Debug, Clone, Default)]
 pub struct AddedMembers {
     pub servers: Vec<String>,
@@ -1587,7 +1587,7 @@ pub struct AddedMembers {
 }
 
 /// Resolve a provider id and write it into the manifest at `dir` (no dry-run).
-/// Shared by the dashboard and MCP server. Handles servers, standalone skills,
+/// Shared by t3code and MCP server. Handles servers, standalone skills,
 /// and vendor packs; returns the members it added.
 ///
 /// Instructions are NOT installed here (the daily-driver-steering opt-in lives
@@ -1596,7 +1596,7 @@ pub struct AddedMembers {
 pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Result<AddedMembers> {
     let ctx = super::load(Some(dir))?;
 
-    // Git packs come through the same door (dashboard Discover, MCP).
+    // Git packs come through the same door (t3code discovery, MCP).
     if let Some(git_ref) = crate::provider::gitpack::GitPackRef::parse(id) {
         let (resolved, origin) = resolve_git_pack_gated(&ctx, &git_ref)?;
         let args = AddFromArgs {

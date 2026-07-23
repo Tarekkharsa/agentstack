@@ -155,7 +155,7 @@ fn configure(
     let interactive = crate::util::confirm::is_interactive();
     let ctx = super::load(manifest_dir)?;
     // Default scope follows the manifest's home: project for a repo manifest,
-    // global only for the machine manifest (see docs/design/default-scope.md).
+    // global only for the machine manifest.
     let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
     let target_ids = resolve_targets(&ctx.loaded.manifest, &ctx.registry, &args.targets)?;
 

@@ -1,326 +1,371 @@
-# Design: the UI control plane (AgentStack governance from t3code)
+# t3code integration contract
 
-> **Status:** lane opened by maintainer decision 2026-07-23 (was: unscheduled
-> draft). The agentstack-side CLI primitives for §8 steps 1–3 are implemented —
-> §7.2 consent-digest binding (`surface_digest` in `trust --preview`,
-> `--consented-digest` required by `trust --yes`), Lane B `use --list --json` +
-> the fail-closed `session start` gate, Lane A `init --plan`. See the TODO.md
-> entry for witnesses. Open: the t3code side (incl. the §7.1 admin-scope
-> decision), Lane C, and the authoring flows.
-> **Scope:** spans two repos — new **CLI primitives** in `agentstack`, and the
-> **UI + RPCs** in `t3code` (`~/Documents/GitHub/t3code`, branch
-> `agentstack-panel`).
-> **Prereqs / related:** [`t3code-panel-design.dc.html`](t3code-panel-design.dc.html)
-> (the shipped read-only panel), [`t3code-upstream-pr.md`](t3code-upstream-pr.md)
-> (the current PR draft and its read-vs-write decision),
-> [`workflows-capability.md`](workflows-capability.md) (the engine this builds on),
-> [`locked-run-contract.md`](locked-run-contract.md) (child-run semantics).
+> **Status:** active product and technical design
+>
+> **Product direction:** [`../../STRATEGY.md`](../../STRATEGY.md)
+>
+> **Ordered work:** [`../../TODO.md`](../../TODO.md)
+>
+> **Scope:** AgentStack CLI contracts plus the t3code server and web client
 
-## 1. What we're building and why
+## Decision
 
-Today the panel is a **window** onto AgentStack governance (Overview / Workflow /
-Activity / Policy tabs, all read-only, plus a small closed set of write actions:
-`apply`, `guard install`, and — most recently — `trust-grant` / `trust-revoke`).
+t3code is AgentStack's primary graphical experience and launch channel.
+AgentStack will not maintain a separate embedded dashboard.
 
-The maintainer's goal is to turn it into a **control room** for non-power users:
+The integration is intentionally asymmetric:
 
-- **The CLI is for power users.** A normal t3code user should be able to set up
-  governance, pick what a session loads, and author + supervise workflows without
-  ever opening a terminal.
-- Three concrete experiences drive this doc:
-  1. **Onboarding a project that has no manifest at all** — a guided `init` in the UI.
-  2. **Choosing / changing the "profile"** (the skills + MCP/extensions a session
-     loads) when starting work.
-  3. **Authoring and supervising workflows** — design the multi-agent architecture
-     conversationally, then run it with a controllable "master" (map-reduce style).
+- **t3code owns presentation, navigation, and user interaction.**
+- **The AgentStack CLI owns plans, validation, consent, writes, recovery, and
+  enforcement.**
 
-This doc exists so a fresh session can implement it without re-deriving the
-security reasoning. **The reasoning is the hard part; the wiring is small.**
+The CLI remains a complete standalone product and automation interface.
+t3code makes the same capabilities easier to discover and use; it does not
+reimplement them.
 
-## 2. The one principle that governs the whole design
+## User promise
 
-Every feature we expose is exactly one of three kinds, and the kind decides where
-the enforcement lives:
+A developer using t3code should understand AgentStack through four jobs:
 
-| Kind | Examples | Rule |
-|---|---|---|
-| **Read** | run doctor, view a workflow run, list profiles, preview trust surface | Free. Build freely. |
-| **Select / act reversibly** | switch to an existing profile, start/abort a run, approve-next mapper | Cheap and safe — **as long as it is safe when the UI is bypassed and the RPC is called directly.** |
-| **Commit new surface** | `init` a manifest, define a new profile, save a new workflow | This is a **trust event.** It always converges on the *same* review-and-confirm gate. |
+1. **Setup** — detect coding tools and import the capabilities already present.
+2. **Toolset** — choose the named set needed for this project or task.
+3. **Status** — know whether the environment is ready and what to do next.
+4. **Undo** — safely reverse an AgentStack-managed change.
 
-**The resolution to "don't expose trust as a UI feature":** trust is not a feature
-you bolt on — it is the **checkpoint that every category-3 flow ends at.** Init
-flows into it. Save-profile flows into it. Save-workflow flows into it. You build
-the review-and-confirm surface **once** and every write flow walks into it. That is
-exactly what content-bound trust is supposed to feel like: the honest last step of
-every edit.
+The first successful journey is:
 
-### 2.1 Non-negotiable invariants (these gate every PR in this lane)
+```text
+open project
+    ↓
+review detected tools and capabilities
+    ↓
+apply one recommended setup
+    ↓
+see Ready
+    ↓
+launch an agent with the selected toolset
+```
 
-These restate the project's [`CLAUDE.md`](../../CLAUDE.md) rules for this feature set.
-A change that violates one is wrong even if a task description asks for it.
+It must not require knowledge of locks, policy, gateways, Docker, confinement,
+or workflows.
 
-1. **Enforcement lives in the CLI/server, never in the frontend.** The UI may
-   *render* a guarantee (e.g. "we showed you the surface before the grant button"),
-   but the guarantee itself must hold when a second RPC client, a future refactor,
-   or an attacker calls the endpoint directly with no UI in the loop. If the safety
-   of an action depends on the UI having shown something first, push that check
-   **down** into the CLI before wiring the button. (This is the exact gap flagged in
-   the current trust-from-UI commit — see §7.)
-2. **Untrusted means inert.** No manifest / untrusted digest ⇒ no skill loads, no
-   MCP spawns, no secret resolves. The UI's honest state for an ungoverned project
-   is "not governed yet — set it up?", never a silent partial load.
-3. **Any pinned byte changes ⇒ re-gate.** Editing a manifest/profile/workflow from
-   the UI changes bytes, so it re-gates and must pass the review before it goes live.
-4. **The UI can never produce an effective policy more permissive than the machine
-   ceiling.** Every child run intersects with the machine policy *per child*. The UI
-   shows **effective** (intersected) capability, not requested.
-5. **No edit-and-continue on recorded evidence.** The master may inspect / approve /
-   abort / rerun. It may **never** inject or edit a step result — that defeats the
-   digest-verified journal (rule 4 in CLAUDE.md).
-6. **Clients never send filesystem paths.** Every RPC takes `{projectId, threadId?}`;
-   a server-side resolver derives the workspace root (existing pattern —
-   `resolveAgentstackWorkspaceRoot` in t3code `ws.ts`). The CLI is never pointed at a
-   client-supplied path.
-7. **CLI output is untrusted input.** args-array spawn (no shell), bounded stdout,
-   timeouts, schema-decoded with graceful null on mismatch. Display strings are
-   sanitized (`text::sanitize_line`) CLI-side.
+## Progressive disclosure
 
-## 3. What already exists to build on (do not re-implement)
+Safety runs from the beginning, but its vocabulary appears only when relevant.
 
-Grounded in the current tree — most of the spine is shipped:
+| Product moment | Primary UI | Deeper detail |
+| --- | --- | --- |
+| New local project | detected tools, proposed setup, files that will change | adapter and ownership details |
+| Normal use | selected toolset, readiness, one next action | pins and delivery mode |
+| Unfamiliar repository content | Review this project | content-bound digest and exact declared surface |
+| Denied action | what was blocked, what is protected, safe next action | matching rule and enforcement limits |
+| User asks for isolation | More protection | gateway, sandbox, lockdown, egress |
+| Investigation | activity and posture | raw reports and enforcement matrix |
 
-**AgentStack CLI:**
-- `agentstack init` ([`init.rs`](../../crates/cli/src/commands/init.rs)) — "never a
-  blank page": detects installed CLIs, imports their MCP servers into one manifest,
-  lifts inline secrets into `${REF}`s (destination: gitignored `.env` default /
-  keychain / skip). **Every write is captured in the `restore` undo ledger.**
-- `agentstack trust <path> --preview` ([`trust.rs`](../../crates/cli/src/commands/trust.rs))
-  — emits the runtime consent surface as JSON (state, re_trust, servers with
-  run/contact target, secrets, category counts), grants **nothing**. Read-only.
-- `agentstack doctor --json` ([`doctor.rs`](../../crates/cli/src/commands/doctor.rs))
-  — now carries a machine-readable top-level `trust` field
-  (`trusted` / `drifted` / `untrusted` / null).
-- `agentstack session start <profile> [--scope]` / `session end [--all]` /
-  `session freeze` ([`session.rs`](../../crates/cli/src/commands/session.rs)) —
-  **ephemeral, revertible** sessions ("clean-at-rest" mode). If the dashboard dies
-  mid-session, `session end` still reverts. `freeze` snapshots a live session into a
-  replayable profile.
-- `agentstack use <profile> --scope project --write` — **static** activation
-  (materialize `.mcp.json` / `.claude/skills/` on disk, gitignored managed block).
-- `Profile { servers, skills, harness }`
-  ([`model.rs`](../../crates/core/src/manifest/model.rs)) — a profile already selects
-  a subset of servers + skills, **and already carries a per-role `harness`** (the CLI
-  a workflow role launches). Multi-CLI-per-agent is anticipated in the model.
-- Workflow engine: `workflow run|report|list` (`--json` on report/list), the
-  digest-pinned child-run drive loop, and **Stage F replay**
-  ([`workflow_replay.rs`](../../crates/cli/src/commands/workflow_replay.rs)) —
-  re-runs a workflow against its digest-verified journal and refuses on divergence.
-- Recorder — per-run `events.jsonl` (`StepSpawned`, step results, `watchdog_kill`,
-  `WorkflowResumed`) + global call audit.
+Rules:
 
-**t3code panel (branch `agentstack-panel`):**
-- `AgentstackCli` service, args-array spawn, bounded/timed, schema-decoded.
-- RPCs: `agentstack.status` / `.activity` / `.workflow` / `.trustPreview`
-  (`orchestration:read`), `agentstack.action` (`orchestration:operate`).
-- `AgentstackActionKind` closed enum → fixed argv (client never supplies a command line).
-- The four-tab panel + guard-denial card + trust review dialog.
+1. Do not show a decision unless its consequence matters now.
+2. Apply safe defaults when no user choice is needed.
+3. Never show a generic denial. Include the blocked action, reason, protected
+   boundary, and exact safe next action.
+4. Present one recommended path before alternatives.
+5. Keep internal names in a Details view and machine-readable payloads.
+6. Simplification may hide vocabulary, never enforcement limits.
 
-## 4. Lane A — onboarding a project with no manifest
+Preferred labels:
 
-**Scenario:** user opens a new thread on a project directory that has no
-`.agentstack/agentstack.toml`.
+| Internal term | Beginner label |
+| --- | --- |
+| profile | Toolset |
+| doctor | Status / Check setup |
+| session | Use temporarily |
+| trust grant | Review this project |
+| policy / sandbox / lockdown | More protection |
+| restore record | Undo |
 
-**Honest current behavior:** the project is inert. Panel state = "not governed."
+## Architecture
 
-**Flow to build:**
-1. Panel detects no manifest (from `doctor --json` with no project ⇒ `trust: null`,
-   or a dedicated probe) and shows a **"Set up governance"** call to action.
-2. **Init preview (read).** New RPC `agentstack.initPlan` → a new CLI mode
-   `agentstack init --plan --json` that runs init's **detection** only and returns,
-   as data: which CLIs were found, which MCP servers would be imported, which inline
-   secrets would be lifted and their proposed destinations. **Writes nothing.**
-3. UI renders the plan with the choices init already owns: *import these servers?*
-   *secrets → [.env / keychain / skip]?*
-4. **Commit (write, trust event).** New action-enum value `init-apply` → fixed argv
-   `init` with the chosen secret-store flag. Init writes the manifest (transactional,
-   `restore`-undoable).
-5. **The flow does not end at "manifest written."** The freshly-written manifest is
-   **untrusted**, so the last screen is the existing **trust review dialog**
-   (`trust --preview` → confirm). Init-in-UI *terminates in the consent gate.*
+```text
+t3code web client
+      │ typed RPC; no argv or arbitrary path
+      ▼
+t3code server
+      │ resolves workspace identity
+      │ negotiates schema/action versions
+      │ maps a closed action enum to fixed argv
+      ▼
+AgentStack CLI
+      │ plans, validates, previews, writes, records, restores
+      ▼
+manifest · native configs · machine state
+```
 
-**CLI work:** add `init --plan --json` (detection-only, structured output). Reuse the
-existing discovery/lift code paths; do not fork them.
-**t3code work:** `agentstack.initPlan` (read RPC), `init-apply` action value, the
-setup wizard component, then hand off to the existing trust dialog.
+### Browser boundary
 
-## 5. Lane B — choosing / changing the session profile
+The browser may send:
 
-**Scenario:** user wants a different set of skills + MCP/extensions loaded for this
-session.
+- a known workspace identifier already owned by the t3code server;
+- a closed action name;
+- typed selections constrained by the prior read response;
+- a consent digest returned by the exact preview being approved.
 
-**The critical distinction (build the UI around it):**
-- **Selecting** an existing, already-trusted profile ⇒ cheap, safe, ephemeral. This
-  is the frictionless everyday action. Build it first.
-- **Defining** a new profile (a skill+server combination never pinned) ⇒ a manifest
-  edit ⇒ a trust event ⇒ routes through the review.
+The browser may not send:
 
-**Flow to build:**
-1. **List (read).** New RPC `agentstack.profiles` → `agentstack use --list --json`
-   (or a small dedicated `profile list --json`): declared profiles + their
-   skills/servers/harness + a per-profile "all skills pinned & trusted?" flag.
-2. **Select (act, reversible).** Thread-start profile picker → new action value
-   `session-start` → `session start <profile> --scope <default>`. Ephemeral;
-   `session end` reverts. Pairs with a `session-end` action.
-   - **Fail-closed rule:** if the chosen profile references skills/servers whose
-     bytes are not pinned/trusted, `session start` must refuse and route to the
-     review — never silently load unpinned content (invariant 2).
-3. **Define (write, trust event).** "New profile" editor (pick skills + servers +
-   harness) → writes `[profiles.<name>]` to the manifest → re-lock → trust review.
+- an arbitrary filesystem path;
+- command-line arguments;
+- an executable or shell string;
+- a policy fragment;
+- a secret value;
+- a request to bypass a guard or machine ceiling.
 
-**CLI work:** structured `--json` profile listing incl. a pinned/trusted flag per
-profile; confirm `session start` fails closed on unpinned surface (add a test if the
-guarantee isn't already enforced).
-**t3code work:** `agentstack.profiles` read RPC; `session-start` / `session-end`
-action values; the picker (cheap path) and the profile editor (trust path).
+### Server boundary
 
-## 6. Lane C — workflow authoring + the controllable master
+The t3code server:
 
-This is the largest lane. Two halves: **authoring** (design-time) and **the master
-console** (run-time).
+- resolves the workspace root from its own session state;
+- finds the AgentStack binary through the approved installation path;
+- enforces a timeout and output bound;
+- decodes explicit JSON schemas;
+- maps actions to fixed argument vectors;
+- requests the dedicated AgentStack administrative authorization for sensitive
+  writes;
+- returns structured errors, never raw upstream terminal output as trusted UI.
 
-### 6.1 Authoring (design-time, pre-trust — cheap and conversational)
+### CLI boundary
 
-The user describes what they want; the model proposes a workflow architecture; they
-iterate on the DAG, swap an agent's CLI/model, add skills/instructions per agent.
-**None of this is committed, so no gate is needed** — it's design work.
+The CLI repeats every precondition independently. A correct frontend is not
+part of a security proof.
 
-- Represent the in-progress design as an **architecture object** the UI renders
-  (agents/roles, their CLI (`harness`), model, skills, instructions, and the
-  map/reduce edges). This is a conversational artifact, not yet manifest content.
-- **Commit = trust event.** "Save workflow" produces the workflow script + declared
-  `[workflows.<name>]` roles pinned into the manifest+lock. The engine already
-  governs this surface: **workflow drift and role-widening block trust until
-  re-locked.** So each agent's CLI/model/skills/instructions is exactly the pinned
-  surface the review dialog shows — the human consents to that shape.
-- **Per-agent capability is intersected per child (invariant 4).** The authoring UI
-  must show each agent's **effective** capability (after machine-ceiling
-  intersection), not what its role *requested*, or users will be baffled when a
-  mapper can't reach something its role "declared."
+Every write remains:
 
-**Open question (§9):** is the authored script *generated* (model writes JS the Boa
-engine runs) or *assembled* from a constrained template? Generated scripts are
-hostile input the engine already sandboxes, but generation-in-UI widens what a
-"save" can pin. Lean template-first; revisit.
+- dry-run or previewable;
+- restricted by machine policy;
+- bound to the server-resolved project;
+- recorded when it changes AgentStack-managed state;
+- recoverable where the underlying operation supports recovery.
 
-### 6.2 The master console (run-time)
+## Versioned contracts
 
-The maintainer's Hadoop mental model maps almost one-to-one onto the shipped engine:
+Every read response begins with:
 
-| Hadoop | AgentStack workflow engine (already built) |
-|---|---|
-| Master tracks per-split metadata | Recorder journals every `StepSpawned` + result per child run |
-| Mapper / reducer processes | Governed child runs — each a locked run with a digest-pinned request |
-| Master reruns a failed/killed task | **Stage F replay** — reruns against digest-verified history, refuses on divergence |
-| Master kills a hung task | `watchdog_kill` |
-| Rebuild lost split data | Child-run stdout artifact verified against recorded `sha256` |
+```json
+{
+  "schema_version": 1,
+  "features": ["init-plan", "profiles-v1", "status-v1", "restore-last"]
+}
+```
 
-**So "make the master controllable" = expose existing engine state + a safe verb set:**
+Feature names describe usable end-to-end contracts, not the presence of one
+field. t3code must disable an action and show the required upgrade when its
+contract is absent.
 
-- **Inspect** (read): live monitor — stages, per-agent state/role/tool-counts, pinned
-  digest, done/running. Most of this exists in the panel's Workflow tab; extend it
-  with a replay-style step timeline over `workflow report --json`.
-- **Approve-next** (act): breakpoint-before-spawn — pause the drive loop and let a
-  human approve/deny the next mapper spawn. This is human-in-the-loop **admission**,
-  on-brand for a governance tool. Approve/deny **only**.
-- **Abort** (act): stop a run (maps to `watchdog_kill` / existing kill path).
-- **Rerun-from-step** (act): re-run a failed/killed child against the verified
-  journal (Stage F replay).
+Compatibility rules:
 
-**Forbidden (invariant 5):** edit-a-result-and-continue. Injecting a fabricated
-mapper output defeats the digest journal. A master that can fabricate a split's data
-is a corruption vector, not a master. "Pause, edit the request, continue" is a
-request the engine never admitted — deny by construction.
+- Unknown response fields are ignored.
+- Missing required fields fail the affected feature closed.
+- An unknown schema major disables the panel with an upgrade message.
+- A newer UI never guesses flags for an older CLI.
+- A newer CLI never assumes an older UI performed a missing review step.
 
-**CLI work:** a run-control surface for approve-next (requires an engine pause point
-before spawn — design against the drive loop, likely the biggest single piece);
-structured live run state for the monitor; confirm rerun rides Stage F unchanged.
-**t3code work:** the master console UI; `workflow.*` action values (approve / deny /
-abort / rerun-from-step) as fixed-argv, each `orchestration:operate` or the new admin
-scope (§7).
+## Read contracts
 
-## 7. Cross-cutting: the scope + consent-binding decision (do first)
+### Setup plan
 
-Two open items from the current trust-from-UI work block this whole lane and should
-be settled before more write actions land:
+Backed by `agentstack init --plan`. It returns:
 
-1. **Dedicated `agentstack:admin` scope.** Trust grant/revoke, `apply`, `guard
-   install`, and the workflow control verbs all touch the **security control plane**.
-   They currently reuse `orchestration:operate` — the same tier as `vcs.pull`. Adding
-   trust and workflow-master control to that tier makes a dedicated
-   `agentstack:admin` scope (in t3code's `AuthAdministrativeScopes`) overdue, not
-   optional. **Decide before adding more action values.**
-2. **Bind consent to what was shown.** Today "the user saw the surface before
-   granting" lives only in a React `&&`; the server will run `trust --yes` on request
-   regardless (invariant 1 gap). Fix: `trust --preview` emits the previewed **surface
-   digest**, and `trust --yes` requires a matching `--consented-digest` or refuses.
-   Then "a human reviewed this exact surface" is CLI-enforced, not UI-rendered. Apply
-   the same pattern to any future "review then commit" action (init, save-profile,
-   save-workflow).
+- coding tools found;
+- importable servers, skills, and instructions;
+- source/origin for each imported item;
+- proposed manifest location;
+- proposed native destinations;
+- secret reference names, never values;
+- unsupported or lossy fields;
+- warnings and blockers;
+- a stable plan identity if a later write needs content binding.
 
-Until these land, keep the read-only slices shippable independently (they already are).
+The UI groups this as Tools found, Capabilities found, Files AgentStack will
+manage, and Values still needed.
 
-## 8. Suggested sequencing
+### Toolsets
 
-Ordered by value-to-risk; each step is independently landable.
+Backed by `agentstack use --list --json`. Each row returns:
 
-1. **Settle §7** (admin scope + consent-digest binding). Unblocks everything else and
-   closes the current UI-enforcement gap.
-2. **Lane B select-only** — profile picker over `agentstack.profiles` +
-   `session-start`/`session-end`. Highest value, lowest risk (ephemeral, reversible,
-   selecting already-trusted surface). **Ship first.**
-3. **Lane A** — `init --plan --json` + setup wizard → hand off to the trust dialog.
-4. **Lane C inspect** — the master monitor / replay timeline (read-only) over
-   existing `workflow report --json`. No new write surface.
-5. **Lane C control** — approve-next / abort / rerun. Requires the engine pause
-   point; supervised, line-by-line-reviewed work.
-6. **Lane B / Lane C authoring** — profile editor and workflow authoring (the
-   category-3 write flows), each terminating in the review gate.
+- stable profile identifier;
+- display name;
+- selected harness;
+- selected servers and skills;
+- readiness;
+- trust/pin status when relevant;
+- whether it is currently active;
+- one actionable reason when it cannot start.
 
-**Note on t3code:** the `agentstack-panel` branch cannot merge upstream yet (t3code
-isn't accepting contributions) and is already 6 commits deep on a fast-moving repo.
-Keep the **read-only slices** (init plan, profile list, master monitor) splittable
-from the **write slices**, so the low-friction parts can land alone when upstream
-opens.
+The UI says Toolset. Details may say that the stored object is a profile.
 
-## 9. Open questions to resolve during implementation
+### Status
 
-- **Admin scope shape** — new `agentstack:admin`, or split read/operate/admin three
-  ways? (§7.1)
-- **Consent-digest mechanics** — what exactly is hashed for the previewed surface,
-  and how does `--yes` verify it without re-deriving a second source of truth? (§7.2)
-- **Workflow authoring: generated vs templated script.** (§6.1) Lean templated.
-- **Where does the engine pause for approve-next?** A pre-spawn admission hook in the
-  drive loop — design against Stage F so a paused run is still resumable/replayable.
-- **Static vs clean-at-rest for UI profile changes.** Session-based (ephemeral,
-  `session start/end`) is the safer default for the UI; `use --write` (static
-  materialization) is the power-user path. Confirm the UI only ever drives the
-  ephemeral path.
-- **Multi-CLI child runs and the machine ceiling.** Confirm the per-child
-  intersection already applies to workflow child runs of differing harnesses, and
-  that the monitor surfaces the effective (not requested) capability.
+Backed by a stable status/doctor JSON contract. The primary response is:
 
-## 10. Verification expectations
+- overall state: `needs_setup`, `needs_attention`, `ready`, or `active`;
+- selected toolset;
+- concise findings;
+- exactly one recommended next action;
+- optional deeper sections.
 
-Per CLAUDE.md — one focused witness per new security-relevant behavior, not
-exhaustive suites:
+The first panel view must not dump every doctor section. Advanced and
+informational checks stay collapsed unless they block the current action.
 
-- `init --plan --json` writes nothing (assert manifest absent after).
-- `session start` on an unpinned-surface profile refuses (fail-closed).
-- consent-digest: `trust --yes` refuses a mismatched/absent `--consented-digest`.
-- master control: approve-next denial spawns nothing; rerun-from-step still refuses
-  on journal divergence (Stage F invariant intact).
-- effective-capability: a child whose role requests more than the ceiling shows the
-  intersected capability, and cannot exceed it at run time.
-- t3code side: each new action value maps to fixed argv; each new read RPC degrades
-  gracefully when the CLI is absent/older (existing `NotFound` pattern).
+### Activity and recovery
+
+Read contracts expose:
+
+- the last AgentStack-managed writes;
+- active sessions/runs;
+- the exact restore identifier;
+- honest evidence coverage labels.
+
+Activity is not prevention and must not be presented as proof that ungoverned
+paths were observed.
+
+## Action contract
+
+The first slice permits only:
+
+```text
+apply_reviewed_setup
+check_status
+start_toolset
+end_toolset
+restore_last_write
+grant_reviewed_project
+revoke_project_grant
+```
+
+Each action has a server-owned mapping to a fixed AgentStack command. Adding an
+action requires:
+
+1. a documented user outcome;
+2. a stable CLI contract;
+3. direct-call tests that bypass the frontend;
+4. recovery behavior;
+5. an authorization decision;
+6. version negotiation.
+
+There is no generic `run_command` action.
+
+## Consent and administrative authority
+
+Project review has two independent halves:
+
+1. **Content consistency.** The preview and `surface_digest` derive from one
+   immutable byte snapshot. The grant returns that digest. The CLI refuses a
+   missing, wrong, or stale digest.
+2. **Human authority.** t3code requires the dedicated `agentstack:admin`
+   authorization for trust, machine-guard, workflow-control, or equivalent
+   sensitive writes.
+
+The digest does not prove a human looked. Administrative scope does not prove
+the bytes stayed unchanged. Both checks are required.
+
+If either half is unavailable, the panel fails closed and gives the exact
+terminal or upgrade path.
+
+## Denial experience
+
+A structured denial contains:
+
+```json
+{
+  "title": "Could not read a protected file",
+  "action": "Read project credentials",
+  "protected": "Machine secret boundary",
+  "reason": "Blocked by the machine filesystem ceiling",
+  "next_action": {
+    "label": "Use a secret reference instead",
+    "kind": "show_help",
+    "target": "secret-references"
+  },
+  "details": {
+    "rule": "machine.filesystem.deny",
+    "posture": "HOST / PROTECTED"
+  }
+}
+```
+
+The UI renders the first four fields immediately. Rule and posture belong in
+Details. A next action that changes authority must use another closed action;
+it cannot be a generated command string.
+
+## Delivery plan
+
+### Slice 0 — correctness prerequisites
+
+- Complete immutable consent-snapshot review.
+- Complete consent-digest plumbing in t3code.
+- Establish `agentstack:admin`.
+- Add CLI/UI compatibility failures.
+
+### Slice 1 — launch experience
+
+- Capability negotiation.
+- Setup plan.
+- Reviewed apply.
+- Concise status.
+- Restore last write.
+- Parity tests against the terminal journey.
+
+### Slice 2 — recurring use
+
+- Toolset picker.
+- Start/end temporary activation.
+- Active-state recovery when t3code closes or restarts.
+- Launch an agent with the selected toolset.
+
+### Experimental — t3code MCP workflow bridge
+
+t3code's MCP may eventually serve as an optional transport for launching and
+supervising other coding harnesses from an AgentStack workflow. This is useful
+only if it reduces duplicated harness integration while preserving the exact
+same authority path.
+
+AgentStack must first resolve, admit, and freeze the child `ExecutionPlan` and
+`AuthorityGrant`. The MCP call may receive only a narrow launch request or
+opaque reference to that admitted plan. It must not accept browser-supplied
+argv, workspace paths, policy, secret values, or authority. The response must
+provide a stable child identity, status, cancellation, result, and evidence
+linkage.
+
+This is not part of the launch experience. It requires capability negotiation,
+fails closed when unavailable or incompatible, and keeps direct CLI child
+launch as the reference implementation and fallback. The research and witness
+tests are tracked in [`../../TODO.md`](../../TODO.md#t3code-mcp-harness-bridge--research-only).
+
+### Slice 3 — contextual safety
+
+- Review unfamiliar project content.
+- Structured denial cards.
+- More protection entry point.
+- Honest enforcement/posture detail.
+
+### Deferred
+
+- Profile authoring.
+- Workflow authoring and supervision.
+- Generic policy editing.
+- Secret-value entry in the browser.
+- Organization administration.
+
+These require evidence from the first two slices and their own narrow designs.
+
+## Acceptance criteria
+
+The integration is ready for launch when:
+
+- a new user can reach Ready from t3code in under five minutes;
+- the terminal and t3code produce the same setup plan and resulting files;
+- no arbitrary path or argv crosses the browser boundary;
+- older/newer CLI and UI combinations fail with useful upgrade guidance;
+- every material write previews its scope and has a visible recovery path;
+- every denial explains the safe next action;
+- normal setup requires no advanced security decision;
+- direct RPC tests prove the CLI/server checks still hold without the UI;
+- the CLI remains fully usable when t3code is absent.

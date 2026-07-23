@@ -1,5 +1,5 @@
 //! Apply history: a per-apply snapshot of every target file we were about to
-//! overwrite, so a bad apply is reversible via `restore` (and the dashboard's
+//! overwrite, so a bad apply is reversible via `restore` (and t3code's
 //! read-only Activity tab lists each entry). Each `apply`
 //! that writes records one entry under `~/.agentstack/history/<id>.json` holding
 //! the *pre-write* content of each touched file. Undo restores those bytes (or

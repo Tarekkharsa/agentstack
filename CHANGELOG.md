@@ -4,6 +4,26 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## Unreleased
+
+### Changed
+
+- AgentStack now positions portability, toolsets, lifecycle diagnosis, and
+  recovery as the primary product value. Security remains the enforced
+  foundation and appears progressively when an action makes it relevant.
+- t3code is the primary graphical integration and launch direction. The CLI
+  remains the complete standalone interface and the sole authority for plans,
+  writes, consent, recovery, and enforcement.
+
+### Removed
+
+- The embedded `agentstack dashboard` command and its bundled web assets were
+  retired to avoid maintaining a second UI. Reusable read-only snapshot data
+  remains available to the MCP and t3code integration paths.
+- Superseded audits, roadmap drafts, implementation memories, and the separate
+  history ledger were removed. `STRATEGY.md`, `TODO.md`, and this changelog now
+  have distinct, non-overlapping roles.
+
 ## v0.15.0 — 2026-07-21
 
 **Skills become a governed supply chain.** This release closes the full

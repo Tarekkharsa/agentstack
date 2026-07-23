@@ -1,9 +1,12 @@
 # Contributing to agentstack
 
-Thanks for looking under the hood. agentstack is a solo-maintained, pre-1.0
-security tool; contributions are welcome, and the bar that matters most is
-the one the code already holds itself to: **claims match enforcement, and
-security claims ship with a test that witnesses them.**
+Thanks for looking under the hood. AgentStack is a solo-maintained, pre-1.0
+cross-CLI environment manager for AI coding tools. It keeps one portable
+configuration usable across otherwise incompatible clients, with trust,
+policy, locking, and evidence as its security foundation. Contributions are
+welcome, and the bar that matters most is the one the code already holds
+itself to: **product behavior stays understandable, claims match enforcement,
+and security claims ship with a test that witnesses them.**
 
 ## Orientation
 
@@ -13,9 +16,9 @@ Read in this order:
    boundaries.
 2. [`docs/ENFORCEMENT.md`](docs/ENFORCEMENT.md) — what is actually enforced,
    per mode. When any doc disagrees with it, it wins.
-3. [`STRATEGY.md`](STRATEGY.md) and [`TODO.md`](TODO.md) — the phase gates
-   and the current work queue. Please don't open PRs for later-phase work;
-   the ordering is deliberate.
+3. [`STRATEGY.md`](STRATEGY.md) and [`TODO.md`](TODO.md) — the product
+   direction, outcome gates, and current work queue. Please don't open PRs for
+   later-stage work; the ordering is deliberate.
 
 ## Build and test
 

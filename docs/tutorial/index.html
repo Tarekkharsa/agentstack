@@ -360,7 +360,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
         <div id="callAudit" class="mono" style="font-size:11.5px;color:var(--muted)"></div>
       </div>
     </div>
-    <p class="lede" style="margin-bottom:14px"><strong>Then see what actually happened.</strong> Two records: the per-run <em>flight recorder</em> (<code class="sm">report run &lt;id&gt;</code>) and the global <em>call audit log</em> — every brokered call, argument digests only, never values. <code class="sm">dashboard</code> shows it all read-only in a browser; <code class="sm">optimize</code> turns the signals into evidence-backed fixes.</p>
+    <p class="lede" style="margin-bottom:14px"><strong>Then see what actually happened.</strong> Two records: the per-run <em>flight recorder</em> (<code class="sm">report run &lt;id&gt;</code>) and the global <em>call audit log</em> — every brokered call, argument digests only, never values. <code class="sm">optimize</code> turns the signals into evidence-backed fixes.</p>
     <div class="term" style="margin-bottom:8px" data-term="report" data-title="your-project — zsh"></div>
   </section>
 
@@ -443,7 +443,7 @@ var TERM={
     {cmd:'agentstack report runs',out:[['r-7f3a  claude-code  LOCKDOWN/ENFORCED  12m   38 calls  ok',W],['r-6c19  claude-code  HOST/PROTECTED     41m  112 calls  ok',W],['r-51b0  codex        HOST/ADVISORY       8m    9 calls  ok',W]]},
     {cmd:'agentstack report calls --since 7',out:[['github.create_issue      31 ok   0 denied',G],['postgres.query           64 ok   2 denied  (policy: machine layer)',A],['argument digests only — values are never stored',D]]},
     {cmd:'agentstack explain github',out:[['origin    official MCP Registry · pinned sha256:2b8e…',W],['policy    tools: 12 allowed, 2 denied · egress: api.github.com only',W],['secrets   may read ${GITHUB_TOKEN} — nothing else',W],['context   ~1.8k tokens per session',D]]},
-    {cmd:'agentstack dashboard',out:[['dashboard: http://127.0.0.1:4173  (read-only — every pane shows the CLI command instead of a button)',G]]}
+    {cmd:'agentstack optimize',out:[['3 recommendations · each includes evidence and an exact next action',G]]}
   ],
   undo:[]
 };
@@ -763,7 +763,7 @@ var CHEATS=[
   ['search / add from <id> --write','find in library + catalog + MCP Registry; apply --write renders it everywhere'],
   ['use <profile> --write','materialize one named subset of the manifest'],
   ['run --locked | --sandbox | --lockdown','climb the posture ladder to kernel-enforced'],
-  ['report runs | calls · dashboard · explain','flight recorder, audit log, read-only web view, vet-first'],
+  ['report runs | calls · optimize · explain','flight recorder, audit log, evidence-backed fixes, vet-first'],
   ['restore --last --write','the one undo verb for every recorded write']];
 function buildRecap(){
   var wrap=$('recapQuiz');

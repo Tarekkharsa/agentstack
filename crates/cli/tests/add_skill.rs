@@ -3,9 +3,8 @@
 // so opt the whole test file out of the workspace unwrap_used deny.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! End-to-end witnesses for `agentstack add skill <source>` (design:
-//! docs/design/add-skill-source-grammar.md §5): a preview mutates nothing
-//! persistent, one `--write` lands manifest + promoted store clone + lock
+//! End-to-end witnesses for `agentstack add skill <source>`. A preview mutates
+//! nothing persistent; one `--write` lands manifest + promoted store clone + lock
 //! pins, the taken-slot path pinned-re-resolves to the same commit, and the
 //! scan gate blocks hostile content before anything is offered.
 

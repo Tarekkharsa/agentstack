@@ -113,7 +113,7 @@ fn list(manifest_dir: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
-    // Report *where* each ref resolves (shared with `explain` + the dashboard).
+    // Report *where* each ref resolves (shared with `explain` + t3code).
     let sources = crate::secret::SecretSources::detect(&ctx.dir);
 
     println!("Secrets referenced by the manifest:\n");

@@ -681,7 +681,7 @@ pub struct SettingsSpec {
     /// Project settings file relative to the repo (e.g. `.claude/settings.json`).
     #[serde(default)]
     pub project: Option<String>,
-    /// Curated catalog of this CLI's known settings, so the dashboard can render
+    /// Curated catalog of this CLI's known settings, so external UIs can render
     /// typed controls (toggles / dropdowns) instead of a raw JSON box. Keys not
     /// listed here are still honored — they're just edited by hand.
     #[serde(default)]
@@ -703,7 +703,7 @@ pub struct SettingField {
     pub options: Vec<String>,
     #[serde(default)]
     pub help: Option<String>,
-    /// Section heading in the dashboard (e.g. "Permissions", "Git").
+    /// Section heading in external UIs (e.g. "Permissions", "Git").
     #[serde(default)]
     pub group: Option<String>,
     /// The CLI's own default, shown as a hint (not written unless chosen).

@@ -28,7 +28,7 @@ pub fn run(args: &StatsArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let mut footprints = Footprints::load().unwrap_or_default();
     if args.live {
         // One live discovery pass through the gateway (HTTP + stdio alike),
-        // then persist so every later stats/explain/dashboard read is offline.
+        // then persist so every later stats/explain/integration read is offline.
         let gw = crate::gateway::Gateway::from_manifest(manifest_dir);
         let measured = crate::footprint::measure(&gw.namespaced_tools());
         if measured.is_empty() {
@@ -47,7 +47,7 @@ pub fn run(args: &StatsArgs, manifest_dir: Option<&Path>) -> Result<()> {
 }
 
 /// The stats report as JSON — the same numbers `run` prints, in the shape the
-/// dashboard's Insights panel embeds. Best-effort: every source degrades to
+/// external integrations consume. Best-effort: every source degrades to
 /// empty rather than failing the snapshot.
 pub fn collect(manifest_dir: Option<&Path>) -> Value {
     let usage = Usage::load().unwrap_or_default();
@@ -59,7 +59,7 @@ pub fn collect(manifest_dir: Option<&Path>) -> Value {
 }
 
 /// Pure core: fold usage counts, live slots, and measured footprints into one
-/// ranked per-capability report. Shared by the CLI renderer and the dashboard,
+/// ranked per-capability report. Shared by the CLI renderer and integrations,
 /// so the two can never drift.
 fn build_report(
     usage: &Usage,

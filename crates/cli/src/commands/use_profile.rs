@@ -349,8 +349,8 @@ pub(crate) struct SkillsActivation {
     pub failed: Vec<(String, String)>,
 }
 
-/// Additive skill materialization for `agentstack add skill --write`
-/// (design: docs/design/add-skill-activation.md §1). A SECOND path beside
+/// Additive skill materialization for `agentstack add skill --write`: a second
+/// path beside
 /// `activate()`'s skills block — that block prunes and full-replaces state,
 /// which are load-bearing `use` behaviors this helper must NOT share:
 /// `plan()` runs with `previously_managed = &[]` (an add never prunes) and
@@ -467,7 +467,7 @@ pub fn activate(
 ) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
     // Default scope follows the manifest's home: project for a repo manifest,
-    // global only for the machine manifest (see docs/design/default-scope.md).
+    // global only for the machine manifest.
     let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
     let resolved_skills = &prepared.resolved_skills;
     let resolved_servers = &prepared.resolved_servers;
@@ -761,7 +761,7 @@ pub fn activate(
             // skills support at all, or (copilot-cli shape) it declares a
             // global skills dir but no project one. Both are REPORTED: a
             // resolved target that can't be materialized is never silently
-            // skipped (add-skill-activation design, follow-up landed).
+            // skipped because profile activation may legitimately omit it.
             let reason = if desc.skills.is_none() {
                 "skills not supported by this CLI"
             } else {

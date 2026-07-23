@@ -165,6 +165,8 @@ fn retired_top_level_verbs_are_gone() {
         vec!["agentstack", "lib", "migrate"],
         // `audit` was folded into `doctor --deep`; the top-level verb is gone.
         vec!["agentstack", "audit"],
+        // The embedded UI was retired in favor of the t3code integration.
+        vec!["agentstack", "dashboard"],
     ] {
         assert!(
             Cli::try_parse_from(&argv).is_err(),

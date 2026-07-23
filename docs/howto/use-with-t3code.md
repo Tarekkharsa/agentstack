@@ -4,93 +4,95 @@
 
 # Use with t3code
 
-For anyone driving their agents through [t3code](https://github.com/pingdotgg/t3code),
-the web GUI over Claude Code, Codex, Cursor, and OpenCode. Short version:
-**AgentStack already governs t3code sessions — you install nothing extra and
-change nothing in t3code.**
+t3code is AgentStack's primary graphical integration and launch channel. The
+goal is to make AgentStack useful where people already start and supervise
+Claude Code, Codex, Cursor, and OpenCode—without asking them to learn a second
+dashboard or the complete AgentStack command surface.
 
-## Why it works automatically
+## What works today
 
-t3code has no config surface of its own. Every session it starts loads the
-underlying CLI's native configuration — Claude Code reads its user, project,
-and local settings; Codex reads `CODEX_HOME`. Those are exactly the files
-AgentStack renders and the hooks it installs, so the manifest, the trust gate,
-and the [guard](../ENFORCEMENT.md) all apply to t3code sessions unchanged.
+AgentStack already manages the native configuration read by the coding CLIs
+t3code launches. Static activation and clean-at-rest sessions therefore apply
+to those launches without t3code reimplementing configuration logic.
 
-One thing to know: t3code's default mode for a new thread is **Full access**,
-which maps to each CLI's own bypass flag (`bypassPermissions` on Claude Code,
-`danger-full-access` on Codex). In that mode the CLI's built-in approval
-prompts are off — the AgentStack guard hook is the **only** pre-tool-use gate
-left standing. That is the point of the integration, but it means guard
-coverage matters more inside t3code than anywhere else.
-
-## Check your posture
+Run:
 
 ```bash
 agentstack doctor
 ```
 
-When `~/.t3` exists, doctor prints a `t3code (supervisor)` section that checks
-the two things able to quietly break the chain:
+When t3code is installed, doctor checks the supervisor integration, including
+provider guard coverage and home-directory overrides that can move a CLI away
+from the configuration AgentStack manages.
 
-- **Guard coverage per provider.** If the guard hook is missing for a CLI that
-  t3code drives, doctor warns that Full-access sessions on that provider run
-  ungated, and names the fix (`agentstack guard install`).
-- **Home overrides.** A t3code provider instance with a custom `homePath` (or
-  Codex `shadowHomePath`) relocates that CLI's whole config surface —
-  global-scope artifacts silently stop applying to its sessions. Doctor reads
-  `~/.t3/userdata/settings.json` and flags every enabled instance that does
-  this. Providers t3code supports but AgentStack has no adapter for are listed
-  as unobserved.
-
-## What a blocked call looks like
-
-Nothing extra to set up: guard denials happen inside the session, so t3code's
-own timeline shows them like any other tool outcome, and every denial lands in
-the AgentStack [audit log](see-what-happened.md).
-
-There is also an optional t3code branch (maintained in this project, pending
-upstream) that renders AgentStack natively in the t3code UI: a governance
-status panel in the chat header backed by `agentstack doctor --json`, and a
-purpose-built "Blocked by AgentStack Guard" card in the timeline showing the
-rule, the blocked target, and the audit note.
-
-One prompt that panel does **not** cause: the macOS keychain dialog some people
-see on first launch of a packaged t3code build ("… wants to use your
-confidential information stored in **t3code Safe Storage**") is t3code's own
-Electron `safeStorage`, not AgentStack. An unsigned or ad-hoc-signed local build
-re-prompts because its signature changes on every rebuild; a signed build asks
-once.
-
-## Per-run evidence (optional)
-
-By default t3code sessions land in the machine-global call audit. To give
-each t3code session its own run identity and `events.jsonl`:
+For per-session run identity, create a transparent launcher:
 
 ```bash
 agentstack shim make claude
 ```
 
-This writes an exec-through wrapper at `~/.agentstack/shims/claude`; point
-the t3code provider instance's **Binary path** setting at it (agentstack
-never edits t3code's settings itself). Every session that instance starts
-then mints a run id before becoming the real CLI — same pid, signals, and
-exit code as a direct launch. Inspect with `agentstack report runs` and
-`agentstack report run <id>`; doctor's t3code section confirms shimmed
-instances. One t3code session = one run.
+Point the matching t3code provider's binary-path setting at the generated shim.
+Each launched session then appears in `agentstack report runs` and receives its
+own run report.
 
-## Limits, honestly
-- t3code injects one MCP endpoint of its own (`t3-code`, for driving its
-  in-app browser preview) directly into each session, outside any config file.
-  It never appears in a manifest or lockfile; the guard still gates its tool
-  calls at runtime.
-- Doctor reads t3code's production state (`~/.t3/userdata`); a t3code built
-  and run from source in dev mode keeps separate state that is not checked.
-- `agentstack doctor` and `agentstack diff` render a project's servers to
-  compare against the on-disk configs, and rendering resolves that project's
-  secrets — so a project whose secrets live in the **OS keychain** can raise a
-  keychain prompt when a UI refreshes those reads. Projects that keep secrets in
-  `.env` or leave them as unresolved `${REF}` placeholders (`agentstack init
-  --secrets env` / `--secrets skip`) never touch the keychain on these read
-  paths. The audit, run, workflow-list, and trust-preview reads never resolve
-  secrets at all.
+## What is being built
+
+The native t3code panel is an active integration, not yet a complete shipped
+contract. The target experience is:
+
+1. **Setup** — show detected coding tools and importable capabilities from
+   `agentstack init --plan`.
+2. **Toolset** — choose a named profile and use it temporarily.
+3. **Status** — show readiness and one recommended next action.
+4. **Undo** — restore the last AgentStack-managed write.
+
+Safety appears progressively:
+
+- Normal local setup does not start with policy or sandbox configuration.
+- Unfamiliar repository content introduces a contextual “Review this project”
+  step bound to the exact previewed surface.
+- A blocked action explains what was blocked, what is protected, and the exact
+  safe next action.
+- Gateway, sandbox, and lockdown choices live under a later “More protection”
+  path with honest coverage labels.
+
+## The integration boundary
+
+t3code owns presentation. The AgentStack CLI owns decisions and authority.
+
+- Reads use explicit, versioned JSON schemas.
+- Workspace identity is resolved by the t3code server, never supplied as an
+  arbitrary browser path.
+- Writes are a closed enum of actions mapped to fixed CLI arguments.
+- The CLI repeats every validation and consent check.
+- Secret values never enter the browser payload.
+- A frontend bug may break the UI, but it cannot grant more authority.
+
+Trust is the clearest example. A preview returns a digest of the immutable
+content snapshot that produced it. A grant action must return that digest, and
+the CLI refuses stale or missing consent. The digest proves content
+consistency, not human attention; t3code's dedicated administrative
+authorization is the separate human-authority boundary.
+
+Until both halves are complete, trust writes stay disabled or fail closed in
+the panel. The terminal trust flow remains the authoritative path.
+
+## Limits
+
+- t3code injects its own browser-preview MCP endpoint directly into sessions,
+  outside native CLI configuration. AgentStack can gate calls on governed
+  paths, but the endpoint is not declared in the project manifest or lockfile.
+  That endpoint is not currently treated as a governed cross-harness workflow
+  launcher. Using t3code MCP for child launch and supervision is a separate
+  research item and must preserve AgentStack's admitted execution plan,
+  authority, cancellation, and evidence path.
+- t3code's most permissive provider modes can disable the coding CLI's own
+  approval prompts. AgentStack guard coverage matters more in those sessions;
+  doctor reports missing coverage.
+- A source-built t3code may keep state in a different location from the
+  packaged app, so doctor may not observe that development state.
+- Read and write parity across CLI/t3code versions is feature-negotiated.
+  Unsupported combinations must fail with an upgrade message, never guess.
+
+The CLI remains a complete standalone interface. t3code makes the same product
+easier to discover and use; it does not become a second implementation.

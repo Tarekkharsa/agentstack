@@ -5,7 +5,7 @@
 
 //! `restore` is the one undo verb: recorded history entries (which cover every
 //! category apply writes — servers, settings, hooks, instructions) are
-//! CLI-undoable by id prefix or `--last`, not only from the dashboard.
+//! CLI-undoable by id prefix or `--last`, not only from t3code.
 
 use std::fs;
 use std::sync::Mutex;

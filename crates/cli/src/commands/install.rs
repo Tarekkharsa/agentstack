@@ -202,7 +202,7 @@ fn sync(
 
 /// Turn a resolve failure into a line that names the likely upstream cause —
 /// a deleted repo or a vanished subpath should not read like a generic git
-/// hiccup (design follow-up: skills-sh-learnings §5, skip/deletion reasons).
+/// hiccup, while reporting skip and deletion reasons.
 fn classify_resolve_err(e: &anyhow::Error, skill: &crate::manifest::Skill) -> String {
     let chain = crate::text::sanitize_line(&format!("{e:#}"));
     let lower = chain.to_lowercase();

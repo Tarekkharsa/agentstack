@@ -134,7 +134,7 @@ pub fn extension_verdict(status: &ExtensionLockStatus) -> Verdict {
     }
 }
 
-/// The activation gate (`use --write`, session start, dashboard): block when
+/// The activation gate (`use --write`, session start, t3code): block when
 /// anything in the resolved set drifted or broke, naming every offender.
 /// `Unpinned` passes — first activation records the pin, which itself flips
 /// the trust digest (the consent chain, not a loophole).

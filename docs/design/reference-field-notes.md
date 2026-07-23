@@ -103,7 +103,7 @@ and the on-wire complement to `src/footprint.rs`'s static counter.
   unchanged and undelayed while a side buffer absorbs `tool_use` names and
   usage — so streamed turns report real `calls` (previously always 0 under
   streaming).
-- **Phase-1 guardrails.** The proxy is **observe-only** (it never injects or
+- **Guardrails.** The proxy is **observe-only** (it never injects or
   mutates the tools/system block, so the prompt-prefix cache stays warm), all
   accounting is **best-effort and fail-open** (a parse hiccup never delays or
   fails the proxied request — a forwarding error returns a 502 but keeps the

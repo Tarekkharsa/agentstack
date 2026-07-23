@@ -1,6 +1,6 @@
-//! Builds the JSON the dashboard renders — a full, read-only view of the
-//! manifest aggregated from the core library (PLAN §9f). Secret *values* are
-//! never included, only `${REF}` names and resolved/unresolved status.
+//! Builds a full, read-only JSON view of the manifest for t3code, MCP, and
+//! other external control surfaces. Secret *values* are never included, only
+//! `${REF}` names and resolved/unresolved status.
 
 use std::path::Path;
 
@@ -25,8 +25,7 @@ fn s(n: usize) -> &'static str {
     }
 }
 
-/// The state the dashboard loads: a full snapshot, or a "needs init" welcome
-/// payload when no manifest exists yet (so a brand-new user can start here).
+/// A full snapshot, or a "needs init" payload when no manifest exists yet.
 pub fn state(manifest_dir: Option<&Path>) -> Result<Value> {
     let base = crate::commands::project_base(manifest_dir)?;
     let dir = crate::manifest::resolve_manifest_dir(&base);
@@ -86,10 +85,9 @@ fn welcome(dir: &Path) -> Result<Value> {
     }))
 }
 
-/// The wire-proxy telemetry as JSON for the dashboard's Proxy panel — the same
+/// The wire-proxy telemetry as JSON for external control surfaces — the same
 /// ranked, per-capability view as `agentstack proxy report`. An empty log
-/// yields `requests: 0` with an empty `capabilities` list (an explicit
-/// empty-state the UI renders, never an error).
+/// yields `requests: 0` with an empty `capabilities` list.
 fn proxy_report() -> Value {
     let report = crate::proxy::aggregate(&crate::proxy::read_all());
     json!({
@@ -337,7 +335,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
                 .map(|s| s.fields.clone())
                 .unwrap_or_default();
             // The catalog keys actually present in the CLI's settings file right
-            // now, so the dashboard reflects reality by default (no manual import).
+            // now, so t3code reflects reality by default (no manual import).
             let live = d
                 .read_settings_value(&ctx.dir)
                 .ok()
@@ -414,7 +412,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
             };
             // The ownership-ledger artifacts in this dir, so a discovered entry
             // agentstack rendered can be labelled managed-by-agentstack (label
-            // only — read-only contract, no write path from the dashboard). A
+            // only — read-only contract, no write path from t3code). A
             // missing/unreadable ledger just yields no managed names.
             let managed: std::collections::BTreeSet<String> = d
                 .extensions_dir_for(scope, &ctx.dir)
@@ -449,7 +447,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
     let health = health_checks(&ctx, manifest, &global_drift, &global_non_selected_drift);
     let next_actions = next_actions(&secrets, &skills, &global_drift, &health);
 
-    // Live tracked harness runs (separate agentstack processes the dashboard can
+    // Live tracked harness runs (separate agentstack processes t3code can
     // observe and kill). For a profile-bound run, surface its trust footprint —
     // the servers + skills that live process can reach — inline.
     let now = std::time::SystemTime::now()
@@ -487,7 +485,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
     // Zero-files gateway: which detected harnesses carry the global
     // `agentstack mcp --auto-project` entry, and where this project stands with
     // the trust gate. Read-only mirror of `doctor`'s bridge section — the
-    // dashboard shows it; granting trust stays a terminal act.
+    // t3code shows it; granting trust stays a terminal act.
     let bridge_harnesses: Vec<Value> = ctx
         .registry
         .iter()
@@ -518,7 +516,7 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
     });
 
     // Read-only analysis panels — the same numbers the CLI's `proxy report`,
-    // `analyze`, `optimize`, and `stats` print, embedded for the dashboard.
+    // `analyze`, `optimize`, and `stats` print, embedded for t3code.
     // Each collector is best-effort (no `?`): a failure degrades to an empty
     // panel rather than sinking the whole snapshot. `statsReport` avoids the
     // existing `stats` key (activation counts consumed by the Usage card).
@@ -685,7 +683,7 @@ fn render_drift_targets(
     Ok(out)
 }
 
-/// A compact doctor-style health summary for the dashboard.
+/// A compact doctor-style health summary for t3code.
 fn health_checks(
     ctx: &crate::commands::Context,
     manifest: &crate::manifest::Manifest,

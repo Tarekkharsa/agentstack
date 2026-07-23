@@ -47,7 +47,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
   # This harness tests the GLOBAL-scope render path: it checks the fenced
   # $HOME and probes the live CLI from outside $proj, where project-scope
   # artifacts are invisible. The default scope is context-derived (project
-  # for a repo manifest, docs/design/default-scope.md), so every write here
+  # for a repo manifest), so every write here
   # must pin --scope global explicitly — assert the pins never get "cleaned
   # up" as redundant.
   grep -q 'as apply --scope global --write' "$0"

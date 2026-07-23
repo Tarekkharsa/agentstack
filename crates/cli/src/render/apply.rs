@@ -87,7 +87,7 @@ impl TargetPlan {
         diff::mask_secrets(&diff::render(&self.existing, &self.proposed), &self.secrets)
     }
 
-    /// Plain (uncolored) diff for the web dashboard — same secret redaction.
+    /// Plain (uncolored) diff for the web t3code — same secret redaction.
     pub fn diff_plain(&self) -> String {
         diff::mask_secrets(
             &diff::render_plain(&self.existing, &self.proposed),
@@ -240,7 +240,7 @@ pub fn plan_target_with_servers(
     let mut warnings: Vec<String> = Vec::new();
     for (name, server) in servers {
         // Definition-level target scoping (`[servers.X] targets = [...]`).
-        // Every plan — apply, diff, doctor drift, use, dashboard — flows
+        // Every plan — apply, diff, doctor drift, use, t3code — flows
         // through here, so the scoping can't disagree between commands. A
         // previously managed server that no longer applies falls into the
         // prune set below, like any other deselection.

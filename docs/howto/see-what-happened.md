@@ -5,8 +5,8 @@
 # See what your agents did
 
 For anyone who wants to inspect what their agent CLIs ran, called, and cost —
-and to vet a capability before relying on it. Prerequisite: none for `explain`
-and the dashboard; the run and call reports need activity agentstack actually
+and to vet a capability before relying on it. Prerequisite: none for `explain`;
+the run and call reports need activity AgentStack actually
 brokered (through the [gateway](../concepts.md) or `agentstack run`) — a plain
 host run that talks to servers directly leaves nothing to report.
 
@@ -17,7 +17,6 @@ host run that talks to servers directly leaves nothing to report.
 | What each capability costs you in context | `agentstack report usage` |
 | Every brokered tool call — ok, denied, errored | `agentstack report calls` |
 | What the `tools` block actually costs per turn, on the wire | `agentstack report wire` |
-| All of it in a browser, read-only | `agentstack dashboard` |
 | Concrete fixes from the signals already collected | `agentstack optimize` |
 | One server or skill, **before** you trust or rely on it | `agentstack explain <name>` |
 
@@ -33,8 +32,7 @@ agentstack report usage --live        # measure each server's tools/list on the 
 agentstack report calls --since 7     # brokered tool calls, last 7 days (--json to script)
 agentstack report wire                # per-turn token weight of the tools block
 
-# Look, don't change
-agentstack dashboard                  # read-only local web view (--no-open just prints the URL)
+# Turn evidence into next actions
 agentstack optimize                   # evidence-backed recommendations (--write applies the safe class only)
 
 # Before you trust or rely on a capability
@@ -51,12 +49,11 @@ runs (argument *digests* only, never values). The two context lenses differ:
 `report usage --live` estimates a server's `tools/list` footprint, `report wire`
 measures what the `tools` block actually costs on the wire.
 
-**Dashboard and optimize.** `agentstack dashboard` opens a read-only local view
-of everything above — runs, calls, usage, secrets, health — and never writes;
-where a control would live it shows the CLI command to copy, including the
-`agentstack restore` to [undo](undo.md) any write. `agentstack optimize` turns
-the same signals into recommendations, each carrying its evidence and the exact
-command or TOML; `--write` applies only the provably-inert safe class.
+**Optimize.** `agentstack optimize` turns the same signals into
+recommendations, each carrying its evidence and the exact command or TOML;
+`--write` applies only the provably-inert safe class. t3code is the primary
+graphical integration and consumes the same machine-readable reports as its
+AgentStack panels land.
 
 **Before you trust.** `agentstack explain <name>` is the vet-first command: it
 shows one server or skill's origin and provenance, whether it has drifted from
@@ -75,5 +72,4 @@ the [enforcement matrix](../ENFORCEMENT.md#the-matrix).
 
 - [Concepts](../concepts.md) — flight recorder, call audit log, posture
 - [Reference: live runs and `report`](../reference.md#live-runs-agentstack-run)
-- [Reference: the dashboard](../reference.md#dashboard)
 - [Reference: optimize](../reference.md#optimize-agentstack-optimize)

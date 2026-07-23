@@ -59,7 +59,6 @@ TREE = [
         ("Workflows (preview)", "workflows.html", "workflows"),
         ("Central library", "reference.html#the-central-library", "library"),
         ("Delivery modes", "concepts.html#delivery-modes", "modes"),
-        ("Dashboard", "reference.html#dashboard", "dashboard"),
     ], "deeper"),
     ("Protect", "$ agentstack trust · guard", [
         ("What trust does & doesn't", "enforcement.html#what-trusted-does-and-does-not-mean", "trustlimits"),
@@ -82,7 +81,6 @@ TREE = [
     ("Project", None, [
         ("Security review", "security-review-2026-07-11.html", "secreview"),
         ("Strategy", f"{GH}/blob/main/STRATEGY.md", "strategy"),
-        ("History", "history.html", "history"),
     ], "deeper"),
 ]
 

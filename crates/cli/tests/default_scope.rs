@@ -3,7 +3,7 @@
 // so opt the whole test file out of the workspace unwrap_used deny.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! The context-derived default scope (docs/design/default-scope.md): with no
+//! The context-derived default scope: with no
 //! `--scope`, a repo manifest writes PROJECT artifacts (the README quickstart
 //! promise — repo-local config plus the managed .gitignore block, nothing in
 //! the machine-global configs), while the machine manifest (~/.agentstack)

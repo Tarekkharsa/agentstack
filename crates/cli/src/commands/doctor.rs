@@ -35,7 +35,7 @@ enum Level {
 
 /// Accumulates every check result (grouped by section). Nothing prints while
 /// checks run — `print` renders the terminal report at the end, filtered by
-/// per-section relevance, and the dashboard renders `to_json` itself. The
+/// per-section relevance, and external integrations render `to_json`. The
 /// error/warning counters are display-independent: every check always runs and
 /// always counts, whether or not its section is shown.
 struct Report {
@@ -116,7 +116,7 @@ impl Report {
 
     /// Render the terminal report. Default: only sections that are relevant to
     /// this project or carry a warn/error. `show_all` (from `--all` or `--ci`)
-    /// prints everything, matching the JSON the dashboard gets.
+    /// prints everything, matching the complete JSON response.
     fn print(&self, show_all: bool) {
         let mut hidden = 0;
         for s in &self.sections {
@@ -234,8 +234,8 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
 }
 
 /// The same checks `doctor` runs, with fix/live off and nothing printed —
-/// the dashboard's Doctor pane. Deep stays on: the pane is an explicit
-/// "run the check-up" surface, so it keeps the content scan's findings.
+/// read-only integration entry point. Deep stays on because an explicit
+/// check-up surface must keep the content scan's findings.
 pub fn collect(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
     let mut report = Report::new();
     run_checks(
@@ -530,7 +530,7 @@ fn run_checks(
         let identity = state::manifest_identity(&ctx.dir);
         // Context-default scope: project for a repo manifest, global for the
         // machine manifest — the scope `apply` writes here when none is passed
-        // (see docs/design/default-scope.md).
+        //.
         let default_scope = Scope::default_for(&ctx.dir);
         // Owner-refreshed servers: the drift check renders with the owning app's
         // on-disk values, so an owned server that changed on disk is reported as

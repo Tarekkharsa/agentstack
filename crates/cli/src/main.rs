@@ -87,7 +87,6 @@ fn run() -> Result<()> {
         Command::Settings(args) => commands::settings::run(args, dir),
         Command::Export(args) => commands::bundle::run_export(args, dir),
         Command::Import(args) => commands::bundle::run_import(args, dir),
-        Command::Dashboard(args) => agentstack::dashboard::serve(args, dir),
         Command::Mcp(args) => agentstack::mcp_server::serve(
             dir,
             args.auto_project,
