@@ -399,3 +399,12 @@ What it must not imply:
 4. **Repeated use must be demonstrated.** At least three real tasks must be run
    on separate occasions and prove easier to repeat than their manual/native
    equivalents before workflows leave preview.
+   - **Occasion 1 of 3 — 2026-07-23, PASS.** The `examples/workflow-acceptance`
+     map→reduce→verify pipeline run end-to-end through the real binary against a
+     real `claude` (5 governed children): `pass: true`, **22.0s** total (vs the
+     22.6s ungoverned pure-Claude-Code bookend and the 86.4s interim courier
+     path — governed execution at ungoverned speed, and far easier to repeat
+     than the hand-wired courier orchestration it replaces). `check-evidence.sh`
+     green: 5 child runs, four gates each, exit 0 each, 5 distinct grant
+     digests, a genuine 3-way map overlap, and the rig `.mcp.json` absent
+     throughout. Occasions 2 and 3 must be genuinely separate sittings.

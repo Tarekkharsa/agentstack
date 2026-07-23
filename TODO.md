@@ -616,8 +616,13 @@ Before promoting them:
 - [ ] Review heap-growth and hostile string/regex behavior.
 - [ ] Preserve the out-of-thread watchdog and honest posture label.
 - [ ] Run at least three recurring tasks on separate occasions.
+  (1 of 3 done — 2026-07-23: workflow-acceptance map→reduce→verify, real
+  `claude` x5, PASS, 22.0s, evidence green; see design doc §9 gate 4.
+  Occasions 2 and 3 must be separate sittings.)
 - [ ] Confirm each task is easier to repeat than the equivalent native/manual
   orchestration.
+  (Occasion 1 evidence: 22.0s governed vs 86.4s hand-wired courier path it
+  replaces, at the 22.6s ungoverned bookend — governed for ~free.)
 - [ ] Confirm roles never widen their selected profile or machine ceiling.
 - [ ] Decide whether library distribution is necessary from demonstrated reuse.
 
