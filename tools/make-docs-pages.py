@@ -44,6 +44,7 @@ PAGES = [
     ("ENFORCEMENT.md", "enforcement.html", "matrix"),
     ("howto/add-a-server.md", "howto/add-a-server.html", "howto-server"),
     ("howto/add-a-skill.md", "howto/add-a-skill.html", "howto-skill"),
+    ("howto/name-a-toolset.md", "howto/name-a-toolset.html", "howto-toolset"),
     ("howto/trust-a-repo.md", "howto/trust-a-repo.html", "howto-trust"),
     ("howto/lock-down-a-run.md", "howto/lock-down-a-run.html", "howto-lockdown"),
     ("howto/team-setup.md", "howto/team-setup.html", "howto-team"),

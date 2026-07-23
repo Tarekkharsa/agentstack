@@ -356,7 +356,12 @@ This is the primary graphical path, not an optional dashboard.
   items on one line with one fix (lock → review → re-trust → retry); genuine
   drift keeps the accurate story. Gate unchanged, message-shape witness added.
   (`use --list --json` already carries one actionable reason per blocked row.)
-- [ ] Document one simple way to create a second profile from an existing setup.
+- [x] Document one simple way to create a second profile from an existing setup
+  (2026-07-23, `docs/howto/name-a-toolset.md`): the capabilities are already in
+  the manifest, so a second toolset just names a subset — add one
+  `[profiles.<name>]` block listing the servers/skills that task needs, then
+  activate it (`session start` or `use --write`); `session freeze --name` is
+  offered as the capture-what-I-used alternative.
 
 ### 2.2 Make temporary switching dependable
 
@@ -395,12 +400,21 @@ This is the primary graphical path, not an optional dashboard.
 
 ### 2.3 Present profiles through user tasks
 
-- [ ] Add two concrete examples:
-  - backend development versus incident response;
-  - minimal project profile versus broad personal profile.
-- [ ] Explain profiles as “named toolsets,” not as policy or workflow roles.
-- [ ] Recommend temporary sessions in the beginner path and keep static apply as
-  the stable/offline path.
+- [x] Add two concrete examples (2026-07-23, `docs/howto/name-a-toolset.md`):
+  backend development versus incident response (everyday DB/code + review
+  skills vs. read-only observability + runbook, activated for the page then
+  reverted); and a minimal committed project toolset versus a broad personal
+  machine-manifest toolset.
+- [x] Explain profiles as “named toolsets,” not as policy or workflow roles
+  (2026-07-23): the howto opens by defining a toolset as a named subset of the
+  setup you already have — "not a policy, a permission level, or a workflow
+  role" — and reiterates that a toolset only selects from capabilities that
+  already passed review, granting no extra authority.
+- [x] Recommend temporary sessions in the beginner path and keep static apply as
+  the stable/offline path (2026-07-23): the "Which activation" section names
+  `session start`/`end` the recommended beginner way to switch and `use
+  --write` the stable/offline path (CI, offline, long-lived checkout), both
+  reversible.
 
 ### 2.4 t3code toolset picker
 

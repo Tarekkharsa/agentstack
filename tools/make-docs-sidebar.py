@@ -46,6 +46,7 @@ TREE = [
         ("The manifest", "concepts.html#the-manifest-and-the-lockfile", "manifest"),
         ("Add a server", "howto/add-a-server.html", "howto-server"),
         ("Add a skill", "howto/add-a-skill.html", "howto-skill"),
+        ("Name a toolset", "howto/name-a-toolset.html", "howto-toolset"),
         ("Undo anything", "howto/undo.html", "howto-undo"),
         ("See what happened", "howto/see-what-happened.html", "howto-audit"),
         ("Trust a cloned repo", "howto/trust-a-repo.html", "howto-trust"),
