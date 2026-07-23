@@ -25,7 +25,9 @@ RIG="${2:?usage: check-evidence.sh <runs-before.txt> <rig-dir> [expected-childre
 EXPECTED="${3:-5}"
 RUNS_DIR="${AGENTSTACK_HOME:-$HOME/.agentstack}/runs"
 
-NEW_IDS=$(comm -13 <(sort "$BEFORE") <(ls "$RUNS_DIR" | sort))
+# Child runs only (r-…): since Stage E the engine also records its own
+# w-… evidence dir, which is not a child and has no gate events.
+NEW_IDS=$(comm -13 <(sort "$BEFORE") <(ls "$RUNS_DIR" | sort) | grep '^r-' || true)
 COUNT=$(echo "$NEW_IDS" | grep -c . || true)
 if [ "$COUNT" -ne "$EXPECTED" ]; then
   echo "FAIL: expected $EXPECTED new child runs, found $COUNT:" >&2
