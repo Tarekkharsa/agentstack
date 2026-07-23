@@ -773,6 +773,28 @@ mod tests {
     }
 
     #[test]
+    fn unbounded_recursion_hits_the_recursion_ceiling() {
+        // Witness 4 (recursion arm): the loop-iteration ceiling is not the only
+        // non-catchable RuntimeLimit set before untrusted code runs. Unbounded
+        // recursion hits the `recursion_limit` (400) and surfaces as the same
+        // non-catchable `IterationLimit` kind (see `classify_engine_error`); the
+        // script's own try/catch is bypassed, and the engine survives.
+        let script = "const meta = { roles: [] };\n\
+             function rec(n) { return rec(n + 1) + 1; }\n\
+             try { rec(0); } catch (e) { globalThis.__leaked = true; }\n\
+             return 1;";
+        let mut run = new_run(script).unwrap();
+        match run.step(Vec::new()) {
+            StepOutcome::Failed(err) => {
+                assert_eq!(err.kind, WorkflowErrorKind::IterationLimit)
+            }
+            other => panic!("expected Failed(IterationLimit), got {other:?}"),
+        }
+        // The engine survived: an independent run completes normally.
+        assert_eq!(run_to_done("const meta = { roles: [] };\nreturn 42;"), 42);
+    }
+
+    #[test]
     fn native_panic_fails_closed() {
         // Witness 6: a panicking native fails the run closed; no unwind escapes
         // the crate; the poisoned run refuses reuse; the process continues.
@@ -980,6 +1002,27 @@ mod tests {
             StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::Internal),
             other => panic!("expected Failed(Internal), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn deeply_nested_return_value_is_refused() {
+        // A2 (output direction): the `MAX_JSON_DEPTH` bound guards BOTH
+        // crossings. `deeply_nested_step_result_is_refused` proves the inbound
+        // path (child result -> JS); this proves the outbound path (a script
+        // that RETURNS a value nested past the ceiling). `settle_root` converts
+        // the fulfilled root through the same depth-bounded `js_to_value`, so
+        // the value is refused cleanly rather than overflowing the native stack.
+        let script = "const meta = { roles: [] };\n\
+             let x = 0;\n\
+             for (let i = 0; i < 300; i++) { x = [x]; }\n\
+             return x;";
+        let mut run = new_run(script).unwrap();
+        match run.step(Vec::new()) {
+            StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::Internal),
+            other => panic!("expected Failed(Internal), got {other:?}"),
+        }
+        // The engine survived: an independent run completes normally.
+        assert_eq!(run_to_done("const meta = { roles: [] };\nreturn 42;"), 42);
     }
 
     #[test]

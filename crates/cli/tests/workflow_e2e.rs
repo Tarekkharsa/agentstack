@@ -243,3 +243,93 @@ fn watchdog_force_exits_a_stalled_run_at_the_process_level() {
         "the terminal event must be recorded by the dying process: {events}"
     );
 }
+
+/// Witness 5, the in-interpreter arm: the watchdog is a real out-of-thread
+/// backstop against a NON-YIELDING slice inside Boa, not merely a rescue for a
+/// drive thread blocked joining a child batch. The scenario above stalls in
+/// Rust (the drive thread `join`s a sleeping child); this one stalls INSIDE the
+/// interpreter — a catastrophic-backtracking regex (`/^(a+)+$/` over a
+/// non-matching string) that ticks no loop-iteration counter and never reaches
+/// a cooperative yield, which is precisely the §12.2 ReDoS residual the hard
+/// backstop exists for. There is no `agent()` call, so the cooperative in-band
+/// deadline can never be checked; only the out-of-thread watchdog can end it.
+/// Same assertions as the batch-join case: exit 124, honest stderr, well before
+/// the (astronomically long) regex would finish, and `watchdog_kill` recorded.
+#[test]
+fn watchdog_force_exits_a_non_yielding_interpreter_slice() {
+    let (home, _bins, path) = fixture();
+    let proj = assert_fs::TempDir::new().unwrap();
+    proj.child("workflows/redos.js")
+        .write_str(
+            "export const meta = { roles: [] };\n\
+             return /^(a+)+$/.test('a'.repeat(40) + 'b');",
+        )
+        .unwrap();
+    proj.child("agentstack.toml")
+        .write_str(
+            "version = 1\n\
+             [workflows.redos]\n\
+             path = \"./workflows/redos.js\"\n\
+             roles = []\n\
+             max_wall_seconds = 1\n",
+        )
+        .unwrap();
+    let lock = agentstack(home.path(), &path, proj.path(), &["lock"]);
+    assert!(
+        lock.status.success(),
+        "lock failed: {}",
+        String::from_utf8_lossy(&lock.stderr)
+    );
+    let consent = agentstack::trust::digest_for(proj.path()).unwrap();
+    let trust = agentstack(
+        home.path(),
+        &path,
+        proj.path(),
+        &["trust", ".", "--yes", "--consented-digest", &consent],
+    );
+    assert!(
+        trust.status.success(),
+        "trust failed: {}",
+        String::from_utf8_lossy(&trust.stderr)
+    );
+
+    let started = Instant::now();
+    let run = agentstack(
+        home.path(),
+        &path,
+        proj.path(),
+        &["workflow", "run", "redos"],
+    );
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        run.status.code(),
+        Some(124),
+        "the watchdog exits 124 even when the stall is inside Boa; stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("wall-clock ceiling"), "{stderr}");
+    // The regex would take astronomically longer than the ~31s ceiling+grace;
+    // an exit under 60s proves the watchdog ended it, not the slice finishing.
+    assert!(
+        elapsed.as_secs() < 60,
+        "watchdog should fire at ~31s (ceiling+grace), took {elapsed:?}"
+    );
+
+    let run_id = stderr
+        .split("admitted: run ")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .expect("admission banner names the workflow run id")
+        .trim()
+        .to_string();
+    assert!(run_id.starts_with("w-"), "{run_id}");
+    let events =
+        std::fs::read_to_string(home.path().join("runs").join(&run_id).join("events.jsonl"))
+            .expect("workflow events.jsonl exists after the force-exit");
+    assert!(
+        events.contains("\"outcome\":\"watchdog_kill\""),
+        "the terminal event must be recorded by the dying process: {events}"
+    );
+}
