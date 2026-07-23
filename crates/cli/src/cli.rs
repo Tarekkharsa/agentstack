@@ -182,11 +182,10 @@ pub enum Command {
     #[command(hide = true, subcommand)]
     Shim(ShimCmd),
 
-    /// Governed workflows (preview): run a pinned workflow under full
-    /// admission — trust gate, strict lock verification, machine-capped
-    /// ceilings — with every `agent()` call becoming a locked child run.
-    /// Hidden while the lane is preview (Stage E adds `workflow report`).
-    #[command(subcommand, hide = true)]
+    /// Governed workflows: run a pinned workflow under full admission —
+    /// trust gate, strict lock verification, machine-capped ceilings — with
+    /// every `agent()` call becoming a locked child run.
+    #[command(subcommand)]
     Workflow(WorkflowCmd),
 
     /// Every "what happened" view in one place.
@@ -512,7 +511,7 @@ pub enum ReportCmd {
     Wire(WireArgs),
 }
 
-/// Governed workflows (preview, design doc §12.4 Stage C): the drive-loop
+/// Governed workflows (design doc §12.4): the drive-loop
 /// composition over the `agentstack-workflow` engine.
 #[derive(Subcommand, Debug)]
 pub enum WorkflowCmd {

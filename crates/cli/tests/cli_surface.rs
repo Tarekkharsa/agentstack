@@ -31,8 +31,8 @@ fn status_parses_and_help_maps_every_command() {
         .collect();
     assert_eq!(
         visible,
-        ["init", "status", "add", "search", "apply", "doctor", "use", "run", "trust"],
-        "the visible list is the beginner loop, in task order"
+        ["init", "status", "add", "search", "apply", "doctor", "use", "run", "workflow", "trust"],
+        "the visible list is the beginner loop, in task order (workflow un-hidden after §9.3 review)"
     );
 
     let after_help = cmd.get_after_help().expect("after_help exists").to_string();

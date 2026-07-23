@@ -377,9 +377,25 @@ What it must not imply:
    capability surface, instructions, and runtime posture. They must not imply
    folder-, secret-, or egress-level isolation unless those dimensions are
    actually bound and enforced for the child.
-3. **The interpreter boundary needs independent review.** Ceiling enforcement,
-   panic-fails-closed behavior, module loading, ambient host capabilities,
-   heap growth, and hostile string/regex behavior remain promotion gates.
+3. **The interpreter boundary has had its independent review — discharged
+   2026-07-23.** A fresh reviewer re-derived the boundary's required witness
+   set from the code and threat model, then diffed it against the shipped
+   suite: ceiling enforcement, panic-fails-closed behavior, module-loading
+   refusal (`IdleModuleLoader`), determinism pinning, and ambient-capability
+   denial are all witnessed, and the two most load-bearing guards (the
+   non-yielding-slice watchdog kill and the compile-strings denial) were
+   confirmed by temporary mutation. Zero blocking findings; the `(preview)`
+   command label is dropped. Caveat: the planned cross-model second pass
+   (codex) was skipped on a quota error, so a cross-model look is a
+   recommended follow-up when credits refill. Three non-blocking coverage
+   refinements remain as recommended follow-ups: (A) add a true in-Boa
+   non-yielding-slice (ReDoS) watchdog e2e witness — the shipped one uses a
+   blocked batch-join, not an in-interpreter stall (a real ReDoS case was
+   verified by hand during review: exit 124, `watchdog_kill` recorded); (B)
+   witness the output-direction JSON depth bound (only the input direction is
+   tested; the bound is shared code); (C) witness the recursion/stack ceiling
+   (only the loop-iteration ceiling is tested; all three are the same
+   non-catchable `RuntimeLimit` class).
 4. **Repeated use must be demonstrated.** At least three real tasks must be run
    on separate occasions and prove easier to repeat than their manual/native
    equivalents before workflows leave preview.

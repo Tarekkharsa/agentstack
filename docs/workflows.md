@@ -12,14 +12,15 @@ verifier to refute the weak ones. Claude Code has an ungoverned version of
 this today; AgentStack's version pins the orchestration code and gives every
 step its own reviewed authority.
 
-**Status: preview.** The full path ships today: declare, pin, and trust a
+**The full path ships today.** Declare, pin, and trust a
 workflow, run it end to end with `agentstack workflow run`, render its
 evidence tree with `agentstack workflow report`, and resume an interrupted
 run with `--resume` (replay from the recorded journal — byte-identical
 script and args, or it refuses). Every agent step runs as a governed
-[locked run](reference.html). The commands stay preview-labelled while the
-interpreter boundary awaits its independent security review — the posture,
-not the feature set, is what's provisional.
+[locked run](reference.html). The interpreter boundary passed its
+independent security review on 2026-07-23; what that settled is the
+*posture*, not the enforcement — a host-tier step is still cooperative-guard
+only, exactly as *Honest limits* below describes.
 
 ## Why a workflow needs governing
 
@@ -108,6 +109,8 @@ runs through `agent()`. Everything else is plain computation.
 The full technical contract and security rationale live in the
 [workflows capability design doc](design/workflows-capability.md). The
 manifest kind, pinning, trust review, the engine, `workflow run` /
-`workflow report`, negotiated ceilings, and journal-replay resume all ship;
-what remains before the preview label drops is the promotion-gate work in
-`TODO.md`, including independent review of the interpreter boundary.
+`workflow report`, negotiated ceilings, and journal-replay resume all ship,
+and the interpreter boundary has passed its independent security review.
+What remains before workflows leave experimental is repeated-use evidence —
+running real workflows on separate occasions and confirming each is easier
+to repeat than hand-rolled orchestration (`TODO.md`).

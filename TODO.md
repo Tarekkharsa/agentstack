@@ -64,9 +64,15 @@ existing boundary. Finish and review them before enabling new UI writes.
   `WeakRef` exposed GC-schedule nondeterminism (now poisoned in the prelude
   alongside `FinalizationRegistry`). Dynamic-compilation denial and runtime
   limits verified sound.
-- [ ] Keep workflows preview-hidden until the script-boundary review is
-  recorded complete (the §9.3 re-run is still pending; its kickoff prompt is
-  saved and it gates the preview-label drop).
+- [x] Script-boundary review recorded complete (§9.3 discharged 2026-07-23):
+  a fresh reviewer re-derived the boundary's witness set from the code and
+  threat model, confirmed the shipped suite proves the load-bearing ones,
+  and mutation-tested the two most load-bearing guards — zero blocking
+  findings. The `(preview)` command label is dropped: `workflow` is now a
+  visible CLI command (a deliberate +1 to the curated visible set) and the
+  docs drop the interpreter-review caveat. The cross-model codex pass was
+  skipped on a quota error (recommended follow-up on refill); three
+  non-blocking coverage refinements recorded in the design doc's §9 gate 3.
 
 ### Consent snapshot and UI authorization
 
@@ -124,8 +130,10 @@ existing boundary. Finish and review them before enabling new UI writes.
   non-interactive gates; t3code refusals are pre-spawn hygiene on top,
   witnessed by the e2e test refusing at the CLI layer).
 
-Stage 0 is closed except the workflow preview-label item above, which stays
-with the pending §9.3 re-run in the experimental workflow lane.
+Stage 0 is closed: the §9.3 interpreter-boundary review discharged the last
+workflow preview-label item (2026-07-23). Workflows remain in the
+experimental lane pending the repeated-use promotion gate below, but the
+command is no longer preview-hidden.
 
 ## Stage 1 — first value in under five minutes
 
@@ -601,7 +609,10 @@ beginner promise.
 
 Before promoting them:
 
-- [ ] Complete the module-loader fix and independent script-boundary review.
+- [x] Complete the module-loader fix and independent script-boundary review
+  (module loader landed earlier; §9.3 boundary review discharged 2026-07-23,
+  zero blocking findings — recommended follow-ups: a cross-model codex pass
+  on quota refill and coverage findings A/B/C in the design doc's §9 gate 3).
 - [ ] Review heap-growth and hostile string/regex behavior.
 - [ ] Preserve the out-of-thread watchdog and honest posture label.
 - [ ] Run at least three recurring tasks on separate occasions.
