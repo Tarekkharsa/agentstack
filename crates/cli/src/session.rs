@@ -183,6 +183,12 @@ fn dir_entries(dir: &Path) -> BTreeSet<String> {
 
 /// Start a session: snapshot, activate `profile` in `scope`, and remember what
 /// to revert.
+///
+/// Fail-closed (UI control-plane §5): unlike `use --write` — a human's
+/// explicit activation, where recording the first pin IS the consent act —
+/// `session start` is the verb external UIs drive headlessly, so it refuses
+/// an untrusted project and any unpinned/drifted surface outright, routing to
+/// the review instead of silently loading content nobody consented to.
 pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result<()> {
     let ctx = crate::commands::load(manifest_dir)?;
     let key_dir = dir_key(&ctx.dir);
@@ -194,6 +200,20 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
         .profiles
         .get(profile)
         .with_context(|| format!("no profile '{profile}' in the manifest"))?;
+
+    // Untrusted means inert: a session materializes skill content into agent
+    // context and server configs the harness will spawn, so the project must
+    // be trusted at its CURRENT bytes before any of that happens.
+    let base = crate::commands::project_base(manifest_dir)?;
+    match crate::trust::check(&base) {
+        crate::trust::TrustState::Trusted => {}
+        crate::trust::TrustState::Changed => anyhow::bail!(
+            "refusing to start a session: the manifest or lockfile changed since this project was trusted — review with `agentstack trust` (or the UI trust review), then retry"
+        ),
+        crate::trust::TrustState::Untrusted => anyhow::bail!(
+            "refusing to start a session: this project is not trusted — review and trust it with `agentstack trust` (or the UI trust review), then retry"
+        ),
+    }
 
     let state = State::load().unwrap_or_default();
     let target_ids = resolve_targets(manifest, &ctx.registry, &[])?;
@@ -209,9 +229,40 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
         allow_unresolved: false,
         prune_foreign: false,
         no_gitignore: false,
+        list: false,
+        json: false,
     };
     let libctx = ctx.library_ctx();
     let prepared = crate::commands::use_profile::prepare(&ctx, &libctx, &use_args)?;
+
+    // Strict pin gate: everything the profile resolved must already be pinned
+    // in agentstack.lock AND match — before a single byte is materialized.
+    // (`activate` below re-checks drift; this adds the no-unpinned rule.)
+    {
+        let lock = crate::lock::Lock::load(&ctx.dir)?;
+        let skill_statuses: Vec<_> = prepared
+            .resolved_skills
+            .iter()
+            .map(|r| {
+                let status =
+                    crate::resolve::classify_skill(&r.name, &r.checksum, r.rev.as_deref(), &lock);
+                (r.name.clone(), status)
+            })
+            .collect();
+        let server_statuses: Vec<_> = prepared
+            .resolved_servers
+            .iter()
+            .map(|r| {
+                let status = crate::resolve::classify_server(&r.name, &r.checksum, &lock);
+                (r.name.clone(), status)
+            })
+            .collect();
+        crate::verify::ensure_session_startable(
+            &format!("profile '{profile}'"),
+            &skill_statuses,
+            &server_statuses,
+        )?;
+    }
 
     // Snapshot: server config files (for undo) + skills dirs (to detect adds,
     // and whether each dir pre-existed so `end` can restore exactly).
@@ -324,5 +375,56 @@ fn remove_entry(p: &Path) {
             let _ = fs::remove_file(p);
         }
         Err(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_fs::prelude::*;
+
+    // SECURITY WITNESS (UI control-plane §5, invariant 2): `session start` is
+    // the verb external UIs drive headlessly, so it must fail closed — an
+    // untrusted project refuses, and a trusted project whose profile
+    // references UNPINNED content refuses too (no first-pin-on-activation
+    // here; that explicit-consent act stays with `use --write`). NEVER delete
+    // or weaken this test.
+    #[test]
+    fn session_start_refuses_untrusted_and_unpinned_surface() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str(
+                "version = 1\n[skills.greet]\npath = \"./skills/greet\"\n[profiles.dev]\nskills = [\"greet\"]\n",
+            )
+            .unwrap();
+        proj.child(".agentstack/skills/greet/SKILL.md")
+            .write_str("# greet\n")
+            .unwrap();
+
+        // (a) Untrusted project: refuse before anything resolves or writes.
+        let err = start(Some(proj.path()), "dev", Scope::Project).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("not trusted"),
+            "routes to the trust review: {err:#}"
+        );
+        assert!(active(proj.path()).is_none());
+
+        // (b) Trusted but UNPINNED: the skill has no lock entry, so the
+        // strict gate refuses — session start never records a first pin.
+        crate::trust::trust(proj.path()).unwrap();
+        let err = start(Some(proj.path()), "dev", Scope::Project).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("unpinned"),
+            "names the unpinned surface: {err:#}"
+        );
+        assert!(active(proj.path()).is_none());
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 }

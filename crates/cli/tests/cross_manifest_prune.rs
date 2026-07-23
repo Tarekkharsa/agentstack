@@ -240,6 +240,8 @@ fn use_prune_foreign_still_works_after_guarded_use() {
         allow_unresolved: false,
         prune_foreign,
         no_gitignore: true,
+        list: false,
+        json: false,
     };
 
     use_profile::run(&use_args(false), Some(&proj_b)).unwrap();

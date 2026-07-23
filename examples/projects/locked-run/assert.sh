@@ -104,7 +104,8 @@ printf '\033[1;36m  agentstack — run --locked: the Protected host tier\033[0m\
 # ── pin + trust: the locked tier's entry requirements ────────────────────────
 say "Pin the surface (lock) and grant consent (trust) — locked runs demand both"
 "$AS" lock --manifest-dir "$PROJECT" >/dev/null
-"$AS" trust . --yes >/dev/null 2>&1
+consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
+"$AS" trust . --yes --consented-digest "$consent" >/dev/null 2>&1
 
 # ── 1) --plan: the auditable description, zero mutation ──────────────────────
 say "1) run claude-code --locked --plan — describe everything, run nothing"
@@ -231,7 +232,8 @@ else
   fi
 fi
 "$AS" lock --manifest-dir "$PROJECT" >/dev/null
-"$AS" trust . --yes >/dev/null 2>&1
+consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
+"$AS" trust . --yes --consented-digest "$consent" >/dev/null 2>&1
 if "$AS" run claude-code --locked >/dev/null 2>&1; then
   ok "D3: re-lock + re-trust readmits the run (consent re-gate, not a lockout)"
 else

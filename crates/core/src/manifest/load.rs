@@ -148,14 +148,47 @@ pub fn load_from_dir(dir: &Path) -> Result<LoadedManifest> {
     let base_text =
         crate::util::read_to_string_bounded(&manifest_path, crate::util::MAX_CONFIG_BYTES)
             .with_context(|| format!("reading {}", manifest_path.display()))?;
-    let mut base: toml::Value = toml::from_str(&base_text)
+
+    let local_path = dir.join(LOCAL_FILE);
+    let local_text = if local_path.exists() {
+        Some(
+            fs::read_to_string(&local_path)
+                .with_context(|| format!("reading {}", local_path.display()))?,
+        )
+    } else {
+        None
+    };
+
+    load_from_contents(dir, &base_text, local_text.as_deref())
+}
+
+/// Parse an already-read manifest layer pair from `dir`. This seam exists so
+/// a caller holding an immutable byte snapshot of the consent surface (the
+/// trust preview) can parse the SAME bytes it digests, instead of re-reading
+/// disk and opening a window where an edit pairs one file state's display
+/// with another's digest. `local_text` is `Some` iff the overlay file was
+/// present when the caller read it.
+pub fn load_from_contents(
+    dir: &Path,
+    manifest_text: &str,
+    local_text: Option<&str>,
+) -> Result<LoadedManifest> {
+    let manifest_path = dir.join(MANIFEST_FILE);
+    // Same rule-7 bound the disk path enforces via its bounded reader — a
+    // snapshot caller must not become an unbounded parse route.
+    if manifest_text.len() as u64 > crate::util::MAX_CONFIG_BYTES {
+        anyhow::bail!(
+            "{} exceeds the {}-byte limit",
+            manifest_path.display(),
+            crate::util::MAX_CONFIG_BYTES
+        );
+    }
+    let mut base: toml::Value = toml::from_str(manifest_text)
         .with_context(|| format!("parsing {}", manifest_path.display()))?;
 
     let local_path = dir.join(LOCAL_FILE);
-    let local_path = if local_path.exists() {
-        let local_text = fs::read_to_string(&local_path)
-            .with_context(|| format!("reading {}", local_path.display()))?;
-        let overlay: toml::Value = toml::from_str(&local_text)
+    let local_path = if let Some(local_text) = local_text {
+        let overlay: toml::Value = toml::from_str(local_text)
             .with_context(|| format!("parsing {}", local_path.display()))?;
         merge_value(&mut base, overlay);
         Some(local_path)

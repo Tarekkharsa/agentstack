@@ -151,7 +151,8 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 say "PATH B — zero-files lease via 'agentstack mcp'"
 # ─────────────────────────────────────────────────────────────────────────────
-"$AS" trust . --yes >/dev/null
+consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
+"$AS" trust . --yes --consented-digest "$consent" >/dev/null
 
 OUT="$SBX/leaseout"
 python3 "$HERE/lease_client.py" "$AS" "$PROJECT" "$OUT"

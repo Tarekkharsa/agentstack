@@ -255,6 +255,15 @@ pub fn run(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
 /// whether this is an attended terminal session; production passes
 /// `crate::util::confirm::is_interactive()`.
 fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) -> Result<()> {
+    if args.plan {
+        // Read-only, so it bypasses the bare/TTY gating below by design; the
+        // global template has no detection to plan over.
+        anyhow::ensure!(
+            !args.global,
+            "--plan applies to project import, not --global"
+        );
+        return run_plan(args, manifest_dir);
+    }
     if args.global {
         return run_global(args);
     }
@@ -301,6 +310,110 @@ fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) ->
     // Any explicit flag (or --yes) proceeds promptlessly as the scriptable
     // primitive: import, write, no prompts beyond what flags allow.
     run_impl(args, manifest_dir, true)
+}
+
+/// `init --plan` — Lane A's read primitive (UI control-plane §4): run init's
+/// DETECTION only and emit the import plan as structured JSON. Writes
+/// nothing, prompts nothing, stores nothing. Reuses the exact discovery and
+/// secret-lifting code paths the real import runs — this is the same plan,
+/// minus the writes — and emits only each lifted secret's `${REF}` name and
+/// origin, NEVER its value: the values live in memory for the lifetime of
+/// this call and are dropped.
+fn run_plan(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let base = match manifest_dir {
+        Some(d) => d.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    let dir = crate::manifest::new_manifest_dir(&base);
+    let manifest_path = dir.join(MANIFEST_FILE);
+    let already_initialized = existing_manifest(manifest_dir)?;
+
+    let registry = Registry::load()?;
+    let mut detected: Vec<serde_json::Value> = Vec::new();
+    let mut servers: IndexMap<String, Server> = IndexMap::new();
+    let mut settings_from: Vec<String> = Vec::new();
+    let mut conflict_counts: IndexMap<String, usize> = IndexMap::new();
+    for desc in registry.iter() {
+        if !desc.detected() {
+            continue;
+        }
+        detected.push(serde_json::json!({
+            "id": desc.id,
+            "display": desc.display,
+        }));
+        if let Some(value) = desc.read_config_value()? {
+            let imported = extract_servers(desc, &value);
+            for c in merge_servers(&mut servers, imported) {
+                *conflict_counts.entry(c).or_insert(0usize) += 1;
+            }
+        }
+        if let Some(value) = desc.read_settings_value(&dir)? {
+            if !extract_settings(desc, &value).is_empty() {
+                settings_from.push(desc.id.clone());
+            }
+        }
+    }
+
+    // Lifting rewrites the in-memory servers to `${REF}` placeholders and
+    // returns the values; the plan serializes reference + origin only.
+    let lifted = lift_secrets(&mut servers);
+    let destination = match resolve_secret_store(args, false)? {
+        SecretStore::Env => "env",
+        SecretStore::Keychain => "keychain",
+        SecretStore::Skip => "skip",
+    };
+
+    // Imported names/targets come from other CLIs' config files — hostile
+    // input; sanitize display strings exactly like the trust preview.
+    let servers_json: Vec<serde_json::Value> = servers
+        .iter()
+        .map(|(name, s)| {
+            let (kind, target) = match s.server_type {
+                crate::manifest::ServerType::Stdio => (
+                    "stdio",
+                    format!(
+                        "{} {}",
+                        s.command.as_deref().unwrap_or("?"),
+                        s.args.join(" ")
+                    )
+                    .trim()
+                    .to_string(),
+                ),
+                crate::manifest::ServerType::Http => ("http", s.url.clone().unwrap_or_default()),
+            };
+            serde_json::json!({
+                "name": crate::text::sanitize_line(name),
+                "kind": kind,
+                "target": crate::text::sanitize_line(&target),
+            })
+        })
+        .collect();
+
+    let out = serde_json::json!({
+        "path": base.display().to_string(),
+        "manifest_path": manifest_path.display().to_string(),
+        "already_initialized": already_initialized.is_some(),
+        "detected": detected,
+        "servers": servers_json,
+        "settings_from": settings_from,
+        "conflicts": conflict_counts
+            .iter()
+            .map(|(name, extra)| serde_json::json!({
+                "name": crate::text::sanitize_line(name),
+                "other_definitions": extra,
+            }))
+            .collect::<Vec<_>>(),
+        "secrets": lifted
+            .iter()
+            .map(|l| serde_json::json!({
+                "reference": l.reference,
+                "origin": crate::text::sanitize_line(&l.origin),
+            }))
+            .collect::<Vec<_>>(),
+        "secrets_destination": destination,
+    });
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
 }
 
 /// Template for the machine-level manifest. Deliberately NOT an import: the
@@ -979,6 +1092,7 @@ mod tests {
             global: false,
             force: false,
             dry_run: false,
+            plan: false,
             secrets: None,
             no_keychain: false,
             yes: false,
@@ -995,6 +1109,29 @@ mod tests {
         assert!(!dir.path().join("agentstack.toml").exists());
     }
 
+    /// Lane A witness (UI control-plane §10): `init --plan` is detection-only
+    /// — it must write NOTHING, under either manifest layout, even when run
+    /// non-interactively with no other flags (the read primitive an external
+    /// wizard calls headlessly). Detection reads the real machine's CLI
+    /// configs, which is fine: the assertion is about writes, not findings.
+    #[test]
+    fn plan_emits_json_and_writes_nothing() {
+        let dir = assert_fs::TempDir::new().unwrap();
+        let args = InitArgs {
+            global: false,
+            force: false,
+            dry_run: false,
+            plan: true,
+            secrets: None,
+            no_keychain: false,
+            yes: false,
+        };
+        run_gated(&args, Some(dir.path()), false).expect("plan is read-only and never refuses");
+        assert!(!dir.path().join(".agentstack").exists());
+        assert!(!dir.path().join("agentstack.toml").exists());
+        assert!(!dir.path().join(".env").exists());
+    }
+
     /// T4 (third-pass DX audit): scripted `init` against an initialized
     /// project must recommend the real next steps (`apply --write`), not the
     /// generic escapes — `--yes` would hit the --force wall and `--dry-run`
@@ -1009,6 +1146,7 @@ mod tests {
             global: false,
             force: false,
             dry_run: false,
+            plan: false,
             secrets: None,
             no_keychain: false,
             yes: false,

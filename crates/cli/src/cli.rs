@@ -453,13 +453,22 @@ pub struct TrustArgs {
     pub revoke: bool,
 
     /// Grant without a terminal: acknowledge the review non-interactively
-    /// (required when stdin is not a TTY).
+    /// (required when stdin is not a TTY). Requires `--consented-digest` —
+    /// the `surface_digest` from `trust --preview` — so the grant is bound
+    /// to the exact bytes that were reviewed.
     #[arg(long)]
     pub yes: bool,
 
+    /// The `surface_digest` a `trust --preview` emitted alongside the surface
+    /// that was reviewed. The grant refuses unless it still matches the bytes
+    /// on disk — CLI-enforced "a human reviewed this exact surface".
+    #[arg(long, value_name = "DIGEST")]
+    pub consented_digest: Option<String>,
+
     /// Emit the review surface as JSON and grant NOTHING (read-only). The
     /// machine-readable consent screen for external UIs — the actual grant
-    /// stays the gated `agentstack trust` flow.
+    /// stays the gated `agentstack trust` flow. Includes `surface_digest`,
+    /// the value a later `--yes --consented-digest` grant must present.
     #[arg(long)]
     pub preview: bool,
 }
@@ -1071,6 +1080,14 @@ pub struct InitArgs {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Detection only, as JSON: which CLIs were found, which MCP servers
+    /// would be imported, which inline secrets would be lifted (their `${REF}`
+    /// names and origins — never values) and the proposed destination. Writes
+    /// nothing, prompts nothing. The read primitive behind external setup
+    /// wizards (UI control-plane §4).
+    #[arg(long)]
+    pub plan: bool,
+
     /// Where lifted token values are stored on the non-interactive path:
     /// `env` (project `.env`, gitignored), `keychain` (OS keychain), or
     /// `skip` (write only `${REF}` placeholders — you provide values later).
@@ -1198,6 +1215,17 @@ pub struct UseArgs {
     /// pass this when your team commits the rendered files.
     #[arg(long)]
     pub no_gitignore: bool,
+
+    /// List declared profiles instead of activating: each profile's resolved
+    /// skills/servers/harness plus a readiness flag — is everything it
+    /// references pinned in agentstack.lock and matching? The read primitive
+    /// behind external profile pickers (UI control-plane §5).
+    #[arg(long)]
+    pub list: bool,
+
+    /// With --list: emit machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]

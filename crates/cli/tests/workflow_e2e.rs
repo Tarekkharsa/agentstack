@@ -103,7 +103,14 @@ fn acceptance_bundle_admits_and_runs_end_to_end() {
         "lock failed: {}",
         String::from_utf8_lossy(&lock.stderr)
     );
-    let trust = agentstack(home.path(), &path, proj.path(), &["trust", ".", "--yes"]);
+    // §7.2: a non-interactive grant presents the previewed surface digest.
+    let consent = agentstack::trust::digest_for(proj.path()).unwrap();
+    let trust = agentstack(
+        home.path(),
+        &path,
+        proj.path(),
+        &["trust", ".", "--yes", "--consented-digest", &consent],
+    );
     assert!(
         trust.status.success(),
         "trust failed: {}",
@@ -178,7 +185,14 @@ fn watchdog_force_exits_a_stalled_run_at_the_process_level() {
         "lock failed: {}",
         String::from_utf8_lossy(&lock.stderr)
     );
-    let trust = agentstack(home.path(), &path, proj.path(), &["trust", ".", "--yes"]);
+    // §7.2: a non-interactive grant presents the previewed surface digest.
+    let consent = agentstack::trust::digest_for(proj.path()).unwrap();
+    let trust = agentstack(
+        home.path(),
+        &path,
+        proj.path(),
+        &["trust", ".", "--yes", "--consented-digest", &consent],
+    );
     assert!(
         trust.status.success(),
         "trust failed: {}",

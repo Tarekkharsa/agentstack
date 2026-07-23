@@ -211,7 +211,7 @@ device "My Projects/app one"
 echo '{}' > "$H/.claude.json"
 seed_manifest
 "$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "apply in a spaced path" || bad "apply failed"
-"$AS" lock >/dev/null 2>&1 && "$AS" trust . --yes >/dev/null 2>&1 && ok "lock + trust in a spaced path" || bad "lock/trust failed"
+"$AS" lock >/dev/null 2>&1 && "$AS" trust . --yes --consented-digest "$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')" >/dev/null 2>&1 && ok "lock + trust in a spaced path" || bad "lock/trust failed"
 "$AS" run claude-code --locked --plan 2>&1 | grep -q "would proceed" && ok "locked --plan green in a spaced path" || bad "locked plan failed"
 
 hdr "C2) unicode project path"
@@ -227,7 +227,8 @@ echo '{}' > "$H/.claude.json"
 printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' > agentstack.toml
 "$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "legacy layout applies" || bad "apply failed"
 "$AS" lock >/dev/null 2>&1 && [ -f agentstack.lock ] && ok "lock lands beside the legacy manifest" || bad "lock misplaced"
-"$AS" trust . --yes >/dev/null 2>&1
+consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
+"$AS" trust . --yes --consented-digest "$consent" >/dev/null 2>&1
 "$AS" run claude-code --locked --plan 2>&1 | grep -q "would proceed" && ok "locked --plan green on the legacy layout" || bad "legacy locked plan failed"
 
 hdr "C4) non-git project"

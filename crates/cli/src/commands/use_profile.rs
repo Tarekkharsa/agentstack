@@ -184,10 +184,152 @@ fn count(n: usize, noun: &str) -> String {
 }
 
 pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    if args.list {
+        return list_profiles(args.json, manifest_dir);
+    }
     let ctx = super::load(manifest_dir)?;
     let libctx = ctx.library_ctx();
     let prepared = prepare(&ctx, &libctx, args)?;
     activate(&ctx, &libctx, args, &prepared)
+}
+
+/// `use --list [--json]` — the Lane B read primitive (UI control-plane §5):
+/// every declared profile with its resolved selection and a readiness flag —
+/// is everything the profile references pinned in `agentstack.lock` and
+/// matching? Read-only and advisory: the flag tells a picker which profiles
+/// are one click from a session and which need `lock`/review first; the
+/// ENFORCEMENT lives in `session start`'s fail-closed gate, which refuses an
+/// unpinned or untrusted surface regardless of what any UI displayed.
+fn list_profiles(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
+    let ctx = super::load(manifest_dir)?;
+    let libctx = ctx.library_ctx();
+    let manifest = &ctx.loaded.manifest;
+    // A broken lockfile fails the listing loudly — its pins are exactly what
+    // the readiness flag reports on.
+    let lock = Lock::load(&ctx.dir)?;
+
+    // Trust is keyed by the project BASE (the dir holding `.agentstack/`),
+    // not the manifest dir.
+    let base = super::project_base(manifest_dir)?;
+    let trust_state = match crate::trust::check(&base) {
+        crate::trust::TrustState::Trusted => "trusted",
+        crate::trust::TrustState::Changed => "drifted",
+        crate::trust::TrustState::Untrusted => "untrusted",
+    };
+
+    let mut profiles: Vec<serde_json::Value> = Vec::new();
+    for (name, profile) in &manifest.profiles {
+        // (skill name, verdict) over the profile's resolved set. Resolution
+        // itself can fail (broken ref, no library); a failed resolution is a
+        // blocker, not a listing error — the picker must still render.
+        let mut blockers: Vec<(String, String)> = Vec::new();
+        let skills: Vec<String> = match resolve_active_skills_with_pins(
+            manifest,
+            Some(name),
+            &ctx.dir,
+            &libctx.library,
+            &libctx.lib_home,
+            &libctx.store,
+            ResolveMode::NoFetch,
+            Some(&lock),
+        ) {
+            Ok(resolved) => {
+                for r in &resolved {
+                    let status = crate::resolve::classify_skill(
+                        &r.name,
+                        &r.checksum,
+                        r.rev.as_deref(),
+                        &lock,
+                    );
+                    match crate::verify::skill_verdict(&status) {
+                        crate::verify::Verdict::Ok => {}
+                        crate::verify::Verdict::Unpinned => blockers
+                            .push((r.name.clone(), "unpinned — run `agentstack lock`".into())),
+                        crate::verify::Verdict::Block(why) => blockers.push((r.name.clone(), why)),
+                    }
+                }
+                resolved.into_iter().map(|r| r.name).collect()
+            }
+            Err(e) => {
+                blockers.push((name.clone(), format!("skills unresolvable — {e}")));
+                profile.skills.clone()
+            }
+        };
+        let servers: Vec<String> = match crate::render::resolve_active_servers(
+            manifest,
+            &libctx.library,
+            &libctx.lib_home,
+            &crate::render::Selection::Profile(name.clone()),
+        ) {
+            Ok(resolved) => {
+                for r in &resolved {
+                    let status = crate::resolve::classify_server(&r.name, &r.checksum, &lock);
+                    match crate::verify::server_verdict(&status) {
+                        crate::verify::Verdict::Ok => {}
+                        crate::verify::Verdict::Unpinned => blockers
+                            .push((r.name.clone(), "unpinned — run `agentstack lock`".into())),
+                        crate::verify::Verdict::Block(why) => blockers.push((r.name.clone(), why)),
+                    }
+                }
+                resolved.into_iter().map(|r| r.name).collect()
+            }
+            Err(e) => {
+                blockers.push((name.clone(), format!("servers unresolvable — {e}")));
+                profile.servers.clone()
+            }
+        };
+        // Names come from unreviewed repo content — sanitized for display,
+        // exactly like the trust preview.
+        profiles.push(serde_json::json!({
+            "name": crate::text::sanitize_line(name),
+            "skills": skills.iter().map(|s| crate::text::sanitize_line(s)).collect::<Vec<_>>(),
+            "servers": servers.iter().map(|s| crate::text::sanitize_line(s)).collect::<Vec<_>>(),
+            "harness": profile.harness.as_deref().map(crate::text::sanitize_line),
+            "pinned": blockers.is_empty(),
+            "blockers": blockers
+                .iter()
+                .map(|(n, why)| serde_json::json!({
+                    "name": crate::text::sanitize_line(n),
+                    "reason": crate::text::sanitize_line(why),
+                }))
+                .collect::<Vec<_>>(),
+        }));
+    }
+
+    if json {
+        let out = serde_json::json!({
+            "path": base.display().to_string(),
+            "trust": trust_state,
+            "profiles": profiles,
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+
+    if profiles.is_empty() {
+        println!(
+            "No profiles declared — the implicit default (every inline skill and server) is what activates."
+        );
+        return Ok(());
+    }
+    println!("Declared profiles (project trust: {trust_state}):");
+    for p in &profiles {
+        let name = p["name"].as_str().unwrap_or("?");
+        let ready = if p["pinned"].as_bool().unwrap_or(false) {
+            "pinned".to_string()
+        } else {
+            format!(
+                "{} blocker(s)",
+                p["blockers"].as_array().map_or(0, Vec::len)
+            )
+        };
+        println!(
+            "  {name}  —  {} skill(s), {} server(s)  [{ready}]",
+            p["skills"].as_array().map_or(0, Vec::len),
+            p["servers"].as_array().map_or(0, Vec::len),
+        );
+    }
+    Ok(())
 }
 
 /// Render the prepared profile into every target (servers + skills), record

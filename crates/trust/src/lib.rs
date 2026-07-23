@@ -45,6 +45,13 @@ pub enum TrustError {
     /// stays the strict one).
     #[error("saving trust store: {0}")]
     Store(String),
+    /// The consented digest does not match the bytes being granted (§7.2 of
+    /// the UI control-plane design): the surface a human previewed is not the
+    /// surface on disk now, so the grant refuses — nothing is written.
+    #[error(
+        "consented digest does not match the current surface — the manifest/lock changed since the preview (consented {consented}, current {actual}); re-run the preview and review again"
+    )]
+    ConsentMismatch { consented: String, actual: String },
 }
 
 pub type Result<T> = std::result::Result<T, TrustError>;
@@ -153,6 +160,55 @@ pub fn key_for(base: &Path) -> String {
         .to_string()
 }
 
+/// The consent surface read ONCE as immutable bytes: the manifest, the local
+/// overlay, and the lockfile. A caller that must both *display* the surface
+/// (parse) and *identify* it (digest) derives both from one snapshot, closing
+/// the read–reread window in which a mid-preview edit could pair an old
+/// display with a new digest (UI control-plane §7.2). `None` for an absent
+/// overlay/lock digests as empty, exactly as [`digest_for`] always has — and
+/// `digest_for` IS this snapshot's digest, so the two can never diverge.
+#[derive(Debug)]
+pub struct ConsentSnapshot {
+    pub manifest: Vec<u8>,
+    pub local: Option<Vec<u8>>,
+    pub lock: Option<Vec<u8>>,
+}
+
+impl ConsentSnapshot {
+    /// Read the three pinned files at `base` in one pass. `None` when there
+    /// is no readable manifest — nothing to consent to.
+    pub fn read(base: &Path) -> Option<ConsentSnapshot> {
+        let dir = agentstack_core::manifest::resolve_manifest_dir(base);
+        let manifest = std::fs::read(dir.join(MANIFEST_FILE)).ok()?;
+        let local = std::fs::read(dir.join(LOCAL_FILE)).ok();
+        let lock = std::fs::read(dir.join(LOCK_FILE)).ok();
+        Some(ConsentSnapshot {
+            manifest,
+            local,
+            lock,
+        })
+    }
+
+    /// The consent digest over exactly these captured bytes — disk edits after
+    /// the snapshot cannot change it.
+    pub fn digest(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(TRUST_DIGEST_DOMAIN);
+        for segment in [
+            self.manifest.as_slice(),
+            self.local.as_deref().unwrap_or_default(),
+            self.lock.as_deref().unwrap_or_default(),
+        ] {
+            // Length prefixes make each file boundary unambiguous, like
+            // framing three byte buffers before concatenating them in
+            // TypeScript.
+            hasher.update((segment.len() as u64).to_le_bytes());
+            hasher.update(segment);
+        }
+        format!("sha256:{:x}", hasher.finalize())
+    }
+}
+
 /// Content digest of the consent surface at `base`: the manifest layers
 /// (`agentstack.toml` plus the `agentstack.local.toml` overlay, both of which
 /// declare runnable servers) and `agentstack.lock`, which pins the definition
@@ -160,28 +216,25 @@ pub fn key_for(base: &Path) -> String {
 /// the lock changes what a name ref runs, so it re-gates the project exactly
 /// like a manifest edit. `None` when there is no manifest.
 pub fn digest_for(base: &Path) -> Option<String> {
-    let dir = agentstack_core::manifest::resolve_manifest_dir(base);
-    let manifest = std::fs::read(dir.join(MANIFEST_FILE)).ok()?;
-    let local = std::fs::read(dir.join(LOCAL_FILE)).unwrap_or_default();
-    let lock = std::fs::read(dir.join(LOCK_FILE)).unwrap_or_default();
-    let mut hasher = Sha256::new();
-    hasher.update(TRUST_DIGEST_DOMAIN);
-    for segment in [&manifest, &local, &lock] {
-        // Length prefixes make each file boundary unambiguous, like framing
-        // three byte buffers before concatenating them in TypeScript.
-        hasher.update((segment.len() as u64).to_le_bytes());
-        hasher.update(segment);
-    }
-    Some(format!("sha256:{:x}", hasher.finalize()))
+    Some(ConsentSnapshot::read(base)?.digest())
 }
 
 /// Where `base` stands right now (digest recomputed against the store).
 pub fn check(base: &Path) -> TrustState {
+    check_digest(base, digest_for(base).as_deref())
+}
+
+/// Where `base` stands for a GIVEN current-content digest (`None` = no
+/// manifest). The seam that lets a [`ConsentSnapshot`] holder evaluate trust
+/// state against the same bytes it displays and digests, instead of a third
+/// disk read; [`check`] is this over `digest_for`, so state semantics keep
+/// one implementation.
+pub fn check_digest(base: &Path, digest: Option<&str>) -> TrustState {
     let store = TrustStore::load();
     let Some(entry) = store.trusted.get(&key_for(base)) else {
         return TrustState::Untrusted;
     };
-    match digest_for(base) {
+    match digest {
         Some(d) if d == entry.digest => TrustState::Trusted,
         // Manifest gone or rewritten since trust — either way, re-review.
         _ => TrustState::Changed,
@@ -202,6 +255,36 @@ pub fn trust_with_snapshot(base: &Path, surface: Vec<SurfaceItem>) -> Result<Str
     record_trust(base, Some(surface))
 }
 
+/// Consent-bound grant (UI control-plane §7.2): record trust only if the
+/// current content digest equals `consented` — the digest a human received
+/// from `trust --preview` alongside the surface they reviewed. Enforced HERE,
+/// at the store-write point, so "a human reviewed this exact surface" holds
+/// even when the caller is a headless RPC server and no UI was in the loop:
+/// both the preview and this check compute the same [`digest_for`] over the
+/// same pinned bytes — no second source of truth — and any byte changed
+/// between preview and grant flips the digest and refuses the write.
+pub fn trust_with_consent(
+    base: &Path,
+    surface: Vec<SurfaceItem>,
+    consented: &str,
+) -> Result<String> {
+    let actual = digest_for(base).ok_or_else(|| TrustError::NoManifest {
+        base: base.to_path_buf(),
+    })?;
+    if consented != actual {
+        return Err(TrustError::ConsentMismatch {
+            consented: consented.to_string(),
+            actual,
+        });
+    }
+    // Record the digest we just VERIFIED, not a re-read of disk: if a byte
+    // changes between this check and the write, the store then holds the
+    // consented digest, the project reads as Changed, and every use site
+    // fails closed — instead of silently blessing bytes nobody reviewed.
+    store_entry(base, actual.clone(), Some(surface))?;
+    Ok(actual)
+}
+
 /// The reviewed surface a prior `trust` recorded for `base` — the input to
 /// re-trust diffing (P14). Independent of digest match: a re-trust after a
 /// manifest edit still diffs against the last consented set.
@@ -220,17 +303,24 @@ fn record_trust(base: &Path, surface: Option<Vec<SurfaceItem>>) -> Result<String
     let digest = digest_for(base).ok_or_else(|| TrustError::NoManifest {
         base: base.to_path_buf(),
     })?;
+    store_entry(base, digest.clone(), surface)?;
+    Ok(digest)
+}
+
+/// The single store-write for a grant: pin `base` at exactly `digest`. Split
+/// out so the consent path can record the digest it verified rather than
+/// re-reading disk (see [`trust_with_consent`]).
+fn store_entry(base: &Path, digest: String, surface: Option<Vec<SurfaceItem>>) -> Result<()> {
     let mut store = TrustStore::load();
     store.trusted.insert(
         key_for(base),
         TrustEntry {
-            digest: digest.clone(),
+            digest,
             trusted_at: now_secs(),
             surface,
         },
     );
-    store.save()?;
-    Ok(digest)
+    store.save()
 }
 
 /// Remove trust for `base`. Returns whether an entry existed.
@@ -272,6 +362,26 @@ mod tests {
             .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
             .unwrap();
         proj
+    }
+
+    #[test]
+    fn snapshot_digest_is_immutable_and_equals_the_path_digest() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let snap = ConsentSnapshot::read(proj.path()).unwrap();
+            // Equivalence: digest_for IS the snapshot digest — one
+            // implementation, two entry points, so they can never diverge.
+            assert_eq!(Some(snap.digest()), digest_for(proj.path()));
+
+            // §7.2 witness: a disk edit AFTER the snapshot changes the path
+            // digest but never the snapshot's — a preview that derives both
+            // its display and its digest from one snapshot cannot pair an old
+            // display with a new digest, whatever the edit interleaving.
+            proj.child(".agentstack/agentstack.toml")
+                .write_str("version = 1\n[servers.evil]\ntype = \"stdio\"\ncommand = \"sh\"\n")
+                .unwrap();
+            assert_ne!(Some(snap.digest()), digest_for(proj.path()));
+        });
     }
 
     #[test]
@@ -363,6 +473,40 @@ mod tests {
             // A never-trusted project reports NeverTrusted.
             let untouched = project_with_manifest();
             assert_eq!(prior_surface(untouched.path()), PriorSurface::NeverTrusted);
+        });
+    }
+
+    // SECURITY WITNESS (trust granting, UI control-plane §7.2): the consent-
+    // digest binding. A grant presented with a digest that does not match the
+    // bytes on disk must refuse and leave the store untouched — this is what
+    // makes "a human reviewed this exact surface" a CLI-enforced guarantee
+    // instead of a UI-rendered one. NEVER delete or weaken this test.
+    #[test]
+    fn consent_grant_refuses_mismatched_digest_and_binds_to_reviewed_bytes() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let previewed = digest_for(proj.path()).unwrap();
+
+            // (a) A wrong/stale digest refuses, and nothing was granted.
+            let err = trust_with_consent(proj.path(), Vec::new(), "sha256:deadbeef").unwrap_err();
+            assert!(matches!(err, TrustError::ConsentMismatch { .. }));
+            assert_eq!(check(proj.path()), TrustState::Untrusted);
+
+            // (b) The previewed digest grants, pinned at exactly that digest.
+            let granted = trust_with_consent(proj.path(), Vec::new(), &previewed).unwrap();
+            assert_eq!(granted, previewed);
+            assert_eq!(check(proj.path()), TrustState::Trusted);
+
+            // (c) The preview-then-edit race: bytes change after the preview,
+            // so the old digest no longer matches — the grant refuses.
+            proj.child(".agentstack/agentstack.toml")
+                .write_str("version = 1\n[servers.evil]\ntype = \"stdio\"\ncommand = \"sh\"\n")
+                .unwrap();
+            let err = trust_with_consent(proj.path(), Vec::new(), &previewed).unwrap_err();
+            assert!(matches!(err, TrustError::ConsentMismatch { .. }));
+            // The earlier grant is still pinned to the OLD bytes, so the
+            // edited project reads as Changed — fail closed, not blessed.
+            assert_eq!(check(proj.path()), TrustState::Changed);
         });
     }
 

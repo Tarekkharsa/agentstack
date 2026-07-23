@@ -263,6 +263,8 @@ fn use_write_errors_when_all_targets_blocked() {
         allow_unresolved: false,
         prune_foreign: false,
         no_gitignore: true,
+        list: false,
+        json: false,
     };
     let err = agentstack::commands::use_profile::run(&uargs, Some(&proj))
         .expect_err("blocked activation must be an error");
@@ -321,6 +323,8 @@ fn partially_blocked_use_still_pins_the_lock() {
         allow_unresolved: false,
         prune_foreign: false,
         no_gitignore: true,
+        list: false,
+        json: false,
     };
     // The server target is still blocked, so the activation exits nonzero...
     let err = agentstack::commands::use_profile::run(&uargs, Some(&proj))

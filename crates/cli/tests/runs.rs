@@ -189,6 +189,12 @@ fn profile_run_applies_then_reverts_on_exit() {
     // Claude Code's project MCP config lives at .mcp.json in the repo root.
     let cfg = proj.join(".mcp.json");
 
+    // `run --profile` rides the session engine, whose start gate now fails
+    // closed on an untrusted or unpinned surface (UI control-plane §5) — so
+    // pin and trust the project first, like a human would have.
+    agentstack::commands::lock::run(&agentstack::cli::LockArgs::default(), Some(&proj)).unwrap();
+    agentstack::trust::trust(&proj).unwrap();
+
     let proj2 = proj.clone();
     let handle = thread::spawn(move || {
         let _ = prepare_and_launch(&proj2, "sleeptest", Some("p1"), &["30".to_string()], false);

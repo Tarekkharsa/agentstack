@@ -122,7 +122,8 @@ fi
 
 # ── 2 + 3) TRUSTED — discovery filtering + execution firewall + audit ─────────
 say "2+3) Trusted: review the manifest, then drive the gateway through one session"
-"$AS" trust . --yes >/dev/null 2>&1
+consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
+"$AS" trust . --yes --consented-digest "$consent" >/dev/null 2>&1
 
 PROBE="$(python3 "$HERE/gateway_probe.py" "$AS" "$PROJECT")"
 

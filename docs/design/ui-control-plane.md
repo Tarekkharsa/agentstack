@@ -1,6 +1,12 @@
 # Design: the UI control plane (AgentStack governance from t3code)
 
-> **Status:** design draft, 2026-07-23. Not yet scheduled against a TODO phase.
+> **Status:** lane opened by maintainer decision 2026-07-23 (was: unscheduled
+> draft). The agentstack-side CLI primitives for §8 steps 1–3 are implemented —
+> §7.2 consent-digest binding (`surface_digest` in `trust --preview`,
+> `--consented-digest` required by `trust --yes`), Lane B `use --list --json` +
+> the fail-closed `session start` gate, Lane A `init --plan`. See the TODO.md
+> entry for witnesses. Open: the t3code side (incl. the §7.1 admin-scope
+> decision), Lane C, and the authoring flows.
 > **Scope:** spans two repos — new **CLI primitives** in `agentstack`, and the
 > **UI + RPCs** in `t3code` (`~/Documents/GitHub/t3code`, branch
 > `agentstack-panel`).

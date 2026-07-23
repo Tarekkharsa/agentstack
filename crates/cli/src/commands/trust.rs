@@ -108,7 +108,7 @@ pub fn run(args: &TrustArgs) -> Result<()> {
     if args.revoke {
         return revoke(&base);
     }
-    grant(&base, args.yes)
+    grant(&base, args.yes, args.consented_digest.as_deref())
 }
 
 /// Read-only: emit the runtime surface a human would consent to, as JSON,
@@ -120,10 +120,41 @@ pub fn run(args: &TrustArgs) -> Result<()> {
 /// verdict. Nothing here writes or fetches.
 fn preview(base: &Path) -> Result<()> {
     let dir = crate::manifest::resolve_manifest_dir(base);
-    let loaded = crate::manifest::load_from_dir(&dir)?;
+    // §7.2: ONE immutable read of the consent surface. The parsed display and
+    // the digest below both derive from this snapshot, so an edit landing
+    // mid-preview can never pair one file state's display with another's
+    // digest — whatever the interleaving (including A→B→A), display and
+    // digest describe the same bytes.
+    let Some(snapshot) = trust::ConsentSnapshot::read(base) else {
+        // No readable manifest: surface the same friendly first-contact error
+        // the disk load path gives.
+        crate::manifest::load_from_dir(&dir)?;
+        anyhow::bail!("manifest disappeared while previewing {}", base.display());
+    };
+    let manifest_text = std::str::from_utf8(&snapshot.manifest).with_context(|| {
+        format!(
+            "{} is not valid UTF-8",
+            dir.join("agentstack.toml").display()
+        )
+    })?;
+    let local_text = snapshot
+        .local
+        .as_deref()
+        .map(std::str::from_utf8)
+        .transpose()
+        .with_context(|| {
+            format!(
+                "{} is not valid UTF-8",
+                dir.join("agentstack.local.toml").display()
+            )
+        })?;
+    let loaded = crate::manifest::load_from_contents(&dir, manifest_text, local_text)?;
     let m = &loaded.manifest;
 
-    let state = match trust::check(base) {
+    // State is judged against the SNAPSHOT digest, not a fresh disk read, so
+    // the state chip describes the same bytes as the display and the digest.
+    let surface_digest = snapshot.digest();
+    let state = match trust::check_digest(base, Some(&surface_digest)) {
         trust::TrustState::Trusted => "trusted",
         trust::TrustState::Changed => "drifted",
         trust::TrustState::Untrusted => "untrusted",
@@ -178,10 +209,15 @@ fn preview(base: &Path) -> Result<()> {
         .filter(|(_, i)| !i.from_user_layer)
         .count();
 
+    // §7.2: `surface_digest` (computed above, from the same snapshot the
+    // display was parsed from) is exactly what a later grant must present as
+    // `--consented-digest` — so "the surface shown" and "the bytes granted"
+    // can never diverge without the digest flipping.
     let out = serde_json::json!({
         "path": base.display().to_string(),
         "state": state,
         "re_trust": re_trust,
+        "surface_digest": surface_digest,
         "servers": servers,
         "secrets": secrets,
         "counts": {
@@ -212,8 +248,8 @@ fn resolve_base(path: Option<&Path>) -> Result<PathBuf> {
     })
 }
 
-fn grant(base: &Path, yes: bool) -> Result<()> {
-    grant_gated(base, yes, std::io::stdin().is_terminal())
+fn grant(base: &Path, yes: bool, consented: Option<&str>) -> Result<()> {
+    grant_gated(base, yes, consented, std::io::stdin().is_terminal())
 }
 
 /// The grant path with the TTY probe injected, so the non-interactive consent
@@ -223,10 +259,11 @@ fn grant(base: &Path, yes: bool) -> Result<()> {
 /// Typing `agentstack trust` at a terminal IS the consent (direnv-allow style),
 /// so an interactive session is unchanged. When stdin is NOT a terminal — a
 /// pipe, a here-string, or an agent driving the shell — the command refuses
-/// unless `--yes` explicitly acknowledges the review, so an agent with shell
-/// access cannot silently self-trust a repo and defeat the untrusted-means-inert
-/// gate.
-fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
+/// unless `--yes` explicitly acknowledges the review AND `--consented-digest`
+/// binds that acknowledgement to the exact previewed bytes (§7.2): `--yes`
+/// alone would let any RPC caller grant without anyone having seen the
+/// surface, which is precisely the UI-enforcement gap this closes.
+fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: bool) -> Result<()> {
     let dir = crate::manifest::resolve_manifest_dir(base);
     let loaded = crate::manifest::load_from_dir(&dir)?;
     let m = &loaded.manifest;
@@ -750,14 +787,28 @@ fn grant_gated(base: &Path, yes: bool, interactive: bool) -> Result<()> {
     // untrusted-means-inert gate.
     if !interactive && !yes {
         anyhow::bail!(
-            "refusing to trust: stdin is not a terminal — review the declarations above and re-run interactively, or pass --yes to acknowledge"
+            "refusing to trust: stdin is not a terminal — review the declarations above and re-run interactively, or acknowledge non-interactively with --yes --consented-digest <surface_digest from `agentstack trust --preview`>"
+        );
+    }
+    // §7.2: a non-interactive `--yes` must also present the digest of the
+    // surface that was reviewed. Without it, "the user saw the review" would
+    // be the caller's claim, not a checked fact.
+    if !interactive && consented.is_none() {
+        anyhow::bail!(
+            "refusing to trust: --yes requires --consented-digest — run `agentstack trust --preview`, review the surface, and pass its `surface_digest` back"
         );
     }
 
     // Store the reviewed surface alongside the pin so the NEXT re-trust can
     // diff against it (P14). Display metadata only — it does not enter the
-    // trust digest, so recording it never re-gates the project.
-    let digest = trust::trust_with_snapshot(base, diff.current)?;
+    // trust digest, so recording it never re-gates the project. When a
+    // consented digest was presented (any mode), the grant is bound to it:
+    // the trust crate refuses at the store-write point unless it still
+    // matches the bytes on disk.
+    let digest = match consented {
+        Some(consented) => trust::trust_with_consent(base, diff.current, consented)?,
+        None => trust::trust_with_snapshot(base, diff.current)?,
+    };
     println!(
         "\n{} trusted at {digest}.\nEditing the manifest or lockfile invalidates this — re-run `agentstack trust` after reviewing changes.\nPinned skill/server content that drifts is blocked at use time until re-locked.\nWithdraw anytime with `agentstack trust --revoke`.",
         "✓".green()
@@ -893,11 +944,13 @@ mod tests {
     // SECURITY WITNESS (trust granting): the non-interactive consent gate. An
     // agent with shell access must NOT be able to self-trust a repo when stdin
     // is not a terminal — doing so would defeat the untrusted-means-inert gate.
-    // Tests run without a TTY, so `interactive: false` is the real refusal path;
-    // `grant_gated` takes the probe as a parameter so both branches are driven
-    // directly. NEVER delete or weaken this test.
+    // Since §7.2, `--yes` alone is not enough either: the acknowledgement must
+    // carry the previewed surface digest, or a headless caller could grant a
+    // surface nobody reviewed. Tests run without a TTY, so `interactive: false`
+    // is the real refusal path; `grant_gated` takes the probe as a parameter so
+    // both branches are driven directly. NEVER delete or weaken this test.
     #[test]
-    fn non_tty_grant_refuses_without_yes_and_leaves_the_store_clean() {
+    fn non_tty_grant_refuses_without_yes_and_consented_digest() {
         let _guard = crate::util::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -912,11 +965,23 @@ mod tests {
             .unwrap();
 
         // (a) Non-TTY, no --yes: refuse, and the trust store keeps no grant.
-        assert!(grant_gated(proj.path(), false, false).is_err());
+        assert!(grant_gated(proj.path(), false, None, false).is_err());
         assert_eq!(trust::check(proj.path()), TrustState::Untrusted);
 
-        // (b) Non-TTY with --yes: the explicit acknowledgement grants trust.
-        grant_gated(proj.path(), true, false).unwrap();
+        // (b) Non-TTY with --yes but NO consented digest: still refuses —
+        // the §7.2 binding, not just the acknowledgement, is required.
+        let err = grant_gated(proj.path(), true, None, false).unwrap_err();
+        assert!(format!("{err:#}").contains("--consented-digest"));
+        assert_eq!(trust::check(proj.path()), TrustState::Untrusted);
+
+        // (c) --yes with a WRONG digest: refuses (the trust-crate witness
+        // covers the store staying clean; here we prove the CLI wiring).
+        assert!(grant_gated(proj.path(), true, Some("sha256:beef"), false).is_err());
+        assert_eq!(trust::check(proj.path()), TrustState::Untrusted);
+
+        // (d) --yes with the previewed digest: grants.
+        let previewed = trust::digest_for(proj.path()).unwrap();
+        grant_gated(proj.path(), true, Some(&previewed), false).unwrap();
         assert_eq!(trust::check(proj.path()), TrustState::Trusted);
 
         std::env::remove_var("AGENTSTACK_HOME");

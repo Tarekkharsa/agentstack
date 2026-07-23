@@ -218,6 +218,8 @@ fn write_lands_manifest_store_and_lock_then_use_materializes() {
             allow_unresolved: false,
             prune_foreign: false,
             no_gitignore: true,
+            list: false,
+            json: false,
         },
         Some(&proj),
     )

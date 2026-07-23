@@ -157,6 +157,39 @@ pub fn ensure_activatable(
     bail_blocked(&format!("activate {what}"), blocked)
 }
 
+/// The session-start gate (UI control-plane §5): STRICTER than
+/// [`ensure_activatable`]. `session start` is the verb external UIs drive
+/// headlessly, so it must never materialize content nobody reviewed — an
+/// `Unpinned` item refuses here too. First-pin-on-activation stays an
+/// explicit-consent act reserved for `use --write` at a human's keyboard;
+/// a session start routes to `agentstack lock` + review instead.
+pub fn ensure_session_startable(
+    what: &str,
+    skills: &[(String, SkillLockStatus)],
+    servers: &[(String, ServerLockStatus)],
+) -> anyhow::Result<()> {
+    let mut blocked: Vec<(String, String)> = Vec::new();
+    let unpinned = || {
+        "unpinned — run `agentstack lock`, review, and re-trust before starting a session"
+            .to_string()
+    };
+    for (name, status) in skills {
+        match skill_verdict(status) {
+            Verdict::Ok => {}
+            Verdict::Unpinned => blocked.push((name.clone(), unpinned())),
+            Verdict::Block(why) => blocked.push((name.clone(), why)),
+        }
+    }
+    for (name, status) in servers {
+        match server_verdict(status) {
+            Verdict::Ok => {}
+            Verdict::Unpinned => blocked.push((name.clone(), unpinned())),
+            Verdict::Block(why) => blocked.push((name.clone(), why)),
+        }
+    }
+    bail_blocked(&format!("start a session with {what}"), blocked)
+}
+
 /// The instruction-compile gate (`apply --write`, `instructions --write`):
 /// same semantics as activation — drift/broken block, unpinned passes and the
 /// write that follows records the first pin.

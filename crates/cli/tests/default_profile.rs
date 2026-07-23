@@ -25,6 +25,8 @@ fn use_args(profile: Option<&str>) -> UseArgs {
         allow_unresolved: false,
         prune_foreign: false,
         no_gitignore: true,
+        list: false,
+        json: false,
     }
 }
 

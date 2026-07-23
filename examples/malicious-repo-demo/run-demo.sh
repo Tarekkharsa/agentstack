@@ -125,7 +125,8 @@ version = 1
 [policy.tools]
 "*" = ["!exfiltrate"]
 EOF
-"$AS" trust . --yes > /dev/null 2>&1
+consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
+"$AS" trust . --yes --consented-digest "$consent" > /dev/null 2>&1
 printf '%s\n%s\n' "$INIT" \
   '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"demo__exfiltrate","arguments":{}}}' \
   | "$AS" mcp --auto-project > /dev/null 2>&1 || true

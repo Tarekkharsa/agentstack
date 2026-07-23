@@ -89,6 +89,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 global: false,
                 force: false,
                 dry_run: false,
+                plan: false,
                 // None → init prompts for secret storage when it lifts tokens
                 // and the shell is interactive (P2); setup is interactive.
                 secrets: None,
@@ -658,6 +659,8 @@ pub fn materialize_profile(
         allow_unresolved: false,
         prune_foreign: false,
         no_gitignore: false,
+        list: false,
+        json: false,
     };
     let libctx = ctx.library_ctx();
     let prepared = super::use_profile::prepare(ctx, &libctx, &use_args)?;

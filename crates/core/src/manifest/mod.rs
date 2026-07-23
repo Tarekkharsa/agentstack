@@ -8,10 +8,10 @@ pub mod load;
 pub mod model;
 
 pub use load::{
-    discover_project_base, load_from_dir, machine_experimental_health, machine_guard_health,
-    machine_policy_health, merge_user_layer, new_manifest_dir, project_root_of,
-    resolve_manifest_dir, LoadedManifest, MachinePolicySource, MANIFEST_FILE, MANIFEST_SUBDIR,
-    SUPPORTED_MANIFEST_VERSION,
+    discover_project_base, load_from_contents, load_from_dir, machine_experimental_health,
+    machine_guard_health, machine_policy_health, merge_user_layer, new_manifest_dir,
+    project_root_of, resolve_manifest_dir, LoadedManifest, MachinePolicySource, MANIFEST_FILE,
+    MANIFEST_SUBDIR, SUPPORTED_MANIFEST_VERSION,
 };
 pub use model::{
     egress_match, egress_pattern_is_malformed, glob_match, glob_to_match, host_from_url,

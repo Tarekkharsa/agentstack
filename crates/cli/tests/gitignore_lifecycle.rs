@@ -32,6 +32,8 @@ fn use_args(profile: &str) -> UseArgs {
         allow_unresolved: false,
         no_gitignore: false,
         prune_foreign: false,
+        list: false,
+        json: false,
     }
 }
 

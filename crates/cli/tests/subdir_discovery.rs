@@ -71,6 +71,7 @@ fn init_from_a_subdir_refuses_to_silently_nest() {
         global: false,
         force: false,
         dry_run: false,
+        plan: false,
         secrets: None,
         no_keychain: false,
         yes: true,

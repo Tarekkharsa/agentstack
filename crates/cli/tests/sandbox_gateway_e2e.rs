@@ -243,9 +243,9 @@ fn trusted_bundle_routes_denied_tool_and_records_it() {
     // Lock + trust the bundle so the gateway builds a live surface. `lock`
     // takes no positional (uses cwd); `trust` defaults to `.`.
     let bin = env!("CARGO_BIN_EXE_agentstack");
-    for step in [vec!["lock"], vec!["trust", "--yes"]] {
+    let run_as = |step: &[&str]| {
         let s = Command::new(bin)
-            .args(&step)
+            .args(step)
             .current_dir(&proj)
             .env("HOME", &home)
             .env("AGENTSTACK_HOME", &as_home)
@@ -257,7 +257,11 @@ fn trusted_bundle_routes_denied_tool_and_records_it() {
             step[0],
             strip_ansi(&String::from_utf8_lossy(&s.stderr))
         );
-    }
+    };
+    run_as(&["lock"]);
+    // §7.2: the non-interactive grant presents the previewed surface digest.
+    let consent = agentstack::trust::digest_for(&proj).unwrap();
+    run_as(&["trust", "--yes", "--consented-digest", &consent]);
 
     // The container reads the mounted gateway config and calls a DENIED tool
     // through the endpoint. node's fetch dials host.docker.internal directly.
@@ -338,16 +342,20 @@ fn lockdown_routes_denied_tool_through_the_sidecar_relay() {
     .unwrap();
 
     let bin = env!("CARGO_BIN_EXE_agentstack");
-    for step in [vec!["lock"], vec!["trust", "--yes"]] {
+    let run_as = |step: &[&str]| {
         let s = Command::new(bin)
-            .args(&step)
+            .args(step)
             .current_dir(&proj)
             .env("HOME", &home)
             .env("AGENTSTACK_HOME", &as_home)
             .output()
             .unwrap();
         assert!(s.status.success(), "`agentstack {}` failed", step[0]);
-    }
+    };
+    run_as(&["lock"]);
+    // §7.2: the non-interactive grant presents the previewed surface digest.
+    let consent = agentstack::trust::digest_for(&proj).unwrap();
+    run_as(&["trust", "--yes", "--consented-digest", &consent]);
 
     let out = Command::new(bin)
         .args(["run", "--lockdown", "gwtest", "--", "-e", CLIENT_SCRIPT])

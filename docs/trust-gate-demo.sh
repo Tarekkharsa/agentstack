@@ -97,7 +97,7 @@ note "→ untrusted, so:"; search
 
 say "Nothing. Until YOU review it, none of its servers are spawned or even contacted."
 run "agentstack trust ."
-"$AS" trust . --yes 2>&1 | clean | sed 's/^/  /' | grep -E "runs|trusted at|Withdraw" || true
+"$AS" trust . --yes --consented-digest "$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')" 2>&1 | clean | sed 's/^/  /' | grep -E "runs|trusted at|Withdraw" || true
 
 say "You saw exactly what it would run, and trusted it (pinned to a content digest)."
 run "agentstack mcp --auto-project   # ask again, now trusted"
