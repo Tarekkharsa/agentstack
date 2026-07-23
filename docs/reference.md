@@ -1346,7 +1346,8 @@ you need the exact verb, flag, or subcommand.
 - **`session`** _(hidden)_ — Manage ephemeral sessions: load a profile for now, then revert it — subcommands `start/end/list/freeze`
 - **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--prompt/--profile/--scope/--keep/--sandbox/--lockdown/--plan`
 - **`kill`** _(hidden)_ — Kill a tracked run by id (and revert its profile if it owned one) — flags `--force`
-- **`workflow`** _(hidden)_ — Governed workflows (preview): run a pinned workflow under full admission — trust gate, strict lock verification, machine-capped ceilings — with every `agent()` call becoming a locked child run. Hidden while the lane is preview (Stage E adds `workflow report`) — subcommands `run/report`
+- **`shim`** _(hidden)_ — Exec-through launcher shim for external supervisors (e.g. t3code) — subcommands `make/exec*`
+- **`workflow`** _(hidden)_ — Governed workflows (preview): run a pinned workflow under full admission — trust gate, strict lock verification, machine-capped ceilings — with every `agent()` call becoming a locked child run. Hidden while the lane is preview (Stage E adds `workflow report`) — subcommands `run/report/list`
 - **`report`** _(hidden)_ — Every "what happened" view in one place — subcommands `run/runs/usage/calls/wire`
 - **`sign`** _(hidden)_ — Sign this project's agentstack.lock with a fresh ed25519 key (writes a detached agentstack.lock.sig, prints the public key to publish) — flags `--print-key-only`
 - **`verify`** _(hidden)_ — Verify agentstack.lock against a published ed25519 public key and its detached signature — flags `--pubkey/--signature`

@@ -32,7 +32,7 @@ every command (listed or not) has its own --help:
   Edit        add · set · search · remove · install · lib · adopt · export · import
   Render      apply · use · instructions · lock · session · diff · restore
   Protect     trust · explain · secret · guard · sign · verify
-  Run         run · kill · workflow · gateway · mcp · try
+  Run         run · kill · workflow · gateway · mcp · shim · try
   Inspect     doctor · report · dashboard · optimize · proxy
 
 Words: a CLI (a.k.a. harness) is the agent tool you run; an adapter compiles
