@@ -72,22 +72,6 @@ real configs, and it asserts every step, so it doubles as the witness that this
 output stays accurate):
 [`examples/first-value-demo/run-demo.sh`](examples/first-value-demo/run-demo.sh).
 
-## t3code is the graphical path
-
-The CLI is complete on its own, but t3code is AgentStack's primary graphical
-integration and launch channel. The native panel is being built around four
-plain-language jobs: **Setup, Toolset, Status, and Undo**. It uses the same
-CLI-owned plans and fixed actions as the terminal; t3code presents the
-experience but never becomes the enforcement boundary.
-
-Today, AgentStack already manages the native CLI configurations t3code launches,
-doctor checks the supervisor integration, and shims can attach per-session run
-identity. The guided setup/toolset panel and consent/admin contract are active
-roadmap work and remain fail-closed until complete.
-
-Read the honest current contract and limits:
-[Use with t3code](https://tarekkharsa.github.io/agentstack/howto/use-with-t3code.html).
-
 ## Install
 
 The one-line installer above verifies the release tarball against the `checksums.txt` published with
@@ -123,7 +107,7 @@ Everything is explained on the website — that is the one place docs live:
 - **[Concepts](https://tarekkharsa.github.io/agentstack/concepts.html)** — every term in two or three plain sentences
 - **[Which mode do I need?](https://tarekkharsa.github.io/agentstack/choose.html)** — protection level and delivery mode, decided in two tables
 - **[How-tos](https://tarekkharsa.github.io/agentstack/docs.html)** — add a server or skill, trust a repo, lock down a run, team setup, CI, undo
-- **[Use with t3code](https://tarekkharsa.github.io/agentstack/howto/use-with-t3code.html)** — current integration, native panel direction, and limits
+- **[Integrations](https://tarekkharsa.github.io/agentstack/integrations.html)** — use AgentStack from t3code and other graphical launchers; the current contract and limits
 - **[See what your agents did](https://tarekkharsa.github.io/agentstack/howto/see-what-happened.html)** — runs, reports, optimize, explain
 - **[Reference](https://tarekkharsa.github.io/agentstack/reference.html)** — the complete feature and command inventory
 

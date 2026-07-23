@@ -39,6 +39,7 @@ PAGES = [
     ("concepts.md", "concepts.html", "concepts"),
     ("choose.md", "choose.html", "choose"),
     ("reference.md", "reference.html", "reference"),
+    ("integrations.md", "integrations.html", "integrations"),
     ("ARCHITECTURE.md", "architecture.html", "how-it-works"),
     ("workflows.md", "workflows.html", "workflows"),
     ("ENFORCEMENT.md", "enforcement.html", "matrix"),
@@ -50,7 +51,6 @@ PAGES = [
     ("howto/team-setup.md", "howto/team-setup.html", "howto-team"),
     ("howto/ci.md", "howto/ci.html", "howto-ci"),
     ("howto/undo.md", "howto/undo.html", "howto-undo"),
-    ("howto/use-with-t3code.md", "howto/use-with-t3code.html", "howto-t3code"),
     ("howto/see-what-happened.md", "howto/see-what-happened.html", "howto-audit"),
 ]
 MD_TO_HTML = {src: out for src, out, _ in PAGES}

@@ -7,7 +7,7 @@
 A **toolset** is a named subset of the setup you already have — "backend",
 "incident", "design" — that you activate together. In the manifest it is a
 `[profiles.<name>]` block; the CLI and the JSON contracts call it a *profile*,
-the t3code panel calls it a *Toolset*. Same object. It names *which* of your
+graphical integrations call it a *Toolset*. Same object. It names *which* of your
 servers and skills come along for a task; it is **not** a policy, a permission
 level, or a workflow role. A manifest with no toolset named activates its whole
 inline set, so you only name one once you want more than one.

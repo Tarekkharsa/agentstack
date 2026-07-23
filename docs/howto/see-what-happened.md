@@ -51,9 +51,8 @@ measures what the `tools` block actually costs on the wire.
 
 **Optimize.** `agentstack optimize` turns the same signals into
 recommendations, each carrying its evidence and the exact command or TOML;
-`--write` applies only the provably-inert safe class. t3code is the primary
-graphical integration and consumes the same machine-readable reports as its
-AgentStack panels land.
+`--write` applies only the provably-inert safe class. The same machine-readable
+reports feed external tools and integrations.
 
 **Before you trust.** `agentstack explain <name>` is the vet-first command: it
 shows one server or skill's origin and provenance, whether it has drifted from

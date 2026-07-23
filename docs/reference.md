@@ -169,7 +169,7 @@ relevant to this project — a feature you've never touched (the zero-files
 gateway, native extensions, reproducibility pins…) stays out of the way until it
 is used or produces a warning/error, which always shows. A closing line counts
 what was hidden; `--all` and `--ci` print the full report, while `--json`
-provides the complete machine-readable view for t3code and automation.
+provides the complete machine-readable view for external tools and automation.
 
 ## Drift: adopt or apply?
 
@@ -777,7 +777,7 @@ Hidden-Unicode findings **block the install** (override with
 content re-scan of everything materialized (skills and instruction files), and
 `doctor --ci` fails on high-severity findings, so a poisoned skill can't slide
 into CI unnoticed. Everyday `doctor` skips this scan (it reads every skill body);
-`--json` emits the whole report machine-readably for t3code and automation.
+`--json` emits the whole report machine-readably for external tools and automation.
 Interactive `init` offers the deep scan as an explicit yes/no at its
 closing doctor step, but only when the project actually has skills.
 
@@ -801,7 +801,7 @@ captures the session's resolved set — the profile's servers plus the skills
 actually loaded — into a new profile (default `<profile>-frozen`) so CI can
 replay it deterministically; review the manifest edit, then `agentstack lock`.
 The same start/end lifecycle backs the MCP `agentstack_session_*` tools and
-t3code's toolset picker.
+external toolset pickers.
 
 ### Execution posture
 
@@ -1268,9 +1268,9 @@ gateway-brokered calls — a server rendered into a native config is called
 directly by the harness, so such servers are never auto-removed on "no calls"
 evidence alone.
 
-## t3code integration
+## Integrations
 
-t3code is AgentStack’s primary graphical surface. It consumes the same read-only JSON reports and invokes a closed set of CLI-owned actions; see [Use with t3code](howto/use-with-t3code.md). The AgentStack CLI remains the complete standalone and automation interface.
+Graphical surfaces consume the same read-only JSON reports and invoke a closed set of CLI-owned actions; see [Integrations](integrations.md). The AgentStack CLI remains the complete standalone and automation interface.
 
 ## Part III — Full command reference
 
@@ -1346,7 +1346,7 @@ content scanning on install + `doctor --deep` · official MCP Registry provider 
 (`[settings.*]` → settings.json) · native extensions (`[extensions.*]` →
 content-pinned harness add-ons, re-verified at `run --locked`) · atomic writes + backups ·
 `export`/`import` · portable lifecycle hooks · agent-operable `mcp` server ·
-t3code integration contracts · live runs (`run`/`report runs`/`kill`) ·
+graphical-integration contracts · live runs (`run`/`report runs`/`kill`) ·
 GitHub Action trust gate ·
 nightly adapter-conformance CI · zero-files gateway (`gateway connect` + `mcp
 --auto-project` + digest-pinned `trust`) · `optimize` (evidence-backed

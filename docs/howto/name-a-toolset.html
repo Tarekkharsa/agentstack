@@ -163,6 +163,13 @@
       </li>
     </ul>
   </div>
+  <div class="grp">
+    <b>Integrations</b>
+    <ul>
+      <li><a href="../integrations.html">t3code</a>
+      </li>
+    </ul>
+  </div>
   <details class="grp">
     <summary>Configure deeper</summary>
     <code>$ agentstack use · session</code>
@@ -206,8 +213,6 @@
       </li>
       <li><a href="../howto/ci.html">Use in CI</a>
       </li>
-      <li><a href="../howto/use-with-t3code.html">Use with t3code</a>
-      </li>
     </ul>
   </details>
   <details class="grp">
@@ -232,7 +237,7 @@
 </aside>
   <main>
 <h1 id="name-a-toolset">Name a toolset</h1>
-<p>A <strong>toolset</strong> is a named subset of the setup you already have — "backend", "incident", "design" — that you activate together. In the manifest it is a <code>[profiles.&lt;name&gt;]</code> block; the CLI and the JSON contracts call it a <em>profile</em>, the t3code panel calls it a <em>Toolset</em>. Same object. It names <em>which</em> of your servers and skills come along for a task; it is <strong>not</strong> a policy, a permission level, or a workflow role. A manifest with no toolset named activates its whole inline set, so you only name one once you want more than one.</p>
+<p>A <strong>toolset</strong> is a named subset of the setup you already have — "backend", "incident", "design" — that you activate together. In the manifest it is a <code>[profiles.&lt;name&gt;]</code> block; the CLI and the JSON contracts call it a <em>profile</em>, graphical integrations call it a <em>Toolset</em>. Same object. It names <em>which</em> of your servers and skills come along for a task; it is <strong>not</strong> a policy, a permission level, or a workflow role. A manifest with no toolset named activates its whole inline set, so you only name one once you want more than one.</p>
 <p>Prerequisite: a project with an <code>.agentstack/agentstack.toml</code> <a href="../concepts.html">manifest</a> (run <code>agentstack init</code> if you don't have one).</p>
 <h2 id="make-a-second-toolset-from-what-you-already-have">Make a second toolset from what you already have<a class="hlink" href="#make-a-second-toolset-from-what-you-already-have" aria-label="Link to this section">#</a></h2>
 <p>The capabilities are already in your manifest. A second toolset just <em>names a subset</em> of them — no re-import, no copying. Add one <code>[profiles.&lt;name&gt;]</code> block that lists the servers and skills that task needs:</p>

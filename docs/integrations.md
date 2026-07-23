@@ -2,14 +2,25 @@
      https://tarekkharsa.github.io/agentstack/ — readers go to the site.
      Edit here, then run: python3 tools/make-docs-pages.py -->
 
-# Use with t3code
+# Integrations
 
-t3code is AgentStack's primary graphical integration and launch channel. The
-goal is to make AgentStack useful where people already start and supervise
-Claude Code, Codex, Cursor, and OpenCode—without asking them to learn a second
-dashboard or the complete AgentStack command surface.
+The AgentStack CLI is the complete, standalone interface: every plan, write,
+consent check, and enforcement decision lives there. An **integration** is an
+optional surface that calls those same stable read APIs and fixed actions to
+make the product easier to discover and use where you already work. An
+integration presents; it never becomes the enforcement boundary, and it never
+becomes a second implementation.
 
-## What works today
+Today there is one.
+
+## t3code
+
+t3code is AgentStack's graphical integration and launch channel. The goal is to
+make AgentStack useful where people already start and supervise Claude Code,
+Codex, Cursor, and OpenCode—without asking them to learn a second dashboard or
+the complete AgentStack command surface.
+
+### What works today
 
 AgentStack already manages the native configuration read by the coding CLIs
 t3code launches. Static activation and clean-at-rest sessions therefore apply
@@ -35,7 +46,7 @@ Point the matching t3code provider's binary-path setting at the generated shim.
 Each launched session then appears in `agentstack report runs` and receives its
 own run report.
 
-## The panel journey
+### The panel journey
 
 The native t3code panel implements the first launch slice end to end:
 
@@ -66,7 +77,7 @@ Safety appears progressively:
 - Gateway, sandbox, and lockdown choices live under a later “More protection”
   path with honest coverage labels.
 
-## The integration boundary
+### The integration boundary
 
 t3code owns presentation. The AgentStack CLI owns decisions and authority.
 
@@ -88,7 +99,7 @@ separate human-authority boundary. Both halves are enforced independently:
 read-only status and planning need no administrative authority, and a
 frontend bug can break the panel but cannot mint a grant.
 
-## Limits
+### Limits
 
 - t3code injects its own browser-preview MCP endpoint directly into sessions,
   outside native CLI configuration. AgentStack can gate calls on governed

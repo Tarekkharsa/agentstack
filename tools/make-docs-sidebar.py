@@ -55,6 +55,9 @@ TREE = [
         ("Every command", "reference.html", "reference"),
         ("Agent manual (skill)", f"{GH}/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md", "manual"),
     ], "open"),
+    ("Integrations", None, [
+        ("t3code", "integrations.html", "integrations"),
+    ], "open"),
     ("Configure deeper", "$ agentstack use · session", [
         ("How it works", "architecture.html", "how-it-works"),
         ("Workflows (preview)", "workflows.html", "workflows"),
@@ -73,7 +76,6 @@ TREE = [
     ("Team & CI", None, [
         ("Team setup", "howto/team-setup.html", "howto-team"),
         ("Use in CI", "howto/ci.html", "howto-ci"),
-        ("Use with t3code", "howto/use-with-t3code.html", "howto-t3code"),
     ], "deeper"),
     ("Observe deeper", "$ agentstack report", [
         ("Reports & call audit", "examples.html#e20", "reports"),
