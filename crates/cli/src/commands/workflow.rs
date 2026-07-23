@@ -477,6 +477,12 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
         })?;
     }
 
+    // Live-run visibility: register the envelope (own pid) so `report runs`
+    // and polling UIs see the workflow while it drives. The guard's Drop
+    // deregisters on every return path below; the watchdog force-exit skips
+    // Drop and is healed by the registry's dead-pid prune.
+    let _envelope = crate::runs::register_workflow_envelope(&run_id, &wf.name, &base);
+
     // 3. Engine construction inside catch_unwind at the CLI edge. Both
     // refusal shapes are recorded terminally: an engine refusal under its
     // kind slug, an escaped panic (past both containments) as `panicked`.
@@ -2020,6 +2026,176 @@ fn print_workflow_list_table(rows: &[WorkflowListRow]) {
     }
 }
 
+// ───────────────────────── workflow runs (history) ─────────────────────────
+
+/// One recorded workflow run's history row — identity and terminal read from
+/// its own `events.jsonl` (evidence as recorded), liveness joined from the
+/// runs registry. The three-way `outcome` is the same normalization as the
+/// report's top level, plus `interrupted` for the state the report cannot
+/// express alone: no terminal recorded AND the envelope process is gone.
+struct WorkflowRunRow {
+    run: String,
+    workflow: String,
+    /// `completed` | `failed` | `running` | `interrupted`.
+    outcome: &'static str,
+    exhausted: bool,
+    /// True when `workflow run <name> --resume <id>` would accept this run:
+    /// interrupted, or terminated by `wall_deadline` / `watchdog_kill`
+    /// (the Stage F resumability rule — never re-derived, just restated).
+    resumable: bool,
+    started_unix: u64,
+    duration_ms: Option<u64>,
+    steps: usize,
+}
+
+pub fn runs(args: &crate::cli::WorkflowRunsArgs) -> Result<()> {
+    let rows = collect_workflow_run_rows(args.limit);
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&workflow_runs_json(&rows))?
+        );
+    } else {
+        print_workflow_runs_table(&rows);
+    }
+    Ok(())
+}
+
+/// The row-gathering half of `runs` (the testable seam). Global by design:
+/// run evidence does not record which project invoked it (the manifest names
+/// the workflow, not the reverse), so the history lists every recorded
+/// envelope on this machine. Bounded: only the newest `limit` directories
+/// (by directory mtime — a cheap pre-parse ordering) are read at all; the
+/// recorded `WorkflowStarted` ts is the authoritative sort key for what
+/// remains. A dir that isn't a parseable workflow log is skipped, never an
+/// error — a listing must not brick on one corrupt run.
+fn collect_workflow_run_rows(limit: usize) -> Vec<WorkflowRunRow> {
+    let root = crate::util::paths::agentstack_home().join("runs");
+    let mut candidates: Vec<(std::time::SystemTime, String)> = std::fs::read_dir(&root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with("w-") {
+                return None;
+            }
+            let mtime = entry.metadata().ok()?.modified().ok()?;
+            Some((mtime, name))
+        })
+        .collect();
+    candidates.sort_by_key(|c| std::cmp::Reverse(c.0));
+
+    // Liveness join: an id present here has a verified-alive pid (the
+    // registry prunes dead records on every `list`).
+    let live: HashSet<String> = crate::runs::list().into_iter().map(|r| r.id).collect();
+
+    let mut rows = Vec::new();
+    for (_, run_id) in candidates.into_iter().take(limit) {
+        let events = RunLog::read(&run_id);
+        let Some((started_unix, workflow)) = events.iter().find_map(|e| match e {
+            RunEvent::WorkflowStarted { ts, workflow, .. } => Some((*ts, workflow.clone())),
+            _ => None,
+        }) else {
+            continue;
+        };
+        // Last terminal wins — a resumed run carries its earlier
+        // `wall_deadline` terminal plus the resumed session's final one.
+        let terminal = events.iter().rev().find_map(|e| match e {
+            RunEvent::WorkflowCompleted {
+                outcome,
+                exhausted,
+                duration_ms,
+                ..
+            } => Some((outcome.clone(), *exhausted, *duration_ms)),
+            _ => None,
+        });
+        let steps: HashSet<u64> = events
+            .iter()
+            .filter_map(|e| match e {
+                RunEvent::StepSpawned { step, .. } => Some(*step),
+                _ => None,
+            })
+            .collect();
+        let (outcome, exhausted, duration_ms, resumable) = match &terminal {
+            Some((raw, ex, dur)) => (
+                if raw == "done" { "completed" } else { "failed" },
+                *ex,
+                Some(*dur),
+                raw == "wall_deadline" || raw == "watchdog_kill",
+            ),
+            None if live.contains(&run_id) => ("running", false, None, false),
+            None => ("interrupted", false, None, true),
+        };
+        rows.push(WorkflowRunRow {
+            run: run_id,
+            workflow,
+            outcome,
+            exhausted,
+            resumable,
+            started_unix,
+            duration_ms,
+            steps: steps.len(),
+        });
+    }
+    rows.sort_by_key(|r| std::cmp::Reverse(r.started_unix));
+    rows
+}
+
+/// Field names mirror the report's JSON verbatim where they overlap
+/// (`run`, `workflow`, `outcome`, `exhausted`, `duration_ms`) — one wire
+/// vocabulary, never a second definition.
+fn workflow_runs_json(rows: &[WorkflowRunRow]) -> serde_json::Value {
+    serde_json::json!({
+        "runs": rows
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "run": r.run,
+                    "workflow": sanitize_line(&r.workflow),
+                    "outcome": r.outcome,
+                    "exhausted": r.exhausted,
+                    "resumable": r.resumable,
+                    "started_unix": r.started_unix,
+                    "duration_ms": r.duration_ms,
+                    "steps": r.steps,
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+}
+
+fn print_workflow_runs_table(rows: &[WorkflowRunRow]) {
+    if rows.is_empty() {
+        println!("(no recorded workflow runs)");
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    println!(
+        "{:<14} {:<24} {:<12} {:<8} {:<10} {:<6} RESUMABLE",
+        "RUN", "WORKFLOW", "OUTCOME", "AGO", "DURATION", "STEPS"
+    );
+    for r in rows {
+        let duration = r
+            .duration_ms
+            .map(|ms| format!("{:.1}s", ms as f64 / 1000.0))
+            .unwrap_or_else(|| "-".to_string());
+        println!(
+            "{:<14} {:<24} {:<12} {:<8} {:<10} {:<6} {}",
+            r.run,
+            sanitize_line(&r.workflow),
+            r.outcome,
+            super::runs::fmt_uptime(now.saturating_sub(r.started_unix)),
+            duration,
+            r.steps,
+            r.resumable,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2755,6 +2931,72 @@ mod tests {
         std::panic::set_hook(previous);
         let err = out.unwrap_err().to_string();
         assert!(err.contains("refusing the run"), "{err}");
+    }
+
+    /// History-listing witness (`workflow runs`): the three-way outcome is
+    /// honest — a recorded terminal lists as completed, a terminal-less run
+    /// with a live envelope lists as running, and a terminal-less run whose
+    /// process is gone lists as interrupted + resumable; rows sort newest
+    /// first by recorded start.
+    #[test]
+    fn workflow_runs_history_reports_three_states() {
+        let _env = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let write = |id: &str, events: &[RunEvent]| {
+            let dir = home.path().join("runs").join(id);
+            std::fs::create_dir_all(&dir).unwrap();
+            let text: String = events
+                .iter()
+                .map(|e| serde_json::to_string(e).unwrap() + "\n")
+                .collect();
+            std::fs::write(dir.join("events.jsonl"), text).unwrap();
+        };
+        let started = |ts: u64| RunEvent::WorkflowStarted {
+            ts,
+            workflow: "demo".into(),
+            workflow_digest: "d".into(),
+            grant_digest: "g".into(),
+            args_digest: "a".into(),
+            max_agents: 3,
+            max_wall_seconds: 60,
+        };
+        write(
+            "w-histdone",
+            &[
+                started(100),
+                RunEvent::WorkflowCompleted {
+                    ts: 130,
+                    outcome: "done".into(),
+                    exhausted: false,
+                    duration_ms: 30_000,
+                },
+            ],
+        );
+        write("w-histcut", &[started(200)]);
+        write("w-histlive", &[started(300)]);
+        let _envelope = crate::runs::register_workflow_envelope("w-histlive", "demo", home.path());
+
+        let rows = collect_workflow_run_rows(20);
+        let by_id: HashMap<&str, &WorkflowRunRow> =
+            rows.iter().map(|r| (r.run.as_str(), r)).collect();
+        assert_eq!(by_id["w-histdone"].outcome, "completed");
+        assert!(!by_id["w-histdone"].resumable);
+        assert_eq!(by_id["w-histdone"].duration_ms, Some(30_000));
+        assert_eq!(by_id["w-histlive"].outcome, "running");
+        assert_eq!(by_id["w-histcut"].outcome, "interrupted");
+        assert!(by_id["w-histcut"].resumable);
+        let order: Vec<&str> = rows.iter().map(|r| r.run.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["w-histlive", "w-histcut", "w-histdone"],
+            "newest recorded start first"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     // ───────────────────────── Stage F resume witnesses ─────────────────────────

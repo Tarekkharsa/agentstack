@@ -126,7 +126,7 @@ pub fn kill(args: &KillArgs) -> Result<()> {
 }
 
 /// Compact human uptime: `45s`, `12m`, `3h05m`.
-fn fmt_uptime(secs: u64) -> String {
+pub(crate) fn fmt_uptime(secs: u64) -> String {
     if secs < 60 {
         format!("{secs}s")
     } else if secs < 3600 {

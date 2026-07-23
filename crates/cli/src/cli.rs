@@ -534,6 +534,16 @@ pub enum WorkflowCmd {
     /// or drifted ones — so it never gates on admission; it reports the
     /// admission state instead.
     List(WorkflowListArgs),
+
+    /// List recorded workflow runs (the `w-…` evidence directories), newest
+    /// first — the durable history behind `workflow report`, read-only.
+    ///
+    /// Each row joins the run's recorded identity and terminal outcome with
+    /// the live-runs registry for an honest three-state: `running` (no
+    /// terminal recorded, envelope process alive), `completed`/`failed`
+    /// (terminal recorded), `interrupted` (no terminal, process gone —
+    /// resumable via `workflow run <name> --resume <id>`).
+    Runs(WorkflowRunsArgs),
 }
 
 #[derive(Args, Debug)]
@@ -576,6 +586,18 @@ pub struct WorkflowListArgs {
     /// Emit the declared workflow list as JSON instead of a human table.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WorkflowRunsArgs {
+    /// Emit the run history as JSON instead of a human table.
+    #[arg(long)]
+    pub json: bool,
+
+    /// Newest-first cap on how many recorded runs are read and listed —
+    /// the evidence directory only grows, so the listing is always bounded.
+    #[arg(long, value_name = "N", default_value_t = 20)]
+    pub limit: usize,
 }
 
 /// The zero-files gateway lifecycle: `connect` registers it in a harness's

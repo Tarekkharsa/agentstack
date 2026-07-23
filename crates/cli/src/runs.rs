@@ -162,6 +162,55 @@ pub(crate) fn gen_workflow_id() -> String {
     format!("w-{}", &gen_id()[2..])
 }
 
+/// RAII registration of a workflow envelope (`w-…`) in the live-runs
+/// registry, so `report runs` (and UIs polling it) can see a workflow while
+/// it drives. The envelope is THIS process, not a spawned child, so the
+/// launch paths never register it — without this, a live workflow is
+/// invisible to the registry.
+///
+/// Drop removes the record on every normal return path (Rust note: like a
+/// `finally` block, but attached to the value's scope — every `?` and early
+/// `return` in the holding function runs it). The watchdog's force-exit
+/// skips Drop by design; the process is dead at that point, so the dead-pid
+/// prune in [`list`] self-heals the stale record instead. `agentstack kill
+/// w-…` signals the envelope's process group like any run — terminating the
+/// drive loop — and an ESRCH (not a group leader) just cleans the record.
+pub(crate) struct EnvelopeRegistration {
+    id: String,
+}
+
+impl Drop for EnvelopeRegistration {
+    fn drop(&mut self) {
+        registry_remove(&self.id);
+    }
+}
+
+/// Best-effort, like every registry write: the registry is observability,
+/// never a gate — a failed save must not block the run.
+pub(crate) fn register_workflow_envelope(
+    id: &str,
+    workflow: &str,
+    project_dir: &Path,
+) -> EnvelopeRegistration {
+    let rec = RunRecord {
+        id: id.to_string(),
+        pid: std::process::id() as i32,
+        harness: "workflow".to_string(),
+        display: format!("workflow {workflow}"),
+        command: std::env::current_exe()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "agentstack".to_string()),
+        args: Vec::new(),
+        cwd: project_dir.to_string_lossy().into_owned(),
+        profile: None,
+        scope: None,
+        started_unix: now_secs(),
+        started_session: false,
+    };
+    registry_insert(rec);
+    EnvelopeRegistration { id: id.to_string() }
+}
+
 /// Drop records whose process has exited. Returns the surviving map and whether
 /// anything was removed (so the caller can persist the cleanup).
 fn prune(mut map: BTreeMap<String, RunRecord>) -> (BTreeMap<String, RunRecord>, bool) {
@@ -719,6 +768,32 @@ mod tests {
             }
         });
         assert_eq!(load_all().len(), 8, "every concurrent insert must survive");
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// Envelope-visibility witness: a registered workflow envelope survives
+    /// `list()`'s prune while the guard lives (own pid — alive), and dropping
+    /// the guard removes it — the contract `report runs` and polling UIs
+    /// depend on to see a workflow while it drives.
+    #[test]
+    fn workflow_envelope_registers_and_drop_deregisters() {
+        let _env = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let guard = register_workflow_envelope("w-envelopetest", "demo", Path::new("/tmp/demo"));
+        assert!(
+            list().iter().any(|r| r.id == "w-envelopetest"),
+            "envelope visible in the live registry while the guard is held"
+        );
+        drop(guard);
+        assert!(
+            !list().iter().any(|r| r.id == "w-envelopetest"),
+            "dropping the guard deregisters the envelope"
+        );
 
         std::env::remove_var("AGENTSTACK_HOME");
     }

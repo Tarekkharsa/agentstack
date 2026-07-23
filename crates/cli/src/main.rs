@@ -110,6 +110,7 @@ fn run() -> Result<()> {
             agentstack::cli::WorkflowCmd::Run(args) => commands::workflow::run(dir, args),
             agentstack::cli::WorkflowCmd::Report(args) => commands::workflow::report(args),
             agentstack::cli::WorkflowCmd::List(args) => commands::workflow::list(dir, args),
+            agentstack::cli::WorkflowCmd::Runs(args) => commands::workflow::runs(args),
         },
         Command::Report(cmd) => match cmd {
             agentstack::cli::ReportCmd::Run(args) => commands::report::run(args),
