@@ -325,12 +325,22 @@ pub fn list_json_value(manifest_dir: Option<&Path>) -> Result<serde_json::Value>
         "trust": trust_state,
         "profiles": profiles,
         // Null when nothing is active; a UI renders the end/recovery action
-        // from this object, never from its own remembered state.
-        "session": active_session.map(|s| serde_json::json!({
-            "profile": crate::text::sanitize_line(&s.profile),
-            "scope": s.scope,
-            "started_unix": s.started_unix,
-        })),
+        // from this object, never from its own remembered state. `abandoned`
+        // (Stage 2.2) carries the CLI's own age-based judgment so the panel
+        // highlights an interrupted session for recovery without duplicating
+        // the threshold in TypeScript.
+        "session": active_session.map(|s| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            serde_json::json!({
+                "profile": crate::text::sanitize_line(&s.profile),
+                "scope": s.scope,
+                "started_unix": s.started_unix,
+                "abandoned": s.is_abandoned(now),
+            })
+        }),
     }))
 }
 

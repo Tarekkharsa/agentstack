@@ -72,6 +72,47 @@ fn render_end_report(report: &crate::session::EndReport, project_root: &std::pat
     out
 }
 
+/// One row for the `session list` rendering.
+struct SessionRow<'a> {
+    dir: &'a str,
+    profile: &'a str,
+    scope: &'a str,
+    age_secs: u64,
+    abandoned: bool,
+}
+
+/// Stage 2.2: `session list` names every active session with its age, flags
+/// the ones that read as abandoned, and offers the exact safe recovery for
+/// each — so a session an interrupted terminal or panel left behind is
+/// visible and one command from being reverted. Pure (no color) so the shape
+/// is unit-testable.
+fn render_session_list(rows: &[SessionRow]) -> String {
+    if rows.is_empty() {
+        return "No active sessions.\n".to_string();
+    }
+    let mut out = String::from("Active sessions:\n");
+    for r in rows {
+        let flag = if r.abandoned {
+            " · looks abandoned"
+        } else {
+            ""
+        };
+        out.push_str(&format!(
+            "  '{}' ({}) · {}{flag}\n      {}\n",
+            r.profile,
+            r.scope,
+            crate::commands::overview::session_age(r.age_secs),
+            r.dir,
+        ));
+        if r.abandoned {
+            out.push_str(
+                "      recover: run `agentstack session end` in that project (or `session end --all`) — it restores your files\n",
+            );
+        }
+    }
+    out
+}
+
 pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
     match &args.cmd {
         SessionCmd::Start { profile, scope } => {
@@ -107,13 +148,21 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
         }
         SessionCmd::List => {
             let list = crate::session::list_all();
-            if list.is_empty() {
-                println!("No active sessions.");
-            } else {
-                for s in list {
-                    println!("{}  profile={} scope={}", s.dir.bold(), s.profile, s.scope,);
-                }
-            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let rows: Vec<SessionRow> = list
+                .iter()
+                .map(|s| SessionRow {
+                    dir: &s.dir,
+                    profile: &s.profile,
+                    scope: &s.scope,
+                    age_secs: now.saturating_sub(s.started_unix),
+                    abandoned: s.is_abandoned(now),
+                })
+                .collect();
+            print!("{}", render_session_list(&rows));
         }
     }
     Ok(())
@@ -171,5 +220,37 @@ mod tests {
         };
         let out = render_end_report(&empty, Path::new("/repo"));
         assert!(out.contains("nothing to revert"));
+    }
+
+    /// Stage 2.2: `session list` names each session with its age, flags the
+    /// abandoned ones, and offers the safe recovery only for those.
+    #[test]
+    fn session_list_flags_abandoned_and_offers_recovery() {
+        assert_eq!(render_session_list(&[]), "No active sessions.\n");
+
+        let rows = [
+            SessionRow {
+                dir: "/repo/a",
+                profile: "dev",
+                scope: "project",
+                age_secs: 240,
+                abandoned: false,
+            },
+            SessionRow {
+                dir: "/repo/b",
+                profile: "ops",
+                scope: "project",
+                age_secs: 14 * 3600,
+                abandoned: true,
+            },
+        ];
+        let out = render_session_list(&rows);
+        assert!(out.contains("'dev' (project) · started 4m ago"));
+        assert!(out.contains("/repo/a"));
+        assert!(out.contains("'ops' (project) · started 14h 0m ago · looks abandoned"));
+        // Recovery is offered for the abandoned session only.
+        assert!(out.contains("recover: run `agentstack session end`"));
+        let recover_lines = out.matches("recover:").count();
+        assert_eq!(recover_lines, 1, "only the abandoned row offers recovery");
     }
 }

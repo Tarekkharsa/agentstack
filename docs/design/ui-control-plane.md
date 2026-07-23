@@ -207,10 +207,14 @@ returns:
 - project trust state (top-level `trust`);
 - whether it is currently active (`active`, under `sessions-v1`).
 
-The top-level `session` object (profile, scope, `started_unix`; null when
-none) is the recovery surface: it reads from the CLI's own session store on
-every call, so a panel that died mid-session renders the interrupted session
-and its safe end action on next load instead of trusting its own memory.
+The top-level `session` object (profile, scope, `started_unix`, `abandoned`;
+null when none) is the recovery surface: it reads from the CLI's own session
+store on every call, so a panel that died mid-session renders the interrupted
+session and its safe end action on next load instead of trusting its own
+memory. `abandoned` carries the CLI's own age-based judgment (a session that
+has outlived a working day, since AgentStack does not supervise the agent
+process) so the panel can highlight an interrupted session for recovery
+without re-deriving the threshold.
 
 The UI says Toolset. Details may say that the stored object is a profile.
 

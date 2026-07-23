@@ -67,6 +67,31 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+/// A session older than this is treated as abandoned (Stage 2.2). AgentStack
+/// does not supervise the agent process — `start` writes the config, the agent
+/// CLI reads it at launch, and the session persists purely as the undo record
+/// until `end`. So there is no process to poll for liveness at this layer; age
+/// is the only honest signal. Twelve hours spans a full working day plus a
+/// buffer, so a session past it has almost certainly outlived whatever launched
+/// it (a closed terminal, a killed panel, a reboot). Offering `session end` is
+/// always safe — it only restores the pre-session bytes — so a rare false
+/// positive costs a nudge, nothing more.
+pub const ABANDONED_AFTER_SECS: u64 = 12 * 3600;
+
+/// Has a session running since `started_unix` outlived any plausible working
+/// session as of `now`? Pure over its inputs so the boundary is unit-tested.
+pub fn is_abandoned(started_unix: u64, now: u64) -> bool {
+    now.saturating_sub(started_unix) >= ABANDONED_AFTER_SECS
+}
+
+impl Session {
+    /// Whether this session reads as abandoned as of `now` (see
+    /// [`is_abandoned`]).
+    pub fn is_abandoned(&self, now: u64) -> bool {
+        is_abandoned(self.started_unix, now)
+    }
+}
+
 /// Record an on-demand load against the active session for `dir`. Idempotent
 /// (sticky): a second load of the same name is a no-op. Returns whether it was
 /// newly recorded. Errors if no session is active here.
@@ -446,6 +471,22 @@ mod tests {
     // references UNPINNED content refuses too (no first-pin-on-activation
     // here; that explicit-consent act stays with `use --write`). NEVER delete
     // or weaken this test.
+    // Stage 2.2: the abandoned boundary is age-only (no process supervision at
+    // this layer) and lives in one place so every surface agrees.
+    #[test]
+    fn is_abandoned_uses_the_twelve_hour_boundary() {
+        let start = 1_000_000u64;
+        // Fresh and mid-session are live.
+        assert!(!is_abandoned(start, start));
+        assert!(!is_abandoned(start, start + 3600));
+        assert!(!is_abandoned(start, start + ABANDONED_AFTER_SECS - 1));
+        // At and past the boundary reads as abandoned.
+        assert!(is_abandoned(start, start + ABANDONED_AFTER_SECS));
+        assert!(is_abandoned(start, start + 48 * 3600));
+        // A clock that went backwards never falsely flags (saturating).
+        assert!(!is_abandoned(start, start - 100));
+    }
+
     #[test]
     fn session_start_refuses_untrusted_and_unpinned_surface() {
         let _guard = crate::util::TEST_ENV_LOCK

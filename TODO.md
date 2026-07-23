@@ -373,9 +373,25 @@ This is the primary graphical path, not an optional dashboard.
   the end report lists the files put back to their pre-session bytes (from
   the session's own history entry) and the skills removed; an end with
   nothing to revert says so instead of implying a restore.
-- [ ] Detect abandoned sessions and offer the safe recovery command.
-- [ ] Test overlapping projects and interrupted processes without silently
-  clobbering user files.
+- [x] Detect abandoned sessions and offer the safe recovery command
+  (2026-07-23): AgentStack does not supervise the agent process, so the honest
+  liveness signal at this layer is age — `session::is_abandoned` treats a
+  session that has outlived a working day (12h) as abandoned, defined once and
+  read by every surface. The bare-`agentstack` Session line flags an abandoned
+  session and leads with the `session end` recovery; `session list` names each
+  session with its age, flags the abandoned ones, and offers the exact safe
+  recovery for those only; `use --list --json`'s `session` object carries an
+  `abandoned` boolean so the panel highlights an interrupted session without
+  re-deriving the threshold. Witnesses: `is_abandoned` boundary,
+  `session_status_line`, and `render_session_list` unit tests.
+- [x] Test overlapping projects and interrupted processes without silently
+  clobbering user files (2026-07-23, `session_overlap.rs`): two projects each
+  run their own session, keyed separately — one project's start/end never
+  touches the other's native config, and each `end` restores only its own
+  project's pre-session bytes; an interrupted (store-only) session stays
+  visible, reads as abandoned once aged, refuses a second `start` that would
+  overwrite the live config, and `end` still restores the original bytes
+  exactly.
 
 ### 2.3 Present profiles through user tasks
 

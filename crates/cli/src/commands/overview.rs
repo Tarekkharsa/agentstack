@@ -271,6 +271,30 @@ pub(crate) fn session_age(secs: u64) -> String {
     }
 }
 
+/// The Session status line's two parts — (headline, recovery hint) — for the
+/// default surface. A live session states it is active temporarily; one that
+/// reads as abandoned (Stage 2.2) is flagged as such and leads with the same
+/// safe `session end` recovery. Pure so both wordings are unit-tested; the
+/// abandoned judgment itself lives in `crate::session::is_abandoned`.
+pub(crate) fn session_status_line(
+    profile: &str,
+    age_secs: u64,
+    abandoned: bool,
+) -> (String, String) {
+    let end = "`agentstack session end` restores your files".to_string();
+    if abandoned {
+        (
+            format!("'{profile}' looks abandoned ({})", session_age(age_secs)),
+            format!("probably a closed terminal — {end}"),
+        )
+    } else {
+        (
+            format!("'{profile}' active temporarily ({})", session_age(age_secs)),
+            end,
+        )
+    }
+}
+
 /// `agentstack status` — the orientation screen by name, plus the cheap health
 /// signals a glance wants (secrets resolving?) and the pointer to the deep
 /// check. Everything expensive (drift rendering, content scans) stays in
@@ -400,13 +424,12 @@ fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    println!(
-                        "  {}  '{}' active temporarily ({}) — {}",
-                        "Session ".bold(),
-                        sess.profile,
-                        session_age(now.saturating_sub(sess.started_unix)),
-                        "`agentstack session end` restores your files".dimmed()
+                    let (headline, hint) = session_status_line(
+                        &sess.profile,
+                        now.saturating_sub(sess.started_unix),
+                        sess.is_abandoned(now),
                     );
+                    println!("  {}  {} — {}", "Session ".bold(), headline, hint.dimmed());
                 }
 
                 // Where this project actually stands, from cheap signals:
@@ -674,5 +697,23 @@ mod tests {
         assert_eq!(session_age(5), "started just now");
         assert_eq!(session_age(240), "started 4m ago");
         assert_eq!(session_age(3900), "started 1h 5m ago");
+    }
+
+    // Stage 2.2: a live session reads as active; an abandoned one is flagged
+    // and both offer the same safe `session end` recovery.
+    #[test]
+    fn session_status_line_flags_abandoned_and_offers_recovery() {
+        let (head, hint) = session_status_line("dev", 240, false);
+        assert_eq!(head, "'dev' active temporarily (started 4m ago)");
+        assert!(hint.contains("agentstack session end"));
+        assert!(!hint.contains("abandoned"));
+
+        let (head, hint) = session_status_line("dev", 14 * 3600, true);
+        assert!(head.contains("looks abandoned"), "flags it: {head}");
+        assert!(head.contains("started 14h 0m ago"));
+        assert!(
+            hint.contains("agentstack session end"),
+            "still offers the safe recovery: {hint}"
+        );
     }
 }
