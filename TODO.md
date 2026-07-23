@@ -244,13 +244,12 @@ This is the primary graphical path, not an optional dashboard.
 
 ### 1.5 First-value proof
 
-- [ ] Build one fenced, reproducible demonstration that:
-  - starts with two real native CLI configurations;
-  - imports an MCP server;
-  - writes one manifest;
-  - renders at least two target formats;
-  - ends with a clean doctor result;
-  - shows the original state can be restored.
+- [x] Build one fenced, reproducible demonstration that starts with two real
+  native CLI configurations, imports an MCP server, writes one manifest,
+  renders two target formats, ends with a clean doctor result, and restores
+  the original state byte-for-byte (2026-07-23:
+  `examples/first-value-demo/run-demo.sh` — self-asserting, sandboxed,
+  asciinema-recordable via `DEMO_PAUSE`).
 - [ ] Record a short demo focused on portability, not threat prevention.
 - [ ] Put the same proof sequence in the README, website, and getting-started
   guide.
