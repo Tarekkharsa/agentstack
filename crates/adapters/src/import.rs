@@ -33,19 +33,45 @@ pub fn extract_settings(desc: &AdapterDescriptor, root: &Value) -> serde_json::M
         .unwrap_or_default()
 }
 
+/// An entry in a CLI's MCP section that could not be imported, with a
+/// plain-language reason. Import never deletes anything — the entry stays in
+/// the CLI's own config — so a skip is information the user deserves, not an
+/// error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedImport {
+    pub name: String,
+    pub reason: &'static str,
+}
+
 /// Extract `(name, Server)` pairs from a target config's value tree, in file
 /// order. Entries that don't look like MCP servers are skipped.
 pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, Server)> {
+    extract_servers_with_skips(desc, root).0
+}
+
+/// [`extract_servers`], but also reporting every entry the import had to skip
+/// and why — so `init` can explain a lossy import in plain language instead of
+/// silently dropping entries.
+pub fn extract_servers_with_skips(
+    desc: &AdapterDescriptor,
+    root: &Value,
+) -> (Vec<(String, Server)>, Vec<SkippedImport>) {
     let Some(mcp) = desc.mcp.as_ref() else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let Some(section) = navigate(root, &mcp.location).and_then(Value::as_object) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
 
     let mut out = Vec::new();
+    let mut skipped = Vec::new();
     for (name, body) in section {
         let Some(obj) = body.as_object() else {
+            skipped.push(SkippedImport {
+                name: name.clone(),
+                reason: "the entry is not a table of fields, so it does not look like an \
+                         MCP server definition",
+            });
             continue;
         };
 
@@ -91,6 +117,11 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
 
         // Skip entries that are neither http nor stdio shaped.
         if url.is_none() && command.is_none() {
+            skipped.push(SkippedImport {
+                name: name.clone(),
+                reason: "it has neither a url nor a command, so agentstack cannot tell \
+                         how to launch or reach it",
+            });
             continue;
         }
 
@@ -139,7 +170,7 @@ pub fn extract_servers(desc: &AdapterDescriptor, root: &Value) -> Vec<(String, S
             },
         ));
     }
-    out
+    (out, skipped)
 }
 
 /// Determine transport: prefer an explicit tag (Claude's `type`), else infer
@@ -285,6 +316,38 @@ mod tests {
         let k = &servers[0].1;
         assert_eq!(k.extra["claude-code"]["custom_key"], json!(true));
         assert!(!k.extra["claude-code"].contains_key("type"));
+    }
+
+    // Stage 1.2: a lossy import is explained, never silent — entries that
+    // don't look like MCP servers come back as named skips with a
+    // plain-language reason, while importable siblings still import.
+    #[test]
+    fn unimportable_entries_are_reported_with_reasons_not_dropped_silently() {
+        let reg = Registry::load().unwrap();
+        let desc = reg.get("claude-code").unwrap();
+        let root = json!({
+            "mcpServers": {
+                "good": { "command": "npx", "args": ["x"] },
+                "no-transport": { "note": "neither url nor command" },
+                "not-a-table": "just a string"
+            }
+        });
+        let (servers, skipped) = extract_servers_with_skips(desc, &root);
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].0, "good");
+        assert_eq!(skipped.len(), 2);
+        let no_transport = skipped
+            .iter()
+            .find(|s| s.name == "no-transport")
+            .expect("shapeless entry reported");
+        assert!(no_transport.reason.contains("neither a url nor a command"));
+        let not_a_table = skipped
+            .iter()
+            .find(|s| s.name == "not-a-table")
+            .expect("non-object entry reported");
+        assert!(not_a_table.reason.contains("not a table"));
+        // The wrapper keeps its original shape for existing callers.
+        assert_eq!(extract_servers(desc, &root).len(), 1);
     }
 
     #[test]

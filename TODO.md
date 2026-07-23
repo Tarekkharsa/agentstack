@@ -153,7 +153,11 @@ t3code presents this as a guided graphical flow; the terminal presents the
 same sequence directly. Both must call the same CLI-owned planning, validation,
 write, and status paths.
 
-- [ ] Audit `agentstack init` from a clean machine/user perspective.
+- [x] Audit `agentstack init` from a clean machine/user perspective
+  (2026-07-23, sandboxed HOME): flagless non-TTY refuses with named escapes;
+  no-CLI machines get the starter manifest; detection distinguishes
+  binaries-on-PATH from configs-found; the summary's "From:" names only CLIs
+  that actually contributed content.
 - [x] Land `init --plan` as the stable, read-only JSON contract for
   detecting CLIs, importable capabilities, secret reference names, origins, and
   proposed destinations without writing or prompting (`e1c8000`).
@@ -163,18 +167,26 @@ write, and status paths.
   found.
 - [ ] Show imported servers, skills, instructions, and secret reference names
   before writing.
-- [ ] Explain unsupported or lossy imports in plain language.
+- [x] Explain unsupported or lossy imports in plain language (2026-07-23):
+  entries the import cannot map are named with a reason and the assurance
+  nothing was deleted, both in `init` output and `init --plan` (`unsupported`);
+  the settings import states that unrecognized settings stay in each CLI's own
+  file.
 - [ ] Make the destination scopes and files visible without requiring knowledge
   of adapter internals.
-- [ ] End the flow with one concise success summary:
-  - source manifest path;
-  - CLIs updated;
-  - capabilities imported;
-  - secrets requiring values;
-  - next command: `agentstack doctor`.
-- [ ] Ensure a failed target does not hide successful targets or leave ownership
-  state ambiguous.
-- [ ] Confirm `agentstack restore` can undo the onboarding write set.
+- [x] End the flow with one concise success summary (2026-07-23): scripted
+  `init` closes with manifest path / source CLIs / imported counts / secrets
+  still needing values / next commands (`render_import_summary`); the wizard
+  close leads with manifest path, CLIs updated, capabilities, and
+  still-needed secrets (`render_setup_facts`).
+- [x] Ensure a failed target does not hide successful targets or leave ownership
+  state ambiguous (2026-07-23): a hard per-target error no longer aborts the
+  apply pass — remaining targets render, completed writes stay recorded in
+  history and ownership state, the summary names the failures, and the exit
+  is nonzero (`apply_partial_failure` witness).
+- [x] Confirm `agentstack restore` can undo the onboarding write set
+  (2026-07-23): `init_restore_onboarding` witnesses one `restore --last`
+  returning manifest, secrets `.env`, and `.gitignore` byte-for-byte.
 
 ### 1.3 t3code launch experience
 

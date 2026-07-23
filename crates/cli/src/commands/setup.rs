@@ -886,6 +886,24 @@ fn files_written_since(
     files
 }
 
+/// The CLI display names whose native files this run actually touched,
+/// derived from the ledger labels (every capture label is
+/// `"<display> · <category>"`), filtered to native CLI-side paths. First-seen
+/// order, deduped — the "CLIs updated" fact in the close.
+fn clis_updated(files: &[(String, String)]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (path, label) in files {
+        if !is_cli_config_path(path) {
+            continue;
+        }
+        let cli = label.split(" · ").next().unwrap_or(label).to_string();
+        if !out.contains(&cli) {
+            out.push(cli);
+        }
+    }
+    out
+}
+
 /// Whether any written path is a native CLI-side config (server config,
 /// instruction file, settings, or a materialized skill) rather than
 /// agentstack's own bookkeeping (the manifest, a lifted-secret `.env`, the
@@ -973,6 +991,17 @@ fn print_change_summary(
         ));
     }
 
+    // Referenced `${REF}`s that still resolve nowhere on this machine — the
+    // skip store, a declined prompt, or an unreachable keychain. The close
+    // must name them, or "what still needs a value" is buried in scrollback.
+    let still_needed: Vec<String> = ctx
+        .loaded
+        .manifest
+        .referenced_secrets()
+        .into_iter()
+        .filter(|name| sources.source_of(name).is_none())
+        .collect();
+
     // Restart advice is warranted only when a native CLI config actually
     // changed — a rendered config/skill in the ledger, the house-rules fragment
     // we compiled into the global instruction files (NOT in the ledger), or the
@@ -981,6 +1010,16 @@ fn print_change_summary(
     let cli_config_changed = cli_config_touched(&files) || seeded_house_rules || guard_wired;
 
     println!("\n{} Setup complete.", "✓".green());
+    print!(
+        "{}",
+        render_setup_facts(
+            &ctx.loaded.manifest_path.display().to_string(),
+            &clis_updated(&files),
+            ctx.loaded.manifest.servers.len(),
+            ctx.loaded.manifest.skills.len(),
+            &still_needed,
+        )
+    );
     println!("\n{}", "What changed on this machine".bold());
     print!(
         "{}",
@@ -993,6 +1032,45 @@ fn print_change_summary(
             guard_wired,
         )
     );
+}
+
+/// Pure formatter for the concise facts block that leads the close (Stage
+/// 1.2): manifest path, which CLIs were updated, what the manifest now
+/// carries, and which secrets still need values. The detailed per-file list
+/// follows in [`render_change_summary`]; this block is the at-a-glance answer.
+fn render_setup_facts(
+    manifest_path: &str,
+    clis: &[String],
+    server_count: usize,
+    skill_count: usize,
+    still_needed: &[String],
+) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "\n  Manifest:      {manifest_path}   (the source of truth your CLIs render from)\n"
+    ));
+    if clis.is_empty() {
+        out.push_str("  CLIs updated:  none — their configs already matched the manifest\n");
+    } else {
+        out.push_str(&format!("  CLIs updated:  {}\n", clis.join(" · ")));
+    }
+    let mut caps = format!("{server_count} MCP server(s)");
+    if skill_count > 0 {
+        caps.push_str(&format!(" · {skill_count} skill(s)"));
+    }
+    out.push_str(&format!("  Capabilities:  {caps}\n"));
+    if !still_needed.is_empty() {
+        out.push_str(&format!(
+            "  Still needed:  {} secret value(s) before this setup can run:\n",
+            still_needed.len()
+        ));
+        for name in still_needed {
+            out.push_str(&format!(
+                "                   agentstack secret set {name}\n"
+            ));
+        }
+    }
+    out
 }
 
 /// Pure formatter for the P7 close body (files / secrets / seeded / one-liners),
@@ -1251,8 +1329,8 @@ fn resolve_missing_secrets(ctx: &super::Context, missing: Vec<String>) -> Result
 mod tests {
     use super::super::overview::Mode;
     use super::{
-        cli_config_touched, fork_plan, is_cli_config_path, mode_switch_plan, render_change_summary,
-        render_stop_summary, should_offer_guard,
+        cli_config_touched, clis_updated, fork_plan, is_cli_config_path, mode_switch_plan,
+        render_change_summary, render_setup_facts, render_stop_summary, should_offer_guard,
     };
 
     // TASK 3: the guard offer is gated — shown only when the shell is
@@ -1317,6 +1395,56 @@ mod tests {
         let (cmds, _) = mode_switch_plan(Mode::ZeroFiles, None);
         assert_eq!(cmds[0], "agentstack gateway connect --all");
         assert_eq!(cmds[1], "agentstack trust .");
+    }
+
+    // Stage 1.2: the close leads with the concise facts — manifest path, CLIs
+    // updated, capabilities, and secrets still needing values (with the exact
+    // command). "CLIs updated" derives from the ledger labels of native-side
+    // paths, so agentstack's own bookkeeping never counts as a CLI update.
+    #[test]
+    fn setup_facts_name_manifest_clis_capabilities_and_missing_secrets() {
+        let files = vec![
+            (
+                ".agentstack/agentstack.toml".to_string(),
+                "manifest · import".to_string(),
+            ),
+            (
+                "~/.claude.json".to_string(),
+                "Claude Code · servers".to_string(),
+            ),
+            (
+                "~/.claude/settings.json".to_string(),
+                "Claude Code · settings".to_string(),
+            ),
+            (
+                "~/.codex/config.toml".to_string(),
+                "Codex CLI · servers".to_string(),
+            ),
+        ];
+        let clis = clis_updated(&files);
+        assert_eq!(
+            clis,
+            vec!["Claude Code".to_string(), "Codex CLI".to_string()]
+        );
+
+        let out = render_setup_facts(
+            "/p/.agentstack/agentstack.toml",
+            &clis,
+            8,
+            2,
+            &["GITHUB_TOKEN".to_string()],
+        );
+        assert!(out.contains("Manifest:      /p/.agentstack/agentstack.toml"));
+        assert!(out.contains("CLIs updated:  Claude Code · Codex CLI"));
+        assert!(out.contains("8 MCP server(s) · 2 skill(s)"));
+        assert!(out.contains("agentstack secret set GITHUB_TOKEN"));
+
+        // Import-only run: nothing native touched → says so plainly; no
+        // missing secrets → no "Still needed" section at all.
+        let quiet = render_setup_facts("/p/agentstack.toml", &clis_updated(&files[..1]), 1, 0, &[]);
+        assert!(quiet.contains("CLIs updated:  none"));
+        assert!(!quiet.contains("Still needed"));
+        assert!(!quiet.contains("skill(s)"));
     }
 
     // P7: the transparency close lists every written file, names each secret's

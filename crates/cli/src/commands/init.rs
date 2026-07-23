@@ -17,7 +17,7 @@ use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use owo_colors::OwoColorize;
 
-use crate::adapter::{extract_servers, extract_settings, Registry};
+use crate::adapter::{extract_servers_with_skips, extract_settings, Registry};
 use crate::cli::{InitArgs, SecretStore};
 use crate::discover::{lift_secrets, merge_servers, Lifted};
 use crate::manifest::load::MANIFEST_FILE;
@@ -423,6 +423,19 @@ pub fn plan_json(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_j
             }))
             .collect::<Vec<_>>(),
         "secrets_destination": destination,
+        // Lossy-import honesty (Stage 1.2): entries the import must leave in
+        // their CLI's own config, each with a plain-language reason. Purely
+        // informational — they never enter the written manifest, so they do
+        // not participate in the plan digest.
+        "unsupported": det
+            .skipped
+            .iter()
+            .map(|(cli, s)| serde_json::json!({
+                "cli": cli,
+                "name": crate::text::sanitize_line(&s.name),
+                "reason": s.reason,
+            }))
+            .collect::<Vec<_>>(),
         "plan_digest": digest,
     }))
 }
@@ -435,6 +448,10 @@ pub fn plan_json(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_j
 struct DetectedImport {
     detected_ids: Vec<String>,
     display_names: Vec<String>,
+    /// Display names of the CLIs that actually contributed servers or
+    /// settings — the honest "imported from" list (a detected CLI with an
+    /// empty config is not a source).
+    contributing: Vec<String>,
     /// Post-lift: inline token values already rewritten to `${REF}`.
     servers: IndexMap<String, Server>,
     /// Full imported settings values per contributing CLI id — exactly what
@@ -442,23 +459,32 @@ struct DetectedImport {
     settings: IndexMap<String, serde_json::Value>,
     conflict_counts: IndexMap<String, usize>,
     lifted: Vec<crate::discover::Lifted>,
+    /// Entries a CLI's config declares that the import had to leave behind,
+    /// as `(cli display name, skip)` — surfaced in the plan and the write
+    /// output so a lossy import is explained, never silent.
+    skipped: Vec<(String, crate::adapter::SkippedImport)>,
 }
 
 fn detect_import(dir: &Path) -> Result<DetectedImport> {
     let registry = Registry::load()?;
     let mut detected_ids: Vec<String> = Vec::new();
     let mut display_names: Vec<String> = Vec::new();
+    let mut contributing: Vec<String> = Vec::new();
     let mut servers: IndexMap<String, Server> = IndexMap::new();
     let mut settings: IndexMap<String, serde_json::Value> = IndexMap::new();
     let mut conflict_counts: IndexMap<String, usize> = IndexMap::new();
+    let mut skipped: Vec<(String, crate::adapter::SkippedImport)> = Vec::new();
     for desc in registry.iter() {
         if !desc.detected() {
             continue;
         }
         detected_ids.push(desc.id.clone());
         display_names.push(desc.display.clone());
+        let mut contributed = false;
         if let Some(value) = desc.read_config_value()? {
-            let imported = extract_servers(desc, &value);
+            let (imported, skips) = extract_servers_with_skips(desc, &value);
+            skipped.extend(skips.into_iter().map(|s| (desc.display.clone(), s)));
+            contributed |= !imported.is_empty();
             for c in merge_servers(&mut servers, imported) {
                 *conflict_counts.entry(c).or_insert(0usize) += 1;
             }
@@ -466,8 +492,12 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
         if let Some(value) = desc.read_settings_value(dir)? {
             let imported = extract_settings(desc, &value);
             if !imported.is_empty() {
+                contributed = true;
                 settings.insert(desc.id.clone(), serde_json::Value::Object(imported));
             }
+        }
+        if contributed {
+            contributing.push(desc.display.clone());
         }
     }
     // Lifting rewrites the in-memory servers to `${REF}` placeholders and
@@ -476,10 +506,12 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
     Ok(DetectedImport {
         detected_ids,
         display_names,
+        contributing,
         servers,
         settings,
         conflict_counts,
         lifted,
+        skipped,
     })
 }
 
@@ -861,10 +893,12 @@ fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Re
     let DetectedImport {
         detected_ids: detected,
         display_names,
+        contributing,
         servers,
         settings,
         conflict_counts,
         lifted,
+        skipped,
     } = det;
     for (name, extra) in &conflict_counts {
         println!(
@@ -942,11 +976,27 @@ version = 1
         "📥".dimmed(),
         servers.len()
     );
+    // Lossy imports are explained, never silent: name each entry the import
+    // left behind, why, and that nothing was deleted. Names come from other
+    // CLIs' config files — hostile input; sanitize before display.
+    for (cli, skip) in &skipped {
+        println!(
+            "{} not imported from {cli}: '{}' — {}; it stays in {cli}'s own config, \
+             nothing was deleted",
+            "⚠".yellow(),
+            crate::text::sanitize_line(&skip.name),
+            skip.reason
+        );
+    }
     if !settings.is_empty() {
         println!(
             "{}  Imported settings from {} CLI(s)",
             "⚙".dimmed(),
             settings.len()
+        );
+        println!(
+            "      {}",
+            "Only settings agentstack understands are imported; every other setting stays in its CLI's own file, untouched.".dimmed()
         );
     }
 
@@ -978,6 +1028,11 @@ version = 1
             "The manifest stays commit-safe; real values resolve locally at apply time.".dimmed()
         );
     }
+
+    // Counts for the closing summary — `servers`/`settings` move into the
+    // manifest below.
+    let server_count = servers.len();
+    let settings_count = settings.len();
 
     // Assemble the manifest.
     let manifest = Manifest {
@@ -1030,6 +1085,10 @@ version = 1
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
     let mut keychain_changes: Vec<KeychainChange> = Vec::new();
     let mut secret_notice: Option<String> = None;
+    // `${REF}`s whose values are NOT stored anywhere after this init (the skip
+    // store, or a keychain that refused a write) — the success summary names
+    // each one so "what still needs a value" is never buried in scrollback.
+    let mut refs_needing_values: Vec<String> = Vec::new();
 
     let writes = (|| -> Result<()> {
         // Store lifted secret VALUES in the chosen backend (P2). The manifest
@@ -1052,6 +1111,7 @@ version = 1
                     }
                     if !unstored.is_empty() {
                         report_unstored_keychain(&unstored);
+                        refs_needing_values = unstored;
                     }
                 }
                 SecretStore::Env => {
@@ -1084,7 +1144,10 @@ version = 1
                         if is_git { " (gitignored)" } else { "" }
                     ));
                 }
-                SecretStore::Skip => report_skipped(&lifted),
+                SecretStore::Skip => {
+                    report_skipped(&lifted);
+                    refs_needing_values = lifted.iter().map(|l| l.reference.clone()).collect();
+                }
             }
         }
 
@@ -1126,13 +1189,65 @@ version = 1
 
     println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());
     if show_next {
-        // The import is done — pointing back at `init` would be circular. Send
-        // the user forward: preview what renders, then verify.
-        println!(
-            "\nNext: review the manifest, then `agentstack apply` to preview what renders into each CLI (and `agentstack doctor` to verify)."
+        // The one concise success summary (Stage 1.2): manifest path, source
+        // CLIs, what was imported, which secrets still need values, and the
+        // exact next commands. The wizard has its own richer close, so this
+        // prints only on the scripted primitive.
+        print!(
+            "{}",
+            render_import_summary(
+                &manifest_path.display().to_string(),
+                // The honest source list: only CLIs that contributed content.
+                // A run that imported nothing falls back to what was detected.
+                if contributing.is_empty() {
+                    &display_names
+                } else {
+                    &contributing
+                },
+                server_count,
+                settings_count,
+                &refs_needing_values,
+            )
         );
     }
     Ok(())
+}
+
+/// Pure formatter for the scripted-import success summary, so its shape is
+/// unit-testable without touching real CLI configs. One block, five facts:
+/// manifest path, source CLIs, imported counts, secrets still needing values,
+/// and the next commands (`apply --write`, then `doctor`).
+fn render_import_summary(
+    manifest_path: &str,
+    sources: &[String],
+    server_count: usize,
+    settings_count: usize,
+    needing_values: &[String],
+) -> String {
+    let mut out = String::new();
+    out.push_str("\nImport complete.\n");
+    out.push_str(&format!(
+        "  Manifest:  {manifest_path}   (the source of truth your CLIs render from)\n"
+    ));
+    out.push_str(&format!("  From:      {}\n", sources.join(" · ")));
+    let mut imported = format!("{server_count} MCP server(s)");
+    if settings_count > 0 {
+        imported.push_str(&format!(" · settings from {settings_count} CLI(s)"));
+    }
+    out.push_str(&format!("  Imported:  {imported}\n"));
+    if !needing_values.is_empty() {
+        out.push_str(&format!(
+            "  Secrets:   {} still need a value before this setup can run:\n",
+            needing_values.len()
+        ));
+        for name in needing_values {
+            out.push_str(&format!("               agentstack secret set {name}\n"));
+        }
+    }
+    out.push_str("  Undo:      agentstack restore --last --write\n");
+    out.push_str("  Next:      agentstack apply --write   (render this setup into your CLIs)\n");
+    out.push_str("             agentstack doctor          (check the result)\n");
+    out
 }
 
 #[cfg(test)]
@@ -1160,10 +1275,12 @@ mod tests {
             DetectedImport {
                 detected_ids: vec!["claude-code".into()],
                 display_names: vec!["Claude Code".into()],
+                contributing: vec!["Claude Code".into()],
                 servers,
                 settings: IndexMap::new(),
                 conflict_counts: IndexMap::new(),
                 lifted: Vec::new(),
+                skipped: Vec::new(),
             }
         };
 
@@ -1182,6 +1299,35 @@ mod tests {
             baseline,
             plan_digest(&mk(&["a", "b"], "safe"), base, false, "keychain")
         );
+    }
+
+    /// Stage 1.2: the scripted import ends with ONE concise summary carrying
+    /// the five facts a new user needs — manifest path, source CLIs, imported
+    /// counts, secrets still needing values (with the exact command), and the
+    /// next commands (`apply --write`, then `doctor`).
+    #[test]
+    fn import_summary_names_path_sources_counts_secrets_and_next() {
+        let out = render_import_summary(
+            "/tmp/proj/.agentstack/agentstack.toml",
+            &["Claude Code".to_string(), "Codex CLI".to_string()],
+            8,
+            2,
+            &["GITHUB_TOKEN".to_string()],
+        );
+        assert!(out.contains("Manifest:  /tmp/proj/.agentstack/agentstack.toml"));
+        assert!(out.contains("From:      Claude Code · Codex CLI"));
+        assert!(out.contains("8 MCP server(s) · settings from 2 CLI(s)"));
+        assert!(out.contains("1 still need a value"));
+        assert!(out.contains("agentstack secret set GITHUB_TOKEN"));
+        assert!(out.contains("agentstack restore --last --write"));
+        assert!(out.contains("agentstack apply --write"));
+        assert!(out.contains("agentstack doctor"));
+
+        // Nothing pending → no secrets section at all, not an empty one.
+        let clean = render_import_summary("/m", &["Claude Code".to_string()], 1, 0, &[]);
+        assert!(!clean.contains("Secrets:"));
+        assert!(!clean.contains("settings from"));
+        assert!(clean.contains("agentstack doctor"));
     }
 
     /// S1 witness (init-secrets design §7): a failing credential store must

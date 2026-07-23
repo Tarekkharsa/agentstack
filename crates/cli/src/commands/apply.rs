@@ -240,6 +240,10 @@ fn render(
     // targets — and only ones actually written, not ones a gate blocked.
     let mut changed_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut blocked_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // Targets whose render or write hit a hard error (I/O, unreadable config).
+    // Distinct from `blocked_targets` (fail-closed gates): a failure here is
+    // unexpected, but it must not hide the targets that DID succeed.
+    let mut failed_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -248,401 +252,425 @@ fn render(
             continue;
         };
 
-        let key = target_key(id, scope, &ctx.dir);
-        // Whether this run compiled the instruction file — one input to the
-        // managed .gitignore block computed at the end of this target's loop.
-        let mut wrote_instructions = false;
+        // The whole per-target render/write runs as one fallible block: a hard
+        // error on THIS target must not abort the pass, because earlier
+        // targets' writes are already on disk — the honest behavior is to
+        // report this target, keep rendering the rest, and record every
+        // completed write in history/state at the end (Stage 1.2: a failed
+        // target never hides successful targets or leaves ownership
+        // ambiguous). Writes inside push their history capture only AFTER the
+        // write succeeds, so a failed write never pollutes the undo ledger.
+        let target_result = (|| -> Result<()> {
+            let key = target_key(id, scope, &ctx.dir);
+            // Whether this run compiled the instruction file — one input to the
+            // managed .gitignore block computed at the end of this target's loop.
+            let mut wrote_instructions = false;
 
-        let mut previously = state.managed_servers(&key);
-        // Names an earlier guarded write kept on disk (state bookkeeping —
-        // they left `managed_servers` when this manifest recorded its own
-        // set). Ones the manifest now selects become managed again below.
-        let kept_before: Vec<String> = state
-            .kept_foreign(&key)
-            .into_iter()
-            .filter(|n| !server_map.contains_key(n))
-            .collect();
-        // Guard cross-manifest global prunes: entries another manifest applied
-        // are kept (and reported below), not deleted, unless --prune-foreign.
-        let foreign = if args.prune_foreign {
-            // Fold previously-kept names into the prune set — the escape
-            // hatch must still reach them after a guarded write re-recorded
-            // this key with only our own managed set.
-            for n in &kept_before {
-                if !previously.contains(n) {
-                    previously.push(n.clone());
+            let mut previously = state.managed_servers(&key);
+            // Names an earlier guarded write kept on disk (state bookkeeping —
+            // they left `managed_servers` when this manifest recorded its own
+            // set). Ones the manifest now selects become managed again below.
+            let kept_before: Vec<String> = state
+                .kept_foreign(&key)
+                .into_iter()
+                .filter(|n| !server_map.contains_key(n))
+                .collect();
+            // Guard cross-manifest global prunes: entries another manifest applied
+            // are kept (and reported below), not deleted, unless --prune-foreign.
+            let foreign = if args.prune_foreign {
+                // Fold previously-kept names into the prune set — the escape
+                // hatch must still reach them after a guarded write re-recorded
+                // this key with only our own managed set.
+                for n in &kept_before {
+                    if !previously.contains(n) {
+                        previously.push(n.clone());
+                    }
                 }
-            }
-            Vec::new()
-        } else {
-            let mut f = state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
-                server_map.contains_key(n)
-            });
-            // Keep surfacing (and tracking) what earlier runs kept.
-            for n in &kept_before {
-                if !f.contains(n) {
-                    f.push(n.clone());
-                }
-            }
-            f
-        };
-        let Some(plan) = plan_target_with_servers(
-            desc,
-            &ctx.resolver,
-            &ruleset,
-            &server_map,
-            &previously,
-            scope,
-            &ctx.dir,
-        )?
-        else {
-            println!("\n{} — no {scope} scope, skipping", desc.display.bold());
-            continue;
-        };
-
-        println!("\n{} ({})", plan.display.bold(), plan.config_path.display());
-
-        if plan.managed.is_empty() && plan.removed.is_empty() && plan.skipped.is_empty() {
-            println!("  no servers selected");
-        }
-        removed_count += plan.removed.len();
-        for r in &plan.removed {
-            if will_write {
-                println!("  {} pruning '{r}' (no longer in manifest)", "−".yellow());
+                Vec::new()
             } else {
-                // A deletion deserves louder wording than a diff line: name
-                // the entry and the file it would vanish from.
+                let mut f = state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
+                    server_map.contains_key(n)
+                });
+                // Keep surfacing (and tracking) what earlier runs kept.
+                for n in &kept_before {
+                    if !f.contains(n) {
+                        f.push(n.clone());
+                    }
+                }
+                f
+            };
+            let Some(plan) = plan_target_with_servers(
+                desc,
+                &ctx.resolver,
+                &ruleset,
+                &server_map,
+                &previously,
+                scope,
+                &ctx.dir,
+            )?
+            else {
+                println!("\n{} — no {scope} scope, skipping", desc.display.bold());
+                return Ok(());
+            };
+
+            println!("\n{} ({})", plan.display.bold(), plan.config_path.display());
+
+            if plan.managed.is_empty() && plan.removed.is_empty() && plan.skipped.is_empty() {
+                println!("  no servers selected");
+            }
+            removed_count += plan.removed.len();
+            for r in &plan.removed {
+                if will_write {
+                    println!("  {} pruning '{r}' (no longer in manifest)", "−".yellow());
+                } else {
+                    // A deletion deserves louder wording than a diff line: name
+                    // the entry and the file it would vanish from.
+                    println!(
+                        "  {} would REMOVE '{r}' from {} (no longer in manifest)",
+                        "−".red(),
+                        plan.config_path.display()
+                    );
+                }
+            }
+            if !foreign.is_empty() {
                 println!(
-                    "  {} would REMOVE '{r}' from {} (no longer in manifest)",
-                    "−".red(),
-                    plan.config_path.display()
+                    "  {} keeping {} — applied by another manifest ↳ keep: agentstack adopt · \
+                 prune: agentstack apply --prune-foreign",
+                    "⚠".yellow(),
+                    foreign.join(", ")
                 );
             }
-        }
-        if !foreign.is_empty() {
-            println!(
-                "  {} keeping {} — applied by another manifest ↳ keep: agentstack adopt · \
-                 prune: agentstack apply --prune-foreign",
-                "⚠".yellow(),
-                foreign.join(", ")
-            );
-        }
-        for (name, reason) in &plan.skipped {
-            println!("  {} skipping '{name}' — {reason}", "↳".cyan());
-        }
-        for w in &plan.warnings {
-            println!(
-                "  {} '{w}' has a cwd that {} can't express — it renders without one \
+            for (name, reason) in &plan.skipped {
+                println!("  {} skipping '{name}' — {reason}", "↳".cyan());
+            }
+            for w in &plan.warnings {
+                println!(
+                    "  {} '{w}' has a cwd that {} can't express — it renders without one \
                  (wrap the command in a shell that cd's if the server needs it)",
-                "⚠".yellow(),
-                plan.display
-            );
-        }
-        for u in &plan.unresolved {
-            // Entries read "NAME (server 'x')" — the first token is the ref
-            // name, which is all `secret set` needs.
-            let name = u.split_whitespace().next().unwrap_or(u.as_str());
-            println!(
-                "  {} unresolved secret {u} ↳ agentstack secret set {name}",
-                "✗".red()
-            );
-            missing_secrets.insert(name.to_string());
-            error_count += 1;
-        }
-        for d in &plan.denied {
-            println!("  {} blocked by policy: {}", "✗".red(), d);
-        }
-        for f in &plan.failed {
-            println!("  {} {}", "✗".red(), crate::render::failed_secret_line(f));
-            // The fix is the same `secret set` whether the secret is missing
-            // or its store failed to read — collect the name so the closing
-            // tail stays copy-pasteable in both cases.
-            let name = f.split_whitespace().next().unwrap_or(f.as_str());
-            missing_secrets.insert(name.to_string());
-            error_count += 1;
-        }
-        // `${REF}`s that didn't resolve must never reach a live config file —
-        // whether the secret is missing or a store failed to read it.
-        let blocked = ((!plan.unresolved.is_empty() || !plan.failed.is_empty()) && !args.allow_unresolved)
+                    "⚠".yellow(),
+                    plan.display
+                );
+            }
+            for u in &plan.unresolved {
+                // Entries read "NAME (server 'x')" — the first token is the ref
+                // name, which is all `secret set` needs.
+                let name = u.split_whitespace().next().unwrap_or(u.as_str());
+                println!(
+                    "  {} unresolved secret {u} ↳ agentstack secret set {name}",
+                    "✗".red()
+                );
+                missing_secrets.insert(name.to_string());
+                error_count += 1;
+            }
+            for d in &plan.denied {
+                println!("  {} blocked by policy: {}", "✗".red(), d);
+            }
+            for f in &plan.failed {
+                println!("  {} {}", "✗".red(), crate::render::failed_secret_line(f));
+                // The fix is the same `secret set` whether the secret is missing
+                // or its store failed to read — collect the name so the closing
+                // tail stays copy-pasteable in both cases.
+                let name = f.split_whitespace().next().unwrap_or(f.as_str());
+                missing_secrets.insert(name.to_string());
+                error_count += 1;
+            }
+            // `${REF}`s that didn't resolve must never reach a live config file —
+            // whether the secret is missing or a store failed to read it.
+            let blocked = ((!plan.unresolved.is_empty() || !plan.failed.is_empty()) && !args.allow_unresolved)
                 // Policy refusals are not a convenience gap: --allow-unresolved
                 // never overrides [policy.secrets]/[policy.egress].
                 || !plan.denied.is_empty();
-        if blocked {
-            write_blockers += 1;
-        }
-
-        if plan.changed() {
-            changed_count += 1;
-            changed_targets.insert(desc.display.clone());
-            if !quiet {
-                print!("{}", indent(&plan.diff()));
-            }
-            if will_write && blocked {
-                blocked_targets.insert(desc.display.clone());
-                let reason = if plan.unresolved.is_empty() {
-                    "secret read failure(s); set them"
-                } else {
-                    "unresolved secret(s); set them"
-                };
-                println!(
-                    "  {} not written — {reason} or pass --allow-unresolved",
-                    "✗".red()
-                );
-            } else if will_write {
-                backups.push(crate::history::capture(
-                    &plan.config_path,
-                    format!("{} · servers", desc.display),
-                ));
-                touched_targets.insert(desc.display.clone());
-                plan.write()?;
-                state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
-                // Track what this guarded write kept on disk (empty after a
-                // --prune-foreign actually pruned them) — see
-                // TargetState::kept_foreign.
-                state.record_kept_foreign(&key, foreign.clone());
-                crate::usage::bump(&plan.managed);
-                if plan.remove_if_empty_shell(desc) {
-                    println!(
-                        "  {} removed empty {}",
-                        "−".yellow(),
-                        plan.config_path.display()
-                    );
-                } else {
-                    println!("  {} wrote {} server(s)", "✓".green(), plan.managed.len());
-                }
-            } else {
-                println!("  {} {} server(s) to apply", "→".cyan(), plan.managed.len());
-            }
-        } else {
-            // Even with no file change, keep state in sync with reality.
-            if will_write {
-                state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
-                state.record_kept_foreign(&key, foreign.clone());
-            }
-            println!("  {} up to date", "✓".green());
-        }
-
-        // Native settings file (permissions, feature flags) — a separate file
-        // from the MCP config, merged at the top level.
-        let prev_settings = state.managed_settings(&key);
-        if let Some(sp) = plan_settings(
-            manifest,
-            desc,
-            &ctx.resolver,
-            &prev_settings,
-            scope,
-            &ctx.dir,
-        )? {
-            for u in &sp.unresolved {
-                let name = u.split_whitespace().next().unwrap_or(u.as_str());
-                println!(
-                    "  {} unresolved secret {u} (settings) ↳ agentstack secret set {name}",
-                    "✗".red()
-                );
-                missing_secrets.insert(name.to_string());
-                error_count += 1;
-            }
-            let sblocked = !sp.unresolved.is_empty() && !args.allow_unresolved;
-            if sblocked {
+            if blocked {
                 write_blockers += 1;
             }
-            for r in &sp.removed {
-                println!(
-                    "  {} pruning setting '{r}' (no longer in manifest)",
-                    "−".yellow()
-                );
-            }
-            if sp.changed() {
+
+            if plan.changed() {
                 changed_count += 1;
                 changed_targets.insert(desc.display.clone());
-                println!(
-                    "  {} settings → {}",
-                    "·".dimmed(),
-                    sp.settings_path.display()
-                );
                 if !quiet {
-                    print!("{}", indent(&sp.diff()));
+                    print!("{}", indent(&plan.diff()));
                 }
-                if will_write && sblocked {
+                if will_write && blocked {
                     blocked_targets.insert(desc.display.clone());
+                    let reason = if plan.unresolved.is_empty() {
+                        "secret read failure(s); set them"
+                    } else {
+                        "unresolved secret(s); set them"
+                    };
                     println!(
-                        "  {} settings not written — unresolved secret(s)",
+                        "  {} not written — {reason} or pass --allow-unresolved",
                         "✗".red()
                     );
                 } else if will_write {
-                    backups.push(crate::history::capture(
-                        &sp.settings_path,
-                        format!("{} · settings", desc.display),
-                    ));
+                    let capture = crate::history::capture(
+                        &plan.config_path,
+                        format!("{} · servers", desc.display),
+                    );
+                    plan.write()?;
+                    backups.push(capture);
                     touched_targets.insert(desc.display.clone());
-                    sp.write()?;
-                    state.record_settings(&key, sp.managed.clone());
-                    println!("  {} wrote {} setting(s)", "✓".green(), sp.managed.len());
+                    state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                    // Track what this guarded write kept on disk (empty after a
+                    // --prune-foreign actually pruned them) — see
+                    // TargetState::kept_foreign.
+                    state.record_kept_foreign(&key, foreign.clone());
+                    crate::usage::bump(&plan.managed);
+                    if plan.remove_if_empty_shell(desc) {
+                        println!(
+                            "  {} removed empty {}",
+                            "−".yellow(),
+                            plan.config_path.display()
+                        );
+                    } else {
+                        println!("  {} wrote {} server(s)", "✓".green(), plan.managed.len());
+                    }
                 } else {
-                    println!("  {} {} setting(s) to apply", "→".cyan(), sp.managed.len());
+                    println!("  {} {} server(s) to apply", "→".cyan(), plan.managed.len());
                 }
-            } else if will_write && !sblocked {
-                state.record_settings(&key, sp.managed.clone());
+            } else {
+                // Even with no file change, keep state in sync with reality.
+                if will_write {
+                    state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                    state.record_kept_foreign(&key, foreign.clone());
+                }
+                println!("  {} up to date", "✓".green());
             }
-        }
 
-        // Lifecycle hooks (compiled into the harness's native hooks config).
-        // At global scope the machine's guard hook rides along so owning the
-        // whole hooks key doesn't strip it (see `guard::machine_hooks_for_apply`).
-        let machine_hooks = if scope == Scope::Global {
-            crate::commands::guard::machine_hooks_for_apply()
-        } else {
-            Vec::new()
-        };
-        let prev_hooks = !state.managed_hooks(&key).is_empty();
-        if let Some(hp) = plan_hooks(
-            manifest,
-            desc,
-            &ctx.resolver,
-            prev_hooks,
-            scope,
-            &ctx.dir,
-            &machine_hooks,
-        )? {
-            for u in &hp.unresolved {
-                let name = u.split_whitespace().next().unwrap_or(u.as_str());
-                println!(
-                    "  {} unresolved secret {u} (hook) ↳ agentstack secret set {name}",
-                    "✗".red()
-                );
-                missing_secrets.insert(name.to_string());
-                error_count += 1;
-            }
-            let hblocked = !hp.unresolved.is_empty() && !args.allow_unresolved;
-            if hblocked {
-                write_blockers += 1;
-            }
-            if hp.changed() {
-                changed_count += 1;
-                changed_targets.insert(desc.display.clone());
-                println!("  {} hooks → {}", "·".dimmed(), hp.path.display());
-                if !quiet {
-                    print!("{}", indent(&hp.diff()));
-                }
-                if will_write && hblocked {
-                    blocked_targets.insert(desc.display.clone());
-                    println!("  {} hooks not written — unresolved secret(s)", "✗".red());
-                } else if will_write {
-                    backups.push(crate::history::capture(
-                        &hp.path,
-                        format!("{} · hooks", desc.display),
-                    ));
-                    touched_targets.insert(desc.display.clone());
-                    hp.write()?;
-                    state.record_hooks(&key, hp.managed.clone());
-                    println!("  {} wrote {} hook(s)", "✓".green(), hp.managed.len());
-                } else {
-                    println!("  {} {} hook(s) to apply", "→".cyan(), hp.managed.len());
-                }
-            } else if will_write && !hblocked {
-                state.record_hooks(&key, hp.managed.clone());
-            }
-        }
-
-        // Instruction fragments (the managed region of CLAUDE.md / AGENTS.md).
-        // Only when the manifest declares [instructions.*]: a manifest without
-        // any must never touch — let alone empty out — a region another layer
-        // (e.g. the machine manifest seeded by `init --global`) owns.
-        if !manifest.instructions.is_empty() {
-            // …and only when fragments actually apply at THIS scope: project
-            // scope filters out every machine-layer fragment, so a project
-            // with none of its own compiles to an empty string there — writing
-            // that would strip a committed managed region from the repo.
-            if let Some(ip) = plan_instructions(manifest, desc, scope, &ctx.dir)
-                .filter(|ip| !ip.fragments.is_empty() || !ip.missing.is_empty())
-            {
-                for m in &ip.missing {
-                    println!("  {} instruction fragment '{m}' source missing", "✗".red());
+            // Native settings file (permissions, feature flags) — a separate file
+            // from the MCP config, merged at the top level.
+            let prev_settings = state.managed_settings(&key);
+            if let Some(sp) = plan_settings(
+                manifest,
+                desc,
+                &ctx.resolver,
+                &prev_settings,
+                scope,
+                &ctx.dir,
+            )? {
+                for u in &sp.unresolved {
+                    let name = u.split_whitespace().next().unwrap_or(u.as_str());
+                    println!(
+                        "  {} unresolved secret {u} (settings) ↳ agentstack secret set {name}",
+                        "✗".red()
+                    );
+                    missing_secrets.insert(name.to_string());
                     error_count += 1;
                 }
-                // A missing source already dropped its content from the
-                // compile — writing now would delete previously compiled
-                // fragments (all sources missing empties the whole region).
-                // Block the write, mirroring the unresolved-secret path.
-                let iblocked = !ip.missing.is_empty();
-                if iblocked {
+                let sblocked = !sp.unresolved.is_empty() && !args.allow_unresolved;
+                if sblocked {
                     write_blockers += 1;
                 }
-                if ip.changed() {
+                for r in &sp.removed {
+                    println!(
+                        "  {} pruning setting '{r}' (no longer in manifest)",
+                        "−".yellow()
+                    );
+                }
+                if sp.changed() {
                     changed_count += 1;
                     changed_targets.insert(desc.display.clone());
-                    println!("  {} instructions → {}", "·".dimmed(), ip.path.display());
+                    println!(
+                        "  {} settings → {}",
+                        "·".dimmed(),
+                        sp.settings_path.display()
+                    );
                     if !quiet {
-                        print!("{}", indent(&ip.diff()));
+                        print!("{}", indent(&sp.diff()));
                     }
-                    if will_write && iblocked {
+                    if will_write && sblocked {
                         blocked_targets.insert(desc.display.clone());
                         println!(
-                            "  {} instructions not written — missing fragment source(s)",
+                            "  {} settings not written — unresolved secret(s)",
                             "✗".red()
                         );
                     } else if will_write {
-                        backups.push(crate::history::capture(
-                            &ip.path,
-                            format!("{} · instructions", desc.display),
-                        ));
+                        let capture = crate::history::capture(
+                            &sp.settings_path,
+                            format!("{} · settings", desc.display),
+                        );
+                        sp.write()?;
+                        backups.push(capture);
                         touched_targets.insert(desc.display.clone());
-                        ip.write()?;
-                        wrote_instructions = true;
-                        println!(
-                            "  {} wrote {} instruction fragment(s)",
-                            "✓".green(),
-                            ip.fragments.len()
-                        );
+                        state.record_settings(&key, sp.managed.clone());
+                        println!("  {} wrote {} setting(s)", "✓".green(), sp.managed.len());
                     } else {
-                        println!(
-                            "  {} {} instruction fragment(s) to apply",
-                            "→".cyan(),
-                            ip.fragments.len()
-                        );
+                        println!("  {} {} setting(s) to apply", "→".cyan(), sp.managed.len());
                     }
+                } else if will_write && !sblocked {
+                    state.record_settings(&key, sp.managed.clone());
                 }
-            } else if desc.instructions.is_none() {
-                // This CLI has no instruction file agentstack manages. If
-                // fragments would otherwise compile here, note the silent drop
-                // in its block rather than omitting it entirely.
-                let n = manifest
-                    .instructions
-                    .values()
-                    .filter(|i| i.compiles_at(id, scope))
-                    .count();
-                if n > 0 {
+            }
+
+            // Lifecycle hooks (compiled into the harness's native hooks config).
+            // At global scope the machine's guard hook rides along so owning the
+            // whole hooks key doesn't strip it (see `guard::machine_hooks_for_apply`).
+            let machine_hooks = if scope == Scope::Global {
+                crate::commands::guard::machine_hooks_for_apply()
+            } else {
+                Vec::new()
+            };
+            let prev_hooks = !state.managed_hooks(&key).is_empty();
+            if let Some(hp) = plan_hooks(
+                manifest,
+                desc,
+                &ctx.resolver,
+                prev_hooks,
+                scope,
+                &ctx.dir,
+                &machine_hooks,
+            )? {
+                for u in &hp.unresolved {
+                    let name = u.split_whitespace().next().unwrap_or(u.as_str());
                     println!(
+                        "  {} unresolved secret {u} (hook) ↳ agentstack secret set {name}",
+                        "✗".red()
+                    );
+                    missing_secrets.insert(name.to_string());
+                    error_count += 1;
+                }
+                let hblocked = !hp.unresolved.is_empty() && !args.allow_unresolved;
+                if hblocked {
+                    write_blockers += 1;
+                }
+                if hp.changed() {
+                    changed_count += 1;
+                    changed_targets.insert(desc.display.clone());
+                    println!("  {} hooks → {}", "·".dimmed(), hp.path.display());
+                    if !quiet {
+                        print!("{}", indent(&hp.diff()));
+                    }
+                    if will_write && hblocked {
+                        blocked_targets.insert(desc.display.clone());
+                        println!("  {} hooks not written — unresolved secret(s)", "✗".red());
+                    } else if will_write {
+                        let capture =
+                            crate::history::capture(&hp.path, format!("{} · hooks", desc.display));
+                        hp.write()?;
+                        backups.push(capture);
+                        touched_targets.insert(desc.display.clone());
+                        state.record_hooks(&key, hp.managed.clone());
+                        println!("  {} wrote {} hook(s)", "✓".green(), hp.managed.len());
+                    } else {
+                        println!("  {} {} hook(s) to apply", "→".cyan(), hp.managed.len());
+                    }
+                } else if will_write && !hblocked {
+                    state.record_hooks(&key, hp.managed.clone());
+                }
+            }
+
+            // Instruction fragments (the managed region of CLAUDE.md / AGENTS.md).
+            // Only when the manifest declares [instructions.*]: a manifest without
+            // any must never touch — let alone empty out — a region another layer
+            // (e.g. the machine manifest seeded by `init --global`) owns.
+            if !manifest.instructions.is_empty() {
+                // …and only when fragments actually apply at THIS scope: project
+                // scope filters out every machine-layer fragment, so a project
+                // with none of its own compiles to an empty string there — writing
+                // that would strip a committed managed region from the repo.
+                if let Some(ip) = plan_instructions(manifest, desc, scope, &ctx.dir)
+                    .filter(|ip| !ip.fragments.is_empty() || !ip.missing.is_empty())
+                {
+                    for m in &ip.missing {
+                        println!("  {} instruction fragment '{m}' source missing", "✗".red());
+                        error_count += 1;
+                    }
+                    // A missing source already dropped its content from the
+                    // compile — writing now would delete previously compiled
+                    // fragments (all sources missing empties the whole region).
+                    // Block the write, mirroring the unresolved-secret path.
+                    let iblocked = !ip.missing.is_empty();
+                    if iblocked {
+                        write_blockers += 1;
+                    }
+                    if ip.changed() {
+                        changed_count += 1;
+                        changed_targets.insert(desc.display.clone());
+                        println!("  {} instructions → {}", "·".dimmed(), ip.path.display());
+                        if !quiet {
+                            print!("{}", indent(&ip.diff()));
+                        }
+                        if will_write && iblocked {
+                            blocked_targets.insert(desc.display.clone());
+                            println!(
+                                "  {} instructions not written — missing fragment source(s)",
+                                "✗".red()
+                            );
+                        } else if will_write {
+                            let capture = crate::history::capture(
+                                &ip.path,
+                                format!("{} · instructions", desc.display),
+                            );
+                            ip.write()?;
+                            backups.push(capture);
+                            touched_targets.insert(desc.display.clone());
+                            wrote_instructions = true;
+                            println!(
+                                "  {} wrote {} instruction fragment(s)",
+                                "✓".green(),
+                                ip.fragments.len()
+                            );
+                        } else {
+                            println!(
+                                "  {} {} instruction fragment(s) to apply",
+                                "→".cyan(),
+                                ip.fragments.len()
+                            );
+                        }
+                    }
+                } else if desc.instructions.is_none() {
+                    // This CLI has no instruction file agentstack manages. If
+                    // fragments would otherwise compile here, note the silent drop
+                    // in its block rather than omitting it entirely.
+                    let n = manifest
+                        .instructions
+                        .values()
+                        .filter(|i| i.compiles_at(id, scope))
+                        .count();
+                    if n > 0 {
+                        println!(
                         "  {} (instructions not supported by this CLI — {n} fragment(s) not compiled)",
                         "·".dimmed()
                     );
+                    }
                 }
             }
-        }
 
-        // Managed .gitignore block: emit an entry only for an artifact this
-        // target actually manages now — after the write sections above, so a
-        // blocked write (nothing recorded) contributes nothing. Both flags read
-        // persistent records `use` shares, keeping the block churn-free across
-        // the two commands. `apply` never materializes skills, so its skills
-        // flag is purely the record a prior `use` left.
-        if scope == Scope::Project && will_write {
-            let instr_path = desc
-                .instructions
-                .as_ref()
-                .and_then(|s| s.path_for(scope, &ctx.dir));
-            let managed = crate::render::gitignore::Managed {
-                config: !state.managed_servers(&key).is_empty()
-                    || !state.kept_foreign(&key).is_empty(),
-                skills: !state.managed_skills(&key).is_empty(),
-                instructions: wrote_instructions
-                    || instr_path
-                        .as_deref()
-                        .is_some_and(crate::render::instructions::manages_file),
-            };
-            ignore_entries.extend(crate::render::gitignore::managed_entries(
-                desc, scope, &ctx.dir, managed,
-            ));
+            // Managed .gitignore block: emit an entry only for an artifact this
+            // target actually manages now — after the write sections above, so a
+            // blocked write (nothing recorded) contributes nothing. Both flags read
+            // persistent records `use` shares, keeping the block churn-free across
+            // the two commands. `apply` never materializes skills, so its skills
+            // flag is purely the record a prior `use` left.
+            if scope == Scope::Project && will_write {
+                let instr_path = desc
+                    .instructions
+                    .as_ref()
+                    .and_then(|s| s.path_for(scope, &ctx.dir));
+                let managed = crate::render::gitignore::Managed {
+                    config: !state.managed_servers(&key).is_empty()
+                        || !state.kept_foreign(&key).is_empty(),
+                    skills: !state.managed_skills(&key).is_empty(),
+                    instructions: wrote_instructions
+                        || instr_path
+                            .as_deref()
+                            .is_some_and(crate::render::instructions::manages_file),
+                };
+                ignore_entries.extend(crate::render::gitignore::managed_entries(
+                    desc, scope, &ctx.dir, managed,
+                ));
+            }
+            Ok(())
+        })();
+        if let Err(err) = target_result {
+            println!(
+                "\n{} {} failed — {err:#}\n  {} other targets continue; completed writes stay \
+                 recorded and undoable",
+                "✗".red(),
+                desc.display.bold(),
+                "·".dimmed()
+            );
+            failed_targets.insert(desc.display.clone());
+            error_count += 1;
         }
     }
 
@@ -753,10 +781,13 @@ fn render(
     }
 
     let written_count = touched_targets.len();
-    // A target can be both written and blocked — e.g. its instructions landed
-    // while its server config was refused over an unresolved secret. Split the
-    // overlap out so the summary counts don't cover the same target twice.
-    let partially_written = touched_targets.intersection(&blocked_targets).count();
+    // A target can be both written and blocked/failed — e.g. its instructions
+    // landed while its server config was refused over an unresolved secret, or
+    // its settings write threw after its servers landed. Split the overlap out
+    // so the summary counts don't cover the same target twice.
+    let incomplete_targets: std::collections::BTreeSet<String> =
+        blocked_targets.union(&failed_targets).cloned().collect();
+    let partially_written = touched_targets.intersection(&incomplete_targets).count();
     if will_write {
         state.save()?;
         // Pin the project-declared instruction fragments that compiled. The
@@ -820,23 +851,41 @@ fn render(
     if will_write {
         // Count targets actually written, not pending changes — a gate above
         // (unresolved secret, missing fragment source) may have blocked some
-        // or all of the writes.
-        if blocked_targets.is_empty() {
+        // of the writes, and a hard error may have failed others.
+        if incomplete_targets.is_empty() {
             println!("Applied to {written_count} target(s).");
         } else {
-            // "Wrote F of C; B blocked" with F + B = C: every changed target is
-            // either fully written or in the blocked set, so the two counts
-            // never overlap. Partially written targets count as blocked.
+            // Every not-fully-written target is blocked, failed, or both;
+            // partially written targets count against the fully-written tally
+            // so the numbers never cover a target twice.
             let fully_written = written_count - partially_written;
             let partial_note = if partially_written > 0 {
                 format!(" ({partially_written} partially written)")
             } else {
                 String::new()
             };
+            let mut what = Vec::new();
+            if !blocked_targets.is_empty() {
+                what.push(format!(
+                    "{} blocked by unresolved secret(s) or missing fragment source(s)",
+                    blocked_targets.len()
+                ));
+            }
+            if !failed_targets.is_empty() {
+                what.push(format!(
+                    "{} failed ({})",
+                    failed_targets.len(),
+                    failed_targets
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
             println!(
-                "Wrote {fully_written} of {} target(s); {} blocked by unresolved secret(s) or missing fragment source(s){partial_note}; see {} above.",
+                "Wrote {fully_written} of {} target(s); {}{partial_note}; see {} above.",
                 changed_targets.len(),
-                blocked_targets.len(),
+                what.join("; "),
                 "✗".red()
             );
         }
@@ -869,6 +918,22 @@ fn render(
     let blocked_write = will_write && !blocked_targets.is_empty();
     if error_count > 0 && !quiet && !blocked_write {
         println!("{error_count} issue(s) — resolve before writing.");
+    }
+
+    // A hard per-target failure exits nonzero AFTER state and history are
+    // recorded above — the successful targets' writes stay owned and undoable,
+    // and the error names exactly which targets did not land.
+    if will_write && !failed_targets.is_empty() {
+        anyhow::bail!(
+            "write failed on {} target(s): {} — each ✗ above has the error; targets written \
+             before or after stay recorded (undo: agentstack restore)",
+            failed_targets.len(),
+            failed_targets
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
 
     // A blocked write is a failure, not a footnote: exit nonzero so scripts
