@@ -120,6 +120,15 @@ impl Report {
     fn print(&self, show_all: bool) {
         let mut hidden = 0;
         for s in &self.sections {
+            // A section that produced no lines has nothing to say — print no
+            // bare header for it, even under `--all`. (This happens when every
+            // line a section would emit is a healthy state we no longer restate,
+            // e.g. Policy on a machine whose only policy is a healthy machine
+            // layer.) It isn't a "feature this project doesn't use", so it
+            // doesn't count toward the hidden-sections footer.
+            if s.lines.is_empty() {
+                continue;
+            }
             // Info lines are context, not findings — they don't force an
             // otherwise-irrelevant section into view.
             let flagged = s
@@ -1819,10 +1828,10 @@ fn check_rendered_extensions(dir: &Path, registry: &crate::adapter::Registry, re
                     continue; // pre-checksum ledger entry: nothing to verify against
                 }
                 match agentstack_core::digest::integrity_root_digest(&ext_dir, &m.filename) {
-                    Ok(current) if current.hex() == m.checksum => report.line(
-                        Level::Ok,
-                        format!("{:<20} rendered copy matches pin ({})", m.name, desc.id),
-                    ),
+                    // Bytes match the pin: healthy, nothing to act on. A pure
+                    // digest confirmation is internal state, so it earns no
+                    // line — only a drift or an unreadable copy (below) does.
+                    Ok(current) if current.hex() == m.checksum => {}
                     Ok(_) => report.line(
                         Level::Error,
                         format!(
@@ -2004,27 +2013,9 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
     // server — a typo'd key would silently firewall nothing. `"*"` is the
     // wildcard key (every server). Same check, same wording, across all
     // three dimensions — only the label and where it's enforced differ.
-    check_named_policy_keys(
-        "tools",
-        "enforced at the gateway",
-        &manifest.policy.tools,
-        manifest,
-        report,
-    );
-    check_named_policy_keys(
-        "egress",
-        "checked against the declared host at write/spawn time",
-        &manifest.policy.egress,
-        manifest,
-        report,
-    );
-    check_named_policy_keys(
-        "secrets",
-        "enforced fail-closed at render + gateway",
-        &manifest.policy.secrets,
-        manifest,
-        report,
-    );
+    check_named_policy_keys("tools", &manifest.policy.tools, manifest, report);
+    check_named_policy_keys("egress", &manifest.policy.egress, manifest, report);
+    check_named_policy_keys("secrets", &manifest.policy.secrets, manifest, report);
     // [policy.filesystem] scopes are bundle-global (not per-server). The
     // write scope is enforced in sandbox mode (the workspace mounts
     // read-only unless it covers the workspace root — deny-by-default);
@@ -2052,31 +2043,19 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
 
 /// One per-server-keyed policy dimension's key-validation: every key in
 /// `map` must be `"*"` or a real server in the manifest, else it silently
-/// firewalls nothing (a typo'd server name). `dimension` is the bare name
-/// (`"tools"`, `"egress"`, `"secrets"`) used in the Ok summary; the Error
-/// line always names the bracketed `[policy.<dimension>]` form to match
-/// how a maintainer would grep the manifest for it.
+/// firewalls nothing (a typo'd server name). Only the typo case earns a
+/// line — a valid key's allow/deny count is internal state, not a decision
+/// the user must act on. `dimension` is the bare name (`"tools"`, `"egress"`,
+/// `"secrets"`); the Error line names the bracketed `[policy.<dimension>]`
+/// form to match how a maintainer would grep the manifest for it.
 fn check_named_policy_keys(
     dimension: &str,
-    enforced_where: &str,
     map: &indexmap::IndexMap<String, Vec<String>>,
     manifest: &Manifest,
     report: &mut Report,
 ) {
-    for (server, rules) in map {
-        if server == "*" || manifest.servers.contains_key(server) {
-            let denies = rules.iter().filter(|r| r.starts_with('!')).count();
-            let allows = rules.len() - denies;
-            let label = if server == "*" {
-                "every server"
-            } else {
-                server
-            };
-            report.line(
-                Level::Ok,
-                format!("{dimension} '{label}' — {allows} allow / {denies} deny rule(s), {enforced_where}"),
-            );
-        } else {
+    for server in map.keys() {
+        if server != "*" && !manifest.servers.contains_key(server) {
             report.line(
                 Level::Error,
                 format!("[policy.{dimension}] '{server}' — no such server in the manifest"),
@@ -2157,9 +2136,11 @@ fn machine_policy_reports(machine: &crate::machine_policy::Inspection) -> bool {
             .is_some_and(|policy| !policy.is_empty())
 }
 
-/// One machine-layer dimension's summary + rename-dodge lint: an Ok line
-/// with the rule-set count (silent when the dimension is unused), then one
-/// Warn per named deny not mirrored under `"*"`.
+/// One machine-layer dimension's rename-dodge lint: one Warn per named deny
+/// not mirrored under `"*"` (silent when the dimension is unused). The bare
+/// rule-set count is internal state — the section's posture headline already
+/// says whether the machine layer constrains anything — so only the
+/// actionable rename-dodge advisory is emitted here.
 fn report_machine_dimension(
     dimension: &str,
     map: &indexmap::IndexMap<String, Vec<String>>,
@@ -2168,13 +2149,6 @@ fn report_machine_dimension(
     if map.is_empty() {
         return;
     }
-    report.line(
-        Level::Ok,
-        format!(
-            "machine [policy.{dimension}] — {} server rule set(s), checked before project policy on every call",
-            map.len()
-        ),
-    );
     // Rename-dodge lint: a named-server deny escapes a repo that renames its
     // server; the "*" key is the rename-proof form.
     for advisory in rename_dodgeable_denies(dimension, map) {
@@ -2268,17 +2242,11 @@ fn check_machine_policy(machine: &crate::machine_policy::Inspection, report: &mu
             Level::Warn,
             format!("machine policy CURRENT — source {source_digest}; snapshot refresh failed ({error})"),
         ),
-        crate::machine_policy::Status::Current {
-            source_digest,
-            snapshot_synced,
-            ..
-        } => report.line(
-            Level::Ok,
-            format!(
-                "machine policy CURRENT — source {source_digest}; snapshot {}",
-                if *snapshot_synced { "in sync" } else { "not in sync" }
-            ),
-        ),
+        // Healthy + in sync: nothing to act on. The digest-first line only
+        // restated internal state, and `snapshot_synced == false` never
+        // reaches here — that case always carries a `cache_error`, caught by
+        // the Warn arm above — so silence here is honest, not a hidden drift.
+        crate::machine_policy::Status::Current { .. } => {}
         crate::machine_policy::Status::LastKnownGood {
             source_error,
             source_digest,
@@ -3014,13 +2982,13 @@ mod tests {
         let mut report = Report::new();
         check_named_policy_keys(
             "egress",
-            "checked against the declared host at write/spawn time",
             &rules_map(&[("known", &["api.example"]), ("ghost", &["!evil.example"])]),
             &manifest,
             &mut report,
         );
         let lines = report_lines(&report);
-        assert!(lines.iter().any(|(l, m)| *l == "ok" && m.contains("known")));
+        // A valid key is silent now — only the typo'd key earns a line.
+        assert!(!lines.iter().any(|(_, m)| m.contains("known")));
         assert!(lines.iter().any(|(l, m)| *l == "error"
             && m.contains("[policy.egress]")
             && m.contains("ghost")
