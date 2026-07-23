@@ -24,13 +24,26 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # `boa_engine` is the workspace's largest dependency (+127 transitive
       # packages, itself not unsafe-free). This gate fails CI when the workflow
-      # crate's normal-dependency tree drifts from the blessed snapshot, so a
-      # transitive-dependency change is a reviewed event, not a silent one. When
-      # the tree legitimately changes, re-bless it in the SAME PR:
-      #   cargo tree -p agentstack-workflow --edges normal > crates/workflow/deps.snapshot
+      # crate's normal-dependency SET drifts from the blessed snapshot, so a
+      # transitive-dependency change is a reviewed event, not a silent one.
+      #
+      # The snapshot is the sorted, unique set of `name vX.Y.Z` — NOT the raw
+      # `cargo tree` output — on purpose: the tree's shape carries the checkout
+      # path (root line), ANSI color (CARGO_TERM_COLOR=always above), and
+      # host-conditional edges (e.g. `num_threads -> libc` exists on macOS but
+      # not Linux). Reducing to the package set strips all three, so the same
+      # snapshot verifies on any machine and re-blesses identically. The
+      # normalizer below must match the one used to bless.
+      #
+      # When the set legitimately changes, re-bless it in the SAME PR:
+      #   cargo tree -p agentstack-workflow --edges normal --color never \
+      #     | sed -E 's/^[^a-zA-Z]*//; s/ \(proc-macro\)//; s/ \(\*\)//; s# \(/.*\)##' \
+      #     | grep -v '^agentstack-workflow ' | sort -u > crates/workflow/deps.snapshot
       - name: Workflow crate dependency drift
         run: |
-          cargo tree -p agentstack-workflow --edges normal > /tmp/workflow-deps.txt
+          cargo tree -p agentstack-workflow --edges normal --color never \
+            | sed -E 's/^[^a-zA-Z]*//; s/ \(proc-macro\)//; s/ \(\*\)//; s# \(/.*\)##' \
+            | grep -v '^agentstack-workflow ' | sort -u > /tmp/workflow-deps.txt
           diff -u crates/workflow/deps.snapshot /tmp/workflow-deps.txt
       - name: Format
         run: cargo fmt --all -- --check

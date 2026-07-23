@@ -1,268 +1,127 @@
-agentstack-workflow v0.15.0 (/Users/tarek.k/Documents/GitHub/agentstack/crates/workflow)
-├── boa_engine v0.21.1
-│   ├── aligned-vec v0.6.4
-│   │   └── equator v0.4.2
-│   │       └── equator-macro v0.4.2 (proc-macro)
-│   │           ├── proc-macro2 v1.0.106
-│   │           │   └── unicode-ident v1.0.24
-│   │           ├── quote v1.0.46
-│   │           │   └── proc-macro2 v1.0.106 (*)
-│   │           └── syn v2.0.118
-│   │               ├── proc-macro2 v1.0.106 (*)
-│   │               ├── quote v1.0.46 (*)
-│   │               └── unicode-ident v1.0.24
-│   ├── arrayvec v0.7.8
-│   ├── bitflags v2.13.0
-│   ├── boa_ast v0.21.1
-│   │   ├── bitflags v2.13.0
-│   │   ├── boa_interner v0.21.1
-│   │   │   ├── boa_gc v0.21.1
-│   │   │   │   ├── boa_macros v0.21.1 (proc-macro)
-│   │   │   │   │   ├── cfg-if v1.0.4
-│   │   │   │   │   ├── cow-utils v0.1.3
-│   │   │   │   │   ├── proc-macro2 v1.0.106 (*)
-│   │   │   │   │   ├── quote v1.0.46 (*)
-│   │   │   │   │   ├── syn v2.0.118 (*)
-│   │   │   │   │   └── synstructure v0.13.2
-│   │   │   │   │       ├── proc-macro2 v1.0.106 (*)
-│   │   │   │   │       ├── quote v1.0.46 (*)
-│   │   │   │   │       └── syn v2.0.118 (*)
-│   │   │   │   ├── boa_string v0.21.1
-│   │   │   │   │   ├── fast-float2 v0.2.3
-│   │   │   │   │   ├── itoa v1.0.18
-│   │   │   │   │   ├── paste v1.0.15 (proc-macro)
-│   │   │   │   │   ├── rustc-hash v2.1.2
-│   │   │   │   │   ├── ryu-js v1.0.3
-│   │   │   │   │   └── static_assertions v1.1.0
-│   │   │   │   ├── hashbrown v0.16.1
-│   │   │   │   │   ├── allocator-api2 v0.2.21
-│   │   │   │   │   ├── equivalent v1.0.2
-│   │   │   │   │   └── foldhash v0.2.0
-│   │   │   │   └── thin-vec v0.2.18
-│   │   │   ├── boa_macros v0.21.1 (proc-macro) (*)
-│   │   │   ├── hashbrown v0.16.1 (*)
-│   │   │   ├── indexmap v2.14.0
-│   │   │   │   ├── equivalent v1.0.2
-│   │   │   │   └── hashbrown v0.17.1
-│   │   │   ├── once_cell v1.21.4
-│   │   │   ├── phf v0.13.1
-│   │   │   │   ├── phf_macros v0.13.1 (proc-macro)
-│   │   │   │   │   ├── phf_generator v0.13.1
-│   │   │   │   │   │   ├── fastrand v2.4.1
-│   │   │   │   │   │   └── phf_shared v0.13.1
-│   │   │   │   │   │       └── siphasher v1.0.3
-│   │   │   │   │   ├── phf_shared v0.13.1 (*)
-│   │   │   │   │   ├── proc-macro2 v1.0.106 (*)
-│   │   │   │   │   ├── quote v1.0.46 (*)
-│   │   │   │   │   └── syn v2.0.118 (*)
-│   │   │   │   └── phf_shared v0.13.1 (*)
-│   │   │   ├── rustc-hash v2.1.2
-│   │   │   └── static_assertions v1.1.0
-│   │   ├── boa_macros v0.21.1 (proc-macro) (*)
-│   │   ├── boa_string v0.21.1 (*)
-│   │   ├── indexmap v2.14.0 (*)
-│   │   ├── num-bigint v0.4.6
-│   │   │   ├── num-integer v0.1.46
-│   │   │   │   └── num-traits v0.2.19
-│   │   │   ├── num-traits v0.2.19
-│   │   │   └── serde v1.0.228
-│   │   │       ├── serde_core v1.0.228
-│   │   │       └── serde_derive v1.0.228 (proc-macro)
-│   │   │           ├── proc-macro2 v1.0.106 (*)
-│   │   │           ├── quote v1.0.46 (*)
-│   │   │           └── syn v2.0.118 (*)
-│   │   └── rustc-hash v2.1.2
-│   ├── boa_gc v0.21.1 (*)
-│   ├── boa_interner v0.21.1 (*)
-│   ├── boa_macros v0.21.1 (proc-macro) (*)
-│   ├── boa_parser v0.21.1
-│   │   ├── bitflags v2.13.0
-│   │   ├── boa_ast v0.21.1 (*)
-│   │   ├── boa_interner v0.21.1 (*)
-│   │   ├── boa_macros v0.21.1 (proc-macro) (*)
-│   │   ├── fast-float2 v0.2.3
-│   │   ├── icu_properties v2.0.2
-│   │   │   ├── displaydoc v0.2.6 (proc-macro)
-│   │   │   │   ├── proc-macro2 v1.0.106 (*)
-│   │   │   │   ├── quote v1.0.46 (*)
-│   │   │   │   └── syn v2.0.118 (*)
-│   │   │   ├── icu_collections v2.0.0
-│   │   │   │   ├── displaydoc v0.2.6 (proc-macro) (*)
-│   │   │   │   ├── potential_utf v0.1.5
-│   │   │   │   │   └── zerovec v0.11.6
-│   │   │   │   │       ├── yoke v0.8.3
-│   │   │   │   │       │   ├── stable_deref_trait v1.2.1
-│   │   │   │   │       │   ├── yoke-derive v0.8.2 (proc-macro)
-│   │   │   │   │       │   │   ├── proc-macro2 v1.0.106 (*)
-│   │   │   │   │       │   │   ├── quote v1.0.46 (*)
-│   │   │   │   │       │   │   ├── syn v2.0.118 (*)
-│   │   │   │   │       │   │   └── synstructure v0.13.2 (*)
-│   │   │   │   │       │   └── zerofrom v0.1.8
-│   │   │   │   │       │       └── zerofrom-derive v0.1.7 (proc-macro)
-│   │   │   │   │       │           ├── proc-macro2 v1.0.106 (*)
-│   │   │   │   │       │           ├── quote v1.0.46 (*)
-│   │   │   │   │       │           ├── syn v2.0.118 (*)
-│   │   │   │   │       │           └── synstructure v0.13.2 (*)
-│   │   │   │   │       ├── zerofrom v0.1.8 (*)
-│   │   │   │   │       └── zerovec-derive v0.11.3 (proc-macro)
-│   │   │   │   │           ├── proc-macro2 v1.0.106 (*)
-│   │   │   │   │           ├── quote v1.0.46 (*)
-│   │   │   │   │           └── syn v2.0.118 (*)
-│   │   │   │   ├── yoke v0.8.3 (*)
-│   │   │   │   ├── zerofrom v0.1.8 (*)
-│   │   │   │   └── zerovec v0.11.6 (*)
-│   │   │   ├── icu_locale_core v2.2.0
-│   │   │   │   ├── displaydoc v0.2.6 (proc-macro) (*)
-│   │   │   │   ├── litemap v0.8.2
-│   │   │   │   ├── tinystr v0.8.3
-│   │   │   │   │   ├── displaydoc v0.2.6 (proc-macro) (*)
-│   │   │   │   │   └── zerovec v0.11.6 (*)
-│   │   │   │   ├── writeable v0.6.3
-│   │   │   │   └── zerovec v0.11.6 (*)
-│   │   │   ├── icu_properties_data v2.0.1
-│   │   │   ├── icu_provider v2.2.0
-│   │   │   │   ├── displaydoc v0.2.6 (proc-macro) (*)
-│   │   │   │   ├── icu_locale_core v2.2.0 (*)
-│   │   │   │   ├── stable_deref_trait v1.2.1
-│   │   │   │   ├── writeable v0.6.3
-│   │   │   │   ├── yoke v0.8.3 (*)
-│   │   │   │   ├── zerofrom v0.1.8 (*)
-│   │   │   │   ├── zerotrie v0.2.4
-│   │   │   │   │   ├── displaydoc v0.2.6 (proc-macro) (*)
-│   │   │   │   │   ├── yoke v0.8.3 (*)
-│   │   │   │   │   └── zerofrom v0.1.8 (*)
-│   │   │   │   └── zerovec v0.11.6 (*)
-│   │   │   ├── potential_utf v0.1.5 (*)
-│   │   │   ├── zerotrie v0.2.4 (*)
-│   │   │   └── zerovec v0.11.6 (*)
-│   │   ├── num-bigint v0.4.6 (*)
-│   │   ├── num-traits v0.2.19
-│   │   ├── regress v0.10.5
-│   │   │   ├── hashbrown v0.16.1 (*)
-│   │   │   └── memchr v2.8.2
-│   │   └── rustc-hash v2.1.2
-│   ├── boa_string v0.21.1 (*)
-│   ├── bytemuck v1.25.2
-│   │   └── bytemuck_derive v1.11.0 (proc-macro)
-│   │       ├── proc-macro2 v1.0.106 (*)
-│   │       ├── quote v1.0.46 (*)
-│   │       └── syn v2.0.118 (*)
-│   ├── cfg-if v1.0.4
-│   ├── cow-utils v0.1.3
-│   ├── dashmap v6.2.1
-│   │   ├── cfg-if v1.0.4
-│   │   ├── crossbeam-utils v0.8.21
-│   │   ├── hashbrown v0.14.5
-│   │   ├── lock_api v0.4.14
-│   │   │   └── scopeguard v1.2.0
-│   │   ├── once_cell v1.21.4
-│   │   └── parking_lot_core v0.9.12
-│   │       ├── cfg-if v1.0.4
-│   │       ├── libc v0.2.186
-│   │       └── smallvec v1.15.2
-│   ├── dynify v0.1.2
-│   │   └── dynify-macros v0.1.2 (proc-macro)
-│   │       ├── proc-macro2 v1.0.106 (*)
-│   │       ├── quote v1.0.46 (*)
-│   │       └── syn v2.0.118 (*)
-│   ├── fast-float2 v0.2.3
-│   ├── float16 v0.1.5
-│   │   └── cfg-if v1.0.4
-│   ├── futures-channel v0.3.32
-│   │   └── futures-core v0.3.32
-│   ├── futures-concurrency v7.7.1
-│   │   ├── fixedbitset v0.5.7
-│   │   ├── futures-core v0.3.32
-│   │   ├── futures-lite v2.6.1
-│   │   │   ├── fastrand v2.4.1
-│   │   │   ├── futures-core v0.3.32
-│   │   │   ├── futures-io v0.3.32
-│   │   │   ├── parking v2.2.1
-│   │   │   └── pin-project-lite v0.2.17
-│   │   ├── pin-project v1.1.13
-│   │   │   └── pin-project-internal v1.1.13 (proc-macro)
-│   │   │       ├── proc-macro2 v1.0.106 (*)
-│   │   │       ├── quote v1.0.46 (*)
-│   │   │       └── syn v2.0.118 (*)
-│   │   └── smallvec v1.15.2
-│   ├── futures-lite v2.6.1 (*)
-│   ├── hashbrown v0.16.1 (*)
-│   ├── icu_normalizer v2.0.1
-│   │   ├── displaydoc v0.2.6 (proc-macro) (*)
-│   │   ├── icu_collections v2.0.0 (*)
-│   │   ├── icu_normalizer_data v2.0.0
-│   │   ├── icu_provider v2.2.0 (*)
-│   │   ├── smallvec v1.15.2
-│   │   ├── utf16_iter v1.0.5
-│   │   ├── write16 v1.0.0
-│   │   └── zerovec v0.11.6 (*)
-│   ├── indexmap v2.14.0 (*)
-│   ├── intrusive-collections v0.9.7
-│   │   └── memoffset v0.9.1
-│   ├── itertools v0.14.0
-│   │   └── either v1.16.0
-│   ├── num-bigint v0.4.6 (*)
-│   ├── num-integer v0.1.46 (*)
-│   ├── num-traits v0.2.19
-│   ├── num_enum v0.7.6
-│   │   ├── num_enum_derive v0.7.6 (proc-macro)
-│   │   │   ├── proc-macro-crate v1.3.1
-│   │   │   │   ├── once_cell v1.21.4
-│   │   │   │   └── toml_edit v0.19.15
-│   │   │   │       ├── indexmap v2.14.0 (*)
-│   │   │   │       ├── toml_datetime v0.6.11
-│   │   │   │       └── winnow v0.5.40
-│   │   │   ├── proc-macro2 v1.0.106 (*)
-│   │   │   ├── quote v1.0.46 (*)
-│   │   │   └── syn v2.0.118 (*)
-│   │   └── rustversion v1.0.22 (proc-macro)
-│   ├── paste v1.0.15 (proc-macro)
-│   ├── portable-atomic v1.14.0
-│   ├── rand v0.9.4
-│   │   ├── rand_chacha v0.9.0
-│   │   │   ├── ppv-lite86 v0.2.21
-│   │   │   │   └── zerocopy v0.8.52
-│   │   │   └── rand_core v0.9.5
-│   │   │       └── getrandom v0.3.4
-│   │   │           ├── cfg-if v1.0.4
-│   │   │           └── libc v0.2.186
-│   │   └── rand_core v0.9.5 (*)
-│   ├── regress v0.10.5 (*)
-│   ├── rustc-hash v2.1.2
-│   ├── ryu-js v1.0.3
-│   ├── serde v1.0.228 (*)
-│   ├── serde_json v1.0.150
-│   │   ├── indexmap v2.14.0 (*)
-│   │   ├── itoa v1.0.18
-│   │   ├── memchr v2.8.2
-│   │   ├── serde_core v1.0.228
-│   │   └── zmij v1.0.21
-│   ├── small_btree v0.1.0
-│   │   └── arrayvec v0.7.8
-│   ├── static_assertions v1.1.0
-│   ├── tag_ptr v0.1.0
-│   ├── tap v1.0.1
-│   ├── thin-vec v0.2.18
-│   ├── thiserror v2.0.18
-│   │   └── thiserror-impl v2.0.18 (proc-macro)
-│   │       ├── proc-macro2 v1.0.106 (*)
-│   │       ├── quote v1.0.46 (*)
-│   │       └── syn v2.0.118 (*)
-│   ├── time v0.3.54
-│   │   ├── deranged v0.5.8
-│   │   ├── libc v0.2.186
-│   │   ├── num-conv v0.2.2
-│   │   ├── num_threads v0.1.7
-│   │   │   └── libc v0.2.186
-│   │   ├── powerfmt v0.2.0
-│   │   ├── time-core v0.1.9
-│   │   └── time-macros v0.2.32 (proc-macro)
-│   │       ├── num-conv v0.2.2
-│   │       └── time-core v0.1.9
-│   └── xsum v0.1.6
-├── serde_json v1.0.150 (*)
-└── thiserror v1.0.69
-    └── thiserror-impl v1.0.69 (proc-macro)
-        ├── proc-macro2 v1.0.106 (*)
-        ├── quote v1.0.46 (*)
-        └── syn v2.0.118 (*)
+aligned-vec v0.6.4
+allocator-api2 v0.2.21
+arrayvec v0.7.8
+bitflags v2.13.0
+boa_ast v0.21.1
+boa_engine v0.21.1
+boa_gc v0.21.1
+boa_interner v0.21.1
+boa_macros v0.21.1
+boa_parser v0.21.1
+boa_string v0.21.1
+bytemuck v1.25.2
+bytemuck_derive v1.11.0
+cfg-if v1.0.4
+cow-utils v0.1.3
+crossbeam-utils v0.8.21
+dashmap v6.2.1
+deranged v0.5.8
+displaydoc v0.2.6
+dynify v0.1.2
+dynify-macros v0.1.2
+either v1.16.0
+equator v0.4.2
+equator-macro v0.4.2
+equivalent v1.0.2
+fast-float2 v0.2.3
+fastrand v2.4.1
+fixedbitset v0.5.7
+float16 v0.1.5
+foldhash v0.2.0
+futures-channel v0.3.32
+futures-concurrency v7.7.1
+futures-core v0.3.32
+futures-io v0.3.32
+futures-lite v2.6.1
+getrandom v0.3.4
+hashbrown v0.14.5
+hashbrown v0.16.1
+hashbrown v0.17.1
+icu_collections v2.0.0
+icu_locale_core v2.2.0
+icu_normalizer v2.0.1
+icu_normalizer_data v2.0.0
+icu_properties v2.0.2
+icu_properties_data v2.0.1
+icu_provider v2.2.0
+indexmap v2.14.0
+intrusive-collections v0.9.7
+itertools v0.14.0
+itoa v1.0.18
+libc v0.2.186
+litemap v0.8.2
+lock_api v0.4.14
+memchr v2.8.2
+memoffset v0.9.1
+num-bigint v0.4.6
+num-conv v0.2.2
+num-integer v0.1.46
+num-traits v0.2.19
+num_enum v0.7.6
+num_enum_derive v0.7.6
+num_threads v0.1.7
+once_cell v1.21.4
+parking v2.2.1
+parking_lot_core v0.9.12
+paste v1.0.15
+phf v0.13.1
+phf_generator v0.13.1
+phf_macros v0.13.1
+phf_shared v0.13.1
+pin-project v1.1.13
+pin-project-internal v1.1.13
+pin-project-lite v0.2.17
+portable-atomic v1.14.0
+potential_utf v0.1.5
+powerfmt v0.2.0
+ppv-lite86 v0.2.21
+proc-macro-crate v1.3.1
+proc-macro2 v1.0.106
+quote v1.0.46
+rand v0.9.4
+rand_chacha v0.9.0
+rand_core v0.9.5
+regress v0.10.5
+rustc-hash v2.1.2
+rustversion v1.0.22
+ryu-js v1.0.3
+scopeguard v1.2.0
+serde v1.0.228
+serde_core v1.0.228
+serde_derive v1.0.228
+serde_json v1.0.150
+siphasher v1.0.3
+small_btree v0.1.0
+smallvec v1.15.2
+stable_deref_trait v1.2.1
+static_assertions v1.1.0
+syn v2.0.118
+synstructure v0.13.2
+tag_ptr v0.1.0
+tap v1.0.1
+thin-vec v0.2.18
+thiserror v1.0.69
+thiserror v2.0.18
+thiserror-impl v1.0.69
+thiserror-impl v2.0.18
+time v0.3.54
+time-core v0.1.9
+time-macros v0.2.32
+tinystr v0.8.3
+toml_datetime v0.6.11
+toml_edit v0.19.15
+unicode-ident v1.0.24
+utf16_iter v1.0.5
+winnow v0.5.40
+write16 v1.0.0
+writeable v0.6.3
+xsum v0.1.6
+yoke v0.8.3
+yoke-derive v0.8.2
+zerocopy v0.8.52
+zerofrom v0.1.8
+zerofrom-derive v0.1.7
+zerotrie v0.2.4
+zerovec v0.11.6
+zerovec-derive v0.11.3
+zmij v1.0.21
