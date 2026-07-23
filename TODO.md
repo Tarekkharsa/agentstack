@@ -285,6 +285,13 @@ picking one up again is a deliberate scope decision.
   reorganization; only its test enforcement stays deferred.)
 - [ ] Activation measurement: five unassisted strangers, sub-15-minute median
   — deferred with Phase 0B distribution.
+- [ ] UI control plane (governance from t3code): guided `init`, session-profile
+  select/define, and workflow authoring + a controllable map-reduce master —
+  each write flow terminating in the trust review gate. Design draft:
+  [`docs/design/ui-control-plane.md`](docs/design/ui-control-plane.md). Blocked
+  on the §7 cross-cutting decision (dedicated `agentstack:admin` scope +
+  consent bound to the previewed surface digest), and not to jump ahead of the
+  workflows §9.3 blocker. Read-only slices are independently landable.
 
 ### Phase 0A exit gate (deferred with distribution)
 
