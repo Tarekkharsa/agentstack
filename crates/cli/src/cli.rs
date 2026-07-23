@@ -456,6 +456,12 @@ pub struct TrustArgs {
     /// (required when stdin is not a TTY).
     #[arg(long)]
     pub yes: bool,
+
+    /// Emit the review surface as JSON and grant NOTHING (read-only). The
+    /// machine-readable consent screen for external UIs — the actual grant
+    /// stays the gated `agentstack trust` flow.
+    #[arg(long)]
+    pub preview: bool,
 }
 
 #[derive(Args, Debug)]

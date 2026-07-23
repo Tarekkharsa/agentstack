@@ -134,6 +134,7 @@ fn trust_grant_requires_a_pinned_matching_surface() {
         list: false,
         revoke: false,
         yes: true,
+        preview: false,
     };
 
     // Unpinned inline skill → refused, pointing at `agentstack lock`.
@@ -156,6 +157,35 @@ fn trust_grant_requires_a_pinned_matching_surface() {
     lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
     trust_cmd::run(&grant_args).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
+}
+
+/// `trust --preview` is read-only: it must never grant, even on a surface a
+/// real grant would accept. It is the UI consent screen, not consent itself.
+#[test]
+fn trust_preview_grants_nothing() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    write_project(&proj);
+    let preview_args = TrustArgs {
+        path: Some(proj.clone()),
+        list: false,
+        revoke: false,
+        yes: false,
+        preview: true,
+    };
+
+    // Even after pinning (a grant would succeed here), preview leaves the
+    // project untrusted — it only reports the surface.
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+    trust_cmd::run(&preview_args).unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Untrusted);
 }
 
 /// A project declaring `[policy.tools]` gets that surfaced in the trust
@@ -199,6 +229,7 @@ fn trust_grant_surfaces_requested_policy() {
         list: false,
         revoke: false,
         yes: true,
+        preview: false,
     };
     trust_cmd::run(&grant_args).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
@@ -243,6 +274,7 @@ fn instruction_drift_blocks_apply_until_relocked() {
         list: false,
         revoke: false,
         yes: true,
+        preview: false,
     };
 
     // Unpinned instruction → trust refuses.
@@ -347,6 +379,7 @@ fn machine_layer_fragments_are_exempt_from_pinning() {
         list: false,
         revoke: false,
         yes: true,
+        preview: false,
     })
     .unwrap();
     apply::run(&apply_args(), Some(&proj)).unwrap();
@@ -413,6 +446,7 @@ fn workflow_drift_and_roles_widening_block_trust_until_relocked() {
         list: false,
         revoke: false,
         yes: true,
+        preview: false,
     };
 
     // Unpinned workflow → trust refuses, naming it.

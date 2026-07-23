@@ -102,10 +102,97 @@ pub fn run(args: &TrustArgs) -> Result<()> {
         return list();
     }
     let base = resolve_base(args.path.as_deref())?;
+    if args.preview {
+        return preview(&base);
+    }
     if args.revoke {
         return revoke(&base);
     }
     grant(&base, args.yes)
+}
+
+/// Read-only: emit the runtime surface a human would consent to, as JSON,
+/// granting nothing. This is the summary an external UI (the t3code trust
+/// dialog) shows before the user consents; the AUTHORITATIVE line-by-line
+/// review and the consent gate stay in `grant_gated`, and the grant itself
+/// (`trust --yes`) still self-gates on an unpinned surface — so this preview
+/// deliberately shows the surface + category counts, not a re-derived blocker
+/// verdict. Nothing here writes or fetches.
+fn preview(base: &Path) -> Result<()> {
+    let dir = crate::manifest::resolve_manifest_dir(base);
+    let loaded = crate::manifest::load_from_dir(&dir)?;
+    let m = &loaded.manifest;
+
+    let state = match trust::check(base) {
+        trust::TrustState::Trusted => "trusted",
+        trust::TrustState::Changed => "drifted",
+        trust::TrustState::Untrusted => "untrusted",
+    };
+    let re_trust = !matches!(
+        trust::prior_surface(base),
+        trust::PriorSurface::NeverTrusted
+    );
+
+    // The gateway's actual runtime surface — library refs resolve exactly as
+    // they will at gateway time. Display strings are sanitized (hostile input).
+    let library = crate::library::Library::load_default_or_warn();
+    let lib_home = crate::util::paths::lib_home();
+    let servers: Vec<serde_json::Value> =
+        crate::resolve::effective_runtime_servers(m, &library, &lib_home, None)
+            .into_iter()
+            .map(|(name, resolved)| match resolved {
+                Ok(r) => {
+                    let (kind, target) = match r.server.server_type {
+                        crate::manifest::ServerType::Stdio => (
+                            "stdio",
+                            format!(
+                                "{} {}",
+                                r.server.command.as_deref().unwrap_or("?"),
+                                r.server.args.join(" ")
+                            )
+                            .trim()
+                            .to_string(),
+                        ),
+                        crate::manifest::ServerType::Http => {
+                            ("http", r.server.url.clone().unwrap_or_default())
+                        }
+                    };
+                    serde_json::json!({
+                        "name": crate::text::sanitize_line(&name),
+                        "kind": kind,
+                        "target": crate::text::sanitize_line(&target),
+                    })
+                }
+                Err(e) => serde_json::json!({
+                    "name": crate::text::sanitize_line(&name),
+                    "kind": "unresolvable",
+                    "target": crate::text::sanitize_line(&e.to_string()),
+                }),
+            })
+            .collect();
+
+    let secrets: Vec<String> = m.referenced_secrets();
+    let instructions = m
+        .instructions
+        .iter()
+        .filter(|(_, i)| !i.from_user_layer)
+        .count();
+
+    let out = serde_json::json!({
+        "path": base.display().to_string(),
+        "state": state,
+        "re_trust": re_trust,
+        "servers": servers,
+        "secrets": secrets,
+        "counts": {
+            "skills": review_skill_names(m).len(),
+            "workflows": m.workflows.len(),
+            "extensions": m.extensions.len(),
+            "instructions": instructions,
+        },
+    });
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
 }
 
 /// Resolve the project base to act on: walk up from the given path (or cwd) so
