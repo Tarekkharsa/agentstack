@@ -201,6 +201,23 @@ pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
 /// ENFORCEMENT lives in `session start`'s fail-closed gate, which refuses an
 /// unpinned or untrusted surface regardless of what any UI displayed.
 fn list_profiles(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
+    let out = list_json_value(manifest_dir)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&crate::ui_contract::envelope(out))?
+        );
+        return Ok(());
+    }
+    print_profile_listing(&out);
+    Ok(())
+}
+
+/// The `use --list` body without the envelope: path, trust, profiles, and the
+/// active session (if any). Public read API so integrations and tests
+/// exercise the exact production listing instead of re-deriving one — the
+/// same seam as `restore::list_json_value` and `init::plan_json`.
+pub fn list_json_value(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
     let ctx = super::load(manifest_dir)?;
     let libctx = ctx.library_ctx();
     let manifest = &ctx.loaded.manifest;
@@ -216,6 +233,12 @@ fn list_profiles(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
         crate::trust::TrustState::Changed => "drifted",
         crate::trust::TrustState::Untrusted => "untrusted",
     };
+
+    // The active session here, if any — the picker's "in use" state, and the
+    // recovery surface when a supervising UI died mid-session: the state
+    // comes from the CLI's own session store on every read, so a reopened
+    // panel sees the interrupted session and can offer the safe end.
+    let active_session = crate::session::active(&ctx.dir);
 
     let mut profiles: Vec<serde_json::Value> = Vec::new();
     for (name, profile) in &manifest.profiles {
@@ -286,6 +309,7 @@ fn list_profiles(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
             "servers": servers.iter().map(|s| crate::text::sanitize_line(s)).collect::<Vec<_>>(),
             "harness": profile.harness.as_deref().map(crate::text::sanitize_line),
             "pinned": blockers.is_empty(),
+            "active": active_session.as_ref().is_some_and(|s| s.profile == *name),
             "blockers": blockers
                 .iter()
                 .map(|(n, why)| serde_json::json!({
@@ -296,27 +320,32 @@ fn list_profiles(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
         }));
     }
 
-    if json {
-        let out = serde_json::json!({
-            "path": base.display().to_string(),
-            "trust": trust_state,
-            "profiles": profiles,
-        });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&crate::ui_contract::envelope(out))?
-        );
-        return Ok(());
-    }
+    Ok(serde_json::json!({
+        "path": base.display().to_string(),
+        "trust": trust_state,
+        "profiles": profiles,
+        // Null when nothing is active; a UI renders the end/recovery action
+        // from this object, never from its own remembered state.
+        "session": active_session.map(|s| serde_json::json!({
+            "profile": crate::text::sanitize_line(&s.profile),
+            "scope": s.scope,
+            "started_unix": s.started_unix,
+        })),
+    }))
+}
 
+/// Human rendering of the listing body (the non-`--json` branch).
+fn print_profile_listing(out: &serde_json::Value) {
+    let trust_state = out["trust"].as_str().unwrap_or("?");
+    let profiles = out["profiles"].as_array().map_or(&[][..], Vec::as_slice);
     if profiles.is_empty() {
         println!(
             "No profiles declared — the implicit default (every inline skill and server) is what activates."
         );
-        return Ok(());
+        return;
     }
     println!("Declared profiles (project trust: {trust_state}):");
-    for p in &profiles {
+    for p in profiles {
         let name = p["name"].as_str().unwrap_or("?");
         let ready = if p["pinned"].as_bool().unwrap_or(false) {
             "pinned".to_string()
@@ -326,13 +355,17 @@ fn list_profiles(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
                 p["blockers"].as_array().map_or(0, Vec::len)
             )
         };
+        let in_use = if p["active"].as_bool().unwrap_or(false) {
+            "  · in use (agentstack session end reverts it)"
+        } else {
+            ""
+        };
         println!(
-            "  {name}  —  {} skill(s), {} server(s)  [{ready}]",
+            "  {name}  —  {} skill(s), {} server(s)  [{ready}]{in_use}",
             p["skills"].as_array().map_or(0, Vec::len),
             p["servers"].as_array().map_or(0, Vec::len),
         );
     }
-    Ok(())
 }
 
 /// Render the prepared profile into every target (servers + skills), record

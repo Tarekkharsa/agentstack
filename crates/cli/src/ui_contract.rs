@@ -29,6 +29,10 @@ pub const SCHEMA_VERSION: u64 = 1;
 /// - `diff-v1`: `diff --json` reports drift per target.
 /// - `restore-last`: `restore --json` lists undoable writes; `restore --last
 ///   [--write]` previews/undoes the newest.
+/// - `sessions-v1`: `use --list --json` carries per-profile `active` and the
+///   top-level `session` object; `session start <profile>` activates
+///   fail-closed (refuses untrusted or unpinned surfaces) and `session end`
+///   reverts — including a session an interrupted UI left behind.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -38,6 +42,7 @@ pub const FEATURES: &[&str] = &[
     "profiles-v1",
     "diff-v1",
     "restore-last",
+    "sessions-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected

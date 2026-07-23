@@ -152,7 +152,8 @@ Every UI-facing read response carries (implemented — `crates/cli/src/ui_contra
 {
   "schema_version": 1,
   "features": ["init-plan", "apply-setup", "trust-preview", "trust-consent",
-               "status-v1", "profiles-v1", "diff-v1", "restore-last"]
+               "status-v1", "profiles-v1", "diff-v1", "restore-last",
+               "sessions-v1"]
 }
 ```
 
@@ -191,16 +192,21 @@ manage, and Values still needed.
 
 ### Toolsets
 
-Backed by `agentstack use --list --json`. Each row returns:
+Backed by `agentstack use --list --json` (implemented — Slice 2). Each row
+returns:
 
 - stable profile identifier;
 - display name;
 - selected harness;
 - selected servers and skills;
-- readiness;
-- trust/pin status when relevant;
-- whether it is currently active;
-- one actionable reason when it cannot start.
+- readiness (`pinned` + per-item `blockers`, each with one actionable reason);
+- project trust state (top-level `trust`);
+- whether it is currently active (`active`, under `sessions-v1`).
+
+The top-level `session` object (profile, scope, `started_unix`; null when
+none) is the recovery surface: it reads from the CLI's own session store on
+every call, so a panel that died mid-session renders the interrupted session
+and its safe end action on next load instead of trusting its own memory.
 
 The UI says Toolset. Details may say that the stored object is a profile.
 
@@ -246,6 +252,8 @@ guard-install   → guard install
 trust-grant     → trust <root> --yes --consented-digest <surface_digest>
 trust-revoke    → trust <root> --revoke
 restore-write   → restore <id> --write --json
+session-start   → session start <profile from use --list --json>
+session-end     → session end
 ```
 
 `setup-apply` and `trust-grant` are consent-bound: the digest must come from
@@ -254,7 +262,12 @@ the CLI refuses when the underlying content changed in between. `restore-write`
 takes an id from the `restore --json` inventory because the undo ledger is
 machine-global — a project panel must undo the newest entry that touches its
 own project (`touches_project`), never a blind machine-wide `--last`.
-Start/end-toolset actions belong to Slice 2 and are not yet in the enum.
+`session-start` is name-bound: the profile must come from the toolsets read
+(the server refuses a malformed name pre-spawn), and the CLI's own gate is the
+enforcement — it refuses an untrusted project and any unpinned or drifted
+surface regardless of what the panel displayed. `session-end` reverts the
+project's session, including one an interrupted panel left behind; it is
+never `--all`.
 
 Each action has a server-owned mapping to a fixed AgentStack command. Adding an
 action requires:

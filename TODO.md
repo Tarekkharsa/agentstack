@@ -319,13 +319,29 @@ This is the primary graphical path, not an optional dashboard.
 
 Start only after the CLI JSON contract is reviewed and stable.
 
-- [ ] Add read-only profiles RPC using server-resolved workspace identity.
-- [ ] Add fixed actions for session start and end.
-- [ ] Label profiles as toolsets in the UI; keep the profile identifier in
-  details and machine-readable contracts.
-- [ ] Show readiness and the effective selected surface.
-- [ ] Keep editing/creating profiles out of this slice.
-- [ ] Demonstrate recovery when the panel closes during an active session.
+- [x] Add read-only profiles RPC using server-resolved workspace identity
+  (2026-07-23: `agentstack.toolsets` → fixed `use --list --json` argv;
+  `sessions-v1` feature gates the session verbs; body carries per-profile
+  `active` and the top-level `session` object).
+- [x] Add fixed actions for session start and end (2026-07-23:
+  `session-start` name-bound to the toolsets read with a pre-spawn shape
+  refusal, `session-end` fixed argv, never `--all`; the CLI's fail-closed
+  gate stays the enforcement — witnessed against the real binary in
+  `AgentstackCli.e2e.test.ts`, refused until trusted and pinned).
+- [x] Label profiles as toolsets in the UI; keep the profile identifier in
+  details and machine-readable contracts (panel card says "Toolsets" / "Use
+  temporarily" / "Stop using"; the wire contract keeps `profiles`).
+- [x] Show readiness and the effective selected surface (per-row server/skill
+  counts + harness; a blocked row shows one actionable reason — trust review
+  first, else the first blocker's own fix).
+- [x] Keep editing/creating profiles out of this slice (read + the two
+  session verbs only; no create/edit surface anywhere).
+- [x] Demonstrate recovery when the panel closes during an active session
+  (2026-07-23: session state is read from the CLI's store on every load —
+  `toolset_sessions.rs` witnesses the listing reporting a session whose
+  supervisor died, and the panel's "Stop using" maps to the same
+  `session end` the e2e proves reverts it). Browser-level walkthrough of the
+  reopened panel remains part of the Stage 2 gate's user scenario.
 
 ### Stage 2 gate
 
