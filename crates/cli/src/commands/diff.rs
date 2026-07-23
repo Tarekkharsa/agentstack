@@ -47,7 +47,11 @@ pub struct OwnerRefresh {
 pub fn run(args: &DiffArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let outcome = collect(args, manifest_dir, !args.json)?;
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&outcome)?);
+        let body = serde_json::to_value(&outcome)?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&crate::ui_contract::envelope(body))?
+        );
     }
     Ok(())
 }

@@ -176,8 +176,39 @@ impl Report {
         None
     }
 
+    /// The one-word answer an external status surface leads with (UI
+    /// control-plane §"Status"). `needs_setup` never comes from here — a
+    /// report only exists once a manifest loaded; [`run`] emits that state
+    /// before checks can run.
+    fn state(&self) -> &'static str {
+        if self.errors + self.warnings > 0 {
+            "needs_attention"
+        } else {
+            "ready"
+        }
+    }
+
     fn to_json(&self) -> serde_json::Value {
+        // Which stronger protections are ACTIVE on this machine — factual
+        // booleans, not a posture claim. `guard` is the cooperative pre-tool
+        // hook (advisory, not confinement); `machine_policy` is the presence
+        // of a machine ceiling. A UI may say "Protected" only over these
+        // facts; the enforcement matrix stays the honest source for what each
+        // actually stops.
+        let guard = matches!(
+            crate::manifest::machine_guard_health(),
+            Some(Ok(cfg)) if cfg.enabled()
+        );
+        let machine_policy = !matches!(
+            crate::machine_policy::inspect().status,
+            crate::machine_policy::Status::Unconfigured
+        );
         serde_json::json!({
+            "state": self.state(),
+            // The same triage line the text report prints ("start with: …") —
+            // exactly one recommended command, or null when nothing to fix.
+            "next_action": self.first_fix(),
+            "protection": { "guard": guard, "machine_policy": machine_policy },
             "errors": self.errors,
             "warnings": self.warnings,
             "trust": self.trust,
@@ -194,6 +225,31 @@ impl Report {
 }
 
 pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    // JSON callers (the t3code status panel) need "no project yet" as a
+    // STATE, not a load error: an uninitialized directory is the normal
+    // starting point of the setup journey, and the panel's whole job is to
+    // say so and point at the one next action. The terminal path keeps its
+    // error (the message already names `agentstack init`), and `--ci` keeps
+    // failing loudly — a gate pointed at an uninitialized directory is a
+    // misconfiguration, not a setup journey.
+    if args.json && !args.ci {
+        let base = super::project_base(manifest_dir)?;
+        let dir = crate::manifest::resolve_manifest_dir(&base);
+        if !dir.join(crate::manifest::load::MANIFEST_FILE).exists() {
+            let out = crate::ui_contract::envelope(serde_json::json!({
+                "state": "needs_setup",
+                "next_action": "agentstack init",
+                "protection": serde_json::Value::Null,
+                "errors": 0,
+                "warnings": 0,
+                "trust": serde_json::Value::Null,
+                "sections": [],
+            }));
+            println!("{}", serde_json::to_string_pretty(&out)?);
+            return Ok(());
+        }
+    }
+
     let mut report = Report::new();
     let fixed = run_checks(args, manifest_dir, &mut report)?;
 
@@ -202,7 +258,10 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         // retired `audit --json` used to occupy — doctor now owns it, as a
         // superset that carries every section, not just the content scan).
         // Nothing else goes to stdout so the output stays parseable.
-        println!("{}", serde_json::to_string_pretty(&report.to_json())?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&crate::ui_contract::envelope(report.to_json()))?
+        );
     } else {
         // `--ci` always shows the full report: a team gate should print exactly
         // what it evaluated, not a per-project selection of it.

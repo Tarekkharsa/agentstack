@@ -27,10 +27,11 @@ pub fn run(args: &RestoreArgs, manifest_dir: Option<&Path>) -> Result<()> {
             .iter()
             .find(|e| !e.undone)
             .context("nothing to undo — no recorded write that isn't already undone")?;
-        return undo_selection(entry, &entries, args.write);
+        return undo_selection(entry, &entries, args.write, args.json);
     }
 
     match &args.adapter {
+        None if args.json => list_json(&registry, &dir),
         None => list(&registry, &dir),
         // An adapter id keeps the original single-slot behavior; anything else
         // is treated as a history-entry id (unique prefix is enough).
@@ -49,7 +50,7 @@ pub fn run(args: &RestoreArgs, manifest_dir: Option<&Path>) -> Result<()> {
             let entries = history::list();
             let matches: Vec<_> = entries.iter().filter(|e| id_matches(&e.id, id)).collect();
             match matches.as_slice() {
-                [one] => undo_selection(one, &entries, args.write),
+                [one] => undo_selection(one, &entries, args.write, args.json),
                 [] => anyhow::bail!(
                     "'{id}' is neither an adapter id nor a recorded change — `agentstack restore` lists both"
                 ),
@@ -60,6 +61,65 @@ pub fn run(args: &RestoreArgs, manifest_dir: Option<&Path>) -> Result<()> {
             }
         }
     }
+}
+
+/// The machine-readable undo inventory (UI control-plane §"Activity and
+/// recovery"): recorded history entries newest-first plus the per-adapter
+/// slot backups. `short_id` is what a fixed `restore <id>` action passes
+/// back; summaries came from our own writer, but sanitize anyway — they name
+/// files from potentially hostile manifests.
+fn list_json(registry: &Registry, dir: &Path) -> Result<()> {
+    let out = list_json_value(registry, dir);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&crate::ui_contract::envelope(out))?
+    );
+    Ok(())
+}
+
+/// The undo inventory as a value — the body `restore --json` prints (without
+/// the envelope). Public so integrations and witnesses read the exact
+/// production shape.
+pub fn list_json_value(registry: &Registry, dir: &Path) -> serde_json::Value {
+    let entries = history::list();
+    let entries_json: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|e| {
+            // The ledger is machine-global (an entry may belong to any
+            // project or to user-level configs). `touches_project` marks the
+            // entries whose captured files live under THIS project, so a
+            // project-scoped Undo surface can offer the right entry instead
+            // of blindly undoing the machine-wide newest.
+            let touches_project = e.files.iter().any(|f| Path::new(&f.path).starts_with(dir));
+            serde_json::json!({
+                "id": e.id,
+                "short_id": short_id(&e.id, &entries),
+                "time_unix": e.time_unix,
+                "scope": e.scope,
+                "summary": crate::text::sanitize_line(&e.summary),
+                "undone": e.undone,
+                "touches_project": touches_project,
+            })
+        })
+        .collect();
+    let mut backups: Vec<serde_json::Value> = Vec::new();
+    for desc in registry.iter() {
+        for scope in [Scope::Global, Scope::Project] {
+            if let Some((path, _)) = desc.config_for(scope, dir) {
+                if atomic::backup_path(&path).exists() {
+                    backups.push(serde_json::json!({
+                        "adapter": desc.id,
+                        "scope": scope.to_string(),
+                        "path": path.display().to_string(),
+                    }));
+                }
+            }
+        }
+    }
+    serde_json::json!({
+        "entries": entries_json,
+        "adapter_backups": backups,
+    })
 }
 
 /// Does user input `input` select entry `entry_id`? A plain prefix works; so
@@ -160,7 +220,12 @@ fn list(registry: &Registry, dir: &Path) -> Result<()> {
 
 /// Preview (or perform) a recorded event's undo: every captured file goes back
 /// to its pre-write bytes; files that didn't exist before are deleted.
-fn undo_selection(entry: &history::Entry, entries: &[history::Entry], write: bool) -> Result<()> {
+fn undo_selection(
+    entry: &history::Entry,
+    entries: &[history::Entry],
+    write: bool,
+    json: bool,
+) -> Result<()> {
     let selected: Vec<&history::Entry> = match &entry.batch {
         Some(batch) => entries
             .iter()
@@ -172,16 +237,50 @@ fn undo_selection(entry: &history::Entry, entries: &[history::Entry], write: boo
         anyhow::bail!("this change batch was already undone");
     }
 
-    if selected.len() > 1 {
-        println!(
-            "{} undo one setup batch ({} recorded phases, newest first)",
-            "↩".cyan(),
-            selected.len()
-        );
+    if !json {
+        if selected.len() > 1 {
+            println!(
+                "{} undo one setup batch ({} recorded phases, newest first)",
+                "↩".cyan(),
+                selected.len()
+            );
+        }
+        for selected_entry in &selected {
+            preview_entry(selected_entry, entries);
+        }
     }
-    for selected_entry in &selected {
-        preview_entry(selected_entry, entries);
-    }
+
+    // One JSON shape for preview and result: `performed` says which this was.
+    // Per-file `action` mirrors the text preview — `revert` (had prior bytes),
+    // `delete` (file did not exist before the write), `match` (already
+    // identical, undo is a no-op there). Computed BEFORE the undo runs so the
+    // reported actions describe what the undo will do, not the state after it.
+    let selected_json: Option<Vec<serde_json::Value>> = json.then(|| {
+        selected
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "id": e.id,
+                    "short_id": short_id(&e.id, entries),
+                    "scope": e.scope,
+                    "summary": crate::text::sanitize_line(&e.summary),
+                    "files": e.files.iter().map(|f| {
+                        let current = std::fs::read_to_string(&f.path).unwrap_or_default();
+                        let action = match &f.before {
+                            Some(before) if !diff::differs(&current, before) => "match",
+                            Some(_) => "revert",
+                            None => "delete",
+                        };
+                        serde_json::json!({
+                            "label": f.label,
+                            "path": f.path,
+                            "action": action,
+                        })
+                    }).collect::<Vec<_>>(),
+                })
+            })
+            .collect()
+    });
 
     if write {
         // Newest-to-oldest is essential when two phases touched the same path:
@@ -190,12 +289,25 @@ fn undo_selection(entry: &history::Entry, entries: &[history::Entry], write: boo
         for selected_entry in &selected {
             history::undo(&selected_entry.id)?;
         }
-        println!(
-            "{} undone — reverted files show up as pending again; re-run `agentstack apply` to re-render.",
-            "✓".green()
-        );
-    } else {
+        if !json {
+            println!(
+                "{} undone — reverted files show up as pending again; re-run `agentstack apply` to re-render.",
+                "✓".green()
+            );
+        }
+    } else if !json {
         println!("\nDry run. Re-run with {} to undo.", "--write".bold());
+    }
+
+    if let Some(selected_json) = selected_json {
+        let out = serde_json::json!({
+            "performed": write,
+            "entries": selected_json,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&crate::ui_contract::envelope(out))?
+        );
     }
     Ok(())
 }

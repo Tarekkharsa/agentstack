@@ -75,6 +75,7 @@ fn init_from_a_subdir_refuses_to_silently_nest() {
         secrets: None,
         no_keychain: false,
         yes: true,
+        consented_plan: None,
     };
     let err = with_cwd(&deep, || commands::init::run(&args, None)).unwrap_err();
     let msg = format!("{err:#}");

@@ -203,11 +203,43 @@ fn preview(base: &Path) -> Result<()> {
             .collect();
 
     let secrets: Vec<String> = m.referenced_secrets();
-    let instructions = m
+
+    // The COMPLETE reviewed surface, by name — not just counts. What an
+    // external consent screen renders must be the same item list the
+    // interactive review prints; a preview that collapsed workflows or
+    // extensions into a number would let a user consent to code they never
+    // saw named. All names arrive from repo content — hostile input — so
+    // display copies are sanitized.
+    let skills: Vec<String> = review_skill_names(m)
+        .iter()
+        .map(|n| crate::text::sanitize_line(n))
+        .collect();
+    let workflows: Vec<serde_json::Value> = m
+        .workflows
+        .iter()
+        .map(|(name, w)| {
+            serde_json::json!({
+                "name": crate::text::sanitize_line(name),
+                "roles": w.roles.iter().map(|r| crate::text::sanitize_line(r)).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    let extensions: Vec<serde_json::Value> = m
+        .extensions
+        .iter()
+        .map(|(name, e)| {
+            serde_json::json!({
+                "name": crate::text::sanitize_line(name),
+                "target": crate::text::sanitize_line(&e.target),
+            })
+        })
+        .collect();
+    let instructions: Vec<String> = m
         .instructions
         .iter()
         .filter(|(_, i)| !i.from_user_layer)
-        .count();
+        .map(|(name, _)| crate::text::sanitize_line(name))
+        .collect();
 
     // §7.2: `surface_digest` (computed above, from the same snapshot the
     // display was parsed from) is exactly what a later grant must present as
@@ -220,14 +252,21 @@ fn preview(base: &Path) -> Result<()> {
         "surface_digest": surface_digest,
         "servers": servers,
         "secrets": secrets,
+        "skills": skills,
+        "workflows": workflows,
+        "extensions": extensions,
+        "instructions": instructions,
         "counts": {
-            "skills": review_skill_names(m).len(),
-            "workflows": m.workflows.len(),
-            "extensions": m.extensions.len(),
-            "instructions": instructions,
+            "skills": skills.len(),
+            "workflows": workflows.len(),
+            "extensions": extensions.len(),
+            "instructions": instructions.len(),
         },
     });
-    println!("{}", serde_json::to_string_pretty(&out)?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&crate::ui_contract::envelope(out))?
+    );
     Ok(())
 }
 

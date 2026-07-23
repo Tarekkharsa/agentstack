@@ -133,6 +133,7 @@ fn init_records_its_manifest_and_restore_last_removes_it() {
             secrets: Some(SecretStore::Skip),
             no_keychain: false,
             yes: false,
+            consented_plan: None,
         },
         Some(&proj),
     )
@@ -148,6 +149,7 @@ fn init_records_its_manifest_and_restore_last_removes_it() {
             last: true,
             scope: None,
             write: true,
+            json: false,
         },
         Some(&proj),
     )
@@ -182,6 +184,7 @@ fn init_rolls_back_when_history_cannot_be_recorded() {
             secrets: Some(SecretStore::Skip),
             no_keychain: false,
             yes: false,
+            consented_plan: None,
         },
         Some(&proj),
     )

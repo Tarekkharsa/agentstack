@@ -22,6 +22,7 @@ fn restore_args(target: Option<&str>, last: bool, write: bool) -> RestoreArgs {
         last,
         scope: None,
         write,
+        json: false,
     }
 }
 

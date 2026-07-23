@@ -1100,6 +1100,13 @@ pub struct InitArgs {
     /// stdin is not a TTY and no other init-shaping flag is given.
     #[arg(long)]
     pub yes: bool,
+
+    /// The `plan_digest` an `init --plan` emitted alongside the plan that was
+    /// reviewed. The scripted import (with `--yes`) then refuses if detection
+    /// no longer produces that exact plan — a CLI config edited between plan
+    /// and apply forces a fresh review instead of importing unseen content.
+    #[arg(long, value_name = "DIGEST")]
+    pub consented_plan: Option<String>,
 }
 
 /// Where `init` (and `secret set`) put lifted token values when the manifest's
@@ -1284,6 +1291,12 @@ pub struct RestoreArgs {
     /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
+
+    /// Machine-readable output: the undoable-change list (no argument) or the
+    /// selected undo's preview/result (`--last`, or an id). External UIs use
+    /// this to show a real Undo affordance instead of prose.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]

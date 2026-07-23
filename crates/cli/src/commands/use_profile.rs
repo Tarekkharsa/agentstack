@@ -302,7 +302,10 @@ fn list_profiles(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
             "trust": trust_state,
             "profiles": profiles,
         });
-        println!("{}", serde_json::to_string_pretty(&out)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&crate::ui_contract::envelope(out))?
+        );
         return Ok(());
     }
 

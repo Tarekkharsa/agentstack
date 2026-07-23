@@ -98,6 +98,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // above and calls `run_for_setup` (which never re-checks the
                 // TTY gate), so this field is irrelevant here.
                 yes: false,
+                consented_plan: None,
             },
             manifest_dir,
         )?;

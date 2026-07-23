@@ -319,7 +319,72 @@ fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) ->
 /// minus the writes — and emits only each lifted secret's `${REF}` name and
 /// origin, NEVER its value: the values live in memory for the lifetime of
 /// this call and are dropped.
+///
+/// The emitted `plan_digest` identifies this exact plan: a later scripted
+/// apply may present it as `--consented-plan` and the write then refuses if
+/// re-running detection yields a different plan — the same reviewed-bytes
+/// binding `trust --preview` / `--consented-digest` gives the trust grant.
 fn run_plan(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&crate::ui_contract::envelope(plan_json(
+            args,
+            manifest_dir
+        )?))?
+    );
+    Ok(())
+}
+
+/// The plan `--plan` prints, without the envelope: body plus `plan_digest`.
+/// Public read API so integrations and the race witnesses exercise the exact
+/// production plan/digest pair instead of re-deriving one.
+pub fn plan_json(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
+    let body = plan_body(args, manifest_dir)?;
+    let digest = plan_digest(&body);
+    let mut out = body;
+    if let serde_json::Value::Object(map) = &mut out {
+        map.insert("plan_digest".into(), digest.into());
+    }
+    Ok(out)
+}
+
+/// The stable identity of a computed plan: a domain-separated digest over its
+/// canonical JSON serialization (everything the user reviews — detected CLIs,
+/// servers, conflicts, secret reference names, destination). Deterministic
+/// for the same on-disk inputs and flags; any change to what detection finds
+/// changes the digest.
+fn plan_digest(body: &serde_json::Value) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"agentstack:init-plan:v1\n");
+    hasher.update(body.to_string().as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+/// When `--consented-plan` was given, recompute the plan from today's disk
+/// state and refuse the write unless it still digests to what the caller
+/// reviewed. Fail closed: a CLI config that changed between `init --plan` and
+/// the apply means the user would import something they never saw — the fix
+/// is a fresh plan, never a silent proceed.
+fn check_consented_plan(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let Some(consented) = args.consented_plan.as_deref() else {
+        return Ok(());
+    };
+    let actual = plan_digest(&plan_body(args, manifest_dir)?);
+    anyhow::ensure!(
+        consented == actual,
+        "refusing to apply: the detected setup changed since this plan was reviewed \
+         (consented {consented}, current {actual}) — re-run `agentstack init --plan`, \
+         review the new plan, and apply with its plan_digest"
+    );
+    Ok(())
+}
+
+/// The plan JSON body (everything except `plan_digest` and the envelope) —
+/// shared verbatim between `--plan` (emit) and `--consented-plan` (recompute
+/// and compare), so the digest can only ever describe what this function
+/// reports.
+fn plan_body(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
     let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
@@ -389,7 +454,7 @@ fn run_plan(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
         })
         .collect();
 
-    let out = serde_json::json!({
+    Ok(serde_json::json!({
         "path": base.display().to_string(),
         "manifest_path": manifest_path.display().to_string(),
         "already_initialized": already_initialized.is_some(),
@@ -411,9 +476,7 @@ fn run_plan(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
             }))
             .collect::<Vec<_>>(),
         "secrets_destination": destination,
-    });
-    println!("{}", serde_json::to_string_pretty(&out)?);
-    Ok(())
+    }))
 }
 
 /// Template for the machine-level manifest. Deliberately NOT an import: the
@@ -692,6 +755,10 @@ fn refuse_nested_init(cwd: &Path) -> Result<()> {
 }
 
 fn run_impl(args: &InitArgs, manifest_dir: Option<&Path>, show_next: bool) -> Result<()> {
+    // Reviewed-plan binding first: nothing below runs (and nothing is ever
+    // written) when the plan the caller consented to no longer matches what
+    // detection would import today.
+    check_consented_plan(args, manifest_dir)?;
     let base = match manifest_dir {
         Some(d) => d.to_path_buf(),
         None => {
@@ -1096,6 +1163,7 @@ mod tests {
             secrets: None,
             no_keychain: false,
             yes: false,
+            consented_plan: None,
         };
         let err = run_gated(&args, Some(dir.path()), false)
             .expect_err("a flagless non-TTY init must refuse");
@@ -1125,6 +1193,7 @@ mod tests {
             secrets: None,
             no_keychain: false,
             yes: false,
+            consented_plan: None,
         };
         run_gated(&args, Some(dir.path()), false).expect("plan is read-only and never refuses");
         assert!(!dir.path().join(".agentstack").exists());
@@ -1150,6 +1219,7 @@ mod tests {
             secrets: None,
             no_keychain: false,
             yes: false,
+            consented_plan: None,
         };
         let with_yes = InitArgs {
             yes: true,
