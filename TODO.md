@@ -273,10 +273,18 @@ This is the primary graphical path, not an optional dashboard.
   the original state byte-for-byte (2026-07-23:
   `examples/first-value-demo/run-demo.sh` — self-asserting, sandboxed,
   asciinema-recordable via `DEMO_PAUSE`).
-- [ ] Record a short demo focused on portability, not threat prevention.
-- [ ] Put the same proof sequence in the README, website, and getting-started
-  guide.
-- [ ] Make expected output accurate against the current binary.
+- [x] Record a short demo focused on portability, not threat prevention
+  (2026-07-23: `docs/demos/first-value.gif` + `.cast`, asciinema+agg at
+  108×30, DEMO_PAUSE=2.5, recorded against the current binary with all eight
+  assertions green in the recorded run).
+- [x] Put the same proof sequence in the README, website, and getting-started
+  guide (2026-07-23: the five-step import → render → doctor → restore sequence
+  with the recording embedded in README "Try it in 60 seconds", the landing
+  quick-start card, and start.html Track A, each linking the runnable script).
+- [x] Make expected output accurate against the current binary (2026-07-23:
+  the embedded output IS the recording of the current binary; `run-demo.sh`
+  exits nonzero on any output-shape drift, so CI can keep it honest, and
+  start.html's wizard transcript was updated to the Stage 1.4 wording).
 
 ### 1.6 Activation study
 

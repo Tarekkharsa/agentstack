@@ -215,6 +215,8 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
         <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack init</span><span style="color:var(--term-muted)"># guided wizard: your CLI configs → one manifest</span></div>
         <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack doctor</span><span style="color:var(--term-muted)"># health + drift; every warning names its fix</span></div>
       </div>
+      <img src="demos/first-value.gif" alt="Recorded proof: two CLIs with different half-setups — import once, render both native formats, doctor clean, restore byte-for-byte" loading="lazy" style="width:100%;border-radius:var(--radius-md);margin-top:var(--space-4);border:1px solid var(--color-divider)">
+      <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-3) 0 0">Import once → both CLIs in sync → clean doctor → fully reversible. Recorded from a real run; reproduce it fenced with <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a> — it asserts every step, so this output stays accurate.</p>
     </div>
   </div>
 

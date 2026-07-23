@@ -63,7 +63,9 @@ run()  { printf '\033[2m$ %s\033[0m\n' "$*"; sleep "$PAUSE"; }
 note() { printf '  \033[2m%s\033[0m\n' "$*"; }
 
 # ── isolated sandbox (nothing touches your real config) ──────────────────────
-SBX="$(mktemp -d)"
+# An explicit short /tmp template instead of $TMPDIR: macOS's per-user temp dir
+# is a ~50-char path that wraps the recorded output's file-path lines.
+SBX="$(mktemp -d /tmp/agentstack-demo.XXXXXX)"
 FAKEHOME="$SBX/home"
 export AGENTSTACK_HOME="$SBX/agentstack-home"
 mkdir -p "$AGENTSTACK_HOME" "$FAKEHOME"

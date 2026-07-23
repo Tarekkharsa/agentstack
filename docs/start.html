@@ -281,6 +281,8 @@ pre.cmd .c { color: var(--term-muted); }
         <p class="eyebrow">Track A · A1–A4 · import, deliver, guard, verify</p>
         <h2>Unify the stack you already have</h2>
         <p class="muted">~5 minutes · no Docker · ends with every CLI in sync, and guarded.</p>
+        <img src="demos/first-value.gif" alt="Recorded proof of the loop this track teaches: import two CLIs' configs once, render both native formats, doctor clean, restore byte-for-byte" loading="lazy" style="width:100%;border-radius:12px;margin-top:1rem;border:1px solid var(--color-divider,#ddd)">
+        <p class="small muted" style="margin-top:0.5rem">The whole track, recorded from a real run: import once → both CLIs in sync → clean doctor → fully reversible. Reproduce it fenced: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a>.</p>
       </div>
 
       <ol class="walk ta">
@@ -333,9 +335,9 @@ pre.cmd .c { color: var(--term-muted); }
 
 <span class="c">Delivery mode  · how capabilities reach your CLIs — switch later.</span>
 <span class="p">? Pick a delivery mode ›</span>
-<span class="ok">❯ static — rendered configs on disk, kept out of git</span>
-<span class="c">  clean-at-rest — materialized only during a session</span>
-<span class="c">  zero-files — served live over the gateway, trust-gated</span></code></pre>
+<span class="ok">❯ static — config files on disk, kept out of git</span>
+<span class="c">  clean-at-rest — active only while you work, then restored</span>
+<span class="c">  zero-files — nothing on disk — served live to your CLIs after review</span></code></pre>
           </div>
 
           <p class="muted">
@@ -390,7 +392,7 @@ pre.cmd .c { color: var(--term-muted); }
 
             <!-- CLEAN-AT-REST -->
             <div class="modepanel" id="mpanel-clean">
-              <h3>Clean-at-rest — materialized only during a session</h3>
+              <h3>Clean-at-rest — active only while you work, then restored</h3>
               <p class="muted">
                 <em>Nothing is rendered.</em> The wizard pins your lockfile and
                 teaches the two-command session rhythm; capabilities exist only
@@ -431,7 +433,7 @@ pre.cmd .c { color: var(--term-muted); }
 
             <!-- ZERO-FILES -->
             <div class="modepanel" id="mpanel-zero">
-              <h3>Zero-files — served live over the gateway, trust-gated</h3>
+              <h3>Zero-files — nothing on disk, served live after review</h3>
               <p class="muted">
                 <em>Nothing is ever written.</em> The wizard offers to register the
                 gateway in your harnesses, then points you at

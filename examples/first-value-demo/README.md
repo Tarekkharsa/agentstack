@@ -30,9 +30,16 @@ that the journey's expected output stays accurate against the current binary.
 vhs stalls on this machine; use asciinema + agg:
 
 ```sh
-DEMO_PAUSE=2.5 asciinema rec first-value.cast -c ./run-demo.sh
-agg first-value.cast first-value.gif
+DEMO_PAUSE=2.5 asciinema rec first-value.cast --window-size 108x30 -c ./run-demo.sh
+agg --font-size 16 first-value.cast first-value.gif
 ```
 
 `DEMO_PAUSE` paces the narration lines for a watchable recording; the default
-(0.6s) is for humans running it live, and `DEMO_PAUSE=0` for CI.
+(0.6s) is for humans running it live, and `DEMO_PAUSE=0` for CI. The fixed
+108×30 window keeps the longest output lines unwrapped (the sandbox already
+pins its temp dir to a short `/tmp` path for the same reason).
+
+The published recording lives at `docs/demos/first-value.gif` (with its
+`.cast` source) and is embedded in the README, the website landing page, and
+the getting-started guide — re-record and replace it after any change to this
+script's output.

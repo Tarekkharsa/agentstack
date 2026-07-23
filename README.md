@@ -53,22 +53,24 @@ agentstack doctor    # verify it landed — every warning names its exact fix
 — no prompts, no token values — then `agentstack apply --write`. Inline tokens are lifted into
 `${REF}` placeholders, resolved per machine and never stored in the manifest.
 
-```text
-$ agentstack init --yes
-🔍  6 CLI binaries on PATH: Claude Code · Codex CLI · … · Pi
-📥  Imported 1 MCP server(s) from existing configs
-✅  Wrote .agentstack/agentstack.toml
+Here is the whole loop, recorded from a real run of the current binary:
 
-$ agentstack apply --write            # render the manifest into every CLI
-Claude Code (.mcp.json)              ✓ wrote 1 server(s)
-Codex CLI (.codex/config.toml)       ✓ wrote 1 server(s)
-Gemini CLI (.gemini/settings.json)   ✓ wrote 1 server(s)
-OpenCode (opencode.json)             ✓ wrote 1 server(s)
-Applied to 4 target(s).
-```
+![Two CLIs with different half-setups: agentstack imports both into one manifest, renders each native format, passes doctor with 0 errors, and restores the machine byte-for-byte](docs/demos/first-value.gif)
 
-Condensed from a real run. Reproduce it fenced (never touches your real configs):
-[`examples/sandbox/demo-firstrun.sh`](examples/sandbox/demo-firstrun.sh).
+1. **Start** — two real native configs: Claude Code knows a `github` server
+   (inline token), Codex knows `tldraw`. Neither knows the other's.
+2. **Import** — `agentstack init --yes --secrets env`: one manifest; the token
+   becomes `${GITHUB_TOKEN}`, its value in a gitignored `.env`.
+3. **Render** — `agentstack apply --scope global --write`: both CLIs now carry
+   both servers, each in its own format.
+4. **Verify** — `agentstack doctor`: 0 errors, 0 warnings.
+5. **Undo** — `agentstack restore --last --write`, twice: every file
+   byte-identical to where it started.
+
+Reproduce it yourself, fenced (an isolated temp `HOME` — it never touches your
+real configs, and it asserts every step, so it doubles as the witness that this
+output stays accurate):
+[`examples/first-value-demo/run-demo.sh`](examples/first-value-demo/run-demo.sh).
 
 ## t3code is the graphical path
 
