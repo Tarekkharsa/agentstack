@@ -253,12 +253,16 @@ existing `workflow run`; review scoped to blueprint-declared workflows.
    script beyond the model's faithfulness. Past prototype it gains a digest-bound
    approve (like `plan_digest`/`surface_digest`).
 
-### Open question to resolve before building C2
+### Open question to resolve before building C2 — RESOLVED (2026-07-24)
 
 The **handshake shape**: blueprint rides in-band as a structured chat/tool block
 (simplest, recommended for v1) vs a dedicated `workflow propose --json` read + a
-fixed approve action (the eventual contract home). Start in-band, migrate to the
-contract once v1 proves the experience.
+fixed approve action (the eventual contract home). **Resolved in favor of
+in-band for v1** — the model emits an `agentstack-blueprint` fence, the panel's
+existing markdown renderer intercepts it, and the three actions send plain
+templated user turns through the existing thread-turn path. No new websocket
+method or CLI surface. Migrating to a `workflow propose --json` read + fixed
+approve action stays the eventual contract home, deferred as a fast-follow.
 
 ---
 
@@ -307,9 +311,20 @@ A checked item means implemented and verified, not merely designed.
   as its own item.)*
 
 ### Lane C1 — workflow observe contract
-- [ ] C1.1 — envelope `workflow list`/`workflow runs` JSON in `ui_contract`
-- [ ] C1.2 — add `workflow-observe-v1` to the `features` set
-- [ ] C1.3 — t3code: negotiate the new feature; monitor consumes the enveloped read
+- [x] C1.1 — envelope `workflow list`/`workflow runs` JSON in `ui_contract`
+  *(2026-07-24: `list_value`/`runs_value` in `crates/cli/src/commands/workflow.rs`
+  envelope at the `--json` print site only; the un-enveloped `_json` helpers and
+  their tests stay untouched)*
+- [x] C1.2 — add `workflow-observe-v1` to the `features` set
+  *(2026-07-24: appended last in `ui_contract::FEATURES` with a doc bullet noting
+  `runs` reads the machine-global `agentstack_home()/runs` dir; parity witness
+  `panel_workflow_observe_reads_carry_envelope` pins both fixed argv through
+  real clap→dispatch)*
+- [x] C1.3 — t3code: negotiate the new feature; monitor consumes the enveloped read
+  *(2026-07-24: `AgentstackWorkflowList`/`Runs` carry the envelope, `AgentstackWorkflowData`
+  spreads negotiation fields; server `workflow()` negotiates off the list payload;
+  `FEATURE_WORKFLOW_OBSERVE` gates an in-section incompatible/upgrade notice;
+  legacy un-enveloped binaries unchanged)*
 
 ### Lane B — skills & profiles (load + activate + create)
 - [x] B1 — CLI: fixed actions add-skill/add-server/create-profile/use-profile
@@ -328,19 +343,44 @@ A checked item means implemented and verified, not merely designed.
   unresolved-`${REF}` block renders a what/why/next-step card)*
 
 ### Lane C2 v1 — reviewable workflows
-- [ ] C2.1 — define the blueprint JSON schema (topology + per-node
+- [x] C2.1 — define the blueprint JSON schema (topology + per-node
   model/effort/instruction + pattern + symbolic fanout)
-- [ ] C2.2 — write the skill: model emits the blueprint, waits for approval,
+  *(2026-07-24: `apps/web/src/components/agentstack/workflow-blueprint.ts` —
+  fail-closed hand-rolled `parseWorkflowBlueprint` that never throws; 64 KiB raw
+  guard; count/length caps; six-value pattern enum; symbolic fanout)*
+- [x] C2.2 — write the skill: model emits the blueprint, waits for approval,
   edit/approve behavior
-- [ ] C2.3 — thin renderer: blueprint → Mermaid (deterministic, tested)
-- [ ] C2.4 — **prototype the propose→approve handshake first** (in-band block +
+  *(2026-07-24: `crates/cli/catalog/skills/propose-workflow/SKILL.md`; §4 rewritten
+  after review — real `pipeline`/`parallel` semantics, single fan-in reducer, real
+  `[workflows.<name>]` schema + `lock`/`trust`/`workflow run` pipeline, both-sides
+  roles rule)*
+- [x] C2.3 — thin renderer: blueprint → Mermaid (deterministic, tested)
+  *(2026-07-24: `blueprint-mermaid.ts` — synthetic node/subgraph ids, single-pass
+  label escaping of hostile strings; both §6 worked examples asserted byte-identical)*
+- [x] C2.4 — **prototype the propose→approve handshake first** (in-band block +
   3 actions); resolve the §6 open question against the feel
-- [ ] C2.5 — t3code: graph-review panel (render + approve / reject / edit-with-model)
-- [ ] C2.6 — agent-as-compiler: on approve, author the workflow from the blueprint
+  *(2026-07-24: resolved **in-band** per the plan — the model emits an
+  `agentstack-blueprint` fence; `ChatMarkdown.tsx` intercepts it on stream
+  complete; the three actions send byte-exact template messages via the existing
+  `startThreadTurn` path. No new websocket method; migration to a
+  `workflow propose --json` contract stays a fast-follow)*
+- [x] C2.5 — t3code: graph-review panel (render + approve / reject / edit-with-model)
+  *(2026-07-24: `BlueprintReviewCard.tsx` + `BlueprintGraph.tsx`; mermaid
+  lazy-loaded, `securityLevel: "strict"`, error boundary → inert `<pre>` on any
+  render failure; actions disabled while streaming)*
+- [x] C2.6 — agent-as-compiler: on approve, author the workflow from the blueprint
   and run via existing `workflow run`
+  *(2026-07-24: SKILL.md §4 — compile-on-approve maps topology→control flow,
+  node role→profile, symbolic fanout→data-dependent loop; faithfulness rule
+  re-emits on any forced deviation)*
 
 ### Before build
-- [ ] Get explicit go for Lanes B and C2 (they touch review boundaries) before
+- [x] Get explicit go for Lanes B and C2 (they touch review boundaries) before
   entering `TODO.md`
-- [ ] Slot accepted lanes into `TODO.md`: A → §1.2/§1.3; C1 → §1.3; B → §2.4;
+  *(B: go given with the Lane A+B session; C2: explicit go given in the
+  2026-07-24 C1+C2 kickoff. Both landed uncommitted, adversarially reviewed to
+  zero blocking findings.)*
+- [x] Slot accepted lanes into `TODO.md`: A → §1.2/§1.3; C1 → §1.3; B → §2.4;
   C2 → new capability lane (needs approval gate)
+  *(2026-07-24: C1 recorded under §1.3; C2 v1 recorded as its own item under
+  "Experimental workflows". A and B were slotted in their own sessions.)*

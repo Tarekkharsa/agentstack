@@ -1864,16 +1864,27 @@ struct WorkflowListRow {
 /// non-`"matches"` `lock_status`) — nothing here makes such an entry
 /// runnable; `run` still re-gates independently through the choke point.
 pub fn list(manifest_dir: Option<&Path>, args: &crate::cli::WorkflowListArgs) -> Result<()> {
-    let rows = collect_workflow_list_rows(manifest_dir)?;
     if args.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&workflow_list_json(&rows))?
+            serde_json::to_string_pretty(&list_value(manifest_dir)?)?
         );
     } else {
+        let rows = collect_workflow_list_rows(manifest_dir)?;
         print_workflow_list_table(&rows);
     }
     Ok(())
+}
+
+/// The enveloped `workflow list --json` body as a `Value` — the Rust-callable
+/// primitive (like `library_index_value`) t3code and tests read without
+/// shelling out. Collects rows, builds the un-enveloped `{"workflows": [...]}`
+/// body via [`workflow_list_json`], then wraps it in the versioned UI-contract
+/// envelope. The `_json` builder stays un-enveloped so its own unit tests keep
+/// asserting the raw body shape.
+pub fn list_value(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
+    let rows = collect_workflow_list_rows(manifest_dir)?;
+    Ok(crate::ui_contract::envelope(workflow_list_json(&rows)))
 }
 
 /// The row-gathering half of `list` (the testable seam): every declared
@@ -2049,16 +2060,28 @@ struct WorkflowRunRow {
 }
 
 pub fn runs(args: &crate::cli::WorkflowRunsArgs) -> Result<()> {
-    let rows = collect_workflow_run_rows(args.limit);
     if args.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&workflow_runs_json(&rows))?
+            serde_json::to_string_pretty(&runs_value(args.limit)?)?
         );
     } else {
+        let rows = collect_workflow_run_rows(args.limit);
         print_workflow_runs_table(&rows);
     }
     Ok(())
+}
+
+/// The enveloped `workflow runs --json` body as a `Value` — the Rust-callable
+/// primitive t3code and tests read without shelling out. Reads the
+/// machine-global `agentstack_home()/runs` history (bounded to the newest
+/// `limit`), builds the un-enveloped `{"runs": [...]}` body via
+/// [`workflow_runs_json`], then wraps it in the versioned UI-contract envelope.
+/// The `_json` builder stays un-enveloped so its own unit tests keep asserting
+/// the raw body shape.
+pub fn runs_value(limit: usize) -> Result<serde_json::Value> {
+    let rows = collect_workflow_run_rows(limit);
+    Ok(crate::ui_contract::envelope(workflow_runs_json(&rows)))
 }
 
 /// The row-gathering half of `runs` (the testable seam). Global by design:

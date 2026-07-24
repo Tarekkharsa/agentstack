@@ -153,7 +153,7 @@ Every UI-facing read response carries (implemented — `crates/cli/src/ui_contra
   "schema_version": 1,
   "features": ["init-plan", "apply-setup", "trust-preview", "trust-consent",
                "status-v1", "profiles-v1", "diff-v1", "restore-last",
-               "sessions-v1"]
+               "sessions-v1", "profiles-edit-v1", "workflow-observe-v1"]
 }
 ```
 

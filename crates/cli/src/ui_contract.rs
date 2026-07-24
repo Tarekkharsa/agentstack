@@ -39,6 +39,13 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   toolset then re-lock + re-render, each bound to a `consent_digest` a prior
 ///   `--preview` returned (apply refuses on drift) and failing closed on an
 ///   unresolved `${REF}`.
+/// - `workflow-observe-v1`: `workflow list --json` surfaces every declared
+///   `[workflows.*]` entry with its per-entry trust + lock state (project-scoped
+///   reads), and `workflow runs --json` lists recorded run history. Unlike the
+///   other reads, `runs` reads the machine-global runs directory
+///   (`agentstack_home()/runs`), not the project — run evidence is not
+///   project-scoped. Both are read-only observation; running/resuming re-gates
+///   independently.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -50,6 +57,7 @@ pub const FEATURES: &[&str] = &[
     "restore-last",
     "sessions-v1",
     "profiles-edit-v1",
+    "workflow-observe-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -89,5 +97,14 @@ mod tests {
             .map(|v| v.as_str().unwrap())
             .collect();
         assert_eq!(features, FEATURES);
+        // Pin the observe contract explicitly and its append-only position:
+        // external UIs gate the workflow observation affordance on this slug,
+        // and the list is grow-at-the-end so decoders can index stably.
+        assert!(features.contains(&"workflow-observe-v1"));
+        assert_eq!(
+            *features.last().unwrap(),
+            "workflow-observe-v1",
+            "FEATURES is append-only: new contracts land at the end"
+        );
     }
 }

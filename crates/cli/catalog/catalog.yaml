@@ -206,3 +206,11 @@
   homepage: https://github.com/Tarekkharsa/agentstack
   tags: [workflow, multi-agent, sandbox, docker, orchestration, review]
   path: skills/orchestrate-workflow
+
+- kind: skill
+  name: propose-workflow
+  display: Propose a reviewable workflow
+  description: "Propose a reviewable multi-agent workflow as a blueprint — name the pattern (map-reduce, pipeline, tournament, loop-until-dry, dag), emit its shape as an agentstack-blueprint JSON block, wait for the user to approve / reject / edit, then author and run it on approve (unofficial, agentstack-authored)"
+  homepage: https://github.com/Tarekkharsa/agentstack
+  tags: [workflow, multi-agent, blueprint, review, approval, orchestration]
+  path: skills/propose-workflow

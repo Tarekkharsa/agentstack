@@ -257,6 +257,14 @@ This is the primary graphical path, not an optional dashboard.
 - [x] Remove or rewrite old t3code copy that claimed completeness before the
   consent/admin contract worked (`docs/howto/use-with-t3code.md` now
   describes the enforced contract).
+- [x] Lane C1 — workflow observe contract (2026-07-24, uncommitted, reviewed
+  zero-blocking): `workflow list`/`runs --json` carry the `ui_contract`
+  envelope via `list_value`/`runs_value` in
+  `crates/cli/src/commands/workflow.rs`; `workflow-observe-v1` appended last in
+  `ui_contract::FEATURES`; parity witness
+  `panel_workflow_observe_reads_carry_envelope` pins both fixed argv; t3code
+  monitor negotiates the feature and consumes the enveloped read. See
+  `docs/design/launch-plan.md` Lane C1.
 
 ### 1.4 Progressive-disclosure acceptance
 
@@ -606,6 +614,21 @@ work.
 
 Workflows remain available for supervised testing but are not part of the
 beginner promise.
+
+**Reviewable workflows (Lane C2 v1)** — landed 2026-07-24 (uncommitted,
+adversarially reviewed to zero blocking findings). The launch headline: a model
+proposes a workflow as an `agentstack-blueprint` JSON blueprint (pattern +
+nodes with role/model/effort/instruction + symbolic fanout + edges), t3code's
+chat renderer intercepts the fence and draws the shape as a Mermaid graph, and
+the user approves / rejects / edits-with-the-model before it runs. Engine
+untouched: the `propose-workflow` skill acts as compiler on approve and runs via
+the existing `agentstack workflow run`. Handshake is in-band (no new websocket
+method); blueprint `model`/`effort` are advisory and there is no digest binding
+between the drawn blueprint and the executed script — both are named v1 caveats.
+Deferred fast-follows: native declarative per-node execution (plan IR, authority
++ Boa boundary, digest-bound approve), direct-manipulation editing, and the
+`workflow propose --json` contract migration. See `docs/design/launch-plan.md`
+Lane C2 v1.
 
 Before promoting them:
 

@@ -26,7 +26,7 @@ use std::sync::Mutex;
 use anyhow::Result;
 use clap::FromArgMatches;
 
-use agentstack::cli::{Cli, Command};
+use agentstack::cli::{Cli, Command, WorkflowCmd};
 use agentstack::commands;
 
 // These tests mutate the process-global HOME/AGENTSTACK_HOME; serialize them
@@ -51,6 +51,12 @@ fn dispatch(argv: &[&str]) -> Result<()> {
         Command::CreateProfile(a) => commands::panel_edit::create_profile(&a, dir),
         Command::UseProfile(a) => commands::panel_edit::use_profile(&a, dir),
         Command::LibraryIndex => commands::panel_edit::library_index(dir),
+        // workflow-observe-v1: the two read-only observation verbs t3code emits
+        // as fixed argv. They print the enveloped body; the JSON-shape witness
+        // asserts on `list_value`/`runs_value` directly (below), while these
+        // arms keep the real clap → dispatch path exercised.
+        Command::Workflow(WorkflowCmd::List(args)) => commands::workflow::list(dir, &args),
+        Command::Workflow(WorkflowCmd::Runs(args)) => commands::workflow::runs(&args),
         _ => panic!("parity dispatch: unexpected subcommand in {argv:?}"),
     }
 }
@@ -461,6 +467,135 @@ fn panel_consent_digest_is_stable_and_binds_manifest() {
         create_profile_digest(&argv, &proj),
         "a manifest edit must move the digest"
     );
+
+    std::env::remove_var("HOME");
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+/// Witness (workflow-observe-v1): the two read-only observation verbs t3code
+/// emits — `workflow list --json` and `workflow runs --json` — route through
+/// the real clap → dispatch path AND carry the versioned UI-contract envelope.
+///
+/// The dispatch arms (which print) are exercised for parity with the panel's
+/// fixed argv; the JSON shape is asserted on `list_value`/`runs_value` directly
+/// (the Rust-callable primitives behind those verbs), in the panel_edit
+/// envelope-assertion style. `runs` reads the machine-global runs dir, isolated
+/// here via `AGENTSTACK_HOME` exactly as `workflow.rs`'s own run tests do.
+#[test]
+fn panel_workflow_observe_reads_carry_envelope() {
+    use agentstack::calllog::RunEvent;
+
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home").join(".agentstack");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", tmp.path().join("home"));
+    std::env::set_var("AGENTSTACK_HOME", &home);
+
+    // A project declaring one workflow: `list` surfaces every declared entry
+    // regardless of admission, so the row appears without pinning or trust.
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("workflows")).unwrap();
+    fs::write(
+        proj.join("workflows/main.js"),
+        "export const meta = { roles: ['w'] };\nreturn 1;\n",
+    )
+    .unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[profiles.w]\n[workflows.demo]\npath = \"./workflows/main.js\"\nroles = [\"w\"]\n",
+    )
+    .unwrap();
+    let proj_root = proj.to_str().unwrap();
+
+    // The exact fixed argv t3code emits — routed through clap + dispatch (the
+    // arms print; here we only need them to run without panicking).
+    dispatch(&[
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "workflow",
+        "list",
+        "--json",
+    ])
+    .unwrap();
+    dispatch(&[
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "workflow",
+        "runs",
+        "--json",
+    ])
+    .unwrap();
+
+    // list_value: enveloped, and the `workflows` body key is intact with the
+    // declared entry present.
+    let list = commands::workflow::list_value(Some(&proj)).unwrap();
+    assert_eq!(
+        list["schema_version"],
+        agentstack::ui_contract::SCHEMA_VERSION
+    );
+    assert!(
+        list["features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "workflow-observe-v1"),
+        "features advertises the observe contract: {list}"
+    );
+    let workflows = list["workflows"]
+        .as_array()
+        .expect("workflows body key intact");
+    assert!(
+        workflows.iter().any(|w| w["name"] == "demo"),
+        "declared workflow surfaced: {list}"
+    );
+
+    // Seed one recorded run under the isolated machine-global runs dir, then
+    // assert runs_value reads it and rides the same envelope.
+    let run_dir = home.join("runs").join("w-paritytest");
+    fs::create_dir_all(&run_dir).unwrap();
+    let events = [
+        RunEvent::WorkflowStarted {
+            ts: 100,
+            workflow: "demo".into(),
+            workflow_digest: "d".into(),
+            grant_digest: "g".into(),
+            args_digest: "a".into(),
+            max_agents: 3,
+            max_wall_seconds: 60,
+        },
+        RunEvent::WorkflowCompleted {
+            ts: 130,
+            outcome: "done".into(),
+            exhausted: false,
+            duration_ms: 30_000,
+        },
+    ];
+    let jsonl: String = events
+        .iter()
+        .map(|e| serde_json::to_string(e).unwrap() + "\n")
+        .collect();
+    fs::write(run_dir.join("events.jsonl"), jsonl).unwrap();
+
+    let runs = commands::workflow::runs_value(20).unwrap();
+    assert_eq!(
+        runs["schema_version"],
+        agentstack::ui_contract::SCHEMA_VERSION
+    );
+    assert!(runs["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|f| f == "workflow-observe-v1"));
+    let run_rows = runs["runs"].as_array().expect("runs body key intact");
+    let row = run_rows
+        .iter()
+        .find(|r| r["run"] == "w-paritytest")
+        .expect("seeded run surfaced from the machine-global runs dir");
+    assert_eq!(row["workflow"], "demo");
+    assert_eq!(row["outcome"], "completed");
 
     std::env::remove_var("HOME");
     std::env::remove_var("AGENTSTACK_HOME");
