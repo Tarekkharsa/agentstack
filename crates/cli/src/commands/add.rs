@@ -1886,10 +1886,120 @@ pub fn add_skill_json(manifest_dir: Option<&Path>, args: &Value) -> Result<Strin
         anyhow::bail!("skill '{name}' already exists");
     }
     let body = serde_json::to_value(&skill)?;
-    let new_text = build_manifest_with(&original, "skills", name, &body, None)?;
+    // Optional profile enrollment: the panel's add-skill-to-profile action passes
+    // a `"profile"` field so the skill lands in `[skills.<name>]` AND its toolset
+    // in ONE atomic write, through the same single-authority path the MCP tool
+    // uses. Absent (the MCP `add_skill` tool's shape) → manifest entry only.
+    let profile = args
+        .get("profile")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let new_text = build_manifest_with(&original, "skills", name, &body, profile)?;
     crate::util::atomic::write(&manifest_path, &new_text)
         .with_context(|| format!("writing {}", manifest_path.display()))?;
     Ok(name.to_string())
+}
+
+/// Add an MCP server to the manifest from a JSON args object. **Moved here from
+/// the MCP server layer** so the agent-facing `agentstack_add_server` tool and
+/// the panel's `add-server-to-profile` action call ONE construction path (house
+/// rule: single authority for mutations). Manifest-only — no configs rendered;
+/// the caller re-locks/re-renders (panel) or a human runs `agentstack apply`
+/// (MCP). Honors an optional `"profile"` field for toolset enrollment in the
+/// same write.
+pub fn add_server_json(manifest_dir: Option<&Path>, args: &Value) -> Result<String> {
+    let name = args
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .context("`name` is required")?;
+    let transport = args
+        .get("transport")
+        .and_then(Value::as_str)
+        .unwrap_or("http");
+    let server = Server {
+        server_type: if transport == "stdio" {
+            ServerType::Stdio
+        } else {
+            ServerType::Http
+        },
+        url: json_str_field(args, "url"),
+        command: json_str_field(args, "command"),
+        args: args
+            .get("args")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        cwd: json_str_field(args, "cwd"),
+        integrity_roots: Vec::new(),
+        targets: crate::manifest::model::all_targets(),
+        owner: None,
+        headers: json_obj_to_map(args.get("headers")),
+        env: json_obj_to_map(args.get("env")),
+        extra: Default::default(),
+    };
+    match server.server_type {
+        ServerType::Http if server.url.is_none() => anyhow::bail!("http server needs `url`"),
+        ServerType::Stdio if server.command.is_none() => {
+            anyhow::bail!("stdio server needs `command`")
+        }
+        _ => {}
+    }
+
+    let base = crate::commands::project_base(manifest_dir)?;
+    let mdir = crate::manifest::resolve_manifest_dir(&base);
+    let manifest_path = mdir.join(crate::manifest::load::MANIFEST_FILE);
+    let original = std::fs::read_to_string(&manifest_path).with_context(|| {
+        format!(
+            "no manifest at {} (run `agentstack init`)",
+            manifest_path.display()
+        )
+    })?;
+    let parsed: Manifest = toml::from_str(&original).context("parsing manifest")?;
+    if parsed.servers.contains_key(name) {
+        anyhow::bail!("server '{name}' already exists");
+    }
+
+    let body = serde_json::to_value(&server)?;
+    let profile = args
+        .get("profile")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let new_text = build_manifest_with(&original, "servers", name, &body, profile)?;
+    crate::util::atomic::write(&manifest_path, &new_text)
+        .with_context(|| format!("writing {}", manifest_path.display()))?;
+
+    let secret_hint = if !server.headers.is_empty() || !server.env.is_empty() {
+        " If it references a ${SECRET}, set it with `agentstack secret set`."
+    } else {
+        ""
+    };
+    Ok(format!(
+        "Added server '{name}' to the manifest (not yet applied). A human should review and run `agentstack apply` to render it into the harnesses.{secret_hint}"
+    ))
+}
+
+/// `args[key]` as an owned `String` if it is a non-null JSON string. Small local
+/// helper for the JSON-arg mutation builders (moved with `add_server_json`).
+fn json_str_field(v: &Value, key: &str) -> Option<String> {
+    v.get(key).and_then(Value::as_str).map(String::from)
+}
+
+/// A JSON object's string-valued entries as an ordered `Key=Value` map (headers
+/// / env). Non-string values are dropped defensively — bundle args are hostile
+/// input.
+fn json_obj_to_map(v: Option<&Value>) -> IndexMap<String, String> {
+    v.and_then(Value::as_object)
+        .map(|o| {
+            o.iter()
+                .filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Parse `Key=Value` strings into an ordered map.

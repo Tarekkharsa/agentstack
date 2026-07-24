@@ -34,6 +34,7 @@ every command (listed or not) has its own --help:
   Protect     trust · explain · secret · guard · sign · verify
   Run         run · kill · shim · workflow · gateway · mcp · try
   Inspect     doctor · report · optimize · proxy
+  Panel       add-skill-to-profile · add-server-to-profile · create-profile · use-profile · library-index
 
 Words: a CLI (a.k.a. harness) is the agent tool you run; an adapter compiles
 its native config; [targets] in the manifest lists which CLIs commands act on.
@@ -314,6 +315,32 @@ Examples:
     /// binary a bare `agentstack` runs and flags stale links.
     #[command(name = "self", hide = true)]
     SelfCmd(SelfArgs),
+
+    // ── Panel actions (launch plan Lane B) ───────────────────────────────────
+    // Digest-bound fixed argv the t3code toolset UI drives. Hidden: internal
+    // control-plane plumbing, not part of the daily terminal surface. Each
+    // mutation runs manifest → re-lock → re-render, bound to a consent digest
+    // exactly like `apply-setup`. New UI capability = new fixed argv actions in
+    // this closed set (pinned by tests/t3code_parity.rs), never MCP-in-browser.
+    /// Add a skill to a toolset and activate it (panel action; digest-bound).
+    #[command(name = "add-skill-to-profile", hide = true)]
+    AddSkillToProfile(PanelAddSkillArgs),
+
+    /// Add a server to a toolset and activate it (panel action; digest-bound).
+    #[command(name = "add-server-to-profile", hide = true)]
+    AddServerToProfile(PanelAddServerArgs),
+
+    /// Create a toolset from existing/library capabilities and activate it.
+    #[command(name = "create-profile", hide = true)]
+    CreateProfile(PanelCreateProfileArgs),
+
+    /// Activate an existing toolset (panel action; digest-bound).
+    #[command(name = "use-profile", hide = true)]
+    UseProfile(PanelUseProfileArgs),
+
+    /// The central-library catalog (skills + servers) for the panel browser.
+    #[command(name = "library-index", hide = true)]
+    LibraryIndex,
 }
 
 #[derive(Args, Debug)]
@@ -1225,6 +1252,138 @@ pub struct UseArgs {
     /// With --list: emit machine-readable JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+/// Consent + apply flags shared by every panel edit action. Preview is the
+/// default (nothing writes); applying requires `--yes` AND a `--consented`
+/// digest from a prior preview — the same non-interactive gate `apply-setup`
+/// and `trust-consent` enforce.
+#[derive(clap::Args, Debug, Clone)]
+pub struct PanelConsent {
+    /// Emit the enveloped plan + consent digest and write nothing (the default
+    /// when `--yes` is absent; accept it explicitly for symmetry).
+    #[arg(long)]
+    pub preview: bool,
+
+    /// Apply non-interactively. Requires `--consented`; refuses without it.
+    #[arg(long)]
+    pub yes: bool,
+
+    /// The consent digest from a prior preview. Apply refuses on any mismatch.
+    #[arg(long, value_name = "DIGEST")]
+    pub consented: Option<String>,
+
+    /// Let activation proceed even if a `${REF}` did not resolve (off by
+    /// default — an unresolved secret blocking the render is a feature).
+    #[arg(long)]
+    pub allow_unresolved: bool,
+}
+
+/// `add-skill-to-profile` — define a new skill (`--git`/`--path`) or enroll an
+/// existing library/inline skill by name (neither flag), into `--profile`.
+#[derive(Args, Debug)]
+pub struct PanelAddSkillArgs {
+    /// Existing toolset to add the skill to and activate.
+    #[arg(long)]
+    pub profile: String,
+
+    /// Manifest / library name the skill is referenced by.
+    #[arg(long)]
+    pub name: String,
+
+    /// New git-sourced skill: the source URL. Omit --git and --path to enroll an
+    /// existing library/inline skill by name.
+    #[arg(long)]
+    pub git: Option<String>,
+
+    /// Branch/tag/commit for a git source (the exact commit is pinned in lock).
+    #[arg(long)]
+    pub rev: Option<String>,
+
+    /// Directory within the repo for a git source.
+    #[arg(long)]
+    pub subpath: Option<String>,
+
+    /// New path-sourced skill: the local SKILL.md directory.
+    #[arg(long)]
+    pub path: Option<String>,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
+/// `add-server-to-profile` — define a new server (any of the wire flags) or
+/// enroll an existing library/inline server by name, into `--profile`.
+#[derive(Args, Debug)]
+pub struct PanelAddServerArgs {
+    /// Existing toolset to add the server to and activate.
+    #[arg(long)]
+    pub profile: String,
+
+    /// Manifest / library name the server is referenced by.
+    #[arg(long)]
+    pub name: String,
+
+    /// Transport for a new server definition.
+    #[arg(long = "type", value_enum, default_value = "http")]
+    pub transport: ServerType,
+
+    /// HTTP server URL (new definition).
+    #[arg(long)]
+    pub url: Option<String>,
+
+    /// Header `Key=Value` (repeatable); values may contain `${REF}`.
+    #[arg(long = "header", value_name = "K=V")]
+    pub headers: Vec<String>,
+
+    /// stdio command (new definition).
+    #[arg(long)]
+    pub command: Option<String>,
+
+    /// stdio arg (repeatable). Accepts leading-dash values.
+    #[arg(long = "arg", value_name = "ARG", allow_hyphen_values = true)]
+    pub args: Vec<String>,
+
+    /// Working directory the stdio server launches from; may contain `${REF}`.
+    #[arg(long)]
+    pub cwd: Option<String>,
+
+    /// Env `Key=Value` (repeatable); values may contain `${REF}`.
+    #[arg(long = "env", value_name = "K=V")]
+    pub env: Vec<String>,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
+/// `create-profile` — a new toolset bundling existing/library skills + servers.
+#[derive(Args, Debug)]
+pub struct PanelCreateProfileArgs {
+    /// New toolset name (must not already exist).
+    #[arg(long)]
+    pub name: String,
+
+    /// Skill to include (repeatable). `*` means every inline skill.
+    #[arg(long = "skill", value_name = "NAME")]
+    pub skills: Vec<String>,
+
+    /// Server to include (repeatable).
+    #[arg(long = "server", value_name = "NAME")]
+    pub servers: Vec<String>,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
+/// `use-profile` — activate an existing toolset (re-lock + re-render only).
+#[derive(Args, Debug)]
+pub struct PanelUseProfileArgs {
+    /// Toolset to activate.
+    #[arg(long)]
+    pub profile: String,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
 }
 
 #[derive(Args, Debug)]

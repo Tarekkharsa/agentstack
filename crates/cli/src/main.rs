@@ -120,5 +120,10 @@ fn run() -> Result<()> {
         },
         Command::Sign(args) => commands::verify_cmd::sign(args, dir),
         Command::Verify(args) => commands::verify_cmd::verify(args, dir),
+        Command::AddSkillToProfile(args) => commands::panel_edit::add_skill(args, dir),
+        Command::AddServerToProfile(args) => commands::panel_edit::add_server(args, dir),
+        Command::CreateProfile(args) => commands::panel_edit::create_profile(args, dir),
+        Command::UseProfile(args) => commands::panel_edit::use_profile(args, dir),
+        Command::LibraryIndex => commands::panel_edit::library_index(dir),
     }
 }

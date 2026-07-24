@@ -83,6 +83,10 @@ const ALLOWLIST: &[&str] = &[
     // this file out of git"; "keeps" is a verb in captured output, not a
     // command.
     "keeps",
+    // docs/start.html — the import plan prints "Files agentstack will manage:";
+    // "will" is a modal verb in captured output, not an `agentstack will`
+    // command.
+    "will",
 ];
 
 /// One `agentstack <verb> [<subverb>]` occurrence found in a code context.

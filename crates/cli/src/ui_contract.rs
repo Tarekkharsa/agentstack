@@ -33,6 +33,12 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   top-level `session` object; `session start <profile>` activates
 ///   fail-closed (refuses untrusted or unpinned surfaces) and `session end`
 ///   reverts — including a session an interrupted UI left behind.
+/// - `profiles-edit-v1`: `library-index` emits the central-library catalog
+///   (skills + servers) for the browser; `add-skill-to-profile`,
+///   `add-server-to-profile`, `create-profile`, and `use-profile` mutate the
+///   toolset then re-lock + re-render, each bound to a `consent_digest` a prior
+///   `--preview` returned (apply refuses on drift) and failing closed on an
+///   unresolved `${REF}`.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -43,6 +49,7 @@ pub const FEATURES: &[&str] = &[
     "diff-v1",
     "restore-last",
     "sessions-v1",
+    "profiles-edit-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected

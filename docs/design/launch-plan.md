@@ -295,9 +295,16 @@ Ordered. `[ ]` = not started, `[~]` = in progress, `[x]` = done + verified.
 A checked item means implemented and verified, not merely designed.
 
 ### Lane A — onboarding finish
-- [ ] A1 — t3code: detect missing `agentstack` binary → install-guidance card
-- [ ] A2 — t3code: SetupPanel mode/allow picker (secrets `env|keychain|skip` +
+- [x] A1 — t3code: detect missing `agentstack` binary → install-guidance card
+  *(2026-07-24: detection was already wired; added plain-language headline +
+  "Check again" affordance)*
+- [x] A2 — t3code: SetupPanel mode/allow picker (secrets `env|keychain|skip` +
   per-import allows); confirm no new CLI surface needed
+  *(2026-07-24: secrets picker shipped, `.env` default, plan re-read per choice
+  because `plan_digest` binds the destination — no new CLI surface needed for
+  secrets. **Per-import allows DO need new CLI surface** — a selection flag on
+  `init`/`init --plan` plus digest coverage of the selected subset — deferred
+  as its own item.)*
 
 ### Lane C1 — workflow observe contract
 - [ ] C1.1 — envelope `workflow list`/`workflow runs` JSON in `ui_contract`
@@ -305,12 +312,20 @@ A checked item means implemented and verified, not merely designed.
 - [ ] C1.3 — t3code: negotiate the new feature; monitor consumes the enveloped read
 
 ### Lane B — skills & profiles (load + activate + create)
-- [ ] B1 — CLI: fixed actions add-skill/add-server/create-profile/use-profile
+- [x] B1 — CLI: fixed actions add-skill/add-server/create-profile/use-profile
   (enveloped, digest-bound, manifest → re-lock → re-render)
-- [ ] B2 — CLI: `profiles-edit-v1` feature + panel-argv read for the library index
-- [ ] B3 — extend `t3code_parity.rs` dispatch + witnesses (re-lock/re-render;
+  *(2026-07-24: `crates/cli/src/commands/panel_edit.rs`; apply-setup pattern —
+  bare call = preview with `consent_digest`, apply = `--yes --consented`;
+  single-path: wraps the same `add::*_json` builders + `use_profile::run` the
+  MCP tools use; MCP `add_server` logic moved into `add.rs`, not duplicated)*
+- [x] B2 — CLI: `profiles-edit-v1` feature + panel-argv read for the library index
+  *(2026-07-24: `library-index` read, additive feature, no schema bump)*
+- [x] B3 — extend `t3code_parity.rs` dispatch + witnesses (re-lock/re-render;
   fail-closed on unresolved `${REF}`)
-- [ ] B4 — t3code: library browser + "add to toolset" + "new toolset" UI
+  *(2026-07-24: 5 dispatch arms + 3 witnesses incl. digest stability/binding)*
+- [x] B4 — t3code: library browser + "add to toolset" + "new toolset" UI
+  *(2026-07-24: gated on `profiles-edit-v1`; preview→digest→apply round-trip;
+  unresolved-`${REF}` block renders a what/why/next-step card)*
 
 ### Lane C2 v1 — reviewable workflows
 - [ ] C2.1 — define the blueprint JSON schema (topology + per-node

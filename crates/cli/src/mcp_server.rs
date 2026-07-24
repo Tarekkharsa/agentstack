@@ -9,11 +9,9 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use indexmap::IndexMap;
 use serde_json::{json, Value};
 
 use crate::manifest::load::MANIFEST_FILE;
-use crate::manifest::{Server, ServerType};
 use crate::secret::Resolver;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -1373,7 +1371,7 @@ fn run_tool_with_lease(
         }
         "agentstack_doctor" => doctor_summary(dir),
         "agentstack_add_from" => add_from(args, dir),
-        "agentstack_add_server" => add_server(args, dir),
+        "agentstack_add_server" => crate::commands::add::add_server_json(dir, args),
         "agentstack_list_loadable" => list_loadable_with_lease(
             dir,
             trust_note,
@@ -1696,81 +1694,6 @@ fn add_from(args: &Value, dir: Option<&Path>) -> Result<String> {
     Ok(format!(
         "Added '{}' (from {}) to the manifest (not yet applied). A human should review secrets and run `agentstack apply`.",
         candidate.name, candidate.source
-    ))
-}
-
-fn add_server(args: &Value, dir: Option<&Path>) -> Result<String> {
-    let name = args
-        .get("name")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .context("`name` is required")?;
-    let transport = args
-        .get("transport")
-        .and_then(Value::as_str)
-        .unwrap_or("http");
-    let server = Server {
-        server_type: if transport == "stdio" {
-            ServerType::Stdio
-        } else {
-            ServerType::Http
-        },
-        url: str_field(args, "url"),
-        command: str_field(args, "command"),
-        args: args
-            .get("args")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        cwd: str_field(args, "cwd"),
-        integrity_roots: Vec::new(),
-        targets: crate::manifest::model::all_targets(),
-        owner: None,
-        headers: obj_to_map(args.get("headers")),
-        env: obj_to_map(args.get("env")),
-        extra: Default::default(),
-    };
-    match server.server_type {
-        ServerType::Http if server.url.is_none() => anyhow::bail!("http server needs `url`"),
-        ServerType::Stdio if server.command.is_none() => {
-            anyhow::bail!("stdio server needs `command`")
-        }
-        _ => {}
-    }
-
-    let base = crate::commands::project_base(dir)?;
-    let mdir = crate::manifest::resolve_manifest_dir(&base);
-    let manifest_path = mdir.join(MANIFEST_FILE);
-    let original = std::fs::read_to_string(&manifest_path).with_context(|| {
-        format!(
-            "no manifest at {} (run `agentstack init`)",
-            manifest_path.display()
-        )
-    })?;
-    let parsed: crate::manifest::Manifest =
-        toml::from_str(&original).context("parsing manifest")?;
-    if parsed.servers.contains_key(name) {
-        anyhow::bail!("server '{name}' already exists");
-    }
-
-    let body = serde_json::to_value(&server)?;
-    let profile = args.get("profile").and_then(Value::as_str);
-    let new_text =
-        crate::commands::add::build_manifest_with(&original, "servers", name, &body, profile)?;
-    crate::util::atomic::write(&manifest_path, &new_text)
-        .with_context(|| format!("writing {}", manifest_path.display()))?;
-
-    let secret_hint = if !server.headers.is_empty() || !server.env.is_empty() {
-        " If it references a ${SECRET}, set it with `agentstack secret set`."
-    } else {
-        ""
-    };
-    Ok(format!(
-        "Added server '{name}' to the manifest (not yet applied). A human should review and run `agentstack apply` to render it into the harnesses.{secret_hint}"
     ))
 }
 
@@ -2349,20 +2272,6 @@ fn load_capability_with_lease(
         out["warning"] = json!(w);
     }
     Ok(serde_json::to_string_pretty(&out)?)
-}
-
-fn str_field(v: &Value, key: &str) -> Option<String> {
-    v.get(key).and_then(Value::as_str).map(String::from)
-}
-
-fn obj_to_map(v: Option<&Value>) -> IndexMap<String, String> {
-    v.and_then(Value::as_object)
-        .map(|o| {
-            o.iter()
-                .filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string())))
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

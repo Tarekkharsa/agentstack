@@ -157,9 +157,14 @@ mod tests {
 
     #[test]
     fn prepare_mints_id_creates_run_log_and_sets_env() {
+        // `AGENTSTACK_HOME` is process-global; under plain `cargo test` this
+        // runs concurrently with other home-relocating tests, so take the
+        // shared env lock (as they do) — otherwise this test's `remove_var`
+        // races them into the real `~/.agentstack`.
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let home = assert_fs::TempDir::new().unwrap();
-        // Serialized by nextest's per-binary process model; the env var is
-        // how every recorder test relocates the home.
         std::env::set_var("AGENTSTACK_HOME", home.path());
 
         let (run_id, cmd) = prepare(Path::new("/bin/echo"), &["hi".into()]);

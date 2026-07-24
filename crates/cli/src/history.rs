@@ -10,6 +10,7 @@
 use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -19,6 +20,28 @@ use crate::util::paths;
 
 /// Keep the most recent N apply events; older ones are pruned.
 const MAX_ENTRIES: usize = 40;
+
+/// Last id value handed out this process. Two `record` calls can land in the
+/// same nanosecond (coarse clock / fast machine), which would give them the
+/// same `<id>.json` filename and silently clobber the first. Clamping each new
+/// id to at least `last + 1` keeps every entry distinct while preserving
+/// lexicographic-== time order. Truncating nanos to `u64` matches the existing
+/// 16-hex-digit id width (good past year 2500).
+static LAST_ID_NANOS: AtomicU64 = AtomicU64::new(0);
+
+/// Turn an observed nanosecond timestamp into a strictly-increasing,
+/// process-unique id value.
+fn monotonic_id_nanos(observed: u128) -> u64 {
+    let observed = observed as u64;
+    let mut last = LAST_ID_NANOS.load(Ordering::Relaxed);
+    loop {
+        let next = observed.max(last.wrapping_add(1));
+        match LAST_ID_NANOS.compare_exchange_weak(last, next, Ordering::SeqCst, Ordering::Relaxed) {
+            Ok(_) => return next,
+            Err(cur) => last = cur,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileChange {
@@ -108,7 +131,9 @@ pub fn record(scope: &str, targets: Vec<String>, files: Vec<FileChange>) -> Resu
     // 16 hex digits, zero-padded so ids stay fixed-width (lexicographic order
     // == time order). Not 32: nanoseconds-since-epoch only fills ~16 digits,
     // and the extra leading zeros made every displayed 8-char prefix "00000000".
-    let id = format!("{:016x}", now.as_nanos());
+    // `monotonic_id_nanos` bumps past any same-nanosecond predecessor so two
+    // back-to-back records never share a filename.
+    let id = format!("{:016x}", monotonic_id_nanos(now.as_nanos()));
     let summary = format!(
         "{} file{} · {}",
         files.len(),

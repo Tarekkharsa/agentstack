@@ -1329,6 +1329,11 @@ you need the exact verb, flag, or subcommand.
 - **`import`** _(hidden)_ — Import an encrypted bundle on a new machine — flags `--force/--no-keychain/--passphrase`
 - **`adapters`** _(hidden)_ — Inspect the available CLI adapters — subcommands `list/show/validate`
 - **`self`** _(hidden)_ — Manage this binary's own install: `self link` puts a stable `agentstack` on PATH (a symlink, no installer needed); `self which` shows which binary a bare `agentstack` runs and flags stale links — subcommands `link/which/docs*`
+- **`add-skill-to-profile`** _(hidden)_ — Add a skill to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--git/--rev/--subpath/--path/--preview/--yes/--consented/--allow-unresolved`
+- **`add-server-to-profile`** _(hidden)_ — Add a server to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--type/--url/--header/--command/--arg/--cwd/--env/--preview/--yes/--consented/--allow-unresolved`
+- **`create-profile`** _(hidden)_ — Create a toolset from existing/library capabilities and activate it — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
+- **`use-profile`** _(hidden)_ — Activate an existing toolset (panel action; digest-bound) — flags `--profile/--preview/--yes/--consented/--allow-unresolved`
+- **`library-index`** _(hidden)_ — The central-library catalog (skills + servers) for the panel browser
 <!-- agentstack:end -->
 
 ## Everything shipped so far

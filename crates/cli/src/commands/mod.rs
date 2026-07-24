@@ -20,6 +20,7 @@ pub mod locked;
 pub mod optimize;
 pub mod overview;
 pub mod pack;
+pub mod panel_edit;
 pub mod proxy;
 pub mod remove;
 pub mod report;
