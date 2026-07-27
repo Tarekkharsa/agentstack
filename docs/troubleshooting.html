@@ -383,6 +383,24 @@ Undo one with: agentstack restore &lt;id&gt; --write (or --last for the newest)<
 <p><strong>What <code>restore</code> does not cover.</strong> It reverts agentstack's own recorded config writes — not side effects a tool already had. A file a server deleted does not come back. Five actions are not file writes and have their own verb: <code>gateway disconnect</code>, <code>guard uninstall</code>, <code>trust --revoke</code>, <code>session end</code>, and <code>remove</code>. Replacing an already-managed skill with the same name is not snapshotted byte-exact, so its restore is not promised exact.</p>
 <p>To take everything back off at once, see <a href="howto/undo.html">undo anything</a> — <code>agentstack uninstall</code> previews first and is itself undoable.</p>
 <h2 id="a-server-wont-start">A server won't start<a class="hlink" href="#a-server-wont-start" aria-label="Link to this section">#</a></h2>
+<p><strong>Start here: <code>agentstack doctor --probe</code>.</strong></p>
+<p>Everything else on this page reads your configuration. <code>--probe</code> actually starts each stdio server, speaks the MCP <code>initialize</code> handshake, and stops it again — so instead of "your manifest is well-formed" you get a per-server answer to the question you actually have.</p>
+<pre class="block"><code>$ agentstack doctor --probe
+MCP server startup (--probe)
+  ✓ notes          started in 62ms · demo-notes · 3 tools
+  ✗ missing        did not start: No such file or directory (os error 2)
+  ✗ stuck          no response 10s after starting — killed — waiting for the database…
+  ⚠ needs-token    not probed — DEMO_API_TOKEN does not resolve ↳ agentstack secret set DEMO_API_TOKEN</code></pre>
+<p>How to read each outcome:</p>
+<ul>
+<li><strong><code>did not start</code></strong> — the command isn't there, isn't executable, or its <code>cwd</code> doesn't exist. If the command is a bare launcher, read the advisory below.</li>
+<li><strong><code>exited before the handshake</code></strong> — it started and then gave up. The clause after the dash is the server's own stderr, which usually names the reason (a bad argument, a rejected credential, a missing runtime).</li>
+<li><strong><code>no response …s after starting — killed</code></strong> — it came up and then hung. Common when a server waits on something that isn't running yet.</li>
+<li><strong><code>not probed</code></strong> — a <code>${REF}</code> doesn't resolve on this machine, so nothing was started; set the secret and re-run rather than reading it as a server fault.</li>
+<li><strong><code>refusing to probe</code></strong> — the project isn't trusted at its current bytes. Review it with <code>agentstack trust</code> first; starting a repo's servers is exactly what that gate holds back.</li>
+</ul>
+<p>Every probe is bounded: ten seconds per server, then the child is killed with its whole process group and reaped. Nothing is left running.</p>
+<p>One caveat. The probe inherits the environment you ran it from, so a server can pass <code>--probe</code> in your terminal and still fail inside a GUI-launched app — which is precisely the failure the next advisory is about.</p>
 <p><strong><code>N server(s) use a bare launcher that resolves via PATH: linear (npx). A GUI-launched harness (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail to spawn them. Terminal-launched CLIs are unaffected. To pin them, use an absolute path or a login-shell wrapper: command = "zsh", args = ["-lc", "exec &lt;launcher&gt; …"]</code></strong></p>
 <p>This is the single most common "it works in my terminal but not in the app" failure. Nearly every published MCP server ships as <code>npx -y …</code>, and <code>npx</code> is found through <code>PATH</code> — which a GUI-launched app does not inherit from your shell. agentstack states this once as an advisory rather than once per server, and it does not count against readiness.</p>
 <p>Two fixes, in the manifest:</p>

@@ -100,6 +100,7 @@ fn doctor_fix_refuses_unresolved_secret() {
     let dargs = DoctorArgs {
         ci: false,
         live: false,
+        probe: false,
         fix: true,
         deep: false,
         all: false,

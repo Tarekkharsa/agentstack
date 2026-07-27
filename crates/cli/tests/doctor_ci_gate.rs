@@ -29,6 +29,7 @@ fn ci_args() -> DoctorArgs {
     DoctorArgs {
         ci: true,
         live: false,
+        probe: false,
         fix: false,
         deep: false,
         all: false,
@@ -101,6 +102,7 @@ fn non_ci_never_fails_on_validation_error() {
     let dargs = DoctorArgs {
         ci: false,
         live: false,
+        probe: false,
         fix: false,
         deep: false,
         all: false,

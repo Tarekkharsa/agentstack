@@ -97,6 +97,20 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   match falls through), which is safe but silent: the CLI says "1 note" and
 ///   the panel says nothing. Gating on this name is what lets a panel show the
 ///   count instead of dropping it (review finding N4).
+/// - `doctor-probe-v1`: `doctor --probe` actually STARTS each stdio server,
+///   speaks the MCP `initialize` handshake, and stops it again; `doctor --json`
+///   then carries a top-level `probe` object — `ran`, `skipped_reason`, and one
+///   `servers` entry per stdio server with `status` (`ok` / `failed` /
+///   `not_probeable`). A separate name rather than a wider reading of
+///   `status-v1`, for two reasons. The first is the usual one: a binary
+///   predating this emits `probe: null` and a UI reading the field would be
+///   sniffing it. The second matters more — this is the ONLY doctor contract
+///   with side effects, so a panel must not offer a "check my servers actually
+///   run" button unless the CLI behind it really can spawn, bound, and reap
+///   those processes. `ran: false` with a `skipped_reason` is a first-class
+///   answer, not an error: the CLI refuses to spawn anything for a project that
+///   is not trusted at its current bytes, and a UI that treats that as a
+///   failure would push the user to retry instead of to the trust review.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -114,6 +128,7 @@ pub const FEATURES: &[&str] = &[
     "workflow-observe-v1",
     "workflow-serial-roles-v1",
     "doctor-advisories-v1",
+    "doctor-probe-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected

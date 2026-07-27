@@ -385,6 +385,44 @@ itself undoable.
 
 ## A server won't start
 
+**Start here: `agentstack doctor --probe`.**
+
+Everything else on this page reads your configuration. `--probe` actually
+starts each stdio server, speaks the MCP `initialize` handshake, and stops it
+again — so instead of "your manifest is well-formed" you get a per-server
+answer to the question you actually have.
+
+```text
+$ agentstack doctor --probe
+MCP server startup (--probe)
+  ✓ notes          started in 62ms · demo-notes · 3 tools
+  ✗ missing        did not start: No such file or directory (os error 2)
+  ✗ stuck          no response 10s after starting — killed — waiting for the database…
+  ⚠ needs-token    not probed — DEMO_API_TOKEN does not resolve ↳ agentstack secret set DEMO_API_TOKEN
+```
+
+How to read each outcome:
+
+- **`did not start`** — the command isn't there, isn't executable, or its `cwd`
+  doesn't exist. If the command is a bare launcher, read the advisory below.
+- **`exited before the handshake`** — it started and then gave up. The clause
+  after the dash is the server's own stderr, which usually names the reason (a
+  bad argument, a rejected credential, a missing runtime).
+- **`no response …s after starting — killed`** — it came up and then hung.
+  Common when a server waits on something that isn't running yet.
+- **`not probed`** — a `${REF}` doesn't resolve on this machine, so nothing was
+  started; set the secret and re-run rather than reading it as a server fault.
+- **`refusing to probe`** — the project isn't trusted at its current bytes.
+  Review it with `agentstack trust` first; starting a repo's servers is exactly
+  what that gate holds back.
+
+Every probe is bounded: ten seconds per server, then the child is killed with
+its whole process group and reaped. Nothing is left running.
+
+One caveat. The probe inherits the environment you ran it from, so a server can
+pass `--probe` in your terminal and still fail inside a GUI-launched app — which
+is precisely the failure the next advisory is about.
+
 **`N server(s) use a bare launcher that resolves via PATH: linear (npx). A GUI-launched harness (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail to spawn them. Terminal-launched CLIs are unaffected. To pin them, use an absolute path or a login-shell wrapper: command = "zsh", args = ["-lc", "exec <launcher> …"]`**
 
 This is the single most common "it works in my terminal but not in the app"

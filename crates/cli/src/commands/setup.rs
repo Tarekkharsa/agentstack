@@ -331,6 +331,7 @@ fn run_static(args: &SetupArgs, scope: Scope, manifest_dir: Option<&Path>) -> Re
         &DoctorArgs {
             ci: false,
             live: false,
+            probe: false,
             fix: false,
             deep,
             all: false,
@@ -393,6 +394,7 @@ fn run_clean_at_rest(ctx: &super::Context, manifest_dir: Option<&Path>) -> Resul
         &DoctorArgs {
             ci: false,
             live: false,
+            probe: false,
             fix: false,
             deep: false,
             all: false,

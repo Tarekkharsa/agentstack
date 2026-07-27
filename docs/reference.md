@@ -21,7 +21,7 @@ implementation internals — live in
   - [Secret resolution](#secret-resolution)
   - [Where lifted secrets go (`init`)](#where-lifted-secrets-go-init)
   - [Unresolved secrets block writes](#unresolved-secrets-block-writes)
-  - [`doctor --live`](#doctor---live)
+  - [Does it actually run? `doctor --live` and `doctor --probe`](#does-it-actually-run-doctor---live-and-doctor---probe)
   - [One undo verb: `restore`](#one-undo-verb-restore)
   - [The whole way out: `uninstall`](#the-whole-way-out-uninstall)
   - [`doctor` shows what you use](#doctor-shows-what-you-use)
@@ -141,13 +141,57 @@ refused for that target — never a `${TOKEN}` placeholder in live config.
 Override with `--allow-unresolved`. Structural manifest validation errors
 block `--write` too.
 
-### `doctor --live`
+### Does it actually run? `doctor --live` and `doctor --probe`
+
+A plain `doctor` proves your config parses, your secrets resolve, and nothing
+has drifted. It does not prove a server *starts* — that is a different
+question, and these two flags answer it for the two transports. Both are
+opt-in, and `--probe` is the only doctor flag with side effects.
 
 ```text
-agentstack doctor --live
+agentstack doctor --live     # HTTP servers: reach them over the network
+agentstack doctor --probe    # stdio servers: actually start them
 ```
-Real MCP `initialize` handshake over HTTP; reports server name + tool count,
-or classifies the error (auth / http / connect).
+
+`--live` performs a real MCP `initialize` handshake over HTTP and reports the
+server name + tool count, or classifies the error (auth / http / connect).
+
+`--probe` does the same for stdio servers the only way there is: it spawns the
+command your manifest declares — same args, same `env`, same `cwd` a rendered
+config would give a harness — speaks `initialize`, counts the tools, and stops
+it again.
+
+```text
+MCP server startup (--probe)
+  ✓ notes          started in 62ms · demo-notes · 3 tools
+  ✗ missing        did not start: No such file or directory (os error 2)
+  ✗ stuck          no response 10s after starting — killed — waiting for the database…
+  ⚠ needs-token    not probed — DEMO_API_TOKEN does not resolve ↳ agentstack secret set DEMO_API_TOKEN
+```
+
+Because it starts real processes, it is bounded on every side:
+
+- **Trusted projects only.** A project that is not trusted at its current bytes
+  gets a refusal, not a probe — starting a repo's servers is exactly the thing
+  the trust gate exists to hold back. Same rule as `session start`.
+- **Ten seconds per server, hard.** Spawn, handshake, and tool count share one
+  deadline. On expiry the child is killed with its whole process group — so a
+  launcher's real server process goes too — and reaped. Ctrl-C stops the loop
+  before the next server rather than orphaning the one in flight.
+- **No half-resolved environments.** A server whose `${REF}` doesn't resolve on
+  this machine is reported as not-probeable and never started, so you get
+  "set this secret" instead of an auth error that blames the server.
+- **Child output is untrusted.** stdout and stderr are length-bounded and
+  stripped of escape sequences before anything is printed.
+
+One caveat worth knowing: the probe inherits *your* environment. Run from a
+terminal, that includes your shell's `PATH` — so a bare `npx` server can pass
+`--probe` here and still fail inside a GUI-launched app, which is the situation
+the bare-launcher advisory warns about. Pin the launcher and the two agree.
+
+`doctor --json` carries the same results under a top-level `probe` object
+(`ran`, `skipped_reason`, and per-server `status` of `ok` / `failed` /
+`not_probeable`); gate on the `doctor-probe-v1` feature name.
 
 ### One undo verb: `restore`
 
@@ -1438,7 +1482,7 @@ you need the exact verb, flag, or subcommand.
 - **`search`** — Search the capability catalog (and mark what's already added)
 - **`apply`** — Render the manifest into each target's native config — flags `--target/--toolset/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore/--verbose`
 - **`instructions`** _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags `--target/--scope/--write`
-- **`doctor`** — Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details — flags `--ci/--live/--fix/--deep/--all/--json`
+- **`doctor`** — Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details — flags `--ci/--live/--probe/--fix/--deep/--all/--json`
 - **`remove`** _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags `--write`
 - **`install`** _(hidden)_ — Fetch skill sources into the store and write the lockfile — flags `--locked/--allow-flagged`
 - **`lock`** _(hidden)_ — Resolve each toolset's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`

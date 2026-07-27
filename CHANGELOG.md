@@ -45,6 +45,29 @@ findings and two interpreter findings. All are closed:
 
 ### Added
 
+- **`agentstack doctor --probe` — proof your servers actually run.** Until now
+  `doctor` could tell you your config parses, your secrets resolve, and your
+  digests match; it could not tell you a server *starts*. It even warned that a
+  bare `npx` launcher may fail to spawn under a GUI-launched harness and then
+  offered no way to find out. `--probe` starts each stdio server exactly as a
+  rendered config would — same args, `env`, and `cwd` — speaks the MCP
+  `initialize` handshake, counts its tools, and stops it again, reporting per
+  server: started (with startup time and tool count), did not start, exited
+  before the handshake, hung past the deadline, or not-probeable. The HTTP
+  counterpart is the existing `--live`.
+
+  It is the one `doctor` flag with side effects, so it is bounded on every
+  side: opt-in only; refused outright for a project that is not trusted at its
+  current bytes, on the same rule as `session start`; ten seconds per server as
+  a hard wall covering spawn, handshake, and tool count; the child killed with
+  its whole process group (so a launcher's real server process goes too) and
+  reaped on every exit path, including Ctrl-C; a server whose `${REF}` does not
+  resolve reported as not-probeable rather than started with a half-substituted
+  environment; and the child's stdout and stderr treated as hostile — bounded
+  and stripped of escape sequences before anything is printed. `doctor --json`
+  carries the results under a top-level `probe` object, behind the new
+  `doctor-probe-v1` feature name.
+
 - **A troubleshooting page and an FAQ**, the two pages the docs set was
   missing. [Troubleshooting](https://tarekkharsa.github.io/agentstack/troubleshooting.html)
   is organised by what the user experiences — "my CLI doesn't see the servers",

@@ -255,7 +255,7 @@
 <p><strong>Contents</strong></p>
 <p><strong><a href="#part-i--the-everyday-loop">Part I — The everyday loop</a></strong></p>
 <ul>
-<li><a href="#secrets-and-trust">Secrets and trust</a><ul><li><a href="#secret-resolution">Secret resolution</a></li><li><a href="#where-lifted-secrets-go-init">Where lifted secrets go (<code>init</code>)</a></li><li><a href="#unresolved-secrets-block-writes">Unresolved secrets block writes</a></li><li><a href="#doctor---live"><code>doctor --live</code></a></li><li><a href="#one-undo-verb-restore">One undo verb: <code>restore</code></a></li><li><a href="#the-whole-way-out-uninstall">The whole way out: <code>uninstall</code></a></li><li><a href="#doctor-shows-what-you-use"><code>doctor</code> shows what you use</a></li></ul></li>
+<li><a href="#secrets-and-trust">Secrets and trust</a><ul><li><a href="#secret-resolution">Secret resolution</a></li><li><a href="#where-lifted-secrets-go-init">Where lifted secrets go (<code>init</code>)</a></li><li><a href="#unresolved-secrets-block-writes">Unresolved secrets block writes</a></li><li><a href="#does-it-actually-run-doctor---live-and-doctor---probe">Does it actually run? <code>doctor --live</code> and <code>doctor --probe</code></a></li><li><a href="#one-undo-verb-restore">One undo verb: <code>restore</code></a></li><li><a href="#the-whole-way-out-uninstall">The whole way out: <code>uninstall</code></a></li><li><a href="#doctor-shows-what-you-use"><code>doctor</code> shows what you use</a></li></ul></li>
 <li><a href="#drift-adopt-or-apply">Drift: adopt or apply?</a><ul><li><a href="#adopt-and-add"><code>adopt</code> and <code>add</code></a></li><li><a href="#search-across-providers">Search across providers</a></li><li><a href="#selective-skills-via-toolsets">Selective skills via toolsets</a></li></ul></li>
 <li><a href="#live-runs-agentstack-run">Live runs (<code>agentstack run</code>)</a></li>
 </ul>
@@ -293,9 +293,26 @@
 <p>Because that file holds real values rather than placeholders, it gets two protections the rendered configs don't need. It is written <strong>mode <code>0600</code></strong> — owner-only, never the ambient umask — and a write tightens a file an older version left more permissive; <code>doctor</code> warns (with the exact <code>chmod</code>) about any <code>.env</code> still readable by other local accounts. And in a git repo it is ignored by an <strong>anchored</strong> rule naming just that path (<code>/.agentstack/.env</code>), written outside the managed <code>.gitignore</code> block so a re-render can never drop it. The rule is deliberately not a bare <code>.env</code>: that would match at every depth and silence the project's own env files, which AgentStack did not write and does not own.</p>
 <h3 id="unresolved-secrets-block-writes">Unresolved secrets block writes<a class="hlink" href="#unresolved-secrets-block-writes" aria-label="Link to this section">#</a></h3>
 <p>If a <code>${REF}</code> doesn't resolve on this machine, <code>apply</code>/<code>use</code> writes are refused for that target — never a <code>${TOKEN}</code> placeholder in live config. Override with <code>--allow-unresolved</code>. Structural manifest validation errors block <code>--write</code> too.</p>
-<h3 id="doctor---live"><code>doctor --live</code><a class="hlink" href="#doctor---live" aria-label="Link to this section">#</a></h3>
-<pre class="block"><code>agentstack doctor --live</code></pre>
-<p>Real MCP <code>initialize</code> handshake over HTTP; reports server name + tool count, or classifies the error (auth / http / connect).</p>
+<h3 id="does-it-actually-run-doctor---live-and-doctor---probe">Does it actually run? <code>doctor --live</code> and <code>doctor --probe</code><a class="hlink" href="#does-it-actually-run-doctor---live-and-doctor---probe" aria-label="Link to this section">#</a></h3>
+<p>A plain <code>doctor</code> proves your config parses, your secrets resolve, and nothing has drifted. It does not prove a server <em>starts</em> — that is a different question, and these two flags answer it for the two transports. Both are opt-in, and <code>--probe</code> is the only doctor flag with side effects.</p>
+<pre class="block"><code>agentstack doctor --live     # HTTP servers: reach them over the network
+agentstack doctor --probe    # stdio servers: actually start them</code></pre>
+<p><code>--live</code> performs a real MCP <code>initialize</code> handshake over HTTP and reports the server name + tool count, or classifies the error (auth / http / connect).</p>
+<p><code>--probe</code> does the same for stdio servers the only way there is: it spawns the command your manifest declares — same args, same <code>env</code>, same <code>cwd</code> a rendered config would give a harness — speaks <code>initialize</code>, counts the tools, and stops it again.</p>
+<pre class="block"><code>MCP server startup (--probe)
+  ✓ notes          started in 62ms · demo-notes · 3 tools
+  ✗ missing        did not start: No such file or directory (os error 2)
+  ✗ stuck          no response 10s after starting — killed — waiting for the database…
+  ⚠ needs-token    not probed — DEMO_API_TOKEN does not resolve ↳ agentstack secret set DEMO_API_TOKEN</code></pre>
+<p>Because it starts real processes, it is bounded on every side:</p>
+<ul>
+<li><strong>Trusted projects only.</strong> A project that is not trusted at its current bytes gets a refusal, not a probe — starting a repo's servers is exactly the thing the trust gate exists to hold back. Same rule as <code>session start</code>.</li>
+<li><strong>Ten seconds per server, hard.</strong> Spawn, handshake, and tool count share one deadline. On expiry the child is killed with its whole process group — so a launcher's real server process goes too — and reaped. Ctrl-C stops the loop before the next server rather than orphaning the one in flight.</li>
+<li><strong>No half-resolved environments.</strong> A server whose <code>${REF}</code> doesn't resolve on this machine is reported as not-probeable and never started, so you get "set this secret" instead of an auth error that blames the server.</li>
+<li><strong>Child output is untrusted.</strong> stdout and stderr are length-bounded and stripped of escape sequences before anything is printed.</li>
+</ul>
+<p>One caveat worth knowing: the probe inherits <em>your</em> environment. Run from a terminal, that includes your shell's <code>PATH</code> — so a bare <code>npx</code> server can pass <code>--probe</code> here and still fail inside a GUI-launched app, which is the situation the bare-launcher advisory warns about. Pin the launcher and the two agree.</p>
+<p><code>doctor --json</code> carries the same results under a top-level <code>probe</code> object (<code>ran</code>, <code>skipped_reason</code>, and per-server <code>status</code> of <code>ok</code> / <code>failed</code> / <code>not_probeable</code>); gate on the <code>doctor-probe-v1</code> feature name.</p>
 <h3 id="one-undo-verb-restore">One undo verb: <code>restore</code><a class="hlink" href="#one-undo-verb-restore" aria-label="Link to this section">#</a></h3>
 <p><code>restore</code> is the single undo verb for agentstack's recorded <strong>writes</strong> — servers, settings, hooks, instructions, even the owned-server manifest refresh. Full walkthrough and the table of the five actions undone by their own verb: <a href="howto/undo.html">undo anything</a>.</p>
 <pre class="block"><code>agentstack restore                 # list the recorded changes
@@ -711,7 +728,7 @@ agentstack self update --write      # download, verify the sha256, install it</c
 <li><strong><code>search</code></strong> — Search the capability catalog (and mark what's already added)</li>
 <li><strong><code>apply</code></strong> — Render the manifest into each target's native config — flags <code>--target/--toolset/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore/--verbose</code></li>
 <li><strong><code>instructions</code></strong> _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags <code>--target/--scope/--write</code></li>
-<li><strong><code>doctor</code></strong> — Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details — flags <code>--ci/--live/--fix/--deep/--all/--json</code></li>
+<li><strong><code>doctor</code></strong> — Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details — flags <code>--ci/--live/--probe/--fix/--deep/--all/--json</code></li>
 <li><strong><code>remove</code></strong> _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags <code>--write</code></li>
 <li><strong><code>install</code></strong> _(hidden)_ — Fetch skill sources into the store and write the lockfile — flags <code>--locked/--allow-flagged</code></li>
 <li><strong><code>lock</code></strong> _(hidden)_ — Resolve each toolset's skill + server refs and pin <code>agentstack.lock</code> — flags <code>--profile/--update/--upgrade/--all/--with-instructions/--yes/--write</code></li>

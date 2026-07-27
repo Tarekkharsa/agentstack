@@ -58,6 +58,21 @@ struct Report {
     /// ran with no project. Exposed in the JSON so consumers don't have to
     /// parse the gateway section's prose.
     trust: Option<&'static str>,
+    /// Structured `--probe` results. `None` on every other invocation, so the
+    /// JSON omits the key entirely: a consumer can tell "not probed" from
+    /// "probed, and there was nothing to probe" (`ran: true`, empty list).
+    probe: Option<ProbeResults>,
+}
+
+/// The `--probe` outcome as a whole, so the JSON can distinguish a probe that
+/// ran from one the trust gate refused. Prose in the section lines says the
+/// same thing; a UI should not have to parse it.
+struct ProbeResults {
+    ran: bool,
+    /// Why nothing was spawned: `untrusted` / `drifted`, or `None` when it ran.
+    skipped_reason: Option<&'static str>,
+    /// One entry per stdio server, in manifest order.
+    servers: Vec<serde_json::Value>,
 }
 
 struct Section {
@@ -78,6 +93,7 @@ impl Report {
             advisories: 0,
             sections: Vec::new(),
             trust: None,
+            probe: None,
         }
     }
 
@@ -233,6 +249,20 @@ impl Report {
         }
     }
 
+    /// The `probe` key, or `null` when `--probe` was not asked for. Absent and
+    /// `ran: false` mean different things (never asked vs asked and refused),
+    /// which is exactly why this is an object rather than a bare array.
+    fn probe_json(&self) -> serde_json::Value {
+        match &self.probe {
+            None => serde_json::Value::Null,
+            Some(p) => serde_json::json!({
+                "ran": p.ran,
+                "skipped_reason": p.skipped_reason,
+                "servers": p.servers,
+            }),
+        }
+    }
+
     fn to_json(&self) -> serde_json::Value {
         // Which stronger protections are ACTIVE on this machine — factual
         // booleans, not a posture claim. `guard` is the cooperative pre-tool
@@ -261,6 +291,9 @@ impl Report {
             // status chip (see `state`).
             "advisories": self.advisories,
             "trust": self.trust,
+            // Per-server startup results (see `doctor-probe-v1`); null unless
+            // `--probe` ran.
+            "probe": self.probe_json(),
             "sections": self.sections.iter().map(|s| serde_json::json!({
                 "title": s.title,
                 "relevant": s.relevant,
@@ -292,6 +325,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 "errors": 0,
                 "warnings": 0,
                 "trust": serde_json::Value::Null,
+                "probe": serde_json::Value::Null,
                 "sections": [],
             }));
             println!("{}", serde_json::to_string_pretty(&out)?);
@@ -357,6 +391,7 @@ pub fn collect(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
         &DoctorArgs {
             ci: false,
             live: false,
+            probe: false,
             fix: false,
             deep: true,
             all: true,
@@ -1549,6 +1584,10 @@ fn run_checks(
         }
     }
 
+    if args.probe {
+        probe_stdio_servers(manifest, &ctx, trust_state, report);
+    }
+
     Ok(fixed)
 }
 
@@ -1573,6 +1612,190 @@ fn resolve_headers(
         .iter()
         .map(|(k, v)| (k.clone(), resolve_str(v, resolver)))
         .collect()
+}
+
+/// Like [`resolve_str`], but records the `${REF}`s that did NOT resolve on this
+/// machine. `--probe` needs the names, not just "something is missing": a
+/// server it refuses to start has to say which secret to set.
+fn resolve_tracked(s: &str, resolver: &dyn Resolver, missing: &mut Vec<String>) -> String {
+    let mut out = s.to_string();
+    for name in crate::secret::refs_in(s) {
+        match resolver.resolve(&name) {
+            Some(v) => out = out.replace(&format!("${{{name}}}"), &v),
+            None => missing.push(name),
+        }
+    }
+    out
+}
+
+/// Hard wall on one stdio probe: spawn, `initialize`, and the best-effort
+/// `tools/list` all share it. Matches the `--live` HTTP budget so the two
+/// probes feel like one feature, and is generous enough for a cold `npx` that
+/// has to unpack a package before it can say hello.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// `--probe`: start every stdio server the manifest declares, speak MCP to it,
+/// and stop it again — the only doctor check with side effects.
+///
+/// Two gates run before any process does. First trust: a session, a run, and a
+/// render all refuse an untrusted project because untrusted repository content
+/// must stay inert, and "spawn the command this repo's manifest names" is the
+/// most direct way there is to break that. Second secrets: a server whose
+/// `${REF}` does not resolve is reported as not-probeable rather than started
+/// with a half-substituted environment, which would produce an auth failure
+/// that blames the server for a missing secret.
+fn probe_stdio_servers(
+    manifest: &Manifest,
+    ctx: &super::Context,
+    trust_state: crate::trust::TrustState,
+    report: &mut Report,
+) {
+    report.section("MCP server startup (--probe)");
+
+    // Same fail-closed rule and the same voice as `session start` — the other
+    // verb an external surface drives that materializes a runtime surface.
+    // A warning rather than a hard exit: `doctor` is the diagnosis command, so
+    // it finishes the report and names the one next step, and an untrusted
+    // project is a choice this line has to be able to explain rather than
+    // abort over.
+    let refusal = match trust_state {
+        crate::trust::TrustState::Trusted => None,
+        crate::trust::TrustState::Changed => Some((
+            "drifted",
+            "refusing to probe: the manifest or lockfile changed since this project was trusted \
+             ↳ agentstack trust",
+        )),
+        crate::trust::TrustState::Untrusted => Some((
+            "untrusted",
+            "refusing to probe: this project is not trusted — starting its servers would run \
+             code nobody has reviewed ↳ agentstack trust",
+        )),
+    };
+    if let Some((reason, msg)) = refusal {
+        report.line(Level::Warn, msg);
+        report.probe = Some(ProbeResults {
+            ran: false,
+            skipped_reason: Some(reason),
+            servers: Vec::new(),
+        });
+        return;
+    }
+
+    let stdio: Vec<_> = manifest
+        .servers
+        .iter()
+        .filter(|(_, s)| s.server_type == ServerType::Stdio)
+        .collect();
+    if stdio.is_empty() {
+        report.line(Level::Ok, "no stdio servers to probe");
+    }
+
+    // Ctrl-C would otherwise kill agentstack outright and orphan whatever
+    // child is running: a probed server is its own process group leader, so
+    // the terminal's SIGINT never reaches it. Intercepting the signal for the
+    // duration of this section keeps `ProbeChild`'s Drop reachable — the
+    // in-flight probe still ends inside its timeout and reaps its child — and
+    // stops the loop before it starts another one. Best-effort: if the handler
+    // won't install, the loop simply never sees an interrupt.
+    let sigint = crate::sys::SigintGuard::install().ok();
+    let interrupted = || {
+        sigint
+            .as_ref()
+            .is_some_and(crate::sys::SigintGuard::interrupted)
+    };
+
+    let root = crate::manifest::project_root_of(&ctx.dir);
+    let mut results = Vec::new();
+    for (name, server) in stdio {
+        if interrupted() {
+            report.line(
+                Level::Warn,
+                "interrupted — the remaining servers were not probed",
+            );
+            break;
+        }
+        let Some(command) = &server.command else {
+            continue;
+        };
+        let mut missing = Vec::new();
+        let command = resolve_tracked(command, &ctx.resolver, &mut missing);
+        let args: Vec<String> = server
+            .args
+            .iter()
+            .map(|a| resolve_tracked(a, &ctx.resolver, &mut missing))
+            .collect();
+        let env: indexmap::IndexMap<String, String> = server
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), resolve_tracked(v, &ctx.resolver, &mut missing)))
+            .collect();
+        // Manifest `cwd` (relative paths anchor at the project root; `join`
+        // keeps absolute ones), defaulting to the project root — the same
+        // working directory a rendered config gives a harness, so the probe
+        // reproduces the real launch rather than an approximation of it.
+        let cwd = match &server.cwd {
+            Some(c) => root.join(resolve_tracked(c, &ctx.resolver, &mut missing)),
+            None => root.clone(),
+        };
+
+        if !missing.is_empty() {
+            missing.sort();
+            missing.dedup();
+            let first = missing[0].clone();
+            report.line(
+                Level::Warn,
+                format!(
+                    "{name:<14} not probed — {} does not resolve ↳ agentstack secret set {first}",
+                    missing.join(", ")
+                ),
+            );
+            results.push(serde_json::json!({
+                "server": name,
+                "status": "not_probeable",
+                "detail": format!("unresolved secret(s): {}", missing.join(", ")),
+            }));
+            continue;
+        }
+
+        match crate::mcp::probe_stdio(&command, &args, &env, &cwd, PROBE_TIMEOUT) {
+            Ok(p) => {
+                let tools = p
+                    .tool_count
+                    .map(|n| format!("{n} tools"))
+                    .unwrap_or_else(|| "handshake OK".into());
+                let who = p.server_name.clone().unwrap_or_else(|| name.clone());
+                let ms = p.elapsed.as_millis();
+                report.line(
+                    Level::Ok,
+                    format!("{name:<14} started in {ms}ms · {who} · {tools}"),
+                );
+                results.push(serde_json::json!({
+                    "server": name,
+                    "status": "ok",
+                    "server_name": p.server_name,
+                    "protocol": p.protocol,
+                    "tools": p.tool_count,
+                    "elapsed_ms": ms as u64,
+                }));
+            }
+            Err(e) => {
+                // `e`'s Display already sanitized every child-supplied byte.
+                let detail = e.to_string();
+                report.line(Level::Error, format!("{name:<14} {detail}"));
+                results.push(serde_json::json!({
+                    "server": name,
+                    "status": "failed",
+                    "detail": detail,
+                }));
+            }
+        }
+    }
+
+    report.probe = Some(ProbeResults {
+        ran: true,
+        skipped_reason: None,
+        servers: results,
+    });
 }
 
 /// Check that each profile's active skills resolve to the content their
@@ -3340,6 +3563,7 @@ mod tests {
             &DoctorArgs {
                 ci,
                 live: false,
+                probe: false,
                 fix: false,
                 deep,
                 all: false,
@@ -3715,5 +3939,100 @@ mod tests {
         ] {
             assert_eq!(missing_command_error("s", &server(quiet)), None, "{quiet}");
         }
+    }
+
+    /// Review finding M10. `--probe` is the only doctor check that starts a
+    /// process, so the two gates in front of it are security properties, not
+    /// conveniences — and the witness for "did not spawn" has to be the
+    /// absence of a side effect, not the presence of a message. Each server
+    /// here touches a marker file on startup, so the marker is proof.
+    #[test]
+    fn probe_spawns_nothing_for_an_untrusted_project_or_an_unresolved_secret() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("AGENTSTACK_HOME", home.path().join(".agentstack"));
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        let clean_marker = proj.path().join("clean.ran");
+        let gated_marker = proj.path().join("gated.ran");
+        let dir = proj.path().join(".agentstack");
+        std::fs::create_dir_all(&dir).unwrap();
+        // Neither server speaks MCP — they touch a file and exit, which is all
+        // this test needs to distinguish "was started" from "was not".
+        std::fs::write(
+            dir.join("agentstack.toml"),
+            format!(
+                "version = 1\n[targets]\ndefault = []\n\
+                 [servers.clean]\ntype = \"stdio\"\ncommand = \"touch\"\nargs = [\"{}\"]\n\
+                 [servers.gated]\ntype = \"stdio\"\ncommand = \"touch\"\nargs = [\"{}\"]\n\
+                 [servers.gated.env]\nTOKEN = \"${{ABSENT_PROBE_TEST_REF}}\"\n",
+                clean_marker.display(),
+                gated_marker.display()
+            ),
+        )
+        .unwrap();
+        let ctx = crate::commands::load(Some(proj.path())).unwrap();
+
+        // Gate 1 — untrusted. Untrusted repository content is inert, and
+        // "start the command this repo's manifest names" is the most direct
+        // way there is to break that, so NEITHER server may run.
+        let mut untrusted = Report::new();
+        probe_stdio_servers(
+            &ctx.loaded.manifest,
+            &ctx,
+            crate::trust::TrustState::Untrusted,
+            &mut untrusted,
+        );
+        let lines = report_lines(&untrusted);
+        assert!(
+            lines
+                .iter()
+                .any(|(l, m)| *l == "warn" && m.contains("refusing to probe")),
+            "{lines:?}"
+        );
+        assert!(
+            !clean_marker.exists() && !gated_marker.exists(),
+            "an untrusted project started a server"
+        );
+        assert_eq!(
+            untrusted.probe.as_ref().map(|p| p.ran),
+            Some(false),
+            "the JSON must say the probe did not run"
+        );
+
+        // Gate 2 — trusted, but one server's `${REF}` does not resolve. That
+        // one is reported as not-probeable rather than started with a
+        // half-substituted environment, which would blame the server for a
+        // missing secret. The other server proves the probe really does spawn
+        // when both gates pass — without it, gate 1 above proves nothing.
+        let mut trusted = Report::new();
+        probe_stdio_servers(
+            &ctx.loaded.manifest,
+            &ctx,
+            crate::trust::TrustState::Trusted,
+            &mut trusted,
+        );
+        let lines = report_lines(&trusted);
+        assert!(
+            clean_marker.exists(),
+            "a trusted project with resolvable refs must actually start the server"
+        );
+        assert!(
+            !gated_marker.exists(),
+            "a server with an unresolved ${{REF}} was started anyway"
+        );
+        assert!(
+            lines.iter().any(|(l, m)| *l == "warn"
+                && m.contains("gated")
+                && m.contains("ABSENT_PROBE_TEST_REF")),
+            "{lines:?}"
+        );
+        let servers = &trusted.probe.as_ref().unwrap().servers;
+        assert_eq!(servers[1]["status"], "not_probeable", "{servers:?}");
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 }

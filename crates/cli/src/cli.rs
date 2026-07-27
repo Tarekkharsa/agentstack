@@ -2002,6 +2002,18 @@ pub struct DoctorArgs {
     #[arg(long)]
     pub live: bool,
 
+    /// Actually start each stdio server and check it comes up (the stdio
+    /// counterpart of --live).
+    ///
+    /// The one doctor flag with side effects: it spawns the commands your
+    /// manifest declares, speaks the MCP `initialize` handshake, and stops
+    /// them again. Every child is bounded by a hard timeout and killed with
+    /// its process group. Refuses to spawn anything for a project that is not
+    /// trusted at its current bytes, and never spawns a server whose `${REF}`
+    /// does not resolve.
+    #[arg(long)]
+    pub probe: bool,
+
     /// Repair safe issues (re-apply drifted target configs).
     #[arg(long)]
     pub fix: bool,
