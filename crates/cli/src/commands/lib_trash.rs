@@ -200,6 +200,51 @@ fn plain_component(name: &str, what: &str) -> Result<()> {
     Ok(())
 }
 
+/// Refuse a trash entry whose own path reaches the body through a symlink.
+///
+/// [`contained`] guards the *destination*; this guards the *source*. `restore`
+/// moves the body with `rename`, which relocates a symlink itself rather than
+/// what it points at — so a `.trash/<id>/body` symlink was renamed into the live
+/// library and the library then served content from wherever it pointed. The
+/// body-name allowlist did not catch it: `body` is exactly the expected name,
+/// and `Path::exists()` follows the link and reports true.
+///
+/// Every component from `root` down to the body is checked, so a symlinked
+/// entry directory (`.trash/<id>`) is refused for the same reason as a symlinked
+/// body — otherwise the link one level up reaches the same outcome. The walk
+/// uses [`std::fs::symlink_metadata`], which never follows.
+///
+/// A missing component is not an error here: the body's absence is diagnosed
+/// separately, with a message about an incomplete entry rather than this one.
+fn no_symlinks_between(root: &Path, path: &Path) -> Result<()> {
+    let Ok(rel) = path.strip_prefix(root) else {
+        // Not under the trash root at all — the caller derived this path from
+        // `entry.dir`, so this is unreachable in practice; fail closed anyway
+        // rather than skip the check.
+        bail!(
+            "refusing to restore: {} is not inside {}",
+            path.display(),
+            root.display()
+        );
+    };
+    let mut walked = root.to_path_buf();
+    for part in rel.components() {
+        walked.push(part);
+        match std::fs::symlink_metadata(&walked) {
+            Ok(md) if md.file_type().is_symlink() => bail!(
+                "refusing to restore: {} is a symlink — restoring would move the link itself \
+                 into the library, which would then serve content from outside it. This trash \
+                 entry was not written by `lib remove`; inspect it, or drop it with \
+                 `agentstack lib trash --empty <id>`",
+                walked.display()
+            ),
+            // Absent: `restore` reports an incomplete entry separately.
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Confirm `dest` really lands inside `root` after symlinks are resolved.
 ///
 /// [`plain_component`] rejects traversal in the name; this catches the other
@@ -396,9 +441,20 @@ fn displace_existing(dest: &Path, staging: &Path) -> Result<Option<PathBuf>> {
         return Ok(None);
     }
     let aside = staging.join("replaced");
+    // A `replaced` already sitting here is the residue of an EARLIER restore
+    // whose rollback did not finish — which makes it possibly the only surviving
+    // copy of the user's live entry. Deleting it to free the name (what this did
+    // before) would destroy exactly the data the staging slot exists to protect.
+    // Refuse instead, and name the recovery: the user can move it back or drop
+    // it deliberately, but this command will not choose for them.
     if aside.exists() {
-        let _ = std::fs::remove_dir_all(&aside);
-        let _ = std::fs::remove_file(&aside);
+        bail!(
+            "refusing to restore: {} already holds a displaced copy from an earlier restore \
+             whose rollback did not complete — it may be the only copy of what used to be at {}. \
+             Move it back or delete it deliberately, then retry.",
+            aside.display(),
+            dest.display()
+        );
     }
     move_path(dest, &aside)
         .with_context(|| format!("setting {} aside before restoring over it", dest.display()))?;
@@ -588,7 +644,15 @@ pub fn restore(lib_home: &Path, id: &str, replace: bool, write: bool) -> Result<
     // and only then discover it had nothing to put in its place, stranding the
     // user's copy under `.trash/<id>/replaced`.
     if let Some(src) = entry.body_path() {
-        if !src.exists() {
+        // Symlink check FIRST: `exists()` follows links, so a symlinked body
+        // pointing at anything present would sail past the emptiness check and
+        // then be renamed — link and all — into the live library.
+        no_symlinks_between(&trash_home(lib_home), &src)?;
+        // `symlink_metadata`, not `exists()`: the latter follows links, so a
+        // symlinked body pointing at anything present would read as "there".
+        // The check above has already refused every symlink, so success here
+        // means a real file or directory.
+        if std::fs::symlink_metadata(&src).is_err() {
             bail!(
                 "refusing to restore: the record names a body at {} but it is not there — \
                  the trash entry is incomplete. Inspect it, or drop it with \
@@ -612,6 +676,13 @@ pub fn restore(lib_home: &Path, id: &str, replace: bool, write: bool) -> Result<
         if let (Some(src), Some(dest)) = (entry.body_path(), body_dest.as_ref()) {
             let replaced = displace_existing(dest, &entry.dir)?;
 
+            // Rollback steps that did NOT succeed. The recovery message must
+            // describe the filesystem as it actually is: claiming the entry was
+            // "left in the trash, unchanged" after a failed rollback sends the
+            // user to a trash entry that is no longer whole, and hides the one
+            // path that still holds their bytes.
+            let mut stranded: Vec<String> = Vec::new();
+
             let outcome = (|| -> Result<()> {
                 if let Some(parent) = dest.parent() {
                     std::fs::create_dir_all(parent)
@@ -621,7 +692,14 @@ pub fn restore(lib_home: &Path, id: &str, replace: bool, write: bool) -> Result<
                 if let Err(e) = library.save(lib_home) {
                     // Put our body back in the trash before propagating, so
                     // the entry stays whole and restorable.
-                    let _ = move_path(dest, &src);
+                    if let Err(back) = move_path(dest, &src) {
+                        stranded.push(format!(
+                            "the restored body is still at {} (could not move it back to {}: \
+                             {back:#})",
+                            dest.display(),
+                            src.display()
+                        ));
+                    }
                     return Err(e);
                 }
                 Ok(())
@@ -629,10 +707,26 @@ pub fn restore(lib_home: &Path, id: &str, replace: bool, write: bool) -> Result<
 
             if let Err(e) = outcome {
                 if let Some(prev) = &replaced {
-                    let _ = move_path(prev, dest);
+                    if let Err(back) = move_path(prev, dest) {
+                        stranded.push(format!(
+                            "the copy that was already at {} is still set aside at {} \
+                             (could not move it back: {back:#})",
+                            dest.display(),
+                            prev.display()
+                        ));
+                    }
                 }
-                return Err(e).with_context(|| {
-                    format!("restoring '{name}' — it was left in the trash, unchanged")
+                return Err(e).with_context(move || {
+                    if stranded.is_empty() {
+                        format!("restoring '{name}' — it was left in the trash, unchanged")
+                    } else {
+                        format!(
+                            "restoring '{name}' — the rollback did NOT complete, so the trash \
+                             entry is not intact: {}. Nothing was deleted; move the paths above \
+                             where you want them before retrying.",
+                            stranded.join("; ")
+                        )
+                    }
                 });
             }
 
@@ -983,6 +1077,130 @@ mod tests {
         let err = restore(&lib, "skill-pdf-1", false, true).unwrap_err();
         assert!(err.to_string().contains("outside the library"), "{err:#}");
         assert!(!outside.join("pdf").exists(), "nothing landed outside");
+    }
+
+    /// F22 witness — the source side of containment. `restore` moves the body
+    /// with `rename`, which relocates a SYMLINK itself rather than its target,
+    /// so a crafted `.trash/<id>/body` link was renamed into the live library and
+    /// the library then served content from outside it. The body-name allowlist
+    /// did not catch it (`body` is the expected name) and `exists()` follows the
+    /// link, so the emptiness check passed too.
+    #[test]
+    #[cfg(unix)]
+    fn restore_refuses_a_symlinked_body() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().join("lib");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(lib.join("skills")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("marker.txt"), "outside the library").unwrap();
+
+        let dir = trash_home(&lib).join("skill-pdf-1");
+        std::fs::create_dir_all(&dir).unwrap();
+        // The body is a link to somewhere outside, not a real directory.
+        std::os::unix::fs::symlink(&outside, dir.join("body")).unwrap();
+        let mut record = blank_record();
+        record.kind = "skill".into();
+        record.name = "pdf".into();
+        record.body = Some("body".into());
+        record.skill = Some(skill("pdf"));
+        std::fs::write(
+            dir.join(RECORD_FILE),
+            toml::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
+
+        let err = restore(&lib, "skill-pdf-1", false, true).unwrap_err();
+        assert!(err.to_string().contains("is a symlink"), "{err:#}");
+        // The library gained nothing, and the link still points where it did.
+        assert!(
+            !lib.join("skills/pdf").exists(),
+            "the link was moved into the library"
+        );
+        assert!(Library::load(&lib).unwrap().get("pdf").is_none());
+        assert!(outside.join("marker.txt").exists(), "outside untouched");
+    }
+
+    /// F22 witness — the same escape one level up: a symlinked ENTRY directory
+    /// reaches an out-of-library body through a perfectly ordinary `body` name,
+    /// so the walk has to check every component, not just the leaf.
+    #[test]
+    #[cfg(unix)]
+    fn restore_refuses_a_symlinked_entry_directory() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().join("lib");
+        let elsewhere = tmp.path().join("elsewhere");
+        std::fs::create_dir_all(lib.join("skills")).unwrap();
+        std::fs::create_dir_all(trash_home(&lib)).unwrap();
+
+        // A complete, VALID entry — but living outside the trash, reached by a
+        // link named like a trash id.
+        std::fs::create_dir_all(elsewhere.join("body")).unwrap();
+        std::fs::write(elsewhere.join("body/SKILL.md"), "# pdf").unwrap();
+        let mut record = blank_record();
+        record.kind = "skill".into();
+        record.name = "pdf".into();
+        record.body = Some("body".into());
+        record.skill = Some(skill("pdf"));
+        std::fs::write(
+            elsewhere.join(RECORD_FILE),
+            toml::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&elsewhere, trash_home(&lib).join("skill-pdf-1")).unwrap();
+
+        let err = restore(&lib, "skill-pdf-1", false, true).unwrap_err();
+        assert!(err.to_string().contains("is a symlink"), "{err:#}");
+        assert!(!lib.join("skills/pdf").exists());
+        assert!(
+            elsewhere.join("body/SKILL.md").exists(),
+            "the out-of-trash body was moved"
+        );
+    }
+
+    /// A leftover `replaced` is the residue of an earlier rollback that did not
+    /// finish, which makes it possibly the ONLY copy of the user's live entry.
+    /// `displace_existing` used to delete it to free the name.
+    #[test]
+    fn restore_refuses_to_overwrite_a_leftover_displaced_copy() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().join("lib");
+        std::fs::create_dir_all(lib.join("skills/pdf")).unwrap();
+        std::fs::write(lib.join("skills/pdf/SKILL.md"), "# live copy").unwrap();
+
+        let dir = trash_home(&lib).join("skill-pdf-1");
+        std::fs::create_dir_all(dir.join("body")).unwrap();
+        std::fs::write(dir.join("body/SKILL.md"), "# trashed copy").unwrap();
+        // The residue: a previous restore set the live entry aside and never
+        // put it back.
+        std::fs::create_dir_all(dir.join("replaced")).unwrap();
+        std::fs::write(dir.join("replaced/SKILL.md"), "# the only surviving copy").unwrap();
+        let mut record = blank_record();
+        record.kind = "skill".into();
+        record.name = "pdf".into();
+        record.body = Some("body".into());
+        record.skill = Some(skill("pdf"));
+        std::fs::write(
+            dir.join(RECORD_FILE),
+            toml::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
+
+        let err = restore(&lib, "skill-pdf-1", true, true).unwrap_err();
+        assert!(
+            err.to_string().contains("rollback did not complete"),
+            "{err:#}"
+        );
+        // Every copy still exists — the refusal deleted nothing.
+        assert_eq!(
+            std::fs::read_to_string(dir.join("replaced/SKILL.md")).unwrap(),
+            "# the only surviving copy"
+        );
+        assert_eq!(
+            std::fs::read_to_string(lib.join("skills/pdf/SKILL.md")).unwrap(),
+            "# live copy"
+        );
+        assert!(dir.join("body/SKILL.md").exists());
     }
 
     /// F22 witness — a record with no index row is refused BEFORE the body

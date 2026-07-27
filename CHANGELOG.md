@@ -123,6 +123,35 @@ findings and two interpreter findings. All are closed:
 
 ### Fixed
 
+- **The library trash can no longer be tricked into serving content from
+  outside the library.** F22's first fix guarded the destination — a plain
+  name, a resolved-path check, a symlinked target — but not the source.
+  `restore` moves the body with `rename`, which relocates a symlink *itself*
+  rather than what it points at, so a crafted `.trash/<id>/body` symlink was
+  renamed into the live library and the library then served whatever it pointed
+  at. The expected-name allowlist did not catch it (`body` is the expected
+  name) and `exists()` follows links, so the incomplete-entry check passed too.
+  Every component from the trash root down to the body is now checked with
+  `symlink_metadata`, which never follows — so a symlinked *entry directory*
+  is refused for the same reason.
+- **A failed restore rollback now says so.** Both rollback moves were
+  best-effort and their errors discarded, while the message still claimed the
+  entry was "left in the trash, unchanged". A rollback that does not complete
+  now reports which paths still hold the bytes and states that nothing was
+  deleted.
+- **Restore refuses to overwrite a leftover displaced copy.** `--replace` sets
+  the live entry aside in `replaced/` before moving the trashed one in. A
+  `replaced/` already present is the residue of an *earlier* restore whose
+  rollback did not finish — possibly the only surviving copy of the live
+  entry — and it was deleted to free the name. It is now a refusal that names
+  the recovery.
+- **A failed `workflows/` creation no longer strands an undo entry.**
+  `workflow declare` records its undo entry before writing anything, but the
+  directory creation sat outside the transaction, so its failure returned early
+  and left a durable no-op at the head of the ledger — `restore --last` would
+  offer to undo a declaration that never happened, shadowing the user's real
+  last change. It runs inside the transaction now, and takes the same
+  rollback-and-discard path as every other step.
 - **The project `.env` is no longer world-readable.** It holds real token
   values, but was written at the ambient umask — `0644` on a normal machine —
   so every local account could read it. It is now created `0600` before any

@@ -268,10 +268,18 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
         })?;
 
     let created_dest_dir = !dest_dir.exists();
-    std::fs::create_dir_all(&dest_dir)
-        .with_context(|| format!("creating {}", dest_dir.display()))?;
 
     let outcome = (|| -> Result<usize> {
+        // Inside the transaction, not before it. When this sat outside, a
+        // failure here returned through `?` and skipped the `match` below
+        // entirely — so the durable entry recorded a moment earlier stayed at
+        // the head of the ledger describing a declaration that never happened,
+        // and `restore --last` would offer that no-op instead of the user's
+        // real last change. Now its failure takes the same rollback-and-discard
+        // path as every other step (rollback counts an absent staged file as
+        // reverted, so this still reports a clean "the project is as it was").
+        std::fs::create_dir_all(&dest_dir)
+            .with_context(|| format!("creating {}", dest_dir.display()))?;
         for s in &staged {
             fail_point(s.label)?;
             crate::util::atomic::write(&s.path, &s.contents)
@@ -532,6 +540,44 @@ mod tests {
                  of the ledger (step '{step}')"
             );
         }
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// F21 witness — creating `workflows/` is INSIDE the transaction. It used to
+    /// run between recording the undo entry and the `match` that discards it, so
+    /// its failure returned through `?` and left a durable no-op sitting at the
+    /// head of the ledger — `restore --last` would then offer to undo a
+    /// declaration that never happened, shadowing the user's real last change.
+    ///
+    /// The failure is injected without the fail-point hook: a plain FILE where
+    /// the directory needs to be makes `create_dir_all` fail for real.
+    #[test]
+    fn a_failure_creating_the_workflows_dir_leaves_no_ledger_entry() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (_tmp, dir, script, blueprint) = project();
+        assert_eq!(crate::history::list().len(), 0, "the ledger starts empty");
+
+        // `workflows` exists, but as a file — `create_dir_all` cannot proceed.
+        fs::write(dir.join("workflows"), "not a directory").unwrap();
+
+        let err = run(Some(&dir), &args("triage", &script, &blueprint, true)).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("workflows"),
+            "the error names the directory it could not create: {err:#}"
+        );
+        assert!(
+            !crate::history::list()
+                .iter()
+                .any(|e| e.scope == "workflow-declare"),
+            "a declare that never wrote anything must not leave an undo entry behind"
+        );
+        // And nothing was written, so there is nothing to undo.
+        assert_eq!(
+            fs::read_to_string(dir.join("workflows")).unwrap(),
+            "not a directory"
+        );
         std::env::remove_var("AGENTSTACK_HOME");
     }
 
