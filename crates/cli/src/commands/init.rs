@@ -1204,8 +1204,10 @@ version = 1
     );
 
     // Counts for the closing summary — `servers`/`settings` move into the
-    // manifest below.
+    // manifest below. The first server's name is kept too, so the toolset
+    // suggestion can name a real one instead of a `<placeholder>`.
     let server_count = servers.len();
+    let first_server = servers.keys().next().cloned();
     let settings_count = settings.len();
 
     // Assemble the manifest.
@@ -1392,6 +1394,7 @@ version = 1
                     &contributing
                 },
                 server_count,
+                first_server.as_deref(),
                 settings_count,
                 &refs_needing_values,
             )
@@ -1408,6 +1411,7 @@ fn render_import_summary(
     manifest_path: &str,
     sources: &[String],
     server_count: usize,
+    first_server: Option<&str>,
     settings_count: usize,
     needing_values: &[String],
 ) -> String {
@@ -1449,16 +1453,24 @@ fn render_import_summary(
     // Toolsets are the reason people come back — and import used to end
     // without ever mentioning them, leaving the whole feature to be found in
     // the docs. Offered only above one server, because a toolset that selects
-    // "the single thing you have" teaches nothing. Concrete over abstract: a
-    // block to paste beats a pointer to a concept.
+    // "the single thing you have" teaches nothing.
+    //
+    // This suggests the `create-profile` COMMAND, not a manifest block to
+    // paste. Hand-editing `[profiles.*]` leaves the lockfile stale until the
+    // next `use --write`, which is exactly the mutate → re-lock → re-render
+    // pipeline `create-profile` performs for you; teaching the manual path
+    // here would teach skipping the re-lock. The server named is a real one
+    // from this import, so the line is runnable as printed.
     if server_count > 1 {
-        out.push_str(
-            "\n  Then:      name a toolset — a subset for one kind of work. Add to the manifest:\n\
-             \x20            [profiles.<name>]\n\
-             \x20            servers = [\"<one of the servers above>\"]\n\
-             \x20          then `agentstack session start <name>` uses it for now, and\n\
-             \x20          `agentstack session end` puts every file back.\n",
-        );
+        if let Some(server) = first_server {
+            out.push_str(&format!(
+                "\n  Then:      name a toolset — a subset for one kind of work:\n\
+                 \x20            agentstack create-profile --name backend --server {server}\n\
+                 \x20          it re-locks and renders for you. Afterwards\n\
+                 \x20          `agentstack session start backend` uses it for now, and\n\
+                 \x20          `agentstack session end` puts every file back.\n"
+            ));
+        }
     }
     out
 }
@@ -1736,6 +1748,7 @@ mod tests {
             "/tmp/proj/.agentstack/agentstack.toml",
             &["Claude Code".to_string(), "Codex CLI".to_string()],
             8,
+            Some("github"),
             2,
             &["GITHUB_TOKEN".to_string()],
         );
@@ -1752,22 +1765,41 @@ mod tests {
         // that brings the originals under the same manifest.
         assert!(out.contains("the CLI configs above are unchanged"));
         assert!(out.contains("agentstack apply --scope global --write"));
-        // F05: toolsets are the reason people come back, so the import that
-        // creates the servers is where they get introduced — concretely.
-        assert!(out.contains("[profiles.<name>]"));
-        assert!(out.contains("agentstack session start"));
+        // F05/N7: toolsets are the reason people come back, so the import that
+        // creates the servers is where they get introduced — as a RUNNABLE
+        // command naming a server from this very import, never a manifest
+        // block to hand-edit. Hand-editing `[profiles.*]` skips the re-lock
+        // that `create-profile` performs, so suggesting it would teach the
+        // wrong pipeline.
+        assert!(out.contains("agentstack create-profile --name backend --server github"));
+        assert!(!out.contains("[profiles."));
+        assert!(out.contains("agentstack session start backend"));
 
         // Nothing pending → no secrets section at all, not an empty one.
-        let clean = render_import_summary("/m", &["Claude Code".to_string()], 1, 0, &[]);
+        let clean = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            1,
+            Some("github"),
+            0,
+            &[],
+        );
         assert!(!clean.contains("Secrets:"));
         assert!(!clean.contains("settings from"));
         assert!(clean.contains("agentstack doctor"));
         // One server is not a toolset worth naming — the offer stays quiet.
-        assert!(!clean.contains("[profiles.<name>]"));
+        assert!(!clean.contains("create-profile"));
 
-        // No servers at all → nothing was copied, so no duplication note.
-        let empty = render_import_summary("/m", &["Claude Code".to_string()], 0, 1, &[]);
+        // No servers at all → nothing was copied, so no duplication note, and
+        // no server name to suggest either.
+        let empty = render_import_summary("/m", &["Claude Code".to_string()], 0, None, 1, &[]);
         assert!(!empty.contains("the CLI configs above are unchanged"));
+        assert!(!empty.contains("create-profile"));
+
+        // Many servers but no name available → the offer is skipped rather
+        // than printing a `<placeholder>` command that would not run.
+        let unnamed = render_import_summary("/m", &["Claude Code".to_string()], 4, None, 0, &[]);
+        assert!(!unnamed.contains("create-profile"));
     }
 
     /// S1 witness (init-secrets design §7): a failing credential store must

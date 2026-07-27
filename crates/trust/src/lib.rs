@@ -52,6 +52,17 @@ pub enum TrustError {
         "consented digest does not match the current surface — the manifest/lock changed since the preview (consented {consented}, current {actual}); re-run the preview and review again"
     )]
     ConsentMismatch { consented: String, actual: String },
+    /// The consented value hashes the SAME bytes but is written in a form this
+    /// gate does not accept (N6). Split from [`Self::ConsentMismatch`] because
+    /// the two demand opposite responses: a real mismatch means re-review the
+    /// changed content, while this means re-send the same value verbatim.
+    /// Reporting a format problem as "the content changed" sent users to
+    /// re-preview, get a byte-identical digest, and loop — and taught them to
+    /// distrust the one gate that must be believed.
+    #[error(
+        "consented digest is the right hash in the wrong form — the surface has NOT changed (given {consented}, expected {actual}); pass the `surface_digest` from `agentstack trust --preview` verbatim, including its `sha256:` prefix"
+    )]
+    ConsentDigestFormat { consented: String, actual: String },
 }
 
 pub type Result<T> = std::result::Result<T, TrustError>;
@@ -312,9 +323,26 @@ pub fn trust_with_consent(
         base: base.to_path_buf(),
     })?;
     if consented != actual {
-        return Err(TrustError::ConsentMismatch {
-            consented: consented.to_string(),
-            actual,
+        // N6: distinguish "you sent a different hash" from "you sent the same
+        // hash without its prefix". The accepted alternative form is derived
+        // from `actual` itself — never by parsing an algorithm label out of
+        // `consented` — so a differently-labelled digest (`md5:<hex>`) can
+        // never be read as equal to a `sha256:` one. The hex body must still
+        // match in full; this narrows what counts as a *diagnosis*, never what
+        // counts as a *match*.
+        let same_bytes = actual
+            .strip_prefix("sha256:")
+            .is_some_and(|hex| consented == hex);
+        return Err(if same_bytes {
+            TrustError::ConsentDigestFormat {
+                consented: consented.to_string(),
+                actual,
+            }
+        } else {
+            TrustError::ConsentMismatch {
+                consented: consented.to_string(),
+                actual,
+            }
         });
     }
     // Record the digest we just VERIFIED, not a re-read of disk: if a byte
@@ -593,6 +621,43 @@ mod tests {
             // The earlier grant is still pinned to the OLD bytes, so the
             // edited project reads as Changed — fail closed, not blessed.
             assert_eq!(check(proj.path()), TrustState::Changed);
+        });
+    }
+
+    // SECURITY WITNESS (N6): a prefix-less digest still REFUSES — the fix was
+    // the diagnosis, never the acceptance rule. The gate must keep rejecting
+    // anything that is not byte-equal to the computed digest; it just has to
+    // say which of the two problems it is, because "the content changed" sent
+    // users to re-preview an unchanged project forever. NEVER relax this into
+    // accepting the bare form.
+    #[test]
+    fn consent_grant_refuses_bare_hex_but_names_it_a_format_problem() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let previewed = digest_for(proj.path()).unwrap();
+            let bare = previewed.strip_prefix("sha256:").unwrap().to_string();
+            assert_ne!(bare, previewed, "fixture must exercise the prefix");
+
+            // Same bytes, wrong form: still refused, still nothing granted…
+            let err = trust_with_consent(proj.path(), Vec::new(), &bare).unwrap_err();
+            assert_eq!(check(proj.path()), TrustState::Untrusted);
+            // …but reported as a format problem, and the message must NOT
+            // claim the surface changed.
+            assert!(matches!(err, TrustError::ConsentDigestFormat { .. }));
+            let msg = err.to_string();
+            assert!(msg.contains("has NOT changed"));
+            assert!(!msg.contains("changed since the preview"));
+
+            // An algorithm label is never normalized away: a different label
+            // over the same hex is a real mismatch, not a format problem.
+            let mislabelled = format!("md5:{bare}");
+            let err = trust_with_consent(proj.path(), Vec::new(), &mislabelled).unwrap_err();
+            assert!(matches!(err, TrustError::ConsentMismatch { .. }));
+            assert_eq!(check(proj.path()), TrustState::Untrusted);
+
+            // And a genuinely different hash stays a genuine mismatch.
+            let err = trust_with_consent(proj.path(), Vec::new(), "deadbeef").unwrap_err();
+            assert!(matches!(err, TrustError::ConsentMismatch { .. }));
         });
     }
 

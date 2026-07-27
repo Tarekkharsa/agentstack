@@ -72,6 +72,40 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
     let manifest = &ctx.loaded.manifest;
 
+    // N5: refuse a manifest that cannot validate, BEFORE pinning anything.
+    //
+    // The lockfile is part of the consent surface, so `lock` is followed by
+    // `trust .` — and without this gate an invalid manifest pinned cleanly,
+    // printed a green ✓, and sent the user into a consent ceremony for a
+    // bundle that could never be admitted; the refusal only surfaced later at
+    // `workflow run`. A trust prompt that turns out to have been pointless is
+    // exactly how a consent gate gets trained into a reflex click, so the
+    // failure moves to the cheapest correct place. Library-aware, and the same
+    // issue set / message / fix text `doctor` and `apply` already produce —
+    // one rule set, three call sites, no third dialect for the user to learn.
+    let libctx = ctx.library_ctx();
+    let vctx = libctx.validate_ctx(&ctx.dir);
+    let target_ids: Vec<&str> = ctx.registry.ids().collect();
+    let errors: Vec<_> = crate::manifest::validate_with_context(manifest, target_ids, &vctx)
+        .into_iter()
+        .filter(|i| i.kind.is_error())
+        .collect();
+    if !errors.is_empty() {
+        let detail = errors
+            .iter()
+            .map(|i| match &i.fix {
+                Some(fix) => format!("{}\n    ↳ {fix}", i.message),
+                None => i.message.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n  ");
+        anyhow::bail!(
+            "refusing to lock: {} validation error(s) — pinning them would put content in the \
+             consent surface that can never be admitted:\n  {detail}",
+            errors.len()
+        );
+    }
+
     // P9: snapshot the consent state *before* pinning. If this project is
     // currently trusted, changing its pins re-gates it — we surface that the
     // moment the change is written, so the user is never silently left with

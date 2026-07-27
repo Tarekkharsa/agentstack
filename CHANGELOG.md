@@ -122,6 +122,24 @@ findings and two interpreter findings. All are closed:
   described as *copied* — the original stays in the CLI's own config — and the
   summary names the resulting duplication and the `--scope global` command that
   resolves it. It also closes by showing how to name a first toolset.
+- **The first-toolset suggestion is a runnable command, not a manifest block.**
+  `init` now prints `agentstack create-profile --name backend --server <one you
+  just imported>` instead of a `[profiles.*]` snippet to paste. Hand-editing
+  the table leaves the lockfile stale until the next `use --write`; the command
+  performs the mutate → re-lock → re-render pipeline, so the printed line is
+  both runnable and correct.
+- **`lock` refuses a manifest that cannot validate**, instead of pinning it and
+  recommending `trust .`. The lockfile is part of the consent surface, so an
+  invalid manifest used to reach a consent prompt for a bundle that could never
+  be admitted — the refusal only surfaced later at `workflow run`. Same issue
+  set, messages, and fixes `doctor` and `apply` already produce.
+- **A prefix-less consent digest is diagnosed as a format problem, not as
+  changed content.** `trust --yes --consented-digest <bare hex>` still refuses
+  — the acceptance rule is unchanged — but it no longer claims the manifest or
+  lock changed and print two visibly identical hashes, which sent users to
+  re-preview an unchanged project in a loop. A differently-labelled digest
+  (`md5:<same hex>`) remains a genuine mismatch: the accepted alternative form
+  is derived from the computed digest, never parsed out of caller input.
 - The panel-only verbs (`add-skill-to-profile`, `add-server-to-profile`,
   `use-profile`, `library-index`) moved out of the human command map into a
   labelled integration-contract section of `--help --all`; `create-profile`
