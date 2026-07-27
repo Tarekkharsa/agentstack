@@ -37,6 +37,9 @@ Read in this order:
 
 Design documents explain active technical contracts. They are not additional
 roadmaps. `CHANGELOG.md` is the historical record.
+`docs/design/README.md` indexes them: which document answers which question,
+and which are closed records rather than live contracts. Read it before opening
+one, not after.
 
 ## Product experience rules
 

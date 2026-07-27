@@ -1464,9 +1464,9 @@ you have:
 
 ```console
 $ agentstack --version
-agentstack 0.15.0 (sandbox: yes)     # a release binary — run --sandbox works
+agentstack 0.16.0 (sandbox: yes)     # a release binary — run --sandbox works
 $ agentstack --version
-agentstack 0.15.0 (sandbox: no)      # a plain source build — it does not
+agentstack 0.16.0 (sandbox: no)      # a plain source build — it does not
 ```
 
 `agentstack doctor` repeats the fact in its **Adapters & CLIs** section, and

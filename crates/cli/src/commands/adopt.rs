@@ -392,7 +392,7 @@ fn new_extras(existing: &Server, imported: Server) -> IndexMap<String, IndexMap<
             let have = existing.extra.get(&target);
             let fresh: IndexMap<String, Value> = fields
                 .into_iter()
-                .filter(|(k, _)| have.map_or(true, |h| !h.contains_key(k)))
+                .filter(|(k, _)| have.is_none_or(|h| !h.contains_key(k)))
                 .collect();
             (!fresh.is_empty()).then_some((target, fresh))
         })

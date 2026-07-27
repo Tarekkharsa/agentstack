@@ -17,7 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      # Intentionally floating: `stable` is a branch ref with no resolvable tag.
+      # `rust-toolchain.toml` at the repo root decides the actual compiler:
+      # rustup honors it for every cargo invocation in this checkout, so this
+      # step only guarantees a rustup exists. Pinning matters most for `fmt`
+      # and `clippy`, whose output moves between releases — a floating stable
+      # made "the tree is formatted" a fact about that week's compiler.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -99,6 +103,32 @@ jobs:
             bash "$script"
             echo "::endgroup::"
           done
+
+  # The MSRV is a promise to anyone building from source on an older toolchain,
+  # and it is a DIFFERENT number from the pinned development toolchain: this job
+  # is what keeps `rust-version` in the workspace Cargo.toml honest. It only
+  # checks that the workspace compiles — running the suite is the pinned
+  # toolchain's job, and doing it twice buys nothing.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Read rust-version from the workspace manifest
+        id: msrv
+        run: |
+          v=$(grep -m1 '^rust-version' Cargo.toml | cut -d'"' -f2)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "MSRV is $v"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # RUSTUP_TOOLCHAIN outranks `rust-toolchain.toml`, which would otherwise
+      # pull in the pinned development compiler and defeat the point of the job.
+      - name: Check the workspace on the declared MSRV
+        env:
+          RUSTUP_TOOLCHAIN: ${{ steps.msrv.outputs.version }}
+        run: cargo check --workspace --all-targets --locked
 
   # The flagship security feature — the sandbox + egress proxy + lockdown — only
   # exists behind the `sandbox`/`docker` features and is proven against a real

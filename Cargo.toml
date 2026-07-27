@@ -6,7 +6,13 @@ members = ["crates/core", "crates/trust", "crates/policy", "crates/adapters", "c
 # etc., so a toolchain bump is one edit here, not nine.
 [workspace.package]
 edition = "2021"
-rust-version = "1.80"
+# The oldest toolchain this workspace actually builds on, verified by CI's
+# `msrv` job. It is NOT a preference: `boa_engine` (the workflow interpreter)
+# declares 1.88, and several transitive crates need edition-2024 Cargo, so
+# anything lower fails to resolve. It said 1.80 until 2026-07-28, which was a
+# claim nobody had checked — the same class of error the enforcement docs exist
+# to prevent, applied to the build instead of to security.
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Tarekkharsa/agentstack"
 

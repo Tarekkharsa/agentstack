@@ -32,6 +32,20 @@ body:
     validations:
       required: true
   - type: textarea
+    id: doctor
+    attributes:
+      label: agentstack doctor --json output
+      description: >-
+        The single most useful thing you can attach: it carries the detected
+        CLIs, every check and its verdict, drift, trust state, and the build's
+        feature set — which is most of what triage would otherwise ask you for
+        one question at a time. It reports secret **references**, never values,
+        but skim it before pasting anyway. If `doctor` itself is what is broken,
+        say so here instead.
+      render: json
+    validations:
+      required: false
+  - type: textarea
     id: manifest
     attributes:
       label: Relevant manifest snippet

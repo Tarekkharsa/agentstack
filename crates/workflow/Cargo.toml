@@ -1,6 +1,6 @@
 [package]
 name = "agentstack-workflow"
-version = "0.15.0"
+version = "0.16.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Governed workflow-orchestration engine (Boa JS) as a self-contained domain"

@@ -1,0 +1,67 @@
+# cargo-deny configuration — the machine-checked half of the dependency policy
+# CLAUDE.md states in prose ("any new dependency requires maintainer approval").
+#
+# The prose rule catches a human adding a crate on purpose. This catches the
+# transitive arrival nobody chose: a dependency that pulls in a copyleft
+# licence, a crate served from somewhere other than crates.io, or a package
+# that has since had an advisory filed against it.
+
+[advisories]
+# Vulnerabilities and unsoundness fail the build. `unmaintained` only warns,
+# deliberately: it is a reason to plan a replacement, not a reason to break
+# every build on the morning someone archives a repository. Today that covers
+# `derivative`, `instant`, `paste` and `proc-macro-error`, all reached
+# transitively through `age` and `boa_engine` — nothing this project chose
+# directly, and nothing it can drop without replacing a dependency.
+yanked = "deny"
+unmaintained = "workspace"
+ignore = []
+
+[licenses]
+# This project is MIT OR Apache-2.0. The allowlist is what a permissively
+# licensed binary may legally carry — everything here is a permissive or
+# public-domain-equivalent licence. A copyleft licence arriving transitively is
+# a licensing decision, so it must fail and be looked at, not be auto-approved.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+    # `webpki-roots` — Mozilla's CA root store, redistributed under a data
+    # licence rather than a code one. Permissive, and the alternative is
+    # shipping no roots.
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Duplicate major versions are noise in a binary this size rather than a
+# defect, so they warn.
+#
+# `wildcards` warns rather than denies. The risk it names is real — a `*`
+# version on an external crate means the build is not reproducible from the
+# manifest alone — but every hit today is one of the ten workspace crates
+# referring to another by bare `path`, which is not that risk.
+# `allow-wildcard-paths` does not exempt them, because these crates are
+# publishable and crates.io rejects path-only dependencies. Denying would
+# therefore mean either a permanently red gate or an ignore list long enough to
+# hide the case worth catching.
+multiple-versions = "warn"
+wildcards = "warn"
+allow-wildcard-paths = true
+deny = []
+
+[sources]
+# Only crates.io. A git or path dependency in a security tool is a supply-chain
+# edge with no registry, no yank mechanism, and no advisory coverage — if one
+# is ever justified, it should require editing this file.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

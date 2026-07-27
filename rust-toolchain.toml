@@ -1,0 +1,18 @@
+# The toolchain every contributor and every CI job builds with.
+#
+# Pinned, not floating. `fmt` and `clippy` output are version-sensitive: a
+# rustup that rolls to a new stable mid-week turns "the tree is formatted" and
+# "clippy is clean" into facts about whichever compiler happened to run, and a
+# contributor whose local stable is a release ahead of CI's gets a diff nobody
+# else can reproduce. Pinning makes the gate mean the same thing everywhere.
+#
+# `rust-version` in the workspace Cargo.toml is a DIFFERENT number and stays
+# where it is: it declares the oldest compiler this crate supports (the MSRV),
+# which CI verifies in its own job. This file says which one we develop on.
+#
+# Bumping: raise `channel`, run `cargo fmt --all` and `cargo clippy --workspace
+# --all-targets -- -D warnings`, and land whatever the new toolchain re-wraps
+# in the same commit — never as a drive-by inside a feature change.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]

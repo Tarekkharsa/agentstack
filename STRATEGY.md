@@ -2,7 +2,7 @@
 
 > **Status:** source of truth for product direction and sequencing
 >
-> **Current as of:** AgentStack 0.15.x
+> **Current as of:** AgentStack 0.16.x
 >
 > **Updated:** 2026-07-23
 >

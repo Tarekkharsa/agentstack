@@ -1,0 +1,63 @@
+name: supply-chain
+
+# Advisories are published against dependencies that were fine when they were
+# added, so this cannot be a merge gate alone — it has to run on a clock. A
+# security tool that ships a vulnerable transitive dependency for three months
+# because nobody re-ran the audit has a worse problem than the dependency.
+on:
+  schedule:
+    # Mondays, 07:00 UTC. Weekly is the right cadence for an advisory feed:
+    # daily mostly re-reports the same finding into an inbox nobody reads.
+    - cron: "0 7 * * 1"
+  push:
+    branches: [main]
+    paths: ["**/Cargo.toml", "Cargo.lock", "deny.toml", ".github/workflows/supply-chain.yml"]
+  pull_request:
+    paths: ["**/Cargo.toml", "Cargo.lock", "deny.toml"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_MULTIPLEXING: "false"
+
+jobs:
+  # `cargo deny` covers advisories, licenses, and duplicate/banned crates in one
+  # pass, configured by deny.toml. Split into two steps so a licence question
+  # and a live vulnerability are never reported as the same failure.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # Unpinned deliberately: an advisory-database reader has to understand
+      # whatever the database currently emits. 0.16 could not parse CVSS 4.0
+      # scores and failed to load the whole database rather than one entry —
+      # a stale audit tool reports "clean" for the wrong reason.
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: Advisories (RUSTSEC)
+        run: cargo deny check advisories
+      - name: Licences, sources, and banned crates
+        run: cargo deny check licenses sources bans
+
+  # An SBOM is the artifact that answers "were we affected?" for a release that
+  # already shipped, which is exactly when the Cargo.lock of that tag is hardest
+  # to reconstruct from memory. Generated per run and kept as an artifact; the
+  # release workflow attaches its own to the tag.
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+      - name: Generate CycloneDX SBOM
+        run: cargo cyclonedx --format json --all --describe crate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: "**/*.cdx.json"
+          if-no-files-found: error

@@ -50,6 +50,22 @@
 --shadow-sm:0 1px 2px rgba(0,0,0,0.4);--shadow-md:0 3px 10px rgba(0,0,0,0.45);--shadow-lg:0 12px 32px rgba(0,0,0,0.55)}
 .card{border-radius:var(--radius-md,16px)}
 body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)}
+/* The hero leads with the product running, not with a logo tile: the left
+   column carries the promise and the one command that starts it, the right
+   carries the recorded proof. Below 940px the proof stacks under the copy
+   rather than shrinking into illegibility. */
+.hero-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:calc(var(--space-6) * 1.2);align-items:center}
+/* The install line is the most important text on the page, so it wraps to stay
+   fully visible rather than scrolling off the right edge of a narrow column. */
+.hero-cmd{background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.82rem;line-height:1.8;margin:0 0 var(--space-4)}
+.hero-cmd .row{display:flex;gap:12px}
+.hero-cmd .row span:last-child{overflow-wrap:anywhere}
+.hero-proof{margin:0;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--color-divider);box-shadow:var(--shadow-lg);background:var(--term-bg)}
+.hero-proof img{display:block;width:100%;height:auto}
+.hero-proof figcaption{font-size:0.8rem;line-height:1.5;color:var(--term-muted);padding:10px 14px;border-top:1px solid var(--term-bd)}
+@media (max-width:940px){
+  .hero-split{grid-template-columns:1fr;gap:var(--space-6)}
+}
 @media (max-width:720px){
   .grid-gaps,.grid-steps{grid-template-columns:1fr !important}
   .nav{flex-wrap:wrap}
@@ -77,21 +93,24 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
   </nav>
 
   <div style="max-width:1060px;margin:0 auto;padding:calc(var(--space-8) * 1.5) var(--space-6) var(--space-8);position:relative">
-    <div style="position:absolute;top:56px;right:48px;width:260px;height:260px;pointer-events:none;z-index:0">
-      <div style="position:absolute;top:0;right:0;width:170px;height:170px;border-radius:44px;border:8px solid var(--color-accent-200);opacity:0.55"></div>
-      <div style="position:absolute;top:34px;right:34px;width:170px;height:170px;border-radius:44px;border:8px solid var(--color-accent-300);opacity:0.7"></div>
-      <div style="position:absolute;top:68px;right:68px;width:170px;height:170px;border-radius:44px;background:linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-600) 100%);box-shadow:var(--shadow-md);display:flex;align-items:center;justify-content:center">
-        <div style="width:52px;height:52px;background:#FDF6EE;border-radius:10px;transform:rotate(45deg)"></div>
+    <div class="hero-split">
+      <div style="min-width:0">
+        <span class="tag tag-accent-2">open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>
+        <h1 style="font-family:var(--font-heading);font-weight:400;font-size:3.4rem;line-height:1.08;margin:var(--space-4) 0 var(--space-4)">One agent setup. Every coding CLI.</h1>
+        <p style="font-size:1.15rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-5)">Import the MCP servers, skills and instructions you already use. AgentStack keeps them in one portable manifest, renders each CLI's native format, switches toolsets by project or task, and makes every change understandable and recoverable.</p>
+        <div class="hero-cmd">
+          <div class="row"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
+          <div class="row"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack init</span></div>
+        </div>
+        <div style="display:flex;gap:var(--space-3);flex-wrap:wrap">
+          <a href="tutorial/" class="btn btn-primary">Unify my setup</a>
+          <a href="docs.html" class="btn btn-secondary">Read the documentation</a>
+        </div>
       </div>
-    </div>
-    <div style="max-width:720px;position:relative">
-      <span class="tag tag-accent-2">open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>
-      <h1 style="font-family:var(--font-heading);font-weight:400;font-size:3.4rem;line-height:1.08;margin:var(--space-4) 0 var(--space-4)">One agent setup. Every coding CLI.</h1>
-      <p style="font-size:1.15rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:600px">Import the MCP servers, skills and instructions you already use. AgentStack keeps them in one portable manifest, renders each CLI's native format, switches toolsets by project or task, and makes every change understandable and recoverable.</p>
-      <div style="display:flex;gap:var(--space-3);flex-wrap:wrap">
-        <a href="tutorial/" class="btn btn-primary">Unify my setup</a>
-        <a href="docs.html" class="btn btn-secondary">Read the documentation</a>
-      </div>
+      <figure class="hero-proof">
+        <img src="demos/first-value.gif" alt="Recorded proof: two CLIs with different half-setups — import once, render both native formats, doctor clean, restore byte-for-byte" width="790" height="560">
+        <figcaption>Two CLIs, two half-setups → one import → both in sync → clean <code>doctor</code> → byte-for-byte restore. Recorded from a real run.</figcaption>
+      </figure>
     </div>
 
     <div style="margin-top:calc(var(--space-8) * 1.5)">
@@ -200,8 +219,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
         <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack init</span><span style="color:var(--term-muted)"># guided wizard: your CLI configs → one manifest</span></div>
         <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack doctor</span><span style="color:var(--term-muted)"># health + drift; every warning names its fix</span></div>
       </div>
-      <img src="demos/first-value.gif" alt="Recorded proof: two CLIs with different half-setups — import once, render both native formats, doctor clean, restore byte-for-byte" loading="lazy" style="width:100%;border-radius:var(--radius-md);margin-top:var(--space-4);border:1px solid var(--color-divider)">
-      <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-3) 0 0">Import once → both CLIs in sync → clean doctor → fully reversible. Recorded from a real run; reproduce it fenced with <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a> — it asserts every step, so this output stays accurate.</p>
+      <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-3) 0 0">That is the run recorded at the top of this page. Reproduce it fenced with <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a> — it asserts every step, so the recording stays accurate.</p>
     </div>
   </div>
 

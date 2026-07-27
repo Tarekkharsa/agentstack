@@ -252,7 +252,7 @@
   </details>
 </aside>
   <main>
-<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.15.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
+<p class="versionbar">These pages describe <b>v0.16.0</b>, the current release.</p>
 <h1 id="feature-reference">Feature reference</h1>
 <p>The complete, implemented-and-tested feature inventory. The <a href="https://github.com/Tarekkharsa/agentstack/blob/main/README.md">README</a> is the tour; this is the map. Terms (CLI, adapter, target, gateway, posture, trust, …) are defined once in <a href="concepts.html">concepts.md</a> — this page assumes them and stays operational.</p>
 <p>Deeper rationale and field notes — edge cases, crate-level caveats, and implementation internals — live in <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/reference-field-notes.md">reference field notes</a>.</p>
@@ -721,9 +721,9 @@ agentstack self update --write      # download, verify the sha256, install it</c
 <h2 id="which-build-am-i-running---version">Which build am I running? (<code>--version</code>)<a class="hlink" href="#which-build-am-i-running---version" aria-label="Link to this section">#</a></h2>
 <p>The Docker sandbox is a compile-time option. Published release binaries are built with it; a plain <code>cargo build --release</code> is not, and the two otherwise carry the same version number and the same <code>--help</code>. <code>--version</code> says which one you have:</p>
 <pre class="block"><code>$ agentstack --version
-agentstack 0.15.0 (sandbox: yes)     # a release binary — run --sandbox works
+agentstack 0.16.0 (sandbox: yes)     # a release binary — run --sandbox works
 $ agentstack --version
-agentstack 0.15.0 (sandbox: no)      # a plain source build — it does not</code></pre>
+agentstack 0.16.0 (sandbox: no)      # a plain source build — it does not</code></pre>
 <p><code>agentstack doctor</code> repeats the fact in its <strong>Adapters &amp; CLIs</strong> section, and <code>agentstack run &lt;cli&gt; --sandbox</code> on a build without it refuses by naming the real cause rather than blaming Docker:</p>
 <pre class="block"><code>$ agentstack run claude-code --sandbox
 error: this build has no sandbox support — nothing was launched

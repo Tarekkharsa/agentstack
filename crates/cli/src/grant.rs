@@ -1225,7 +1225,7 @@ fn to_hex(bytes: &[u8]) -> String {
 /// Parse lowercase/upshifted hex into bytes; `None` on any non-hex or odd
 /// length. Used only to decode a MAC we then compare in constant time.
 fn from_hex(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len())
@@ -2119,7 +2119,7 @@ mod tests {
     // ---- 3b-i witnesses ----
 
     fn h64(c: char) -> String {
-        std::iter::repeat(c).take(64).collect()
+        std::iter::repeat_n(c, 64).collect()
     }
 
     fn granted_server(toml_src: &str, binding: GrantedServerBinding) -> GrantedServer {

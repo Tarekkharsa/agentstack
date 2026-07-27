@@ -1454,7 +1454,7 @@ fn run_checks(
             readable
                 && entry
                     .description(&skills_lib_home)
-                    .map_or(true, |d| d.trim().is_empty())
+                    .is_none_or(|d| d.trim().is_empty())
         })
         .map(|entry| entry.name.as_str())
         .collect();

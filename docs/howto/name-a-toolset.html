@@ -252,7 +252,7 @@
   </details>
 </aside>
   <main>
-<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.15.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
+<p class="versionbar">These pages describe <b>v0.16.0</b>, the current release.</p>
 <h1 id="name-a-toolset">Name a toolset</h1>
 <p>A <strong>toolset</strong> is a named subset of the setup you already have — "backend", "incident", "design" — that you activate together. In the manifest it is a <code>[profiles.&lt;name&gt;]</code> block — the manifest key kept its original spelling so existing manifests keep working, but everything you read and type says <em>toolset</em>. It names <em>which</em> of your servers and skills come along for a task; it is <strong>not</strong> a policy, a permission level, or a workflow role. A manifest with no toolset named activates its whole inline set, so you only name one once you want more than one.</p>
 <p>Prerequisite: a project with an <code>.agentstack/agentstack.toml</code> <a href="../concepts.html">manifest</a> (run <code>agentstack init</code> if you don't have one).</p>

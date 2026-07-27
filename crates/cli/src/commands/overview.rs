@@ -98,7 +98,7 @@ pub(crate) fn has_rendered_artifacts(ctx: &super::Context, target_ids: &[String]
             return false;
         };
         let ours =
-            scope != Scope::Global || t.source_manifest.as_deref().map_or(true, |s| s == identity);
+            scope != Scope::Global || t.source_manifest.as_deref().is_none_or(|s| s == identity);
         ours && (!t.managed_servers.is_empty()
             || !t.managed_skills.is_empty()
             || !t.managed_settings.is_empty()

@@ -4,7 +4,35 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
-## Unreleased
+## v0.16.0 — 2026-07-28
+
+**The release an end-to-end review asked for.** Two independent product
+reviews walked the whole journey — install, import, apply, check, switch,
+undo, remove — and reported thirty-two findings, most of them coherence
+rather than correctness: a tool that was well built but read as unfinished
+ninety seconds after the happy path ended. This release closes every one of
+them that was a defect. The plaintext `.env` is written `0600`; success
+summaries count what they covered instead of what changed; `--help` fits a
+screen; `create-profile` no longer activates what it names; undo entries say
+which change they are; the product says **toolset** in every sentence a
+person reads; `init` targets the CLIs that actually contributed config
+instead of every binary on `PATH`; and `apply` reports what moved instead of
+reprinting the files.
+
+It also adds the four things a first-time user reached for and did not find:
+a **troubleshooting page and an FAQ**, **shell completions**, `doctor
+--probe` to prove a rendered server actually starts, and a **tiered adapter
+support matrix** that says which of the thirteen adapters are exercised by
+CI and which are best-effort. The CLI is now stated plainly as the primary
+surface and the launch channel, the Homebrew formula is generated from the
+release's own checksums rather than checked in and stale, and `agentstack
+self update` gives the binary an upgrade path.
+
+Security: `doctor --live` no longer contacts an untrusted repository's
+servers, and an independent line-by-line review of the consent/grant path
+and the workflow interpreter closed eleven findings. **Consent digest v3
+means every trusted project reads as `Changed` once after upgrading —
+re-review with `agentstack trust`.**
 
 ### Security
 
@@ -122,7 +150,7 @@ findings and two interpreter findings. All are closed:
 - **`--version` says which build you have**: the sandbox backend is a
   compile-time option, so a release binary and a plain `cargo build --release`
   used to be indistinguishable while having different capabilities. Now
-  `agentstack --version` prints `agentstack 0.15.0 (sandbox: yes|no)`,
+  `agentstack --version` prints `agentstack 0.16.0 (sandbox: yes|no)`,
   `agentstack doctor` repeats it in **Adapters & CLIs**, and `run --sandbox` on
   a build without it names the real cause — compiled without the feature —
   instead of reading like a Docker problem.
@@ -236,8 +264,42 @@ findings and two interpreter findings. All are closed:
 - Witnesses: end-to-end preview→edit→apply race tests for both consent
   bindings, and a parity test proving the t3code panel's fixed argv and the
   direct CLI journey produce byte-identical files.
+- **The landing page leads with the product.** The hero's right half was a
+  decorative logo tile and the install command was two screens down; the
+  recorded first-value run and the `curl` line now sit above the fold
+  together. This is a tool whose value is visible — two configs converging, a
+  clean `doctor`, a byte-perfect restore — and the recording that shows it was
+  buried below the fold.
+- **A pinned toolchain (`rust-toolchain.toml`) and an MSRV job.** `fmt` and
+  `clippy` output moves between compiler releases, so a floating `stable` made
+  "the tree is formatted" a claim about whichever compiler ran that week.
+- **Supply-chain gates.** `deny.toml` plus a weekly `cargo deny` run
+  (advisories, licences, sources, banned crates) and a CycloneDX SBOM. An
+  advisory filed against a dependency that was fine when it was added is not
+  something a merge gate alone can catch.
+- **Bug reports can attach `doctor --json`.** It carries the detected CLIs,
+  every check and verdict, drift, trust state and the build's feature set — most
+  of what triage would otherwise ask for one question at a time.
 
 ### Fixed
+
+- **The declared minimum Rust version was wrong.** `rust-version` said
+  `1.80`; the workspace has not built on it for some time — `boa_engine`
+  requires 1.88 and several transitive crates need an edition-2024 Cargo, so
+  the resolver fails outright. It now says `1.88`, and CI's new `msrv` job
+  checks the claim on every push rather than trusting it. A build claim
+  nobody had verified is the same defect class the enforcement docs exist to
+  prevent, pointed at the build instead of at security.
+- **Two advisories cleared out of the lockfile**: `crossbeam-epoch` 0.9.18 →
+  0.9.20 (RUSTSEC-2026-0204, invalid pointer dereference; reached only through
+  dev-dependencies, so no shipped binary contained it) and `anyhow` 1.0.102 →
+  1.0.104 (RUSTSEC-2026-0190, unsoundness in `Error::downcast_mut`).
+- **Five clippy lints a warm build cache had been hiding.** Incremental clippy
+  reused cached results for the CLI crate, so lints a toolchain update
+  introduced never re-ran locally and would have failed CI on a cold checkout.
+  Bumping every crate version forced the re-analysis that found them
+  (`unnecessary_map_or` ×3, `manual_is_multiple_of`, `manual_repeat_n`). All
+  are mechanical rewrites with no behavior change.
 
 - **The library trash can no longer be tricked into serving content from
   outside the library.** F22's first fix guarded the destination — a plain
