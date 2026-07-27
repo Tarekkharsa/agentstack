@@ -113,7 +113,7 @@ its servers and materializes its skills, and they stay until you change them.
 `agentstack session start <name>` is the temporary form: the same activation,
 but `agentstack session end` puts every file back.
 
-Naming a toolset does not activate it. `agentstack create-profile` writes the
+Naming a toolset does not activate it. `agentstack toolset create` writes the
 manifest entry and re-locks, and renders nothing at all — activation is always
 a separate, explicit step. More:
 [name a toolset](howto/name-a-toolset.md).

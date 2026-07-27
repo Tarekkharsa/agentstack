@@ -313,8 +313,8 @@ agentstack apply --write</code></pre>
 agentstack adopt --write     # the disk is right: pull the edit into the manifest
 agentstack apply --write     # the manifest is right: re-render over the disk</code></pre>
 <p><code>diff</code> reports the same comparison <code>doctor</code> does, so the two never disagree.</p>
-<p><strong><code>Claude Code    edited on disk since last apply ↳ review: agentstack diff · keep the hand-edit: agentstack adopt</code></strong></p>
-<p>Someone (or another tool) changed the region agentstack manages. <code>adopt</code> pulls that change back into the manifest so it survives the next apply; <code>apply --write</code> throws it away and re-renders.</p>
+<p><strong><code>Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack diff · adopt the on-disk version: agentstack adopt</code></strong></p>
+<p>The region agentstack manages changed since its last write. <code>doctor</code> states the fact without guessing the cause — a hand-edit is the common one, but a session that ended onto a stale baseline reaches the same state, so it does not accuse you of editing. <code>agentstack diff</code> shows what moved and labels each entry <code>managed</code>, <code>foreign (kept)</code>, or <code>hand-edited</code>. Then pick a side: <code>adopt</code> pulls the on-disk version back into the manifest so it survives the next apply; <code>apply --write</code> throws it away and re-renders.</p>
 <p><strong><code>Claude Code    kept &lt;names&gt; — applied by another manifest ↳ keep them: agentstack adopt · prune them: agentstack apply --prune-foreign</code></strong></p>
 <p><strong>Foreign</strong> entries: written by a <em>different</em> project's manifest into the same global file. <code>apply</code> keeps them by default — this is context, not a defect. Removing them takes the explicit flag, because they are somebody else's servers.</p>
 <p><strong><code>Claude Code    would REMOVE &lt;names&gt; ↳ keep them: agentstack adopt · prune them: agentstack apply --write</code></strong></p>
@@ -373,11 +373,10 @@ agentstack restore 18c634a4 --write # undo one by its id prefix</code></pre>
 <p>The ledger looks like this:</p>
 <pre class="block"><code>Recorded changes (newest first):
 
-  18c634a4  20s ago  project  1 file · Claude Code
+  18c6358f  20s ago  project  apply   1 file · Claude Code
 
 Undo one with: agentstack restore &lt;id&gt; --write (or --last for the newest)</code></pre>
-<p><strong><code>error: unexpected argument '--list' found</code></strong></p>
-<p>There is no <code>--list</code> flag. Bare <code>agentstack restore</code> <em>is</em> the list.</p>
+<p>Each row names the operation that wrote it — <code>init</code>, <code>apply</code>, <code>session start 'backend'</code> — so three otherwise identical rows can be told apart. <code>agentstack restore --list</code> is an alias for the bare form, since that is what most people type.</p>
 <p><strong>Restoring a config that a tool broke, not agentstack</strong></p>
 <pre class="block"><code>agentstack restore claude-code</code></pre>
 <p>That is the fallback path: one adapter's config from its single-slot backup, rather than a recorded change.</p>

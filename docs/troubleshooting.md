@@ -186,11 +186,15 @@ agentstack apply --write     # the manifest is right: re-render over the disk
 
 `diff` reports the same comparison `doctor` does, so the two never disagree.
 
-**`Claude Code    edited on disk since last apply ↳ review: agentstack diff · keep the hand-edit: agentstack adopt`**
+**`Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack diff · adopt the on-disk version: agentstack adopt`**
 
-Someone (or another tool) changed the region agentstack manages. `adopt` pulls
-that change back into the manifest so it survives the next apply; `apply
---write` throws it away and re-renders.
+The region agentstack manages changed since its last write. `doctor` states the
+fact without guessing the cause — a hand-edit is the common one, but a session
+that ended onto a stale baseline reaches the same state, so it does not accuse
+you of editing. `agentstack diff` shows what moved and labels each entry
+`managed`, `foreign (kept)`, or `hand-edited`. Then pick a side: `adopt` pulls
+the on-disk version back into the manifest so it survives the next apply;
+`apply --write` throws it away and re-renders.
 
 **`Claude Code    kept <names> — applied by another manifest ↳ keep them: agentstack adopt · prune them: agentstack apply --prune-foreign`**
 
@@ -349,14 +353,15 @@ The ledger looks like this:
 ```text
 Recorded changes (newest first):
 
-  18c634a4  20s ago  project  1 file · Claude Code
+  18c6358f  20s ago  project  apply   1 file · Claude Code
 
 Undo one with: agentstack restore <id> --write (or --last for the newest)
 ```
 
-**`error: unexpected argument '--list' found`**
-
-There is no `--list` flag. Bare `agentstack restore` *is* the list.
+Each row names the operation that wrote it — `init`, `apply`, `session start
+'backend'` — so three otherwise identical rows can be told apart. `agentstack
+restore --list` is an alias for the bare form, since that is what most people
+type.
 
 **Restoring a config that a tool broke, not agentstack**
 
