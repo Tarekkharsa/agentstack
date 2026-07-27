@@ -20,11 +20,13 @@
 //!    only when Clap declares a positional argument; this catches shapes such
 //!    as the retired `proxy start`, not just nonexistent top-level verbs. The
 //!    generator check above only concerns the inventory region, not free prose.
-//! 3. `visible_help_says_toolset` / `docs_prose_say_toolset` — the vocabulary
-//!    gate. One concept, one word: the product calls a named subset of your
-//!    setup a **toolset** everywhere a person reads it. "Profile" survives only
-//!    as file format and wire contract (`[profiles.<name>]`, the JSON fields,
-//!    the frozen panel argv), which stay spelled that way on purpose.
+//! 3. `visible_help_says_toolset` / `docs_prose_say_toolset` /
+//!    `authored_html_pages_say_toolset` — the vocabulary gate, on all three
+//!    surfaces a person reads: the visible clap tree, Markdown prose, and the
+//!    hand-authored site pages no generator would ever rewrite. One concept,
+//!    one word: a named subset of your setup is a **toolset**. "Profile"
+//!    survives only as file format and wire contract (`[profiles.<name>]`, the
+//!    JSON fields, the frozen panel argv), spelled that way on purpose.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -852,5 +854,191 @@ fn action_default_binary_matches_this_release() {
         default,
         format!("v{}", env!("CARGO_PKG_VERSION")),
         "a pinned action release must install its matching binary by default"
+    );
+}
+
+// ------------------------------------------------- authored-page vocabulary --
+
+/// Output paths (relative to `docs/`) of every page `tools/make-docs-pages.py`
+/// compiles from Markdown.
+///
+/// Parsed from the script's `PAGES` list at test time rather than duplicated
+/// here. That inversion is the robust direction: the authored set is then
+/// *everything else* under `docs/`, so a brand-new hand-written page is
+/// covered by the vocabulary gate the moment it lands, with nobody having to
+/// remember to enroll it. Hardcoding the authored six would silently fail open
+/// on the seventh. Compiled pages are excluded because editing them is a
+/// no-op — the generator overwrites them — so their vocabulary has to be
+/// fixed in the `.md` source instead, where the existing Markdown prose gate
+/// already applies.
+fn compiled_html_pages(root: &Path) -> HashSet<String> {
+    let script = std::fs::read_to_string(root.join("tools/make-docs-pages.py"))
+        .expect("tools/make-docs-pages.py readable");
+    let list = script
+        .split_once("PAGES = [")
+        .map(|(_, tail)| tail)
+        .and_then(|tail| tail.split_once("\n]"))
+        .map(|(body, _)| body)
+        .expect("make-docs-pages.py must keep its `PAGES = [` ... `\n]` literal");
+
+    // Each entry is ("<src>.md", "<out>.html", "<sidebar key>"); take the
+    // middle field. A plain quote-split keeps this free of a regex dependency.
+    let mut out = HashSet::new();
+    for line in list.lines() {
+        let fields: Vec<&str> = line.split('"').collect();
+        // ["    (", src, ", ", out, ", ", key, "),"] → quoted fields are odd indices.
+        if fields.len() >= 4 {
+            out.insert(fields[3].to_string());
+        }
+    }
+    assert!(
+        out.contains("concepts.html") && out.contains("howto/undo.html"),
+        "PAGES parse produced an implausible set — did the literal's shape change? got {out:?}"
+    );
+    out
+}
+
+/// Every hand-authored HTML page under `docs/`: the whole tree minus the
+/// compiled outputs, minus pure design assets, minus redirect stubs.
+fn authored_html_pages(root: &Path) -> Vec<PathBuf> {
+    let compiled = compiled_html_pages(root);
+    let docs = root.join("docs");
+    let mut found = Vec::new();
+    collect_html(&docs, &mut found);
+
+    let mut pages: Vec<PathBuf> = found
+        .into_iter()
+        .filter(|p| {
+            let rel = p.strip_prefix(&docs).unwrap().to_string_lossy().to_string();
+            // `design/` and `theme/` hold brand mockups and the OG card, not
+            // documentation prose.
+            if rel.starts_with("design/") || rel.starts_with("theme/") {
+                return false;
+            }
+            if compiled.contains(&rel) {
+                return false;
+            }
+            let content = std::fs::read_to_string(p).expect("readable html doc");
+            !content.contains(r#"http-equiv="refresh""#) // redirect stub
+        })
+        .collect();
+    pages.sort();
+    assert!(
+        pages.iter().any(|p| p.ends_with("index.html")),
+        "the landing page must be in the authored set"
+    );
+    pages
+}
+
+fn collect_html(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries {
+        let path = entry.expect("readable dir entry").path();
+        if path.is_dir() {
+            collect_html(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("html") {
+            out.push(path);
+        }
+    }
+}
+
+/// Byte ranges of every `style="..."` attribute value. These pages carry heavy
+/// inline CSS; a property or custom-property name is not prose and must never
+/// trip the vocabulary gate.
+fn style_attr_spans(content: &str) -> Vec<(usize, usize)> {
+    let lower = content.to_ascii_lowercase();
+    let mut spans = Vec::new();
+    let mut from = 0usize;
+    while let Some(rel) = lower[from..].find("style=\"") {
+        let open = from + rel + "style=\"".len();
+        match content[open..].find('"') {
+            Some(len) => {
+                spans.push((open, open + len));
+                from = open + len + 1;
+            }
+            None => break, // unterminated attribute; nothing sane to skip
+        }
+    }
+    spans
+}
+
+/// Substrings in which "profile" is a frozen *identifier* rather than a word
+/// of prose. These are contracts we do not own the spelling of, so the gate
+/// must let them through wherever they appear.
+const PROFILE_IDENTIFIERS: &[&str] = &[
+    // The manifest table key. The concept was renamed; the TOML key was not.
+    "[profiles.",
+    // The MCP wire field, e.g. `agentstack_lease_open({ "profile": "backend" })`.
+    "\"profile\"",
+    // Panel/MCP verb names in the fixed-argv contract t3code drives.
+    "create-profile",
+    "use-profile",
+    "_create_profile",
+    // The flag as the fixed-argv panel verbs still spell it. On VISIBLE
+    // commands the long form is now `--toolset`, with `--profile` kept as a
+    // working alias — so prose showing a visible command should say
+    // `--toolset`, and this entry exists for the hidden panel contract only.
+    "--profile",
+    // A real directory (`examples/mcp-profile-lease/`), wired into CI.
+    "mcp-profile-lease",
+];
+
+/// Byte ranges covered by any [`PROFILE_IDENTIFIERS`] occurrence.
+fn identifier_spans(content: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    for needle in PROFILE_IDENTIFIERS {
+        let mut from = 0usize;
+        while let Some(rel) = content[from..].find(needle) {
+            let start = from + rel;
+            spans.push((start, start + needle.len()));
+            from = start + needle.len();
+        }
+    }
+    spans
+}
+
+#[test]
+fn authored_html_pages_say_toolset() {
+    let root = repo_root();
+    let mut violations: Vec<String> = Vec::new();
+
+    for path in authored_html_pages(&root) {
+        let content = std::fs::read_to_string(&path).expect("readable html doc");
+        let lower = content.to_ascii_lowercase();
+
+        // Regions where "profile" is never prose: rendered code, inline CSS,
+        // and the frozen identifiers above.
+        let mut skip = html_code_spans(&content);
+        skip.extend(style_attr_spans(&content));
+        skip.extend(identifier_spans(&content));
+
+        let display = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+
+        for (pos, _) in lower.match_indices("profile") {
+            if in_any_span(pos, &skip) {
+                continue;
+            }
+            violations.push(format!(
+                "{display}:{} — {}",
+                line_number(&content, pos),
+                snippet_for_line(&content, pos)
+            ));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "hand-authored site pages must say \"toolset\", not \"profile\" — one \
+         concept, one word. Rewrite the prose below (a frozen identifier such \
+         as the `[profiles.*]` TOML key, the `\"profile\"` MCP wire field, the \
+         `--profile` flag, or a `*-profile` panel verb belongs in \
+         PROFILE_IDENTIFIERS instead):\n{}",
+        violations.join("\n")
     );
 }

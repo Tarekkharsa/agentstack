@@ -114,7 +114,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
             <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg></div>
             <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Switching tasks pollutes shared files</div>
           </div>
-          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Profiles select a task-specific toolset. Temporary sessions activate it and restore the previous native configuration afterward.</div>
+          <div class="card-body" style="font-size:0.95rem;line-height:1.6">A toolset selects the servers and skills one task needs. Temporary sessions activate it and restore the previous native configuration afterward.</div>
           <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
             <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-2-700);font-weight:700">closed by</span>
             <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack session start</code>
@@ -147,11 +147,11 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
 
     <div style="margin-top:calc(var(--space-8) * 1.5)">
       <h2 style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">One lifecycle, one source of truth</h2>
-      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:620px">Bring in what you already use, organize it into profiles, activate the right toolset, diagnose changes and recover without rebuilding native files by hand.</p>
+      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:620px">Bring in what you already use, organize it into toolsets, activate the right one, diagnose changes and recover without rebuilding native files by hand.</p>
       <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-8)">
         <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">import</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
         <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">manifest</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">profile</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
+        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">toolset</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
         <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">activate</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
         <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">doctor</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
         <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-text);color:var(--color-bg);border:1.5px solid var(--color-text)">restore</span><span style="color:var(--color-accent);font-weight:700"></span></span>
@@ -165,7 +165,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
           <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">2</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Switch</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Use profiles and temporary sessions for different projects and tasks.</div></div>
+          <div><div style="font-weight:700;margin-bottom:2px">Switch</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Use toolsets and temporary sessions for different projects and tasks.</div></div>
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
           <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">3</div>

@@ -300,7 +300,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     <h1 class="lesson">One governed stack across projects and machines</h1>
     <p class="lede">Three tools carry your setup beyond a single project:</p>
     <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
-      <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">profiles</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Named subsets of the manifest ("backend", "design"). <code class="sm">use &lt;profile&gt; --write</code> materializes only that profile's skills and prunes the rest it owns.</span></div>
+      <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">toolsets</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Named subsets of the manifest ("backend", "design"). <code class="sm">use &lt;toolset&gt; --write</code> materializes only that toolset's skills and prunes the rest it owns.</span></div>
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">library</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Your central home at <code class="sm">~/.agentstack/lib/</code> — skills and server definitions projects reference <em>by name</em> instead of copying. <code class="sm">lib sync</code> carries it across machines.</span></div>
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">search + add</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">One search over your library, the bundled catalog, and the official MCP Registry. <code class="sm">add from &lt;id&gt; --write</code> adds it to the manifest with its secrets lifted to <code class="sm">${REF}</code>s; one <code class="sm">apply --write</code> then renders it to <strong>all your CLIs at once</strong>. Skills also install from any repo: <code class="sm">add skill owner/repo --write</code>.</span></div>
     </div>
@@ -432,12 +432,12 @@ var TERM={
   scale:[
     {cmd:'agentstack search postgres',out:[['[library]   pg-tools        your central library  (~/.agentstack/lib/)',W],['[registry]  postgres-mcp    registry.modelcontextprotocol.io',W],['[catalog]   sql-skill       bundled catalog',W]]},
     {cmd:'agentstack add from postgres-mcp --write',out:[['✓ resolved from the official MCP Registry',G],['🔑 secret lifted → ${DATABASE_URL}',A],['✓ added to .agentstack/agentstack.toml',G],['next: agentstack apply --write renders it to all 4 CLIs at once',D]]},
-    {cmd:'agentstack use backend --write',out:[['✓ materialized 3 skill(s) for profile "backend"',G],['✓ pruned 2 skill(s) owned by other profiles  (hand-made dirs untouched)',D]]}
+    {cmd:'agentstack use backend --write',out:[['✓ materialized 3 skill(s) for toolset "backend"',G],['✓ pruned 2 skill(s) owned by other toolsets  (hand-made dirs untouched)',D]]}
   ],
   run:[
     {cmd:'agentstack run claude-code --locked',out:[['┌ run r-6c19 · claude-code',W],['│ posture  HOST / PROTECTED',A],['│ gates    trust ✓ · lock ✓ · policy admission ✓ · tool surface frozen',D],['└ launching on host…',W]]},
     {cmd:'agentstack run claude-code --lockdown',out:[['┌ run r-7f3a · claude-code',W],['│ posture  LOCKDOWN / ENFORCED',G],['│ egress   only via audited proxy — no direct route out of the container',D],['│ policy   machine ∩ project · 14 tool rules · 3 egress hosts',D],['└ launching in container…',W]]},
-    {cmd:'agentstack kill r-7f3a',out:[['✓ stopped run r-7f3a and reverted the profile it owned',G]]}
+    {cmd:'agentstack kill r-7f3a',out:[['✓ stopped run r-7f3a and reverted the toolset it owned',G]]}
   ],
   report:[
     {cmd:'agentstack report runs',out:[['r-7f3a  claude-code  LOCKDOWN/ENFORCED  12m   38 calls  ok',W],['r-6c19  claude-code  HOST/PROTECTED     41m  112 calls  ok',W],['r-51b0  codex        HOST/ADVISORY       8m    9 calls  ok',W]]},
@@ -449,7 +449,7 @@ var TERM={
 };
 /* lesson 10 terminal reuses its own command set */
 TERM.undo=[
-  {cmd:'agentstack session start backend',out:[['✓ session started — rendered profile "backend" for now',G],['clean-at-rest rhythm: files exist only until session end',D]]},
+  {cmd:'agentstack session start backend',out:[['✓ session started — rendered toolset "backend" for now',G],['clean-at-rest rhythm: files exist only until session end',D]]},
   {cmd:'agentstack session end',out:[['✓ session ended — rendered files reverted, repo pristine again',G]]},
   {cmd:'agentstack sign',out:[['✓ lockfile signed — agentstack.lock.sig (detached ed25519)',G],['public key (64 hex — publish it, e.g. commit as team.pub): 9b1de40c…',D]]},
   {cmd:'agentstack verify --pubkey $(cat team.pub)',out:[['✓ signature valid — lockfile matches the maintainer’s key',G]]},
@@ -537,7 +537,7 @@ var TERMS=[
   ['gateway','the broker in the middle','AgentStack’s in-process broker. Instead of each CLI talking to MCP servers directly, calls route through the gateway, where policy is checked and every call is logged. Only gateway-routed ("brokered") calls are policy-checked and audited.'],
   ['trust','your local approval','Your approval that a project may auto-load on this machine, pinned to a SHA-256 consent digest of manifest + overlay + lockfile. Until you trust, a clone is inert. Change any pinned byte — a git pull, a re-lock — and it drops back to untrusted.'],
   ['policy','machine ∩ project','Rules fencing tools, egress, secrets, and filesystem paths. Your machine policy is checked before any project’s on every brokered call; the effective policy is the intersection, so a repo can only narrow your rules, never loosen them.'],
-  ['profile','a named subset','A named subset of the manifest ("backend", "design") you activate together with use <profile>. A manifest with no profiles activates its whole inline set — you only name one when you have several.'],
+  ['toolset','a named subset','A named subset of the manifest ("backend", "design") you activate together with use <toolset>. A manifest with no toolsets activates its whole inline set — you only name one when you have several.'],
   ['posture','how strongly it’s enforced','The per-run label printed on the run banner: HOST/ADVISORY, HOST/PROTECTED, SANDBOX/PROXIED, or LOCKDOWN/ENFORCED — what the effective policy is actually enforced by, not just what it says.']
 ];
 function renderTermCards(){
@@ -570,7 +570,7 @@ var MODE={
     lines:[['Preview: 1 server → 4 targets  (.mcp.json, .codex/config.toml, .gemini/settings.json, opencode.json)','w'],['Proceed? [Y/n] y','a'],['✓ apply --write — rendered to 4 target(s)','g'],['✓ skills activated · doctor: all green','g']],
     note:'The render path: preview → confirm → apply --write → activate skills → doctor. Files sit ready on disk the moment a CLI starts.'},
   clean:{name:'clean-at-rest',desc:'repo stays pristine between sessions — files exist only inside session start / session end',
-    lines:[['✓ agentstack lock — name refs pinned, nothing rendered','g'],['git status → clean','w'],['next: agentstack session start <profile>   # renders for one session','d'],['      agentstack session end             # reverts every file','d']],
+    lines:[['✓ agentstack lock — name refs pinned, nothing rendered','g'],['git status → clean','w'],['next: agentstack session start <toolset>   # renders for one session','d'],['      agentstack session end             # reverts every file','d']],
     note:'Nothing is rendered now. The wizard teaches the session rhythm instead: capabilities arrive with session start and revert on session end.'},
   zero:{name:'zero-files',desc:'nothing on disk — the gateway serves each trusted repo’s stack live (CLI must speak MCP)',
     lines:[['✓ agentstack lock — pinned, nothing rendered','g'],['Register the gateway in your CLIs? [Y/n] y','a'],['✓ gateway connect --all --write — 4 CLIs registered','g'],['→ finish with:  agentstack trust .','w']],
@@ -761,7 +761,7 @@ var CHEATS=[
   ['gateway connect','register the gateway once per CLI (zero-files mode)'],
   ['trust . / --list / --revoke','review a repo, pin its digest; any edit re-gates it'],
   ['search / add from <id> --write','find in library + catalog + MCP Registry; apply --write renders it everywhere'],
-  ['use <profile> --write','materialize one named subset of the manifest'],
+  ['use <toolset> --write','materialize one named subset of the manifest'],
   ['run --locked | --sandbox | --lockdown','climb the posture ladder to kernel-enforced'],
   ['report runs | calls · optimize · explain','flight recorder, audit log, evidence-backed fixes, vet-first'],
   ['restore --last --write','the one undo verb for every recorded write']];

@@ -95,7 +95,7 @@
           <a href="#r4" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">4</span><span>An HTTP server with auth</span></a>
           <a href="#r5" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">5</span><span>A native key for one CLI</span></a>
           <a href="#r6" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">6</span><span>Add skills</span></a>
-          <a href="#r7" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">7</span><span>Task-specific profiles</span></a>
+          <a href="#r7" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">7</span><span>Task-specific toolsets</span></a>
           <a href="#r8" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">8</span><span>Share house rules across CLIs</span></a>
           <a href="#r25" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">25</span><span>Native extensions</span></a>
           <a href="#r9" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">9</span><span>The everyday loop</span></a>
@@ -316,7 +316,7 @@
           <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">6</span>
           <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Add skills</div>
         </div>
-        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Skills are reusable instruction/tool bundles. Point at a local directory — relative paths anchor at the manifest's directory (.agentstack/). Skills activate through profiles (next), not apply.</div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Skills are reusable instruction/tool bundles. Point at a local directory — relative paths anchor at the manifest's directory (.agentstack/). Skills activate through toolsets (next), not apply.</div>
         <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
           <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
             <div style="white-space:pre"><span style="color:var(--term-text)">[skills.sql-review]</span><span style="color:var(--term-muted)"></span></div>
@@ -329,13 +329,13 @@
       <div id="r7" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
         <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
           <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">7</span>
-          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Task-specific profiles</div>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Task-specific toolsets</div>
         </div>
-        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">A profile is a named bundle of servers + skills you switch on for a kind of work. Fewer tools on the wire means fewer tokens billed every turn (see §21).</div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">A toolset is a named bundle of servers + skills you switch on for a kind of work. Fewer tools on the wire means fewer tokens billed every turn (see §21).</div>
         <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
           <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">load only what the task needs</div>
           <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
-            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">profile: backend</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">github, kibana + sql-review</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">toolset: backend</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">github, kibana + sql-review</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
             <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">use backend --write</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">materialize</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
             <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">loaded</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">just backend's set — others stay off</div></div></div>
           </div>
@@ -357,7 +357,7 @@
             <button data-copy="agentstack use backend --write" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
           </div>
           <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
-            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack use backend --write</span><span style="color:var(--term-muted)">   # activate the backend profile</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack use backend --write</span><span style="color:var(--term-muted)">   # activate the backend toolset</span></div>
           </div>
         </div>
         <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Load only what the task needs — others stay off.</div>
@@ -441,7 +441,7 @@
           </div>
           <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
             <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack lib add-server github --file github.toml --write</span><span style="color:var(--term-muted)">   # once, machine-wide, content-scanned</span></div>
-            <div style="white-space:pre"><span style="color:var(--term-text)">servers = ["github"]</span><span style="color:var(--term-muted)">   # any project: reference it by name in a profile, then agentstack lock</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">servers = ["github"]</span><span style="color:var(--term-muted)">   # any project: reference it by name in a toolset, then agentstack lock</span></div>
           </div>
         </div>
       </div>
@@ -651,7 +651,7 @@
             <div style="white-space:pre"><span style="color:var(--term-bad)">agent → demo.secret_read  ✗ denied  [policy.tools]</span><span style="color:var(--term-muted)"></span></div>
           </div>
         </div>
-        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Every brokered call lands in ~/.agentstack/audit/calls.jsonl. After trust, an agent can fence one MCP connection to a profile with agentstack_lease_open — no .mcp.json, skill folder, or session entry written; lease_freeze proposes a manifest profile from what the task actually used.</div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Every brokered call lands in ~/.agentstack/audit/calls.jsonl. After trust, an agent can fence one MCP connection to a toolset with agentstack_lease_open — no .mcp.json, skill folder, or session entry written; lease_freeze proposes a manifest toolset from what the task actually used.</div>
       </div>
 
       <!-- Recipe 18 -->
@@ -741,10 +741,10 @@
         </div>
         <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
           <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
-            <button data-copy="agentstack run claude-code --sandbox --lockdown --profile backend" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+            <button data-copy="agentstack run claude-code --sandbox --lockdown --toolset backend" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
           </div>
           <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
-            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack run claude-code --sandbox --lockdown --profile backend</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack run claude-code --sandbox --lockdown --toolset backend</span><span style="color:var(--term-muted)"></span></div>
             <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack report run &lt;run-id&gt;</span><span style="color:var(--term-muted)">   # the run's flight recorder: every egress decision</span></div>
           </div>
         </div>
@@ -826,10 +826,10 @@
             <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack report wire</span><span style="color:var(--term-muted)">   # ranks tokens/turn vs. how often each was called</span></div>
           </div>
         </div>
-        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> A server that's expensive but never used is flagged drop / lazy — data-driven pruning that closes the loop with the profiles you manage.</div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> A server that's expensive but never used is flagged drop / lazy — data-driven pruning that closes the loop with the toolsets you manage.</div>
       </div>
 
-      <div class="card" style="background:var(--color-accent-100);margin-top:var(--space-6)"><div class="card-body" style="font-size:0.95rem;line-height:1.6"><strong>Our default recommendation:</strong> for interactive work in an MCP-capable harness, commit the manifest + lock, connect the gateway once, trust each reviewed repo, and open the smallest useful profile as an MCP lease. Choose native rendering only when the harness must read native files; add lockdown when the agent process needs isolation.</div></div>
+      <div class="card" style="background:var(--color-accent-100);margin-top:var(--space-6)"><div class="card-body" style="font-size:0.95rem;line-height:1.6"><strong>Our default recommendation:</strong> for interactive work in an MCP-capable harness, commit the manifest + lock, connect the gateway once, trust each reviewed repo, and open the smallest useful toolset as an MCP lease. Choose native rendering only when the harness must read native files; add lockdown when the agent process needs isolation.</div></div>
     </div>
   </div>
 

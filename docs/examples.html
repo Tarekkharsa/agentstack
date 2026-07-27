@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentStack by example — from a one-line manifest to sandboxed execution</title>
-<meta name="description" content="Every capability by example, simplest to most advanced: manifests, secrets, skills, profiles, the tool firewall, the trust gate, the central library, sandboxed lockdown runs, and governed TypeScript execution.">
+<meta name="description" content="Every capability by example, simplest to most advanced: manifests, secrets, skills, toolsets, the tool firewall, the trust gate, the central library, sandboxed lockdown runs, and governed TypeScript execution.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
@@ -154,7 +154,7 @@
       <h2 id="library" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">sandbox · central library</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-kicker">by name, not by copy</div>
-        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)"><code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">central-demo/</code> is <strong>just a manifest</strong> — a profile referencing a server + skill by name, no inline definitions, no capability files. Both resolve from the central library at <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">~/.agentstack/lib/</code>. Walk the flow:</div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)"><code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">central-demo/</code> is <strong>just a manifest</strong> — a toolset referencing a server + skill by name, no inline definitions, no capability files. Both resolve from the central library at <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">~/.agentstack/lib/</code>. Walk the flow:</div>
         <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-3)">
           <span id="lib-crumbs" style="display:contents"></span>
           <span style="flex:1"></span>
@@ -177,7 +177,7 @@
       <h2 id="lease" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">mcp-profile-lease</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-kicker">the zero-file workflow, proven</div>
-        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)">One real <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">agentstack mcp</code> stdio process: the agent opens the <em>backend</em> profile, loads its skill, freezes what it observed into a new profile, and closes — asserting that <strong>none</strong> of the native artifacts (.mcp.json, .claude/skills/, sessions.json) were ever created. Step through the lifecycle — these are MCP tool calls, not shell commands:</div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)">One real <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">agentstack mcp</code> stdio process: the agent opens the <em>backend</em> toolset, loads its skill, freezes what it observed into a new toolset, and closes — asserting that <strong>none</strong> of the native artifacts (.mcp.json, .claude/skills/, sessions.json) were ever created. Step through the lifecycle — these are MCP tool calls, not shell commands:</div>
         <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-3)">
           <span id="le-crumbs" style="display:contents"></span>
           <span style="flex:1"></span>
@@ -315,8 +315,8 @@
     ],
     le: [
       { name: 'open', lines: [['agentstack_lease_open({ "profile": "backend" })', 'w'], ['✓ lease active — this one connection now sees only backend’s servers', 'g']], note: 'An MCP tool call by the agent, not a shell command. Process-local: another terminal cannot see it.' },
-      { name: 'load', lines: [['agentstack_list_loadable({})  →  sql-review (+ the using-agentstack manual)', 'w'], ['agentstack_load({ "name": "sql-review", "reason": "review this migration" })', 'w'], ['✓ loaded — first load recorded with its reason', 'g']], note: 'Discovery and loading stay fenced to the leased profile; the reason lands in the in-memory trail.' },
-      { name: 'freeze', lines: [['agentstack_lease_freeze({ "name": "backend-observed" })', 'w'], ['✓ manifest-only proposal: leased servers + skills actually loaded → new profile', 'g'], ['human side:  review the edit, then  $ agentstack lock', 'y']], note: 'Freeze converts observed usage into a reviewable profile — the agent proposes, the human locks.' },
+      { name: 'load', lines: [['agentstack_list_loadable({})  →  sql-review (+ the using-agentstack manual)', 'w'], ['agentstack_load({ "name": "sql-review", "reason": "review this migration" })', 'w'], ['✓ loaded — first load recorded with its reason', 'g']], note: 'Discovery and loading stay fenced to the leased toolset; the reason lands in the in-memory trail.' },
+      { name: 'freeze', lines: [['agentstack_lease_freeze({ "name": "backend-observed" })', 'w'], ['✓ manifest-only proposal: leased servers + skills actually loaded → new toolset', 'g'], ['human side:  review the edit, then  $ agentstack lock', 'y']], note: 'Freeze converts observed usage into a reviewable toolset — the agent proposes, the human locks.' },
       { name: 'close', lines: [['agentstack_lease_close({})', 'w'], ['✓ closed — nothing to restore', 'g'], ['assert: no .mcp.json · no .claude/skills/ · no sessions.json  →  PASS', 'g']], note: 'A lease never renders native files, so close (or process exit) has no cleanup contract.' }
     ]
   };
@@ -385,7 +385,7 @@
     { name: 'per-cli-instructions', short: 'different instructions per CLI, from one file', detail: 'Instruction targeting: content that reaches only Claude Code vs only Codex from one manifest. Hand-written prose outside the managed region survives every re-render, through the edit → re-lock → re-write loop.' },
     { name: 'policy-intersection', short: 'a repo that tries to loosen policy — and can’t', detail: 'Through the real gateway: a repo allows delete_everything in its own policy, but the machine layer denies it — the tool is invisible to discovery, refused with the machine layer named in the error, and audited in calls.jsonl.' },
     { name: 'restricted-folders', short: 'forbidden folders stay forbidden, across CLI dialects', detail: '[policy.filesystem] deny + guard hooks over a realistic tree (src/, secrets/, infra/prod/, personal-notes/): reads and writes into forbidden folders are blocked across the CLIs’ different hook dialects, allowed paths pass, and every denial is audited.' },
-    { name: 'skills-workout', short: 'both skill paths serve byte-identical content', detail: 'The static render (use --write) and the zero-files MCP lease (lease_open / list_loadable / load) serve byte-identical skill content, profile fencing holds in both, and never-clobber pruning protects hand-made skill folders.' },
+    { name: 'skills-workout', short: 'both skill paths serve byte-identical content', detail: 'The static render (use --write) and the zero-files MCP lease (lease_open / list_loadable / load) serve byte-identical skill content, toolset fencing holds in both, and never-clobber pruning protects hand-made skill folders.' },
     { name: 'locked-run', short: 'the Protected tier, attacked from six angles', detail: '--plan mutates nothing; a clean run --locked freezes the grant and records evidence; the frozen bridge refuses mutating control-plane tools; a tampered artifact fails machine authentication; manifest drift and a one-byte executable edit both refuse before launch; --profile fences the frozen grant.' },
     { name: 'device-onboarding', short: 'the messy-real-machine matrix', detail: 'Zero/one/three CLIs across native formats; inline tokens lifted to ${REF}s (never written back as plaintext); conflicts surfaced instead of silently resolved; hand-written configs and prose survive apply/restore/prune; spaced and unicode paths, legacy layout, non-git dirs, a spaced machine home.' }
   ];

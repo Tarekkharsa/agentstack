@@ -361,8 +361,15 @@ findings and two interpreter findings. All are closed:
 - **User-facing text says "toolset" (F17).** `use`, `session`, `lock`, and
   `kill` describe toolsets in their help; `use --list` says "Declared toolsets"
   and, when there are none, offers the command that names the first one. The
-  manifest table stays `[profiles.*]` and flags keep their names — those are
-  API, and the panel's argv contract pins them.
+  hand-authored site pages now match (H2) — the landing page led with
+  "Profiles select a task-specific toolset", three names for one thing on the
+  first page anyone sees, and `docs.html`, `cookbook.html`, `examples.html`,
+  `start.html` and the tutorial carried the same split. A CI check
+  (`authored_html_pages_say_toolset`) holds the line: it reads the compiled-page
+  list out of `tools/make-docs-pages.py` and lints everything else under
+  `docs/`, so a new authored page is covered the day it lands. The manifest
+  table stays `[profiles.*]` and flags keep their names — those are API, and
+  the panel's argv contract pins them.
 - **A prefix-less consent digest is diagnosed as a format problem, not as
   changed content.** `trust --yes --consented-digest <bare hex>` still refuses
   — the acceptance rule is unchanged — but it no longer claims the manifest or

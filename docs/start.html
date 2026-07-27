@@ -300,7 +300,7 @@ pre.cmd .c { color: var(--term-muted); }
             steps differ per mode, so the walkthrough forks below — this page follows
             <strong>static</strong>, the default. By hand, that flow is
             <code>init</code> → <code>apply --write</code> →
-            <code>use &lt;profile&gt; --write</code>.
+            <code>use &lt;toolset&gt; --write</code>.
           </p>
           <pre class="cmd">agentstack init</pre>
           <p class="expect">You should see</p>
@@ -420,7 +420,7 @@ pre.cmd .c { color: var(--term-muted); }
 <span class="c">  no configs rendered, no skills materialized — that stays `agentstack use --write`.</span>
 
 <span class="c">  · capabilities exist only during a session — the repo stays clean for git:</span>
-<span class="c">    </span>agentstack session start &lt;profile&gt;
+<span class="c">    </span>agentstack session start &lt;toolset&gt;
 <span class="c">    </span>agentstack session end
 
 <span class="c">Doctor</span>
@@ -434,7 +434,7 @@ pre.cmd .c { color: var(--term-muted); }
               <div class="rhythm">
                 <p class="expect">Your daily rhythm afterwards</p>
                 <p class="muted">
-                  <code>agentstack session start &lt;profile&gt;</code> when you sit
+                  <code>agentstack session start &lt;toolset&gt;</code> when you sit
                   down; <code>agentstack session end</code> when you're done. Nothing
                   generated is left on disk in between.
                 </p>
@@ -490,7 +490,7 @@ pre.cmd .c { color: var(--term-muted); }
             placeholders (safe to commit); a native config whose format needs the
             real value receives it resolved at write time — the rendered files sit
             behind a managed gitignore. Skills activate through
-            profiles, not <code>apply</code> — <code>agentstack use &lt;profile&gt;
+            toolsets, not <code>apply</code> — <code>agentstack use &lt;toolset&gt;
             --write</code> materializes them (<code>apply</code> reminds you).
           </p>
           <pre class="cmd">agentstack apply --write</pre>
@@ -627,10 +627,10 @@ agentstack gateway connect --all --write    <span class="c"># write it into each
             loosen) and lands in <code>~/.agentstack/audit/calls.jsonl</code>.
           </p>
           <div class="callout">
-            <b>Optional: fence one profile, no project files</b>
+            <b>Optional: fence one toolset, no project files</b>
             <p>Inside the agent session, call
               <code>agentstack_lease_open({ "profile": "backend" })</code> — that MCP
-              connection then sees only the profile's servers and loadable skills.
+              connection then sees only the toolset's servers and loadable skills.
               <code>agentstack_lease_status</code> inspects it,
               <code>agentstack_lease_close</code> (or ending the process) drops it;
               it's process-local, nothing to restore.
