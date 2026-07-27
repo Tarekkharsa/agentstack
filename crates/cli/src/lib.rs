@@ -54,6 +54,7 @@ pub mod store;
 pub(crate) mod sys;
 pub mod text;
 pub mod ui_contract;
+pub mod update;
 // The binary calls this before its first print; the module itself stays
 // crate-private so the unsafe surface is reachable only through this fn.
 pub use sys::reset_sigpipe;

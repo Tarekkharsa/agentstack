@@ -89,6 +89,26 @@ cargo build --release                  # add --features sandbox for `run --sandb
 Release binaries ship with sandbox support compiled in; a bare `cargo build` does not — pass
 `--features sandbox` to get `run --sandbox` / `--lockdown`.
 
+### Upgrading
+
+```sh
+agentstack self update           # what a newer release would install; downloads nothing
+agentstack self update --write   # download, verify the sha256, install it
+```
+
+Like every other mutating command it previews by default. The archive is verified against the
+release's published `checksums.txt` **before** it is unpacked or moved into place; a mismatch aborts
+and leaves your existing binary untouched. That proves the transfer, not the provenance of the
+release — for provenance, `gh attestation verify <asset> --repo Tarekkharsa/agentstack`.
+
+A Homebrew install upgrades with `brew upgrade agentstack`, a source build with `cargo build
+--release`, and a binary in a directory you cannot write needs `sudo` — each is detected and
+explained before anything is downloaded.
+
+`agentstack doctor` shows a one-line note when a newer release exists (a note, never a warning:
+it cannot make a healthy setup look unhealthy). The check is cached for 24 hours, never blocks, and
+is silent offline. Turn it off entirely with `AGENTSTACK_NO_UPDATE_CHECK=1`.
+
 ## Grow into it
 
 Start with configuration portability. Add toolsets, sharing, and stronger

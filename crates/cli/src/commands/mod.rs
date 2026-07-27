@@ -31,6 +31,7 @@ pub mod sandbox;
 pub mod search;
 pub mod secret;
 pub mod self_cmd;
+pub mod self_update;
 pub mod session;
 pub mod settings;
 pub mod setup;

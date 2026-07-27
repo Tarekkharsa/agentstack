@@ -311,9 +311,10 @@ Examples:
     #[command(hide = true)]
     Adapters(AdaptersArgs),
 
-    /// Manage this binary's own install: `self link` puts a stable `agentstack`
-    /// on PATH (a symlink, no installer needed); `self which` shows which
-    /// binary a bare `agentstack` runs and flags stale links.
+    /// Manage this binary's own install: `self update` upgrades it to the newest
+    /// published release (checksum-verified); `self link` puts a stable
+    /// `agentstack` on PATH (a symlink, no installer needed); `self which` shows
+    /// which binary a bare `agentstack` runs and flags stale links.
     #[command(name = "self", hide = true)]
     SelfCmd(SelfArgs),
 
@@ -423,11 +424,42 @@ pub enum SelfCommand {
     /// Show what `agentstack` on PATH resolves to vs the binary running now,
     /// flagging stale or broken links (e.g. after a rebuild).
     Which,
+    /// Upgrade this binary to the newest published release: previews what it
+    /// would install, verifies the download against the release's published
+    /// sha256 before anything is unpacked, then swaps it in with `--write`.
+    #[command(after_help = "\
+Replaces the binary you are running with the latest GitHub release. Same shape as
+every other mutating command: it previews by default and only acts on --write.
+
+  agentstack self update            show what a newer release would install
+  agentstack self update --write    download, verify the sha256, install it
+
+The archive is checked against the checksums.txt published with the release
+BEFORE it is unpacked or moved into place. A mismatch aborts and leaves the
+binary you already have byte-for-byte untouched. That proves the transfer, not
+the provenance of the release — for provenance, verify the build attestation:
+`gh attestation verify <asset> --repo Tarekkharsa/agentstack`.
+
+A Homebrew install is handled by `brew upgrade agentstack`, a source build by
+`cargo build --release`, and a binary in a directory you cannot write needs
+`sudo` — each is detected and explained before anything is downloaded.
+
+Set AGENTSTACK_NO_UPDATE_CHECK=1 to stop AgentStack contacting the release
+channel at all (this command and `doctor`'s once-a-day note).")]
+    Update(SelfUpdateArgs),
+
     /// Regenerate the "All commands" inventory in docs/reference.md from the
     /// live clap tree. No flag prints the block; `--write` splices it into the
     /// managed region. A maintainer/CI command, not part of the daily surface.
     #[command(hide = true)]
     Docs(SelfDocsArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct SelfUpdateArgs {
+    /// Download, verify, and install the newer release (else preview only).
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[derive(Args, Debug)]

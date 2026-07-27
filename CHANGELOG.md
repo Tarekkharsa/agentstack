@@ -58,6 +58,27 @@ findings and two interpreter findings. All are closed:
   my API key in the manifest, do I have to commit it, can my teammate use a
   different CLI, do I need Docker, what happens if I uninstall). Both are
   reachable from the sidebar, the docs index, and the README.
+- **`agentstack self update` — an upgrade path (C4b).** Until now a binary you
+  installed stayed at the version you installed, and nothing ever told you a
+  newer one existed. `agentstack self update` previews what the newest release
+  would install and `--write` installs it. **The archive is verified against
+  the `checksums.txt` published with the release before it is unpacked or moved
+  into place**, then swapped in with an atomic rename; a mismatch aborts with
+  both digests and leaves your existing binary byte-for-byte untouched. Stated
+  honestly: archive and checksums share one TLS-authenticated origin, so that
+  proves the integrity of the transfer, not the provenance of the release — the
+  command names `gh attestation verify` for provenance rather than claiming it.
+  The three cases it cannot fix are detected *before anything is downloaded*
+  and answered with a command that works: Homebrew (`brew upgrade`), an
+  unwritable directory (`sudo`), and a platform with no published asset. A
+  source build is refused and pointed at `cargo build --release`.
+- **`agentstack doctor` says when a newer release exists.** One line, as a
+  **note** — it counts in `advisories`, never in `errors`/`warnings`, so it
+  cannot move `state` off `ready` or become the "start with" action. At most
+  one short bounded request per 24 hours, cached in
+  `~/.agentstack/update-check.json`, silent when offline, and backing off for a
+  full day after a failed check rather than re-dialling. Opt out of every
+  release-channel request with `AGENTSTACK_NO_UPDATE_CHECK=1`.
 - **`doctor-advisories-v1`** joins the negotiated `features` list: `doctor
   --json` carries an `advisories` count and section lines can carry
   `level: "advisory"`. A panel that does not know the name renders advisories

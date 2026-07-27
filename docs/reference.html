@@ -674,6 +674,29 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
                                  # no toolset, not rendered anywhere, ≥14d of
                                  # history) and trust grants for deleted dirs</code></pre>
 <p>The contract: <strong>every recommendation carries its evidence</strong> (numbers, window, data source), <strong>the exact command or TOML</strong> to act on it, and <strong>why it is safe or why it needs review</strong>. One stated limit: the audit log only sees gateway-brokered calls — a server rendered into a native config is called directly by the harness, so such servers are never auto-removed on "no calls" evidence alone.</p>
+<h2 id="staying-current-agentstack-self-update">Staying current (<code>agentstack self update</code>)<a class="hlink" href="#staying-current-agentstack-self-update" aria-label="Link to this section">#</a></h2>
+<p>Upgrading the binary is part of the product, not a manual chore. <code>agentstack self update</code> replaces the binary you are running with the newest published release, and <code>agentstack doctor</code> tells you when there is one.</p>
+<pre class="block"><code>agentstack self update              # what a newer release would install; downloads nothing
+agentstack self update --write      # download, verify the sha256, install it</code></pre>
+<p>Same shape as every other mutating command: <strong>it previews by default and only acts on <code>--write</code>.</strong></p>
+<p><strong>The download is verified before it is used.</strong> The release archive is checked against the <code>checksums.txt</code> published with that release <em>before it is unpacked or moved into place</em>, and the new binary is swapped in with an atomic rename. A mismatch aborts, prints both digests, and leaves the binary you already have byte-for-byte untouched — the same guarantee <code>install.sh</code> gives, for the same reason. Be precise about what that proves: the archive and its checksums come from the same TLS-authenticated origin, so this establishes the <strong>integrity of the transfer</strong>, not the provenance of the release. Provenance is a separate, stronger check the command points you at rather than claiming:</p>
+<pre class="block"><code>gh attestation verify agentstack-&lt;target&gt;.tar.gz --repo Tarekkharsa/agentstack</code></pre>
+<p>Three situations the command cannot fix, each detected <strong>before anything is downloaded</strong> and answered with a command that works:</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Situation</th><th>What it tells you</th></tr></thead><tbody>
+<tr><td>Installed by Homebrew</td><td><code>brew upgrade agentstack</code> — replacing the file directly desynchronizes the formula</td></tr>
+<tr><td>Binary in a directory you cannot write</td><td><code>sudo agentstack self update --write</code></td></tr>
+<tr><td>No published asset for your platform</td><td>the releases page, with your OS/arch named</td></tr>
+</tbody></table></div>
+<p>A source build (<code>target/release/agentstack</code>, the <code>self link</code> workflow) is refused too and pointed at <code>git pull &amp;&amp; cargo build --release</code>: downloading a release over somebody's build output would be a surprise, not an upgrade.</p>
+<h3 id="the-version-note-in-doctor">The version note in <code>doctor</code><a class="hlink" href="#the-version-note-in-doctor" aria-label="Link to this section">#</a></h3>
+<p><code>agentstack doctor</code> carries one line when a newer release exists:</p>
+<pre class="block"><code>Updates
+  · AgentStack 0.16.0 is available (you are on 0.15.0) ↳ agentstack self update</code></pre>
+<p>It is a <strong>note</strong>, not a warning: it counts in <code>doctor --json</code>'s <code>advisories</code>, never in <code>errors</code> or <code>warnings</code>, so it cannot move <code>state</code> off <code>ready</code> or become the "start with" next action. A current binary prints no section at all.</p>
+<p>The check is deliberately cheap: at most one short, bounded request per 24 hours, cached in <code>~/.agentstack/update-check.json</code>. It never blocks, and it is silent when you are offline — a failed check backs off for the full day rather than re-dialling on every command. Nothing is checked at all when the running binary is a build-tree binary, which cannot take a downloaded release anyway.</p>
+<p>Opt out of every release-channel request — this command and the note — with:</p>
+<pre class="block"><code>export AGENTSTACK_NO_UPDATE_CHECK=1</code></pre>
 <h2 id="integrations">Integrations<a class="hlink" href="#integrations" aria-label="Link to this section">#</a></h2>
 <p>Graphical surfaces consume the same read-only JSON reports and invoke a closed set of CLI-owned actions; see <a href="integrations.html">Integrations</a>. The AgentStack CLI remains the complete standalone and automation interface.</p>
 <h2 id="part-iii--full-command-reference">Part III — Full command reference<a class="hlink" href="#part-iii--full-command-reference" aria-label="Link to this section">#</a></h2>
@@ -719,7 +742,7 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 <li><strong><code>export</code></strong> _(hidden)_ — Export the manifest (+ lock, + optionally secrets) as an encrypted bundle — flags <code>--output/--secrets/--passphrase</code></li>
 <li><strong><code>import</code></strong> _(hidden)_ — Import an encrypted bundle on a new machine — flags <code>--force/--no-keychain/--passphrase</code></li>
 <li><strong><code>adapters</code></strong> _(hidden)_ — Inspect the available CLI adapters — subcommands <code>list/show/validate</code></li>
-<li><strong><code>self</code></strong> _(hidden)_ — Manage this binary's own install: <code>self link</code> puts a stable <code>agentstack</code> on PATH (a symlink, no installer needed); <code>self which</code> shows which binary a bare <code>agentstack</code> runs and flags stale links — subcommands <code>link/which/docs*</code></li>
+<li><strong><code>self</code></strong> _(hidden)_ — Manage this binary's own install: <code>self update</code> upgrades it to the newest published release (checksum-verified); <code>self link</code> puts a stable <code>agentstack</code> on PATH (a symlink, no installer needed); <code>self which</code> shows which binary a bare <code>agentstack</code> runs and flags stale links — subcommands <code>link/which/update/docs*</code></li>
 <li><strong><code>add-skill-to-profile</code></strong> _(hidden)_ — Add a skill to a toolset and activate it (panel action; digest-bound) — flags <code>--profile/--name/--git/--rev/--subpath/--path/--preview/--yes/--consented/--allow-unresolved</code></li>
 <li><strong><code>add-server-to-profile</code></strong> _(hidden)_ — Add a server to a toolset and activate it (panel action; digest-bound) — flags <code>--profile/--name/--type/--url/--header/--command/--arg/--cwd/--env/--preview/--yes/--consented/--allow-unresolved</code></li>
 <li><strong><code>uninstall</code></strong> _(hidden)_ — Remove everything AgentStack manages, previewing first — flags <code>--scope/--write/--verbose/--keep-home</code></li>

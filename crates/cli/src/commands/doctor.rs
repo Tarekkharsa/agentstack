@@ -1509,6 +1509,18 @@ fn run_checks(
         check_effective_policy(manifest, report);
     }
 
+    // Is this binary out of date? An [`Level::Advisory`], because it is true
+    // and worth reading once but is not a defect in *this* setup — it must
+    // never move the status chip off `ready` or become the "start with" fix.
+    // Costs at most one short, cached network call a day, is silent when
+    // offline, and does nothing at all under AGENTSTACK_NO_UPDATE_CHECK
+    // (see `crate::update`). The section is only created when there is
+    // something to say, so a current binary prints no header.
+    if let Some(note) = crate::update::advisory() {
+        report.section("Updates");
+        report.line(Level::Advisory, note);
+    }
+
     if args.live {
         report.section("MCP connectivity (--live)");
         let http: Vec<_> = manifest

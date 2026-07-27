@@ -1341,6 +1341,72 @@ gateway-brokered calls — a server rendered into a native config is called
 directly by the harness, so such servers are never auto-removed on "no calls"
 evidence alone.
 
+## Staying current (`agentstack self update`)
+
+Upgrading the binary is part of the product, not a manual chore. `agentstack
+self update` replaces the binary you are running with the newest published
+release, and `agentstack doctor` tells you when there is one.
+
+```bash
+agentstack self update              # what a newer release would install; downloads nothing
+agentstack self update --write      # download, verify the sha256, install it
+```
+
+Same shape as every other mutating command: **it previews by default and only
+acts on `--write`.**
+
+**The download is verified before it is used.** The release archive is checked
+against the `checksums.txt` published with that release *before it is unpacked
+or moved into place*, and the new binary is swapped in with an atomic rename. A
+mismatch aborts, prints both digests, and leaves the binary you already have
+byte-for-byte untouched — the same guarantee `install.sh` gives, for the same
+reason. Be precise about what that proves: the archive and its checksums come
+from the same TLS-authenticated origin, so this establishes the **integrity of
+the transfer**, not the provenance of the release. Provenance is a separate,
+stronger check the command points you at rather than claiming:
+
+```bash
+gh attestation verify agentstack-<target>.tar.gz --repo Tarekkharsa/agentstack
+```
+
+Three situations the command cannot fix, each detected **before anything is
+downloaded** and answered with a command that works:
+
+| Situation | What it tells you |
+| --- | --- |
+| Installed by Homebrew | `brew upgrade agentstack` — replacing the file directly desynchronizes the formula |
+| Binary in a directory you cannot write | `sudo agentstack self update --write` |
+| No published asset for your platform | the releases page, with your OS/arch named |
+
+A source build (`target/release/agentstack`, the `self link` workflow) is
+refused too and pointed at `git pull && cargo build --release`: downloading a
+release over somebody's build output would be a surprise, not an upgrade.
+
+### The version note in `doctor`
+
+`agentstack doctor` carries one line when a newer release exists:
+
+```text
+Updates
+  · AgentStack 0.16.0 is available (you are on 0.15.0) ↳ agentstack self update
+```
+
+It is a **note**, not a warning: it counts in `doctor --json`'s `advisories`,
+never in `errors` or `warnings`, so it cannot move `state` off `ready` or become
+the "start with" next action. A current binary prints no section at all.
+
+The check is deliberately cheap: at most one short, bounded request per 24
+hours, cached in `~/.agentstack/update-check.json`. It never blocks, and it is
+silent when you are offline — a failed check backs off for the full day rather
+than re-dialling on every command. Nothing is checked at all when the running
+binary is a build-tree binary, which cannot take a downloaded release anyway.
+
+Opt out of every release-channel request — this command and the note — with:
+
+```bash
+export AGENTSTACK_NO_UPDATE_CHECK=1
+```
+
 ## Integrations
 
 Graphical surfaces consume the same read-only JSON reports and invoke a closed set of CLI-owned actions; see [Integrations](integrations.md). The AgentStack CLI remains the complete standalone and automation interface.
@@ -1401,7 +1467,7 @@ you need the exact verb, flag, or subcommand.
 - **`export`** _(hidden)_ — Export the manifest (+ lock, + optionally secrets) as an encrypted bundle — flags `--output/--secrets/--passphrase`
 - **`import`** _(hidden)_ — Import an encrypted bundle on a new machine — flags `--force/--no-keychain/--passphrase`
 - **`adapters`** _(hidden)_ — Inspect the available CLI adapters — subcommands `list/show/validate`
-- **`self`** _(hidden)_ — Manage this binary's own install: `self link` puts a stable `agentstack` on PATH (a symlink, no installer needed); `self which` shows which binary a bare `agentstack` runs and flags stale links — subcommands `link/which/docs*`
+- **`self`** _(hidden)_ — Manage this binary's own install: `self update` upgrades it to the newest published release (checksum-verified); `self link` puts a stable `agentstack` on PATH (a symlink, no installer needed); `self which` shows which binary a bare `agentstack` runs and flags stale links — subcommands `link/which/update/docs*`
 - **`add-skill-to-profile`** _(hidden)_ — Add a skill to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--git/--rev/--subpath/--path/--preview/--yes/--consented/--allow-unresolved`
 - **`add-server-to-profile`** _(hidden)_ — Add a server to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--type/--url/--header/--command/--arg/--cwd/--env/--preview/--yes/--consented/--allow-unresolved`
 - **`uninstall`** _(hidden)_ — Remove everything AgentStack manages, previewing first — flags `--scope/--write/--verbose/--keep-home`

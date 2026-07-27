@@ -24,6 +24,7 @@ pub fn run(args: &SelfArgs) -> Result<()> {
     match &args.command {
         SelfCommand::Link(link) => run_link(link),
         SelfCommand::Which => run_which(),
+        SelfCommand::Update(update) => super::self_update::run(update),
         SelfCommand::Docs(docs) => run_docs(docs),
     }
 }
@@ -236,7 +237,9 @@ fn run_which() -> Result<()> {
 
 /// The running binary, fully resolved (same pattern as connect's
 /// `bridge_command`) — the link must point at the real file, never at itself.
-fn running_exe() -> Result<PathBuf> {
+/// `self update` shares it for the same reason: it must replace the binary, not
+/// a symlink standing in for it.
+pub(crate) fn running_exe() -> Result<PathBuf> {
     std::env::current_exe()
         .context("cannot determine the running executable")?
         .canonicalize()
