@@ -434,12 +434,26 @@ fn preflight_prerequisites() -> Result<()> {
         })
 }
 
+/// The refusal a binary compiled without the `sandbox` feature owes the user.
+/// It names the real cause — a *build* property, not a missing daemon or a
+/// broken project — because that is the one thing the binary alone could never
+/// be asked about before `agentstack --version` started reporting the feature
+/// set. Both feature-off paths below raise exactly this, so they cannot drift.
+#[cfg(not(feature = "sandbox"))]
+fn no_sandbox_support() -> anyhow::Error {
+    anyhow::anyhow!(
+        "this build has no sandbox support — nothing was launched\n\n  \
+         it was compiled without the optional `sandbox` feature, so --sandbox and \
+         --lockdown have no container backend to start\n  \
+         rebuild it with:  cargo build --features sandbox\n  \
+         or install a published release binary — those ship with it\n  \
+         either way, a sandbox run also needs a running Docker daemon"
+    )
+}
+
 #[cfg(not(feature = "sandbox"))]
 fn preflight_prerequisites() -> Result<()> {
-    anyhow::bail!(
-        "sandbox support is not compiled into this build — rebuild with \
-         `cargo build --features sandbox` (it also needs a running Docker daemon)."
-    )
+    Err(no_sandbox_support())
 }
 
 /// Entry point for `agentstack run --sandbox`.
@@ -1350,10 +1364,7 @@ fn execute_lockdown(
 
 #[cfg(not(feature = "sandbox"))]
 fn execute_plan(_plan: ExecutionPlan) -> Result<()> {
-    anyhow::bail!(
-        "sandbox support is not compiled into this build — rebuild with \
-         `cargo build --features sandbox` (it also needs a running Docker daemon)."
-    )
+    Err(no_sandbox_support())
 }
 
 #[cfg(test)]

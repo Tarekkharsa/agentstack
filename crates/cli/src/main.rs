@@ -107,6 +107,7 @@ fn run() -> Result<()> {
         Command::Trust(args) => commands::trust::run(args),
         Command::Guard(args) => commands::guard::run(args),
         Command::SelfCmd(args) => commands::self_cmd::run(args),
+        Command::Completions(args) => commands::completions::run(args),
         Command::Run(args) => commands::runs::run(args, dir),
         Command::Kill(args) => commands::runs::kill(args),
         Command::Shim(cmd) => commands::shim::run(cmd),

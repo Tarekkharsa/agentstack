@@ -12,10 +12,29 @@ use clap::{Args, Parser, Subcommand};
 use crate::manifest::ServerType;
 use crate::scope::Scope;
 
+/// Was this binary compiled with the optional `sandbox` feature?
+///
+/// Release binaries are; a plain `cargo build --release` is not, and the two
+/// otherwise carry the same version number and the same `--help`. That silence
+/// produced confusing bug reports (a contributor testing a sandbox fix on a
+/// build that cannot run one), so every surface that could mislead about which
+/// build is in hand says so: `--version` below, `doctor`'s adapters section,
+/// and the `run --sandbox` refusal.
+pub const SANDBOX_SUPPORT: bool = cfg!(feature = "sandbox");
+
+/// `--version`'s payload — the crate version plus the compiled-in feature set
+/// (`0.15.0 (sandbox: yes)`). clap prints the binary name in front of it. Two
+/// `cfg`-selected constants rather than one runtime `format!` because clap
+/// wants a `&'static str`.
+#[cfg(feature = "sandbox")]
+pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (sandbox: yes)");
+#[cfg(not(feature = "sandbox"))]
+pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (sandbox: no)");
+
 #[derive(Parser, Debug)]
 #[command(
     name = "agentstack",
-    version,
+    version = VERSION,
     about = "One portable manifest, every agent CLI.",
     long_about = "Manage MCP servers + skills across Claude Code, Codex, and more, \
                   from a single portable .agentstack/agentstack.toml.",
@@ -318,6 +337,14 @@ Examples:
     #[command(name = "self", hide = true)]
     SelfCmd(SelfArgs),
 
+    /// Print a tab-completion script for bash, zsh, or fish.
+    ///
+    /// Writes to stdout — see docs/reference.md for where each shell wants the
+    /// file. Completes command names, subcommands, and long flags; values are
+    /// left to the shell.
+    #[command(hide = true)]
+    Completions(CompletionsArgs),
+
     // ── Panel actions (launch plan Lane B) ───────────────────────────────────
     // Digest-bound fixed argv the t3code toolset UI drives. Hidden: internal
     // control-plane plumbing, not part of the daily terminal surface. Each
@@ -480,6 +507,23 @@ pub struct SelfLinkArgs {
     /// symlink is always re-pointed; a real file is refused without this).
     #[arg(long)]
     pub force: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct CompletionsArgs {
+    /// Which shell to emit for.
+    #[arg(value_enum)]
+    pub shell: Shell,
+}
+
+/// The shells `agentstack completions` can emit for. Deliberately a closed set
+/// rather than a free string: each one has a hand-written emitter in
+/// `commands/completions.rs`, so an unknown name has nothing to produce.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shell {
+    Bash,
+    Zsh,
+    Fish,
 }
 
 #[derive(Args, Debug)]
@@ -2291,7 +2335,7 @@ pub fn full_command_inventory() -> String {
          \n\
          The map, grouped by task:\n\
          \n  \
-         Set up      init · status · adapters · settings · self\n  \
+         Set up      init · status · adapters · settings · self · completions\n  \
          Edit        add · set · search · remove · install · lib · toolset · adopt · export · import\n  \
          Render      apply · use · instructions · lock · session · diff · restore · uninstall\n  \
          Protect     trust · explain · secret · guard · sign · verify\n  \

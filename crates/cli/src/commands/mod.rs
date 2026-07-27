@@ -6,6 +6,7 @@ pub mod adopt;
 pub mod analyze;
 pub mod apply;
 pub mod bundle;
+pub mod completions;
 pub mod connect;
 pub mod diff;
 pub mod doctor;

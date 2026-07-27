@@ -564,6 +564,35 @@ fn run_checks(
         }
     }
 
+    // Which build is this? A release binary compiles the optional `sandbox`
+    // feature in; a source `cargo build --release` does not, and nothing else
+    // in the binary distinguishes them — same version, same `--help`, different
+    // capabilities. Info, not a warning: a build without it is a fact like an
+    // uninstalled CLI, not a fault.
+    //
+    // Gated to the advanced paths (`--all`, `--ci`, and every JSON caller —
+    // `collect` passes `all`) because the words it has to use name a mode the
+    // beginner journey never mentions. tests/ordinary_journey_vocab.rs is the
+    // witness: a scripted init → apply → doctor must not print "sandbox" at
+    // all. Progressive disclosure, not omission — the fact is always in the
+    // JSON, and the person who needs it is already running `doctor --all`.
+    if args.all || args.ci || args.json {
+        report.line(
+            Level::Info,
+            if crate::cli::SANDBOX_SUPPORT {
+                format!(
+                    "{:<14} sandbox support compiled in · run --sandbox needs a running Docker daemon",
+                    "this build"
+                )
+            } else {
+                format!(
+                    "{:<14} no sandbox support · run --sandbox/--lockdown refuse ↳ install a release binary, or cargo build --release --features sandbox",
+                    "this build"
+                )
+            },
+        );
+    }
+
     check_t3code(report);
 
     // Zero-files gateway: which harnesses have the global `agentstack mcp
