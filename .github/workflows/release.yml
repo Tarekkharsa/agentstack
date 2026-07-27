@@ -75,6 +75,10 @@ jobs:
       contents: write
       id-token: write
     steps:
+      # Needed for packaging/homebrew/* — this job otherwise only consumes
+      # build artifacts and has no working tree.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: assets
@@ -83,6 +87,20 @@ jobs:
       - name: Generate checksums
         working-directory: assets
         run: sha256sum agentstack-* > checksums.txt
+
+      # C4a: the tap formula is derived from THIS release's own checksums, so a
+      # published formula can never carry a hash someone pasted by hand — the
+      # failure mode the checked-in template had (a real-looking file five
+      # minor versions stale). Publishing it to the tap repo stays a human
+      # step; see RELEASING.md.
+      - name: Render the Homebrew formula
+        run: |
+          set -e
+          version="${GITHUB_REF_NAME#v}"
+          python3 packaging/homebrew/render-formula.py \
+            --version "$version" \
+            --checksums assets/checksums.txt \
+            --out assets/agentstack.rb
 
       - name: Attest release binaries
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
@@ -98,6 +116,7 @@ jobs:
             assets/agentstack-*.tar.gz
             assets/agentstack-*.zip
             assets/checksums.txt
+            assets/agentstack.rb
 
   # The egress-proxy sidecar image `--lockdown` needs. The binary's compiled
   # default is this exact GHCR path pinned to its own crate version

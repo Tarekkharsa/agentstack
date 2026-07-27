@@ -1,33 +1,39 @@
-# Homebrew formula template for agentstack.
+# Homebrew formula TEMPLATE for agentstack — not installable as-is.
 #
-# After a release, fill in VERSION and the per-arch sha256 (from the release
-# `.tar.gz` assets), then publish to a tap repo (e.g. tarekkh/homebrew-tap):
-#   brew install Tarekkharsa/tap/agentstack
+# `packaging/homebrew/render-formula.py` fills the placeholders below from a
+# release's own `checksums.txt`, and `release.yml` runs it so every release
+# publishes a ready `agentstack.rb` as an asset. Publishing that file to the tap
+# repository stays a human step (see RELEASING.md).
+#
+# There is deliberately no checked-in rendered formula. One used to live here
+# with a real-looking version and real-looking hashes, five minor versions
+# stale — a file that reads as publishable and installs the wrong binary is
+# worse than no file.
 class Agentstack < Formula
   desc "One portable manifest, every agent CLI — manage MCP servers + skills across AI coding tools"
   homepage "https://github.com/Tarekkharsa/agentstack"
-  version "0.10.1"
+  version "__VERSION__"
   license any_of: ["MIT", "Apache-2.0"]
 
   on_macos do
     on_arm do
       url "https://github.com/Tarekkharsa/agentstack/releases/download/v#{version}/agentstack-aarch64-apple-darwin.tar.gz"
-      sha256 "992310c9d3bd1cd3df14abe4db3ebb0d48d1ca80951c5ae2183ea5f51a446d4a"
+      sha256 "__SHA256_AARCH64_APPLE_DARWIN__"
     end
     on_intel do
       url "https://github.com/Tarekkharsa/agentstack/releases/download/v#{version}/agentstack-x86_64-apple-darwin.tar.gz"
-      sha256 "3c101ee4920b44de2fb9f75b3efb2c4733a53818268e93b766d5e5e49074b97b"
+      sha256 "__SHA256_X86_64_APPLE_DARWIN__"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/Tarekkharsa/agentstack/releases/download/v#{version}/agentstack-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "4124e96d4dcf6e1e23c9e496dfede421a57e2de6ad73a31d7d7625c534f7170d"
+      sha256 "__SHA256_AARCH64_UNKNOWN_LINUX_GNU__"
     end
     on_intel do
       url "https://github.com/Tarekkharsa/agentstack/releases/download/v#{version}/agentstack-x86_64-unknown-linux-gnu.tar.gz"
-      sha256 "0e75fc3005068d91c74dfa88362fb58d6193c4dc49c2775981e1858bb364d0e3"
+      sha256 "__SHA256_X86_64_UNKNOWN_LINUX_GNU__"
     end
   end
 

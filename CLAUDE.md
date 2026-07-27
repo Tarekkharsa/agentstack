@@ -13,13 +13,17 @@ opening lesson or a separate product.
 
 The product has two interfaces:
 
-- **t3code is the primary graphical experience and launch channel.** Build
-  setup, toolset selection, status, recovery, and contextual safety guidance
-  there.
-- **The AgentStack CLI is the source of authority and automation contract.**
-  It owns all validation, writes, consent checks, and enforcement. t3code calls
-  stable read APIs and a closed set of fixed actions; the frontend is never an
-  enforcement boundary.
+- **The AgentStack CLI is the primary surface and the launch channel**, as well
+  as the source of authority and automation contract. It owns all validation,
+  writes, consent checks, and enforcement — and it is the thing a stranger can
+  obtain and run today, which is what makes it the surface the product is judged
+  on. Setup, toolset selection, status, and recovery must be complete and
+  legible here first.
+- **t3code is the optional graphical companion.** It calls stable read APIs and
+  a closed set of fixed actions; the frontend is never an enforcement boundary.
+  It is where some users graduate, not how they arrive. Revisit this when t3code
+  is publicly obtainable — it is a private fork with no download today, which is
+  precisely why it stopped being called the launch channel.
 
 The old embedded AgentStack dashboard was removed. Do not recreate a second UI.
 Improve t3code or the CLI/API that supports it.

@@ -30,10 +30,11 @@ confinement, and evidence make that convenience dependable.
 The operating decisions are:
 
 1. Lead with cross-CLI portability and configuration lifecycle management.
-2. Make t3code the primary graphical product surface and launch channel; keep
-   the CLI as the authority, automation contract, and complete power-user path.
-3. Make setup through t3code or `init → apply → doctor` the shortest path to
-   first value.
+2. Make the CLI the primary surface and the launch channel: it is the authority,
+   the automation contract, the complete power-user path, and — decisively — the
+   thing a stranger can actually obtain and run today. t3code is the optional
+   graphical companion over that same authority, not the way in.
+3. Make `init → apply → doctor` the shortest path to first value.
 4. Make profiles and reversible sessions the primary recurring-use feature.
 5. Elevate `doctor`, `diff`, `adopt`, and `restore` into core product
    experiences, not supporting utilities.
@@ -98,15 +99,25 @@ portable configuration
 
 AgentStack has one product with two interfaces, not two competing products.
 
-### t3code: the primary graphical experience
+### t3code: the optional graphical companion
 
-t3code is the preferred surface for discovery, onboarding, everyday status,
-toolset selection, temporary activation, recovery, and contextual safety
-guidance. It matters strategically because users can receive AgentStack's value
-inside the environment where they already launch and supervise coding agents.
-They should not need to learn a second application before seeing the benefit.
+t3code presents discovery, everyday status, toolset selection, temporary
+activation, recovery, and contextual safety guidance inside the environment
+where users already launch and supervise coding agents. That is real value, and
+it stays a goal.
 
-The first t3code experience should answer:
+It is not the launch channel, and this is a correction rather than a
+restatement. A launch channel has to be something a stranger can get: t3code is
+a private fork with no download and no presence on the website, so naming it
+primary pointed every new reader at a surface they could not obtain, while the
+surface they COULD obtain went undescribed. Product claims may not exceed what
+is actually reachable — the same rule the enforcement docs hold the security
+claims to.
+
+So: the CLI is how people arrive and how the product is judged. t3code is what
+some of them graduate to. When t3code is publicly obtainable, revisit this.
+
+The t3code experience should answer:
 
 1. What coding tools and existing capabilities did AgentStack find?
 2. Which named toolset do I want for this project?
@@ -542,7 +553,8 @@ AgentStack should own:
 AgentStack should integrate with:
 
 - Existing agent CLIs rather than replacing them.
-- t3code as the primary graphical launch and supervision surface.
+- t3code as a graphical supervision surface over the CLI's authority (not the
+  launch channel — see "the optional graphical companion" above).
 - Vendor and community capability catalogs.
 - OS and external secret stores.
 - Existing sandbox and runtime technologies.

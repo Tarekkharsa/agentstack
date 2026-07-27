@@ -63,24 +63,41 @@ binary to `/usr/local/bin` (or `~/.local/bin`).
 
 ## 3. Homebrew
 
+**The formula is generated for you.** `release.yml` renders it from the
+release's own `checksums.txt` and attaches `agentstack.rb` to the release
+alongside the binaries, so its hashes are always the bytes that release
+published. There is no checked-in formula to update — only
+`packaging/homebrew/agentstack.rb.tmpl` and `render-formula.py`, and the
+renderer refuses to write anything if a target's checksum is missing.
+
+Publishing is the one manual step, because it writes to a different repository:
+
 ```sh
-# compute the per-arch checksums from the published assets:
 TAG="v$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d'"' -f2)"
-for t in aarch64-apple-darwin x86_64-apple-darwin \
-         aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu; do
-  curl -fsSL "https://github.com/Tarekkharsa/agentstack/releases/download/$TAG/agentstack-$t.tar.gz" | shasum -a 256
-done
+
+# 1. Fetch the formula this release generated.
+gh release download "$TAG" --repo Tarekkharsa/agentstack --pattern agentstack.rb --clobber
+
+# 2. Commit it to the tap. Create the repo on first use — it must be named
+#    `homebrew-<tap>` for `brew install <owner>/<tap>/<formula>` to resolve:
+#    gh repo create Tarekkharsa/homebrew-tap --public
+git -C ../homebrew-tap pull
+mkdir -p ../homebrew-tap/Formula && cp agentstack.rb ../homebrew-tap/Formula/
+git -C ../homebrew-tap add Formula/agentstack.rb
+git -C ../homebrew-tap commit -m "agentstack $TAG"
+git -C ../homebrew-tap push
 ```
 
-Update `version` and the `sha256` fields in
-`packaging/homebrew/agentstack.rb` (the checked-in file is a template whose
-values are from the version named in its `version` line — regenerate per
-release), commit it to a tap repo `tarekkh/homebrew-tap` (create it on first
-use), then:
+Then verify from a clean machine (or `brew uninstall` first):
 
 ```sh
 brew install Tarekkharsa/tap/agentstack
+agentstack --version   # must match $TAG
 ```
+
+Homebrew-installed binaries are managed by brew: `agentstack self update`
+detects this and points at `brew upgrade` rather than replacing the file
+underneath the package manager.
 
 ## 4. Container images (sandbox / lockdown)
 
