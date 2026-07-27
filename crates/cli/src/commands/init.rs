@@ -1322,7 +1322,7 @@ version = 1
                             &project_root.join(".gitignore"),
                             ".gitignore · .env rule",
                         ));
-                        if !env_file::ensure_gitignored(&project_root, true)? {
+                        if !env_file::ensure_gitignored(&project_root, &dir, true)? {
                             backups.pop();
                         }
                     }

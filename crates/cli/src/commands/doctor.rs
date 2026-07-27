@@ -628,6 +628,24 @@ fn run_checks(
             ),
         }
     }
+    // A `.env` is the one store that holds secret VALUES in plain text on disk,
+    // so its mode is part of whether the secret is actually protected. Versions
+    // before 0.16 wrote it at the ambient umask (0644 on a normal machine),
+    // leaving tokens readable by every local account; `write_private` fixes new
+    // writes, and this names the files already on disk. Warn, not error: the
+    // secret still resolves, and only the owner can fix the mode.
+    let env_path = ctx.dir.join(".env");
+    if env_path.exists() && crate::util::atomic::is_group_or_world_readable(&env_path) == Some(true)
+    {
+        report.line(
+            Level::Warn,
+            format!(
+                ".env is readable by other local accounts — it holds real token values \
+                 ↳ chmod 600 {}",
+                env_path.display()
+            ),
+        );
+    }
 
     report.section("Drift");
     if args.skip_drift {

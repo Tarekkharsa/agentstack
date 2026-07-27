@@ -410,7 +410,7 @@ var TERM={
   unify:[
     {cmd:'curl -fsSL …/install.sh | sh',out:[['downloading agentstack v'+VERSION+'…',D],['verifying tarball against checksums.txt… ok',D],['✓ installed to ~/.local/bin/agentstack',G]]},
     {cmd:'agentstack init --yes',out:[['🔍  6 CLI binaries on PATH: Claude Code · Codex CLI · Cursor · Gemini CLI · OpenCode · Pi',W],['📥  Imported 1 MCP server(s) from existing configs',W],['🔑  Lifted 1 inline token → ${GITHUB_TOKEN}  (stored in gitignored .env)',A],['✅  Wrote .agentstack/agentstack.toml',G]]},
-    {cmd:'agentstack apply --write',out:[['Claude Code (.mcp.json)              ✓ wrote 1 server(s)',G],['Codex CLI (.codex/config.toml)       ✓ wrote 1 server(s)',G],['Gemini CLI (.gemini/settings.json)   ✓ wrote 1 server(s)',G],['OpenCode (opencode.json)             ✓ wrote 1 server(s)',G],['Applied to 4 target(s).',W]]}
+    {cmd:'agentstack apply --write',out:[['Claude Code (.mcp.json)              ✓ wrote 1 server(s)',G],['Codex CLI (.codex/config.toml)       ✓ wrote 1 server(s)',G],['Gemini CLI (.gemini/settings.json)   ✓ wrote 1 server(s)',G],['OpenCode (opencode.json)             ✓ wrote 1 server(s)',G],['4 target(s) in sync — wrote 4.',W]]}
   ],
   verify:[
     {cmd:'agentstack doctor',out:[['✓ manifest valid  (.agentstack/agentstack.toml)',G],['✓ secrets — 2/2 ${REF}s resolve on this machine',G],['⚠ drift — .mcp.json edited on disk since last apply',A],['   fix: agentstack diff  →  adopt (keep edit)  or  apply --write (keep manifest)',D],['✓ guard installed in 4 CLIs',G],['3 sections hidden (features you don’t use) — doctor --all shows everything',D]]},

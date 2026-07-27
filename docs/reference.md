@@ -121,9 +121,18 @@ Interactive prompts for the three; non-interactive takes `--secrets` and default
 to `keychain` when absent, so CI never starts writing plaintext by surprise.
 `--no-keychain` is the deprecated alias for `--secrets skip`; a skip prints every
 unstored `${REF}` with the command to store it. The `.env` writer places values
-next to the manifest with a managed `.gitignore` entry, and `secret set
---env-file` targets that same `.env`. The manifest itself only ever holds
-`${REF}` placeholders (rule 5).
+next to the manifest, and `secret set --env-file` targets that same `.env`. The
+manifest itself only ever holds `${REF}` placeholders (rule 5).
+
+Because that file holds real values rather than placeholders, it gets two
+protections the rendered configs don't need. It is written **mode `0600`** —
+owner-only, never the ambient umask — and a write tightens a file an older
+version left more permissive; `doctor` warns (with the exact `chmod`) about any
+`.env` still readable by other local accounts. And in a git repo it is ignored by
+an **anchored** rule naming just that path (`/.agentstack/.env`), written outside
+the managed `.gitignore` block so a re-render can never drop it. The rule is
+deliberately not a bare `.env`: that would match at every depth and silence the
+project's own env files, which AgentStack did not write and does not own.
 
 ### Unresolved secrets block writes
 
@@ -1351,7 +1360,6 @@ subcommand carries a trailing `*` (e.g. `guard`'s `check*`). Reach for it when
 you need the exact verb, flag, or subcommand.
 
 <!-- agentstack:generated commands -->
-- **`setup`** _(hidden)_ — Hidden alias of interactive `init` — same guided wizard, older name — flags `--target/--profile/--scope`
 - **`init`** — Set up everything in one command: detect, import, choose, apply, verify — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--yes/--consented-plan`
 - **`status`** — Where this project stands, on one screen: detected CLIs, manifest, trust, secrets, and the one next step
 - **`add`** — Add a server or skill to the manifest — subcommands `from/server/skill`
@@ -1371,13 +1379,13 @@ you need the exact verb, flag, or subcommand.
 - **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--prompt/--profile/--scope/--keep/--sandbox/--lockdown/--plan`
 - **`kill`** _(hidden)_ — Kill a tracked run by id (and revert its toolset if it owned one) — flags `--force`
 - **`shim`** _(hidden)_ — Exec-through launcher shim for external supervisors (e.g. t3code) — subcommands `make/exec*`
-- **`workflow`** — Governed workflows: run a pinned workflow under full admission — trust gate, strict lock verification, machine-capped ceilings — with every `agent()` call becoming a locked child run — subcommands `run/report/list/runs/explain/declare`
+- **`workflow`** _(hidden)_ — Run a reviewed multi-agent task using toolsets you already approved — subcommands `run/report/list/runs/explain/declare`
 - **`report`** _(hidden)_ — Every "what happened" view in one place — subcommands `run/runs/usage/calls/wire`
 - **`sign`** _(hidden)_ — Sign this project's agentstack.lock with a fresh ed25519 key (writes a detached agentstack.lock.sig, prints the public key to publish) — flags `--print-key-only`
 - **`verify`** _(hidden)_ — Verify agentstack.lock against a published ed25519 public key and its detached signature — flags `--pubkey/--signature`
 - **`guard`** _(hidden)_ — Machine-level destructive-command guard — subcommands `check*/test/install/uninstall/status`
 - **`gateway`** _(hidden)_ — The zero-files gateway: register it once per CLI (`connect`) and every trusted repo brings its own servers through `agentstack mcp --auto-project` with no per-project files — subcommands `connect/disconnect`
-- **`trust`** — Trust a project's manifest for the zero-files gateway (direnv-style) — flags `--list/--revoke/--yes/--consented-digest/--preview`
+- **`trust`** — Review and approve this project's declared capabilities — required before anything activates them — flags `--list/--revoke/--yes/--consented-digest/--preview`
 - **`mcp`** _(hidden)_ — Run agentstack as an MCP server over stdio (for an agent to call) — flags `--auto-project/--transparent`
 - **`diff`** _(hidden)_ — Show drift between the manifest and the on-disk configs — flags `--target/--profile/--scope/--json`
 - **`explain`** _(hidden)_ — Explain a server, skill, or instruction before you rely on it — flags `--json`

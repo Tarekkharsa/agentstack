@@ -1,4 +1,4 @@
-//! `agentstack trust` — the human gate for the zero-files gateway.
+//! `agentstack trust` — the human gate every activation path checks.
 //!
 //! `connect` registers one global gateway per harness; `mcp --auto-project`
 //! then discovers whatever manifest the current repo carries. This command is
@@ -379,8 +379,12 @@ fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: boo
     let m = &loaded.manifest;
     let surface_digest = snapshot.digest();
 
+    // Name the whole consequence, not one consumer. The gateway used to be the
+    // only thing this gate fed, but `session start` (and every other activation
+    // path) refuses on an untrusted project too — describing it as gateway-only
+    // made that refusal read as a bug.
     println!(
-        "Trusting {} for the zero-files gateway.\n",
+        "Reviewing {} — approving this lets its capabilities activate.\n",
         base.display().to_string().bold()
     );
 

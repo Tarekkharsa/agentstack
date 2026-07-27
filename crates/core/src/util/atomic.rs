@@ -13,16 +13,46 @@ use anyhow::{Context, Result};
 
 use crate::util::paths;
 
+/// The mode a secret-bearing file is created with: owner read/write only. A
+/// `.env` holds real token values, so it must not be readable by other local
+/// accounts — the same bar `crates/cli`'s key and machine-policy writers already
+/// hold themselves to.
+#[cfg(unix)]
+pub const PRIVATE_MODE: u32 = 0o600;
+
 /// Atomically write `contents` to `path`: back up the current file (best
 /// effort), write a sibling temp file, fsync it, then `rename` it into place.
 pub fn write(path: &Path, contents: &str) -> Result<()> {
+    write_inner(path, contents, false)
+}
+
+/// Like [`write`], but the result is readable only by its owner ([`PRIVATE_MODE`]
+/// on Unix; a no-op elsewhere). Use this for every file that holds a real secret
+/// *value* rather than a `${REF}` placeholder.
+///
+/// The mode is applied to the temp file *before* any bytes are written, so the
+/// secret is never briefly world-readable, and the rename carries that inode's
+/// permissions to the target — replacing a too-permissive file left behind by an
+/// older version. Any pre-write backup is tightened the same way.
+pub fn write_private(path: &Path, contents: &str) -> Result<()> {
+    write_inner(path, contents, true)
+}
+
+fn write_inner(path: &Path, contents: &str, private: bool) -> Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
     }
     if path.exists() {
-        let _ = backup(path); // best effort — never block a write on backup
+        // Best effort — never block a write on backup. A backup of a secret file
+        // is itself a secret file: `fs::copy` carries the source mode, but the
+        // source may predate `write_private`, so tighten it explicitly.
+        if let Ok(dst) = backup(path) {
+            if private {
+                harden(&dst);
+            }
+        }
     }
     let tmp = tmp_path(path);
     // Write, then fsync the temp file so its bytes are durably on disk BEFORE
@@ -31,7 +61,7 @@ pub fn write(path: &Path, contents: &str) -> Result<()> {
     // metadata reaches disk before the file's data pages do. fsync-then-rename
     // is the standard durable-replace recipe.
     {
-        let mut f = fs::File::create(&tmp).with_context(|| format!("writing {}", tmp.display()))?;
+        let mut f = create(&tmp, private).with_context(|| format!("writing {}", tmp.display()))?;
         f.write_all(contents.as_bytes())
             .with_context(|| format!("writing {}", tmp.display()))?;
         f.sync_all()
@@ -51,6 +81,53 @@ pub fn write(path: &Path, contents: &str) -> Result<()> {
         let _ = handle.sync_all();
     }
     Ok(())
+}
+
+/// Create the temp file, restricting its mode up front when the payload is a
+/// secret. `OpenOptions::mode` intersects with the process umask, so the result
+/// is never *more* permissive than [`PRIVATE_MODE`].
+fn create(path: &Path, private: bool) -> std::io::Result<fs::File> {
+    #[cfg(unix)]
+    if private {
+        use std::os::unix::fs::OpenOptionsExt;
+        return fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(PRIVATE_MODE)
+            .open(path);
+    }
+    let _ = private; // no permission bits to set off Unix
+    fs::File::create(path)
+}
+
+/// Best-effort tightening of an existing file to owner-only. Used for backups of
+/// secret files, where failing to chmod must not fail the write it protects.
+fn harden(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_MODE));
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// Whether `path` is readable by anyone other than its owner. `None` when the
+/// mode cannot be read (missing file, or a platform without Unix permissions),
+/// so callers can distinguish "not a problem" from "cannot tell".
+#[cfg(unix)]
+pub fn is_group_or_world_readable(path: &Path) -> Option<bool> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(path).ok()?.permissions().mode();
+    Some(mode & 0o077 != 0)
+}
+
+/// Off Unix there are no permission bits to inspect, so every caller gets
+/// "cannot tell" rather than a false all-clear.
+#[cfg(not(unix))]
+pub fn is_group_or_world_readable(_path: &Path) -> Option<bool> {
+    None
 }
 
 /// Copy the current file to `~/.agentstack/backups/<sanitized-path>` (a single
@@ -154,6 +231,56 @@ mod tests {
         // Whoever renamed last wins, but the file is intact and complete.
         let last = fs::read_to_string(&target).unwrap();
         assert!(last.starts_with("writer-"), "unexpected content: {last}");
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// Rule 5's filesystem half: a file holding real secret *values* must not be
+    /// readable by other local accounts. Before this, `.env` inherited the
+    /// default umask (0644 on a normal machine) while the CLI's key and
+    /// machine-policy writers already used 0600.
+    #[cfg(unix)]
+    #[test]
+    fn write_private_leaves_the_file_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let f = tmp.child("secrets.env");
+        write_private(f.path(), "TOKEN=abc\n").unwrap();
+        let mode = fs::metadata(f.path()).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, PRIVATE_MODE, "expected 0600, got {mode:o}");
+        assert_eq!(is_group_or_world_readable(f.path()), Some(false));
+        // A plain `write` to the same path is the contrast the bug was about.
+        let g = tmp.child("plain.json");
+        write(g.path(), "{}").unwrap();
+        assert_eq!(is_group_or_world_readable(g.path()), Some(true));
+    }
+
+    /// Replacing a file an older version left at 0644 must tighten it: the
+    /// rename carries the temp inode's mode, so the permissive inode goes away
+    /// rather than being written into again.
+    #[cfg(unix)]
+    #[test]
+    fn write_private_tightens_a_previously_permissive_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let f = tmp.child("secrets.env");
+        f.write_str("TOKEN=old\n").unwrap();
+        fs::set_permissions(f.path(), fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_private(f.path(), "TOKEN=new\n").unwrap();
+
+        let mode = fs::metadata(f.path()).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, PRIVATE_MODE, "expected 0600, got {mode:o}");
+        assert_eq!(fs::read_to_string(f.path()).unwrap(), "TOKEN=new\n");
+        // The pre-write backup holds the old secret, so it is private too.
+        let b = backup_path(f.path());
+        assert_eq!(fs::read_to_string(&b).unwrap(), "TOKEN=old\n");
+        let bmode = fs::metadata(&b).unwrap().permissions().mode() & 0o777;
+        assert_eq!(bmode, PRIVATE_MODE, "backup leaked at {bmode:o}");
         std::env::remove_var("AGENTSTACK_HOME");
     }
 

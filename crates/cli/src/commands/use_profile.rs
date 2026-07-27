@@ -610,6 +610,12 @@ pub fn activate(
     // right under a "✓ N skill(s) → …" line reads as a contradiction when no
     // CLI binaries are on PATH but skills were genuinely written.
     let mut wrote_skill_dirs = 0;
+    // Targets this activation covers — written or already carrying the right
+    // servers. Needed separately from `wrote` for the same reason as in `apply`:
+    // activating a toolset whose servers are already on disk changes nothing, and
+    // "on 0 target(s)" printed above the list of files it now manages reads as
+    // failure.
+    let mut covered_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut blocked_targets: Vec<String> = Vec::new();
     // Distinct missing secret names across targets — the final blocked error
     // prints their exact `secret set` commands (see the apply counterpart).
@@ -738,6 +744,7 @@ pub fn activate(
                         state.record_kept_foreign(&key, foreign.clone());
                         crate::usage::bump(&plan.managed);
                         wrote += 1;
+                        covered_targets.insert(desc.display.clone());
                         if plan.remove_if_empty_shell(desc) {
                             println!(
                                 "  {} removed empty {}",
@@ -757,6 +764,7 @@ pub fn activate(
                     if args.write && !blocked {
                         state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
                         state.record_kept_foreign(&key, foreign.clone());
+                        covered_targets.insert(desc.display.clone());
                     }
                     println!("  {} servers up to date", "✓".green());
                 }
@@ -910,24 +918,39 @@ pub fn activate(
                     label
                 );
             } else {
-                println!(
-                    "\n{} activated '{}' on {wrote} target(s).",
-                    "✓".green(),
-                    label
-                );
+                // Coverage first, changes second — see `covered_targets`. A
+                // re-activation of an already-current toolset changes nothing,
+                // and the bare changed-count read as "nothing happened".
+                let covered = covered_targets.len().max(wrote);
+                if wrote == 0 {
+                    println!(
+                        "\n{} '{}' already active on {covered} target(s) — nothing to change.",
+                        "✓".green(),
+                        label
+                    );
+                } else {
+                    println!(
+                        "\n{} activated '{}' on {covered} target(s) — wrote {wrote}.",
+                        "✓".green(),
+                        label
+                    );
+                }
             }
             // Only claim undoability for what restore actually covers: the
             // server configs captured above (skills revert via `session end`).
+            // Name the exact command — bare `agentstack restore` lists the
+            // ledger instead of undoing, so it read as a broken instruction.
             if wrote > 0 {
-                println!("  {}", "undo: agentstack restore".dimmed());
+                println!("  {}", "undo: agentstack restore --last --write".dimmed());
             }
         } else {
             // A blocked target is a failure, not a footnote: report it in the
             // summary and exit nonzero so scripts can't mistake this for done.
             println!(
-                "\n{} activated '{}' on {wrote} target(s); {} target(s) BLOCKED: {}",
+                "\n{} activated '{}' on {} target(s) (wrote {wrote}); {} target(s) BLOCKED: {}",
                 "⚠".yellow(),
                 label,
+                covered_targets.len().max(wrote),
                 blocked_targets.len(),
                 blocked_targets.join(", ")
             );

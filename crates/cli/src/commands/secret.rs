@@ -53,7 +53,7 @@ fn set(name: &str, value: Option<&str>, env_file: bool, manifest_dir: Option<&Pa
         let project_root = crate::manifest::project_root_of(&dir);
         let is_git = project_root.join(".git").exists();
         if is_git {
-            crate::secret::env_file::ensure_gitignored(&project_root, true)?;
+            crate::secret::env_file::ensure_gitignored(&project_root, &dir, true)?;
         }
         println!(
             "{} stored '{name}' in {}/.env{}",

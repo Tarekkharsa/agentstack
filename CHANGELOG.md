@@ -123,6 +123,39 @@ findings and two interpreter findings. All are closed:
 
 ### Fixed
 
+- **The project `.env` is no longer world-readable.** It holds real token
+  values, but was written at the ambient umask — `0644` on a normal machine —
+  so every local account could read it. It is now created `0600` before any
+  bytes are written, a write tightens a file an older version left permissive,
+  and pre-write backups of it are hardened the same way. `doctor` warns about
+  any `.env` still readable by others and names the exact `chmod`. **If you
+  used `--secrets env` on an earlier build, run `agentstack doctor` — it will
+  tell you which file to fix, and the next `secret set --env-file` repairs it
+  automatically.**
+- **The `.gitignore` rule AgentStack writes is scoped to its own file.** It was
+  a bare `.env`, which git matches at every depth — so it silently ignored the
+  project's own env files too. It is now anchored (`/.agentstack/.env`, or
+  `/.env` for a legacy root manifest), and still lives outside the managed
+  block so a re-render cannot drop it. Existing hand-written `.env` /
+  `/.env` / `**/.env` rules are still honoured, so nothing is added twice.
+- **Apply and activation summaries no longer say "0 target(s)" after
+  succeeding.** They counted only *changed* targets, so an idempotent re-apply
+  printed `Applied to 0 target(s).` under four `✓ up to date` lines, and
+  `session start` printed `activated 'x' on 0 target(s).` directly above the
+  list of four files it manages. Both now report coverage first:
+  `4 target(s) in sync — wrote 4.` / `4 target(s) already in sync — nothing to
+  change.`
+- **Undo pointers name a command that undoes.** `apply` and `use` suggested
+  bare `agentstack restore`, which *lists* the ledger; they now print
+  `agentstack restore --last --write`.
+- **`status` stopped recommending `doctor` twice** in six lines, once as the
+  next step and again as the deep check. The second pointer now appears only
+  when the next step is something else.
+- **`trust` describes what it actually gates.** Its summary and banner said
+  "for the zero-files gateway", but `session start` and every other activation
+  path refuse on an untrusted project too — so the refusal read as a bug. It is
+  now "review and approve this project's declared capabilities — required
+  before anything activates them".
 - **Status paths no longer prompt for keychain values.** On macOS, `doctor`,
   secret provenance, MCP status, and the t3code snapshot ask the keychain only
   whether an entry *exists* rather than decrypting it. Read-only status stopped
@@ -131,6 +164,18 @@ findings and two interpreter findings. All are closed:
 
 ### Changed
 
+- **`--help` is one screen again.** It listed nine curated commands and then
+  printed all ~40 names two lines below, undoing the curation on the same
+  screen and making a config manager look like an enterprise platform. The
+  task-grouped map moved to `agentstack --help --all`, which now leads with it;
+  the default help keeps the Start-here block, the vocabulary note, and one
+  pointer.
+- **`workflow` left the everyday command list.** The interpreter-boundary
+  review passed, so the `(preview)` label stays gone and the command is fully
+  reachable — but workflows remain an advanced lane until the repeated-use gate
+  closes, and their vocabulary (admission, ceilings, locked child runs) was the
+  densest a first-time user met. The short summary is now outcome language; the
+  precise version lives in `agentstack workflow --help`.
 - AgentStack now positions portability, toolsets, lifecycle diagnosis, and
   recovery as the primary product value. Security remains the enforced
   foundation and appears progressively when an action makes it relevant.
@@ -202,6 +247,8 @@ findings and two interpreter findings. All are closed:
 
 ### Removed
 
+- **`agentstack setup`**, the hidden alias of interactive `init`, is gone — one
+  wizard, one name. (The internal `SetupArgs` type `init` builds is unchanged.)
 - The embedded `agentstack dashboard` command and its bundled web assets were
   retired to avoid maintaining a second UI. Reusable read-only snapshot data
   remains available to the MCP and t3code integration paths.

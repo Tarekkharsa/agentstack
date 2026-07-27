@@ -537,7 +537,10 @@ fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
         next.1.dimmed()
     );
     println!("  {}", "All commands: agentstack --help".dimmed());
-    if status {
+    // The deep-check pointer is redundant when `doctor` is already the one next
+    // step: printing the same command twice, described two different ways, made
+    // it look like two different things and undercut the single-next-step rule.
+    if status && !next.0.starts_with("agentstack doctor") {
         println!(
             "  {}",
             "Deep check (drift, quirks, supply chain): agentstack doctor".dimmed()

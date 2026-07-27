@@ -68,7 +68,6 @@ fn run() -> Result<()> {
         Command::Lock(args) => commands::lock::dispatch(args, dir),
         Command::Try(args) => commands::try_skill::run(args),
         Command::Remove(args) => commands::remove::run(args, dir),
-        Command::Setup(args) => commands::setup::run(args, dir),
         Command::Apply(args) => commands::apply::run(args, dir),
         Command::Diff(args) => commands::diff::run(args, dir),
         Command::Explain(args) => commands::explain::run(args, dir),

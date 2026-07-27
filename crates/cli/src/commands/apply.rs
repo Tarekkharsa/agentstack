@@ -88,7 +88,10 @@ fn restart_hint(outcome: &Outcome) {
             "{} Restart or reopen your agent CLI(s) so they pick up the new config.",
             "→".cyan()
         );
-        crate::outln!("  {}", "undo: agentstack restore".dimmed());
+        // Name the exact command, not the bare verb: `agentstack restore` alone
+        // lists the ledger, so a user following this line got a list to read
+        // rather than the undo they were promised.
+        crate::outln!("  {}", "undo: agentstack restore --last --write".dimmed());
     }
 }
 
@@ -243,6 +246,12 @@ fn render(
     let project_root = crate::manifest::project_root_of(&ctx.dir);
     let mut ignore_entries: Vec<String> = Vec::new();
     let mut touched_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // Every target this scope actually covers — written or already in sync. The
+    // summary needs it separately from `touched_targets`: an idempotent re-apply
+    // touches nothing, and "Applied to 0 target(s)" under four `✓ up to date`
+    // lines reads as failure when it means the opposite.
+    let mut in_scope_targets: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
     // Per-target outcome for the write summary: `changed_count` tallies plans
     // (a target can change servers + settings + hooks), so the summary counts
     // targets — and only ones actually written, not ones a gate blocked.
@@ -322,6 +331,7 @@ fn render(
             };
 
             crate::outln!("\n{} ({})", plan.display.bold(), plan.config_path.display());
+            in_scope_targets.insert(desc.display.clone());
 
             if plan.managed.is_empty() && plan.removed.is_empty() && plan.skipped.is_empty() {
                 crate::outln!("  no servers selected");
@@ -861,7 +871,17 @@ fn render(
         // (unresolved secret, missing fragment source) may have blocked some
         // of the writes, and a hard error may have failed others.
         if incomplete_targets.is_empty() {
-            crate::outln!("Applied to {written_count} target(s).");
+            // Report coverage first and changes second. The old form printed only
+            // the changed count, so a clean re-apply said "Applied to 0
+            // target(s)" directly under four "✓ up to date" lines.
+            let covered = in_scope_targets.len().max(written_count);
+            if written_count == 0 {
+                crate::outln!("{covered} target(s) already in sync — nothing to change.");
+            } else {
+                // The undo pointer belongs to `restart_hint`, which already
+                // prints it on the standalone path — don't print a second one.
+                crate::outln!("{covered} target(s) in sync — wrote {written_count}.");
+            }
         } else {
             // Every not-fully-written target is blocked, failed, or both;
             // partially written targets count against the fully-written tally

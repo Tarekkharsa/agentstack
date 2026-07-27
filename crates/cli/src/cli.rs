@@ -25,20 +25,10 @@ Start here:
   agentstack init                one command sets up everything: import, choose, apply, verify
   agentstack status              where this project stands, on one screen
 
-The list above is the everyday loop. This is the full map, grouped by task —
-every command (listed or not) has its own --help:
-
-  Set up      init · status · adapters · settings · self
-  Edit        add · set · search · remove · install · lib · create-profile · adopt · export · import
-  Render      apply · use · instructions · lock · session · diff · restore · uninstall
-  Protect     trust · explain · secret · guard · sign · verify
-  Run         run · kill · shim · workflow · gateway · mcp · try
-  Inspect     doctor · report · optimize · proxy
-
 Words: a CLI (a.k.a. harness) is the agent tool you run; an adapter compiles
 its native config; [targets] in the manifest lists which CLIs commands act on.
 
-Full inventory with one-line summaries: agentstack --help --all"
+Every command, grouped by task: agentstack --help --all"
 )]
 pub struct Cli {
     /// Project or manifest directory (prefers .agentstack/agentstack.toml).
@@ -62,12 +52,6 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     // ── Everyday: the core loop most projects ever need (shown in --help) ─
-    /// Hidden alias of interactive `init` — same guided wizard, older name.
-    ///
-    /// Kept so muscle memory and old links keep working; never advertised.
-    #[command(hide = true)]
-    Setup(SetupArgs),
-
     /// Set up everything in one command: detect, import, choose, apply, verify.
     ///
     /// Detects CLIs, imports their configs, lets you choose where secrets
@@ -182,10 +166,17 @@ pub enum Command {
     #[command(hide = true, subcommand)]
     Shim(ShimCmd),
 
-    /// Governed workflows: run a pinned workflow under full admission —
-    /// trust gate, strict lock verification, machine-capped ceilings — with
-    /// every `agent()` call becoming a locked child run.
-    #[command(subcommand)]
+    /// Run a reviewed multi-agent task using toolsets you already approved.
+    ///
+    /// Hidden from the everyday list, not from the CLI: the interpreter
+    /// boundary passed its review (so the `(preview)` label is gone), but
+    /// workflows stay an advanced lane until the repeated-use gate in
+    /// `TODO.md` closes — and their vocabulary (admission, ceilings, locked
+    /// child runs) is the densest in the product. Full detail lives in
+    /// `agentstack workflow --help`: each `agent()` call is admitted against
+    /// the trust gate, verified against a strict lock, capped by the machine
+    /// ceiling, and spawned as its own locked child run.
+    #[command(subcommand, hide = true)]
     Workflow(WorkflowCmd),
 
     /// Every "what happened" view in one place.
@@ -223,13 +214,15 @@ pub enum Command {
     #[command(subcommand, hide = true)]
     Gateway(GatewayCmd),
 
-    /// Trust a project's manifest for the zero-files gateway (direnv-style).
+    /// Review and approve this project's declared capabilities — required
+    /// before anything activates them.
     ///
-    /// Until trusted, an auto-discovered project gets control-plane tools
-    /// only: none of its servers are spawned or contacted, no secrets are
-    /// resolved. Trust pins the content digest of the manifest layers AND
-    /// the lockfile — editing either (a `git pull`, an `agentstack lock`)
-    /// requires re-trusting.
+    /// Until trusted, none of the project's servers are spawned or contacted
+    /// and no secrets are resolved: `session start` refuses, and an
+    /// auto-discovered project reaching the zero-files gateway gets
+    /// control-plane tools only. Trust pins the content digest of the
+    /// manifest layers AND the lockfile — editing either (a `git pull`, an
+    /// `agentstack lock`) requires re-trusting.
     Trust(TrustArgs),
 
     /// Run agentstack as an MCP server over stdio (for an agent to call).
@@ -2196,9 +2189,23 @@ pub fn full_command_inventory() -> String {
     }
 
     let cmd = Cli::command();
+    // The task-grouped name map lives here rather than in the default `--help`.
+    // Printing all ~40 names two lines under a curated list of 11 undid the
+    // curation on the same screen; a reader who asked for `--all` has opted in.
     let mut out = String::from(
         "agentstack — every command, including the ones the default --help groups away.\n\
-         Run `agentstack <command> --help` for flags and details.\n\n",
+         Run `agentstack <command> --help` for flags and details.\n\
+         \n\
+         The map, grouped by task:\n\
+         \n  \
+         Set up      init · status · adapters · settings · self\n  \
+         Edit        add · set · search · remove · install · lib · create-profile · adopt · export · import\n  \
+         Render      apply · use · instructions · lock · session · diff · restore · uninstall\n  \
+         Protect     trust · explain · secret · guard · sign · verify\n  \
+         Run         run · kill · shim · workflow · gateway · mcp · try\n  \
+         Inspect     doctor · report · optimize · proxy\n\
+         \n\
+         And in full:\n\n",
     );
     push(&mut out, &cmd, 2, false);
     out.push_str(

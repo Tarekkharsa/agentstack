@@ -16,9 +16,10 @@ fn command_tree_is_well_formed() {
 }
 
 // DX witnesses for the progressive-disclosure help surface:
-// `status` exists (git/docker muscle memory), the visible list stays the
-// small beginner loop, and the after_help map lists every top-level command
-// so nothing hidden is undiscoverable.
+// `status` exists (git/docker muscle memory), the visible list stays the small
+// beginner loop, the default `--help` does NOT re-dump the whole surface it just
+// curated, and `--help --all` lists every top-level command so nothing hidden is
+// undiscoverable.
 #[test]
 fn status_parses_and_help_maps_every_command() {
     Cli::try_parse_from(["agentstack", "status"]).expect("status must parse");
@@ -31,27 +32,46 @@ fn status_parses_and_help_maps_every_command() {
         .collect();
     assert_eq!(
         visible,
-        ["init", "status", "add", "search", "apply", "doctor", "use", "run", "workflow", "trust"],
-        "the visible list is the beginner loop, in task order (workflow un-hidden after §9.3 review)"
+        ["init", "status", "add", "search", "apply", "doctor", "use", "run", "trust"],
+        "the visible list is the beginner loop, in task order — `workflow` stays \
+         reachable but out of it until the repeated-use gate closes"
     );
+
+    // Review finding H5: the default help used to print all ~40 command names two
+    // lines under the curated list, undoing the curation on the same screen. The
+    // task-grouped map moved into `--help --all`, so `--help` must advertise the
+    // way in without listing what is behind it.
+    let after_help = cmd.get_after_help().expect("after_help exists").to_string();
+    assert!(
+        after_help.contains("--help --all"),
+        "the short help must still name the way to the full map"
+    );
+    for grouped_only in ["proxy", "shim", "sign", "gateway", "optimize", "kill"] {
+        assert!(
+            !after_help.contains(grouped_only),
+            "'{grouped_only}' is back in the default --help, which re-dumps the \
+             surface the visible list curates (H5)"
+        );
+    }
 
     // Every top-level command stays discoverable, but not all of it belongs in
     // the *human* task map: the panel verbs are fixed argv a graphical client
     // invokes, and listing them beside `init` and `doctor` made the surface
-    // look bigger than the product is. They now live under their own heading
-    // in `--help --all`. Discoverability is the invariant; the human map being
-    // exhaustive is not.
-    let after_help = cmd.get_after_help().expect("after_help exists").to_string();
+    // look bigger than the product is. They live under their own heading.
+    // Discoverability is the invariant; the human map being exhaustive is not.
     let inventory = agentstack::cli::full_command_inventory();
-    let (contract_heading, contract_section) = inventory
+    let (human, contract_section) = inventory
         .split_once("Integration contract (t3code)")
         .expect("the inventory carries a labelled integration-contract section");
+    let (task_map, full_list) = human
+        .split_once("And in full:")
+        .expect("the inventory leads with the task-grouped map");
     for c in cmd.get_subcommands() {
         let name = c.get_name();
-        if name == "help" || name == "setup" {
-            continue; // setup is a deliberately unadvertised legacy alias.
+        if name == "help" {
+            continue;
         }
-        if after_help.contains(name) {
+        if task_map.contains(name) {
             assert!(
                 !contract_section.contains(&format!("\n  {name} ")),
                 "'{name}' is in the human map, so it must not also be filed as panel-only"
@@ -60,11 +80,11 @@ fn status_parses_and_help_maps_every_command() {
         }
         assert!(
             contract_section.contains(name),
-            "'{name}' is in neither the grouped after_help map nor the \
+            "'{name}' is in neither the grouped task map nor the \
              integration-contract section — it would be undiscoverable"
         );
         assert!(
-            !contract_heading.contains(&format!("\n  {name} ")),
+            !full_list.contains(&format!("\n  {name} ")),
             "'{name}' must be listed once, under the contract heading only"
         );
     }
