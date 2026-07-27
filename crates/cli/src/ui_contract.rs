@@ -38,7 +38,22 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   `add-server-to-profile`, `create-profile`, and `use-profile` mutate the
 ///   toolset then re-lock + re-render, each bound to a `consent_digest` a prior
 ///   `--preview` returned (apply refuses on drift) and failing closed on an
-///   unresolved `${REF}`.
+///   unresolved `${REF}`. NOTE: `create-profile` no longer re-renders — see
+///   `toolset-create-v2`, which is the name to gate on for that. This paragraph
+///   still describes what a binary advertising ONLY `profiles-edit-v1` does,
+///   which is what the name has to keep meaning.
+/// - `toolset-create-v2`: `create-profile` writes the manifest entry and
+///   re-locks, and renders NOTHING — naming a toolset is no longer switching to
+///   it (review finding H3). Activation is a separate verb (`use-profile`, or
+///   `session start` for a reversible one). A separate name rather than a
+///   revision of `profiles-edit-v1`, because a binary advertising that older
+///   name legitimately re-renders on create: a panel that showed "created and
+///   active" on the strength of `profiles-edit-v1` would be right about the old
+///   binary and wrong about this one. `--allow-unresolved` is inert for this
+///   verb now (nothing renders, so no `${REF}` resolves), exactly as it already
+///   is for `remove-from-library`. The other three `profiles-edit-v1` verbs
+///   (`add-skill-to-profile`, `add-server-to-profile`, `use-profile`) still
+///   re-lock AND re-render, and are unchanged.
 /// - `library-remove-v1`: `remove-from-library --kind skill|server --name <n>`
 ///   drops a capability from the MACHINE-WIDE central library, bound to a
 ///   `consent_digest` a prior `--preview` returned — here over the library index
@@ -84,6 +99,7 @@ pub const FEATURES: &[&str] = &[
     "restore-last",
     "sessions-v1",
     "profiles-edit-v1",
+    "toolset-create-v2",
     "library-remove-v1",
     "workflow-observe-v1",
     "workflow-serial-roles-v1",

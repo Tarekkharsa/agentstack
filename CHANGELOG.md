@@ -79,10 +79,10 @@ findings and two interpreter findings. All are closed:
 - **`create-profile` is usable by hand.** At a terminal it now shows a plain
   review and asks, instead of requiring the panel's
   `--yes --consented <digest>` round trip — naming a toolset was previously
-  reachable only by editing TOML. The non-interactive contract is unchanged:
-  a pipe, script, or panel still gets the enveloped preview and still cannot
-  write without presenting the reviewed digest, and `--preview` forces that
-  shape at a terminal too.
+  reachable only by editing TOML. The authority contract is unchanged: no
+  caller writes without presenting the reviewed digest, and `--preview` forces
+  the enveloped shape at a terminal too. (See *Changed* for what a bare
+  non-interactive call does now, and for create no longer rendering.)
 - **Advisory findings in `doctor`.** Findings that are true but carry no action
   for this project — a server launched through bare `npx`, for instance — are
   now counted separately from warnings, reported as notes, and excluded from
@@ -193,6 +193,30 @@ findings and two interpreter findings. All are closed:
 
 ### Changed
 
+- **Naming a toolset no longer switches to it.** `create-profile` used to write
+  the manifest entry, re-lock, *and* render the new toolset into every CLI as a
+  side effect of being named — so defining a subset silently changed your setup,
+  and the later `session end` returned to that subset instead of your full
+  manifest, which is what turned a clean `doctor` into five drift warnings for
+  anyone who followed the documented path. It now writes the entry and re-locks,
+  and renders nothing. Activate it when you actually want it:
+  `agentstack session start <name>` (reversible) or `agentstack use <name>
+  --write` (on disk). Panels gate on the new **`toolset-create-v2`** feature
+  name; `profiles-edit-v1` keeps its old meaning, and the other three verbs it
+  covers are unchanged.
+- **A bare non-interactive `create-profile` refuses instead of printing a
+  consent envelope.** Piped, in CI, or driven by an agent, it used to dump a
+  JSON envelope with a `consent_digest` and a fourteen-element `features` array
+  at whoever ran it. The two-step digest contract is right for machines and
+  wrong as an answer to a person, so it now lives behind the flag a machine
+  passes — `--preview` — and the bare call says, in a sentence, which flag it
+  wants.
+- **`init`'s closing summary stops recommending a toolset.** It taught
+  `create-profile` as the step after `apply --write` + `doctor`; a first-time
+  user with a handful of servers has nothing to subset yet, and the suggestion
+  sent them into a second concept — and, before the change above, into an
+  unannounced render — one command after the part that worked. The summary now
+  ends at `apply --write` → `doctor`.
 - **`--help` is one screen again.** It listed nine curated commands and then
   printed all ~40 names two lines below, undoing the curation on the same
   screen and making a config manager look like an enterprise platform. The

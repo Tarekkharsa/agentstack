@@ -342,7 +342,7 @@ added to those files are left alone. Every file edit is captured first, so
     )]
     Uninstall(UninstallArgs),
 
-    /// Name a toolset: bundle some of what you already have, and activate it.
+    /// Name a toolset: bundle some of what you already have. Does not activate it.
     #[command(
         name = "create-profile",
         hide = true,
@@ -351,15 +351,18 @@ A toolset is a named subset of this project's servers and skills — one for
 backend work, one for incident response — so you switch context without
 editing five config files.
 
+Naming one does not switch to it: this writes the manifest entry and re-locks,
+and renders nothing.
+
   agentstack create-profile --name backend --server github
-      at a terminal: shows what it will create, asks, then re-locks and renders
+      at a terminal: shows what it will create, asks, then writes and re-locks
 
   agentstack session start backend      use it for now
   agentstack session end                put every native file back
 
-Scripts and graphical clients get the two-step contract instead: a bare call
-(or --preview) emits the plan plus a consent digest, and applying needs
-`--yes --consented <digest>`."
+Scripts and graphical clients get the two-step contract instead: --preview
+emits the plan plus a consent digest, and applying needs
+`--yes --consented <digest>`. A bare non-interactive call refuses and says so."
     )]
     CreateProfile(PanelCreateProfileArgs),
 

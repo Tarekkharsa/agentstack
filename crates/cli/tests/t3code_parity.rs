@@ -253,13 +253,15 @@ fn create_profile_digest(argv: &[&str], proj: &Path) -> String {
     }
 }
 
-/// Witness (profiles-edit-v1): the panel's `create-profile` apply runs the house
-/// pipeline through the ONE activation path, so it both RE-LOCKS (pins
-/// `agentstack.lock`) and RE-RENDERS (materializes the toolset's skills into the
-/// target). Real, not mocked: a declared claude-code target and an inline skill
-/// on disk, driven through the exact fixed argv the panel bridge emits — no MCP.
+/// Witness (toolset-create-v2): the panel's `create-profile` apply RE-LOCKS
+/// (pins `agentstack.lock`) and RENDERS NOTHING — naming a toolset is not
+/// switching to it (review finding H3). Activation stays a separate verb
+/// (`use-profile`, `session start`), which is why the capability got a new name
+/// rather than a wider reading of `profiles-edit-v1`. Real, not mocked: a
+/// declared claude-code target and an inline skill on disk, driven through the
+/// exact fixed argv the panel bridge emits — no MCP.
 #[test]
-fn panel_create_profile_relocks_and_rerenders() {
+fn panel_create_profile_relocks_and_does_not_render() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
     let home = tmp.path().join("home");
@@ -314,13 +316,26 @@ fn panel_create_profile_relocks_and_rerenders() {
 
     // Re-lock: the toolset's skill is now pinned in agentstack.lock.
     let lock = fs::read_to_string(proj.join("agentstack.lock"))
-        .expect("create-profile activation must pin the lockfile");
+        .expect("create-profile must pin the lockfile");
     assert!(lock.contains("demo"), "the skill is pinned: {lock}");
 
-    // Re-render: the skill materialized into the claude-code project skills dir.
+    // The manifest entry exists — the create half really happened.
+    let manifest = fs::read_to_string(proj.join("agentstack.toml")).unwrap();
     assert!(
-        proj.join(".claude/skills/demo/SKILL.md").exists(),
-        "create-profile activation must materialize the skill into the target"
+        manifest.contains("[profiles.web]"),
+        "create-profile writes the manifest entry: {manifest}"
+    );
+
+    // No render: the skill did NOT materialize into the claude-code target, and
+    // the target's own skills dir was never created. This is the H3 half — if
+    // it regresses, creating a toolset silently switches the user's CLIs.
+    assert!(
+        !proj.join(".claude/skills/demo").exists(),
+        "create-profile must not materialize the skill into the target"
+    );
+    assert!(
+        !proj.join(".claude").exists(),
+        "create-profile must not create the target's config dir at all"
     );
 
     // The library-index read arm routes too — a fresh read against the same

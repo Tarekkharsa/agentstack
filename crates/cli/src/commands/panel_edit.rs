@@ -19,11 +19,17 @@
 //! bug: the manifest keeps the `${REF}` (never a value) and the render is
 //! blocked until the human sets the secret.
 //!
-//! One verb sits outside that pipeline on purpose: `remove-from-library` edits
-//! the MACHINE-WIDE central library, not this project, so it re-locks and
-//! re-renders nothing and its consent digest binds `library.toml` bytes instead
-//! of manifest bytes. It is still previewed, digest-bound, and — because the
-//! entry moves to `lib/.trash` rather than being deleted — recoverable.
+//! Two verbs sit outside that pipeline on purpose:
+//!
+//! - `remove-from-library` edits the MACHINE-WIDE central library, not this
+//!   project, so it re-locks and re-renders nothing and its consent digest binds
+//!   `library.toml` bytes instead of manifest bytes. It is still previewed,
+//!   digest-bound, and — because the entry moves to `lib/.trash` rather than
+//!   being deleted — recoverable.
+//! - `create-profile` stops after `mutate manifest → re-lock` (review finding
+//!   H3). Naming a toolset is not switching to it, so nothing renders and no
+//!   `${REF}` is resolved; activation is `use-profile` or `session start`.
+//!   Panels gate on `toolset-create-v2` for this.
 
 use std::io::IsTerminal;
 use std::path::Path;
@@ -89,15 +95,24 @@ fn load_manifest(dir: Option<&Path>) -> Result<Manifest> {
 fn build_preview(action: &str, digest: &str, mut body: Map<String, Value>) -> Value {
     body.insert("action".into(), action.into());
     body.insert("consent_digest".into(), digest.to_string().into());
-    body.insert(
-        "note".into(),
+    // `create-profile` is the one action here that no longer renders (it names a
+    // toolset; activating it is a separate verb), so it cannot carry the shared
+    // note's render/`${REF}` clauses — they would be false. Every other action
+    // still re-locks and re-renders.
+    let note = if action == "create-profile" {
+        format!(
+            "Review, then apply with --yes --consented {digest}. Applying writes the \
+             manifest entry and re-locks — nothing is rendered, so no ${{REF}} secret is \
+             resolved. Activate it separately with `use-profile` or `session start`."
+        )
+    } else {
         format!(
             "Review, then apply with --yes --consented {digest}. Applying re-locks and \
              re-renders the toolset; an unresolved ${{REF}} secret blocks the render \
              (set it with `agentstack secret set`, then re-apply)."
         )
-        .into(),
-    );
+    };
+    body.insert("note".into(), note.into());
     crate::ui_contract::envelope(Value::Object(body))
 }
 
@@ -406,7 +421,9 @@ fn kv_to_object(pairs: &[String]) -> Result<Value> {
 // ── create-profile ──────────────────────────────────────────────────────────
 
 /// `create-profile` — create a new toolset from existing/library skills and
-/// servers, then activate it. Preview by default; apply with `--yes --consented`.
+/// servers. Naming is not activating: this writes the manifest entry and
+/// re-locks, and nothing is rendered. Preview by default; apply with
+/// `--yes --consented`.
 pub fn create_profile(args: &PanelCreateProfileArgs, dir: Option<&Path>) -> Result<()> {
     create_profile_gated(args, dir, std::io::stdin().is_terminal())
 }
@@ -417,12 +434,14 @@ pub fn create_profile(args: &PanelCreateProfileArgs, dir: Option<&Path>) -> Resu
 ///
 /// Three callers, three shapes, one authority path:
 ///
-/// - **The panel** (headless, `--yes --consented <digest>`) — unchanged: the
-///   digest it echoes back must match a freshly recomputed one or nothing is
-///   written.
-/// - **Any other headless caller** (a pipe, a script, an agent) — unchanged:
-///   the bare call is the JSON preview, and applying still needs the digest.
-///   `--preview` forces this shape even at a terminal.
+/// - **The panel** (headless, `--preview` then `--yes --consented <digest>`) —
+///   the digest it echoes back must match a freshly recomputed one or nothing
+///   is written.
+/// - **Any other headless caller** (a pipe, a script, an agent) — `--preview`
+///   is the JSON envelope, and applying still needs the digest. A *bare*
+///   headless call refuses with a sentence naming the flag it needs (review
+///   finding H3): the two-step digest contract is right for machines and wrong
+///   as the thing a person sees when they pipe the command somewhere.
 /// - **A human at a terminal** — new. Creating a toolset was previously only
 ///   reachable by hand-editing TOML or by performing the panel's two-step
 ///   digest dance, which left the product's own retention feature with no
@@ -443,11 +462,20 @@ fn create_profile_gated(
 ) -> Result<()> {
     let preview = create_profile_preview(args, dir)?;
     if !args.consent.yes {
-        if args.consent.preview || !interactive {
+        if args.consent.preview {
             return emit(&preview);
         }
+        if !interactive {
+            // The envelope is a machine contract, so it is behind the flag a
+            // machine passes. A bare headless call gets prose, not JSON.
+            anyhow::bail!(
+                "nothing was created — this is not a terminal, so there is no one to ask.\n\
+                 Run it at a terminal, or pass --preview to get the plan and its consent \
+                 digest, then re-run with --yes --consented <digest>."
+            );
+        }
         print_create_review(args, preview_digest(&preview)?);
-        if !confirm("Create and activate it?")? {
+        if !confirm("Create it?")? {
             println!("cancelled — nothing was written.");
             return Ok(());
         }
@@ -467,7 +495,40 @@ fn create_profile_gated(
         "servers": args.servers,
     });
     crate::commands::add::add_profile_json(dir, &create)?;
-    activate(&args.name, args.consent.allow_unresolved, dir)
+
+    // Naming a toolset is not switching to it (review finding H3). The manifest
+    // entry is written and the new members are pinned — but nothing renders, so
+    // no native config file moves and no `${REF}` is resolved. Re-locking goes
+    // through `lock::run`, the existing lock-only path, rather than a second
+    // pinning path of our own; it also carries the "trusted project, new pins,
+    // trust is now stale" notice, which a fresh toolset legitimately triggers.
+    crate::commands::lock::run(
+        &crate::cli::LockArgs {
+            profile: Some(args.name.clone()),
+            ..Default::default()
+        },
+        dir,
+    )?;
+    print_created(&args.name);
+    Ok(())
+}
+
+/// What a human sees after a create: what happened, and the one command that
+/// makes it take effect. `restore --last` is deliberately NOT offered — create
+/// writes only the manifest, and the undo ledger captures rendered config
+/// files, so pointing at it here would undo somebody else's earlier write.
+fn print_created(name: &str) {
+    use owo_colors::OwoColorize;
+    println!("\n{} toolset {} created.", "✓".green(), name.bold());
+    println!(
+        "  {}",
+        "Nothing was rendered — your CLIs are unchanged.".dimmed()
+    );
+    println!("  Activate it:  agentstack session start {name}");
+    println!(
+        "  {}",
+        format!("Undo: delete the [profiles.{name}] block from agentstack.toml").dimmed()
+    );
 }
 
 /// The interactive review: the same facts the JSON preview carries, in prose.
@@ -485,17 +546,17 @@ fn print_create_review(args: &PanelCreateProfileArgs, digest: &str) {
     }
     println!(
         "\n  {}",
-        "Creating it re-locks the manifest and renders this toolset into your CLIs.".dimmed()
+        "Creating it writes the manifest entry and re-locks. Nothing is rendered —".dimmed()
     );
     println!(
         "  {}",
-        "An unresolved ${REF} secret blocks the render — set it, then re-run.".dimmed()
+        format!(
+            "activate it afterwards with `agentstack session start {}`.",
+            args.name
+        )
+        .dimmed()
     );
-    println!("  {}", format!("consent digest: {digest}").dimmed());
-    println!(
-        "  {}\n",
-        "Undo with: agentstack restore --last --write".dimmed()
-    );
+    println!("  {}\n", format!("consent digest: {digest}").dimmed());
 }
 
 /// A y/N prompt on stdin. Only ever reached on the interactive path, where
@@ -891,11 +952,12 @@ mod tests {
         assert!(verify_consent(Some("sha256:aa"), "sha256:aa").is_ok());
     }
 
-    /// F05: making `create-profile` usable by a human must not open a hole for
-    /// anything else. The headless contract is unchanged — a non-interactive
-    /// caller gets the preview and cannot write without the digest — and
-    /// `--preview` still forces the JSON shape even at a terminal. Only the
-    /// attended-terminal path is new, and it is gated on the TTY probe.
+    /// F05 + H3: making `create-profile` usable by a human must not open a hole
+    /// for anything else. The *authority* contract is unchanged — no caller
+    /// writes without a matching digest — while the *shape* of a bare headless
+    /// call moved behind `--preview` (H3): the JSON envelope is a machine
+    /// contract and now requires the flag a machine passes, so a person who
+    /// pipes the command gets a sentence instead of a digest dump.
     #[test]
     fn create_profile_headless_contract_is_unchanged() {
         let _g = crate::util::TEST_ENV_LOCK
@@ -925,10 +987,15 @@ mod tests {
             text.contains("[profiles.backend]")
         };
 
-        // Headless, bare: the preview is emitted and nothing is written — even
-        // though `interactive` would have prompted.
-        create_profile_gated(&args(false, false, None), Some(tmp.path()), false).unwrap();
-        assert!(!wrote(), "a headless preview must not write");
+        // H3: headless and bare — no envelope, no write, and the refusal names
+        // the flag a machine caller is missing rather than printing one.
+        let err = create_profile_gated(&args(false, false, None), Some(tmp.path()), false)
+            .expect_err("a bare headless call must refuse rather than emit the envelope");
+        assert!(
+            err.to_string().contains("--preview"),
+            "the refusal names the flag it needs: {err}"
+        );
+        assert!(!wrote(), "a refused headless call must not write");
 
         // `--preview` forces the same read shape at a terminal, so a graphical
         // client driving a PTY never trips the prompt.

@@ -24,14 +24,21 @@ of them — no re-import, no copying. The shortest path is one command:
 agentstack create-profile --name backend --server postgres --server github --skill sql-review
 ```
 
-At a terminal it shows what it will create, asks, and on yes re-locks the
-manifest and renders the toolset into your CLIs. `--skill '*'` means every
-inline skill. Undo it like any other write: `agentstack restore --last --write`.
+At a terminal it shows what it will create, asks, and on yes writes the
+`[profiles.backend]` block and re-locks. `--skill '*'` means every inline skill.
 
-Scripts and graphical clients get a two-step contract instead — a bare call (or
-`--preview`) emits the plan plus a consent digest, and applying needs
+**Naming a toolset does not switch to it.** Nothing is rendered and none of your
+CLIs change — you have defined a subset, not chosen it. Activate it when you
+want it, with `agentstack session start backend` (see
+[below](#which-activation-session-or-apply)). To undo the creation itself,
+delete the `[profiles.backend]` block from the manifest.
+
+Scripts and graphical clients get a two-step contract instead — `--preview`
+emits the plan plus a consent digest, and applying needs
 `--yes --consented <digest>`, so nothing writes without something having
-reviewed exactly that plan against exactly those manifest bytes.
+reviewed exactly that plan against exactly those manifest bytes. A bare
+non-interactive call refuses and says which flag it wants, rather than printing
+a digest at a person who did not ask for one.
 
 ## Or write it by hand
 

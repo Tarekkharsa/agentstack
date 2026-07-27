@@ -1401,7 +1401,7 @@ you need the exact verb, flag, or subcommand.
 - **`add-skill-to-profile`** _(hidden)_ — Add a skill to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--git/--rev/--subpath/--path/--preview/--yes/--consented/--allow-unresolved`
 - **`add-server-to-profile`** _(hidden)_ — Add a server to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--type/--url/--header/--command/--arg/--cwd/--env/--preview/--yes/--consented/--allow-unresolved`
 - **`uninstall`** _(hidden)_ — Remove everything AgentStack manages, previewing first — flags `--scope/--write/--verbose/--keep-home`
-- **`create-profile`** _(hidden)_ — Name a toolset: bundle some of what you already have, and activate it — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
+- **`create-profile`** _(hidden)_ — Name a toolset: bundle some of what you already have. Does not activate it — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
 - **`use-profile`** _(hidden)_ — Activate an existing toolset (panel action; digest-bound) — flags `--profile/--preview/--yes/--consented/--allow-unresolved`
 - **`library-index`** _(hidden)_ — The central-library catalog (skills + servers) for the panel browser
 - **`remove-from-library`** _(hidden)_ — Remove a skill or server from the central library (panel action; digest-bound). Moves it to the library trash — recoverable with `agentstack lib trash --restore <id> --write` — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`
