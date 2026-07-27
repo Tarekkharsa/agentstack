@@ -42,6 +42,10 @@ TREE = [
         ("Examples", "examples.html", "examples"),
         ("Cookbook", "cookbook.html", "cookbook"),
     ], "open"),
+    ("When it breaks", "$ agentstack status · doctor", [
+        ("Troubleshooting", "troubleshooting.html", "troubleshooting"),
+        ("FAQ", "faq.html", "faq"),
+    ], "open"),
     ("Everyday", "$ agentstack add · apply · doctor", [
         ("The manifest", "concepts.html#the-manifest-and-the-lockfile", "manifest"),
         ("Add a server", "howto/add-a-server.html", "howto-server"),

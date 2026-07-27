@@ -45,6 +45,19 @@ findings and two interpreter findings. All are closed:
 
 ### Added
 
+- **A troubleshooting page and an FAQ**, the two pages the docs set was
+  missing. [Troubleshooting](https://tarekkharsa.github.io/agentstack/troubleshooting.html)
+  is organised by what the user experiences — "my CLI doesn't see the servers",
+  "a secret won't resolve", "it says my files drifted", "it refuses because the
+  project isn't trusted", "I want to undo something", "a server won't start" —
+  and quotes each message verbatim from the binary so the text pasted into a
+  search box is the text that finds the fix, paired with the exact repair
+  command `doctor` would have printed after its `↳`. The
+  [FAQ](https://tarekkharsa.github.io/agentstack/faq.html) answers the fifteen
+  questions a first-week user actually asks (will this overwrite my configs, is
+  my API key in the manifest, do I have to commit it, can my teammate use a
+  different CLI, do I need Docker, what happens if I uninstall). Both are
+  reachable from the sidebar, the docs index, and the README.
 - **`doctor-advisories-v1`** joins the negotiated `features` list: `doctor
   --json` carries an `advisories` count and section lines can carry
   `level: "advisory"`. A panel that does not know the name renders advisories

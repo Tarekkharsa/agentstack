@@ -38,6 +38,8 @@ SITE = "https://tarekkharsa.github.io/agentstack"
 PAGES = [
     ("concepts.md", "concepts.html", "concepts"),
     ("choose.md", "choose.html", "choose"),
+    ("troubleshooting.md", "troubleshooting.html", "troubleshooting"),
+    ("faq.md", "faq.html", "faq"),
     ("reference.md", "reference.html", "reference"),
     ("integrations.md", "integrations.html", "integrations"),
     ("ARCHITECTURE.md", "architecture.html", "how-it-works"),

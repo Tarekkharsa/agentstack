@@ -78,6 +78,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
     <div class="doc-toc" style="width:200px;flex:none;position:sticky;top:24px;align-self:flex-start;display:flex;flex-direction:column;gap:var(--space-2)">
       <div style="font-size:0.78rem;font-weight:700;letter-spacing:0.08em;color:var(--color-neutral-600);text-transform:uppercase;margin-bottom:var(--space-1)">On this page</div>
       <a href="#start" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.95rem">Getting started</a>
+      <a href="#broken" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.95rem">When it breaks</a>
       <a href="#concepts" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.95rem">Concepts</a>
       <a href="#commands" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.95rem">Command reference</a>
       <a href="#howtos" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.95rem">How-tos</a>
@@ -101,6 +102,13 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
           <div style="display:flex;gap:var(--space-3);align-items:baseline"><span class="tag tag-accent">2</span><div><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack apply --write</code> — renders the manifest back into every CLI's native config. Edit once, applied everywhere.</div></div>
           <div style="display:flex;gap:var(--space-3);align-items:baseline"><span class="tag tag-accent">3</span><div><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack doctor</code> — health and drift checks; every warning names its exact fix. Undo any recorded write with <code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">restore --last --write</code>.</div></div>
         </div>
+      </div>
+
+      <h2 id="broken" style="font-family:var(--font-heading);font-weight:400;font-size:1.7rem;margin:0 0 var(--space-3)">When something breaks</h2>
+      <p style="font-size:0.98rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-3);max-width:640px">Paste the line your terminal printed into the <a href="troubleshooting.html">troubleshooting page</a> — every message there is quoted from the binary and followed by the exact command that fixes it. For the questions that come before an error, there is a short <a href="faq.html">FAQ</a>.</p>
+      <div class="doc-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);margin-bottom:var(--space-6)">
+        <div class="card elev-sm"><div class="card-kicker">troubleshooting</div><div class="card-title" style="font-size:1rem;font-family:var(--font-body);font-weight:700"><a href="troubleshooting.html" style="color:inherit">Search for your error text</a></div><div class="card-body" style="font-size:0.95rem;line-height:1.6">My CLI doesn't see the servers · a secret won't resolve · it says my files drifted · it refuses because the project isn't trusted · I want to undo something · a server won't start.</div></div>
+        <div class="card elev-sm"><div class="card-kicker">faq</div><div class="card-title" style="font-size:1rem;font-family:var(--font-body);font-weight:700"><a href="faq.html" style="color:inherit">Frequently asked</a></div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Will this overwrite my existing configs? Is my API key in the manifest? Do I have to commit it? Can my teammate use a different CLI? Do I need Docker? What happens if I uninstall?</div></div>
       </div>
 
       <h2 id="concepts" style="font-family:var(--font-heading);font-weight:400;font-size:1.7rem;margin:0 0 var(--space-3)">Concepts</h2>
