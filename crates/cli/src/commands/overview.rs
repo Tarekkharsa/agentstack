@@ -149,12 +149,21 @@ pub(crate) fn detect_mode(ctx: &super::Context, target_ids: &[String]) -> Mode {
 /// through `apply`/`use` whatever the trust state, and no bridge exists to
 /// unlock. So it is *not* nagged toward a `trust .` that never converges — its
 /// untrusted state stays a true Status label, and the next step falls through
-/// to the normal ladder. That ladder: a manifest never activated but holding
-/// capabilities → `init`; otherwise the wiring is in place → `doctor`. Pure
-/// over its inputs so the routing is unit-tested without touching disk.
+/// to the normal ladder. That ladder: capabilities declared but nothing on
+/// disk yet → `apply --write`; otherwise the wiring is in place → `doctor`.
+/// Pure over its inputs so the routing is unit-tested without touching disk.
+///
+/// **This function never recommends `init`.** It is only reached once a
+/// manifest has loaded, and `init` refuses when one exists — so recommending
+/// it here sent a user who had just finished a successful first run into an
+/// error. The state that used to trigger it (`!locked`, i.e. never activated)
+/// is not something `init` fixes: a project is unlocked until `use`/`lock`
+/// runs, which is a normal resting state for a static setup, not an unfinished
+/// import. The honest question is "is this rendered?", which `rendered`
+/// answers.
 pub(crate) fn next_step(
     trust: crate::trust::TrustState,
-    locked: bool,
+    rendered: bool,
     has_capabilities: bool,
     trust_relevant: bool,
 ) -> (&'static str, &'static str) {
@@ -168,14 +177,12 @@ pub(crate) fn next_step(
             "the manifest or lock changed — review and re-trust",
         ),
         // Untrusted or trust-stale but trust changes nothing here (static, no
-        // gateway), or already trusted: fall through to the normal ladder. A
-        // never-activated manifest with capabilities finishes its first run via
-        // `init`; otherwise the wiring is in place → `doctor`.
+        // gateway), or already trusted: fall through to the normal ladder.
         _ => {
-            if !locked && has_capabilities {
+            if has_capabilities && !rendered {
                 (
-                    "agentstack init",
-                    "finish the first run — preview, apply, activate",
+                    "agentstack apply --write",
+                    "render this setup into your CLIs",
                 )
             } else {
                 (
@@ -493,7 +500,12 @@ fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
                 }
 
                 let has_capabilities = !m.skills.is_empty() || !m.servers.is_empty();
-                let fallback = next_step(trust, locked, has_capabilities, trust_relevant);
+                // "Is anything on disk for these targets?" — the signal that
+                // actually distinguishes "imported but not applied" from
+                // "set up and resting". `locked` does not: a static project
+                // stays unlocked until `use`/`lock` runs.
+                let rendered = has_rendered_artifacts(&ctx, &target_ids);
+                let fallback = next_step(trust, rendered, has_capabilities, trust_relevant);
                 let profile = if m.profiles.len() == 1 {
                     m.profiles
                         .keys()
@@ -612,7 +624,7 @@ mod tests {
         assert_eq!(orientation_trust_note(TrustState::Trusted), None);
 
         // Trust-relevant (bridge registered / gate-dependent mode): untrusted
-        // and stale both send the human to `trust .`, whatever the lock holds.
+        // and stale both send the human to `trust .`, whatever is rendered.
         assert_eq!(
             next_step(TrustState::Untrusted, false, true, true).0,
             "agentstack trust ."
@@ -627,13 +639,12 @@ mod tests {
         );
 
         // Static, no-gateway (trust irrelevant): the untrusted/stale state does
-        // NOT hijack the headline — it falls through to the normal ladder. A
-        // never-activated manifest with capabilities finishes its first run via
-        // `init`; an activated (or empty) one verifies via `doctor`. This is the
-        // fix for the never-converging trust nag.
+        // NOT hijack the headline — it falls through to the normal ladder.
+        // Declared but unrendered → `apply --write`; rendered (or empty) →
+        // `doctor`. This is the fix for the never-converging trust nag.
         assert_eq!(
             next_step(TrustState::Untrusted, false, true, false).0,
-            "agentstack init"
+            "agentstack apply --write"
         );
         assert_eq!(
             next_step(TrustState::Untrusted, true, false, false).0,
@@ -648,12 +659,12 @@ mod tests {
             "agentstack doctor"
         );
 
-        // Once trusted the trust-relevance flag is moot: the first-run vs. verify
+        // Once trusted the trust-relevance flag is moot: the render vs. verify
         // ladder applies either way.
         for relevant in [true, false] {
             assert_eq!(
                 next_step(TrustState::Trusted, false, true, relevant).0,
-                "agentstack init"
+                "agentstack apply --write"
             );
             assert_eq!(
                 next_step(TrustState::Trusted, true, false, relevant).0,
@@ -664,6 +675,45 @@ mod tests {
                 "agentstack doctor"
             );
         }
+    }
+
+    /// F02 regression: the recommended next step must never be a command that
+    /// refuses. `init` errors out once a manifest exists ("init has nothing
+    /// left to do here"), and `next_step` only runs when one has loaded — so
+    /// no combination of its inputs may produce it. Before this, a normal
+    /// finished setup (imported, applied, never `use`d) recommended exactly
+    /// that, and following the advice printed an error.
+    #[test]
+    fn next_step_never_recommends_a_command_that_refuses() {
+        use crate::trust::TrustState;
+        for trust in [
+            TrustState::Trusted,
+            TrustState::Untrusted,
+            TrustState::Changed,
+        ] {
+            for rendered in [true, false] {
+                for has_capabilities in [true, false] {
+                    for trust_relevant in [true, false] {
+                        let (cmd, why) =
+                            next_step(trust, rendered, has_capabilities, trust_relevant);
+                        assert!(
+                            !cmd.contains("init"),
+                            "a loaded manifest must never be sent back to init \
+                             (trust={trust:?} rendered={rendered} caps={has_capabilities} \
+                             relevant={trust_relevant}) → {cmd} / {why}"
+                        );
+                    }
+                }
+            }
+        }
+
+        // And the specific shape that used to break: trusted or not, a project
+        // holding capabilities that are already on disk is set up — verify it,
+        // don't re-import it.
+        assert_eq!(
+            next_step(TrustState::Untrusted, true, true, false).0,
+            "agentstack doctor"
+        );
     }
 
     // P18(a) witness: orientation names profiles rather than counting them, one

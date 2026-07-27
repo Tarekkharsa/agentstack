@@ -29,6 +29,13 @@ enum Level {
     /// leftovers. Rendered dimmed, counted in neither total — so the closing
     /// "N error(s), M warning(s)" only counts things this project should act on.
     Info,
+    /// True and worth stating, but not a defect in *this* setup the user is
+    /// expected to repair — an ecosystem caveat (a bare `npx` launcher is how
+    /// nearly every published MCP server ships). Counted in its own total so a
+    /// healthy project still reports `ready`, and never eligible as the one
+    /// "start with" next action. Between [`Level::Info`] and [`Level::Warn`]:
+    /// louder than context, quieter than a thing to fix.
+    Advisory,
     Warn,
     Error,
 }
@@ -41,6 +48,10 @@ enum Level {
 struct Report {
     errors: usize,
     warnings: usize,
+    /// [`Level::Advisory`] findings. Deliberately *not* folded into
+    /// `warnings`: `state()` and `first_fix()` both read "is there something
+    /// to act on?", and an advisory answers no.
+    advisories: usize,
     sections: Vec<Section>,
     /// The project's machine-readable trust state (`trusted` / `drifted` /
     /// `untrusted`), set when a project context is checked. `None` when doctor
@@ -64,6 +75,7 @@ impl Report {
         Report {
             errors: 0,
             warnings: 0,
+            advisories: 0,
             sections: Vec::new(),
             trust: None,
         }
@@ -90,6 +102,10 @@ impl Report {
         let tag = match level {
             Level::Ok => "ok",
             Level::Info => "info",
+            Level::Advisory => {
+                self.advisories += 1;
+                "advisory"
+            }
             Level::Warn => {
                 self.warnings += 1;
                 "warn"
@@ -130,11 +146,13 @@ impl Report {
                 continue;
             }
             // Info lines are context, not findings — they don't force an
-            // otherwise-irrelevant section into view.
+            // otherwise-irrelevant section into view. Advisories do: they are
+            // real findings the user should read once, just not ones that
+            // count against the project's readiness.
             let flagged = s
                 .lines
                 .iter()
-                .any(|(tag, _)| *tag == "warn" || *tag == "error");
+                .any(|(tag, _)| *tag == "warn" || *tag == "error" || *tag == "advisory");
             if !(show_all || s.relevant || flagged) {
                 hidden += 1;
                 continue;
@@ -144,7 +162,10 @@ impl Report {
                 let mark = match *tag {
                     "warn" => "⚠".yellow().to_string(),
                     "error" => "✗".red().to_string(),
-                    "info" => "·".dimmed().to_string(),
+                    // An advisory keeps a readable body (unlike `info`, which
+                    // is dimmed whole) but a quiet marker, so the eye reads it
+                    // once without filing it next to the things to fix.
+                    "info" | "advisory" => "·".dimmed().to_string(),
                     _ => "✓".green().to_string(),
                 };
                 // Dim info lines whole so the eye skips them on a first read.
@@ -171,24 +192,39 @@ impl Report {
     /// an error exists would send the user into a wall; better no triage line
     /// than a misleading one. Reuses the `↳` convention every actionable line
     /// in this file already follows, so it needs no extra bookkeeping.
+    /// Among the candidates at that level, one AgentStack can run itself wins
+    /// over one that hands the user off to another tool. Both are honest, but
+    /// "run this command" converges and "go and do a thing in Codex" is a
+    /// detour — and the section order that used to decide this was an
+    /// implementation detail, not a ranking. Section order still breaks ties
+    /// *within* each class, which is a stable, reviewable rule.
+    ///
+    /// Advisories are never candidates: they have nothing to converge on.
     fn first_fix(&self) -> Option<&str> {
         let want = if self.errors > 0 { "error" } else { "warn" };
-        for s in &self.sections {
-            for (tag, msg) in &s.lines {
-                if *tag == want {
-                    if let Some((_, fix)) = msg.split_once("↳ ") {
-                        return Some(fix.trim());
-                    }
-                }
-            }
-        }
-        None
+        let candidates: Vec<&str> = self
+            .sections
+            .iter()
+            .flat_map(|s| &s.lines)
+            .filter(|(tag, _)| *tag == want)
+            .filter_map(|(_, msg)| msg.split_once("↳ ").map(|(_, fix)| fix.trim()))
+            .collect();
+        candidates
+            .iter()
+            .find(|fix| fix.starts_with("agentstack "))
+            .or_else(|| candidates.first())
+            .copied()
     }
 
     /// The one-word answer an external status surface leads with (UI
     /// control-plane §"Status"). `needs_setup` never comes from here — a
     /// report only exists once a manifest loaded; [`run`] emits that state
     /// before checks can run.
+    ///
+    /// Advisories are excluded on purpose. A status chip that sits on
+    /// "needs attention" for a setup with nothing to repair trains the user to
+    /// ignore it, which costs more than the advisory was worth; only findings
+    /// with an action behind them may move this off `ready`.
     fn state(&self) -> &'static str {
         if self.errors + self.warnings > 0 {
             "needs_attention"
@@ -220,6 +256,10 @@ impl Report {
             "protection": { "guard": guard, "machine_policy": machine_policy },
             "errors": self.errors,
             "warnings": self.warnings,
+            // Findings that are true but carry no action for this project.
+            // A UI may show the count as a quiet note; it must not drive the
+            // status chip (see `state`).
+            "advisories": self.advisories,
             "trust": self.trust,
             "sections": self.sections.iter().map(|s| serde_json::json!({
                 "title": s.title,
@@ -280,8 +320,15 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         if fixed > 0 {
             println!("{} re-applied {fixed} drifted target(s).", "✓".green());
         }
+        // Notes are reported separately from warnings so the headline count
+        // answers "what must I fix?" and nothing else.
+        let notes = if report.advisories > 0 {
+            format!(", {} note(s)", report.advisories)
+        } else {
+            String::new()
+        };
         println!(
-            "{} error(s), {} warning(s).",
+            "{} error(s), {} warning(s){notes}.",
             report.errors, report.warnings
         );
         // Triage, not just totals: name the one fix to start with.
@@ -452,7 +499,7 @@ fn run_checks(
                 let wiring = desc
                     .config
                     .as_ref()
-                    .map(|c| format!("{} parses", paths::expand_tilde(&c.path).display()))
+                    .map(|c| format!("{} parses", tidy_path(&paths::expand_tilde(&c.path))))
                     .unwrap_or_else(|| "no MCP config to check".to_string());
                 if desc.is_installed() {
                     match desc.read_config_value() {
@@ -1028,7 +1075,7 @@ fn run_checks(
                 Level::Warn,
                 format!(
                     "Codex will IGNORE {}/.codex/config.toml — the project is not trusted in ~/.codex/config.toml (projects.\"{}\".trust_level) ↳ open Codex in this folder once and accept the trust prompt",
-                    root.display(),
+                    tidy_path(&root),
                     root.display()
                 ),
             );
@@ -1044,7 +1091,12 @@ fn run_checks(
         }
     }
     for q in quirks {
-        report.line(Level::Warn, q);
+        let level = if q.advisory {
+            Level::Advisory
+        } else {
+            Level::Warn
+        };
+        report.line(level, q.msg);
     }
 
     // Lifecycle hooks: the same staleness contract as instructions — the
@@ -1238,7 +1290,7 @@ fn run_checks(
                 Level::Warn,
                 format!(
                     "{stale} leftover dir(s) under {} — {what}; remove with `rm -rf {}`",
-                    root.display(),
+                    tidy_path(&root),
                     root.display()
                 ),
             );
@@ -2620,11 +2672,77 @@ const PATH_DEPENDENT_LAUNCHERS: &[&str] = &[
 /// `PATH`), so a shell command is never itself the fragile case.
 const SHELL_COMMANDS: &[&str] = &["zsh", "bash", "sh", "fish"];
 
-/// Flag a stdio server whose `command` is a bare, `PATH`-dependent launcher — no
-/// path separator, not a tilde path, and in [`PATH_DEPENDENT_LAUNCHERS`]. We
-/// only warn for that known set (not every bare command) so intentional `PATH`
+/// Tidy an absolute path for the report: fold away `.` and `..` segments, then
+/// abbreviate `$HOME` to `~`. Purely lexical — no `canonicalize`, which would
+/// hit the filesystem, fail on paths that do not exist yet, and rewrite
+/// symlinked prefixes into something the user never typed.
+///
+/// Display-only. The JSON contract and every fix command keep the full path;
+/// this exists so a diagnostic does not print `/home/me/proj/../.claude.json`
+/// at someone who is trying to read it quickly.
+fn tidy_path(path: &Path) -> String {
+    let mut parts: Vec<std::ffi::OsString> = Vec::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                let root = std::path::Component::RootDir.as_os_str();
+                let up = std::path::Component::ParentDir.as_os_str();
+                match parts.last().map(|p| p.as_os_str()) {
+                    // Nothing above the root to climb into: `/..` is `/`.
+                    Some(p) if p == root => {}
+                    // A real segment to fold away.
+                    Some(p) if p != up => {
+                        parts.pop();
+                    }
+                    // A leading (or stacked) `..` in a relative path still
+                    // means something — folding it would change the path.
+                    _ => parts.push(comp.as_os_str().to_os_string()),
+                }
+            }
+            other => parts.push(other.as_os_str().to_os_string()),
+        }
+    }
+    let cleaned: std::path::PathBuf = parts.iter().collect();
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(rel) = cleaned.strip_prefix(&home) {
+            return format!("~/{}", rel.display());
+        }
+    }
+    cleaned.display().to_string()
+}
+
+/// A quirk finding plus whether the user is expected to act on it.
+#[derive(Debug)]
+struct Quirk {
+    /// True for ecosystem caveats (see [`Level::Advisory`]) rather than
+    /// defects in this manifest. Advisory quirks are stated once and do not
+    /// count against readiness.
+    advisory: bool,
+    msg: String,
+}
+
+impl Quirk {
+    fn warn(msg: String) -> Self {
+        Quirk {
+            advisory: false,
+            msg,
+        }
+    }
+
+    fn advisory(msg: String) -> Self {
+        Quirk {
+            advisory: true,
+            msg,
+        }
+    }
+}
+
+/// Is this a stdio server whose `command` is a bare, `PATH`-dependent launcher
+/// — no path separator, not a tilde path, and in [`PATH_DEPENDENT_LAUNCHERS`]?
+/// We only flag that known set (not every bare command) so intentional `PATH`
 /// binaries with a stable install location don't produce false positives.
-fn bare_launcher_quirk(name: &str, server: &Server) -> Option<String> {
+fn bare_launcher(server: &Server) -> Option<&str> {
     if server.server_type != ServerType::Stdio {
         return None;
     }
@@ -2637,20 +2755,38 @@ fn bare_launcher_quirk(name: &str, server: &Server) -> Option<String> {
     if !PATH_DEPENDENT_LAUNCHERS.contains(&cmd) {
         return None;
     }
-    Some(format!(
-        "server '{name}': bare launcher `{cmd}` resolves via PATH; a GUI-launched harness \
-         (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail to spawn \
-         it. Use an absolute path (e.g. an absolute {cmd} under the intended version) or a \
-         login-shell wrapper: command = \"zsh\", args = [\"-lc\", \"exec {cmd} …\"]"
-    ))
+    Some(cmd)
+}
+
+/// One advisory covering every bare-launcher server, not one per server.
+/// Nearly every published MCP server ships as `npx -y …`, so per-server lines
+/// scale with the size of a normal setup while saying the same thing N times.
+fn bare_launcher_advisory(hits: &[(&str, &str)]) -> String {
+    let servers = hits
+        .iter()
+        .map(|(name, cmd)| format!("{name} ({cmd})"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let n = hits.len();
+    format!(
+        "{n} server(s) use a bare launcher that resolves via PATH: {servers}. A GUI-launched \
+         harness (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail \
+         to spawn them. Terminal-launched CLIs are unaffected. To pin them, use an absolute path \
+         or a login-shell wrapper: command = \"zsh\", args = [\"-lc\", \"exec <launcher> …\"]"
+    )
 }
 
 /// Detect per-target syntax a CLI can't handle, before it breaks at runtime.
-fn check_quirks(manifest: &Manifest) -> Vec<String> {
+///
+/// Everything here is a real finding, but they split two ways: a manifest that
+/// says something a target cannot express is the user's to fix, while a bare
+/// `npx` launcher is how the ecosystem ships and is only worth stating once.
+fn check_quirks(manifest: &Manifest) -> Vec<Quirk> {
     let mut out = Vec::new();
+    let mut bare = Vec::new();
     for (name, server) in &manifest.servers {
-        if let Some(msg) = bare_launcher_quirk(name, server) {
-            out.push(msg);
+        if let Some(cmd) = bare_launcher(server) {
+            bare.push((name.as_str(), cmd));
         }
         // Codex has no ${VAR:-default} expansion; flag it generally since the
         // manifest is meant to render to every target.
@@ -2661,21 +2797,26 @@ fn check_quirks(manifest: &Manifest) -> Vec<String> {
             .chain(server.url.iter())
         {
             if val.contains(":-") && val.contains("${") {
-                out.push(format!(
+                out.push(Quirk::warn(format!(
                     "server '{name}': ${{VAR:-default}} syntax is unsupported by Codex"
-                ));
+                )));
                 break;
             }
         }
         // stdio servers with http-only fields, or vice versa.
         if server.server_type == ServerType::Stdio && !server.headers.is_empty() {
-            out.push(format!(
+            out.push(Quirk::warn(format!(
                 "server '{name}': stdio transport ignores `headers`"
-            ));
+            )));
         }
         if server.server_type == ServerType::Http && server.command.is_some() {
-            out.push(format!("server '{name}': http transport ignores `command`"));
+            out.push(Quirk::warn(format!(
+                "server '{name}': http transport ignores `command`"
+            )));
         }
+    }
+    if !bare.is_empty() {
+        out.push(Quirk::advisory(bare_launcher_advisory(&bare)));
     }
     out
 }
@@ -3241,12 +3382,12 @@ mod tests {
         toml::from_str(&src).expect("valid manifest toml")
     }
 
-    fn quirks_for(toml_body: &str) -> Vec<String> {
+    fn quirks_for(toml_body: &str) -> Vec<Quirk> {
         check_quirks(&manifest_with_server(toml_body))
     }
 
-    fn is_bare_launcher_warning(q: &str) -> bool {
-        q.contains("bare launcher") && q.contains("resolves via PATH")
+    fn is_bare_launcher_warning(q: &Quirk) -> bool {
+        q.msg.contains("bare launcher") && q.msg.contains("resolves via PATH")
     }
 
     #[test]
@@ -3255,7 +3396,7 @@ mod tests {
             "type = \"stdio\"\ncommand = \"npx\"\nargs = [\"chrome-devtools-mcp@latest\"]",
         );
         assert!(
-            quirks.iter().any(|q| is_bare_launcher_warning(q)),
+            quirks.iter().any(is_bare_launcher_warning),
             "expected a bare-launcher warning, got {quirks:?}"
         );
     }
@@ -3263,7 +3404,7 @@ mod tests {
     #[test]
     fn bare_node_launcher_is_flagged() {
         let quirks = quirks_for("type = \"stdio\"\ncommand = \"node\"\nargs = [\"server.js\"]");
-        assert!(quirks.iter().any(|q| is_bare_launcher_warning(q)));
+        assert!(quirks.iter().any(is_bare_launcher_warning));
     }
 
     #[test]
@@ -3271,10 +3412,7 @@ mod tests {
         let quirks = quirks_for(
             "type = \"stdio\"\ncommand = \"/usr/local/bin/node\"\nargs = [\"server.js\"]",
         );
-        assert!(
-            !quirks.iter().any(|q| is_bare_launcher_warning(q)),
-            "{quirks:?}"
-        );
+        assert!(!quirks.iter().any(is_bare_launcher_warning), "{quirks:?}");
     }
 
     #[test]
@@ -3282,19 +3420,13 @@ mod tests {
         let quirks = quirks_for(
             "type = \"stdio\"\ncommand = \"zsh\"\nargs = [\"-lc\", \"exec npx chrome-devtools-mcp@latest\"]",
         );
-        assert!(
-            !quirks.iter().any(|q| is_bare_launcher_warning(q)),
-            "{quirks:?}"
-        );
+        assert!(!quirks.iter().any(is_bare_launcher_warning), "{quirks:?}");
     }
 
     #[test]
     fn http_server_is_not_flagged() {
         let quirks = quirks_for("type = \"http\"\nurl = \"https://example.com/mcp\"");
-        assert!(
-            !quirks.iter().any(|q| is_bare_launcher_warning(q)),
-            "{quirks:?}"
-        );
+        assert!(!quirks.iter().any(is_bare_launcher_warning), "{quirks:?}");
     }
 
     #[test]
@@ -3302,10 +3434,122 @@ mod tests {
         // A custom binary name outside the known launcher set is assumed to have
         // a stable install location; we don't want false positives on it.
         let quirks = quirks_for("type = \"stdio\"\ncommand = \"my-mcp-server\"\nargs = []");
-        assert!(
-            !quirks.iter().any(|q| is_bare_launcher_warning(q)),
-            "{quirks:?}"
+        assert!(!quirks.iter().any(is_bare_launcher_warning), "{quirks:?}");
+    }
+
+    /// F12: the report is read at a glance, so paths in it are folded and
+    /// `$HOME`-abbreviated. Purely lexical — a `..` with nothing to fold into
+    /// still means something and survives.
+    #[test]
+    fn tidy_path_folds_and_abbreviates() {
+        assert_eq!(
+            tidy_path(Path::new("/srv/proj/../home/.claude.json")),
+            "/srv/home/.claude.json"
         );
+        assert_eq!(tidy_path(Path::new("/srv/./proj/x")), "/srv/proj/x");
+        // Nothing above the root to climb into: `..` is dropped rather than
+        // producing a path that escapes `/`.
+        assert_eq!(tidy_path(Path::new("/../etc")), "/etc");
+        // A relative path climbing out keeps its meaning.
+        assert_eq!(tidy_path(Path::new("../sibling")), "../sibling");
+
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(
+                tidy_path(&home.join("proj/.mcp.json")),
+                "~/proj/.mcp.json",
+                "$HOME is abbreviated"
+            );
+        }
+    }
+
+    /// F04: nearly every published MCP server ships as `npx -y …`, so the
+    /// bare-launcher finding must be stated ONCE with a count, not once per
+    /// server — otherwise the noise scales with the size of a normal setup.
+    #[test]
+    fn bare_launcher_finding_is_collapsed_and_advisory() {
+        let manifest: Manifest = toml::from_str(
+            "version = 1\n\
+             [servers.a]\ntype = \"stdio\"\ncommand = \"npx\"\nargs = [\"a\"]\n\
+             [servers.b]\ntype = \"stdio\"\ncommand = \"npx\"\nargs = [\"b\"]\n\
+             [servers.c]\ntype = \"stdio\"\ncommand = \"node\"\nargs = [\"c.js\"]\n",
+        )
+        .expect("valid manifest toml");
+        let quirks = check_quirks(&manifest);
+        let bare: Vec<_> = quirks
+            .iter()
+            .filter(|q| is_bare_launcher_warning(q))
+            .collect();
+        assert_eq!(bare.len(), 1, "one line for all of them, got {quirks:?}");
+        let q = bare[0];
+        assert!(q.advisory, "an ecosystem caveat is not a defect to repair");
+        assert!(q.msg.starts_with("3 server(s)"), "{}", q.msg);
+        for name in ["a", "b", "c"] {
+            assert!(q.msg.contains(name), "must name {name}: {}", q.msg);
+        }
+    }
+
+    /// F01: the whole point of the advisory tier. A project whose only
+    /// findings are advisories has nothing to repair, so it must read `ready`
+    /// and must not have one of them chosen as its "start with" next action.
+    #[test]
+    fn advisories_leave_the_project_ready() {
+        let mut report = Report::new();
+        report.section("Quirks");
+        report.line(
+            Level::Advisory,
+            "2 server(s) use a bare launcher ↳ pin them",
+        );
+        report.line(Level::Ok, "no unsupported syntax for any target");
+
+        assert_eq!(report.advisories, 1);
+        assert_eq!(report.warnings, 0);
+        assert_eq!(report.errors, 0);
+        assert_eq!(report.state(), "ready");
+        assert_eq!(
+            report.first_fix(),
+            None,
+            "an advisory must never become the one recommended action"
+        );
+
+        // A real warning still moves it, and still wins the triage line.
+        report.line(
+            Level::Warn,
+            "Codex will IGNORE this config ↳ open Codex once",
+        );
+        assert_eq!(report.state(), "needs_attention");
+        assert_eq!(report.first_fix(), Some("open Codex once"));
+    }
+
+    /// F03: the recommended action used to be whichever warning happened to
+    /// sit in the earliest section. Rank instead — a fix AgentStack can run
+    /// beats a hand-off to another tool, even when the hand-off is listed
+    /// first.
+    #[test]
+    fn first_fix_prefers_a_command_agentstack_can_run() {
+        let mut report = Report::new();
+        report.section("Instructions");
+        report.line(Level::Warn, "Codex will IGNORE this ↳ open Codex once");
+        report.section("Drift");
+        report.line(
+            Level::Warn,
+            "2 change(s) pending ↳ agentstack apply --write",
+        );
+        assert_eq!(report.first_fix(), Some("agentstack apply --write"));
+
+        // Errors still outrank warnings, and the same preference applies
+        // within the error class.
+        report.section("Manifest");
+        report.line(Level::Error, "unreadable ↳ open it and fix the syntax");
+        assert_eq!(report.first_fix(), Some("open it and fix the syntax"));
+        report.line(Level::Error, "unpinned ↳ agentstack lock");
+        assert_eq!(report.first_fix(), Some("agentstack lock"));
+
+        // With no runnable command anywhere, the first candidate stands.
+        let mut manual = Report::new();
+        manual.section("Instructions");
+        manual.line(Level::Warn, "a ↳ do this by hand");
+        manual.line(Level::Warn, "b ↳ then this");
+        assert_eq!(manual.first_fix(), Some("do this by hand"));
     }
 
     /// The node_repl lesson: an absolute stdio command that no longer exists

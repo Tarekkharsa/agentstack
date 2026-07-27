@@ -19,6 +19,7 @@
 //! bug: the manifest keeps the `${REF}` (never a value) and the render is
 //! blocked until the human sets the secret.
 
+use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -400,11 +401,58 @@ fn kv_to_object(pairs: &[String]) -> Result<Value> {
 /// `create-profile` — create a new toolset from existing/library skills and
 /// servers, then activate it. Preview by default; apply with `--yes --consented`.
 pub fn create_profile(args: &PanelCreateProfileArgs, dir: Option<&Path>) -> Result<()> {
+    create_profile_gated(args, dir, std::io::stdin().is_terminal())
+}
+
+/// The create path with the TTY probe injected, so the consent gate is testable
+/// without a real terminal. `interactive` is whether stdin is a TTY;
+/// production passes `std::io::stdin().is_terminal()`.
+///
+/// Three callers, three shapes, one authority path:
+///
+/// - **The panel** (headless, `--yes --consented <digest>`) — unchanged: the
+///   digest it echoes back must match a freshly recomputed one or nothing is
+///   written.
+/// - **Any other headless caller** (a pipe, a script, an agent) — unchanged:
+///   the bare call is the JSON preview, and applying still needs the digest.
+///   `--preview` forces this shape even at a terminal.
+/// - **A human at a terminal** — new. Creating a toolset was previously only
+///   reachable by hand-editing TOML or by performing the panel's two-step
+///   digest dance, which left the product's own retention feature with no
+///   usable on-ramp (review finding F05). Typing the command at a terminal is
+///   the consent, exactly as `agentstack trust` treats it, with the same
+///   honest limit: `isatty` proves stdin is a terminal device, not that a
+///   human is attending it. The enforceable property is unchanged — headless
+///   callers still cannot create without presenting the reviewed digest.
+///
+/// The interactive path is strictly *stronger* than a bare `--yes` would be:
+/// the digest is recomputed after the human answers and compared against the
+/// one they were shown, so a manifest edited during the prompt refuses instead
+/// of silently creating against bytes nobody reviewed.
+fn create_profile_gated(
+    args: &PanelCreateProfileArgs,
+    dir: Option<&Path>,
+    interactive: bool,
+) -> Result<()> {
     let preview = create_profile_preview(args, dir)?;
     if !args.consent.yes {
-        return emit(&preview);
+        if args.consent.preview || !interactive {
+            return emit(&preview);
+        }
+        print_create_review(args, preview_digest(&preview)?);
+        if !confirm("Create and activate it?")? {
+            println!("cancelled — nothing was written.");
+            return Ok(());
+        }
+        // Re-read and re-derive: the human reviewed the digest above, so bind
+        // to it rather than trusting that the manifest sat still while they
+        // thought about it.
+        let fresh = create_profile_preview(args, dir)?;
+        verify_consent(Some(preview_digest(&preview)?), preview_digest(&fresh)?)
+            .context("the manifest changed while you were reviewing")?;
+    } else {
+        verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
     }
-    verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
 
     let create = json!({
         "name": args.name,
@@ -413,6 +461,47 @@ pub fn create_profile(args: &PanelCreateProfileArgs, dir: Option<&Path>) -> Resu
     });
     crate::commands::add::add_profile_json(dir, &create)?;
     activate(&args.name, args.consent.allow_unresolved, dir)
+}
+
+/// The interactive review: the same facts the JSON preview carries, in prose.
+/// Deliberately short — a toolset is a named subset, and the consequence a
+/// human needs before saying yes is "which capabilities, and what happens on
+/// yes", not the envelope's schema fields.
+fn print_create_review(args: &PanelCreateProfileArgs, digest: &str) {
+    use owo_colors::OwoColorize;
+    println!("New toolset {}\n", args.name.bold());
+    if !args.servers.is_empty() {
+        println!("  servers  {}", args.servers.join(", "));
+    }
+    if !args.skills.is_empty() {
+        println!("  skills   {}", args.skills.join(", "));
+    }
+    println!(
+        "\n  {}",
+        "Creating it re-locks the manifest and renders this toolset into your CLIs.".dimmed()
+    );
+    println!(
+        "  {}",
+        "An unresolved ${REF} secret blocks the render — set it, then re-run.".dimmed()
+    );
+    println!("  {}", format!("consent digest: {digest}").dimmed());
+    println!(
+        "  {}\n",
+        "Undo with: agentstack restore --last --write".dimmed()
+    );
+}
+
+/// A y/N prompt on stdin. Only ever reached on the interactive path, where
+/// stdin is a terminal; anything that is not an explicit yes cancels.
+fn confirm(question: &str) -> Result<bool> {
+    use std::io::Write;
+    print!("{question} [y/N] ");
+    std::io::stdout().flush().ok();
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .context("could not read the answer from stdin")?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "Yes"))
 }
 
 /// Validate the request and build its enveloped preview (with the
@@ -633,6 +722,73 @@ mod tests {
         assert!(verify_consent(None, "sha256:aa").is_err());
         assert!(verify_consent(Some("sha256:bb"), "sha256:aa").is_err());
         assert!(verify_consent(Some("sha256:aa"), "sha256:aa").is_ok());
+    }
+
+    /// F05: making `create-profile` usable by a human must not open a hole for
+    /// anything else. The headless contract is unchanged — a non-interactive
+    /// caller gets the preview and cannot write without the digest — and
+    /// `--preview` still forces the JSON shape even at a terminal. Only the
+    /// attended-terminal path is new, and it is gated on the TTY probe.
+    #[test]
+    fn create_profile_headless_contract_is_unchanged() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", tmp.path().join("home"));
+        std::fs::write(
+            tmp.path().join("agentstack.toml"),
+            "version = 1\n\n[servers.github]\ntype = \"stdio\"\ncommand = \"npx\"\n",
+        )
+        .unwrap();
+
+        let args = |preview: bool, yes: bool, consented: Option<&str>| PanelCreateProfileArgs {
+            name: "backend".into(),
+            skills: vec![],
+            servers: vec!["github".into()],
+            consent: crate::cli::PanelConsent {
+                preview,
+                yes,
+                consented: consented.map(str::to_string),
+                allow_unresolved: false,
+            },
+        };
+        let wrote = || {
+            let text = std::fs::read_to_string(tmp.path().join("agentstack.toml")).unwrap();
+            text.contains("[profiles.backend]")
+        };
+
+        // Headless, bare: the preview is emitted and nothing is written — even
+        // though `interactive` would have prompted.
+        create_profile_gated(&args(false, false, None), Some(tmp.path()), false).unwrap();
+        assert!(!wrote(), "a headless preview must not write");
+
+        // `--preview` forces the same read shape at a terminal, so a graphical
+        // client driving a PTY never trips the prompt.
+        create_profile_gated(&args(true, false, None), Some(tmp.path()), true).unwrap();
+        assert!(!wrote(), "--preview must not write, terminal or not");
+
+        // Applying still needs the digest, terminal or not.
+        for interactive in [true, false] {
+            let err = create_profile_gated(&args(false, true, None), Some(tmp.path()), interactive)
+                .expect_err("--yes without --consented must refuse");
+            assert!(
+                err.to_string().contains("--consented"),
+                "the refusal names the missing flag: {err}"
+            );
+            assert!(!wrote());
+
+            let err = create_profile_gated(
+                &args(false, true, Some("sha256:nope")),
+                Some(tmp.path()),
+                interactive,
+            )
+            .expect_err("a mismatched digest must refuse");
+            assert!(err.to_string().contains("consent digest mismatch"), "{err}");
+            assert!(!wrote());
+        }
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     /// The single-authority builder writes `[skills.<name>]` AND the toolset

@@ -29,12 +29,11 @@ The list above is the everyday loop. This is the full map, grouped by task —
 every command (listed or not) has its own --help:
 
   Set up      init · status · adapters · settings · self
-  Edit        add · set · search · remove · install · lib · adopt · export · import
-  Render      apply · use · instructions · lock · session · diff · restore
+  Edit        add · set · search · remove · install · lib · create-profile · adopt · export · import
+  Render      apply · use · instructions · lock · session · diff · restore · uninstall
   Protect     trust · explain · secret · guard · sign · verify
   Run         run · kill · shim · workflow · gateway · mcp · try
   Inspect     doctor · report · optimize · proxy
-  Panel       add-skill-to-profile · add-server-to-profile · create-profile · use-profile · library-index
 
 Words: a CLI (a.k.a. harness) is the agent tool you run; an adapter compiles
 its native config; [targets] in the manifest lists which CLIs commands act on.
@@ -330,8 +329,45 @@ Examples:
     #[command(name = "add-server-to-profile", hide = true)]
     AddServerToProfile(PanelAddServerArgs),
 
-    /// Create a toolset from existing/library capabilities and activate it.
-    #[command(name = "create-profile", hide = true)]
+    /// Remove everything AgentStack manages, previewing first.
+    #[command(
+        hide = true,
+        after_help = "\
+The guaranteed exit. Reverts every managed region AgentStack rendered — servers,
+settings, hooks, and instruction blocks — in each CLI's own config, then removes
+AgentStack's own state directory.
+
+  agentstack uninstall                    show what would be removed (default)
+  agentstack uninstall --verbose          ...with the full diff of each file
+  agentstack uninstall --write            do it
+  agentstack uninstall --write --keep-home  keep ~/.agentstack (and the undo ledger)
+
+Your agentstack.toml is never touched — this removes rendered output, not your
+setup, so you can re-`apply` at any time. Foreign entries you or another tool
+added to those files are left alone. Every file edit is captured first, so
+`agentstack restore` still works afterwards unless you also removed ~/.agentstack."
+    )]
+    Uninstall(UninstallArgs),
+
+    /// Name a toolset: bundle some of what you already have, and activate it.
+    #[command(
+        name = "create-profile",
+        hide = true,
+        after_help = "\
+A toolset is a named subset of this project's servers and skills — one for
+backend work, one for incident response — so you switch context without
+editing five config files.
+
+  agentstack create-profile --name backend --server github
+      at a terminal: shows what it will create, asks, then re-locks and renders
+
+  agentstack session start backend      use it for now
+  agentstack session end                put every native file back
+
+Scripts and graphical clients get the two-step contract instead: a bare call
+(or --preview) emits the plan plus a consent digest, and applying needs
+`--yes --consented <digest>`."
+    )]
     CreateProfile(PanelCreateProfileArgs),
 
     /// Activate an existing toolset (panel action; digest-bound).
@@ -1281,8 +1317,9 @@ pub struct UseArgs {
 /// and `trust-consent` enforce.
 #[derive(clap::Args, Debug, Clone)]
 pub struct PanelConsent {
-    /// Emit the enveloped plan + consent digest and write nothing (the default
-    /// when `--yes` is absent; accept it explicitly for symmetry).
+    /// Emit the enveloped plan + consent digest and write nothing. The default
+    /// for every non-interactive caller; pass it explicitly to force the JSON
+    /// shape at a terminal too.
     #[arg(long)]
     pub preview: bool,
 
@@ -1375,6 +1412,27 @@ pub struct PanelAddServerArgs {
 
     #[command(flatten)]
     pub consent: PanelConsent,
+}
+
+/// `uninstall` — revert every managed region and remove AgentStack's own state.
+#[derive(Args, Debug)]
+pub struct UninstallArgs {
+    /// Which rendered output to revert: `project`, `global`, or `all`.
+    #[arg(long, default_value = "all", value_parser = ["project", "global", "all"])]
+    pub scope: String,
+
+    /// Actually remove. Without it this only shows what would be removed.
+    #[arg(long)]
+    pub write: bool,
+
+    /// Show the full diff of every file, not just its name.
+    #[arg(long, short)]
+    pub verbose: bool,
+
+    /// Leave `~/.agentstack` in place — its undo ledger, trust store, and
+    /// central library survive, so `agentstack restore` keeps working.
+    #[arg(long)]
+    pub keep_home: bool,
 }
 
 /// `create-profile` — a new toolset bundling existing/library skills + servers.
@@ -1971,15 +2029,32 @@ pub enum SecretCommand {
 pub fn full_command_inventory() -> String {
     use clap::CommandFactory;
 
-    fn push(out: &mut String, cmd: &clap::Command, indent: usize) {
+    /// Fixed argv the t3code panel drives; not commands a person runs. They
+    /// stay listed (the inventory is complete by definition) but under their
+    /// own heading, so the human map is not padded with machine surface.
+    /// `create-profile` is deliberately absent — it is genuinely useful by
+    /// hand and lives in the `Edit` group of the default help.
+    const PANEL_ONLY: &[&str] = &[
+        "add-skill-to-profile",
+        "add-server-to-profile",
+        "use-profile",
+        "library-index",
+    ];
+
+    fn push(out: &mut String, cmd: &clap::Command, indent: usize, panel: bool) {
         for sub in cmd.get_subcommands() {
             if sub.get_name() == "help" {
+                continue;
+            }
+            // Top level only: nested subcommands of a panel verb travel with
+            // their parent, and no nested name collides with these.
+            if indent == 2 && PANEL_ONLY.contains(&sub.get_name()) != panel {
                 continue;
             }
             let about = sub.get_about().map(|s| s.to_string()).unwrap_or_default();
             let pad = " ".repeat(indent);
             out.push_str(&format!("{pad}{:<16} {about}\n", sub.get_name()));
-            push(out, sub, indent + 2);
+            push(out, sub, indent + 2, panel);
         }
     }
 
@@ -1988,7 +2063,12 @@ pub fn full_command_inventory() -> String {
         "agentstack — every command, including the ones the default --help groups away.\n\
          Run `agentstack <command> --help` for flags and details.\n\n",
     );
-    push(&mut out, &cmd, 2);
+    push(&mut out, &cmd, 2, false);
+    out.push_str(
+        "\nIntegration contract (t3code) — fixed actions a graphical panel invokes.\n\
+         Not part of the everyday surface; each is digest-bound and previews before it writes.\n\n",
+    );
+    push(&mut out, &cmd, 2, true);
     out
 }
 

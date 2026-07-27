@@ -15,11 +15,29 @@ inline set, so you only name one once you want more than one.
 Prerequisite: a project with an `.agentstack/agentstack.toml`
 [manifest](../concepts.md) (run `agentstack init` if you don't have one).
 
-## Make a second toolset from what you already have
+## The one-command way
 
-The capabilities are already in your manifest. A second toolset just *names a
-subset* of them — no re-import, no copying. Add one `[profiles.<name>]` block
-that lists the servers and skills that task needs:
+The capabilities are already in your manifest. A toolset just *names a subset*
+of them — no re-import, no copying. The shortest path is one command:
+
+```bash
+agentstack create-profile --name backend --server postgres --server github --skill sql-review
+```
+
+At a terminal it shows what it will create, asks, and on yes re-locks the
+manifest and renders the toolset into your CLIs. `--skill '*'` means every
+inline skill. Undo it like any other write: `agentstack restore --last --write`.
+
+Scripts and graphical clients get a two-step contract instead — a bare call (or
+`--preview`) emits the plan plus a consent digest, and applying needs
+`--yes --consented <digest>`, so nothing writes without something having
+reviewed exactly that plan against exactly those manifest bytes.
+
+## Or write it by hand
+
+A toolset is four lines of TOML, and reading it is often clearer than reading a
+command. Add one `[profiles.<name>]` block that lists the servers and skills
+that task needs:
 
 ```toml
 # .agentstack/agentstack.toml — you already have these servers and skills.

@@ -23,6 +23,7 @@ implementation internals — live in
   - [Unresolved secrets block writes](#unresolved-secrets-block-writes)
   - [`doctor --live`](#doctor---live)
   - [One undo verb: `restore`](#one-undo-verb-restore)
+  - [The whole way out: `uninstall`](#the-whole-way-out-uninstall)
   - [`doctor` shows what you use](#doctor-shows-what-you-use)
 - [Drift: adopt or apply?](#drift-adopt-or-apply)
   - [`adopt` and `add`](#adopt-and-add)
@@ -155,6 +156,35 @@ agentstack restore <adapter>       # single-slot config restore (fallback)
 
 Reverted files show up as pending again; `agentstack restore` lists the same
 recorded writes and the identifier needed to roll each one back.
+
+### The whole way out: `uninstall`
+
+`restore` reverses one write. `uninstall` reverses all of them — every managed
+region agentstack rendered (servers, settings, hooks, instruction blocks) in
+every CLI's own config, then agentstack's own state directory.
+
+```text
+agentstack uninstall                      # show what would be removed (default)
+agentstack uninstall --verbose            # ...with the full diff of each file
+agentstack uninstall --write              # do it
+agentstack uninstall --write --keep-home  # keep ~/.agentstack (and the undo ledger)
+agentstack uninstall --scope project      # this project only (or `global`)
+```
+
+It removes what agentstack manages, not what you wrote: **your
+`agentstack.toml` is never touched**, so re-running `apply --write` brings the
+whole setup back. Foreign entries you or another tool added to those same files
+are left alone, as are entries a *different* project's manifest manages at
+global scope. A config file left holding nothing but an empty container is
+deleted rather than left as a husk, and its directory with it if that is now
+empty too.
+
+Removal goes through the same planners `apply` uses — given an empty manifest —
+so every file edit is captured in the history ledger first. **An uninstall is
+itself undoable** with `agentstack restore --last --write`, as one entry. That
+is why `~/.agentstack` goes last, and why `--keep-home` exists: the ledger lives
+there, so keeping it keeps the undo. The binary itself is not removed — take it
+off the way you installed it.
 
 ### `doctor` shows what you use
 
@@ -1331,7 +1361,8 @@ you need the exact verb, flag, or subcommand.
 - **`self`** _(hidden)_ — Manage this binary's own install: `self link` puts a stable `agentstack` on PATH (a symlink, no installer needed); `self which` shows which binary a bare `agentstack` runs and flags stale links — subcommands `link/which/docs*`
 - **`add-skill-to-profile`** _(hidden)_ — Add a skill to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--git/--rev/--subpath/--path/--preview/--yes/--consented/--allow-unresolved`
 - **`add-server-to-profile`** _(hidden)_ — Add a server to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--type/--url/--header/--command/--arg/--cwd/--env/--preview/--yes/--consented/--allow-unresolved`
-- **`create-profile`** _(hidden)_ — Create a toolset from existing/library capabilities and activate it — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
+- **`uninstall`** _(hidden)_ — Remove everything AgentStack manages, previewing first — flags `--scope/--write/--verbose/--keep-home`
+- **`create-profile`** _(hidden)_ — Name a toolset: bundle some of what you already have, and activate it — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
 - **`use-profile`** _(hidden)_ — Activate an existing toolset (panel action; digest-bound) — flags `--profile/--preview/--yes/--consented/--allow-unresolved`
 - **`library-index`** _(hidden)_ — The central-library catalog (skills + servers) for the panel browser
 <!-- agentstack:end -->

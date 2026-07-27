@@ -253,6 +253,18 @@ agentstack restore claude-code     # fallback: restore one adapter's config from
 <tr><td>a server or skill in the manifest</td><td><code>agentstack remove &lt;name&gt; --write</code></td><td>drops it from the manifest and the lockfile</td></tr>
 </tbody></table></div>
 <p><strong>Limits.</strong> <code>restore</code> reverts agentstack's own recorded config writes, not side effects a tool already had — a file a server deleted is not brought back. Nothing here permanently deletes your data; each verb reverses one agentstack change. One edge case: replacing an already-managed skill with the same name is not snapshotted byte-exact, so its restore is not promised exact.</p>
+<h2 id="undo-all-of-it">Undo all of it<a class="hlink" href="#undo-all-of-it" aria-label="Link to this section">#</a></h2>
+<p>The verbs above each reverse one thing. To reverse <strong>everything</strong> — every managed region agentstack rendered into every CLI's config, plus its own state directory — there is one command:</p>
+<pre class="block"><code>agentstack uninstall          # show what would be removed; changes nothing
+agentstack uninstall --verbose  # ...with the full diff of each file
+agentstack uninstall --write  # do it</code></pre>
+<p>Like every other write in agentstack, it previews first: the bare command lists what it would take off and stops.</p>
+<p>It removes what agentstack manages, not what you wrote. <strong>Your <code>agentstack.toml</code> stays exactly where it is</strong>, so <code>agentstack apply --write</code> brings the whole setup back whenever you want it. Entries you or another tool added to those same config files by hand are left alone, and so is anything a different project's manifest manages at global scope.</p>
+<p>Because the removal runs through the same machinery as a normal write, every file it touches is recorded first — so <strong>the uninstall is itself undoable</strong>:</p>
+<pre class="block"><code>agentstack restore --last --write   # put it all back</code></pre>
+<p>That only holds while the ledger exists, and the ledger lives in <code>~/.agentstack</code>, which <code>uninstall</code> removes last. Keep it with:</p>
+<pre class="block"><code>agentstack uninstall --write --keep-home</code></pre>
+<p>Two things it does not do: remove the <code>agentstack</code> binary (take that off the way you installed it), and touch a capability's own installed files outside the regions agentstack renders.</p>
 <ul>
 <li><a href="../concepts.html">Concepts</a> — trust, gateway, guard, session, drift</li>
 <li><a href="../reference.html#one-undo-verb-restore">Reference: one undo verb (<code>restore</code>)</a></li>

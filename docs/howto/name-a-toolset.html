@@ -239,8 +239,13 @@
 <h1 id="name-a-toolset">Name a toolset</h1>
 <p>A <strong>toolset</strong> is a named subset of the setup you already have — "backend", "incident", "design" — that you activate together. In the manifest it is a <code>[profiles.&lt;name&gt;]</code> block; the CLI and the JSON contracts call it a <em>profile</em>, graphical integrations call it a <em>Toolset</em>. Same object. It names <em>which</em> of your servers and skills come along for a task; it is <strong>not</strong> a policy, a permission level, or a workflow role. A manifest with no toolset named activates its whole inline set, so you only name one once you want more than one.</p>
 <p>Prerequisite: a project with an <code>.agentstack/agentstack.toml</code> <a href="../concepts.html">manifest</a> (run <code>agentstack init</code> if you don't have one).</p>
-<h2 id="make-a-second-toolset-from-what-you-already-have">Make a second toolset from what you already have<a class="hlink" href="#make-a-second-toolset-from-what-you-already-have" aria-label="Link to this section">#</a></h2>
-<p>The capabilities are already in your manifest. A second toolset just <em>names a subset</em> of them — no re-import, no copying. Add one <code>[profiles.&lt;name&gt;]</code> block that lists the servers and skills that task needs:</p>
+<h2 id="the-one-command-way">The one-command way<a class="hlink" href="#the-one-command-way" aria-label="Link to this section">#</a></h2>
+<p>The capabilities are already in your manifest. A toolset just <em>names a subset</em> of them — no re-import, no copying. The shortest path is one command:</p>
+<pre class="block"><code>agentstack create-profile --name backend --server postgres --server github --skill sql-review</code></pre>
+<p>At a terminal it shows what it will create, asks, and on yes re-locks the manifest and renders the toolset into your CLIs. <code>--skill '*'</code> means every inline skill. Undo it like any other write: <code>agentstack restore --last --write</code>.</p>
+<p>Scripts and graphical clients get a two-step contract instead — a bare call (or <code>--preview</code>) emits the plan plus a consent digest, and applying needs <code>--yes --consented &lt;digest&gt;</code>, so nothing writes without something having reviewed exactly that plan against exactly those manifest bytes.</p>
+<h2 id="or-write-it-by-hand">Or write it by hand<a class="hlink" href="#or-write-it-by-hand" aria-label="Link to this section">#</a></h2>
+<p>A toolset is four lines of TOML, and reading it is often clearer than reading a command. Add one <code>[profiles.&lt;name&gt;]</code> block that lists the servers and skills that task needs:</p>
 <pre class="block"><code># .agentstack/agentstack.toml — you already have these servers and skills.
 [servers.postgres]      # ...
 [servers.github]        # ...

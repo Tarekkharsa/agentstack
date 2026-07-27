@@ -73,7 +73,7 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
         let outcome = render(args, manifest_dir, true, true, true)?;
         restart_hint(&outcome);
     } else {
-        println!("Not written. Re-run with {} to apply.", "--write".bold());
+        crate::outln!("Not written. Re-run with {} to apply.", "--write".bold());
     }
     Ok(())
 }
@@ -84,11 +84,11 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
 /// telling the user so at the moment of mutation is the cheapest trust there is.
 fn restart_hint(outcome: &Outcome) {
     if outcome.written_count > 0 {
-        println!(
+        crate::outln!(
             "{} Restart or reopen your agent CLI(s) so they pick up the new config.",
             "→".cyan()
         );
-        println!("  {}", "undo: agentstack restore".dimmed());
+        crate::outln!("  {}", "undo: agentstack restore".dimmed());
     }
 }
 
@@ -143,7 +143,7 @@ fn render(
         crate::render::refresh_owned_servers(&mut server_map, &ctx.registry, scope, &ctx.dir);
     let manifest_refresh = plan_owned_manifest_refresh(&ctx.loaded, &owned);
     for o in owned.iter().filter(|o| o.stale) {
-        println!(
+        crate::outln!(
             "{} {}: {} (owner) updated its own entry — fanning out the on-disk values",
             "↻".cyan(),
             o.name,
@@ -153,11 +153,19 @@ fn render(
 
     let mut will_write = want_write;
 
+    // A reader hanging up mid-pass (`apply --write | head`) must not kill the
+    // process between two targets — that leaves some CLIs rendered and the
+    // rest drifted, the exact state this command exists to remove. The guard
+    // suppresses the kill; the `outln!`/`out!` macros this function prints
+    // through drop the resulting EPIPE instead of panicking. Held for the
+    // whole pass and dropped on return, restoring normal piping behaviour.
+    let _sigpipe = want_write.then(crate::sys::SigpipeIgnored::new);
+
     // Structural validation errors would produce broken/partial config — never
     // write on them.
     if will_write && has_errors {
         if !quiet {
-            println!(
+            crate::outln!(
                 "\n{} manifest has validation errors — not writing. Fix them first.",
                 "✗".red()
             );
@@ -195,7 +203,7 @@ fn render(
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
     if target_ids.is_empty() {
         if !quiet {
-            println!("No targets to apply to. Set [targets].default or pass --target.");
+            crate::outln!("No targets to apply to. Set [targets].default or pass --target.");
         }
         return Ok(Outcome {
             changed_count: 0,
@@ -205,11 +213,11 @@ fn render(
         });
     }
 
-    println!("Scope: {scope}");
+    crate::outln!("Scope: {scope}");
     // When the target list was implicit (no [targets], no --target), say what
     // it resolved to and how to pin it — the fan-out should never be a surprise.
     if !quiet && args.targets.is_empty() && manifest.targets.default.is_empty() {
-        println!(
+        crate::outln!(
             "Targets: {} detected CLI(s) — no [targets] in the manifest; pin the list with `agentstack init` or a [targets] block",
             target_ids.len()
         );
@@ -247,7 +255,7 @@ fn render(
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
-            println!("{} unknown adapter '{id}' — skipping", "⚠".yellow());
+            crate::outln!("{} unknown adapter '{id}' — skipping", "⚠".yellow());
             error_count += 1;
             continue;
         };
@@ -309,23 +317,23 @@ fn render(
                 &ctx.dir,
             )?
             else {
-                println!("\n{} — no {scope} scope, skipping", desc.display.bold());
+                crate::outln!("\n{} — no {scope} scope, skipping", desc.display.bold());
                 return Ok(());
             };
 
-            println!("\n{} ({})", plan.display.bold(), plan.config_path.display());
+            crate::outln!("\n{} ({})", plan.display.bold(), plan.config_path.display());
 
             if plan.managed.is_empty() && plan.removed.is_empty() && plan.skipped.is_empty() {
-                println!("  no servers selected");
+                crate::outln!("  no servers selected");
             }
             removed_count += plan.removed.len();
             for r in &plan.removed {
                 if will_write {
-                    println!("  {} pruning '{r}' (no longer in manifest)", "−".yellow());
+                    crate::outln!("  {} pruning '{r}' (no longer in manifest)", "−".yellow());
                 } else {
                     // A deletion deserves louder wording than a diff line: name
                     // the entry and the file it would vanish from.
-                    println!(
+                    crate::outln!(
                         "  {} would REMOVE '{r}' from {} (no longer in manifest)",
                         "−".red(),
                         plan.config_path.display()
@@ -333,7 +341,7 @@ fn render(
                 }
             }
             if !foreign.is_empty() {
-                println!(
+                crate::outln!(
                     "  {} keeping {} — applied by another manifest ↳ keep: agentstack adopt · \
                  prune: agentstack apply --prune-foreign",
                     "⚠".yellow(),
@@ -341,10 +349,10 @@ fn render(
                 );
             }
             for (name, reason) in &plan.skipped {
-                println!("  {} skipping '{name}' — {reason}", "↳".cyan());
+                crate::outln!("  {} skipping '{name}' — {reason}", "↳".cyan());
             }
             for w in &plan.warnings {
-                println!(
+                crate::outln!(
                     "  {} '{w}' has a cwd that {} can't express — it renders without one \
                  (wrap the command in a shell that cd's if the server needs it)",
                     "⚠".yellow(),
@@ -355,7 +363,7 @@ fn render(
                 // Entries read "NAME (server 'x')" — the first token is the ref
                 // name, which is all `secret set` needs.
                 let name = u.split_whitespace().next().unwrap_or(u.as_str());
-                println!(
+                crate::outln!(
                     "  {} unresolved secret {u} ↳ agentstack secret set {name}",
                     "✗".red()
                 );
@@ -363,10 +371,10 @@ fn render(
                 error_count += 1;
             }
             for d in &plan.denied {
-                println!("  {} blocked by policy: {}", "✗".red(), d);
+                crate::outln!("  {} blocked by policy: {}", "✗".red(), d);
             }
             for f in &plan.failed {
-                println!("  {} {}", "✗".red(), crate::render::failed_secret_line(f));
+                crate::outln!("  {} {}", "✗".red(), crate::render::failed_secret_line(f));
                 // The fix is the same `secret set` whether the secret is missing
                 // or its store failed to read — collect the name so the closing
                 // tail stays copy-pasteable in both cases.
@@ -388,7 +396,7 @@ fn render(
                 changed_count += 1;
                 changed_targets.insert(desc.display.clone());
                 if !quiet {
-                    print!("{}", indent(&plan.diff()));
+                    crate::out!("{}", indent(&plan.diff()));
                 }
                 if will_write && blocked {
                     blocked_targets.insert(desc.display.clone());
@@ -397,7 +405,7 @@ fn render(
                     } else {
                         "unresolved secret(s); set them"
                     };
-                    println!(
+                    crate::outln!(
                         "  {} not written — {reason} or pass --allow-unresolved",
                         "✗".red()
                     );
@@ -416,16 +424,16 @@ fn render(
                     state.record_kept_foreign(&key, foreign.clone());
                     crate::usage::bump(&plan.managed);
                     if plan.remove_if_empty_shell(desc) {
-                        println!(
+                        crate::outln!(
                             "  {} removed empty {}",
                             "−".yellow(),
                             plan.config_path.display()
                         );
                     } else {
-                        println!("  {} wrote {} server(s)", "✓".green(), plan.managed.len());
+                        crate::outln!("  {} wrote {} server(s)", "✓".green(), plan.managed.len());
                     }
                 } else {
-                    println!("  {} {} server(s) to apply", "→".cyan(), plan.managed.len());
+                    crate::outln!("  {} {} server(s) to apply", "→".cyan(), plan.managed.len());
                 }
             } else {
                 // Even with no file change, keep state in sync with reality.
@@ -433,7 +441,7 @@ fn render(
                     state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
                     state.record_kept_foreign(&key, foreign.clone());
                 }
-                println!("  {} up to date", "✓".green());
+                crate::outln!("  {} up to date", "✓".green());
             }
 
             // Native settings file (permissions, feature flags) — a separate file
@@ -449,7 +457,7 @@ fn render(
             )? {
                 for u in &sp.unresolved {
                     let name = u.split_whitespace().next().unwrap_or(u.as_str());
-                    println!(
+                    crate::outln!(
                         "  {} unresolved secret {u} (settings) ↳ agentstack secret set {name}",
                         "✗".red()
                     );
@@ -461,7 +469,7 @@ fn render(
                     write_blockers += 1;
                 }
                 for r in &sp.removed {
-                    println!(
+                    crate::outln!(
                         "  {} pruning setting '{r}' (no longer in manifest)",
                         "−".yellow()
                     );
@@ -469,17 +477,17 @@ fn render(
                 if sp.changed() {
                     changed_count += 1;
                     changed_targets.insert(desc.display.clone());
-                    println!(
+                    crate::outln!(
                         "  {} settings → {}",
                         "·".dimmed(),
                         sp.settings_path.display()
                     );
                     if !quiet {
-                        print!("{}", indent(&sp.diff()));
+                        crate::out!("{}", indent(&sp.diff()));
                     }
                     if will_write && sblocked {
                         blocked_targets.insert(desc.display.clone());
-                        println!(
+                        crate::outln!(
                             "  {} settings not written — unresolved secret(s)",
                             "✗".red()
                         );
@@ -492,9 +500,9 @@ fn render(
                         backups.push(capture);
                         touched_targets.insert(desc.display.clone());
                         state.record_settings(&key, sp.managed.clone());
-                        println!("  {} wrote {} setting(s)", "✓".green(), sp.managed.len());
+                        crate::outln!("  {} wrote {} setting(s)", "✓".green(), sp.managed.len());
                     } else {
-                        println!("  {} {} setting(s) to apply", "→".cyan(), sp.managed.len());
+                        crate::outln!("  {} {} setting(s) to apply", "→".cyan(), sp.managed.len());
                     }
                 } else if will_write && !sblocked {
                     state.record_settings(&key, sp.managed.clone());
@@ -521,7 +529,7 @@ fn render(
             )? {
                 for u in &hp.unresolved {
                     let name = u.split_whitespace().next().unwrap_or(u.as_str());
-                    println!(
+                    crate::outln!(
                         "  {} unresolved secret {u} (hook) ↳ agentstack secret set {name}",
                         "✗".red()
                     );
@@ -535,13 +543,13 @@ fn render(
                 if hp.changed() {
                     changed_count += 1;
                     changed_targets.insert(desc.display.clone());
-                    println!("  {} hooks → {}", "·".dimmed(), hp.path.display());
+                    crate::outln!("  {} hooks → {}", "·".dimmed(), hp.path.display());
                     if !quiet {
-                        print!("{}", indent(&hp.diff()));
+                        crate::out!("{}", indent(&hp.diff()));
                     }
                     if will_write && hblocked {
                         blocked_targets.insert(desc.display.clone());
-                        println!("  {} hooks not written — unresolved secret(s)", "✗".red());
+                        crate::outln!("  {} hooks not written — unresolved secret(s)", "✗".red());
                     } else if will_write {
                         let capture =
                             crate::history::capture(&hp.path, format!("{} · hooks", desc.display));
@@ -549,9 +557,9 @@ fn render(
                         backups.push(capture);
                         touched_targets.insert(desc.display.clone());
                         state.record_hooks(&key, hp.managed.clone());
-                        println!("  {} wrote {} hook(s)", "✓".green(), hp.managed.len());
+                        crate::outln!("  {} wrote {} hook(s)", "✓".green(), hp.managed.len());
                     } else {
-                        println!("  {} {} hook(s) to apply", "→".cyan(), hp.managed.len());
+                        crate::outln!("  {} {} hook(s) to apply", "→".cyan(), hp.managed.len());
                     }
                 } else if will_write && !hblocked {
                     state.record_hooks(&key, hp.managed.clone());
@@ -571,7 +579,7 @@ fn render(
                     .filter(|ip| !ip.fragments.is_empty() || !ip.missing.is_empty())
                 {
                     for m in &ip.missing {
-                        println!("  {} instruction fragment '{m}' source missing", "✗".red());
+                        crate::outln!("  {} instruction fragment '{m}' source missing", "✗".red());
                         error_count += 1;
                     }
                     // A missing source already dropped its content from the
@@ -585,13 +593,13 @@ fn render(
                     if ip.changed() {
                         changed_count += 1;
                         changed_targets.insert(desc.display.clone());
-                        println!("  {} instructions → {}", "·".dimmed(), ip.path.display());
+                        crate::outln!("  {} instructions → {}", "·".dimmed(), ip.path.display());
                         if !quiet {
-                            print!("{}", indent(&ip.diff()));
+                            crate::out!("{}", indent(&ip.diff()));
                         }
                         if will_write && iblocked {
                             blocked_targets.insert(desc.display.clone());
-                            println!(
+                            crate::outln!(
                                 "  {} instructions not written — missing fragment source(s)",
                                 "✗".red()
                             );
@@ -604,13 +612,13 @@ fn render(
                             backups.push(capture);
                             touched_targets.insert(desc.display.clone());
                             wrote_instructions = true;
-                            println!(
+                            crate::outln!(
                                 "  {} wrote {} instruction fragment(s)",
                                 "✓".green(),
                                 ip.fragments.len()
                             );
                         } else {
-                            println!(
+                            crate::outln!(
                                 "  {} {} instruction fragment(s) to apply",
                                 "→".cyan(),
                                 ip.fragments.len()
@@ -627,7 +635,7 @@ fn render(
                         .filter(|i| i.compiles_at(id, scope))
                         .count();
                     if n > 0 {
-                        println!(
+                        crate::outln!(
                         "  {} (instructions not supported by this CLI — {n} fragment(s) not compiled)",
                         "·".dimmed()
                     );
@@ -662,7 +670,7 @@ fn render(
             Ok(())
         })();
         if let Err(err) = target_result {
-            println!(
+            crate::outln!(
                 "\n{} {} failed — {err:#}\n  {} other targets continue; completed writes stay \
                  recorded and undoable",
                 "✗".red(),
@@ -690,7 +698,7 @@ fn render(
     // fan-out above already used the on-disk values.
     let (refresh_files, refresh_elsewhere) = manifest_refresh;
     for name in &refresh_elsewhere {
-        println!(
+        crate::outln!(
             "\n{} {name}: owned definition is declared outside this manifest (central library \
              or inherited layer) — the fresh values still fan out, but refresh the declaring \
              file to clear the stale definition",
@@ -701,7 +709,7 @@ fn render(
         let names: Vec<&str> = entries.iter().map(|(n, _)| n.as_str()).collect();
         changed_count += 1;
         if !will_write {
-            println!(
+            crate::outln!(
                 "\n{} manifest refresh pending for owned server(s) {} → {}",
                 "→".cyan(),
                 names.join(", "),
@@ -746,7 +754,7 @@ fn render(
         ));
         crate::util::atomic::write(path, &new_text)
             .with_context(|| format!("writing {}", path.display()))?;
-        println!(
+        crate::outln!(
             "\n{} refreshed owned server(s) {} in {}",
             "✓".green(),
             names.join(", "),
@@ -767,12 +775,12 @@ fn render(
                 false
             };
             if repinned {
-                println!(
+                crate::outln!(
                     "  {} trust re-pinned — the refreshed values came from the owner's own config",
                     "·".dimmed()
                 );
             } else {
-                println!(
+                crate::outln!(
                     "  {} manifest changed — review and re-run `agentstack trust`",
                     "·".dimmed()
                 );
@@ -806,7 +814,7 @@ fn render(
         match crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true) {
             Ok(true) => {
                 backups.push(capture);
-                println!(
+                crate::outln!(
                     "\n{} .gitignore: managed block updated — generated artifacts stay out of git ({} to commit them instead)",
                     "✓".green(),
                     "--no-gitignore".bold()
@@ -836,24 +844,24 @@ fn render(
     if !manifest.skills.is_empty() && !quiet {
         let n = manifest.skills.len();
         match manifest.profiles.keys().next() {
-            Some(first) => println!(
+            Some(first) => crate::outln!(
                 "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them through a profile: `agentstack use {first} --write` (or `agentstack init`, which does this for you)",
                 "ℹ".cyan()
             ),
-            None => println!(
+            None => crate::outln!(
                 "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them: `agentstack use --write` (no profiles declared, so everything inline is the default)",
                 "ℹ".cyan()
             ),
         }
     }
 
-    println!();
+    crate::outln!();
     if will_write {
         // Count targets actually written, not pending changes — a gate above
         // (unresolved secret, missing fragment source) may have blocked some
         // of the writes, and a hard error may have failed others.
         if incomplete_targets.is_empty() {
-            println!("Applied to {written_count} target(s).");
+            crate::outln!("Applied to {written_count} target(s).");
         } else {
             // Every not-fully-written target is blocked, failed, or both;
             // partially written targets count against the fully-written tally
@@ -882,7 +890,7 @@ fn render(
                         .join(", ")
                 ));
             }
-            println!(
+            crate::outln!(
                 "Wrote {fully_written} of {} target(s); {}{partial_note}; see {} above.",
                 changed_targets.len(),
                 what.join("; "),
@@ -894,13 +902,13 @@ fn render(
             // Don't point at `--write` when validation already guarantees it
             // would refuse — the next command is fixing the manifest, not
             // re-running the one that just failed.
-            println!(
+            crate::outln!(
                 "{changed_count} target(s) would change{} — fix the {} validation error(s) above before writing.",
                 removal_note(removed_count),
                 "✗".red()
             );
         } else {
-            println!(
+            crate::outln!(
                 "{changed_count} target(s) would change{}. Re-run with {} to write.",
                 removal_note(removed_count),
                 "--write".bold()
@@ -908,7 +916,7 @@ fn render(
         }
     } else {
         // A confirm prompt is about to follow — don't tell the user to re-run.
-        println!(
+        crate::outln!(
             "{changed_count} target(s) would change{}.",
             removal_note(removed_count)
         );
@@ -917,7 +925,7 @@ fn render(
     // the whole story — a third "N issue(s)" line in between was pure repetition.
     let blocked_write = will_write && !blocked_targets.is_empty();
     if error_count > 0 && !quiet && !blocked_write {
-        println!("{error_count} issue(s) — resolve before writing.");
+        crate::outln!("{error_count} issue(s) — resolve before writing.");
     }
 
     // A hard per-target failure exits nonzero AFTER state and history are
@@ -988,8 +996,8 @@ fn print_validation(
                 "⚠".yellow().to_string()
             };
             match &issue.fix {
-                Some(fix) => println!("{mark} {} ↳ {fix}", issue.message),
-                None => println!("{mark} {}", issue.message),
+                Some(fix) => crate::outln!("{mark} {} ↳ {fix}", issue.message),
+                None => crate::outln!("{mark} {}", issue.message),
             }
         }
     }

@@ -266,19 +266,48 @@
   description: "Review the day's diff, then verify the findings",
 }
 
-// map: one reader per file → reduce: synthesize → verify: refute the weak ones
-const found = await pipeline(
+const FINDINGS = {
+  type: 'object',
+  required: ['findings'],
+  properties: {
+    findings: {
+      type: 'array',
+      items: { type: 'object', required: ['file', 'summary'] },
+    },
+  },
+}
+
+// map: one reader per file, each returning validated JSON rather than prose
+const mapped = await pipeline(
   files,
-  f =&gt; agent(`List issues in ${f}. Return findings only.`, { role: 'reader' }),
+  f =&gt; agent(`List issues in ${f}.`, { role: 'reader', schema: FINDINGS }),
 )
-const report = await agent(`Synthesize and rank:\n${found.join('\n')}`, { role: 'writer' })
+const findings = mapped.filter(Boolean).flatMap(m =&gt; m.findings)
+
+// reduce: one synthesis per key group, so no single prompt has to hold everything
+const claims = await parallel(
+  partition(findings, 4, f =&gt; f.file).map(group =&gt; () =&gt;
+    agent(`Synthesize and rank:\n${JSON.stringify(group)}`, { role: 'writer' })),
+)
+
+// verify: an independent refuter under a narrower role
 const checked = await parallel(
-  claims.map(c =&gt; () =&gt; agent(`Try to refute: ${c}`, { role: 'verifier' })),
+  claims.filter(Boolean).map(c =&gt; () =&gt; agent(`Try to refute: ${c}`, { role: 'verifier' })),
 )
-return keepUnrefuted(report, checked)</code></pre>
+return keepUnrefuted(claims, checked)</code></pre>
 <p>The script runs inside a sandboxed interpreter with no filesystem, network, or environment access — the only thing it can do is request governed agent runs through <code>agent()</code>. Everything else is plain computation.</p>
+<h3 id="getting-structured-results-back">Getting structured results back<a class="hlink" href="#getting-structured-results-back" aria-label="Link to this section">#</a></h3>
+<p>Pass a <code>schema</code> and the promise resolves with a <strong>parsed value</strong> instead of text, so a later stage can index it rather than parse prose. A result that does not satisfy the schema fails that step closed — the script sees <code>null</code> and decides. There is deliberately no automatic re-ask: a retry would spend an agent slot your ceiling never granted.</p>
+<p>Validation constrains <strong>shape, not content</strong>. A schema-validated result is still model output, and a prompt-injected step can return perfectly schema-valid lies. It is a parsing convenience, not a trust boundary.</p>
+<h3 id="splitting-and-grouping">Splitting and grouping<a class="hlink" href="#splitting-and-grouping" aria-label="Link to this section">#</a></h3>
+<p><code>shard(items, { per })</code> and <code>partition(items, r, keyFn)</code> are plain computation over values you already have — no agent, no tokens. <code>partition</code> returns exactly <code>r</code> buckets (empty ones included, so your reducer count never varies with the data) and always places the same key in the same bucket, which is what lets one reducer see all of a file's findings. It is not a balanced split: skewed keys make skewed buckets, and the fix is a better key.</p>
+<h3 id="keeping-wide-runs-in-memory">Keeping wide runs in memory<a class="hlink" href="#keeping-wide-runs-in-memory" aria-label="Link to this section">#</a></h3>
+<p>A run that fans out over large outputs can ask for <code>agent(prompt, { result: 'handle' })</code>, resolving with <code>{ digest, bytes, preview }</code> instead of the full text. There is also a machine ceiling on total result bytes; a run that exceeds it fails closed and tells you to use handles. Handles cost about 620 bytes each, so they are for stages returning kilobytes — on short results they are simply pointless.</p>
+<h3 id="before-you-run-it">Before you run it<a class="hlink" href="#before-you-run-it" aria-label="Link to this section">#</a></h3>
+<p><code>agentstack workflow explain &lt;name&gt;</code> reports the effective ceilings, which roles launch serially, and how many <code>agent()</code> call <strong>sites</strong> the pinned script has — statically, spawning nothing. Sites are not calls: one site inside a loop runs once per item, so real fan-out is data-dependent. The enforced bound on total spawns is <code>max_agents</code>, refused per call.</p>
 <h2 id="where-it-stands">Where it stands<a class="hlink" href="#where-it-stands" aria-label="Link to this section">#</a></h2>
 <p>The full technical contract and security rationale live in the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/workflows-capability.md">workflows capability design doc</a>. The manifest kind, pinning, trust review, the engine, <code>workflow run</code> / <code>workflow report</code>, negotiated ceilings, and journal-replay resume all ship, and the interpreter boundary has passed its independent security review. What remains before workflows leave experimental is repeated-use evidence — running real workflows on separate occasions and confirming each is easier to repeat than hand-rolled orchestration (<code>TODO.md</code>).</p>
+<p>Scaling work — how the drive loop behaves at width, and what it costs — is tracked separately in the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/workflow-scaling.md">workflow scaling plan</a>, which also records two things it deliberately did <strong>not</strong> build: automatic retry and straggler speculation (nothing in the current model can prove a role is side-effect free, and a claim the enforcement cannot back does not ship), and distributed workers (the measured bottleneck is the latency tail, not a shortage of machines).</p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/workflows.md">docs/workflows.md</a> — this page is generated from it.</p>
   </main>
 </div>

@@ -45,6 +45,29 @@ findings and two interpreter findings. All are closed:
 
 ### Added
 
+- **`agentstack uninstall` — the whole way out.** Reverts every managed region
+  agentstack rendered (servers, settings, hooks, instruction blocks) in every
+  CLI's own config, then removes `~/.agentstack`. Previews by default;
+  `--write` acts, `--verbose` shows each diff, `--keep-home` keeps the undo
+  ledger, `--scope` limits it. Removal runs through the same planners `apply`
+  uses, given an empty manifest, so it takes exactly what agentstack manages
+  and leaves foreign entries — and another project's global entries —
+  untouched. Your `agentstack.toml` is never touched, and because each edit is
+  captured first, **the uninstall is itself undoable** with
+  `agentstack restore --last --write`.
+- **`create-profile` is usable by hand.** At a terminal it now shows a plain
+  review and asks, instead of requiring the panel's
+  `--yes --consented <digest>` round trip — naming a toolset was previously
+  reachable only by editing TOML. The non-interactive contract is unchanged:
+  a pipe, script, or panel still gets the enveloped preview and still cannot
+  write without presenting the reviewed digest, and `--preview` forces that
+  shape at a terminal too.
+- **Advisory findings in `doctor`.** Findings that are true but carry no action
+  for this project — a server launched through bare `npx`, for instance — are
+  now counted separately from warnings, reported as notes, and excluded from
+  both the project's `state` and its recommended next action. A healthy setup
+  reads `ready` instead of sitting permanently on `needs_attention`.
+  `doctor --json` gains an `advisories` count.
 - **Versioned UI contract.** Every machine-readable read for external panels
   (`init --plan`, `trust --preview`, `doctor --json`, `use --list --json`,
   `diff --json`, `restore --json`) now carries `schema_version` and a
@@ -80,6 +103,30 @@ findings and two interpreter findings. All are closed:
 - t3code is the primary graphical integration and launch direction. The CLI
   remains the complete standalone interface and the sole authority for plans,
   writes, consent, recovery, and enforcement.
+- **`status` no longer recommends a command that refuses.** Its next step now
+  keys off whether the setup is rendered rather than whether it is locked, so
+  a finished first run is told to verify it, not to re-run `init` (which
+  errors once a manifest exists). A project holding capabilities that are not
+  on disk yet is pointed at `apply --write`.
+- **`doctor`'s recommended action is ranked, not first-encountered.** A fix
+  agentstack can run wins over a hand-off to another tool; section order only
+  breaks ties within a class.
+- **The bare-launcher quirk is stated once, with a count**, instead of once per
+  server — nearly every published MCP server ships as `npx -y …`, so the
+  per-server form scaled its noise with the size of a normal setup.
+- **`apply --write` survives a broken pipe.** Piping it into `head` (or
+  quitting `less` early) used to kill the process between two targets, leaving
+  some CLIs rendered and the rest drifted. Output is now expendable; the write
+  pass is not.
+- **`init` says what it actually did with your tokens.** Lifted values are
+  described as *copied* — the original stays in the CLI's own config — and the
+  summary names the resulting duplication and the `--scope global` command that
+  resolves it. It also closes by showing how to name a first toolset.
+- The panel-only verbs (`add-skill-to-profile`, `add-server-to-profile`,
+  `use-profile`, `library-index`) moved out of the human command map into a
+  labelled integration-contract section of `--help --all`; `create-profile`
+  moved into the everyday `Edit` group. Diagnostic output abbreviates `$HOME`
+  and folds `..` segments.
 
 ### Removed
 

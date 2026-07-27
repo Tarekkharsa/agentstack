@@ -60,10 +60,14 @@ Here is the whole loop, recorded from a real run of the current binary:
 1. **Start** — two real native configs: Claude Code knows a `github` server
    (inline token), Codex knows `tldraw`. Neither knows the other's.
 2. **Import** — `agentstack init --yes --secrets env`: one manifest; the token
-   becomes `${GITHUB_TOKEN}`, its value in a gitignored `.env`.
+   is copied to a gitignored `.env` and referenced as `${GITHUB_TOKEN}` (your
+   CLI's own config keeps its copy until you apply at global scope).
 3. **Render** — `agentstack apply --scope global --write`: both CLIs now carry
    both servers, each in its own format.
-4. **Verify** — `agentstack doctor`: 0 errors, 0 warnings.
+4. **Verify** — `agentstack doctor`: 0 errors. On your own machine expect a
+   note or two — advisories like "these servers launch via bare `npx`" are
+   stated once and do not count against readiness; a first Codex project also
+   warns until you open Codex there once and accept its trust prompt.
 5. **Undo** — `agentstack restore --last --write`, twice: every file
    byte-identical to where it started.
 
@@ -95,7 +99,7 @@ governance only when you need them:
 | [1 — Unify](https://tarekkharsa.github.io/agentstack/start.html) | `agentstack init` → `apply` | one manifest rendered correctly for every CLI |
 | 2 — Switch | profiles · `session start/end` | task-specific toolsets without permanent config pollution |
 | [3 — Diagnose](https://tarekkharsa.github.io/agentstack/start.html#s-verify) | `agentstack doctor` · `diff` | drift explained before anything changes |
-| [4 — Recover](https://tarekkharsa.github.io/agentstack/howto/undo.html) | `adopt` · `apply` · `restore` | keep intentional edits, reconcile output, or undo safely |
+| [4 — Recover](https://tarekkharsa.github.io/agentstack/howto/undo.html) | `adopt` · `apply` · `restore` · `uninstall` | keep intentional edits, reconcile output, undo one change — or take all of it back off |
 | [5 — Share](https://tarekkharsa.github.io/agentstack/howto/team-setup.html) | manifest · lock · library | reproducible setups across projects, machines, and teammates |
 | [6 — Govern](https://tarekkharsa.github.io/agentstack/howto/trust-a-repo.html) | trust · policy · lockdown | reviewed activation and stronger enforced execution when needed |
 

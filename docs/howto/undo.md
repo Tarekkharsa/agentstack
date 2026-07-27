@@ -38,6 +38,45 @@ Nothing here permanently deletes your data; each verb reverses one agentstack
 change. One edge case: replacing an already-managed skill with the same name is
 not snapshotted byte-exact, so its restore is not promised exact.
 
+## Undo all of it
+
+The verbs above each reverse one thing. To reverse **everything** — every
+managed region agentstack rendered into every CLI's config, plus its own state
+directory — there is one command:
+
+```bash
+agentstack uninstall          # show what would be removed; changes nothing
+agentstack uninstall --verbose  # ...with the full diff of each file
+agentstack uninstall --write  # do it
+```
+
+Like every other write in agentstack, it previews first: the bare command lists
+what it would take off and stops.
+
+It removes what agentstack manages, not what you wrote. **Your
+`agentstack.toml` stays exactly where it is**, so `agentstack apply --write`
+brings the whole setup back whenever you want it. Entries you or another tool
+added to those same config files by hand are left alone, and so is anything a
+different project's manifest manages at global scope.
+
+Because the removal runs through the same machinery as a normal write, every
+file it touches is recorded first — so **the uninstall is itself undoable**:
+
+```bash
+agentstack restore --last --write   # put it all back
+```
+
+That only holds while the ledger exists, and the ledger lives in
+`~/.agentstack`, which `uninstall` removes last. Keep it with:
+
+```bash
+agentstack uninstall --write --keep-home
+```
+
+Two things it does not do: remove the `agentstack` binary (take that off the way
+you installed it), and touch a capability's own installed files outside the
+regions agentstack renders.
+
 - [Concepts](../concepts.md) — trust, gateway, guard, session, drift
 - [Reference: one undo verb (`restore`)](../reference.md#one-undo-verb-restore)
 - [Reference: drift — adopt or apply?](../reference.md#drift-adopt-or-apply)

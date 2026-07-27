@@ -57,6 +57,33 @@ pub mod ui_contract;
 // The binary calls this before its first print; the module itself stays
 // crate-private so the unsafe surface is reachable only through this fn.
 pub use sys::reset_sigpipe;
+
+/// `println!` that drops write errors instead of panicking on them.
+///
+/// Paired with [`sys::SigpipeIgnored`]: inside a write pass a reader hanging
+/// up must cost the user some *output*, never a half-finished set of file
+/// writes. Everywhere else keep using `println!` — a silent failure to print
+/// is only acceptable where the alternative is worse.
+#[macro_export]
+macro_rules! outln {
+    () => {{
+        use std::io::Write;
+        let _ = writeln!(std::io::stdout());
+    }};
+    ($($arg:tt)*) => {{
+        use std::io::Write;
+        let _ = writeln!(std::io::stdout(), $($arg)*);
+    }};
+}
+
+/// `print!` counterpart of [`outln`] — same contract, no trailing newline.
+#[macro_export]
+macro_rules! out {
+    ($($arg:tt)*) => {{
+        use std::io::Write;
+        let _ = write!(std::io::stdout(), $($arg)*);
+    }};
+}
 // TODO(phase-1): shim — migrate callers to agentstack_trust:: and drop.
 pub use agentstack_trust as trust;
 pub mod usage;

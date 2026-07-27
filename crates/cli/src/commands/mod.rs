@@ -37,6 +37,7 @@ pub mod shim;
 pub mod stats;
 pub mod trust;
 pub mod try_skill;
+pub mod uninstall;
 pub mod upgrade;
 pub mod use_profile;
 pub mod verify_cmd;

@@ -242,7 +242,7 @@
 <p><strong>Contents</strong></p>
 <p><strong><a href="#part-i--the-everyday-loop">Part I — The everyday loop</a></strong></p>
 <ul>
-<li><a href="#secrets-and-trust">Secrets and trust</a><ul><li><a href="#secret-resolution">Secret resolution</a></li><li><a href="#where-lifted-secrets-go-init">Where lifted secrets go (<code>init</code>)</a></li><li><a href="#unresolved-secrets-block-writes">Unresolved secrets block writes</a></li><li><a href="#doctor---live"><code>doctor --live</code></a></li><li><a href="#one-undo-verb-restore">One undo verb: <code>restore</code></a></li><li><a href="#doctor-shows-what-you-use"><code>doctor</code> shows what you use</a></li></ul></li>
+<li><a href="#secrets-and-trust">Secrets and trust</a><ul><li><a href="#secret-resolution">Secret resolution</a></li><li><a href="#where-lifted-secrets-go-init">Where lifted secrets go (<code>init</code>)</a></li><li><a href="#unresolved-secrets-block-writes">Unresolved secrets block writes</a></li><li><a href="#doctor---live"><code>doctor --live</code></a></li><li><a href="#one-undo-verb-restore">One undo verb: <code>restore</code></a></li><li><a href="#the-whole-way-out-uninstall">The whole way out: <code>uninstall</code></a></li><li><a href="#doctor-shows-what-you-use"><code>doctor</code> shows what you use</a></li></ul></li>
 <li><a href="#drift-adopt-or-apply">Drift: adopt or apply?</a><ul><li><a href="#adopt-and-add"><code>adopt</code> and <code>add</code></a></li><li><a href="#search-across-providers">Search across providers</a></li><li><a href="#selective-skills-via-profiles">Selective skills via profiles</a></li></ul></li>
 <li><a href="#live-runs-agentstack-run">Live runs (<code>agentstack run</code>)</a></li>
 </ul>
@@ -289,6 +289,15 @@ agentstack restore &lt;id&gt; --write    # revert one (unique id prefix)
 agentstack restore --last --write  # revert the most recent
 agentstack restore &lt;adapter&gt;       # single-slot config restore (fallback)</code></pre>
 <p>Reverted files show up as pending again; <code>agentstack restore</code> lists the same recorded writes and the identifier needed to roll each one back.</p>
+<h3 id="the-whole-way-out-uninstall">The whole way out: <code>uninstall</code><a class="hlink" href="#the-whole-way-out-uninstall" aria-label="Link to this section">#</a></h3>
+<p><code>restore</code> reverses one write. <code>uninstall</code> reverses all of them — every managed region agentstack rendered (servers, settings, hooks, instruction blocks) in every CLI's own config, then agentstack's own state directory.</p>
+<pre class="block"><code>agentstack uninstall                      # show what would be removed (default)
+agentstack uninstall --verbose            # ...with the full diff of each file
+agentstack uninstall --write              # do it
+agentstack uninstall --write --keep-home  # keep ~/.agentstack (and the undo ledger)
+agentstack uninstall --scope project      # this project only (or `global`)</code></pre>
+<p>It removes what agentstack manages, not what you wrote: <strong>your <code>agentstack.toml</code> is never touched</strong>, so re-running <code>apply --write</code> brings the whole setup back. Foreign entries you or another tool added to those same files are left alone, as are entries a <em>different</em> project's manifest manages at global scope. A config file left holding nothing but an empty container is deleted rather than left as a husk, and its directory with it if that is now empty too.</p>
+<p>Removal goes through the same planners <code>apply</code> uses — given an empty manifest — so every file edit is captured in the history ledger first. <strong>An uninstall is itself undoable</strong> with <code>agentstack restore --last --write</code>, as one entry. That is why <code>~/.agentstack</code> goes last, and why <code>--keep-home</code> exists: the ledger lives there, so keeping it keeps the undo. The binary itself is not removed — take it off the way you installed it.</p>
 <h3 id="doctor-shows-what-you-use"><code>doctor</code> shows what you use<a class="hlink" href="#doctor-shows-what-you-use" aria-label="Link to this section">#</a></h3>
 <pre class="block"><code>agentstack doctor         # only the sections relevant to this project
 agentstack doctor --all   # every section
@@ -668,7 +677,7 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 <li><strong><code>run</code></strong> — Launch an agent CLI as a tracked run — flags <code>--locked/--prompt/--profile/--scope/--keep/--sandbox/--lockdown/--plan</code></li>
 <li><strong><code>kill</code></strong> _(hidden)_ — Kill a tracked run by id (and revert its profile if it owned one) — flags <code>--force</code></li>
 <li><strong><code>shim</code></strong> _(hidden)_ — Exec-through launcher shim for external supervisors (e.g. t3code) — subcommands <code>make/exec*</code></li>
-<li><strong><code>workflow</code></strong> — Governed workflows: run a pinned workflow under full admission — trust gate, strict lock verification, machine-capped ceilings — with every <code>agent()</code> call becoming a locked child run — subcommands <code>run/report/list/runs</code></li>
+<li><strong><code>workflow</code></strong> — Governed workflows: run a pinned workflow under full admission — trust gate, strict lock verification, machine-capped ceilings — with every <code>agent()</code> call becoming a locked child run — subcommands <code>run/report/list/runs/explain</code></li>
 <li><strong><code>report</code></strong> _(hidden)_ — Every "what happened" view in one place — subcommands <code>run/runs/usage/calls/wire</code></li>
 <li><strong><code>sign</code></strong> _(hidden)_ — Sign this project's agentstack.lock with a fresh ed25519 key (writes a detached agentstack.lock.sig, prints the public key to publish) — flags <code>--print-key-only</code></li>
 <li><strong><code>verify</code></strong> _(hidden)_ — Verify agentstack.lock against a published ed25519 public key and its detached signature — flags <code>--pubkey/--signature</code></li>
@@ -687,6 +696,12 @@ agentstack optimize --write      # apply ONLY the safe class: provably-inert
 <li><strong><code>import</code></strong> _(hidden)_ — Import an encrypted bundle on a new machine — flags <code>--force/--no-keychain/--passphrase</code></li>
 <li><strong><code>adapters</code></strong> _(hidden)_ — Inspect the available CLI adapters — subcommands <code>list/show/validate</code></li>
 <li><strong><code>self</code></strong> _(hidden)_ — Manage this binary's own install: <code>self link</code> puts a stable <code>agentstack</code> on PATH (a symlink, no installer needed); <code>self which</code> shows which binary a bare <code>agentstack</code> runs and flags stale links — subcommands <code>link/which/docs*</code></li>
+<li><strong><code>add-skill-to-profile</code></strong> _(hidden)_ — Add a skill to a toolset and activate it (panel action; digest-bound) — flags <code>--profile/--name/--git/--rev/--subpath/--path/--preview/--yes/--consented/--allow-unresolved</code></li>
+<li><strong><code>add-server-to-profile</code></strong> _(hidden)_ — Add a server to a toolset and activate it (panel action; digest-bound) — flags <code>--profile/--name/--type/--url/--header/--command/--arg/--cwd/--env/--preview/--yes/--consented/--allow-unresolved</code></li>
+<li><strong><code>uninstall</code></strong> _(hidden)_ — Remove everything AgentStack manages, previewing first — flags <code>--scope/--write/--verbose/--keep-home</code></li>
+<li><strong><code>create-profile</code></strong> _(hidden)_ — Name a toolset: bundle some of what you already have, and activate it — flags <code>--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved</code></li>
+<li><strong><code>use-profile</code></strong> _(hidden)_ — Activate an existing toolset (panel action; digest-bound) — flags <code>--profile/--preview/--yes/--consented/--allow-unresolved</code></li>
+<li><strong><code>library-index</code></strong> _(hidden)_ — The central-library catalog (skills + servers) for the panel browser</li>
 </ul>
 <h2 id="everything-shipped-so-far">Everything shipped so far<a class="hlink" href="#everything-shipped-so-far" aria-label="Link to this section">#</a></h2>
 <p>A single-glance census of every capability that exists today — the fastest way to confirm a feature is real before you go hunting for its section above.</p>

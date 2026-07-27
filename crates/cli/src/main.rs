@@ -78,6 +78,7 @@ fn run() -> Result<()> {
         Command::Adopt(args) => commands::adopt::run(args, dir),
         Command::Lib(args) => commands::lib::run(args, dir),
         Command::Restore(args) => commands::restore::run(args, dir),
+        Command::Uninstall(args) => commands::uninstall::run(args, dir),
         Command::Doctor(args) => commands::doctor::run(args, dir),
         Command::Search(args) => commands::search::run(args, dir),
         Command::Proxy(args) => commands::proxy::run(args, dir),

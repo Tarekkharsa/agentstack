@@ -123,6 +123,66 @@ pub fn reset_sigpipe() {
 #[cfg(not(unix))]
 pub fn reset_sigpipe() {}
 
+/// Suppress `SIGPIPE` death for the lifetime of the guard, restoring the
+/// default disposition on drop.
+///
+/// [`reset_sigpipe`] deliberately lets a reader hanging up kill the process —
+/// the right behaviour for a read-only command being piped into `head`. It is
+/// the wrong behaviour for a command that is part-way through writing files:
+/// `apply --write | head` used to die between two targets, leaving half the
+/// CLIs rendered and the rest drifted, which is exactly the state the product
+/// exists to prevent. Output is expendable; a half-finished write is not.
+///
+/// Ignoring the signal only stops the *kill*. The write pass must also route
+/// its narrative through [`crate::outln`] so an `EPIPE` returns an error to be
+/// dropped instead of panicking inside `println!`.
+#[cfg(unix)]
+pub struct SigpipeIgnored;
+
+#[cfg(unix)]
+impl SigpipeIgnored {
+    pub fn new() -> Self {
+        // SAFETY: `signal` with `SIG_IGN` for a valid signal number installs
+        // the kernel's ignore disposition. No handler of ours runs, no
+        // pointers are dereferenced, no memory is reachable to corrupt.
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+        }
+        SigpipeIgnored
+    }
+}
+
+#[cfg(unix)]
+impl Default for SigpipeIgnored {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SigpipeIgnored {
+    fn drop(&mut self) {
+        reset_sigpipe();
+    }
+}
+
+#[cfg(not(unix))]
+pub struct SigpipeIgnored;
+
+#[cfg(not(unix))]
+impl SigpipeIgnored {
+    pub fn new() -> Self {
+        SigpipeIgnored
+    }
+}
+
+#[cfg(not(unix))]
+impl Default for SigpipeIgnored {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Whether the process `pid` is still alive — `kill(pid, 0)` delivers no
 /// signal, it only probes for the target's existence and our permission to
 /// signal it.

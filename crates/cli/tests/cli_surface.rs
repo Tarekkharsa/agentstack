@@ -35,15 +35,37 @@ fn status_parses_and_help_maps_every_command() {
         "the visible list is the beginner loop, in task order (workflow un-hidden after §9.3 review)"
     );
 
+    // Every top-level command stays discoverable, but not all of it belongs in
+    // the *human* task map: the panel verbs are fixed argv a graphical client
+    // invokes, and listing them beside `init` and `doctor` made the surface
+    // look bigger than the product is. They now live under their own heading
+    // in `--help --all`. Discoverability is the invariant; the human map being
+    // exhaustive is not.
     let after_help = cmd.get_after_help().expect("after_help exists").to_string();
+    let inventory = agentstack::cli::full_command_inventory();
+    let (contract_heading, contract_section) = inventory
+        .split_once("Integration contract (t3code)")
+        .expect("the inventory carries a labelled integration-contract section");
     for c in cmd.get_subcommands() {
         let name = c.get_name();
         if name == "help" || name == "setup" {
             continue; // setup is a deliberately unadvertised legacy alias.
         }
+        if after_help.contains(name) {
+            assert!(
+                !contract_section.contains(&format!("\n  {name} ")),
+                "'{name}' is in the human map, so it must not also be filed as panel-only"
+            );
+            continue;
+        }
         assert!(
-            after_help.contains(name),
-            "'{name}' must appear in the grouped after_help map"
+            contract_section.contains(name),
+            "'{name}' is in neither the grouped after_help map nor the \
+             integration-contract section — it would be undiscoverable"
+        );
+        assert!(
+            !contract_heading.contains(&format!("\n  {name} ")),
+            "'{name}' must be listed once, under the contract heading only"
         );
     }
 }

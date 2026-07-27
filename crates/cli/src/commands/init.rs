@@ -1158,9 +1158,15 @@ version = 1
     // Inline secrets were lifted during detection. This is the moment that
     // matters: plaintext tokens were sitting in live CLI configs — show
     // exactly where each one was.
+    //
+    // The wording is deliberately "copied", not "lifted"/"moved": import reads
+    // the source config and never edits it, so the original plaintext is still
+    // there afterwards. Saying "lifted" would let a security-conscious reader
+    // believe their live config had been cleaned when it hasn't — the one
+    // place this output could overstate, so it doesn't.
     if !lifted.is_empty() {
         println!(
-            "{}  {} — lifted to secure references:",
+            "{}  {} — replaced with secure references here:",
             "🔐".dimmed(),
             format!(
                 "Found {} plaintext token(s) in your live CLI configs",
@@ -1181,6 +1187,11 @@ version = 1
         println!(
             "      {}",
             "The manifest stays commit-safe; real values resolve locally at apply time.".dimmed()
+        );
+        println!(
+            "      {}",
+            "Each value was COPIED — the original is still in the CLI's own config, unchanged."
+                .dimmed()
         );
     }
 
@@ -1420,9 +1431,35 @@ fn render_import_summary(
             out.push_str(&format!("               agentstack secret set {name}\n"));
         }
     }
+    // Import reads the CLIs' own configs and never edits them, so the entries
+    // it copied still live there. After `apply --write` the same server is
+    // described in two uncoordinated places — which is the exact problem this
+    // product exists to remove, so it gets named here rather than discovered
+    // later as drift.
+    if server_count > 0 {
+        out.push_str(
+            "  Note:      the CLI configs above are unchanged — after `apply --write` these\n\
+             \x20            servers are described in two places. To manage the originals from\n\
+             \x20            this manifest too: agentstack apply --scope global --write\n",
+        );
+    }
     out.push_str("  Undo:      agentstack restore --last --write\n");
     out.push_str("  Next:      agentstack apply --write   (render this setup into your CLIs)\n");
     out.push_str("             agentstack doctor          (check the result)\n");
+    // Toolsets are the reason people come back — and import used to end
+    // without ever mentioning them, leaving the whole feature to be found in
+    // the docs. Offered only above one server, because a toolset that selects
+    // "the single thing you have" teaches nothing. Concrete over abstract: a
+    // block to paste beats a pointer to a concept.
+    if server_count > 1 {
+        out.push_str(
+            "\n  Then:      name a toolset — a subset for one kind of work. Add to the manifest:\n\
+             \x20            [profiles.<name>]\n\
+             \x20            servers = [\"<one of the servers above>\"]\n\
+             \x20          then `agentstack session start <name>` uses it for now, and\n\
+             \x20          `agentstack session end` puts every file back.\n",
+        );
+    }
     out
 }
 
@@ -1711,11 +1748,26 @@ mod tests {
         assert!(out.contains("agentstack apply --write"));
         assert!(out.contains("agentstack doctor"));
 
+        // F09: import copies, it does not move — say so, and name the command
+        // that brings the originals under the same manifest.
+        assert!(out.contains("the CLI configs above are unchanged"));
+        assert!(out.contains("agentstack apply --scope global --write"));
+        // F05: toolsets are the reason people come back, so the import that
+        // creates the servers is where they get introduced — concretely.
+        assert!(out.contains("[profiles.<name>]"));
+        assert!(out.contains("agentstack session start"));
+
         // Nothing pending → no secrets section at all, not an empty one.
         let clean = render_import_summary("/m", &["Claude Code".to_string()], 1, 0, &[]);
         assert!(!clean.contains("Secrets:"));
         assert!(!clean.contains("settings from"));
         assert!(clean.contains("agentstack doctor"));
+        // One server is not a toolset worth naming — the offer stays quiet.
+        assert!(!clean.contains("[profiles.<name>]"));
+
+        // No servers at all → nothing was copied, so no duplication note.
+        let empty = render_import_summary("/m", &["Claude Code".to_string()], 0, 1, &[]);
+        assert!(!empty.contains("the CLI configs above are unchanged"));
     }
 
     /// S1 witness (init-secrets design §7): a failing credential store must
