@@ -18,6 +18,12 @@
 //! Activation fails closed on an unresolved `${REF}` secret — a feature, not a
 //! bug: the manifest keeps the `${REF}` (never a value) and the render is
 //! blocked until the human sets the secret.
+//!
+//! One verb sits outside that pipeline on purpose: `remove-from-library` edits
+//! the MACHINE-WIDE central library, not this project, so it re-locks and
+//! re-renders nothing and its consent digest binds `library.toml` bytes instead
+//! of manifest bytes. It is still previewed, digest-bound, and — because the
+//! entry moves to `lib/.trash` rather than being deleted — recoverable.
 
 use std::io::IsTerminal;
 use std::path::Path;
@@ -26,7 +32,8 @@ use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 
 use crate::cli::{
-    PanelAddServerArgs, PanelAddSkillArgs, PanelCreateProfileArgs, PanelUseProfileArgs,
+    PanelAddServerArgs, PanelAddSkillArgs, PanelCreateProfileArgs, PanelLibraryKind,
+    PanelRemoveFromLibraryArgs, PanelUseProfileArgs,
 };
 use crate::manifest::Manifest;
 
@@ -672,6 +679,166 @@ pub fn library_index_value(dir: Option<&Path>) -> Result<Value> {
         "profiles": profiles,
     });
     Ok(crate::ui_contract::envelope(body))
+}
+
+// ── remove-from-library ─────────────────────────────────────────────────────
+
+/// `remove-from-library` — drop a skill or server from the CENTRAL library
+/// (machine-wide), moving it to `lib/.trash` so the removal is recoverable.
+///
+/// This is the odd one out among the panel mutations, deliberately:
+///  - It edits machine state (`~/.agentstack/lib`), not the project manifest,
+///    so it does NOT re-lock or re-render. A project that references the name
+///    keeps its manifest entry and its pinned lock row untouched; the next
+///    `use`/`doctor` is where an unresolvable name surfaces — which is why the
+///    preview says out loud whether this project depends on it.
+///  - Its consent digest therefore binds `library.toml` bytes (the state that
+///    actually changes), not manifest bytes, so a concurrent library edit
+///    between preview and apply invalidates consent exactly the way a
+///    concurrent manifest edit does for the other verbs.
+pub fn remove_from_library(args: &PanelRemoveFromLibraryArgs, dir: Option<&Path>) -> Result<()> {
+    let preview = remove_from_library_preview(args, dir)?;
+    if !args.consent.yes {
+        return emit(&preview);
+    }
+    verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
+
+    let lib_home = crate::util::paths::lib_home();
+    let trashed_to = match args.kind {
+        PanelLibraryKind::Skill => {
+            crate::commands::lib::remove_skill(&lib_home, &args.name, true)?.trashed_to
+        }
+        PanelLibraryKind::Server => {
+            crate::commands::lib::remove_server(&lib_home, &args.name, true)?.trashed_to
+        }
+    };
+    let id = trashed_to
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    println!(
+        "removed {} '{}' from the central library — restore with `agentstack lib trash --restore {} --write`",
+        args.kind.as_str(),
+        args.name,
+        id,
+    );
+    Ok(())
+}
+
+/// Validate the request and build its enveloped preview. Fails closed when the
+/// name is not in the library. The body names what moves to the trash, whether
+/// the current project still references the name, and which of its toolsets do —
+/// the panel needs all three to write an honest confirmation card.
+pub fn remove_from_library_preview(
+    args: &PanelRemoveFromLibraryArgs,
+    dir: Option<&Path>,
+) -> Result<Value> {
+    let lib_home = crate::util::paths::lib_home();
+    let kind = args.kind.as_str();
+
+    // Preview the removal through the same function the apply calls, with
+    // `write = false`: nothing is mutated, and a missing name errors here —
+    // before a digest exists to consent to.
+    let (source, body, trash_dest) = match args.kind {
+        PanelLibraryKind::Skill => {
+            let outcome = crate::commands::lib::remove_skill(&lib_home, &args.name, false)?;
+            (
+                outcome.source_kind,
+                outcome.removed_dir.map(|p| p.display().to_string()),
+                outcome.trashed_to,
+            )
+        }
+        PanelLibraryKind::Server => {
+            let outcome = crate::commands::lib::remove_server(&lib_home, &args.name, false)?;
+            (
+                "file".to_string(),
+                outcome.removed_file.map(|p| p.display().to_string()),
+                outcome.trashed_to,
+            )
+        }
+    };
+
+    // Is this project relying on the name? The manifest is optional — the
+    // library browser works without one — and a project that defines the
+    // capability inline does not depend on the library copy at all.
+    let manifest = load_manifest(dir).ok();
+    let (in_manifest, inline, profiles) = match &manifest {
+        None => (false, false, Vec::new()),
+        Some(m) => {
+            let (declared, field): (bool, fn(&crate::manifest::Profile) -> &Vec<String>) =
+                match args.kind {
+                    PanelLibraryKind::Skill => (m.skills.contains_key(&args.name), |p| &p.skills),
+                    PanelLibraryKind::Server => {
+                        (m.servers.contains_key(&args.name), |p| &p.servers)
+                    }
+                };
+            let profiles: Vec<String> = m
+                .profiles
+                .iter()
+                .filter(|(_, p)| field(p).iter().any(|n| n == &args.name))
+                .map(|(name, _)| name.clone())
+                .collect();
+            (declared || !profiles.is_empty(), declared, profiles)
+        }
+    };
+
+    let params = json!({ "kind": kind, "name": args.name });
+    // The library index — not the manifest — is the state this action changes,
+    // so that is what consent binds to.
+    let library_bytes = std::fs::read(crate::library::Library::path(&lib_home)).unwrap_or_default();
+    let digest = action_digest("remove-from-library", &params, &library_bytes);
+
+    let trash_id = trash_dest
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let mut body_map = Map::new();
+    body_map.insert(
+        "removal".into(),
+        json!({
+            "kind": kind,
+            "name": args.name,
+            "source": source,
+            // What leaves its place on disk (a git-backed skill has no local
+            // body — the shared store cache is never touched by a removal).
+            "body": body,
+            "trash_id": trash_id,
+            "trash_path": trash_dest.display().to_string(),
+            "restore_command": format!("agentstack lib trash --restore {trash_id} --write"),
+            // Machine-wide: every project referencing this name is affected,
+            // not just the one the panel happens to be open on.
+            "scope": "machine",
+            // This project's stake in it, so the card can warn instead of
+            // pretending a shared library is project-local.
+            "used_by_this_project": in_manifest,
+            "defined_inline_here": inline,
+            "profiles": profiles,
+        }),
+    );
+    Ok(build_remove_preview(
+        "remove-from-library",
+        &digest,
+        body_map,
+    ))
+}
+
+/// Like [`build_preview`], but with the note this action actually needs:
+/// removal is machine-wide, recoverable, and re-renders nothing.
+fn build_remove_preview(action: &str, digest: &str, mut body: Map<String, Value>) -> Value {
+    body.insert("action".into(), action.into());
+    body.insert("consent_digest".into(), digest.to_string().into());
+    body.insert(
+        "note".into(),
+        format!(
+            "Review, then apply with --yes --consented {digest}. This removes the capability \
+             from the machine-wide central library — every project that references it by name \
+             is affected. No manifest, lockfile, or rendered config is touched. The entry moves \
+             to the library trash and can be restored."
+        )
+        .into(),
+    );
+    crate::ui_contract::envelope(Value::Object(body))
 }
 
 #[cfg(test)]

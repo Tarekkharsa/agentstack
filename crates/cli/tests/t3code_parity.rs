@@ -51,6 +51,7 @@ fn dispatch(argv: &[&str]) -> Result<()> {
         Command::CreateProfile(a) => commands::panel_edit::create_profile(&a, dir),
         Command::UseProfile(a) => commands::panel_edit::use_profile(&a, dir),
         Command::LibraryIndex => commands::panel_edit::library_index(dir),
+        Command::RemoveFromLibrary(a) => commands::panel_edit::remove_from_library(&a, dir),
         // workflow-observe-v1: the two read-only observation verbs t3code emits
         // as fixed argv. They print the enveloped body; the JSON-shape witness
         // asserts on `list_value`/`runs_value` directly (below), while these
@@ -466,6 +467,175 @@ fn panel_consent_digest_is_stable_and_binds_manifest() {
         first,
         create_profile_digest(&argv, &proj),
         "a manifest edit must move the digest"
+    );
+
+    std::env::remove_var("HOME");
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+/// Witness (profiles-edit-v1, library curation): `remove-from-library` is the
+/// one panel mutation that edits MACHINE state instead of the project, so this
+/// pins the three properties that make it safe to expose in a UI:
+///
+///  1. It is recoverable — the body and the index row move to `lib/.trash`,
+///     and `lib trash --restore` puts both back.
+///  2. It never touches the project — manifest and lockfile are byte-identical
+///     after the removal (no silent re-lock, no re-render).
+///  3. Consent binds the library index, not the manifest: a library edit
+///     between preview and apply moves the digest, so stale consent is refused.
+#[test]
+fn panel_remove_from_library_is_recoverable_and_leaves_the_project_alone() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+    let lib_home = home.join(".agentstack").join("lib");
+
+    // A library skill, added through the one insertion path.
+    let src = tmp.path().join("src-pdf");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("SKILL.md"), "---\ndescription: pdf\n---\n# pdf\n").unwrap();
+    commands::lib::add_skill(
+        &lib_home,
+        "pdf",
+        commands::lib::LibSource::Path(&src),
+        false,
+        true,
+        false,
+    )
+    .unwrap();
+
+    // A project that references it by name — the case where the panel must warn.
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[profiles.web]\nskills = [\"pdf\"]\n",
+    )
+    .unwrap();
+    let proj_root = proj.to_str().unwrap();
+    let manifest_before = fs::read(proj.join("agentstack.toml")).unwrap();
+
+    let argv = [
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "remove-from-library",
+        "--kind",
+        "skill",
+        "--name",
+        "pdf",
+    ];
+    let args = match command_of(&argv) {
+        Command::RemoveFromLibrary(a) => a,
+        _ => panic!("not a remove-from-library argv"),
+    };
+
+    // The preview names the scope, the dependency, and the way back.
+    let preview = commands::panel_edit::remove_from_library_preview(&args, Some(&proj)).unwrap();
+    let digest = preview["consent_digest"].as_str().unwrap().to_string();
+    assert!(digest.starts_with("sha256:"), "{digest}");
+    let removal = &preview["removal"];
+    assert_eq!(removal["scope"], "machine");
+    assert_eq!(removal["used_by_this_project"], true);
+    assert_eq!(removal["profiles"][0], "web");
+    assert!(removal["restore_command"]
+        .as_str()
+        .unwrap()
+        .contains("lib trash --restore"));
+
+    // A library edit between preview and apply re-keys the digest: the panel's
+    // reviewed consent cannot be replayed against different library state.
+    commands::lib::add_skill(
+        &lib_home,
+        "other",
+        commands::lib::LibSource::Path(&src),
+        false,
+        true,
+        false,
+    )
+    .unwrap();
+    let after_drift =
+        commands::panel_edit::remove_from_library_preview(&args, Some(&proj)).unwrap();
+    assert_ne!(
+        digest,
+        after_drift["consent_digest"].as_str().unwrap(),
+        "a library edit must move the digest"
+    );
+    let digest = after_drift["consent_digest"].as_str().unwrap().to_string();
+
+    // Apply through the real clap → dispatch path with the reviewed digest.
+    let apply = [
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "remove-from-library",
+        "--kind",
+        "skill",
+        "--name",
+        "pdf",
+        "--yes",
+        "--consented",
+        &digest,
+    ];
+    dispatch(&apply).unwrap();
+
+    // (1) gone from the library, (2) the project untouched, (3) recoverable.
+    let library = agentstack::library::Library::load(&lib_home).unwrap();
+    assert!(library.get("pdf").is_none(), "removed from the library");
+    assert!(
+        !lib_home.join("skills/pdf").exists(),
+        "body left lib/skills"
+    );
+    assert_eq!(
+        manifest_before,
+        fs::read(proj.join("agentstack.toml")).unwrap(),
+        "the project manifest is not touched by a library removal"
+    );
+    assert!(
+        !proj.join("agentstack.lock").exists(),
+        "a library removal never re-locks the project"
+    );
+
+    let trashed = commands::lib_trash::list(&lib_home).unwrap();
+    assert_eq!(trashed.len(), 1, "the removal is in the trash");
+    commands::lib_trash::restore(&lib_home, &trashed[0].id, false, true).unwrap();
+    assert!(
+        agentstack::library::Library::load(&lib_home)
+            .unwrap()
+            .get("pdf")
+            .is_some(),
+        "restore puts the entry back"
+    );
+    assert!(
+        lib_home.join("skills/pdf/SKILL.md").exists(),
+        "restore puts the body back"
+    );
+
+    // Stale consent is refused before anything moves.
+    let stale = [
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "remove-from-library",
+        "--kind",
+        "skill",
+        "--name",
+        "pdf",
+        "--yes",
+        "--consented",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    ];
+    let err = dispatch(&stale).unwrap_err().to_string();
+    assert!(err.contains("consent digest mismatch"), "{err}");
+    assert!(
+        agentstack::library::Library::load(&lib_home)
+            .unwrap()
+            .get("pdf")
+            .is_some(),
+        "refusal changed nothing"
     );
 
     std::env::remove_var("HOME");

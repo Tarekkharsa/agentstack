@@ -15,7 +15,9 @@ use owo_colors::OwoColorize;
 use crate::cli::{
     LibAddArgs, LibAddExtensionArgs, LibAddHookArgs, LibAddServerArgs, LibArgs, LibKind,
     LibRemoveArgs, LibRemoveExtensionArgs, LibRemoveHookArgs, LibRemoveServerArgs, LibSyncArgs,
+    LibTrashArgs,
 };
+use crate::commands::lib_trash;
 use crate::library::{Library, LibraryExtension, LibraryHook, LibraryServer, LibrarySkill};
 use crate::manifest::{Hook, Server, Skill};
 use crate::store::{dir_digest, dir_size, Store};
@@ -37,6 +39,7 @@ pub fn run(args: &LibArgs, manifest_dir: Option<&Path>) -> Result<()> {
         LibKind::RemoveServer(a) => remove_server_cli(a),
         LibKind::RemoveExtension(a) => remove_extension_cli(a),
         LibKind::RemoveHook(a) => remove_hook_cli(a),
+        LibKind::Trash(a) => trash_cli(a),
         LibKind::Sync(a) => sync(a),
         LibKind::PackInit(a) => super::pack::init(a.name.as_deref()),
     }
@@ -936,39 +939,51 @@ fn secretish_keys_in_line(line: &str) -> Vec<String> {
 #[derive(Debug)]
 pub struct ServerRemoveOutcome {
     pub name: String,
-    /// The `lib/servers/<name>.toml` file that would be / was deleted (`None` if
-    /// the name is unsafe — then only the index entry is dropped).
+    /// The `lib/servers/<name>.toml` file that would be / was moved to the trash
+    /// (`None` if the name is unsafe — then only the index entry is dropped).
     pub removed_file: Option<PathBuf>,
+    /// Where the removal landed in `lib/.trash` (the dry-run destination when
+    /// nothing was written).
+    pub trashed_to: PathBuf,
     pub written: bool,
 }
 
 /// Remove a server from the central library: drop the `library.toml` entry and
-/// delete its `lib/servers/<name>.toml` definition. The file path derives solely
-/// from the (validated) name, so it can never escape `lib/servers`. A missing
-/// name is a hard error; `write=false` mutates nothing.
+/// move its `lib/servers/<name>.toml` definition into `lib/.trash` (restorable
+/// with `lib trash --restore <id>`). The file path derives solely from the
+/// (validated) name, so it can never escape `lib/servers`. A missing name is a
+/// hard error; `write=false` mutates nothing.
 pub fn remove_server(lib_home: &Path, name: &str, write: bool) -> Result<ServerRemoveOutcome> {
     let mut library = Library::load(lib_home)?;
-    if library.get_server(name).is_none() {
+    let Some(entry) = library.get_server(name).cloned() else {
         bail!("'{name}' is not a server in the central library — run `agentstack lib list` to see what's there");
-    }
+    };
     // The definition file is always `lib/servers/<name>.toml`; only compute it
     // for a safe name so a hand-edited index can never target an outside path.
     let removed_file =
         valid_lib_name(name).then(|| lib_home.join("servers").join(format!("{name}.toml")));
 
-    if write {
-        if let Some(f) = &removed_file {
-            if f.exists() {
-                std::fs::remove_file(f).with_context(|| format!("removing {}", f.display()))?;
-            }
-        }
+    let trashed_to = if write {
+        let mut record = lib_trash::blank_record();
+        record.server = Some(entry);
+        let trashed = lib_trash::stash(
+            lib_home,
+            lib_trash::Kind::Server,
+            name,
+            removed_file.as_deref(),
+            record,
+        )?;
         library.remove_server(name);
         library.save(lib_home)?;
-    }
+        trashed.dir
+    } else {
+        lib_trash::plan_destination(lib_home, lib_trash::Kind::Server, name)
+    };
 
     Ok(ServerRemoveOutcome {
         name: name.to_string(),
         removed_file,
+        trashed_to,
         written: write,
     })
 }
@@ -982,16 +997,14 @@ fn remove_server_cli(args: &LibRemoveServerArgs) -> Result<()> {
             "✓".green(),
             outcome.name
         );
-        if let Some(f) = &outcome.removed_file {
-            println!("  deleted {}", f.display());
-        }
+        print_trash_note(&outcome.trashed_to, outcome.removed_file.as_deref());
     } else {
         println!(
             "Would remove server '{}' from the central library:",
             outcome.name.bold()
         );
         match &outcome.removed_file {
-            Some(f) => println!("  {} delete {}", "−".yellow(), f.display()),
+            Some(f) => println!("  {} move {} to the trash", "−".yellow(), f.display()),
             None => println!("  {} index entry only", "−".yellow()),
         }
         println!("\nDry run. Re-run with {} to apply.", "--write".bold());
@@ -1192,37 +1205,48 @@ fn add_hook_cli(args: &LibAddHookArgs, manifest_dir: Option<&Path>) -> Result<()
 #[derive(Debug)]
 pub struct HookRemoveOutcome {
     pub name: String,
-    /// The `lib/hooks/<name>.toml` file that would be / was deleted (`None` if
-    /// the name is unsafe — then only the index entry is dropped).
+    /// Where the removal landed in `lib/.trash` (the dry-run destination when
+    /// nothing was written).
+    pub trashed_to: PathBuf,
+    /// The `lib/hooks/<name>.toml` file that would be / was moved to the trash
+    /// (`None` if the name is unsafe — then only the index entry is dropped).
     pub removed_file: Option<PathBuf>,
     pub written: bool,
 }
 
 /// Remove a hook from the central library: drop the `library.toml` entry and
-/// delete its `lib/hooks/<name>.toml` definition. The file path derives solely
+/// move its `lib/hooks/<name>.toml` definition into `lib/.trash`. The path derives solely
 /// from the (validated) name, so it can never escape `lib/hooks`. A missing name
 /// is a hard error; `write=false` mutates nothing.
 pub fn remove_hook(lib_home: &Path, name: &str, write: bool) -> Result<HookRemoveOutcome> {
     let mut library = Library::load(lib_home)?;
-    if library.get_hook(name).is_none() {
+    let Some(entry) = library.get_hook(name).cloned() else {
         bail!("'{name}' is not a hook in the central library — run `agentstack lib list` to see what's there");
-    }
+    };
     let removed_file =
         valid_lib_name(name).then(|| lib_home.join("hooks").join(format!("{name}.toml")));
 
-    if write {
-        if let Some(f) = &removed_file {
-            if f.exists() {
-                std::fs::remove_file(f).with_context(|| format!("removing {}", f.display()))?;
-            }
-        }
+    let trashed_to = if write {
+        let mut record = lib_trash::blank_record();
+        record.hook = Some(entry);
+        let trashed = lib_trash::stash(
+            lib_home,
+            lib_trash::Kind::Hook,
+            name,
+            removed_file.as_deref(),
+            record,
+        )?;
         library.remove_hook(name);
         library.save(lib_home)?;
-    }
+        trashed.dir
+    } else {
+        lib_trash::plan_destination(lib_home, lib_trash::Kind::Hook, name)
+    };
 
     Ok(HookRemoveOutcome {
         name: name.to_string(),
         removed_file,
+        trashed_to,
         written: write,
     })
 }
@@ -1236,16 +1260,14 @@ fn remove_hook_cli(args: &LibRemoveHookArgs) -> Result<()> {
             "✓".green(),
             outcome.name
         );
-        if let Some(f) = &outcome.removed_file {
-            println!("  deleted {}", f.display());
-        }
+        print_trash_note(&outcome.trashed_to, outcome.removed_file.as_deref());
     } else {
         println!(
             "Would remove hook '{}' from the central library:",
             outcome.name.bold()
         );
         match &outcome.removed_file {
-            Some(f) => println!("  {} delete {}", "−".yellow(), f.display()),
+            Some(f) => println!("  {} move {} to the trash", "−".yellow(), f.display()),
             None => println!("  {} index entry only", "−".yellow()),
         }
         println!("\nDry run. Re-run with {} to apply.", "--write".bold());
@@ -1536,15 +1558,19 @@ fn add_extension_cli(args: &LibAddExtensionArgs) -> Result<()> {
 pub struct ExtensionRemoveOutcome {
     pub name: String,
     pub source_kind: String,
-    /// The contained `lib/extensions/<name>` that would be / was deleted (path
-    /// sources only; `None` for git-backed or uncontained entries).
+    /// The contained `lib/extensions/<name>` that would be / was moved to the
+    /// trash (path sources only; `None` for git-backed or uncontained entries).
     pub removed_dir: Option<PathBuf>,
+    /// Where the removal landed in `lib/.trash` (the dry-run destination when
+    /// nothing was written).
+    pub trashed_to: PathBuf,
     pub written: bool,
 }
 
 /// Remove an extension from the central library at `lib_home` — the inverse of
-/// [`add_extension`]. A path entry's `lib/extensions/<name>` copy is deleted;
-/// git-backed entries leave the shared store cache untouched.
+/// [`add_extension`]. A path entry's `lib/extensions/<name>` copy moves into
+/// `lib/.trash` (restorable); git-backed entries leave the shared store cache
+/// untouched.
 pub fn remove_extension(
     lib_home: &Path,
     name: &str,
@@ -1562,17 +1588,28 @@ pub fn remove_extension(
     } else {
         None
     };
-    if write {
-        if let Some(dir) = &removed_dir {
-            remove_path(dir)?;
-        }
+    let source_kind = entry.source.clone();
+    let trashed_to = if write {
+        let mut record = lib_trash::blank_record();
+        record.extension = Some(entry);
+        let trashed = lib_trash::stash(
+            lib_home,
+            lib_trash::Kind::Extension,
+            name,
+            removed_dir.as_deref(),
+            record,
+        )?;
         library.remove_extension(name);
         library.save(lib_home)?;
-    }
+        trashed.dir
+    } else {
+        lib_trash::plan_destination(lib_home, lib_trash::Kind::Extension, name)
+    };
     Ok(ExtensionRemoveOutcome {
         name: name.to_string(),
-        source_kind: entry.source,
+        source_kind,
         removed_dir,
+        trashed_to,
         written: write,
     })
 }
@@ -1587,9 +1624,7 @@ fn remove_extension_cli(args: &LibRemoveExtensionArgs) -> Result<()> {
             outcome.name,
             outcome.source_kind
         );
-        if let Some(dir) = &outcome.removed_dir {
-            println!("  deleted {}", dir.display());
-        }
+        print_trash_note(&outcome.trashed_to, outcome.removed_dir.as_deref());
     } else {
         println!(
             "Would remove extension '{}' ({}) from the central library:",
@@ -1597,7 +1632,7 @@ fn remove_extension_cli(args: &LibRemoveExtensionArgs) -> Result<()> {
             outcome.source_kind
         );
         match &outcome.removed_dir {
-            Some(dir) => println!("  {} delete {}", "−".yellow(), dir.display()),
+            Some(dir) => println!("  {} move {} to the trash", "−".yellow(), dir.display()),
             None if outcome.source_kind == "git" => println!(
                 "  {} index entry only (store cache left in place)",
                 "−".yellow()
@@ -1784,17 +1819,22 @@ pub struct RemoveOutcome {
     pub name: String,
     /// `"path"` or `"git"`, from the removed index entry.
     pub source_kind: String,
-    /// The contained `lib/skills/<name>` dir that would be / was deleted
-    /// (path skills only; `None` for git-backed or uncontained entries).
+    /// The contained `lib/skills/<name>` dir that would be / was moved to the
+    /// trash (path skills only; `None` for git-backed or uncontained entries).
     pub removed_dir: Option<PathBuf>,
+    /// Where the removal landed in `lib/.trash` — the id to `lib trash --restore`.
+    /// On a dry run this is the destination it *would* get.
+    pub trashed_to: PathBuf,
     /// False on a dry run (nothing was mutated).
     pub written: bool,
 }
 
 /// Remove a skill from the central library at `lib_home`. The inverse of
-/// [`add_skill`]: drops the `library.toml` entry and, for a path skill, deletes
-/// its contained `lib/skills/<name>` directory. Git-backed entries leave the
-/// shared store cache untouched. Does not touch project manifests or lockfiles.
+/// [`add_skill`]: drops the `library.toml` entry and, for a path skill, moves
+/// its contained `lib/skills/<name>` directory into `lib/.trash` (recoverable
+/// with `lib trash --restore <id>`) rather than deleting it. Git-backed entries
+/// leave the shared store cache untouched. Project manifests and lockfiles are
+/// never touched.
 ///
 /// A missing name is a hard error. When `write` is false, nothing is mutated.
 pub fn remove_skill(lib_home: &Path, name: &str, write: bool) -> Result<RemoveOutcome> {
@@ -1803,8 +1843,8 @@ pub fn remove_skill(lib_home: &Path, name: &str, write: bool) -> Result<RemoveOu
         bail!("'{name}' is not in the central library — run `agentstack lib list` to see what's there");
     };
 
-    // Only path skills own files to delete, and only within lib/skills. A git
-    // entry references the shared store cache — never delete that here.
+    // Only path skills own local files, and only within lib/skills. A git entry
+    // references the shared store cache — never move or delete that here.
     let removed_dir = if entry.source == "path" {
         entry
             .path
@@ -1814,21 +1854,29 @@ pub fn remove_skill(lib_home: &Path, name: &str, write: bool) -> Result<RemoveOu
         None
     };
 
-    if write {
-        if let Some(dir) = &removed_dir {
-            if dir.exists() {
-                std::fs::remove_dir_all(dir)
-                    .with_context(|| format!("removing {}", dir.display()))?;
-            }
-        }
+    let source_kind = entry.source.clone();
+    let trashed_to = if write {
+        let mut record = lib_trash::blank_record();
+        record.skill = Some(entry);
+        let trashed = lib_trash::stash(
+            lib_home,
+            lib_trash::Kind::Skill,
+            name,
+            removed_dir.as_deref(),
+            record,
+        )?;
         library.remove(name);
         library.save(lib_home)?;
-    }
+        trashed.dir
+    } else {
+        lib_trash::plan_destination(lib_home, lib_trash::Kind::Skill, name)
+    };
 
     Ok(RemoveOutcome {
         name: name.to_string(),
-        source_kind: entry.source,
+        source_kind,
         removed_dir,
+        trashed_to,
         written: write,
     })
 }
@@ -1844,9 +1892,7 @@ fn remove(args: &LibRemoveArgs) -> Result<()> {
             outcome.name,
             outcome.source_kind
         );
-        if let Some(dir) = &outcome.removed_dir {
-            println!("  deleted {}", dir.display());
-        }
+        print_trash_note(&outcome.trashed_to, outcome.removed_dir.as_deref());
     } else {
         println!(
             "Would remove '{}' ({}) from the central library:",
@@ -1854,7 +1900,7 @@ fn remove(args: &LibRemoveArgs) -> Result<()> {
             outcome.source_kind
         );
         match &outcome.removed_dir {
-            Some(dir) => println!("  {} delete {}", "−".yellow(), dir.display()),
+            Some(dir) => println!("  {} move {} to the trash", "−".yellow(), dir.display()),
             None if outcome.source_kind == "git" => {
                 println!(
                     "  {} index entry only (store cache left in place)",
@@ -1866,6 +1912,129 @@ fn remove(args: &LibRemoveArgs) -> Result<()> {
         println!("\nDry run. Re-run with {} to apply.", "--write".bold());
     }
     Ok(())
+}
+
+/// `agentstack lib trash` — the recovery half of removal: list what is
+/// recoverable, put one entry back, or delete the trash for good. Listing is the
+/// bare command because that is what someone reaches for first ("what did I
+/// remove?"); both mutations need `--write`, like every other library write.
+fn trash_cli(args: &LibTrashArgs) -> Result<()> {
+    let lib_home = paths::lib_home();
+
+    if let Some(id) = &args.restore {
+        let outcome = lib_trash::restore(&lib_home, id, args.replace, args.write)?;
+        if outcome.written {
+            println!(
+                "{} restored {} '{}' to the central library",
+                "✓".green(),
+                outcome.kind,
+                outcome.name
+            );
+            if let Some(dest) = &outcome.body_dest {
+                println!("  {}", dest.display());
+            }
+        } else {
+            println!(
+                "Would restore {} '{}' to the central library:",
+                outcome.kind,
+                outcome.name.bold()
+            );
+            match &outcome.body_dest {
+                Some(dest) => println!("  {} {}", "+".green(), dest.display()),
+                None => println!("  {} index entry only", "+".green()),
+            }
+            println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+        }
+        return Ok(());
+    }
+
+    if args.empty {
+        let outcome = lib_trash::empty(&lib_home, args.id.as_deref(), args.write)?;
+        if outcome.entries.is_empty() {
+            println!("The library trash is already empty.");
+            return Ok(());
+        }
+        if outcome.written {
+            println!(
+                "{} deleted {} trash {} permanently",
+                "✓".green(),
+                outcome.entries.len(),
+                plural_entry(outcome.entries.len())
+            );
+        } else {
+            println!(
+                "Would permanently delete {} trash {}:",
+                outcome.entries.len(),
+                plural_entry(outcome.entries.len())
+            );
+            for e in &outcome.entries {
+                println!("  {} {} ({})", "−".yellow(), e.id, e.record.name);
+            }
+            println!(
+                "\nDry run. Re-run with {} to apply. This cannot be undone.",
+                "--write".bold()
+            );
+        }
+        return Ok(());
+    }
+
+    let entries = lib_trash::list(&lib_home)?;
+    if entries.is_empty() {
+        println!("Nothing in the library trash.");
+        println!(
+            "Removals ({}) land here and stay restorable.",
+            "agentstack lib remove <name> --write".bold()
+        );
+        return Ok(());
+    }
+    println!(
+        "Removed from the central library — restorable ({}):\n",
+        lib_trash::trash_home(&lib_home).display()
+    );
+    for e in &entries {
+        println!(
+            "  {:<28} {} {}",
+            e.id.bold(),
+            e.record.kind,
+            e.record.name.cyan()
+        );
+        if let Some(origin) = &e.record.body_origin {
+            println!("  {:<28} was {}", "", origin);
+        }
+    }
+    println!(
+        "\nRestore: {}\nEmpty:   {}",
+        "agentstack lib trash --restore <id> --write".bold(),
+        "agentstack lib trash --empty --write".bold()
+    );
+    Ok(())
+}
+
+/// `entry`/`entries` — keeps the count lines grammatical.
+fn plural_entry(n: usize) -> &'static str {
+    if n == 1 {
+        "entry"
+    } else {
+        "entries"
+    }
+}
+
+/// The one line every removal prints after a write: where it went and how to
+/// undo it. Removal is recoverable by construction (the body and the index row
+/// move to `lib/.trash`), and the user only benefits from that if they are told
+/// the id.
+fn print_trash_note(trashed_to: &Path, moved_body: Option<&Path>) {
+    let id = trashed_to
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if let Some(body) = moved_body {
+        println!("  moved {} to the trash", body.display());
+    }
+    println!(
+        "  undo: {}",
+        format!("agentstack lib trash --restore {id} --write").bold()
+    );
 }
 
 /// Resolve a library entry's `path` to the exact contained `lib/skills/<...>`
@@ -1938,7 +2107,31 @@ fn is_temp_path(p: &Path) -> bool {
 const LIB_GITIGNORE: &str = "# agentstack central library — synced across machines.\n\
      # The content store cache lives outside this repo (~/.agentstack/store) and\n\
      # never travels. Nothing secret belongs here: server defs are ${REF} only.\n\
-     .DS_Store\n";
+     .DS_Store\n\
+     .trash/\n";
+
+/// The trash line every synced library needs. A library initialized before the
+/// trash existed has a `.gitignore` without it, and [`sync_init`] only writes
+/// the file when it is absent — so each sync ensures the line, or a removal on
+/// one machine would push its own undo copy to every other machine.
+const LIB_GITIGNORE_TRASH_LINE: &str = ".trash/";
+
+/// Append the trash ignore line to an existing library `.gitignore` that
+/// predates it. Idempotent; a missing file is left to [`sync_init`].
+fn ensure_trash_ignored(lib: &Path) -> Result<()> {
+    let path = lib.join(".gitignore");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    if text.lines().any(|l| l.trim() == LIB_GITIGNORE_TRASH_LINE) {
+        return Ok(());
+    }
+    let sep = if text.ends_with('\n') { "" } else { "\n" };
+    let updated = format!("{text}{sep}{LIB_GITIGNORE_TRASH_LINE}\n");
+    crate::util::atomic::write(&path, &updated)
+        .with_context(|| format!("updating {}", path.display()))?;
+    Ok(())
+}
 
 /// Run git in `dir`, returning trimmed stdout; a non-zero exit is an error
 /// carrying git's stderr.
@@ -1971,6 +2164,9 @@ fn sync(args: &LibSyncArgs) -> Result<()> {
         set_remote(&lib, url)?;
         println!("{} remote set → {url}", "✓".green());
     }
+    // Libraries initialized before the trash existed still ignore it, so a
+    // removal never travels as a resurrection copy.
+    ensure_trash_ignored(&lib)?;
     if args.status {
         return sync_status(&lib);
     }
@@ -3140,7 +3336,10 @@ mod tests {
     }
 
     #[test]
-    fn remove_write_deletes_path_entry_and_files() {
+    /// Removal takes the entry out of the library and the body out of
+    /// `lib/skills` — but into the trash, not into nothing. The round trip is
+    /// what makes curating a library safe: remove, then change your mind.
+    fn remove_write_moves_entry_and_files_to_the_trash() {
         let lib = assert_fs::TempDir::new().unwrap();
         let work = assert_fs::TempDir::new().unwrap();
         let src = src_skill(&work, "# body\n");
@@ -3153,10 +3352,19 @@ mod tests {
             out.removed_dir.as_deref(),
             Some(lib.child("skills/x").path())
         );
-        assert!(!lib.child("skills/x").path().exists(), "dir deleted");
+        assert!(!lib.child("skills/x").path().exists(), "left lib/skills");
         assert!(
             Library::load(lib.path()).unwrap().get("x").is_none(),
             "entry gone"
+        );
+        // …and is recoverable: the body and the index row are both in the trash.
+        assert!(out.trashed_to.join("body/SKILL.md").exists(), "body kept");
+        let id = out.trashed_to.file_name().unwrap().to_string_lossy();
+        lib_trash::restore(lib.path(), &id, false, true).unwrap();
+        assert!(lib.child("skills/x/SKILL.md").path().exists(), "body back");
+        assert!(
+            Library::load(lib.path()).unwrap().get("x").is_some(),
+            "entry back"
         );
     }
 
@@ -3501,7 +3709,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_server_deletes_index_and_file() {
+    fn remove_server_trashes_index_and_file() {
         let lib = assert_fs::TempDir::new().unwrap();
         let work = assert_fs::TempDir::new().unwrap();
         let file = server_file(&work, "kibana", "https://k/mcp");
@@ -3511,12 +3719,23 @@ mod tests {
         assert!(out.written);
         assert!(
             !lib.child("servers/kibana.toml").path().exists(),
-            "file deleted"
+            "definition left lib/servers"
         );
         assert!(Library::load(lib.path())
             .unwrap()
             .get_server("kibana")
             .is_none());
+
+        // A server definition is one file, so it lands as `body.toml` — and the
+        // restore puts it back at `servers/<name>.toml`.
+        assert!(out.trashed_to.join("body.toml").exists(), "definition kept");
+        let id = out.trashed_to.file_name().unwrap().to_string_lossy();
+        lib_trash::restore(lib.path(), &id, false, true).unwrap();
+        assert!(lib.child("servers/kibana.toml").path().exists(), "back");
+        assert!(Library::load(lib.path())
+            .unwrap()
+            .get_server("kibana")
+            .is_some());
     }
 
     #[test]

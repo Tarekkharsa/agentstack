@@ -122,7 +122,7 @@ pub enum Command {
     #[command(hide = true)]
     Install(InstallArgs),
 
-    /// Resolve each profile's skill + server refs and pin `agentstack.lock`.
+    /// Resolve each toolset's skill + server refs and pin `agentstack.lock`.
     ///
     /// Library-aware resolution; no configs rendered, no skills
     /// materialized — the lock-only counterpart of `use <profile> --write`,
@@ -155,10 +155,10 @@ pub enum Command {
     Adopt(AdoptArgs),
 
     // ── Activate & run ───────────────────────────────────────────────────
-    /// Activate a profile: render its servers + materialize its skills.
+    /// Activate a toolset: render its servers + materialize its skills.
     Use(UseArgs),
 
-    /// Manage ephemeral sessions: load a profile for now, then revert it.
+    /// Use a toolset temporarily: load it for now, then put every file back.
     #[command(hide = true)]
     Session(SessionArgs),
 
@@ -168,7 +168,7 @@ pub enum Command {
     /// here or through an integrated supervisor such as t3code.
     Run(RunArgs),
 
-    /// Kill a tracked run by id (and revert its profile if it owned one).
+    /// Kill a tracked run by id (and revert its toolset if it owned one).
     #[command(hide = true)]
     Kill(KillArgs),
 
@@ -377,6 +377,12 @@ Scripts and graphical clients get the two-step contract instead: a bare call
     /// The central-library catalog (skills + servers) for the panel browser.
     #[command(name = "library-index", hide = true)]
     LibraryIndex,
+
+    /// Remove a skill or server from the central library (panel action;
+    /// digest-bound). Moves it to the library trash — recoverable with
+    /// `agentstack lib trash --restore <id> --write`.
+    #[command(name = "remove-from-library", hide = true)]
+    RemoveFromLibrary(PanelRemoveFromLibraryArgs),
 }
 
 #[derive(Args, Debug)]
@@ -618,6 +624,63 @@ pub enum WorkflowCmd {
     /// ceiling allows" at authoring time instead of after paying for the
     /// first N children.
     Explain(WorkflowExplainArgs),
+
+    /// Declare a workflow in ONE transaction: stage the script (and the
+    /// blueprint it was approved from), add its `[workflows.<name>]` manifest
+    /// entry, validate, and re-lock — or, on any failure, put everything back
+    /// exactly as it was.
+    ///
+    /// This exists because authoring a workflow by hand is six separate writes
+    /// (script, manifest entry, role profiles, lock, trust, run), and a
+    /// failure at step four used to leave a half-written manifest behind a
+    /// button labelled "Approve" (review finding F14). One command, one
+    /// rollback, one `agentstack restore` entry.
+    ///
+    /// It stops before `trust` on purpose: consent is the human's step, and a
+    /// command that granted it would be the second authority path this
+    /// codebase refuses to grow.
+    Declare(WorkflowDeclareArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct WorkflowDeclareArgs {
+    /// The workflow name — becomes `[workflows.<name>]` and the staged
+    /// filename. Must be a plain path component and must not already exist.
+    #[arg(long)]
+    pub name: String,
+
+    /// Path to the workflow script to stage into `.agentstack/workflows/`.
+    #[arg(long)]
+    pub script: PathBuf,
+
+    /// Path to the `agentstack-blueprint` JSON this script was authored from.
+    /// Staged beside the script and pinned with it, so the graph a user
+    /// approved and the bytes that run are one consent (F13).
+    #[arg(long)]
+    pub blueprint: Option<PathBuf>,
+
+    /// A role the script's `agent()` calls may name (repeatable). Every role
+    /// must already exist as a `[profiles.<role>]` table — this command
+    /// declares a workflow, it never mints authority.
+    #[arg(long = "role")]
+    pub roles: Vec<String>,
+
+    /// Requested ceiling on total agent spawns. Narrowed by the machine cap.
+    #[arg(long)]
+    pub max_agents: Option<u32>,
+
+    /// Requested wall-clock ceiling in seconds. Narrowed by the machine cap.
+    #[arg(long)]
+    pub max_wall_seconds: Option<u64>,
+
+    /// Show what would be written and change nothing. The default for every
+    /// non-interactive caller.
+    #[arg(long)]
+    pub preview: bool,
+
+    /// Perform the transaction.
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1465,6 +1528,50 @@ pub struct PanelUseProfileArgs {
     pub consent: PanelConsent,
 }
 
+/// The library collections the panel may remove from. Skills and servers are
+/// the two kinds `library-index` publishes, so they are the two the browser can
+/// act on; extensions and hooks stay CLI-only (`lib remove-extension`,
+/// `lib remove-hook`) until the browser lists them.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanelLibraryKind {
+    Skill,
+    Server,
+}
+
+impl PanelLibraryKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PanelLibraryKind::Skill => "skill",
+            PanelLibraryKind::Server => "server",
+        }
+    }
+}
+
+/// `remove-from-library` — drop one central-library capability, machine-wide.
+///
+/// Unlike the `add-*-to-profile` verbs this touches no manifest, no lockfile,
+/// and renders nothing: the central library is machine state, shared by every
+/// project. It is still digest-bound, because it is a destructive-looking
+/// change the user must see first — and it is recoverable, because the body and
+/// index row move to `lib/.trash` rather than being deleted.
+///
+/// It carries the shared [`PanelConsent`] block so every panel verb has one
+/// consent shape; `--allow-unresolved` is inert here (nothing renders, so no
+/// `${REF}` is ever resolved) and t3code never emits it for this verb.
+#[derive(Args, Debug)]
+pub struct PanelRemoveFromLibraryArgs {
+    /// Which library collection the name lives in.
+    #[arg(long, value_enum)]
+    pub kind: PanelLibraryKind,
+
+    /// The central-library name to remove.
+    #[arg(long)]
+    pub name: String,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
 #[derive(Args, Debug)]
 pub struct ExplainArgs {
     /// Name of a server or skill in the manifest.
@@ -1590,6 +1697,14 @@ Examples:
     RemoveExtension(LibRemoveExtensionArgs),
     /// Remove a hook from the central library.
     RemoveHook(LibRemoveHookArgs),
+    /// List what removal put in the library trash, and restore or empty it.
+    /// Every `lib remove*` moves the entry here instead of deleting it.
+    #[command(after_help = "\
+Examples:
+  agentstack lib trash                                  # what's recoverable
+  agentstack lib trash --restore skill-pdf-1753574400 --write
+  agentstack lib trash --empty --write                  # delete it for good")]
+    Trash(LibTrashArgs),
     /// Sync the central library across machines as a git repo (commit local
     /// changes, pull, push). Secrets never travel — server defs are `${REF}`.
     Sync(LibSyncArgs),
@@ -1717,6 +1832,27 @@ pub struct LibAddExtensionArgs {
 pub struct LibRemoveExtensionArgs {
     /// The library extension name to remove.
     pub name: String,
+    /// Write the change (else preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibTrashArgs {
+    /// Put a trashed entry back in the library (its id, from the listing).
+    #[arg(long, value_name = "ID", conflicts_with = "empty")]
+    pub restore: Option<String>,
+    /// Permanently delete the trash — everything, or just `--id <ID>`. This is
+    /// the one library operation that destroys content.
+    #[arg(long)]
+    pub empty: bool,
+    /// Limit `--empty` to one entry.
+    #[arg(long, value_name = "ID", requires = "empty")]
+    pub id: Option<String>,
+    /// Restore over a same-named entry (or an existing body) that came back
+    /// after the removal.
+    #[arg(long, requires = "restore")]
+    pub replace: bool,
     /// Write the change (else preview).
     #[arg(long)]
     pub write: bool,
@@ -2039,6 +2175,7 @@ pub fn full_command_inventory() -> String {
         "add-server-to-profile",
         "use-profile",
         "library-index",
+        "remove-from-library",
     ];
 
     fn push(out: &mut String, cmd: &clap::Command, indent: usize, panel: bool) {

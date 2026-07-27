@@ -965,6 +965,37 @@ project) or `lib add ./<name> --write` (every project). Every `lib add` runs the
 prompt-injection scan as `install`/`doctor --deep` before the copy becomes
 canonical (high findings block unless `--allow-flagged`) and warns above ~10 MiB.
 
+### Removing capabilities (and getting them back)
+
+```text
+agentstack lib remove <name> --write             # skill
+agentstack lib remove-server <name> --write      # MCP server
+agentstack lib trash                             # what's recoverable
+agentstack lib trash --restore <id> --write      # put one back
+agentstack lib trash --empty --write             # delete it for good
+```
+
+Every `lib remove*` (skills, servers, extensions, hooks) **moves** the entry to
+`lib/.trash/<id>/` instead of deleting it: the body goes in as `body/` or
+`body.toml`, and the dropped `library.toml` row is recorded beside it in
+`entry.toml`. Each removal prints the `--restore` line that undoes it. A
+git-backed entry has no local body — only the index row moves; the shared store
+cache is never touched.
+
+`lib trash --restore` puts the row back in `library.toml` and the body back at
+its canonical path, refusing (unless `--replace`) when the name has been taken
+again since. `--empty` is the only library operation that destroys content, and
+it only ever deletes inside `lib/.trash`.
+
+The trash is machine-local — `lib sync` gitignores it — so removing something on
+one machine never pushes a resurrection copy to another.
+
+Removing from the library does **not** edit any project: manifests, lockfiles,
+and rendered configs are untouched. A project that references the name by bare
+`skills = ["…"]` keeps working until its next `lock`/`use`, which is where the
+now-unresolvable name surfaces. Removing a project's *own* entry is
+`agentstack remove <name> --write`.
+
 ### Syncing across machines (`lib sync`)
 
 ```text
@@ -1331,16 +1362,16 @@ you need the exact verb, flag, or subcommand.
 - **`doctor`** — Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details — flags `--ci/--live/--fix/--deep/--all/--json`
 - **`remove`** _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags `--write`
 - **`install`** _(hidden)_ — Fetch skill sources into the store and write the lockfile — flags `--locked/--allow-flagged`
-- **`lock`** _(hidden)_ — Resolve each profile's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`
+- **`lock`** _(hidden)_ — Resolve each toolset's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`
 - **`try`** _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags `--skill/--rev/--subpath/--allow-flagged`
-- **`lib`** _(hidden)_ — Manage the central capability library — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/sync/pack-init`
+- **`lib`** _(hidden)_ — Manage the central capability library — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init`
 - **`adopt`** _(hidden)_ — Keep a hand-edit: pull drifted native config back into the manifest — flags `--target/--scope/--write/--no-keychain`
-- **`use`** — Activate a profile: render its servers + materialize its skills — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
-- **`session`** _(hidden)_ — Manage ephemeral sessions: load a profile for now, then revert it — subcommands `start/end/list/freeze`
+- **`use`** — Activate a toolset: render its servers + materialize its skills — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
+- **`session`** _(hidden)_ — Use a toolset temporarily: load it for now, then put every file back — subcommands `start/end/list/freeze`
 - **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--prompt/--profile/--scope/--keep/--sandbox/--lockdown/--plan`
-- **`kill`** _(hidden)_ — Kill a tracked run by id (and revert its profile if it owned one) — flags `--force`
+- **`kill`** _(hidden)_ — Kill a tracked run by id (and revert its toolset if it owned one) — flags `--force`
 - **`shim`** _(hidden)_ — Exec-through launcher shim for external supervisors (e.g. t3code) — subcommands `make/exec*`
-- **`workflow`** — Governed workflows: run a pinned workflow under full admission — trust gate, strict lock verification, machine-capped ceilings — with every `agent()` call becoming a locked child run — subcommands `run/report/list/runs/explain`
+- **`workflow`** — Governed workflows: run a pinned workflow under full admission — trust gate, strict lock verification, machine-capped ceilings — with every `agent()` call becoming a locked child run — subcommands `run/report/list/runs/explain/declare`
 - **`report`** _(hidden)_ — Every "what happened" view in one place — subcommands `run/runs/usage/calls/wire`
 - **`sign`** _(hidden)_ — Sign this project's agentstack.lock with a fresh ed25519 key (writes a detached agentstack.lock.sig, prints the public key to publish) — flags `--print-key-only`
 - **`verify`** _(hidden)_ — Verify agentstack.lock against a published ed25519 public key and its detached signature — flags `--pubkey/--signature`
@@ -1365,6 +1396,7 @@ you need the exact verb, flag, or subcommand.
 - **`create-profile`** _(hidden)_ — Name a toolset: bundle some of what you already have, and activate it — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
 - **`use-profile`** _(hidden)_ — Activate an existing toolset (panel action; digest-bound) — flags `--profile/--preview/--yes/--consented/--allow-unresolved`
 - **`library-index`** _(hidden)_ — The central-library catalog (skills + servers) for the panel browser
+- **`remove-from-library`** _(hidden)_ — Remove a skill or server from the central library (panel action; digest-bound). Moves it to the library trash — recoverable with `agentstack lib trash --restore <id> --write` — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`
 <!-- agentstack:end -->
 
 ## Everything shipped so far

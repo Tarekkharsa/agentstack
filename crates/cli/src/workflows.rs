@@ -146,6 +146,42 @@ pub fn normalized_workflows(
                 "refusing to normalize workflow '{name}': lock verification failed ({other:?}) — run `agentstack lock`, review, and re-trust"
             ),
         }
+        // F13: the approved blueprint is verified at ADMISSION, not only at
+        // review. The trust digest covers the manifest and lock BYTES, so
+        // editing the blueprint file alone leaves the project reading Trusted
+        // — its checksum lives inside the lock, and the lock did not change.
+        // Without this check the graph a user approved could be swapped after
+        // consent while the run proceeded, which is precisely the binding this
+        // finding exists to create. Same posture as the script's pin: verified
+        // from disk, never fetched, and a mismatch refuses the RUN.
+        if let Some(declared) = &wf.blueprint {
+            let locked = lock
+                .workflows
+                .iter()
+                .find(|w| &w.name == name)
+                .and_then(|w| w.blueprint_checksum.clone());
+            let Some(locked) = locked else {
+                anyhow::bail!(
+                    "refusing to normalize workflow '{name}': it declares an approved blueprint \
+                     ('{declared}') that the lock does not pin — run `agentstack lock`, review, \
+                     and re-trust"
+                );
+            };
+            let actual = agentstack_core::digest::contained_file_digest(manifest_dir, declared)
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "refusing to normalize workflow '{name}': its approved blueprint \
+                         ('{declared}') could not be verified: {e:#}"
+                    )
+                })?;
+            if actual != locked {
+                anyhow::bail!(
+                    "refusing to normalize workflow '{name}': the approved blueprint \
+                     ('{declared}') changed since it was pinned — the graph that was reviewed is \
+                     not the graph on disk. Re-review it, run `agentstack lock`, and re-trust"
+                );
+            }
+        }
         // Effective ceilings: the manifest requests (or the built-in default
         // stands in), the machine cap clamps. min() — a request can only
         // reduce the cap, never raise it (rule 2).
@@ -309,6 +345,85 @@ mod tests {
         .to_string();
         assert!(err.contains("ghost"), "{err}");
         assert!(err.contains("profiles"), "{err}");
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    // SECURITY WITNESS (F13): the approved blueprint is verified at ADMISSION,
+    // not only when a human happens to be looking at the review.
+    //
+    // This is the whole point of the finding. The trust digest covers manifest
+    // and lock BYTES; the blueprint's checksum lives INSIDE the lock, so
+    // editing the blueprint file alone leaves the project reading Trusted and
+    // the lock unchanged. Without a check here the graph a user approved could
+    // be swapped after consent and the run would proceed — the two gates would
+    // stay independent, which is exactly what F13 exists to fix.
+    // NEVER delete this test or soften the refusal into a warning.
+    #[test]
+    fn blueprint_swapped_after_consent_refuses_admission() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let proj = assert_fs::TempDir::new().unwrap();
+
+        const WITH_BLUEPRINT: &str = r#"
+            version = 1
+            [profiles.reader]
+            [workflows.audit]
+            path = "./workflows/audit"
+            blueprint = "./workflows/audit.blueprint.json"
+            roles = ["reader"]
+            "#;
+        proj.child("workflows/audit.blueprint.json")
+            .write_str(r#"{"workflow":"audit","pattern":"map-reduce","nodes":[],"edges":[]}"#)
+            .unwrap();
+        let (manifest, store) = pinned_project(&proj, WITH_BLUEPRINT);
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+        let machine = WorkflowPolicy::default();
+        let lock = Lock::load(proj.path()).unwrap();
+
+        // Unchanged: admission succeeds and carries the workflow.
+        let ok = normalized_workflows(proj.path(), &manifest, proj.path(), &store, &lock, &machine)
+            .expect("an unchanged blueprint admits");
+        assert_eq!(ok.len(), 1);
+
+        // Swap ONLY the blueprint. Script untouched, lock untouched — so the
+        // project still reads Trusted and the script's own pin still matches.
+        proj.child("workflows/audit.blueprint.json")
+            .write_str(r#"{"workflow":"audit","pattern":"tournament","nodes":[],"edges":[]}"#)
+            .unwrap();
+        let err =
+            normalized_workflows(proj.path(), &manifest, proj.path(), &store, &lock, &machine)
+                .unwrap_err()
+                .to_string();
+        assert!(
+            err.contains("blueprint") && err.contains("changed"),
+            "the refusal must name the blueprint and say it changed: {err}"
+        );
+
+        // A declared blueprint the lock does not pin at all is refused too —
+        // otherwise "the approved graph" would be a claim with nothing behind
+        // it.
+        proj.child("workflows/audit.blueprint.json")
+            .write_str(r#"{"workflow":"audit","pattern":"map-reduce","nodes":[],"edges":[]}"#)
+            .unwrap();
+        let mut unpinned = lock.clone();
+        for w in unpinned.workflows.iter_mut() {
+            w.blueprint_checksum = None;
+        }
+        let err = normalized_workflows(
+            proj.path(),
+            &manifest,
+            proj.path(),
+            &store,
+            &unpinned,
+            &machine,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("does not pin"), "{err}");
 
         std::env::remove_var("AGENTSTACK_HOME");
     }

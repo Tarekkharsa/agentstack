@@ -1004,6 +1004,24 @@ pub struct Workflow {
     pub rev: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subpath: Option<String>,
+    /// The reviewed BLUEPRINT this script was authored from — a project-local
+    /// path to the `agentstack-blueprint` JSON a user approved as a graph
+    /// (review finding F13).
+    ///
+    /// Its purpose is to make one consent cover both artifacts. Approving a
+    /// picture of a workflow and then consenting to a script are otherwise two
+    /// independent gates, and the second one — the one that actually
+    /// authorizes execution — showed content the first one never displayed.
+    /// Declared here, the blueprint is pinned beside the script, so the trust
+    /// preview can render the approved shape next to the bytes that will run
+    /// and a change to EITHER re-gates.
+    ///
+    /// What this does NOT do, stated plainly because rule 8 requires it:
+    /// AgentStack does not verify that the script implements the blueprint.
+    /// Faithfulness is still the authoring model's, and a reviewer reads both.
+    /// Optional — a hand-written workflow has no blueprint and needs none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blueprint: Option<String>,
     /// The profiles the script's `agent()` calls may name — a CLOSED set, the
     /// workflow's whole authority-request surface. Every entry must exist in
     /// `[profiles]`; an empty list is valid (pure computation, spawns nothing).

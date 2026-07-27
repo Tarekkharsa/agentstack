@@ -51,6 +51,21 @@ findings and two interpreter findings. All are closed:
   as `ok` — safe, but silent — so the name is what lets it show the count
   instead of dropping it. t3code surfaces them as a muted "· 2 notes" beside
   the status chip.
+- **The approved workflow blueprint is pinned with the script (F13).**
+  `[workflows.<n>].blueprint` names the reviewed graph; `lock` pins it beside
+  the script, so one consent covers both and editing either re-gates. The trust
+  review renders the approved pattern and each node's role/model/effort right
+  where execution is authorized, and **admission verifies the pin** — a graph
+  swapped after consent refuses the run. Stated honestly, in the review itself:
+  the two artifacts are bound, but nothing verifies the script implements the
+  graph.
+- **`agentstack workflow declare` — authoring as one transaction (F14).**
+  Stages the script and blueprint, adds the manifest entry, validates, and
+  re-locks; on any failure it rolls all of it back and names the step that
+  failed. Previously six independent writes, where a failure partway left a
+  half-declared workflow behind a button labelled "Approve". Previews by
+  default; a successful declare is one `agentstack restore` entry. It
+  deliberately does not trust or run — consent stays the human's step.
 - **`agentstack uninstall` — the whole way out.** Reverts every managed region
   agentstack rendered (servers, settings, hooks, instruction blocks) in every
   CLI's own config, then removes `~/.agentstack`. Previews by default;
@@ -154,6 +169,11 @@ findings and two interpreter findings. All are closed:
   by design — this removes rendered output, not your setup — but "AgentStack is
   uninstalled" reads as "nothing of mine is left", so the summary now says so
   and reports how many secret values the kept `.env` holds.
+- **User-facing text says "toolset" (F17).** `use`, `session`, `lock`, and
+  `kill` describe toolsets in their help; `use --list` says "Declared toolsets"
+  and, when there are none, offers the command that names the first one. The
+  manifest table stays `[profiles.*]` and flags keep their names — those are
+  API, and the panel's argv contract pins them.
 - **A prefix-less consent digest is diagnosed as a format problem, not as
   changed content.** `trust --yes --consented-digest <bare hex>` still refuses
   — the acceptance rule is unchanged — but it no longer claims the manifest or

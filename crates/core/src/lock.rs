@@ -164,6 +164,15 @@ pub struct LockedWorkflow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
     pub checksum: Sha256Hex,
+    /// The declared blueprint path this workflow was authored from (F13).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blueprint: Option<String>,
+    /// SHA-256 of the approved blueprint's bytes. Pinned BESIDE `checksum` so
+    /// the reviewed graph and the executable it produced are one consent: the
+    /// lockfile feeds the trust digest, so editing either artifact re-gates the
+    /// project. Absent for a workflow with no blueprint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blueprint_checksum: Option<Sha256Hex>,
 }
 
 /// A pinned MCP server: the SHA-256 of its **definition** (a `${REF}`-only
@@ -703,6 +712,8 @@ mod tests {
             git: None,
             rev: None,
             checksum: Sha256Hex::of(b"cafe"),
+            blueprint: None,
+            blueprint_checksum: None,
         });
         lock.upsert_workflow(LockedWorkflow {
             name: "audit".into(),
@@ -712,6 +723,8 @@ mod tests {
             git: Some("https://example.com/x.git".into()),
             rev: Some("abc123".into()),
             checksum: Sha256Hex::of(b"beef"),
+            blueprint: None,
+            blueprint_checksum: None,
         });
         assert_eq!(lock.workflows[0].name, "audit", "sorted by name");
         assert_eq!(
@@ -729,6 +742,8 @@ mod tests {
             git: None,
             rev: None,
             checksum: Sha256Hex::of(b"f00d"),
+            blueprint: None,
+            blueprint_checksum: None,
         });
         assert_eq!(
             lock.get_workflow("nightly-review").unwrap().checksum,

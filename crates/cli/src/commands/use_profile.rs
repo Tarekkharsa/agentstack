@@ -349,12 +349,20 @@ fn print_profile_listing(out: &serde_json::Value) {
     let trust_state = out["trust"].as_str().unwrap_or("?");
     let profiles = out["profiles"].as_array().map_or(&[][..], Vec::as_slice);
     if profiles.is_empty() {
+        // F17: the user-facing word is "toolset" (t3code says it too); the
+        // manifest table stays `[profiles.*]` and is named as such where the
+        // user would have to type it. An empty list is also the one moment
+        // where naming a first toolset is obviously useful, so it offers the
+        // command rather than only reporting the absence.
         println!(
-            "No profiles declared — the implicit default (every inline skill and server) is what activates."
+            "No toolsets yet — the implicit default (every inline skill and server) is what activates."
+        );
+        println!(
+            "  Name one:  agentstack create-profile --name <name> --server <server>"
         );
         return;
     }
-    println!("Declared profiles (project trust: {trust_state}):");
+    println!("Declared toolsets (project trust: {trust_state}):");
     for p in profiles {
         let name = p["name"].as_str().unwrap_or("?");
         let ready = if p["pinned"].as_bool().unwrap_or(false) {

@@ -725,6 +725,16 @@ fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: boo
                     blockers.push((name.clone(), error));
                 }
             }
+            // F13: when this script was authored from an approved blueprint,
+            // show the SHAPE that was approved right here — this gate is the
+            // one that authorizes execution, and until now it showed only
+            // bytes while the graph the user actually reviewed lived in a chat
+            // message. A reviewer should not have to remember a picture.
+            if let Some(declared) = &wf.blueprint {
+                for line in blueprint_review_lines(&dir, name, declared, &lock, &mut blockers) {
+                    println!("      {line}");
+                }
+            }
         }
     }
 
@@ -945,6 +955,136 @@ fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: boo
         "✓".green()
     );
     Ok(())
+}
+
+/// The review lines for a workflow's approved blueprint (F13): the shape the
+/// user signed off as a graph, shown at the gate that actually authorizes the
+/// script. Pushes a blocker when the blueprint is unpinned or drifted, because
+/// "this is the graph you approved" must be a claim the lockfile can back.
+///
+/// Blueprint bytes are HOSTILE INPUT — they arrive from a model's output
+/// stream through a repo file. Everything here is bounded and fails to a
+/// stated "unreadable" rather than a panic or a partial render; a blueprint
+/// that will not parse is shown as such, never silently skipped, or its
+/// absence would read as "no graph was approved".
+fn blueprint_review_lines(
+    dir: &Path,
+    name: &str,
+    declared: &str,
+    lock: &crate::lock::Lock,
+    blockers: &mut Vec<(String, String)>,
+) -> Vec<String> {
+    // Anchored at the manifest dir, matching how `[workflows.*].path` and the
+    // lock's blueprint pin resolve — see `lock::pin_blueprint`.
+    let shown = crate::text::sanitize_line(declared);
+
+    let actual = match agentstack_core::digest::contained_file_digest(dir, declared) {
+        Ok(d) => d,
+        Err(e) => {
+            blockers.push((
+                name.to_string(),
+                format!("approved blueprint '{declared}' is unreadable: {e}"),
+            ));
+            return vec![format!(
+                "{} approved blueprint {shown} — {}",
+                "✗".red(),
+                "UNREADABLE".red()
+            )];
+        }
+    };
+    match lock.workflows.iter().find(|w| w.name == name) {
+        Some(l) if l.blueprint_checksum.as_ref() == Some(&actual) => {}
+        Some(_) => {
+            blockers.push((
+                name.to_string(),
+                "approved blueprint drifted from lock — re-review and run `agentstack lock`"
+                    .to_string(),
+            ));
+            return vec![format!(
+                "{} approved blueprint {shown} — {}",
+                "✗".red(),
+                "DRIFTED from lock".red()
+            )];
+        }
+        None => {
+            blockers.push((
+                name.to_string(),
+                "approved blueprint unpinned — run `agentstack lock`".to_string(),
+            ));
+            return vec![format!(
+                "{} approved blueprint {shown} — {}",
+                "✗".red(),
+                "unpinned".red()
+            )];
+        }
+    }
+
+    let mut out = vec![format!(
+        "{} approved blueprint {shown}   [pinned]",
+        "◆".cyan()
+    )];
+    match std::fs::read_to_string(dir.join(declared))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+    {
+        Some(v) => {
+            let pattern = v
+                .get("pattern")
+                .and_then(|p| p.as_str())
+                .unwrap_or("custom");
+            let goal = v.get("goal").and_then(|g| g.as_str()).unwrap_or("");
+            out.push(format!(
+                "    pattern: {}{}",
+                crate::text::sanitize_line(pattern),
+                if goal.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — {}", crate::text::sanitize_line(goal))
+                }
+            ));
+            // Cap the node list: a blueprint is bounded at authoring time, but
+            // a repo file is not, and a review surface that can be flooded is
+            // a review surface that gets skipped.
+            if let Some(nodes) = v.get("nodes").and_then(|n| n.as_array()) {
+                for node in nodes.iter().take(16) {
+                    let f = |k: &str| {
+                        node.get(k)
+                            .and_then(|x| x.as_str())
+                            .map(crate::text::sanitize_line)
+                            .unwrap_or_else(|| "?".into())
+                    };
+                    let fanout = node
+                        .get("fanout")
+                        .and_then(|x| x.as_str())
+                        .map(|s| format!(" ×{}", crate::text::sanitize_line(s)))
+                        .unwrap_or_default();
+                    out.push(format!(
+                        "    · {} — role {} · {}/{}{fanout}",
+                        f("phase"),
+                        f("role"),
+                        f("model"),
+                        f("effort")
+                    ));
+                }
+                if nodes.len() > 16 {
+                    out.push(format!("    · … {} more node(s)", nodes.len() - 16));
+                }
+            }
+        }
+        None => out.push(format!(
+            "    {}",
+            "(blueprint is pinned but not readable as JSON — review the file itself)".yellow()
+        )),
+    }
+    // Rule 8: say exactly what the pin does and does not buy. The graph and
+    // the script are one consent; nothing here proves the script implements
+    // the graph.
+    out.push(format!(
+        "    {}",
+        "the graph and the script are pinned together; agentstack does not verify the script implements the graph"
+            .dimmed()
+    ));
+    out
 }
 
 /// Print what the project's `[policy]` requests, per dimension. Bundles can

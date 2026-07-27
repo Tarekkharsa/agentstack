@@ -391,6 +391,24 @@ pub(crate) fn record_extension_pins(
 /// alongside the provenance — the review binds this script to these
 /// capability sets, so a later roles change is drift even with unchanged
 /// bytes. Returns how many pinned.
+/// Digest a declared blueprint path (F13), with the same containment rules the
+/// rest of the integrity surface uses: `contained_file_digest` refuses a path
+/// that escapes its anchor or passes through a symlink anywhere, so a repo
+/// cannot point "the approved graph" at a file outside the bundle or swap it
+/// via a link after review. The blueprint is a single JSON file, so this is
+/// the file-level digest rather than the directory walk a script source gets.
+///
+/// Anchored at the MANIFEST dir, not the project root — `[workflows.*].path`
+/// resolves that way (`resolve_workflow_entry` passes `manifest_dir` to
+/// `integrity_root_digest`), and the blueprint sits beside the script it
+/// belongs to. Anchoring the two differently would make `./workflows/x.js` and
+/// `./workflows/x.blueprint.json` mean two different directories.
+fn pin_blueprint(dir: &Path, name: &str, declared: &str) -> Result<Sha256Hex> {
+    agentstack_core::digest::contained_file_digest(dir, declared).with_context(|| {
+        format!("pinning the approved blueprint '{declared}' for workflow '{name}'")
+    })
+}
+
 pub(crate) fn record_workflow_pins(
     dir: &Path,
     manifest: &Manifest,
@@ -405,6 +423,15 @@ pub(crate) fn record_workflow_pins(
         let resolved =
             crate::resolve::resolve_workflow_entry(name, wf, dir, store, ResolveMode::Fetch)
                 .with_context(|| format!("pinning workflow '{name}'"))?;
+        // F13: the approved blueprint is pinned BESIDE the script, so one
+        // consent covers both and editing either re-gates the project. Strict
+        // like every other pin — a declared blueprint that cannot be read is
+        // an error, never a silently-dropped pin, or "approved graph" would
+        // become a claim the lockfile does not actually carry.
+        let blueprint_checksum = match &wf.blueprint {
+            Some(rel) => Some(pin_blueprint(dir, name, rel)?),
+            None => None,
+        };
         lock.upsert_workflow(agentstack_core::lock::LockedWorkflow {
             name: name.clone(),
             roles: resolved.roles.clone(),
@@ -414,6 +441,8 @@ pub(crate) fn record_workflow_pins(
             rev: resolved.rev.clone(),
             checksum: Sha256Hex::parse(&resolved.checksum)
                 .with_context(|| format!("pinning workflow '{name}'"))?,
+            blueprint: wf.blueprint.clone(),
+            blueprint_checksum,
         });
         pinned += 1;
     }

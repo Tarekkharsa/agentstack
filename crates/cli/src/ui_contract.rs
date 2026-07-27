@@ -39,6 +39,16 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   toolset then re-lock + re-render, each bound to a `consent_digest` a prior
 ///   `--preview` returned (apply refuses on drift) and failing closed on an
 ///   unresolved `${REF}`.
+/// - `library-remove-v1`: `remove-from-library --kind skill|server --name <n>`
+///   drops a capability from the MACHINE-WIDE central library, bound to a
+///   `consent_digest` a prior `--preview` returned — here over the library index
+///   bytes, since no manifest is involved. It is the only panel mutation that
+///   edits machine state instead of the project (nothing re-locks, nothing
+///   re-renders) and it is recoverable: the body and index row move to
+///   `lib/.trash`, restorable with `lib trash --restore <id> --write`. A
+///   separate name from `profiles-edit-v1` because a binary advertising that
+///   contract legitimately predates removal — a panel offering a Remove button
+///   on the older name would offer a button the CLI cannot honor.
 /// - `workflow-observe-v1`: `workflow list --json` surfaces every declared
 ///   `[workflows.*]` entry with its per-entry trust + lock state (project-scoped
 ///   reads), and `workflow runs --json` lists recorded run history. Unlike the
@@ -74,6 +84,7 @@ pub const FEATURES: &[&str] = &[
     "restore-last",
     "sessions-v1",
     "profiles-edit-v1",
+    "library-remove-v1",
     "workflow-observe-v1",
     "workflow-serial-roles-v1",
     "doctor-advisories-v1",
@@ -116,17 +127,15 @@ mod tests {
             .map(|v| v.as_str().unwrap())
             .collect();
         assert_eq!(features, FEATURES);
-        // Pin the observe contract explicitly and its append-only position:
-        // external UIs gate the workflow observation affordance on this slug,
-        // and the list is grow-at-the-end so decoders can index stably.
-        assert!(features.contains(&"workflow-observe-v1"));
-        // Append-only, checked as an ORDERING rather than by naming whatever
-        // happens to be last — every name added so far must still appear in
-        // the order it was added, so a future entry can only extend the tail.
-        // Naming the tail meant each new contract edited the assertion into
-        // testing itself; this way adding one at the end passes untouched and
-        // reordering or removing one fails.
-        let expected_prefix = [
+        // Every name ever shipped must still be SERVED. That — not position —
+        // is the property external UIs depend on: they gate an affordance with
+        // `features.includes("<name>")`, so dropping or renaming one silently
+        // disables a working button, while inserting a new name anywhere is
+        // harmless. An earlier version of this test pinned the order instead
+        // and failed the moment a contract was added mid-list, which tested
+        // the test rather than the contract. Removing a name is a
+        // schema-version bump, so it must break here first.
+        for shipped in [
             "init-plan",
             "apply-setup",
             "trust-preview",
@@ -140,11 +149,18 @@ mod tests {
             "workflow-observe-v1",
             "workflow-serial-roles-v1",
             "doctor-advisories-v1",
-        ];
-        assert_eq!(
-            features[..expected_prefix.len()],
-            expected_prefix,
-            "FEATURES is append-only: existing names keep their order, new ones land at the end"
-        );
+        ] {
+            assert!(
+                features.contains(&shipped),
+                "FEATURES dropped '{shipped}' — a UI gating on that name loses a working \
+                 affordance, so removing one needs a schema-version bump"
+            );
+        }
+        // No duplicates: a repeated name means two contracts think they own it.
+        let mut sorted = features.clone();
+        sorted.sort_unstable();
+        let before = sorted.len();
+        sorted.dedup();
+        assert_eq!(before, sorted.len(), "FEATURES contains a duplicate name");
     }
 }

@@ -112,6 +112,9 @@ fn run() -> Result<()> {
             agentstack::cli::WorkflowCmd::List(args) => commands::workflow::list(dir, args),
             agentstack::cli::WorkflowCmd::Runs(args) => commands::workflow::runs(args),
             agentstack::cli::WorkflowCmd::Explain(args) => commands::workflow::explain(dir, args),
+            agentstack::cli::WorkflowCmd::Declare(args) => {
+                commands::workflow_declare::run(dir, args)
+            }
         },
         Command::Report(cmd) => match cmd {
             agentstack::cli::ReportCmd::Run(args) => commands::report::run(args),
@@ -127,5 +130,6 @@ fn run() -> Result<()> {
         Command::CreateProfile(args) => commands::panel_edit::create_profile(args, dir),
         Command::UseProfile(args) => commands::panel_edit::use_profile(args, dir),
         Command::LibraryIndex => commands::panel_edit::library_index(dir),
+        Command::RemoveFromLibrary(args) => commands::panel_edit::remove_from_library(args, dir),
     }
 }

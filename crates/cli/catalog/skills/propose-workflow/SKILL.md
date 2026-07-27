@@ -219,10 +219,28 @@ not accepted. Adding the table only produces a validation error.
 
 Then run the governed pipeline `docs/workflows.md` specifies:
 
-1. **Declare** a `[workflows.<name>]` manifest entry and write the script at
-   `.agentstack/workflows/<name>.js`.
-2. **Re-lock** with `agentstack lock` — pins the script by its strict content
-   digest (a symlink anywhere is a hard error).
+1. **Declare — ONE command, one rollback.** Write the script and the approved
+   blueprint to temp files, then:
+
+   ```
+   agentstack workflow declare --name <name> \
+     --script /tmp/<name>.js --blueprint /tmp/<name>.blueprint.json \
+     --role <role> [--role <role> …] \
+     --max-agents <n> --max-wall-seconds <n> --write
+   ```
+
+   It stages both files under `.agentstack/workflows/`, adds the
+   `[workflows.<name>]` entry, validates, and re-locks — **or rolls every one
+   of those back and tells you which step failed.** Do NOT hand-write the
+   manifest entry and lock separately: that was six independent writes, and a
+   failure partway left a half-declared workflow behind a button the user had
+   already approved (F14). Omit `--write` first to see the plan.
+
+   Pass `--blueprint` whenever the workflow came from an approved graph. It
+   pins the blueprint beside the script, so the trust review below shows the
+   shape the user signed off on — see the F13 note after this list.
+2. *(folded into step 1 — `declare` re-locks for you.)* Run `agentstack lock`
+   by hand only when you edited a declared workflow afterwards.
 3. **Trust** the pinned bytes with `agentstack trust .` — review the declared
    roles/ceilings, then pin. Untrusted, the workflow never parses and its name
    is not invocable; a one-byte change re-gates.
@@ -232,39 +250,41 @@ Then run the governed pipeline `docs/workflows.md` specifies:
    `--args-json '<json>'`); read the evidence tree with `agentstack workflow
    report <run-id>`.
 
-### The second gate is not ceremony — say so (F13)
+### The second gate shows the graph now — but it is still yours to frame (F13)
 
-Approving the blueprint and trusting the script are **two different consents
-over two different things**, and the second one is the one that actually
-authorizes execution. The user approved a *picture of intent*; `agentstack
-trust .` shows them *JavaScript the picture never displayed*. Nothing in v1
-binds the two — that integrity binding is a named fast-follow — so the only
-thing standing between "reviewed" and "rubber-stamped" is how you frame step 3.
+Approving the blueprint and trusting the script are two consents, and the
+second one is the one that actually authorizes execution. They are no longer
+independent: passing `--blueprint` to `declare` pins the approved graph beside
+the script, so `agentstack trust .` renders the pattern and every node's
+role/model/effort right above the roles and ceilings, and changing **either**
+artifact re-gates the project. Admission verifies the blueprint pin too — a
+graph swapped after consent refuses the run, it does not warn.
 
-**Before running `agentstack trust .`, tell the user, in one short message:**
+What that binding does NOT do, and you must not imply otherwise: **nothing
+checks that the script implements the graph.** That is still your faithfulness.
+So before `agentstack trust .`, tell the user in one short message:
 
 - that this is the script you compiled **from the blueprint they approved**,
-  named by its `workflow` field;
-- what is in it that the graph could not show — the actual prompts, and any
-  place you had to deviate (if you deviated at all, you should have re-emitted
-  the blueprint instead, per the faithfulness rule);
-- that the trust gate is reviewing **the bytes, not the shape**, so skimming it
-  is not the same as having approved the graph.
+  and the review will show that graph back to them;
+- what the graph could not show — the actual prompts, and any place you had to
+  deviate (if you deviated at all, you should have re-emitted the blueprint
+  instead, per the faithfulness rule);
+- that the gate reviews **the bytes as well as the shape**, so skimming the
+  script is not the same as having approved the graph.
 
-Never present step 3 as "just confirm again". A consent gate that reads as
+Never present it as "just confirm again". A consent gate that reads as
 redundant gets clicked through, and then it protects nothing.
 
-### If any step fails, leave nothing behind (F14)
+### If a step fails, leave nothing behind (F14)
 
-Steps 1–3 write to the user's project after they clicked a button labelled
-**Approve**. If step 2 or 3 fails — a lock error, a refused trust, a ceiling
-the manifest won't admit — **do not stop and leave the wreckage**. Undo what
-you wrote, in reverse order:
+`declare` is a transaction: on any failure it rolls back the script, the
+blueprint, and the manifest entry, and its error names the step that failed.
+Report that message; do not attempt your own cleanup, and do not retry blindly
+— a rolled-back declare means the project is already as it was.
 
-1. `agentstack restore --last --write` if a write was recorded, otherwise
-   remove the `[workflows.<name>]` entry you added and delete
-   `.agentstack/workflows/<name>.js`.
-2. Say plainly which step failed and why, in the user's words, not the tool's.
+`trust` and `run` come after, and neither writes project files, so a refusal
+there leaves nothing to undo. If you need to remove a *successful* declare,
+`agentstack restore --last --write` reverts it as one entry.
 3. Offer the next move: fix and retry, or re-open the blueprint for editing.
 
 A half-written manifest plus an orphan script is worse than a clean refusal —
