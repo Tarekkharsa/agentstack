@@ -195,6 +195,22 @@ pub fn undo(id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Drop an entry that turned out to describe nothing.
+///
+/// This exists for the record-before-mutation pattern: a command that must
+/// survive a crash records its undo entry BEFORE the first write, so an
+/// interrupted run still leaves a durable way back. When such a run instead
+/// fails cleanly and rolls itself back completely, the entry it pre-recorded
+/// now describes a project state that already holds — keeping it would put a
+/// no-op at the head of the ledger and shadow the user's real last change from
+/// `restore --last`. Deleting is safe precisely because the entry is
+/// declarative (put these bytes back / delete this file), so applying it twice
+/// is the same as applying it once; a caller that could NOT fully roll back
+/// must keep its entry instead.
+pub fn discard(id: &str) {
+    let _ = fs::remove_file(dir().join(format!("{id}.json")));
+}
+
 /// Restore captured files in reverse write order. Public so a command that is
 /// still assembling an entry can roll back partial writes if a later write or
 /// the history record itself fails.

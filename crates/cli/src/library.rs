@@ -360,11 +360,16 @@ impl Library {
     }
 
     /// Write the index to a library home, creating the directory if needed.
+    /// Write the index. Atomic (write-temp-then-rename), because a removal
+    /// moves a body to the trash and then saves this file: a torn write here
+    /// leaves the body in the trash and the index unreadable, which is the one
+    /// state neither the removal nor a restore can reason about.
     pub fn save(&self, lib_home: &Path) -> Result<()> {
         fs::create_dir_all(lib_home).with_context(|| format!("creating {}", lib_home.display()))?;
         let path = Self::path(lib_home);
         let text = toml::to_string_pretty(self)?;
-        fs::write(&path, text).with_context(|| format!("writing {}", path.display()))
+        crate::util::atomic::write(&path, &text)
+            .with_context(|| format!("writing {}", path.display()))
     }
 
     /// Look up a library skill by the name a project references it by.

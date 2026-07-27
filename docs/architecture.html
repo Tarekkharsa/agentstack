@@ -92,6 +92,8 @@
   main img { max-width: 100%; height: auto; }
   .gennote { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.3rem; }
   .srcline { margin-top: 2.6rem; padding-top: 1rem; border-top: 1px solid var(--line-soft); font-family: var(--mono); font-size: 0.74rem; color: var(--muted); }
+  .versionbar { margin: 0 0 1.8rem; padding: 0.7rem 0.95rem; border: 1px solid var(--line-soft); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--surface); font-size: 0.82rem; color: var(--muted); }
+  .versionbar b { color: var(--ink); font-weight: 650; }
   footer { border-top: 1px solid var(--line); margin-top: 3rem; }
   footer .bar { font-size: 0.85rem; color: var(--muted); }
 </style>
@@ -236,6 +238,7 @@
   </details>
 </aside>
   <main>
+<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.15.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
 <h1 id="agentstack--architecture">AgentStack — Architecture</h1>
 <p><em>Current as of agentstack 0.15.x.</em></p>
 <p>For contributors and architects. If you just want to use AgentStack, start with the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/README.md">README</a> and the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/start.html">getting-started walkthrough</a>.</p>
@@ -259,7 +262,7 @@
 <p><strong>A note on vocabulary.</strong> User-facing docs — the README, the getting-started walkthrough, and the how-to guides — call the reviewed config file the <strong>manifest</strong>. This document keeps <strong>bundle</strong> as its strategic frame: it means the manifest, its optional local overlay, and the resolved lockfile taken together as the single unit that gets declared, pinned, trusted, and distributed. Wherever you read "bundle" below, read "the manifest and its lock as one consent unit."</p>
 <p>Core principle: <strong>nothing executes automatically until its content is trusted; governed execution is constrained and recorded.</strong></p>
 <h2 id="where-this-starts">Where this starts<a class="hlink" href="#where-this-starts" aria-label="Link to this section">#</a></h2>
-<p>The current implementation is a nine-crate Rust workspace. It ships the manifest and lock resolver, 13 CLI adapters, a central capability library, content-bound trust, machine-first policy, a single-dispatch MCP gateway, Docker sandbox and lockdown runtimes, egress enforcement, per-run recording, and an experimental frozen-plan executor. This document describes the current boundaries. <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md"><code>../STRATEGY.md</code></a> defines the gated direction, and <a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md"><code>../TODO.md</code></a> names the current work.</p>
+<p>The current implementation is a ten-crate Rust workspace. It ships the manifest and lock resolver, 13 CLI adapters, a central capability library, content-bound trust, machine-first policy, a single-dispatch MCP gateway, Docker sandbox and lockdown runtimes, egress enforcement, per-run recording, an experimental frozen-plan executor, and a self-contained workflow engine. This document describes the current boundaries. <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md"><code>../STRATEGY.md</code></a> defines the gated direction, and <a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md"><code>../TODO.md</code></a> names the current work.</p>
 <h2 id="the-flow">The flow<a class="hlink" href="#the-flow" aria-label="Link to this section">#</a></h2>
 <pre class="block"><code>manifest + library → resolve + lock → adapters → native CLI config
                             │

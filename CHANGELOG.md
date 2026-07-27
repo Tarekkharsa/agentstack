@@ -112,9 +112,22 @@ findings and two interpreter findings. All are closed:
   preview/result output, so a project-scoped Undo reverts its own newest
   write — never another project's — while `restore --last` keeps its
   machine-wide meaning.
+- **Library removals are recoverable.** `lib remove*` now moves the entry to a
+  machine-local `lib/.trash/` instead of deleting it. `lib trash` lists what is
+  there, `lib trash --restore <id>` puts an entry back (refusing to overwrite a
+  same-named capability unless you pass `--replace`), and `lib trash --empty`
+  discards it for good. The t3code Remove action is bound to the same path.
 - Witnesses: end-to-end preview→edit→apply race tests for both consent
   bindings, and a parity test proving the t3code panel's fixed argv and the
   direct CLI journey produce byte-identical files.
+
+### Fixed
+
+- **Status paths no longer prompt for keychain values.** On macOS, `doctor`,
+  secret provenance, MCP status, and the t3code snapshot ask the keychain only
+  whether an entry *exists* rather than decrypting it. Read-only status stopped
+  triggering a system authorization prompt on every check after a local
+  rebuild.
 
 ### Changed
 

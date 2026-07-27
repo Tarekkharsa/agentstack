@@ -357,9 +357,7 @@ fn print_profile_listing(out: &serde_json::Value) {
         println!(
             "No toolsets yet — the implicit default (every inline skill and server) is what activates."
         );
-        println!(
-            "  Name one:  agentstack create-profile --name <name> --server <server>"
-        );
+        println!("  Name one:  agentstack create-profile --name <name> --server <server>");
         return;
     }
     println!("Declared toolsets (project trust: {trust_state}):");

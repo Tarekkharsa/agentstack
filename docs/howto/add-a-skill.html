@@ -92,6 +92,8 @@
   main img { max-width: 100%; height: auto; }
   .gennote { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.3rem; }
   .srcline { margin-top: 2.6rem; padding-top: 1rem; border-top: 1px solid var(--line-soft); font-family: var(--mono); font-size: 0.74rem; color: var(--muted); }
+  .versionbar { margin: 0 0 1.8rem; padding: 0.7rem 0.95rem; border: 1px solid var(--line-soft); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--surface); font-size: 0.82rem; color: var(--muted); }
+  .versionbar b { color: var(--ink); font-weight: 650; }
   footer { border-top: 1px solid var(--line); margin-top: 3rem; }
   footer .bar { font-size: 0.85rem; color: var(--muted); }
 </style>
@@ -236,6 +238,7 @@
   </details>
 </aside>
   <main>
+<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.15.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
 <h1 id="add-a-skill">Add a skill</h1>
 <p>For anyone giving their agent CLIs a skill — a portable directory with a <code>SKILL.md</code> of instructions. Prerequisite: a project with an <code>.agentstack/agentstack.toml</code> <a href="../concepts.html">manifest</a> (run <code>agentstack init</code> if you don't have one).</p>
 <p>Four verbs, by where the skill lives and how long you want it:</p>

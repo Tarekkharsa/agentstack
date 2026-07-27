@@ -428,9 +428,65 @@ CSS = """
   main img { max-width: 100%; height: auto; }
   .gennote { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.3rem; }
   .srcline { margin-top: 2.6rem; padding-top: 1rem; border-top: 1px solid var(--line-soft); font-family: var(--mono); font-size: 0.74rem; color: var(--muted); }
+  .versionbar { margin: 0 0 1.8rem; padding: 0.7rem 0.95rem; border: 1px solid var(--line-soft); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--surface); font-size: 0.82rem; color: var(--muted); }
+  .versionbar b { color: var(--ink); font-weight: 650; }
   footer { border-top: 1px solid var(--line); margin-top: 3rem; }
   footer .bar { font-size: 0.85rem; color: var(--muted); }
 """
+
+
+def version_banner():
+    """Say which build these pages describe.
+
+    The docs are compiled from `main`, but the installer serves the latest
+    release, so a page can document a command the reader's binary does not
+    have — with nothing on the page admitting it (review finding F01).
+
+    Derived from CHANGELOG.md, deliberately, and NOT from git. Generation must
+    be a pure function of committed files: the docs CI gate regenerates and
+    diffs against what is checked in, so anything environment-dependent turns
+    an ordinary build into a failure. An earlier version of this read
+    `git describe`, which emitted nothing at all in a tarball or a clone
+    without tag history — changing every generated page.
+
+    CHANGELOG.md carries both facts already, and the release process updates
+    it: the newest `## vX.Y.Z` heading is the latest release, and a non-empty
+    `## Unreleased` section above it means `main` is ahead of that release.
+    """
+    text = (ROOT / "CHANGELOG.md").read_text()
+
+    released = re.search(r"^## +(v[0-9][^\s—-]*)", text, re.M)
+    if not released:
+        # No release recorded yet. "Ahead of the latest release" is not a
+        # meaningful thing to say, so say the part that is still true.
+        return (
+            '<p class="versionbar">These pages are generated from '
+            "<code>main</code> and may describe unreleased behavior. "
+            "<code>agentstack --version</code> says which build you have.</p>"
+        )
+    tag = released.group(1)
+
+    unreleased = re.search(
+        r"^## +Unreleased\s*(.*?)(?=^## +v)", text, re.M | re.S
+    )
+    has_unreleased = bool(unreleased and unreleased.group(1).strip())
+
+    if not has_unreleased:
+        return (
+            f'<p class="versionbar">These pages describe <b>{esc(tag)}</b>, '
+            "the current release.</p>"
+        )
+    return (
+        '<p class="versionbar">These pages describe <b>unreleased '
+        f"<code>main</code></b>, which is ahead of the latest release "
+        f"(<b>{esc(tag)}</b>) — and the release is what "
+        f'<a href="{GH}/releases/latest">the installer gives you</a>. '
+        "Commands and flags documented here may not exist in your build; "
+        "<code>agentstack --version</code> says which one you have.</p>"
+    )
+
+
+VERSION_BANNER = version_banner()
 
 
 def build_page(src_rel, out_rel, key):
@@ -483,6 +539,7 @@ def build_page(src_rel, out_rel, key):
 <div class="docwrap">
 {aside}
   <main>
+{VERSION_BANNER}
 {body}
   <p class="srcline">Source of truth: <a href="{gh_src}">docs/{src_rel}</a> — this page is generated from it.</p>
   </main>

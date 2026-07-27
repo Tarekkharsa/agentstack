@@ -966,16 +966,17 @@ pub fn remove_server(lib_home: &Path, name: &str, write: bool) -> Result<ServerR
     let trashed_to = if write {
         let mut record = lib_trash::blank_record();
         record.server = Some(entry);
-        let trashed = lib_trash::stash(
+        remove_as_transaction(
             lib_home,
             lib_trash::Kind::Server,
             name,
             removed_file.as_deref(),
             record,
-        )?;
-        library.remove_server(name);
-        library.save(lib_home)?;
-        trashed.dir
+            &mut library,
+            |l| {
+                l.remove_server(name);
+            },
+        )?
     } else {
         lib_trash::plan_destination(lib_home, lib_trash::Kind::Server, name)
     };
@@ -1229,16 +1230,17 @@ pub fn remove_hook(lib_home: &Path, name: &str, write: bool) -> Result<HookRemov
     let trashed_to = if write {
         let mut record = lib_trash::blank_record();
         record.hook = Some(entry);
-        let trashed = lib_trash::stash(
+        remove_as_transaction(
             lib_home,
             lib_trash::Kind::Hook,
             name,
             removed_file.as_deref(),
             record,
-        )?;
-        library.remove_hook(name);
-        library.save(lib_home)?;
-        trashed.dir
+            &mut library,
+            |l| {
+                l.remove_hook(name);
+            },
+        )?
     } else {
         lib_trash::plan_destination(lib_home, lib_trash::Kind::Hook, name)
     };
@@ -1592,16 +1594,17 @@ pub fn remove_extension(
     let trashed_to = if write {
         let mut record = lib_trash::blank_record();
         record.extension = Some(entry);
-        let trashed = lib_trash::stash(
+        remove_as_transaction(
             lib_home,
             lib_trash::Kind::Extension,
             name,
             removed_dir.as_deref(),
             record,
-        )?;
-        library.remove_extension(name);
-        library.save(lib_home)?;
-        trashed.dir
+            &mut library,
+            |l| {
+                l.remove_extension(name);
+            },
+        )?
     } else {
         lib_trash::plan_destination(lib_home, lib_trash::Kind::Extension, name)
     };
@@ -1858,16 +1861,17 @@ pub fn remove_skill(lib_home: &Path, name: &str, write: bool) -> Result<RemoveOu
     let trashed_to = if write {
         let mut record = lib_trash::blank_record();
         record.skill = Some(entry);
-        let trashed = lib_trash::stash(
+        remove_as_transaction(
             lib_home,
             lib_trash::Kind::Skill,
             name,
             removed_dir.as_deref(),
             record,
-        )?;
-        library.remove(name);
-        library.save(lib_home)?;
-        trashed.dir
+            &mut library,
+            |l| {
+                l.remove(name);
+            },
+        )?
     } else {
         lib_trash::plan_destination(lib_home, lib_trash::Kind::Skill, name)
     };
@@ -2057,8 +2061,62 @@ fn contained_lib_skill_dir(lib_home: &Path, path: &str) -> Option<PathBuf> {
 }
 
 /// A name safe to use as a `lib/skills/<name>` directory and index key.
+/// Remove a capability as one transaction: body to the trash, row out of the
+/// index, index saved — or none of it.
+///
+/// Each of the four `remove_*` paths used to inline these three steps, and all
+/// four had the same hole: `stash` moved the body, and a failure in the save
+/// that followed left the body in the trash with the index still naming it —
+/// a capability that is neither present nor removed, and that a later restore
+/// would refuse because the name is still taken. Undoing the stash on that
+/// failure is the whole point of routing them through here.
+///
+/// `drop_row` removes the entry from the in-memory index; the caller supplies
+/// it because each kind has its own collection.
+fn remove_as_transaction(
+    lib_home: &Path,
+    kind: lib_trash::Kind,
+    name: &str,
+    body: Option<&Path>,
+    record: lib_trash::TrashRecord,
+    library: &mut Library,
+    drop_row: impl FnOnce(&mut Library),
+) -> Result<PathBuf> {
+    let trashed = lib_trash::stash(lib_home, kind, name, body, record)?;
+    drop_row(library);
+    match library.save(lib_home) {
+        Ok(()) => Ok(trashed.dir),
+        Err(e) => {
+            if lib_trash::unstash(&trashed, body) {
+                Err(e).with_context(|| {
+                    format!("saving the library index — '{name}' was put back, nothing was removed")
+                })
+            } else {
+                // The body could not go home. Say exactly that rather than
+                // implying a clean rollback, and name where it is.
+                Err(e).with_context(|| {
+                    format!(
+                        "saving the library index, and '{name}' could NOT be put back — its \
+                         content is in {} and the index still lists it. Restore it with \
+                         `agentstack lib trash --restore {} --replace --write`",
+                        trashed.dir.display(),
+                        trashed.id
+                    )
+                })
+            }
+        }
+    }
+}
+
+/// Is this index name safe to turn into a `lib/<kind>/<name>` path?
+///
+/// One rule, shared with the trash: this decides whether a removal targets a
+/// FILE, and [`lib_trash::restore`] decides whether that file can come back.
+/// Two predicates that disagreed would trash a body under a name the restore
+/// would then reject — recoverable in name only (review finding F22). A name
+/// this rejects is removed from the index alone, with nothing on disk touched.
 fn valid_lib_name(name: &str) -> bool {
-    !name.is_empty() && !name.contains('/') && !name.contains('\\') && name != "." && name != ".."
+    lib_trash::is_plain_component(name)
 }
 
 /// Resolve a possibly-relative, possibly-`~` path to an absolute one.

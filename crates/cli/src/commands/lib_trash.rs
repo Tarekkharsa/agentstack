@@ -22,6 +22,22 @@
 //! Nothing here resolves, renders, or executes anything — it moves bytes and
 //! rewrites the index. Trashed content is inert: it is out of `library.toml`,
 //! so no resolver, render, or agent path can reach it until it is restored.
+//!
+//! **`entry.toml` is hostile input** (review finding F22). It is machine-local
+//! state, not repository content, so a bad record is not a privilege boundary
+//! being crossed — but it is still a file a hand edit, a half-written removal,
+//! or a future schema can shape, and rule 7 applies to all of it. [`restore`]
+//! therefore validates the *whole* record — name is a plain component, body is
+//! one of the two known slots, the index row exists and agrees with the name,
+//! and the derived destination canonically resolves inside `lib_home` — before
+//! it moves a single byte. An earlier version derived the destination from the
+//! kind and treated that as containment; the name was joined on verbatim, and
+//! a record named `../../../escaped` restored outside the library.
+//!
+//! The mutations are ordered so every one of them can be walked back: the body
+//! moves first (undoable by moving it back), anything it replaces is set aside
+//! rather than deleted, and the index is saved last. A failure at any point
+//! leaves the trash entry intact and the library as it was.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -144,6 +160,89 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// Reject a name that is not a single plain path component.
+///
+/// `restore` derives its destination from the *kind* and this name. Deriving
+/// the directory from the kind was assumed to make the destination safe, but
+/// the name is joined onto it verbatim, so a record naming `../../../escaped`
+/// put the body outside `lib/` entirely (review finding F22). `entry.toml` is
+/// machine-local state a hand edit or a half-written record can shape, which
+/// rule 7 says to parse defensively — so the name is checked, not trusted.
+///
+/// The rule is about *components*, not substrings. `..` is rejected because it
+/// is the parent-directory component; a name like `my..skill` contains those
+/// two characters but is one ordinary component and a legal library name, so
+/// rejecting it would break real names for no safety gain. Backslash is
+/// rejected explicitly: on Unix it is an ordinary character that
+/// [`Path::components`] would happily fold into one component, but these names
+/// also become Windows paths.
+pub fn is_plain_component(name: &str) -> bool {
+    use std::path::Component;
+    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains('\0') {
+        return false;
+    }
+    let mut components = Path::new(name).components();
+    // Exactly one component, and it must be a Normal one — `.` parses as
+    // CurDir and `..` as ParentDir, so both fall out here without a string
+    // comparison.
+    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
+}
+
+fn plain_component(name: &str, what: &str) -> Result<()> {
+    if !is_plain_component(name) {
+        bail!(
+            "refusing to restore: the trash record's {what} '{name}' is not a plain name — \
+             it must be one path component: no '/', no '\\', and not '.' or '..'. This record \
+             was not written by `lib remove` (or was edited by hand); delete it with \
+             `agentstack lib trash --empty <id>`"
+        );
+    }
+    Ok(())
+}
+
+/// Confirm `dest` really lands inside `root` after symlinks are resolved.
+///
+/// [`plain_component`] rejects traversal in the name; this catches the other
+/// route — a `lib/skills` that is (or contains) a symlink pointing elsewhere,
+/// where a perfectly plain name still resolves outside the library. Belt and
+/// braces on purpose: the containment claim in this module's docs should hold
+/// because it is checked, not because the inputs looked well-formed.
+fn contained(root: &Path, dest: &Path) -> Result<()> {
+    // The destination itself does not exist yet; canonicalize the nearest
+    // existing ancestor and re-append what is missing.
+    let mut existing = dest.to_path_buf();
+    let mut rest = Vec::new();
+    while !existing.exists() {
+        let Some(parent) = existing.parent().map(|p| p.to_path_buf()) else {
+            break;
+        };
+        if let Some(name) = existing.file_name() {
+            rest.push(name.to_os_string());
+        }
+        existing = parent;
+    }
+    let base = existing
+        .canonicalize()
+        .with_context(|| format!("resolving {}", existing.display()))?;
+    let mut resolved = base;
+    for part in rest.into_iter().rev() {
+        resolved.push(part);
+    }
+    let root = root
+        .canonicalize()
+        .with_context(|| format!("resolving {}", root.display()))?;
+    if !resolved.starts_with(&root) {
+        bail!(
+            "refusing to restore: {} resolves to {}, which is outside the library at {} — \
+             the trash can only ever put bytes back inside the library",
+            dest.display(),
+            resolved.display(),
+            root.display()
+        );
+    }
+    Ok(())
+}
+
 /// A filesystem-safe slug for a library name. Library names are already
 /// constrained, but the index is a hand-editable file: anything outside
 /// `[A-Za-z0-9._-]` becomes `_` so a crafted name can never introduce a path
@@ -224,13 +323,26 @@ pub fn stash(
     record.body = None;
     record.body_origin = None;
 
+    // Deliberately NOT refused here on an unsafe name. Removing a corrupt
+    // index entry is a cleanup path that has to keep working, and such an
+    // entry never has a body to move — `valid_lib_name` already declines to
+    // target a file for it, so nothing leaves the library either way. The
+    // record it leaves is inert and `restore` refuses it by name with a
+    // pointer at `lib trash --empty`.
+    //
+    // Describe the move before making it. The record is written first, with
+    // the body field already set, so a failure mid-move leaves a record that
+    // names a body — recoverable and visible in `lib trash` — instead of a
+    // moved body with no record at all, which `list` would skip and no path
+    // could reach (review finding F22).
+    let mut moved: Option<(PathBuf, PathBuf)> = None;
     if let Some(src) = body {
         if src.exists() {
             let is_dir = src.is_dir();
-            let dest = dir.join(if is_dir { BODY_DIR } else { BODY_FILE });
-            move_path(src, &dest)?;
-            record.body = Some(if is_dir { BODY_DIR } else { BODY_FILE }.to_string());
+            let slot = if is_dir { BODY_DIR } else { BODY_FILE };
+            record.body = Some(slot.to_string());
             record.body_origin = Some(src.display().to_string());
+            moved = Some((src.to_path_buf(), dir.join(slot)));
         }
     }
 
@@ -238,7 +350,59 @@ pub fn stash(
     crate::util::atomic::write(&dir.join(RECORD_FILE), &text)
         .with_context(|| format!("writing {}", dir.join(RECORD_FILE).display()))?;
 
+    if let Some((src, dest)) = &moved {
+        if let Err(e) = move_path(src, dest) {
+            // Nothing moved, so the record describes a body that is not there.
+            // Drop the whole record directory rather than leave that behind.
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e);
+        }
+    }
+
     Ok(TrashedEntry { id, dir, record })
+}
+
+/// Undo a [`stash`] that has not been committed to by an index save.
+///
+/// A removal is two steps — move the body here, then drop the index row and
+/// save. If the save fails, the body has already moved and the index still
+/// names it: the capability is now invisible to the library and present only
+/// in the trash, which is neither removed nor intact. This puts it back.
+///
+/// Best-effort by construction: it runs on an error path, and the error that
+/// sent us here is the one worth reporting. It returns whether the body made
+/// it home so the caller can say which of the two situations the user is in.
+pub fn unstash(entry: &TrashedEntry, origin: Option<&Path>) -> bool {
+    let restored = match (entry.body_path(), origin) {
+        (Some(src), Some(dest)) if src.exists() => move_path(&src, dest).is_ok(),
+        // Nothing was moved, so there is nothing to put back.
+        _ => true,
+    };
+    if restored {
+        let _ = std::fs::remove_dir_all(&entry.dir);
+    }
+    restored
+}
+
+/// Move whatever currently occupies `dest` aside, into `staging`, and return
+/// where it went (`None` when there was nothing there).
+///
+/// `--replace` used to `remove_dir_all` the live entry before moving the
+/// trashed one in, which made a failure halfway through destroy the copy the
+/// user already had. Setting it aside instead means the mutation is undoable
+/// right up until the index save succeeds.
+fn displace_existing(dest: &Path, staging: &Path) -> Result<Option<PathBuf>> {
+    if !dest.exists() {
+        return Ok(None);
+    }
+    let aside = staging.join("replaced");
+    if aside.exists() {
+        let _ = std::fs::remove_dir_all(&aside);
+        let _ = std::fs::remove_file(&aside);
+    }
+    move_path(dest, &aside)
+        .with_context(|| format!("setting {} aside before restoring over it", dest.display()))?;
+    Ok(Some(aside))
 }
 
 /// Move a file or directory, falling back to copy + delete when `rename` cannot
@@ -319,11 +483,54 @@ pub struct RestoreOutcome {
 /// overwrite a newer capability with the same name.
 pub fn restore(lib_home: &Path, id: &str, replace: bool, write: bool) -> Result<RestoreOutcome> {
     let entry = get(lib_home, id)?;
+
+    // ── validate the WHOLE record before touching anything ───────────────
+    // Every check that can refuse this restore runs here, before the first
+    // byte moves. It used to be interleaved with the mutation — the body was
+    // moved, and only then was the index row looked for — so a record missing
+    // its row failed with the body already gone from the trash and absent from
+    // the index (review finding F22).
     let kind = entry
         .record
         .kind()
         .with_context(|| format!("trash entry '{id}' has an unknown kind"))?;
     let name = entry.record.name.clone();
+    plain_component(&name, "name")?;
+
+    // The body field names a fixed location inside the record directory. It is
+    // an enum written by `stash`, not a path — treat anything else as a record
+    // we did not write.
+    if let Some(b) = entry.record.body.as_deref() {
+        if b != BODY_DIR && b != BODY_FILE {
+            bail!(
+                "refusing to restore: the trash record's body '{b}' is not one of '{BODY_DIR}' \
+                 or '{BODY_FILE}' — this record was not written by `lib remove`"
+            );
+        }
+    }
+
+    // Take the index row now, and require it to agree with the record's name.
+    // A row naming something else would restore the body under one name and
+    // the index entry under another.
+    let row_name = match kind {
+        Kind::Skill => entry.record.skill.as_ref().map(|e| e.name.clone()),
+        Kind::Server => entry.record.server.as_ref().map(|e| e.name.clone()),
+        Kind::Extension => entry.record.extension.as_ref().map(|e| e.name.clone()),
+        Kind::Hook => entry.record.hook.as_ref().map(|e| e.name.clone()),
+    }
+    .with_context(|| {
+        format!(
+            "trash entry '{id}' has no {} index row — it cannot be put back",
+            kind.as_str()
+        )
+    })?;
+    if row_name != name {
+        bail!(
+            "refusing to restore: the record names '{name}' but its {} index row names \
+             '{row_name}' — a restore must put one capability back under one name",
+            kind.as_str()
+        );
+    }
 
     let mut library = Library::load(lib_home)?;
     let taken = match kind {
@@ -339,74 +546,109 @@ pub fn restore(lib_home: &Path, id: &str, replace: bool, write: bool) -> Result<
         );
     }
 
-    // Where the body belongs. Derived from the *kind*, not from the recorded
-    // origin path, so a hand-edited record can never write outside the library.
+    // Where the body belongs: derived from the kind, with a validated name,
+    // and then CHECKED to land inside the library. The derivation alone was
+    // the old containment argument and it was not sufficient.
     let body_dest = entry.body_path().map(|_| match kind {
         Kind::Skill => lib_home.join("skills").join(&name),
         Kind::Extension => lib_home.join("extensions").join(&name),
         Kind::Server => lib_home.join("servers").join(format!("{name}.toml")),
         Kind::Hook => lib_home.join("hooks").join(format!("{name}.toml")),
     });
+    if let Some(dest) = body_dest.as_ref() {
+        contained(lib_home, dest)?;
+        if dest.is_symlink() {
+            bail!(
+                "refusing to restore: {} is a symlink — restoring would write through it",
+                dest.display()
+            );
+        }
+        if dest.exists() && !replace {
+            bail!(
+                "{} already exists — pass --replace to overwrite it",
+                dest.display()
+            );
+        }
+    }
+
+    // Stage the index change in memory. Nothing is on disk yet, so a failure
+    // here is free.
+    match kind {
+        Kind::Skill => library.upsert(entry.record.skill.clone().expect("checked above")),
+        Kind::Server => library.upsert_server(entry.record.server.clone().expect("checked above")),
+        Kind::Extension => {
+            library.upsert_extension(entry.record.extension.clone().expect("checked above"))
+        }
+        Kind::Hook => library.upsert_hook(entry.record.hook.clone().expect("checked above")),
+    }
+
+    // The record says it has a body; the body must actually be there. Checked
+    // with the rest of the validation, BEFORE anything is displaced — a record
+    // pointing at a body that is gone used to set the live entry aside first
+    // and only then discover it had nothing to put in its place, stranding the
+    // user's copy under `.trash/<id>/replaced`.
+    if let Some(src) = entry.body_path() {
+        if !src.exists() {
+            bail!(
+                "refusing to restore: the record names a body at {} but it is not there — \
+                 the trash entry is incomplete. Inspect it, or drop it with \
+                 `agentstack lib trash --empty {id}`",
+                src.display()
+            );
+        }
+    }
 
     if write {
+        // ── mutate ───────────────────────────────────────────────────────
+        // Order matters: the body moves first because it is the only step
+        // that can be undone by moving it back. If saving the index then
+        // fails, the body returns to the trash and the entry is untouched —
+        // better a restore that did nothing than a body outside any index.
+        //
+        // Every failure after the displacement puts the displaced copy back.
+        // The closure exists so there is ONE place that can return an error
+        // here, and one place that undoes the displacement — an early `?`
+        // between the two is what stranded the replacement before.
         if let (Some(src), Some(dest)) = (entry.body_path(), body_dest.as_ref()) {
-            if dest.exists() {
-                if !replace {
-                    bail!(
-                        "{} already exists — pass --replace to overwrite it",
-                        dest.display()
-                    );
+            let replaced = displace_existing(dest, &entry.dir)?;
+
+            let outcome = (|| -> Result<()> {
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent)
+                        .with_context(|| format!("creating {}", parent.display()))?;
                 }
-                if dest.is_dir() {
-                    std::fs::remove_dir_all(dest)
-                        .with_context(|| format!("removing {}", dest.display()))?;
+                move_path(&src, dest)?;
+                if let Err(e) = library.save(lib_home) {
+                    // Put our body back in the trash before propagating, so
+                    // the entry stays whole and restorable.
+                    let _ = move_path(dest, &src);
+                    return Err(e);
+                }
+                Ok(())
+            })();
+
+            if let Err(e) = outcome {
+                if let Some(prev) = &replaced {
+                    let _ = move_path(prev, dest);
+                }
+                return Err(e).with_context(|| {
+                    format!("restoring '{name}' — it was left in the trash, unchanged")
+                });
+            }
+
+            // The index is saved and the body is home. Only now is the
+            // replaced copy (if any) genuinely superseded.
+            if let Some(prev) = replaced {
+                let _ = if prev.is_dir() {
+                    std::fs::remove_dir_all(&prev)
                 } else {
-                    std::fs::remove_file(dest)
-                        .with_context(|| format!("removing {}", dest.display()))?;
-                }
+                    std::fs::remove_file(&prev)
+                };
             }
-            if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("creating {}", parent.display()))?;
-            }
-            move_path(&src, dest)?;
+        } else {
+            library.save(lib_home)?;
         }
 
-        match kind {
-            Kind::Skill => {
-                let e = entry
-                    .record
-                    .skill
-                    .clone()
-                    .context("trash entry has no skill index row")?;
-                library.upsert(e);
-            }
-            Kind::Server => {
-                let e = entry
-                    .record
-                    .server
-                    .clone()
-                    .context("trash entry has no server index row")?;
-                library.upsert_server(e);
-            }
-            Kind::Extension => {
-                let e = entry
-                    .record
-                    .extension
-                    .clone()
-                    .context("trash entry has no extension index row")?;
-                library.upsert_extension(e);
-            }
-            Kind::Hook => {
-                let e = entry
-                    .record
-                    .hook
-                    .clone()
-                    .context("trash entry has no hook index row")?;
-                library.upsert_hook(e);
-            }
-        }
-        library.save(lib_home)?;
         // The record directory is now empty of meaning — drop it so a restored
         // entry cannot be restored twice.
         std::fs::remove_dir_all(&entry.dir)
@@ -563,10 +805,12 @@ mod tests {
         assert!(Library::load(lib).unwrap().get("pdf").is_none());
     }
 
-    /// A name that tries to escape its directory is slugged, so the trash id
-    /// stays a single path component.
+    /// F22: stashing a corrupt index name still works — that is the cleanup
+    /// path — but the record it leaves is inert, and `restore` refuses it by
+    /// name rather than acting on it. The pair is what makes the entry safe:
+    /// it can be listed and emptied, never put back.
     #[test]
-    fn ids_never_carry_a_path_component() {
+    fn a_stashed_unsafe_name_is_inert_and_never_restorable() {
         let tmp = assert_fs::TempDir::new().unwrap();
         let lib = tmp.path();
         let mut record = blank_record();
@@ -576,12 +820,77 @@ mod tests {
             version: None,
             provenance: None,
         });
+        // No body: `valid_lib_name` refuses to target a file for such a name,
+        // so a removal never has bytes to move here.
         let entry = stash(lib, Kind::Server, "../../etc/x", None, record).unwrap();
-
         assert!(!entry.id.contains('/'), "{}", entry.id);
-        assert!(!entry.id.contains(".."), "{}", entry.id);
         assert!(entry.dir.starts_with(trash_home(lib)));
-        assert!(trash_home(lib).is_dir(), "everything stayed under .trash");
+
+        let err = restore(lib, &entry.id, false, true).unwrap_err();
+        assert!(err.to_string().contains("is not a plain name"), "{err:#}");
+        assert!(err.to_string().contains("--empty"), "says how to clear it");
+
+        // And it can be cleared.
+        empty(lib, Some(&entry.id), true).unwrap();
+        assert!(!entry.dir.exists());
+    }
+
+    /// F22: the two name rules are ONE rule. A name the trash would refuse to
+    /// restore must never have had a file targeted for it in the first place.
+    #[test]
+    fn the_removal_and_restore_name_rules_agree() {
+        for name in ["../../etc/x", "..", ".", "a/b", "", "a\\b", "/abs", "a\0b"] {
+            assert!(
+                !is_plain_component(name),
+                "'{name}' must be rejected by the shared rule"
+            );
+        }
+        // The rule is about path COMPONENTS, not substrings. `..` between
+        // other characters is an ordinary name, and rejecting it would break
+        // legal library names for no gain — it cannot traverse anywhere.
+        for name in [
+            "pdf", "my-skill", "a.b", "x_1", "a..b", "..hidden", "v1..v2",
+        ] {
+            assert!(is_plain_component(name), "'{name}' should be allowed");
+        }
+    }
+
+    /// F22 follow-up: a name containing `..` as characters is legal, and the
+    /// whole round trip works for it — the grammar fix is not just a predicate
+    /// change, the body genuinely lands back in the right place.
+    #[test]
+    fn a_name_with_embedded_dots_round_trips() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().to_path_buf();
+        let live = lib.join("skills/a..b");
+        std::fs::create_dir_all(&live).unwrap();
+        std::fs::write(live.join("SKILL.md"), "# dots").unwrap();
+
+        let mut record = blank_record();
+        record.skill = Some(skill("a..b"));
+        let entry = stash(&lib, Kind::Skill, "a..b", Some(&live), record).unwrap();
+        assert!(!live.exists(), "body moved to the trash");
+
+        restore(&lib, &entry.id, false, true).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(live.join("SKILL.md")).unwrap(),
+            "# dots",
+            "body came back to lib/skills/a..b"
+        );
+        assert!(Library::load(&lib).unwrap().get("a..b").is_some());
+    }
+
+    /// The id builder stays defensive independently of that refusal: it is the
+    /// last line between a name and a path component in the trash layout.
+    #[test]
+    fn ids_never_carry_a_path_component() {
+        for name in ["../../etc/x", "..", "a/b", "....", "/abs"] {
+            let s = slug(name);
+            assert!(!s.contains('/'), "{name} -> {s}");
+            assert!(!s.contains('\\'), "{name} -> {s}");
+            assert!(!s.contains(".."), "{name} -> {s}");
+            assert!(!s.is_empty(), "{name} -> {s}");
+        }
     }
 
     /// Emptying deletes trash content only.
@@ -601,5 +910,259 @@ mod tests {
         assert_eq!(done.entries.len(), 1);
         assert!(!entry.dir.exists());
         assert!(list(lib).unwrap().is_empty());
+    }
+
+    /// F22 witness — the reproduction from the review, verbatim: a hand-written
+    /// record naming `../../../escaped` used to restore a skill body OUTSIDE
+    /// `lib/` and exit successfully.
+    #[test]
+    fn restore_refuses_a_record_whose_name_escapes_the_library() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().join("lib");
+        std::fs::create_dir_all(&lib).unwrap();
+
+        // Hand-build the trash entry the way a crafted `entry.toml` would be.
+        let dir = trash_home(&lib).join("skill-x-1");
+        std::fs::create_dir_all(dir.join("body")).unwrap();
+        std::fs::write(dir.join("body/SKILL.md"), "# pwned").unwrap();
+        let mut record = blank_record();
+        record.kind = "skill".into();
+        record.name = "../../../escaped".into();
+        record.body = Some("body".into());
+        record.skill = Some(skill("../../../escaped"));
+        std::fs::write(
+            dir.join(RECORD_FILE),
+            toml::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
+
+        let err = restore(&lib, "skill-x-1", false, true).unwrap_err();
+        assert!(err.to_string().contains("is not a plain name"), "{err:#}");
+
+        // Nothing moved, anywhere.
+        assert!(
+            dir.join("body/SKILL.md").exists(),
+            "body stayed in the trash"
+        );
+        assert!(
+            !tmp.path().parent().unwrap().join("escaped").exists(),
+            "nothing was written outside the library"
+        );
+        assert!(Library::load(&lib)
+            .unwrap()
+            .get("../../../escaped")
+            .is_none());
+    }
+
+    /// F22 witness — the other traversal route: a plain name whose destination
+    /// resolves outside the library through a symlinked kind directory.
+    #[test]
+    #[cfg(unix)]
+    fn restore_refuses_when_the_destination_resolves_outside_the_library() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().join("lib");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, lib.join("skills")).unwrap();
+
+        let dir = trash_home(&lib).join("skill-pdf-1");
+        std::fs::create_dir_all(dir.join("body")).unwrap();
+        std::fs::write(dir.join("body/SKILL.md"), "# pdf").unwrap();
+        let mut record = blank_record();
+        record.kind = "skill".into();
+        record.name = "pdf".into();
+        record.body = Some("body".into());
+        record.skill = Some(skill("pdf"));
+        std::fs::write(
+            dir.join(RECORD_FILE),
+            toml::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
+
+        let err = restore(&lib, "skill-pdf-1", false, true).unwrap_err();
+        assert!(err.to_string().contains("outside the library"), "{err:#}");
+        assert!(!outside.join("pdf").exists(), "nothing landed outside");
+    }
+
+    /// F22 witness — a record with no index row is refused BEFORE the body
+    /// moves. It used to move the body first and fail afterwards, leaving the
+    /// bytes in neither the trash nor the index.
+    #[test]
+    fn restore_refuses_a_record_with_no_index_row_without_moving_the_body() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().join("lib");
+        std::fs::create_dir_all(&lib).unwrap();
+
+        let dir = trash_home(&lib).join("skill-pdf-1");
+        std::fs::create_dir_all(dir.join("body")).unwrap();
+        std::fs::write(dir.join("body/SKILL.md"), "# pdf").unwrap();
+        let mut record = blank_record();
+        record.kind = "skill".into();
+        record.name = "pdf".into();
+        record.body = Some("body".into());
+        // record.skill deliberately left None.
+        std::fs::write(
+            dir.join(RECORD_FILE),
+            toml::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
+
+        let err = restore(&lib, "skill-pdf-1", false, true).unwrap_err();
+        assert!(err.to_string().contains("no skill index row"), "{err:#}");
+        assert!(
+            dir.join("body/SKILL.md").exists(),
+            "the body must still be in the trash"
+        );
+        assert!(!lib.join("skills/pdf").exists());
+    }
+
+    /// F22 witness — an index row naming something other than the record is a
+    /// refusal, not a restore that splits the two apart.
+    #[test]
+    fn restore_refuses_when_the_index_row_names_something_else() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().join("lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        let dir = trash_home(&lib).join("skill-pdf-1");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut record = blank_record();
+        record.kind = "skill".into();
+        record.name = "pdf".into();
+        record.skill = Some(skill("something-else"));
+        std::fs::write(
+            dir.join(RECORD_FILE),
+            toml::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
+
+        let err = restore(&lib, "skill-pdf-1", false, true).unwrap_err();
+        assert!(err.to_string().contains("index row names"), "{err:#}");
+    }
+
+    /// F22 witness — a body field that is not one of the two known slots is
+    /// refused rather than joined onto the record directory as a path.
+    #[test]
+    fn restore_refuses_an_unknown_body_slot() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().join("lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        let dir = trash_home(&lib).join("skill-pdf-1");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut record = blank_record();
+        record.kind = "skill".into();
+        record.name = "pdf".into();
+        record.body = Some("../../../etc/passwd".into());
+        record.skill = Some(skill("pdf"));
+        std::fs::write(
+            dir.join(RECORD_FILE),
+            toml::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
+
+        let err = restore(&lib, "skill-pdf-1", false, true).unwrap_err();
+        assert!(err.to_string().contains("is not one of"), "{err:#}");
+    }
+
+    /// F22 witness — `--replace` sets the live entry aside instead of deleting
+    /// it, so the copy the user already had survives a failure partway through.
+    #[test]
+    fn replace_preserves_the_live_entry_until_the_index_is_saved() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().join("lib");
+        let live = lib.join("skills/pdf");
+        std::fs::create_dir_all(&live).unwrap();
+        std::fs::write(live.join("SKILL.md"), "# live").unwrap();
+
+        let mut record = blank_record();
+        record.skill = Some(skill("pdf"));
+        let entry = stash(&lib, Kind::Skill, "pdf", Some(&live), record).unwrap();
+
+        // Re-add a different body under the same name, then restore over it.
+        std::fs::create_dir_all(&live).unwrap();
+        std::fs::write(live.join("SKILL.md"), "# newer").unwrap();
+        let mut library = Library::load(&lib).unwrap();
+        library.upsert(skill("pdf"));
+        library.save(&lib).unwrap();
+
+        restore(&lib, &entry.id, true, true).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(live.join("SKILL.md")).unwrap(),
+            "# live",
+            "the trashed copy is back"
+        );
+        assert!(!entry.dir.exists(), "the trash entry is consumed");
+        assert!(
+            !lib.join("skills/replaced").exists(),
+            "no staging leftovers in the library"
+        );
+    }
+
+    /// F22 follow-up — a record naming a body that is not there must be
+    /// refused BEFORE the live entry is displaced. It used to set the user's
+    /// copy aside first and only then fail, stranding it under
+    /// `.trash/<id>/replaced`.
+    #[test]
+    fn a_missing_body_is_refused_before_the_live_entry_is_displaced() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().to_path_buf();
+        let live = lib.join("skills/pdf");
+        std::fs::create_dir_all(&live).unwrap();
+        std::fs::write(live.join("SKILL.md"), "# the live copy").unwrap();
+        let mut library = Library::load(&lib).unwrap();
+        library.upsert(skill("pdf"));
+        library.save(&lib).unwrap();
+
+        // A record that claims a body it does not have.
+        let dir = trash_home(&lib).join("skill-pdf-1");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut record = blank_record();
+        record.kind = "skill".into();
+        record.name = "pdf".into();
+        record.body = Some("body".into());
+        record.skill = Some(skill("pdf"));
+        std::fs::write(
+            dir.join(RECORD_FILE),
+            toml::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
+
+        let err = restore(&lib, "skill-pdf-1", true, true).unwrap_err();
+        assert!(err.to_string().contains("is not there"), "{err:#}");
+
+        // The live copy is still exactly where it was — not under .trash.
+        assert_eq!(
+            std::fs::read_to_string(live.join("SKILL.md")).unwrap(),
+            "# the live copy"
+        );
+        assert!(
+            !dir.join("replaced").exists(),
+            "nothing was displaced into the trash entry"
+        );
+    }
+
+    /// F22 follow-up — `unstash` is the removal path's rollback: the body goes
+    /// back where it came from and the trash record is dropped, so a failed
+    /// removal leaves no half-state.
+    #[test]
+    fn unstash_puts_the_body_back_and_drops_the_record() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path().to_path_buf();
+        let live = lib.join("skills/pdf");
+        std::fs::create_dir_all(&live).unwrap();
+        std::fs::write(live.join("SKILL.md"), "# body").unwrap();
+
+        let mut record = blank_record();
+        record.skill = Some(skill("pdf"));
+        let entry = stash(&lib, Kind::Skill, "pdf", Some(&live), record).unwrap();
+        assert!(!live.exists(), "stash moved it out");
+
+        assert!(unstash(&entry, Some(&live)), "rollback reported success");
+        assert_eq!(
+            std::fs::read_to_string(live.join("SKILL.md")).unwrap(),
+            "# body",
+            "body is back at its origin"
+        );
+        assert!(!entry.dir.exists(), "trash record dropped");
     }
 }
