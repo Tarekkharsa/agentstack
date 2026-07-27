@@ -398,7 +398,9 @@ not code (Claude's `type:"http"`, Codex's `http_headers` subtable, Gemini's
 and per-OS config paths (`{config}/…`) resolve per platform. macOS and Linux are the
 supported platforms; the published Windows binary is not exercised by CI, so treat
 Windows paths as untested rather than supported.
-`agentstack adapters list` shows their ids.
+`agentstack adapters list` shows their ids. Which of the thirteen is checked
+against the real CLI nightly, which is snapshot-only, and what each one actually
+manages: [adapters.md](adapters.md).
 
 ### Rendering and merging
 

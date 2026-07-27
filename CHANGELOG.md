@@ -45,6 +45,21 @@ findings and two interpreter findings. All are closed:
 
 ### Added
 
+- **A tiered adapter support matrix, published.** Thirteen adapters shipped
+  under one word — "supported" — while only five of them are checked nightly
+  against the real upstream CLI and the rest are pinned by a render snapshot
+  that only compares our output to our own expectation. The new
+  [adapter support matrix](docs/adapters.md) states per adapter which of the two
+  checks it gets (tier 1 nightly-verified, tier 2 best-effort, tier 3
+  community-reported and currently empty), reads each adapter's real
+  capabilities out of its descriptor — servers, project scope, skills,
+  instructions, hooks, settings, extensions, headless run — and says plainly
+  what happens when a vendor changes its config schema: tier 1 goes red within
+  a day, tier 2 you notice first. It also explains why conformance is nightly
+  rather than per-pull-request, and that a descriptor dropped into
+  `~/.agentstack/adapters/` is tier 3 by definition. Same claim discipline the
+  enforcement matrix applies to security, applied to compatibility.
+
 - **`agentstack doctor --probe` — proof your servers actually run.** Until now
   `doctor` could tell you your config parses, your secrets resolve, and your
   digests match; it could not tell you a server *starts*. It even warned that a

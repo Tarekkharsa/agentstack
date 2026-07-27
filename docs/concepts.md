@@ -67,7 +67,9 @@ uses **CLI**.
 
 **Adapter** — AgentStack's per-CLI compiler that turns one manifest into that
 CLI's own config format. `agentstack adapters list` shows their ids; there are
-13 today.
+13 today, at three different levels of verification —
+[adapters.md](adapters.md) says what each one is tested against and what it
+manages.
 
 **Target** — an adapter id you name in `[targets]` (or a `--target` flag) to say
 which CLIs a command acts on. More:

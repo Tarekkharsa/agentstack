@@ -57,6 +57,7 @@ TREE = [
     ], "open"),
     ("Reference", None, [
         ("Every command", "reference.html", "reference"),
+        ("Adapter support matrix", "adapters.html", "adapters"),
         ("Agent manual (skill)", f"{GH}/blob/main/crates/cli/catalog/skills/using-agentstack/SKILL.md", "manual"),
     ], "open"),
     ("Integrations", None, [

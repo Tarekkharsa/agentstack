@@ -62,6 +62,10 @@ narrow that for their own machine.
 Thirteen adapters ship today: Antigravity, Claude Code, Claude Desktop, Codex
 CLI, GitHub Copilot CLI, Cursor, Gemini CLI, Junie, Kiro, OpenCode, Pi, VS
 Code, and Windsurf. `agentstack adapters list` shows which are installed here.
+They are not equally verified — five get a nightly check against the real CLI
+and the rest are best-effort. The
+[adapter support matrix](adapters.md) says which is which, and what each one
+manages.
 
 ## What if two of my CLIs already define the same server?
 
