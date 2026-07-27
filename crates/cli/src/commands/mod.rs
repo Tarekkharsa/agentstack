@@ -41,7 +41,10 @@ pub mod upgrade;
 pub mod use_profile;
 pub mod verify_cmd;
 pub mod workflow;
+pub mod workflow_dispatch;
 pub mod workflow_replay;
+pub mod workflow_result;
+pub mod workflow_schema;
 
 use std::path::{Path, PathBuf};
 

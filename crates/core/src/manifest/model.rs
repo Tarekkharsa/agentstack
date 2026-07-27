@@ -227,6 +227,16 @@ pub struct WorkflowPolicy {
     /// consumer — the cap bounds concurrency, it cannot deadlock the drive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_concurrent: Option<u32>,
+    /// Ceiling on the TOTAL bytes of `agent()` results handed to the
+    /// interpreter across one run. The workflow crate's posture label states
+    /// honestly that no JS heap cap exists in-process; this is the bound that
+    /// makes a wide fan-out over large outputs a refusal rather than
+    /// unbounded growth. Absent = the drive loop's built-in default.
+    ///
+    /// MACHINE-owned like the rest of this table, and never script-negotiated:
+    /// a script's remedy is to ask for `result: 'handle'`, not for more room.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_resident_result_bytes: Option<u64>,
 }
 
 impl WorkflowPolicy {
@@ -234,6 +244,7 @@ impl WorkflowPolicy {
         self.max_agents.is_none()
             && self.max_wall_seconds.is_none()
             && self.max_concurrent.is_none()
+            && self.max_resident_result_bytes.is_none()
     }
 }
 
@@ -1005,6 +1016,45 @@ pub struct Workflow {
     /// Requested wall-clock ceiling in seconds. Same min(request, cap) rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_wall_seconds: Option<u64>,
+    /// `[workflows.<name>.scheduling.<role>]` — per-role scheduling requests.
+    ///
+    /// The scaling plan's thesis lives here: every freedom a scheduler wants
+    /// (retry a task, race a duplicate, place it anywhere) is paid for by task
+    /// PURITY, so purity must be a checked property of the granted authority
+    /// rather than an author's claim. Validation therefore refuses a claim the
+    /// current authority model cannot substantiate — see
+    /// `docs/design/workflow-scaling.md` §4 Phase 4.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub scheduling: IndexMap<String, RoleScheduling>,
+}
+
+/// One role's scheduling request. New table, so `deny_unknown_fields`: a typo
+/// here would silently mean "default scheduling" on a surface whose whole
+/// purpose is to be explicit about what the framework may do.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RoleScheduling {
+    /// Asserts this role's children have no side effects — no filesystem
+    /// writes, no network reach — and may therefore be retried or duplicated
+    /// freely.
+    ///
+    /// Currently **refused by validation**, and the refusal is the honest
+    /// answer rather than a limitation to route around: `[policy.filesystem]`
+    /// is bundle-global (not per-profile), its `write` scope is enforced only
+    /// in sandbox mode, and workflow children run at the host tier. Nothing in
+    /// today's model can prove the claim, and rule 8 says claims match
+    /// enforcement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_free: Option<bool>,
+    /// How many times a failed child of this role may be retried. Gated on
+    /// `effect_free`: a retry of a mutating child duplicates its effects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<u32>,
+    /// Whether a straggler of this role may have a backup copy raced against
+    /// it. Gated on `effect_free` for the same reason, doubled: a speculative
+    /// duplicate runs *concurrently* with the original.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speculative: Option<bool>,
 }
 
 impl Workflow {

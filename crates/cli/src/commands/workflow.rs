@@ -31,11 +31,11 @@
 //!    postures, and outcomes live in each child's own log and are JOINED by
 //!    `workflow report`, never duplicated into workflow events.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as AnyhowContext, Result};
@@ -49,7 +49,10 @@ use agentstack_workflow::{
 use crate::calllog::{RunEvent, RunLog};
 use crate::cli::{RunArgs, WorkflowReportArgs, WorkflowRunArgs};
 use crate::commands::locked::{run_locked_child, supports_injection, ts};
+use crate::commands::workflow_dispatch;
 use crate::commands::workflow_replay::{read_verified_result, JournaledTerminal, ReplayJournal};
+use crate::commands::workflow_result::{self, ResidentBudget};
+use crate::commands::workflow_schema;
 use crate::text::sanitize_line;
 use crate::workflows::NormalizedWorkflow;
 
@@ -297,14 +300,14 @@ fn bound_label(opts: &serde_json::Value) -> Option<String> {
 
 /// One admitted role: the profile name it fences to, the harness the
 /// profile binds (default claude-code), and how its children schedule.
-struct RoleBinding {
-    harness: String,
+pub(crate) struct RoleBinding {
+    pub(crate) harness: String,
     /// Injection-capable children fan out concurrently; the rest fall back
     /// to park/swap and run strictly serially, labeled (§12.1).
-    injectable: bool,
+    pub(crate) injectable: bool,
     /// codex carries the §12.1 connector residual — surfaced PER CHILD in
     /// the run output (a workflow multiplies the exposure N times).
-    codex_residual: bool,
+    pub(crate) codex_residual: bool,
 }
 
 pub fn run(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<()> {
@@ -355,7 +358,10 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
     // Validation already proved every role names a declared profile; this
     // resolves the binding and refuses a harness the registry doesn't know
     // or that can't run headless.
-    let bindings = resolve_bindings(&ctx, wf)?;
+    // `Arc` from the start rather than cloned later: the persistent dispatch
+    // workers need a `'static` handle, and the bindings are read-only after
+    // resolution, so sharing beats duplicating the map per worker.
+    let bindings = Arc::new(resolve_bindings(&ctx, wf)?);
 
     // Invoker args: untrusted input, size-bounded before parse (depth is
     // bounded by serde_json at parse and by the engine boundary at install).
@@ -579,6 +585,60 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
     // wall clock.
     let deadline = std::time::Instant::now() + Duration::from_secs(effective_wall);
 
+    // Phase 1 (continuous dispatch): persistent workers that outlive any one
+    // batch. Everything they touch is owned or `Arc`-shared, so they are plain
+    // `'static` threads — no scoped-thread restructuring of this function, and
+    // no borrow of the drive loop's mutable state.
+    let dispatch = Arc::new(Dispatch::new());
+    let owned_manifest_dir = manifest_dir.map(|p| p.to_path_buf());
+    let (child_tx, child_rx) = mpsc::channel::<ChildStep>();
+    // Held only for its `Drop`: retiring and joining the workers on EVERY
+    // exit path of this function is the whole contract (see `PoolGuard`).
+    let _pool = {
+        // One placement backend, shared by every worker. Local is the
+        // reference implementation and the permanent fallback; Phase 6 would
+        // add a remote one behind the same trait, never beside it.
+        let placement: Arc<dyn workflow_dispatch::Dispatcher> =
+            Arc::new(workflow_dispatch::LocalDispatcher {
+                manifest_dir: owned_manifest_dir.clone(),
+                bindings: Arc::clone(&bindings),
+                pids: Arc::clone(&pids),
+            });
+        let mut handles = Vec::with_capacity(max_concurrent);
+        for _ in 0..max_concurrent {
+            let (dispatch, placement, tx) = (
+                Arc::clone(&dispatch),
+                Arc::clone(&placement),
+                child_tx.clone(),
+            );
+            handles.push(std::thread::spawn(move || {
+                dispatch_worker(dispatch, placement, tx)
+            }));
+        }
+        PoolGuard {
+            dispatch: Arc::clone(&dispatch),
+            handles,
+        }
+    };
+    // The drive loop's own sender is dropped so `child_rx` disconnects once
+    // every worker has exited — otherwise a wait could block forever after
+    // shutdown.
+    drop(child_tx);
+    // Children enqueued but not yet reported. The drive loop must never exit
+    // leaving this above zero without recording those steps.
+    let mut outstanding: usize = 0;
+
+    // Phase 2b: the machine-owned ceiling on TOTAL result bytes handed to the
+    // interpreter. Charged on both the live and the replay path, in the same
+    // order, so a resumed run reaches the same verdict as the run it
+    // continues.
+    let mut resident = ResidentBudget::new(
+        machine_policy
+            .workflows
+            .max_resident_result_bytes
+            .unwrap_or(workflow_result::DEFAULT_MAX_RESIDENT_RESULT_BYTES),
+    );
+
     // The drive loop: step → fan out the batch as locked children → feed the
     // results back — until Done or Failed. Exhaustion of the granted
     // max_agents ceiling is enforced INSIDE the engine, per call (Stage D):
@@ -593,6 +653,29 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
     // Stage F: steps fed from the journal so far (the marker's count).
     let mut replayed_count: u64 = 0;
     let final_value = loop {
+        // Phase 2b: a breached resident ceiling fails the RUN, not the step —
+        // it is a machine ceiling, like the wall clock, and a script must not
+        // be able to absorb it. Checked before the results are fed, so the
+        // offending bytes never reach the interpreter.
+        if resident.overflowed() {
+            drop(done_tx);
+            note_exhaustion(&run, effective_agents);
+            return Err(wev.fail(
+                "resident_cap",
+                run.exhausted(),
+                anyhow::anyhow!(
+                    "workflow '{}' exceeded the machine's resident-result ceiling \
+                     ({} bytes; {} accumulated) — failing closed rather than growing the \
+                     interpreter heap without bound. Ask for `agent(prompt, {{ result: \
+                     'handle' }})` on the wide stages so results resolve as \
+                     {{digest, bytes, preview}}, or raise `[policy.workflows] \
+                     max_resident_result_bytes`",
+                    wf.name,
+                    resident.cap(),
+                    resident.used(),
+                ),
+            ));
+        }
         let outcome = run.step(std::mem::take(&mut results));
         print_progress(run.take_progress());
         match outcome {
@@ -694,11 +777,18 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                         // terminal ever appending; salvaging its result from
                         // the child's own log is partial-result salvage —
                         // out of scope — so the step runs again.
+                        // The REQUEST rides along with its journal entry: a
+                        // replayed result has to go through the same
+                        // schema transform the live path applied (Phase 2a),
+                        // and the schema lives in the request's opts. Feeding
+                        // the raw string here while the original fed a
+                        // validated object would make resume diverge from the
+                        // run it claims to continue.
                         let mut completed_taken = Vec::new();
                         for (request, t) in batch.requests.iter().zip(taken) {
                             let t = t.expect("counted journaled above");
                             if t.terminal.is_some() {
-                                completed_taken.push(t);
+                                completed_taken.push((request, t));
                             } else {
                                 live_owned.push(request.clone());
                             }
@@ -708,14 +798,17 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                         // (results were pushed in the same iteration that
                         // appended the events), and promise settlement order
                         // is script-observable.
-                        completed_taken.sort_by_key(|t| t.terminal.map(|(_, idx)| idx));
-                        for t in completed_taken {
+                        completed_taken.sort_by_key(|(_, t)| t.terminal.map(|(_, idx)| idx));
+                        for (request, t) in completed_taken {
                             match t.terminal.expect("filtered on Some").0 {
                                 JournaledTerminal::Completed => {
                                     let text = read_verified_result(t.step, &t.child_run_id)?;
                                     // Replayed results are taint sources too,
                                     // same bounds — live-tail StepSpawned
-                                    // events keep faithful marks.
+                                    // events keep faithful marks. The RAW
+                                    // bytes are the taint source in both
+                                    // paths, before any schema transform, so
+                                    // the marks stay comparable.
                                     if text.len() >= TAINT_MIN_BYTES
                                         && completed_results.len() < TAINT_MAX_SOURCES
                                     {
@@ -725,11 +818,34 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                                                 .to_string(),
                                         ));
                                     }
+                                    // Same transform as the live path. A
+                                    // schema that no longer matches the
+                                    // verified artifact replays as a FAILED
+                                    // step rather than as a mismatched
+                                    // value — the artifact is what the
+                                    // original child produced, and resume
+                                    // never re-runs a journaled step.
+                                    let output = if workflow_result::wants_handle(&request.opts) {
+                                        StepOutput::Completed(workflow_result::handle_value(&text))
+                                    } else {
+                                        match workflow_schema::child_result_value(
+                                            &text,
+                                            &request.opts,
+                                        ) {
+                                            Ok(value) => StepOutput::Completed(value),
+                                            Err(_) => StepOutput::Failed,
+                                        }
+                                    };
+                                    // Charged on the replay path too, in the
+                                    // same order — otherwise a resumed run
+                                    // could pass a ceiling the original run
+                                    // breached, or breach one it passed.
+                                    if let StepOutput::Completed(value) = &output {
+                                        resident.charge(value);
+                                    }
                                     replay_feed.push(StepResult {
                                         request_id: t.step,
-                                        output: StepOutput::Completed(serde_json::Value::String(
-                                            text,
-                                        )),
+                                        output,
                                     });
                                 }
                                 // §3.1 / R1: a journaled failure replays as
@@ -769,7 +885,13 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                 // run id is pre-generated here so the event can name it.
                 // Replayed steps emit nothing new — their events already
                 // exist in the journal.
-                let mut child_ids: HashMap<u64, String> = HashMap::new();
+                // Spawn events for the WHOLE batch are appended before ANY of
+                // its children is enqueued. Continuous dispatch does not
+                // relax this: a batch's `StepSpawned` events stay contiguous
+                // and strictly before execution, which is exactly the shape
+                // Stage F's replay alignment reads ("a genuine journal
+                // records a whole batch's spawns before executing it").
+                let mut queued: Vec<QueuedSpawn> = Vec::with_capacity(live.len());
                 for request in live {
                     let child_run_id = record_step_spawned(
                         &wev,
@@ -777,60 +899,98 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                         bindings.get(&request.role),
                         &completed_results,
                     )?;
-                    child_ids.insert(request.id, child_run_id);
+                    let serial = !bindings
+                        .get(&request.role)
+                        .map(|b| b.injectable)
+                        .unwrap_or(false);
+                    queued.push(QueuedSpawn {
+                        request: request.clone(),
+                        child_run_id,
+                        serial,
+                    });
                 }
-                let steps = execute_batch(
-                    manifest_dir,
-                    &bindings,
-                    live,
-                    max_concurrent,
-                    &pids,
-                    &child_ids,
-                );
-                // Step completions are material evidence too: an
-                // unrecordable completion fails the run (gate 2) — better an
-                // error than an unrecorded step. Replayed results feed FIRST
-                // (their journal order), live results after in completion
-                // order — for a straddle batch nothing was ever fed to the
-                // original engine, so no prior settlement observation exists
-                // to contradict.
+                outstanding += queued.len();
+                for item in queued {
+                    dispatch.enqueue(item);
+                }
+
+                // Replayed results feed FIRST (their journal order), live
+                // results after in completion order.
                 results = replay_feed;
-                results.reserve(steps.len());
-                for step in steps {
-                    match &step.result.output {
-                        StepOutput::Completed(value) => {
-                            wev.material(&RunEvent::StepCompleted {
-                                ts: ts(),
-                                step: step.result.request_id,
-                            })?;
-                            // Bounded taint-source retention: only the first
-                            // TAINT_MAX_SOURCES qualifying results, each kept
-                            // as its needle prefix only — the detector never
-                            // uses more, so the truncation changes no mark.
-                            if let Some(text) = value.as_str() {
-                                if text.len() >= TAINT_MIN_BYTES
-                                    && completed_results.len() < TAINT_MAX_SOURCES
-                                {
-                                    completed_results.push((
-                                        step.result.request_id,
-                                        truncate_on_char_boundary(text, TAINT_NEEDLE_BYTES)
-                                            .to_string(),
-                                    ));
-                                }
-                            }
-                        }
-                        StepOutput::Failed => {
-                            wev.material(&RunEvent::StepFailed {
-                                ts: ts(),
-                                step: step.result.request_id,
-                                reason: step.reason.unwrap_or("failed").to_string(),
-                            })?;
-                        }
-                    }
-                    results.push(step.result);
+
+                // WHEN to step the engine again — the Phase 1 decision:
+                //
+                // * While a resume journal is still active, wait for the
+                //   WHOLE batch (lockstep). Stage F's alignment reasoning
+                //   assumes batch-at-a-time execution, and a resume is not
+                //   where to spend novelty; streaming begins on the first
+                //   fully-live batch, which is the common case.
+                // * Otherwise wait for just ONE completion and drain whatever
+                //   else is ready. Later stages then overlap earlier ones, so
+                //   the straggler tail is paid once per run instead of once
+                //   per stage.
+                let wait_for = if replay.is_some() { outstanding } else { 1 };
+                collect_completions(
+                    &child_rx,
+                    &wev,
+                    &mut outstanding,
+                    wait_for,
+                    &mut completed_results,
+                    &mut results,
+                    &mut resident,
+                )?;
+            }
+            // Continuous dispatch: resolving one promise need not produce a
+            // new spawn or settle the root, so the engine suspends with
+            // requests still outstanding. Collect at least one more result
+            // and step again. (The engine only reports this while it is
+            // genuinely owed results; a wedged root with nothing outstanding
+            // is still the `Failed` stall it always was.)
+            StepOutcome::Awaiting => {
+                collect_completions(
+                    &child_rx,
+                    &wev,
+                    &mut outstanding,
+                    1,
+                    &mut completed_results,
+                    &mut results,
+                    &mut resident,
+                )?;
+                // Nothing outstanding and nothing arrived: the drive would
+                // spin forever asking the engine the same question. Fail
+                // closed instead — this is a composition defect, not a
+                // script error.
+                if results.is_empty() && outstanding == 0 {
+                    drop(done_tx);
+                    note_exhaustion(&run, effective_agents);
+                    return Err(wev.fail(
+                        "engine_invariant_breach",
+                        run.exhausted(),
+                        anyhow::anyhow!(
+                            "workflow '{}': the engine is awaiting step results with no \
+                             children outstanding — failing closed (this is a composition \
+                             defect, not a script error; please report it)",
+                            wf.name
+                        ),
+                    ));
                 }
             }
             StepOutcome::Done(value) => {
+                // Continuous dispatch makes an outstanding child possible at
+                // Done: the engine settles the root as soon as the script's
+                // OWN awaits are satisfied, so an `agent()` whose promise the
+                // script never awaited can still be in flight. Its outcome is
+                // still material evidence — "nothing trusted runs unobserved"
+                // — so drain and record before the terminal, rather than
+                // exiting and leaving a spawned step with no completion.
+                drain_outstanding(
+                    &child_rx,
+                    &wev,
+                    &mut outstanding,
+                    &mut completed_results,
+                    &mut results,
+                    &mut resident,
+                )?;
                 // Stage F: the run ended while the journal was still active
                 // (a resume whose live tail was empty, or a journal naming
                 // steps the engine never re-issued). Leftovers refuse
@@ -847,6 +1007,17 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
             StepOutcome::Failed(err) => {
                 drop(done_tx);
                 note_exhaustion(&run, effective_agents);
+                // Same reason as Done: a step already announced as spawned
+                // must not be left without a terminal just because the engine
+                // failed. Recorded before the workflow's own failure event.
+                drain_outstanding(
+                    &child_rx,
+                    &wev,
+                    &mut outstanding,
+                    &mut completed_results,
+                    &mut results,
+                    &mut resident,
+                )?;
                 // Stage F, same discipline as Done: leftover journal entries
                 // refuse without appending (the failure here is the REPLAY's
                 // divergence, not a new outcome of the run); a cleanly
@@ -1082,75 +1253,306 @@ fn format_progress(event: &Progress) -> String {
 /// One executed step: the engine-facing result plus the launcher-authored
 /// failure category the drive loop records in `StepFailed.reason` (Stage E).
 /// The category is OURS, never upstream or script text (redaction gate 3).
-struct ChildStep {
-    result: StepResult,
-    reason: Option<&'static str>,
+pub(crate) struct ChildStep {
+    pub(crate) result: StepResult,
+    pub(crate) reason: Option<&'static str>,
 }
 
-/// Fan one engine batch out as locked children. Injection-capable children
-/// run concurrently under the cap (each is an independent worker thread
-/// re-running the FULL per-child gate sequence — trust, strict verify,
-/// admission, grant freeze — via `run_locked_child`); park/swap children run
-/// strictly serially afterwards, labeled `serial (config-swap)` (§12.1: the
-/// one deliberate degrade, stated honestly and recorded on `StepSpawned`).
-/// Each child runs under the run id the drive loop pre-announced in its
-/// `StepSpawned` event (`child_ids`, keyed by request id). Results are keyed
-/// by request id, so completion order is irrelevant.
-fn execute_batch(
-    manifest_dir: Option<&Path>,
-    bindings: &HashMap<String, RoleBinding>,
-    requests: &[SpawnRequest],
-    max_concurrent: usize,
-    pids: &crate::runs::ChildPids,
-    child_ids: &HashMap<u64, String>,
-) -> Vec<ChildStep> {
-    let (concurrent, serial): (Vec<&SpawnRequest>, Vec<&SpawnRequest>) = requests
-        .iter()
-        .partition(|r| bindings.get(&r.role).map(|b| b.injectable).unwrap_or(false));
+/// One queued child: the frozen request plus the run id the drive loop already
+/// announced for it in a fail-closed `StepSpawned` event. Carrying the id on
+/// the queue item (rather than in a side map) is what lets a worker be a plain
+/// `'static` thread with no borrow of the drive loop's state.
+struct QueuedSpawn {
+    request: SpawnRequest,
+    child_run_id: String,
+    serial: bool,
+}
 
-    let results: Mutex<Vec<ChildStep>> = Mutex::new(Vec::with_capacity(requests.len()));
-    let next = AtomicUsize::new(0);
-    std::thread::scope(|scope| {
-        for _ in 0..max_concurrent.min(concurrent.len()) {
-            // Workers pull from a shared index; each borrows the batch state
-            // for the scope's lifetime (shared refs are Copy, so `move` just
-            // copies the borrows into the worker).
-            let (next, results, concurrent) = (&next, &results, &concurrent);
-            scope.spawn(move || loop {
-                let i = next.fetch_add(1, Ordering::SeqCst);
-                let Some(request) = concurrent.get(i) else {
-                    break;
-                };
-                let result = run_child(manifest_dir, bindings, request, pids, false, child_ids);
-                results
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .push(result);
-            });
+/// The dispatch queue behind **continuous dispatch** (scaling plan Phase 1).
+///
+/// The drive loop used to fan a batch out and join ALL of it before stepping
+/// the engine again. That made the host re-impose a barrier the script API
+/// explicitly does not have: `pipeline()` is per-item and barrier-free by
+/// contract, so item *i*'s second stage should start the moment item *i*'s
+/// first stage returns — but a whole-batch join made it wait for the slowest
+/// sibling. With agent latency being heavy-tailed (measured straggler ratios
+/// of 8–14 in `examples/workflow-scale`), that tail was paid once per stage
+/// instead of once per run.
+///
+/// Now workers are persistent and outlive any one batch: the drive loop
+/// enqueues, then steps the engine as soon as ANY child completes, so later
+/// stages overlap earlier ones. Two properties are preserved exactly:
+///
+/// - **Spawn evidence still precedes launch.** The drive loop appends every
+///   `StepSpawned` for a batch, fail-closed, BEFORE enqueuing any of them —
+///   so a batch's spawn events remain contiguous and all-before-execution,
+///   which is the shape Stage F's replay alignment reads.
+/// - **Park/swap children still get the project to themselves.** They mutate
+///   the shared project config, so they take [`Dispatch::project`] exclusively
+///   while injectable children share it. Under the old code that was
+///   "serial phase after the concurrent phase"; the lock expresses the same
+///   invariant without a phase boundary. (The locked layer's atomic sentinel
+///   remains the fail-closed backstop if the scheduling is ever wrong.)
+struct Dispatch {
+    queue: Mutex<VecDeque<QueuedSpawn>>,
+    ready: Condvar,
+    /// Shared by injectable children, exclusive to park/swap children.
+    /// Honest limitation: `std::sync::RwLock` makes no writer-preference
+    /// guarantee, so a park/swap child can in principle be delayed by a
+    /// continuous stream of injectable ones. It cannot be starved forever in
+    /// a bounded run, and the consequence of delay is latency, never a
+    /// corrupted config — so v1 accepts it rather than hand-rolling a queue.
+    project: std::sync::RwLock<()>,
+    shutdown: AtomicBool,
+}
+
+impl Dispatch {
+    fn new() -> Self {
+        Self {
+            queue: Mutex::new(VecDeque::new()),
+            ready: Condvar::new(),
+            project: std::sync::RwLock::new(()),
+            shutdown: AtomicBool::new(false),
         }
-    });
-    for request in serial {
-        let result = run_child(manifest_dir, bindings, request, pids, true, child_ids);
-        results
+    }
+
+    /// Enqueue one already-recorded spawn and wake exactly one worker.
+    fn enqueue(&self, item: QueuedSpawn) {
+        self.queue
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .push(result);
+            .push_back(item);
+        self.ready.notify_one();
     }
-    results.into_inner().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Owns the worker threads and guarantees they are retired on EVERY exit path
+/// of the drive loop — including the `?` early returns for a wall-deadline
+/// refusal, an engine failure, or an unrecordable event. Retiring means: stop
+/// taking new work, let any in-flight child finish (killing a governed child
+/// mid-flight would leave its own run log without a terminal), then join.
+struct PoolGuard {
+    dispatch: Arc<Dispatch>,
+    handles: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for PoolGuard {
+    fn drop(&mut self) {
+        self.dispatch.shutdown.store(true, Ordering::Release);
+        self.dispatch.ready.notify_all();
+        for handle in self.handles.drain(..) {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// One persistent worker: pull, run the child under the correct project-lock
+/// discipline, report. Each child re-runs the FULL per-child gate sequence —
+/// trust, strict verify, admission, grant freeze — via `run_locked_child`;
+/// nothing about the pool changes what a child is allowed to do.
+fn dispatch_worker(
+    dispatch: Arc<Dispatch>,
+    placement: Arc<dyn workflow_dispatch::Dispatcher>,
+    done: mpsc::Sender<ChildStep>,
+) {
+    loop {
+        let queued = {
+            let mut queue = dispatch.queue.lock().unwrap_or_else(|e| e.into_inner());
+            loop {
+                if dispatch.shutdown.load(Ordering::Acquire) {
+                    return;
+                }
+                if let Some(item) = queue.pop_front() {
+                    break item;
+                }
+                queue = dispatch
+                    .ready
+                    .wait(queue)
+                    .unwrap_or_else(|e| e.into_inner());
+            }
+        };
+
+        // Placement goes through the Phase 5 seam. The descriptor carries
+        // identities only — no argv, policy, secrets, or paths — so a future
+        // backend cannot widen or redirect what admission already froze.
+        let task = workflow_dispatch::TaskDescriptor {
+            step: queued.request.id,
+            role: queued.request.role.clone(),
+            child_run_id: queued.child_run_id.clone(),
+            serial: queued.serial,
+        };
+
+        // The lock is held for exactly the child's lifetime. Acquired in a
+        // block so it is released before the send, and so a panicking child
+        // (contained inside `run_child`) cannot leave it held.
+        let step = if queued.serial {
+            let _exclusive = dispatch.project.write().unwrap_or_else(|e| e.into_inner());
+            placement.run(&task, &queued.request)
+        } else {
+            let _shared = dispatch.project.read().unwrap_or_else(|e| e.into_inner());
+            placement.run(&task, &queued.request)
+        };
+
+        // A disconnected receiver means the drive loop is gone; stop quietly.
+        if done.send(step).is_err() {
+            return;
+        }
+    }
+}
+
+/// Wait for completions and fold them into `results`, recording each one
+/// fail-closed (gate 2: an unrecordable completion fails the run — better an
+/// error than an unrecorded step).
+///
+/// `wait_for` is how many completions to BLOCK for; everything else already
+/// finished is drained without blocking. The drive loop passes `outstanding`
+/// for the lockstep (resume-replay) path and `1` for continuous dispatch —
+/// one function, two policies, no duplicated recording logic.
+///
+/// Deliberately **not** deadline-aware. The cooperative wall check keeps its
+/// shipped semantics — evaluated before a batch is dispatched, refusing the
+/// NEXT batch rather than interrupting children already in flight. Making it
+/// fire mid-flight would be an enforcement-timing change, which is a
+/// line-by-line-review class of edit and not what Phase 1 is for. A run that
+/// wedges with children in flight is the out-of-thread watchdog's job, exactly
+/// as before.
+#[allow(clippy::too_many_arguments)]
+fn collect_completions(
+    done_rx: &mpsc::Receiver<ChildStep>,
+    wev: &WorkflowEvidence,
+    outstanding: &mut usize,
+    wait_for: usize,
+    completed_results: &mut Vec<(u64, String)>,
+    results: &mut Vec<StepResult>,
+    resident: &mut ResidentBudget,
+) -> Result<()> {
+    let target = wait_for.min(*outstanding);
+    let mut received = 0usize;
+
+    while received < target {
+        match done_rx.recv() {
+            Ok(step) => {
+                record_completion(wev, &step, completed_results, results, resident)?;
+                *outstanding -= 1;
+                received += 1;
+            }
+            // Every worker is gone (they only exit on shutdown or a send
+            // failure). Nothing further can arrive; stop waiting.
+            Err(_) => break,
+        }
+    }
+
+    // Opportunistic drain: anything already finished joins this same engine
+    // step instead of waiting for the next one.
+    while *outstanding > 0 {
+        match done_rx.try_recv() {
+            Ok(step) => {
+                record_completion(wev, &step, completed_results, results, resident)?;
+                *outstanding -= 1;
+            }
+            Err(_) => break,
+        }
+    }
+    Ok(())
+}
+
+/// Wait for every outstanding child and record each one, ignoring the wall
+/// deadline. Used on the terminal paths (`Done` / engine `Failed`), where the
+/// engine will not be stepped again but announced spawns still owe the
+/// evidence tree a terminal. Bounded in practice by the out-of-thread
+/// watchdog, which force-exits at ceiling + grace no matter what this does.
+fn drain_outstanding(
+    done_rx: &mpsc::Receiver<ChildStep>,
+    wev: &WorkflowEvidence,
+    outstanding: &mut usize,
+    completed_results: &mut Vec<(u64, String)>,
+    results: &mut Vec<StepResult>,
+    resident: &mut ResidentBudget,
+) -> Result<()> {
+    while *outstanding > 0 {
+        match done_rx.recv() {
+            Ok(step) => {
+                record_completion(wev, &step, completed_results, results, resident)?;
+                *outstanding -= 1;
+            }
+            // Every worker exited without reporting; nothing more can arrive.
+            Err(_) => break,
+        }
+    }
+    Ok(())
+}
+
+/// Record one child's terminal event and fold its result into the engine feed.
+fn record_completion(
+    wev: &WorkflowEvidence,
+    step: &ChildStep,
+    completed_results: &mut Vec<(u64, String)>,
+    results: &mut Vec<StepResult>,
+    resident: &mut ResidentBudget,
+) -> Result<()> {
+    match &step.result.output {
+        StepOutput::Completed(value) => {
+            // Phase 2b: charge the machine-owned resident ceiling. Sticky on
+            // breach; the drive loop polls it after collecting and fails the
+            // RUN closed, the same shape as the wall deadline.
+            resident.charge(value);
+            wev.material(&RunEvent::StepCompleted {
+                ts: ts(),
+                step: step.result.request_id,
+            })?;
+            // Bounded taint-source retention: only the first
+            // TAINT_MAX_SOURCES qualifying results, each kept as its needle
+            // prefix only — the detector never uses more, so the truncation
+            // changes no mark.
+            //
+            // A schema-validated step resolves with an OBJECT, not a string
+            // (Phase 2a), so reading `as_str()` alone would silently drop
+            // every structured result from the taint evidence. Serializing
+            // the non-string case keeps the influence path reviewable: what
+            // flows into a later prompt is the rendered value, which is
+            // exactly what a substring detector should be looking for.
+            let text = match value.as_str() {
+                Some(text) => Some(std::borrow::Cow::Borrowed(text)),
+                None => serde_json::to_string(value)
+                    .ok()
+                    .map(std::borrow::Cow::Owned),
+            };
+            if let Some(text) = text {
+                if text.len() >= TAINT_MIN_BYTES && completed_results.len() < TAINT_MAX_SOURCES {
+                    completed_results.push((
+                        step.result.request_id,
+                        truncate_on_char_boundary(&text, TAINT_NEEDLE_BYTES).to_string(),
+                    ));
+                }
+            }
+        }
+        StepOutput::Failed => {
+            wev.material(&RunEvent::StepFailed {
+                ts: ts(),
+                step: step.result.request_id,
+                reason: step.reason.unwrap_or("failed").to_string(),
+            })?;
+        }
+    }
+    results.push(step.result.clone());
+    Ok(())
 }
 
 /// Run one spawn request as a locked child and consume its outcome. F5: the
-/// child's bounded stdout resolves the `agent()` promise DIRECTLY as one
-/// verbatim string (`from_utf8_lossy` is the only transform — no courier, no
-/// JSON hand-copy, no trim). F3: success/failure is consumed from the child
-/// run's RECORDED `LockedOutcome`, never the process exit alone.
-fn run_child(
+/// child's bounded stdout resolves the `agent()` promise DIRECTLY (
+/// `from_utf8_lossy` is the only transform — no courier, no JSON hand-copy,
+/// no trim) as a verbatim string, or — when the call declared a `schema`
+/// (Phase 2a) — as the value extracted and validated from those same bytes by
+/// [`workflow_schema::child_result_value`]. F3: success/failure is consumed
+/// from the child run's RECORDED `LockedOutcome`, never the process exit
+/// alone.
+pub(crate) fn run_child(
     manifest_dir: Option<&Path>,
     bindings: &HashMap<String, RoleBinding>,
     request: &SpawnRequest,
     pids: &crate::runs::ChildPids,
     serial: bool,
-    child_ids: &HashMap<u64, String>,
+    run_id: &str,
 ) -> ChildStep {
     let completed = |value: serde_json::Value| ChildStep {
         result: StepResult {
@@ -1176,16 +1578,6 @@ fn run_child(
         );
         return failed("unbound_role");
     };
-    let Some(run_id) = child_ids.get(&request.id) else {
-        // Same class: the drive loop pre-announces every id; a missing one
-        // is a composition bug, and the step fails closed in-band.
-        eprintln!(
-            "  ✗ agent #{} has no pre-announced child run id — failing the step closed",
-            request.id,
-        );
-        return failed("missing_child_id");
-    };
-
     // The per-child header line. The label is SCRIPT-controlled → sanitized.
     let label = request
         .opts
@@ -1217,10 +1609,47 @@ fn run_child(
         );
     }
 
+    // Phase 2b: `schema` and `result: 'handle'` are contradictory — one asks
+    // for the parsed value, the other says the value is too large to hold.
+    // Refused rather than silently ranked, so a script never gets the opposite
+    // of what it asked for.
+    if workflow_result::wants_handle(&request.opts)
+        && workflow_schema::declared_schema(&request.opts).is_some()
+    {
+        eprintln!(
+            "  {} agent #{} declares both a schema and result:'handle' — contradictory; \
+             failing the step closed before launch",
+            "✗".red(),
+            request.id,
+        );
+        return failed("schema_handle_conflict");
+    }
+
+    // Phase 2a: a declared schema appends an output contract to the prompt.
+    // It is prompt DATA delivered through the descriptor's argv or stdin like
+    // any other prompt text — never shell-interpolated (rule 7). An unusable
+    // schema fails the step closed here rather than launching a child whose
+    // result could never be validated.
+    let prompt = match workflow_schema::declared_schema(&request.opts) {
+        None => request.prompt.clone(),
+        Some(schema) => match workflow_schema::contract_suffix(schema) {
+            Ok(suffix) => format!("{}{}", request.prompt, suffix),
+            Err(err) => {
+                eprintln!(
+                    "  {} agent #{} declares an unusable schema — failing the step closed \
+                     before launch (the script sees null and decides severity)",
+                    "✗".red(),
+                    request.id,
+                );
+                return failed(err.reason());
+            }
+        },
+    };
+
     let child_args = RunArgs {
         harness: binding.harness.clone(),
         locked: true,
-        prompt: Some(request.prompt.clone()),
+        prompt: Some(prompt),
         // The role's profile FENCES the child (witness 9: its grant is ≤ the
         // profile's capability set — the shipped W2 profile-fence semantics).
         profile: Some(request.role.clone()),
@@ -1272,9 +1701,33 @@ fn run_child(
                             ""
                         },
                     );
-                    completed(serde_json::Value::String(
-                        String::from_utf8_lossy(&report.stdout).into_owned(),
-                    ))
+                    let raw = String::from_utf8_lossy(&report.stdout).into_owned();
+                    // Phase 2b: an opt-in handle resolves with the digest of
+                    // the artifact the locked path already persisted, so a
+                    // wide fan-out over large outputs keeps the heap flat.
+                    if workflow_result::wants_handle(&request.opts) {
+                        return completed(workflow_result::handle_value(&raw));
+                    }
+                    match workflow_schema::child_result_value(&raw, &request.opts) {
+                        Ok(value) => completed(value),
+                        // Deliberately NO automatic re-ask: a CLI-side retry
+                        // would spawn a child the engine never counted
+                        // against `max_agents`, which is a ceiling bypass.
+                        // The step fails closed and the script decides.
+                        // Retry accounting is Phase 4's, alongside purity.
+                        Err(err) => {
+                            eprintln!(
+                                "  {} agent #{} returned output that does not satisfy its \
+                                 declared schema ({}) — failing the step closed; no re-ask \
+                                 (a retry would spend an agent slot the ceiling never \
+                                 granted)",
+                                "✗".red(),
+                                request.id,
+                                err.reason(),
+                            );
+                            failed(err.reason())
+                        }
+                    }
                 }
                 recorded => {
                     eprintln!(
@@ -1834,6 +2287,186 @@ fn render_workflow_report_json(run_id: &str) -> Result<String> {
     }))?)
 }
 
+// ───────────────────────── workflow explain (static) ─────────────────────────
+
+/// `agentstack workflow explain <name>` — what a run would cost, before
+/// paying for it.
+///
+/// Goes through the SAME admission choke point as `run` (trust gate first,
+/// strict lock verification, ceiling intersection) rather than a lighter
+/// read-only path, because reading the script at all is the thing rule 3
+/// forbids for an untrusted bundle: "an untrusted bundle's workflows never
+/// parse, never normalize, never execute." An untrusted or drifted entry is
+/// refused here exactly as it would be by `run`; `workflow list` remains the
+/// refusal-free surface for *whether* an entry is admissible.
+///
+/// Static in the strong sense: `extract_meta` parses without ever
+/// constructing an interpreter `Context`, and no child is spawned.
+pub fn explain(manifest_dir: Option<&Path>, args: &crate::cli::WorkflowExplainArgs) -> Result<()> {
+    let value = explain_value(manifest_dir, &args.name)?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+    print_explain(&value);
+    Ok(())
+}
+
+/// The analysis as a `Value` — the testable seam, and what `--json` prints.
+fn explain_value(manifest_dir: Option<&Path>, name: &str) -> Result<serde_json::Value> {
+    let ctx = super::load(manifest_dir)?;
+    let base = crate::manifest::project_root_of(&ctx.dir);
+    let machine_policy = crate::machine_policy::load()?;
+    let lock = crate::lock::Lock::load(&ctx.dir)?;
+    let store = crate::store::Store::default_store();
+
+    let admitted = crate::workflows::normalized_workflows(
+        &base,
+        &ctx.loaded.manifest,
+        &ctx.dir,
+        &store,
+        &lock,
+        &machine_policy.workflows,
+    )?;
+    let wf = admitted.iter().find(|w| w.name == name).with_context(|| {
+        let names: Vec<&str> = admitted.iter().map(|w| w.name.as_str()).collect();
+        format!(
+            "no workflow named '{name}' — declared and admitted: {}",
+            if names.is_empty() {
+                "(none)".to_string()
+            } else {
+                names.join(", ")
+            }
+        )
+    })?;
+
+    let script = read_pinned_script(wf)?;
+    let meta = extract_meta(&script)
+        .map_err(|e| anyhow::anyhow!("workflow '{name}' has an unusable meta block: {e}"))?;
+
+    // The ceiling chain, same three-way min the run computes.
+    let effective_agents = meta
+        .max_agents
+        .map_or(wf.max_agents, |m| m.min(wf.max_agents));
+    let effective_wall = meta
+        .max_wall_seconds
+        .map_or(wf.max_wall_seconds, |m| m.min(wf.max_wall_seconds));
+    let max_concurrent = machine_policy
+        .workflows
+        .max_concurrent
+        .unwrap_or(DEFAULT_MAX_CONCURRENT)
+        .max(1);
+
+    let serial = serial_roles_of(&ctx, &wf.roles);
+    let roles: Vec<serde_json::Value> = wf
+        .roles
+        .iter()
+        .map(|role| {
+            serde_json::json!({
+                "role": sanitize_line(role),
+                "serial": serial.contains(role),
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({
+        "workflow": sanitize_line(&wf.name),
+        "workflow_digest": wf.checksum,
+        "roles": roles,
+        "effective_max_agents": effective_agents,
+        "effective_max_wall_seconds": effective_wall,
+        "max_concurrent": max_concurrent,
+        "agent_call_sites": agent_call_sites(&script),
+    }))
+}
+
+/// Count literal `agent(` occurrences outside string and comment context.
+///
+/// This is a count of call **sites**, deliberately not an estimate of calls:
+/// one site inside a `.map()` or a loop runs as many times as the data says,
+/// and the actual fan-out width is data-dependent and undecidable here. The
+/// render says so in as many words rather than letting a number imply an
+/// analysis that was not performed — the honest bound on calls is
+/// `effective_max_agents`, which the engine enforces per call.
+fn agent_call_sites(script: &str) -> usize {
+    let bytes = script.as_bytes();
+    let mut count = 0usize;
+    let mut i = 0usize;
+    let (mut in_line, mut in_block, mut quote, mut escaped) = (false, false, 0u8, false);
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_line {
+            if b == b'\n' {
+                in_line = false;
+            }
+        } else if in_block {
+            if b == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                in_block = false;
+                i += 1;
+            }
+        } else if quote != 0 {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == quote {
+                quote = 0;
+            }
+        } else if b == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            in_line = true;
+            i += 1;
+        } else if b == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            in_block = true;
+            i += 1;
+        } else if b == b'"' || b == b'\'' || b == b'`' {
+            quote = b;
+        } else if script[i..].starts_with("agent(")
+            // Not a suffix of a longer identifier (`myagent(`).
+            && !matches!(bytes.get(i.wrapping_sub(1)), Some(c) if c.is_ascii_alphanumeric() || *c == b'_' || *c == b'$')
+        {
+            count += 1;
+            i += "agent(".len() - 1;
+        }
+        i += 1;
+    }
+    count
+}
+
+fn print_explain(v: &serde_json::Value) {
+    println!("workflow  {}", v["workflow"].as_str().unwrap_or("?"));
+    println!("pinned    {}", v["workflow_digest"].as_str().unwrap_or("?"));
+    println!();
+    println!(
+        "ceilings  max_agents={}  max_wall_seconds={}  concurrency={}",
+        v["effective_max_agents"], v["effective_max_wall_seconds"], v["max_concurrent"]
+    );
+    println!();
+    println!("roles");
+    for role in v["roles"].as_array().cloned().unwrap_or_default() {
+        let serial = role["serial"].as_bool().unwrap_or(false);
+        println!(
+            "  {:<20} {}",
+            role["role"].as_str().unwrap_or("?"),
+            if serial {
+                "serial — children run ONE AT A TIME whatever the concurrency cap says"
+            } else {
+                "concurrent"
+            }
+        );
+    }
+    println!();
+    println!(
+        "{} agent() call site(s) in the pinned source.",
+        v["agent_call_sites"]
+    );
+    println!(
+        "Sites, not calls: one site inside a loop or .map() runs once per item, so the actual\n\
+         fan-out is data-dependent. The enforced bound on TOTAL spawns is max_agents={} — the\n\
+         engine refuses the call past it, per call.",
+        v["effective_max_agents"]
+    );
+}
+
 /// One `[workflows.*]` manifest entry's admission status — the row `list`
 /// prints or emits.
 struct WorkflowListRow {
@@ -1844,9 +2477,49 @@ struct WorkflowListRow {
     trusted: bool,
     lock_status: &'static str,
     roles: Vec<String>,
+    /// Roles whose harness cannot take a per-child injected MCP config, so
+    /// their children fall back to park/swap and run one at a time with the
+    /// project to themselves (§12.1).
+    ///
+    /// Surfaced here because it is an AUTHORING-TIME fact with a large
+    /// performance consequence: a 20-wide `parallel()` over a serial role
+    /// executes sequentially no matter how high the concurrency cap is. Before
+    /// this, the only signal was a `serial (config-swap)` note per child in
+    /// the run log — i.e. after the author had already designed the fan-out
+    /// and paid for it once.
+    serial_roles: Vec<String>,
     max_agents: u32,
     max_wall_seconds: u64,
     checksum: Option<String>,
+}
+
+/// Which of `roles` launch through the serial park/swap path, decided by the
+/// same [`supports_injection`] predicate the drive loop schedules on — never a
+/// second definition.
+///
+/// Refusal-free, matching `list`'s contract: a role with no declared profile,
+/// or one binding an unknown harness, is simply not claimed to be serial. That
+/// entry has a bigger problem than scheduling, and `run`/`doctor` are where it
+/// gets reported.
+fn serial_roles_of(ctx: &super::Context, roles: &[String]) -> Vec<String> {
+    roles
+        .iter()
+        .filter(|role| {
+            ctx.loaded
+                .manifest
+                .profiles
+                .get(role.as_str())
+                .map(|p| {
+                    p.harness
+                        .clone()
+                        .unwrap_or_else(|| "claude-code".to_string())
+                })
+                .and_then(|harness| ctx.registry.get(&harness))
+                .map(|desc| !supports_injection(desc))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect()
 }
 
 /// `agentstack workflow list` — every declared `[workflows.*]` entry with its
@@ -1962,6 +2635,7 @@ fn collect_workflow_list_rows(manifest_dir: Option<&Path>) -> Result<Vec<Workflo
             declared: true,
             trusted,
             lock_status,
+            serial_roles: serial_roles_of(&ctx, &roles),
             roles,
             max_agents,
             max_wall_seconds,
@@ -1986,6 +2660,7 @@ fn workflow_list_json(rows: &[WorkflowListRow]) -> serde_json::Value {
                 "trusted": r.trusted,
                 "lock_status": r.lock_status,
                 "roles": r.roles.iter().map(|s| sanitize_line(s)).collect::<Vec<_>>(),
+                "serial_roles": r.serial_roles.iter().map(|s| sanitize_line(s)).collect::<Vec<_>>(),
                 "max_agents": r.max_agents,
                 "max_wall_seconds": r.max_wall_seconds,
                 "checksum": r.checksum,
@@ -2021,6 +2696,22 @@ fn print_workflow_list_table(rows: &[WorkflowListRow]) {
         "NAME", "TRUSTED", "LOCK", "AGENTS", "WALL(s)"
     );
     for r in rows {
+        // A serial role is marked inline rather than given its own column:
+        // it is a property OF a role, and the mark is only meaningful next to
+        // the name it qualifies.
+        let roles = r
+            .roles
+            .iter()
+            .map(|role| {
+                let name = sanitize_line(role);
+                if r.serial_roles.contains(role) {
+                    format!("{name}*")
+                } else {
+                    name
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         println!(
             "{:<24} {:<8} {:<14} {:<8} {:<10} {}",
             sanitize_line(&r.name),
@@ -2028,11 +2719,15 @@ fn print_workflow_list_table(rows: &[WorkflowListRow]) {
             r.lock_status,
             r.max_agents,
             r.max_wall_seconds,
-            r.roles
-                .iter()
-                .map(|s| sanitize_line(s))
-                .collect::<Vec<_>>()
-                .join(","),
+            roles,
+        );
+    }
+    if rows.iter().any(|r| !r.serial_roles.is_empty()) {
+        println!();
+        println!(
+            "* this role's harness takes no per-child MCP config, so its children run ONE AT A \
+             TIME regardless of the concurrency cap — a wide parallel() over it executes \
+             sequentially."
         );
     }
 }
@@ -2249,6 +2944,9 @@ mod tests {
             "  emit-json*) printf '%s' '{\"a\":1,\"b\":[1,2,3]}' ;;\n",
             "  sleep*) sleep 1.5; printf 'ok' ;;\n",
             "  long*) printf '%080d' 7 ;;\n",
+            // 4000 bytes: large enough that a result handle (preview + digest,
+            // ~620 bytes) is a genuine saving rather than overhead.
+            "  huge*) printf '%04000d' 7 ;;\n",
             "  fail*) exit 3 ;;\n",
             "  overlap*)\n",
             "    set -- $last\n",
@@ -2425,6 +3123,370 @@ mod tests {
             let digests = recorded_grant_digests(home);
             assert_eq!(digests.len(), 2, "{digests:?}");
             assert_ne!(digests[0], digests[1]);
+        });
+    }
+
+    /// Phase 2a: a declared `schema` resolves the `agent()` promise with a
+    /// PARSED value rather than a string, so a downstream stage can index it
+    /// instead of parsing prose. The fake harness's `emit-json` prompt
+    /// returns `{"a":1,"b":[1,2,3]}`.
+    #[cfg(unix)]
+    #[test]
+    fn a_declared_schema_resolves_the_promise_with_a_parsed_value() {
+        workflow_fixture(|_home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const out = await agent('emit-json', { role: 'w', schema: {\n\
+                   type: 'object',\n\
+                   required: ['a', 'b'],\n\
+                   properties: { a: { type: 'integer' }, b: { type: 'array', items: { type: 'integer' } } },\n\
+                 }});\n\
+                 return { typed: typeof out, a: out.a, second: out.b[1] };",
+            );
+            let value = run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!({ "typed": "object", "a": 1, "second": 2 }),
+                "a schema'd result must reach the script as structured data"
+            );
+        });
+    }
+
+    /// Phase 2a, the failing half: output that does not satisfy the declared
+    /// schema fails the step CLOSED (the script sees `null`) and records the
+    /// launcher-authored reason. Critically it must NOT re-ask — a retry
+    /// would spend an agent slot the engine's ceiling never granted.
+    #[cfg(unix)]
+    #[test]
+    fn schema_mismatch_fails_the_step_closed_without_a_re_ask() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                // The fake harness answers 'ok' — valid JSON it is not.
+                "export const meta = { roles: ['w'] };\n\
+                 const out = await agent('plain', { role: 'w', schema: { type: 'object' } });\n\
+                 return { sawNull: out === null };",
+            );
+            let value = run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            assert_eq!(value, serde_json::json!({ "sawNull": true }));
+
+            let (_run, events) = workflow_run_events(home);
+            let reasons: Vec<String> = events
+                .iter()
+                .filter_map(|e| match e {
+                    RunEvent::StepFailed { reason, .. } => Some(reason.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                reasons,
+                vec!["schema_no_json".to_string()],
+                "the schema failure is recorded with its launcher-authored category"
+            );
+            let spawns = events
+                .iter()
+                .filter(|e| matches!(e, RunEvent::StepSpawned { .. }))
+                .count();
+            assert_eq!(
+                spawns, 1,
+                "exactly one child: a re-ask would spend an agent slot the ceiling never granted"
+            );
+        });
+    }
+
+    /// Phase 4: the purity surface fails CLOSED. Every scheduling freedom is
+    /// gated on a property the current authority model cannot verify, so
+    /// declaring one is a validation error that names the prerequisite —
+    /// rather than a silently-accepted claim a repo file could use to buy a
+    /// freedom the enforcement cannot back (rule 8).
+    #[test]
+    fn scheduling_freedoms_are_refused_with_their_prerequisite_named() {
+        let manifest_toml = r#"
+            version = 1
+            [profiles.w]
+            [workflows.t]
+            path = "./workflows/main.js"
+            roles = ["w"]
+            [workflows.t.scheduling.w]
+            effect_free = true
+            retry = 2
+            speculative = true
+        "#;
+        let manifest: crate::manifest::Manifest = toml::from_str(manifest_toml).unwrap();
+        let issues = crate::manifest::validate(&manifest);
+        let texts: Vec<String> = issues.iter().map(|i| i.message.clone()).collect();
+        let joined = texts.join("\n");
+        for needle in ["effect_free", "speculative", "retry"] {
+            assert!(
+                texts.iter().any(|t| t.contains(needle)),
+                "{needle} must be refused: {joined}"
+            );
+        }
+        // The refusal has to teach, not just deny.
+        assert!(
+            joined.contains("bundle-global") && joined.contains("host tier"),
+            "the effect_free refusal must name why it cannot be verified: {joined}"
+        );
+    }
+
+    /// Scheduling for a role the workflow never declared is a typo with real
+    /// consequences (the author believes a stage is configured when it is
+    /// not), so it is refused rather than ignored.
+    #[test]
+    fn scheduling_for_an_undeclared_role_is_refused() {
+        let manifest_toml = r#"
+            version = 1
+            [profiles.w]
+            [workflows.t]
+            path = "./workflows/main.js"
+            roles = ["w"]
+            [workflows.t.scheduling.ghost]
+            retry = 0
+        "#;
+        let manifest: crate::manifest::Manifest = toml::from_str(manifest_toml).unwrap();
+        let issues = crate::manifest::validate(&manifest);
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.message.contains("scheduling for role 'ghost'")),
+            "{:?}",
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// Phase 3: `workflow explain` reports the ceiling chain, per-role
+    /// scheduling, and call SITES — statically, spawning nothing.
+    #[cfg(unix)]
+    #[test]
+    fn explain_reports_ceilings_and_scheduling_without_spawning() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'], maxAgents: 3 };\n\
+                 const out = await parallel(args.items.map(i => () =>\n\
+                   agent('map ' + i, { role: 'w' })));\n\
+                 return agent('reduce', { role: 'w' });",
+            );
+            let before = child_run_dirs(home);
+            let v = explain_value(Some(proj.path()), "t").unwrap();
+
+            // The script's meta narrows the manifest ceiling; explain shows
+            // the same three-way min the run would enforce.
+            assert_eq!(v["effective_max_agents"], 3);
+            assert_eq!(v["agent_call_sites"], 2);
+            assert_eq!(v["roles"][0]["role"], "w");
+            // claude-code takes per-child MCP config, so it is not serial.
+            assert_eq!(v["roles"][0]["serial"], false);
+            // The verified strict integrity-root digest, in the same bare-hex
+            // form `workflow list` reports.
+            let digest = v["workflow_digest"].as_str().unwrap();
+            assert_eq!(digest.len(), 64, "{digest}");
+            assert!(digest.chars().all(|c| c.is_ascii_hexdigit()), "{digest}");
+            assert_eq!(
+                child_run_dirs(home).difference(&before).count(),
+                0,
+                "explain is static: it must never spawn a child"
+            );
+        });
+    }
+
+    /// The call-site count must not be fooled by the word appearing in a
+    /// string, a comment, or a longer identifier — an inflated count would
+    /// misinform exactly the authoring decision the command exists to
+    /// support.
+    #[test]
+    fn agent_call_sites_ignores_strings_comments_and_identifiers() {
+        let script = "// agent( in a line comment\n\
+             /* agent( in a block comment */\n\
+             const s = 'agent(' + \"agent(\" + `agent(`;\n\
+             const myagent = null; myagent(1);\n\
+             await agent('real one', { role: 'w' });\n\
+             const x = agent('real two', { role: 'w' });";
+        assert_eq!(agent_call_sites(script), 2);
+    }
+
+    /// Phase 2b: `result: 'handle'` resolves with `{digest, bytes, preview}`
+    /// instead of the full text, so a wide fan-out over large outputs keeps
+    /// the interpreter heap flat. The fake harness's `long` prompt returns 80
+    /// bytes.
+    #[cfg(unix)]
+    #[test]
+    fn a_handle_result_resolves_with_the_artifact_digest_not_the_text() {
+        workflow_fixture(|_home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const h = await agent('long', { role: 'w', result: 'handle' });\n\
+                 return { keys: Object.keys(h).sort(), bytes: h.bytes, \
+                          digested: h.digest.startsWith('sha256:') };",
+            );
+            let value = run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!({
+                    "keys": ["bytes", "digest", "preview"],
+                    "bytes": 80,
+                    "digested": true,
+                })
+            );
+        });
+    }
+
+    /// Phase 2b: a schema and a handle are contradictory — one asks for the
+    /// parsed value, the other says the value is too large to hold. The step
+    /// is refused BEFORE launch rather than one silently outranking the other.
+    #[cfg(unix)]
+    #[test]
+    fn schema_and_handle_together_are_refused_before_launch() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const out = await agent('emit-json', { role: 'w', result: 'handle', \
+                                                        schema: { type: 'object' } });\n\
+                 return { sawNull: out === null };",
+            );
+            let before = child_run_dirs(home);
+            let value = run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            assert_eq!(value, serde_json::json!({ "sawNull": true }));
+            assert_eq!(
+                child_run_dirs(home).difference(&before).count(),
+                0,
+                "the contradiction is caught before any child launches"
+            );
+        });
+    }
+
+    /// Phase 2b: breaching the machine's resident-result ceiling fails the
+    /// RUN, not the step. A script must not be able to absorb a machine
+    /// ceiling the way it absorbs a failed child, and the message has to name
+    /// the remedy.
+    #[cfg(unix)]
+    #[test]
+    fn the_resident_ceiling_fails_the_run_and_names_the_remedy() {
+        workflow_fixture(|home, proj| {
+            // 1-byte ceiling: the first result of any size breaches it.
+            std::fs::write(
+                home.path().join("agentstack.toml"),
+                "version = 1\n\n[policy.workflows]\nmax_resident_result_bytes = 1\n",
+            )
+            .unwrap();
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const a = await agent('long', { role: 'w' });\n\
+                 return { absorbed: true, len: a.length };",
+            );
+            let err = run_value(Some(proj.path()), &wf_args("t", None)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("resident-result ceiling"), "{msg}");
+            assert!(
+                msg.contains("result: 'handle'"),
+                "the refusal must name the remedy: {msg}"
+            );
+
+            let (_id, events) = workflow_run_events(home);
+            let terminals: Vec<String> = events
+                .iter()
+                .filter_map(|e| match e {
+                    RunEvent::WorkflowCompleted { outcome, .. } => Some(outcome.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(terminals, ["resident_cap"], "recorded under its own slug");
+        });
+    }
+
+    /// Phase 2b: the same run passes under the same ceiling once the wide
+    /// stage asks for handles — the remedy the refusal names actually works,
+    /// which is what makes the ceiling a bound rather than a wall.
+    #[cfg(unix)]
+    #[test]
+    fn handles_keep_a_run_under_a_ceiling_that_full_text_breaches() {
+        workflow_fixture(|home, proj| {
+            std::fs::write(
+                home.path().join("agentstack.toml"),
+                "version = 1\n\n[policy.workflows]\nmax_resident_result_bytes = 2000\n",
+            )
+            .unwrap();
+            // Two 4000-byte results are 8000 bytes of text against a 2000-byte
+            // ceiling; as handles they charge only preview + digest (~620 each).
+            const FULL: &str = "export const meta = { roles: ['w'] };\n\
+                 const out = await parallel([\n\
+                   () => agent('huge', { role: 'w' }),\n\
+                   () => agent('huge', { role: 'w' }),\n\
+                 ]);\n\
+                 return out.filter(Boolean).length;";
+            pin_and_trust(proj, SIMPLE_MANIFEST, FULL);
+            let err = run_value(Some(proj.path()), &wf_args("t", None)).unwrap_err();
+            assert!(
+                format!("{err:#}").contains("resident-result ceiling"),
+                "full text must breach this ceiling, or the test proves nothing"
+            );
+
+            // Same run, same ceiling, handles instead of text.
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                &FULL.replace("{ role: 'w' }", "{ role: 'w', result: 'handle' }"),
+            );
+            assert_eq!(
+                run_value(Some(proj.path()), &wf_args("t", None)).unwrap(),
+                serde_json::json!(2),
+                "the remedy the refusal names must actually work"
+            );
+        });
+    }
+
+    /// Phase 1 (continuous dispatch): a LATER stage's child overlaps an
+    /// EARLIER stage's still-running child. This is the property the batch
+    /// barrier made impossible, and the reason `pipeline()` can finally mean
+    /// on the host what it has always meant in the script.
+    ///
+    /// The rendezvous is the discriminator, not a clock. Item 2's stage-1
+    /// child (`B1`) blocks until item 1's stage-2 child (`A2`) starts. Under
+    /// whole-batch joining, `A2` could not start until `B1` returned, so `B1`
+    /// exhausted its bounded wait and failed — the script would see `null`.
+    /// Under continuous dispatch both are in flight together and both
+    /// complete. Asserting item 2 is non-null therefore fails closed against a
+    /// regression to batch joining, with no timing assumption.
+    #[cfg(unix)]
+    #[test]
+    fn a_later_stage_child_overlaps_an_earlier_stage_child() {
+        workflow_fixture(|_home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const out = await pipeline([1, 2],\n\
+                   (item) => item === 1\n\
+                     ? agent('quick', { role: 'w' })\n\
+                     : agent(`overlap ${args.dir} B1 A2`, { role: 'w' }),\n\
+                   (prev, item) => item === 1\n\
+                     ? agent(`overlap ${args.dir} A2 B1`, { role: 'w' })\n\
+                     : prev,\n\
+                 );\n\
+                 return out;",
+            );
+            let markers = proj.child("markers");
+            markers.create_dir_all().unwrap();
+            let args_json = serde_json::json!({ "dir": markers.path() }).to_string();
+
+            let value = run_value(Some(proj.path()), &wf_args("t", Some(&args_json))).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!(["A2-ok", "B1-ok"]),
+                "item 2's first-stage child must still be running when item 1's \
+                 second-stage child starts — a null here means the host joined the \
+                 whole batch again and the cross-stage overlap was lost"
+            );
         });
     }
 
@@ -2894,19 +3956,23 @@ mod tests {
                 opts: serde_json::Value::Null,
             };
             let child_id = record_step_spawned(&wev, &request, bindings.get("w"), &[]).unwrap();
-            let mut child_ids = HashMap::new();
-            child_ids.insert(0, child_id);
             let pids: crate::runs::ChildPids = Arc::new(Mutex::new(HashSet::new()));
 
-            let steps = execute_batch(
+            // Post-Phase-1 the scheduling decision lives in the drive loop
+            // (which routes a non-injectable role through the exclusive
+            // project lock) and the launcher just honours the `serial` flag —
+            // so the witness drives `run_child` directly. What it asserts is
+            // unchanged and is the part that matters: the config-swap fallback
+            // is RECORDED on the spawn event, not merely printed.
+            let step = run_child(
                 Some(proj.path()),
                 &bindings,
-                &[request],
-                4,
+                &request,
                 &pids,
-                &child_ids,
+                true,
+                &child_id,
             );
-            assert!(matches!(steps[0].result.output, StepOutput::Completed(_)));
+            assert!(matches!(step.result.output, StepOutput::Completed(_)));
             let recorded = RunLog::read(&run_id).into_iter().find_map(|e| match e {
                 RunEvent::StepSpawned { serial, .. } => Some(serial),
                 _ => None,
@@ -3108,6 +4174,44 @@ mod tests {
             assert!(report.contains("Resumed 1 time(s)"), "{report}");
             assert!(report.contains("[replayed on resume]"), "{report}");
             assert!(report.contains("[live, resumed session]"), "{report}");
+        });
+    }
+
+    /// Phase 2a × Stage F: a REPLAYED schema'd step must reach the script as
+    /// the same structured value the live run produced.
+    ///
+    /// The subtle failure this guards is silent. `read_verified_result`
+    /// returns the child's raw stdout bytes, so a replay that skipped the
+    /// schema transform would feed a JSON *string* where the original fed an
+    /// *object* — the resumed run would then take a different branch, or
+    /// throw on a property access, while every digest still matched. Asserting
+    /// value equality against the uninterrupted run is what catches it.
+    #[cfg(unix)]
+    #[test]
+    fn a_replayed_schema_step_feeds_the_same_structured_value() {
+        workflow_fixture(|home, proj| {
+            pin_and_trust(
+                proj,
+                SIMPLE_MANIFEST,
+                "export const meta = { roles: ['w'] };\n\
+                 const schema = { type: 'object', required: ['a'] };\n\
+                 const a = await agent('emit-json', { role: 'w', schema });\n\
+                 const b = await agent('emit-json', { role: 'w', schema });\n\
+                 return { first: a.a, secondLen: b.b.length, typed: typeof a };",
+            );
+            let uninterrupted = run_value(Some(proj.path()), &wf_args("t", None)).unwrap();
+            assert_eq!(
+                uninterrupted,
+                serde_json::json!({ "first": 1, "secondLen": 3, "typed": "object" })
+            );
+            let (id, events) = workflow_run_events(home);
+
+            rewrite_journal(home, &id, &journal_prefix(&events, is_completed(0)));
+            let value = run_value(Some(proj.path()), &wf_resume("t", None, &id)).unwrap();
+            assert_eq!(
+                value, uninterrupted,
+                "the replayed step must re-apply the schema transform, not feed raw stdout"
+            );
         });
     }
 

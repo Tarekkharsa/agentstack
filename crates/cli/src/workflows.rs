@@ -226,6 +226,7 @@ mod tests {
             max_agents: Some(10),
             max_wall_seconds: None,
             max_concurrent: None,
+            max_resident_result_bytes: None,
         };
 
         // Untrusted → refuses before anything resolves; no name invocable.

@@ -649,6 +649,87 @@ Before promoting them:
 - [ ] Confirm roles never widen their selected profile or machine ceiling.
 - [ ] Decide whether library distribution is necessary from demonstrated reuse.
 
+### Workflow scaling lane
+
+Design: [`docs/design/workflow-scaling.md`](docs/design/workflow-scaling.md).
+MapReduce-informed, but only where the analogy holds. The spine is that every
+framework freedom Hadoop enjoys (retry, reorder, relocate, race) is paid for by
+task purity — so the lane buys purity back where a profile can *prove* it,
+rather than where an author claims it. Post-launch: the 2026-07-25 product
+review puts the everyday loop ahead of this, and that stands.
+
+- [x] Phase 0 — measurement rig (2026-07-26, uncommitted).
+  `examples/workflow-scale/`: latency-configurable mock harness (latency is
+  checksum-derived from the prompt, so runs replay identically), width and
+  concurrency knobs, `analyze.py`. Uses only the shipped report shape.
+  Baseline finding that set the phase order: the batch barrier and the
+  concurrency cap are *coupled* — at conc 4 efficiency was 0.885 (pool
+  saturated, barrier nearly free), at conc 16 it fell to 0.547. Neither fix
+  was worth shipping alone.
+- [x] Phase 1 — continuous dispatch (2026-07-26, uncommitted). Persistent
+  worker pool replacing whole-batch joining; children stay in flight across
+  `step()`. New `StepOutcome::Awaiting` in the engine distinguishes "still
+  owed results" from the pre-existing stall failure. Width 100 / conc 16:
+  15.36s → 12.00s (efficiency 0.547 → 0.675); **0.902 at a flat latency
+  distribution**, so the residual loss under heavy tails is the tail itself.
+  Preserved: spawn-evidence-before-launch, lockstep resume replay, park/swap
+  exclusivity, and the wall check's batch-boundary semantics. Witness:
+  `a_later_stage_child_overlaps_an_earlier_stage_child` (rendezvous-based,
+  mutation-verified against a forced-lockstep regression).
+- [x] Phase 1b — surface the serial cliff in `workflow list` (`*` in the
+  table, `serial_roles` in JSON): a wide `parallel()` over a non-injectable
+  role runs sequentially whatever the cap says, and that was previously only
+  visible per-child in the run log.
+- [x] Phase 2a — schema-validated results (2026-07-26, uncommitted).
+  `agent(prompt, {schema})` resolves the promise with a parsed value;
+  `crates/cli/src/commands/workflow_schema.rs` holds the prompt contract, a
+  tolerant extractor (fences/prose, string- and escape-aware balanced scan),
+  and a bounded JSON Schema subset — no new dependency, unsupported keywords
+  documented as ignored. **No automatic re-ask**: a CLI retry would spend an
+  agent slot the engine's ceiling never granted. The same transform runs on
+  the replay path, or a resumed run would feed a string where the original fed
+  an object (witnessed). Taint sources serialize non-string results so
+  structured output stays on the influence evidence.
+- [ ] Phase 2b — content-addressed artifact store
+  (`~/.agentstack/artifacts/<sha256>`) plus a resident-result byte cap, past
+  which `agent()` returns a frozen opaque `{digest, bytes, preview}` handle.
+  This is what actually bounds the JS heap the posture label admits is
+  uncapped.
+- [x] Phase 3 — `shard()` / `partition()` in the prelude and
+  `agentstack workflow explain <name>` (2026-07-26, uncommitted). `partition`
+  returns exactly `r` buckets including empty ones, so reducer count (and
+  ceiling arithmetic) is not data-dependent; placement is a fixed FNV-1a over
+  the key string, so a replay reproduces the split. `explain` runs the same
+  admission choke point as `run` (rule 3: an untrusted bundle's script must not
+  be parsed) and reports call SITES, not calls, saying so explicitly.
+- [~] Phase 4 — purity surface landed and **failing closed**; execution half
+  BLOCKED. `[workflows.<n>.scheduling.<role>]` parses `effect_free` / `retry` /
+  `speculative`, and validation refuses all three with the prerequisite named.
+  **The plan's premise was wrong**: a `Profile` fences servers/skills/harness
+  only; `[policy.filesystem]` is bundle-global, its `write` scope is enforced
+  only in sandbox mode, and workflow children run at host tier — so nothing
+  today can verify effect-freedom. Deriving it would violate rule 8; accepting
+  the author's claim would defeat the thesis. Unblocked by either per-profile
+  filesystem/egress dimensions, or deriving purity from a sandbox/lockdown
+  posture for the role's children.
+- [x] Phase 5 — the `Dispatcher` seam with a local-only implementation
+  (2026-07-26, uncommitted). `TaskDescriptor` carries digests and names, never
+  argv/policy/secrets/paths — the absence is the contract and has its own
+  witness. Acceptance held: the existing suite passes unchanged and the bench
+  is unmoved (11.87s vs 12.00s at width 100/conc 16).
+  - [ ] Still open from Phase 5: cancellation propagation (the watchdog
+    orphans in-flight children) and splitting report/list/runs out of
+    `workflow.rs` (review F16).
+- [ ] Phase 6 — distributed workers. **Trigger NOT met as of 2026-07-26, so
+  nothing was built.** The binding constraint at width 100 is the straggler
+  tail (0.673 heavy-tail vs 0.902 flat), whose fix is Phase 4's backup tasks —
+  blocked on the purity prerequisite, not on a shortage of machines.
+- [ ] Review F13 — bind the approved blueprint to the executed bytes
+  (`plan_digest`), so the two consent gates do not read as independent
+  ceremony.
+- [ ] Review F14 — make compile-on-approve one recorded, undoable transaction
+  through the restore ledger.
+
 ### t3code MCP harness bridge — research only
 
 t3code already exposes an MCP surface and may be able to launch or supervise

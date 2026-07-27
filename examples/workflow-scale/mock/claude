@@ -1,0 +1,65 @@
+#!/bin/sh
+# Latency-configurable mock harness for the workflow scaling bench.
+#
+# Stands in for `claude` on PATH so the bench costs zero tokens and — more
+# importantly — so child latency is a CONTROLLED variable rather than whatever
+# the model happened to do. Real-model timing is the acceptance rig's job
+# (examples/workflow-acceptance); this one exists to characterise the DRIVE
+# LOOP.
+#
+# Latency is derived deterministically from a checksum of the prompt, so the
+# same width replays with the same per-shard latencies across runs and across
+# the barrier/no-barrier comparison. That determinism is the whole point: a
+# random distribution would make two runs incomparable, and the engine's own
+# determinism rule bars a clock inside the script anyway.
+#
+# Distribution (heavy-tailed on purpose — agent latency is not normal):
+#   70%  fast    SCALE_FAST_MS   (default  200ms)
+#   25%  medium  SCALE_MED_MS    (default  800ms)
+#    5%  slow    SCALE_SLOW_MS   (default 4000ms)   <- the straggler tail
+#
+# Set SCALE_FLAT=1 for a uniform SCALE_FAST_MS distribution, which isolates
+# throughput effects from straggler effects.
+
+FAST_MS=${SCALE_FAST_MS:-200}
+MED_MS=${SCALE_MED_MS:-800}
+SLOW_MS=${SCALE_SLOW_MS:-4000}
+OUT_BYTES=${SCALE_OUT_BYTES:-200}
+
+# The prompt is the last argument, matching how the locked-run seam invokes the
+# harness descriptor's headless form.
+prompt=""
+for a in "$@"; do prompt="$a"; done
+
+if [ "${SCALE_FLAT:-0}" = "1" ]; then
+  ms=$FAST_MS
+else
+  # cksum is POSIX and present on both macOS and Linux. Deterministic in the
+  # prompt, so shard N always draws the same latency bucket.
+  h=$(printf '%s' "$prompt" | cksum | awk '{print $1}')
+  bucket=$((h % 100))
+  if [ "$bucket" -lt 70 ]; then
+    ms=$FAST_MS
+  elif [ "$bucket" -lt 95 ]; then
+    ms=$MED_MS
+  else
+    ms=$SLOW_MS
+  fi
+fi
+
+# POSIX sh has no float arithmetic; build "S.mmm" textually. Both macOS and GNU
+# sleep accept fractional seconds.
+secs=$((ms / 1000))
+frac=$((ms % 1000))
+sleep "$secs.$(printf '%03d' "$frac")"
+
+# A realistic-length result: short enough to stay cheap, long enough to clear
+# the drive loop's 64-byte taint-detection floor, so the bench exercises the
+# same evidence path a real run does.
+printf 'mock-result '
+i=0
+while [ "$i" -lt "$OUT_BYTES" ]; do
+  printf 'y'
+  i=$((i + 1))
+done
+printf '\n'

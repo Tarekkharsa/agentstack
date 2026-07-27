@@ -202,6 +202,21 @@ pub enum StepOutput {
 pub enum StepOutcome {
     /// Spawns are pending — fan them out, feed the results, call `step` again.
     Batch(StepBatch),
+    /// No new spawns and the root has not settled, but requests handed out
+    /// earlier are still unanswered — the script is genuinely awaiting them.
+    ///
+    /// This is the **continuous dispatch** outcome: a caller that steps the
+    /// engine as soon as ANY child completes (rather than joining a whole
+    /// batch) will routinely land here, because resolving one promise need
+    /// not produce either a new spawn or a settled root. Feed more results
+    /// and step again.
+    ///
+    /// It is deliberately distinct from the stall failure below: "still owed
+    /// results" and "wedged with nothing outstanding" are different states,
+    /// and only the second is a defect. A caller that has no outstanding
+    /// requests and receives `Awaiting` would itself be the bug — the engine
+    /// only reports it while [`SpawnState::awaiting`] is non-empty.
+    Awaiting,
     /// The root promise fulfilled; this is the final value.
     Done(serde_json::Value),
     /// Limit hit, panic, uncaught throw, or engine/host error.
@@ -526,9 +541,18 @@ impl WorkflowRun {
         };
 
         match promise.state() {
-            PromiseState::Pending => StepOutcome::Failed(WorkflowError::internal(
-                "workflow stalled: root promise pending with no pending spawns",
-            )),
+            PromiseState::Pending => {
+                // Outstanding requests mean the caller still owes results, so
+                // this is a normal suspension, not a stall. Only a pending
+                // root with NOTHING outstanding is genuinely wedged — that
+                // remains the internal failure it always was.
+                if !self.state.borrow().awaiting.is_empty() {
+                    return StepOutcome::Awaiting;
+                }
+                StepOutcome::Failed(WorkflowError::internal(
+                    "workflow stalled: root promise pending with no pending spawns",
+                ))
+            }
             PromiseState::Fulfilled(value) => match js_to_value(&value, &mut self.context, 0) {
                 Ok(value) => StepOutcome::Done(value),
                 Err(err) => StepOutcome::Failed(err),
@@ -1039,6 +1063,59 @@ mod tests {
         // item 1 (index 0): 1*10+0=10 -> 110 ; item 2 throws -> null ;
         // item 3 (index 2): 3*10+2=32 -> 132.
         assert_eq!(run_to_done(script), serde_json::json!([110, null, 132]));
+    }
+
+    #[test]
+    fn shard_splits_without_dropping_or_padding() {
+        // Phase 3: the tail shard is short, never padded, and nothing is lost.
+        let script = "const meta = { roles: [] };\n\
+             const s = shard([1,2,3,4,5], { per: 2 });\n\
+             return { shapes: s.map(x => x.length), flat: s.flat(),\n\
+                      empty: shard([], { per: 3 }).length,\n\
+                      clamped: shard([1,2], { per: 0 }).map(x => x.length) };";
+        assert_eq!(
+            run_to_done(script),
+            serde_json::json!({
+                "shapes": [2, 2, 1],
+                "flat": [1, 2, 3, 4, 5],
+                "empty": 0,
+                // `per: 0` must clamp to 1, not loop forever.
+                "clamped": [1, 1],
+            })
+        );
+    }
+
+    #[test]
+    fn partition_is_stable_exact_width_and_key_grouping() {
+        // Phase 3, the three properties a multi-reducer stage depends on:
+        // exactly `r` buckets (so the agent count is not data-dependent), the
+        // same key always in the same bucket (so a reducer sees all of its
+        // key's items), and determinism across calls (so a resumed run
+        // reproduces the split).
+        let script = "const meta = { roles: [] };\n\
+             const items = [];\n\
+             for (let i = 0; i < 40; i++) items.push({ file: 'f' + (i % 7), i });\n\
+             const a = partition(items, 4, x => x.file);\n\
+             const b = partition(items, 4, x => x.file);\n\
+             const same = JSON.stringify(a) === JSON.stringify(b);\n\
+             const byKey = {};\n\
+             a.forEach((bucket, bi) => bucket.forEach(x => {\n\
+               byKey[x.file] = byKey[x.file] === undefined ? bi : byKey[x.file];\n\
+               if (byKey[x.file] !== bi) byKey[x.file] = -1;\n\
+             }));\n\
+             return { buckets: a.length, total: a.flat().length, same,\n\
+                      split: Object.values(byKey).some(v => v === -1),\n\
+                      emptyStillCounted: partition([], 3, x => x).length };";
+        assert_eq!(
+            run_to_done(script),
+            serde_json::json!({
+                "buckets": 4,
+                "total": 40,
+                "same": true,
+                "split": false,
+                "emptyStillCounted": 3,
+            })
+        );
     }
 
     #[test]

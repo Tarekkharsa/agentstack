@@ -572,6 +572,16 @@ pub enum WorkflowCmd {
     /// (terminal recorded), `interrupted` (no terminal, process gone —
     /// resumable via `workflow run <name> --resume <id>`).
     Runs(WorkflowRunsArgs),
+
+    /// Explain what a workflow would cost BEFORE running it: its declared
+    /// roles and ceilings, which roles launch serially, and the `agent()`
+    /// call sites the pinned script contains.
+    ///
+    /// Static and read-only — the script is parsed, never executed, and no
+    /// child is spawned. The point is to catch "this fans out wider than the
+    /// ceiling allows" at authoring time instead of after paying for the
+    /// first N children.
+    Explain(WorkflowExplainArgs),
 }
 
 #[derive(Args, Debug)]
@@ -605,6 +615,17 @@ pub struct WorkflowReportArgs {
 
     /// Emit the evidence tree as JSON instead of the human-readable text
     /// render — the same recorded join, structured for scripting.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WorkflowExplainArgs {
+    /// The `[workflows.<name>]` entry to explain.
+    #[arg(value_name = "NAME")]
+    pub name: String,
+
+    /// Emit the static analysis as JSON instead of a human render.
     #[arg(long)]
     pub json: bool,
 }

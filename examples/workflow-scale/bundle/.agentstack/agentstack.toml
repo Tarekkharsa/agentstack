@@ -1,0 +1,42 @@
+version = 1
+
+[project]
+name = "workflow-scale"
+
+# The scaling bench (Phase 0 of the workflow scaling plan). Unlike
+# `workflow-acceptance` — which proves the composition works end to end at
+# width 5 — this bundle exists to be run at width 5 / 25 / 100 against a
+# latency-configurable mock harness, so the drive loop's behaviour under fan-out
+# is measured rather than assumed.
+#
+# Ceilings are requests: the effective value is min(request, machine cap). They
+# are set high here on purpose — this bundle is pointed at a fenced
+# AGENTSTACK_HOME by `bench.sh`, and the whole point is to let the WIDTH, not
+# the ceiling, be the independent variable.
+[workflows.scale-bench]
+description = "Pipelined map+verify, then combine and reduce — the fan-out shape, parameterized by width"
+path = "./workflows/scale-bench.js"
+roles = ["mapper", "verifier", "combiner", "reducer"]
+# The manifest ceiling is itself validated into 1..=1000, so 1000 is the most a
+# workflow may request. That bounds the bench's usable width at 450:
+# 450 map + 450 verify + 57 combine + 1 reduce = 958.
+max_agents = 1000
+max_wall_seconds = 3600
+
+# Empty-surface role profiles: the children need nothing but a model, so the
+# bench measures the drive loop and the child process cost, not server startup.
+[profiles.mapper]
+servers = []
+skills = []
+
+[profiles.verifier]
+servers = []
+skills = []
+
+[profiles.combiner]
+servers = []
+skills = []
+
+[profiles.reducer]
+servers = []
+skills = []

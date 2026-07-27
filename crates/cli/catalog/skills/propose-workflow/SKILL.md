@@ -155,6 +155,68 @@ item through all stages independently** — per-item, no barrier, no fan-in;
 - Symbolic `fanout` becomes a data-dependent loop over the real inputs at
   author time (e.g. the changed-file list) — never a hardcoded count.
 
+### Authoring primitives that make a wide workflow actually work
+
+Use these when the fan-out is more than a handful of nodes. They are the
+difference between a workflow that demos and one that survives width.
+
+- **`schema` on any map node whose output a later stage reads.**
+  `agent(prompt, { role, schema })` resolves with a **parsed value**, so the
+  reduce stage indexes fields instead of parsing prose. At width 5 prose is
+  survivable; at width 100 the chance that *every* mapper emits parseable
+  output collapses, and a reduce that string-matches its inputs is the most
+  common way a wide workflow fails. Supported subset: `type`, `properties`,
+  `required`, `items`, `enum`, `additionalProperties: false` — anything else in
+  the schema document is **ignored**, so do not rely on it.
+
+  A step whose output fails the schema fails **closed** — the script sees
+  `null`, and there is **no automatic re-ask** (a retry would spend an agent
+  slot the ceiling never granted). Write the script to tolerate `null`:
+  `.filter(Boolean)` before the reduce, every time.
+
+  Tell the user plainly if they ask: schema validation constrains **shape, not
+  content**. A prompt-injected step can return perfectly schema-valid lies, so
+  it is a parsing convenience, never a trust boundary.
+
+- **`partition(items, r, keyFn)` when one reducer cannot hold the map output.**
+  A single reduce node is the default and is right for small fan-out. Past
+  roughly a hundred map results, one reduce prompt stops fitting in any context
+  window and the run fails on the last step **after paying for every mapper**.
+  Split it: `partition` returns exactly `r` buckets (empty ones included, so
+  your reducer count never varies with the data) and always routes the same key
+  to the same bucket. Then `parallel` one reducer per bucket, and — if the
+  blueprint calls for a single answer — one final fan-in over the R results.
+
+  If you do this, the blueprint must show it: R reducer nodes plus the final
+  fan-in, not one reduce node. The shape the user approved has to be the shape
+  that runs.
+
+- **`shard(items, { per })`** to batch small inputs into fewer children. 200
+  files as 200 children is usually worse than 20 children of 10 files: same
+  tokens, a tenth of the process and admission overhead.
+
+- **`result: 'handle'`** on stages returning kilobytes each. The promise
+  resolves with `{ digest, bytes, preview }` instead of the full text, keeping
+  a wide run under the machine's resident-result ceiling. A handle costs ~620
+  bytes, so it is pointless on short results. If a run fails with
+  `resident_cap`, this is the remedy the error names.
+
+- **`agentstack workflow explain <name>`** after step 2 and before step 4. It
+  reports the effective ceilings, which roles launch serially, and the
+  `agent()` call sites — statically, spawning nothing. Cheap way to catch "this
+  fans out wider than `max_agents` allows" before paying for the first N
+  children.
+
+**Serial roles are a real cliff.** A role whose harness takes no per-child MCP
+config runs its children **one at a time**, whatever the concurrency cap says.
+`workflow explain` and `workflow list` mark those roles. Do not design a
+20-wide map onto one.
+
+**Do not write `[workflows.<n>.scheduling]`.** `effect_free`, `retry`, and
+`speculative` all parse and are all **refused by validation** — nothing in the
+current authority model can prove a role is side-effect free, so the claim is
+not accepted. Adding the table only produces a validation error.
+
 Then run the governed pipeline `docs/workflows.md` specifies:
 
 1. **Declare** a `[workflows.<name>]` manifest entry and write the script at
@@ -164,9 +226,50 @@ Then run the governed pipeline `docs/workflows.md` specifies:
 3. **Trust** the pinned bytes with `agentstack trust .` — review the declared
    roles/ceilings, then pin. Untrusted, the workflow never parses and its name
    is not invocable; a one-byte change re-gates.
-4. **Run** with `agentstack workflow run <name>` (invoker input via
+4. **Check the cost statically** with `agentstack workflow explain <name>` —
+   ceilings, serial roles, call sites. Spawns nothing.
+5. **Run** with `agentstack workflow run <name>` (invoker input via
    `--args-json '<json>'`); read the evidence tree with `agentstack workflow
    report <run-id>`.
+
+### The second gate is not ceremony — say so (F13)
+
+Approving the blueprint and trusting the script are **two different consents
+over two different things**, and the second one is the one that actually
+authorizes execution. The user approved a *picture of intent*; `agentstack
+trust .` shows them *JavaScript the picture never displayed*. Nothing in v1
+binds the two — that integrity binding is a named fast-follow — so the only
+thing standing between "reviewed" and "rubber-stamped" is how you frame step 3.
+
+**Before running `agentstack trust .`, tell the user, in one short message:**
+
+- that this is the script you compiled **from the blueprint they approved**,
+  named by its `workflow` field;
+- what is in it that the graph could not show — the actual prompts, and any
+  place you had to deviate (if you deviated at all, you should have re-emitted
+  the blueprint instead, per the faithfulness rule);
+- that the trust gate is reviewing **the bytes, not the shape**, so skimming it
+  is not the same as having approved the graph.
+
+Never present step 3 as "just confirm again". A consent gate that reads as
+redundant gets clicked through, and then it protects nothing.
+
+### If any step fails, leave nothing behind (F14)
+
+Steps 1–3 write to the user's project after they clicked a button labelled
+**Approve**. If step 2 or 3 fails — a lock error, a refused trust, a ceiling
+the manifest won't admit — **do not stop and leave the wreckage**. Undo what
+you wrote, in reverse order:
+
+1. `agentstack restore --last --write` if a write was recorded, otherwise
+   remove the `[workflows.<name>]` entry you added and delete
+   `.agentstack/workflows/<name>.js`.
+2. Say plainly which step failed and why, in the user's words, not the tool's.
+3. Offer the next move: fix and retry, or re-open the blueprint for editing.
+
+A half-written manifest plus an orphan script is worse than a clean refusal —
+it leaves the project in a state the user never approved and cannot easily
+name.
 
 A minimal end-to-end anchor:
 

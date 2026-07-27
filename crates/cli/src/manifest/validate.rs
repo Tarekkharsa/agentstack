@@ -648,6 +648,86 @@ fn run<'a>(
                 );
             }
         }
+
+        // [workflows.<name>.scheduling.<role>] — the scaling plan's purity
+        // surface. Every check below fails CLOSED, because the whole point of
+        // the design is that a scheduling freedom must be earned by a property
+        // the system can verify, not by an assertion in a repo file.
+        for (role, sched) in &wf.scheduling {
+            if !wf.roles.iter().any(|r| r == role) {
+                issues.push(
+                    Issue::new(
+                        IssueKind::UnknownWorkflowRole,
+                        format!(
+                            "workflow '{name}' declares scheduling for role '{role}', which is \
+                             not in its roles list"
+                        ),
+                    )
+                    .with_fix(format!(
+                        "add '{role}' to [workflows.{name}] roles, or remove \
+                         [workflows.{name}.scheduling.{role}]"
+                    )),
+                );
+            }
+            // The prerequisite, stated precisely rather than as "unsupported":
+            // a reader should learn exactly what would make the claim
+            // checkable.
+            if sched.effect_free == Some(true) {
+                issues.push(
+                    Issue::new(
+                        IssueKind::InvalidWorkflowBounds,
+                        format!(
+                            "workflow '{name}' role '{role}' declares effect_free = true, which \
+                             nothing in the current authority model can verify: \
+                             [policy.filesystem] is bundle-global rather than per-profile, its \
+                             `write` scope is enforced only in sandbox mode, and workflow \
+                             children run at the host tier. Accepting the claim would let a \
+                             repo file grant a scheduling freedom the enforcement cannot back"
+                        ),
+                    )
+                    .with_fix(format!(
+                        "remove effect_free from [workflows.{name}.scheduling.{role}]; it \
+                         becomes available once a role's profile can bind and enforce \
+                         filesystem-write and egress denial for its children"
+                    )),
+                );
+            }
+            // Both freedoms are gated on the purity that cannot yet be
+            // proven, so both are refused — with the reason, not a shrug.
+            if sched.speculative == Some(true) {
+                issues.push(
+                    Issue::new(
+                        IssueKind::InvalidWorkflowBounds,
+                        format!(
+                            "workflow '{name}' role '{role}' declares speculative = true. A \
+                             backup task runs a SECOND child concurrently with the first, so it \
+                             duplicates whatever effects that child has — it is available only \
+                             for a role proven effect-free, which is not yet expressible"
+                        ),
+                    )
+                    .with_fix(format!(
+                        "remove speculative from [workflows.{name}.scheduling.{role}]"
+                    )),
+                );
+            }
+            if sched.retry.is_some_and(|r| r > 0) {
+                issues.push(
+                    Issue::new(
+                        IssueKind::InvalidWorkflowBounds,
+                        format!(
+                            "workflow '{name}' role '{role}' declares retry, which re-runs a \
+                             child that may already have written files or called an API — \
+                             available only for a role proven effect-free, which is not yet \
+                             expressible"
+                        ),
+                    )
+                    .with_fix(format!(
+                        "remove retry from [workflows.{name}.scheduling.{role}]; a failed step \
+                         surfaces to the script as null, which lets the workflow decide"
+                    )),
+                );
+            }
+        }
     }
 
     issues

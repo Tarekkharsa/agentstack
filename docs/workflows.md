@@ -88,21 +88,78 @@ export const meta = {
   description: "Review the day's diff, then verify the findings",
 }
 
-// map: one reader per file → reduce: synthesize → verify: refute the weak ones
-const found = await pipeline(
+const FINDINGS = {
+  type: 'object',
+  required: ['findings'],
+  properties: {
+    findings: {
+      type: 'array',
+      items: { type: 'object', required: ['file', 'summary'] },
+    },
+  },
+}
+
+// map: one reader per file, each returning validated JSON rather than prose
+const mapped = await pipeline(
   files,
-  f => agent(`List issues in ${f}. Return findings only.`, { role: 'reader' }),
+  f => agent(`List issues in ${f}.`, { role: 'reader', schema: FINDINGS }),
 )
-const report = await agent(`Synthesize and rank:\n${found.join('\n')}`, { role: 'writer' })
+const findings = mapped.filter(Boolean).flatMap(m => m.findings)
+
+// reduce: one synthesis per key group, so no single prompt has to hold everything
+const claims = await parallel(
+  partition(findings, 4, f => f.file).map(group => () =>
+    agent(`Synthesize and rank:\n${JSON.stringify(group)}`, { role: 'writer' })),
+)
+
+// verify: an independent refuter under a narrower role
 const checked = await parallel(
-  claims.map(c => () => agent(`Try to refute: ${c}`, { role: 'verifier' })),
+  claims.filter(Boolean).map(c => () => agent(`Try to refute: ${c}`, { role: 'verifier' })),
 )
-return keepUnrefuted(report, checked)
+return keepUnrefuted(claims, checked)
 ```
 
 The script runs inside a sandboxed interpreter with no filesystem, network,
 or environment access — the only thing it can do is request governed agent
 runs through `agent()`. Everything else is plain computation.
+
+### Getting structured results back
+
+Pass a `schema` and the promise resolves with a **parsed value** instead of
+text, so a later stage can index it rather than parse prose. A result that
+does not satisfy the schema fails that step closed — the script sees `null`
+and decides. There is deliberately no automatic re-ask: a retry would spend
+an agent slot your ceiling never granted.
+
+Validation constrains **shape, not content**. A schema-validated result is
+still model output, and a prompt-injected step can return perfectly
+schema-valid lies. It is a parsing convenience, not a trust boundary.
+
+### Splitting and grouping
+
+`shard(items, { per })` and `partition(items, r, keyFn)` are plain computation
+over values you already have — no agent, no tokens. `partition` returns
+exactly `r` buckets (empty ones included, so your reducer count never varies
+with the data) and always places the same key in the same bucket, which is
+what lets one reducer see all of a file's findings. It is not a balanced
+split: skewed keys make skewed buckets, and the fix is a better key.
+
+### Keeping wide runs in memory
+
+A run that fans out over large outputs can ask for
+`agent(prompt, { result: 'handle' })`, resolving with
+`{ digest, bytes, preview }` instead of the full text. There is also a
+machine ceiling on total result bytes; a run that exceeds it fails closed and
+tells you to use handles. Handles cost about 620 bytes each, so they are for
+stages returning kilobytes — on short results they are simply pointless.
+
+### Before you run it
+
+`agentstack workflow explain <name>` reports the effective ceilings, which
+roles launch serially, and how many `agent()` call **sites** the pinned
+script has — statically, spawning nothing. Sites are not calls: one site
+inside a loop runs once per item, so real fan-out is data-dependent. The
+enforced bound on total spawns is `max_agents`, refused per call.
 
 ## Where it stands
 
@@ -114,3 +171,12 @@ and the interpreter boundary has passed its independent security review.
 What remains before workflows leave experimental is repeated-use evidence —
 running real workflows on separate occasions and confirming each is easier
 to repeat than hand-rolled orchestration (`TODO.md`).
+
+Scaling work — how the drive loop behaves at width, and what it costs — is
+tracked separately in the
+[workflow scaling plan](design/workflow-scaling.md), which also records two
+things it deliberately did **not** build: automatic retry and straggler
+speculation (nothing in the current model can prove a role is side-effect
+free, and a claim the enforcement cannot back does not ship), and distributed
+workers (the measured bottleneck is the latency tail, not a shortage of
+machines).
