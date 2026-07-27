@@ -103,7 +103,7 @@ fn build_preview(action: &str, digest: &str, mut body: Map<String, Value>) -> Va
         format!(
             "Review, then apply with --yes --consented {digest}. Applying writes the \
              manifest entry and re-locks — nothing is rendered, so no ${{REF}} secret is \
-             resolved. Activate it separately with `use-profile` or `session start`."
+             resolved. Activate it separately with `agentstack use <name>`."
         )
     } else {
         format!(
@@ -171,7 +171,7 @@ fn activate(profile: &str, allow_unresolved: bool, dir: Option<&Path>) -> Result
 fn ensure_profile_exists(manifest: &Manifest, profile: &str) -> Result<()> {
     anyhow::ensure!(
         manifest.profiles.contains_key(profile),
-        "no toolset '{profile}' — create it first (create-profile)",
+        "no toolset '{profile}' — create it first with `agentstack toolset create`",
     );
     Ok(())
 }

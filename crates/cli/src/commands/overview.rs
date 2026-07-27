@@ -216,7 +216,7 @@ pub(crate) fn clean_at_rest_next_step(
     } else {
         Some((
             format!("agentstack session start {profile}"),
-            "materialize the profile for this session",
+            "materialize the toolset for this session",
         ))
     }
 }
@@ -262,7 +262,7 @@ pub(crate) fn profiles_line(names: &[String], active: Option<&str>) -> String {
             .map(render)
             .collect::<Vec<_>>()
             .join(", ");
-        format!("{} profiles: {shown}, …", names.len())
+        format!("{} toolsets: {shown}, …", names.len())
     }
 }
 
@@ -417,7 +417,7 @@ fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
                     let names: Vec<String> = m.profiles.keys().cloned().collect();
                     println!(
                         "  {}  {}",
-                        "Profiles".bold(),
+                        "Toolsets".bold(),
                         profiles_line(&names, active_session.as_ref().map(|s| s.profile.as_str()))
                     );
                 }
@@ -511,9 +511,9 @@ fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
                         .keys()
                         .next()
                         .map(String::as_str)
-                        .unwrap_or("<profile>")
+                        .unwrap_or("<toolset>")
                 } else {
-                    "<profile>"
+                    "<toolset>"
                 };
                 clean_at_rest_next_step(mode, trust, locked, active_session.is_some(), profile)
                     .unwrap_or_else(|| (fallback.0.to_string(), fallback.1))
@@ -737,10 +737,10 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        assert_eq!(profiles_line(&five, None), "5 profiles: a, b, c, …");
+        assert_eq!(profiles_line(&five, None), "5 toolsets: a, b, c, …");
         assert_eq!(
             profiles_line(&five, Some("b")),
-            "5 profiles: a, b (active), c, …"
+            "5 toolsets: a, b (active), c, …"
         );
     }
 

@@ -45,17 +45,19 @@ distribute. In user-facing prose the word is **manifest**; they are the same
 thing. More: [reference.md — the manifest](reference.md#the-manifest),
 [ARCHITECTURE.md — the bundle](ARCHITECTURE.md#layer-1--the-bundle-cratescore).
 
-## Profile
+## Toolset
 
-**Profile** — a named subset of the manifest ("backend", "design") you activate
-together. A manifest with no profiles activates its whole inline set as the
-default, so you only name one when you have more than one.
+**Toolset** — a named subset of the manifest ("backend", "design") you activate
+together. A manifest with no toolsets activates its whole inline set as the
+default, so you only name one when you have more than one. In the manifest file
+a toolset is a `[profiles.<name>]` table — the key kept its original spelling so
+existing manifests keep working.
 
 **Preset (unrelated)** — the policy *presets* in
 [`examples/policies/`](../examples/policies/) (`compatible`, `developer`,
 `locked-down`, `ci`) are unrelated starter machine-policy files you copy and
-edit, not profiles. More:
-[reference.md — selective skills via profiles](reference.md#selective-skills-via-profiles).
+edit, not toolsets. More:
+[reference.md — selective skills via toolsets](reference.md#selective-skills-via-toolsets).
 
 ## CLI, adapter, target
 
@@ -198,14 +200,14 @@ commit the intent (manifest plus lockfile); the rendered artifacts — `.mcp.jso
 - **static** (the default) — rendered files sit on disk, kept out of git by a
   managed `.gitignore` block. Works however you launch your tools, since the
   capabilities are real files the CLI reads directly.
-- **clean-at-rest** — nothing generated persists between sessions. A profile is
+- **clean-at-rest** — nothing generated persists between sessions. A toolset is
   injected when a session or run starts and reverted on exit; `agentstack lock`
   pins the manifest's name refs *without rendering anything*, so `git status`
   stays silent.
 - **zero-files** — no per-project files at all. The gateway is registered once
   per CLI, and every trusted repo serves its own stack live over it; a
   [lease](#lease-session-or-locked-run-fence) can fence one connection to a
-  profile without rendering native files.
+  toolset without rendering native files.
 
 Not sure which you need? See [which mode do I need?](choose.md). More:
 [reference.md — where rendered files live](reference.md#where-rendered-files-live-three-modes).
@@ -217,15 +219,15 @@ back. They differ in what they touch and how they clean up:
 
 | Mechanism | What it scopes | How long it lives | How it ends | Read more |
 |---|---|---|---|---|
-| **MCP profile lease** (`agentstack_lease_open` / `_status` / `_close` / `_freeze`) | the live gateway and the loadable-skill menu, narrowed to one profile — no native files rendered | one MCP connection, in the memory of a single `agentstack mcp` process | `lease_close` or process exit; nothing to restore, since it rendered nothing | [reference.md — MCP profile leases](reference.md#mcp-profile-leases-one-connection-one-capability-fence) |
-| **Native session** (`agentstack session start` / `end` / `freeze`) | a profile's servers, skills, instructions, settings, and hooks, *rendered to disk* | from `session start` until you end it | `session end` (or `end --all`) reverts the write | [reference.md — ephemeral sessions](reference.md#ephemeral-sessions-agentstack-session) |
-| **Locked-run fence** (`agentstack run <cli> --locked --profile <p>`) | the run's frozen capability surface, narrowed to that profile's server subset — a fence, not a session, so no native state is applied or reverted | the life of the run process | the run process exits | [reference.md — the Protected tier](reference.md#the-protected-tier-in-detail-run---locked) |
+| **MCP toolset lease** (`agentstack_lease_open` / `_status` / `_close` / `_freeze`) | the live gateway and the loadable-skill menu, narrowed to one toolset — no native files rendered | one MCP connection, in the memory of a single `agentstack mcp` process | `lease_close` or process exit; nothing to restore, since it rendered nothing | [reference.md — MCP toolset leases](reference.md#mcp-toolset-leases-one-connection-one-capability-fence) |
+| **Native session** (`agentstack session start` / `end` / `freeze`) | a toolset's servers, skills, instructions, settings, and hooks, *rendered to disk* | from `session start` until you end it | `session end` (or `end --all`) reverts the write | [reference.md — ephemeral sessions](reference.md#ephemeral-sessions-agentstack-session) |
+| **Locked-run fence** (`agentstack run <cli> --locked --toolset <p>`) | the run's frozen capability surface, narrowed to that toolset's server subset — a fence, not a session, so no native state is applied or reverted | the life of the run process | the run process exits | [reference.md — the Protected tier](reference.md#the-protected-tier-in-detail-run---locked) |
 
 The lease is the zero-file counterpart of a native session, so the two are
 mutually exclusive: the MCP control plane refuses to place a lease over an active
 native session, or to start a native session over an active lease. `freeze` (on
 either the lease or the session) promotes the observed set into a new manifest
-profile — a proposal you review, then `agentstack lock`.
+toolset — a proposal you review, then `agentstack lock`.
 
 ## Secrets
 

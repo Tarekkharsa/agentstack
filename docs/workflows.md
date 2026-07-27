@@ -39,7 +39,7 @@ until you review and pin it.
   byte and trust re-gates — you review again before it can run.
 - **Untrusted means inert.** Until the bundle is trusted, a workflow never
   parses as script and its name is not even invocable. No dev-mode exception.
-- **Roles can only narrow.** Each `agent()` call names a **role** — a profile
+- **Roles can only narrow.** Each `agent()` call names a **role** — a toolset
   with its own tools, servers, folders, secrets, and egress. A workflow
   *requests* a closed set of roles; it can never grant or widen authority. A
   child step's grant is always within the workflow's, which is within your
@@ -80,7 +80,7 @@ report labels each step's posture rather than implying uniform containment.
 A workflow is one JavaScript file with a small, familiar API — the same
 `agent()` / `parallel()` / `pipeline()` vocabulary as Claude Code, with one
 change: `agent()` takes a **role**, not a model, because the harness and
-model are properties of the role's profile, not something a script may choose.
+model are properties of the role's toolset, not something a script may choose.
 
 ```js
 export const meta = {

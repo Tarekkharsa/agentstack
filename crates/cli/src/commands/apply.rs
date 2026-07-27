@@ -867,11 +867,11 @@ fn render(
         let n = manifest.skills.len();
         match manifest.profiles.keys().next() {
             Some(first) => crate::outln!(
-                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them through a profile: `agentstack use {first} --write` (or `agentstack init`, which does this for you)",
+                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them through a toolset: `agentstack use {first} --write` (or `agentstack init`, which does this for you)",
                 "ℹ".cyan()
             ),
             None => crate::outln!(
-                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them: `agentstack use --write` (no profiles declared, so everything inline is the default)",
+                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them: `agentstack use --write` (no toolsets declared, so everything inline is the default)",
                 "ℹ".cyan()
             ),
         }

@@ -3,8 +3,8 @@
 > **One agent setup. Every coding CLI.**
 > AgentStack imports the MCP servers, skills, and instructions you already use,
 > keeps them in one portable manifest, and renders the right native configuration
-> for Claude Code, Codex, Cursor, Gemini CLI, OpenCode, and more. Profiles let
-> you switch toolsets by project or task; doctor, diff, and restore keep every
+> for Claude Code, Codex, Cursor, Gemini CLI, OpenCode, and more. Named toolsets
+> let you switch by project or task; doctor, diff, and restore keep every
 > change understandable and recoverable.
 
 Portable does not mean automatic: configuration from an unfamiliar repository
@@ -26,8 +26,8 @@ one source of truth:
 - **Stop repeating configuration.** Import what you already have, then render
   one [manifest](https://tarekkharsa.github.io/agentstack/concepts.html) into
   every supported CLI's native format.
-- **Switch by project or task.** Profiles select a named toolset; temporary
-  sessions activate it and restore the previous native files afterward.
+- **Switch by project or task.** A toolset is a named subset of your setup;
+  temporary sessions activate it and restore the previous native files afterward.
 - **Understand and repair drift.** `doctor` finds the problem, `diff` shows the
   consequence, `adopt` keeps an intentional hand edit, and `restore` undoes a
   bad change.
@@ -91,13 +91,13 @@ Release binaries ship with sandbox support compiled in; a bare `cargo build` doe
 
 ## Grow into it
 
-Start with configuration portability. Add profiles, sharing, and stronger
+Start with configuration portability. Add toolsets, sharing, and stronger
 governance only when you need them:
 
 | Step | You run | You get |
 | --- | --- | --- |
 | [1 — Unify](https://tarekkharsa.github.io/agentstack/start.html) | `agentstack init` → `apply` | one manifest rendered correctly for every CLI |
-| 2 — Switch | profiles · `session start/end` | task-specific toolsets without permanent config pollution |
+| 2 — Switch | toolsets · `session start/end` | task-specific toolsets without permanent config pollution |
 | [3 — Diagnose](https://tarekkharsa.github.io/agentstack/start.html#s-verify) | `agentstack doctor` · `diff` | drift explained before anything changes |
 | [4 — Recover](https://tarekkharsa.github.io/agentstack/howto/undo.html) | `adopt` · `apply` · `restore` · `uninstall` | keep intentional edits, reconcile output, undo one change — or take all of it back off |
 | [5 — Share](https://tarekkharsa.github.io/agentstack/howto/team-setup.html) | manifest · lock · library | reproducible setups across projects, machines, and teammates |

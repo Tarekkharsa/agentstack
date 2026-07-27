@@ -14,7 +14,7 @@ Four verbs, by where the skill lives and how long you want it:
 | You have | Use |
 | --- | --- |
 | Any skills repo (GitHub shorthand, git URL) or a local dir | `agentstack add skill <source>` |
-| A skill you want reusable across projects by name | `agentstack lib add <source>` + reference it from a [profile](../concepts.md) |
+| A skill you want reusable across projects by name | `agentstack lib add <source>` + reference it from a [toolset](../concepts.md) |
 | Nothing yet — you're writing one | `agentstack lib new <name>` scaffolds the template |
 | Curiosity — run it once, install nothing | `agentstack try <source> \| <your agent CLI>` |
 
@@ -28,7 +28,7 @@ agentstack add skill anthropics/skills --skill pdf --write
 agentstack add skill https://github.com/o/r/tree/main/skills/pdf --write
 agentstack add skill ./my-skill --write
 
-# 2. Reusable across projects: into the central library, then name it in a profile
+# 2. Reusable across projects: into the central library, then name it in a toolset
 agentstack lib add anthropics/skills --skill pdf --write
 #   then in any manifest:  [profiles.backend]  skills = ["pdf"]
 
@@ -45,7 +45,7 @@ anything is offered, and a dry run fetches into transient staging — the
 [manifest](../concepts.md), [lockfile](../concepts.md), and content store
 stay untouched until `--write`. The write records the exact commit and
 content checksum in the lockfile, and — in the static delivery mode, when
-the active profile is unambiguous — materializes the skill into your CLIs'
+the active toolset is unambiguous — materializes the skill into your CLIs'
 skills directories immediately. Other modes get the honest next step
 printed: `session start` for clean-at-rest; `agentstack trust .` for
 [zero-files](trust-a-repo.md), because the manifest edit re-gates trust.
@@ -58,6 +58,6 @@ that doesn't fit gets `--name` to choose. Update later with
 `agentstack lock --update` (branch and rev-less pins re-track their
 upstream; a vanished repo errors instead of pretending).
 
-- [Concepts](../concepts.md) — skill, profile, library, lockfile
+- [Concepts](../concepts.md) — skill, toolset, library, lockfile
 - [Reference: `add skill <source>`](../reference.md#add-skill-source--install-from-any-skills-repo)
 - [Reference: the central library](../reference.md#the-central-library)

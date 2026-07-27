@@ -323,7 +323,7 @@ fn run<'a>(
                     Err(ServerResolveError::Unresolved { .. }) => issues.push(
                         Issue::new(
                             IssueKind::UnknownServerRef,
-                            format!("profile '{pname}' references unknown server '{sref}'"),
+                            format!("toolset '{pname}' references unknown server '{sref}'"),
                         )
                         .with_fix(format!(
                             "define it (agentstack add server {sref} …) or remove '{sref}' from [profiles.{pname}] servers"
@@ -332,7 +332,7 @@ fn run<'a>(
                     Err(ServerResolveError::Source(e)) => issues.push(
                         Issue::new(
                             IssueKind::UnresolvableServerRef,
-                            format!("profile '{pname}' server '{sref}' failed to resolve: {e}"),
+                            format!("toolset '{pname}' server '{sref}' failed to resolve: {e}"),
                         )
                         .with_fix(format!(
                             "re-add its source (agentstack add server {sref} …) or remove '{sref}' from [profiles.{pname}] servers"
@@ -342,7 +342,7 @@ fn run<'a>(
                 None => issues.push(
                     Issue::new(
                         IssueKind::UnknownServerRef,
-                        format!("profile '{pname}' references unknown server '{sref}'"),
+                        format!("toolset '{pname}' references unknown server '{sref}'"),
                     )
                     .with_fix(format!(
                         "define it (agentstack add server {sref} …) or remove '{sref}' from [profiles.{pname}] servers"
@@ -376,7 +376,7 @@ fn run<'a>(
                         Err(ResolveError::Unresolved { .. }) => issues.push(
                             Issue::new(
                                 IssueKind::UnknownSkillRef,
-                                format!("profile '{pname}' references unknown skill '{kref}'"),
+                                format!("toolset '{pname}' references unknown skill '{kref}'"),
                             )
                             .with_fix(format!(
                                 "define it (agentstack add skill <source> --name {kref}) or remove '{kref}' from [profiles.{pname}] skills"
@@ -391,7 +391,7 @@ fn run<'a>(
                             issues.push(
                                 Issue::new(
                                     IssueKind::UnresolvableSkillRef,
-                                    format!("profile '{pname}' skill '{kref}': {e}"),
+                                    format!("toolset '{pname}' skill '{kref}': {e}"),
                                 )
                                 .with_fix(format!(
                                     "drop the [skills.{kref}] block so the library copy resolves"
@@ -401,7 +401,7 @@ fn run<'a>(
                         Err(ResolveError::Source(e)) => issues.push(
                             Issue::new(
                                 IssueKind::UnresolvableSkillRef,
-                                format!("profile '{pname}' skill '{kref}' failed to resolve: {e}"),
+                                format!("toolset '{pname}' skill '{kref}' failed to resolve: {e}"),
                             )
                             .with_fix(format!(
                                 "re-add its source (agentstack add skill <source> --name {kref}) or remove '{kref}' from [profiles.{pname}] skills"
@@ -412,7 +412,7 @@ fn run<'a>(
                 None => issues.push(
                     Issue::new(
                         IssueKind::UnknownSkillRef,
-                        format!("profile '{pname}' references unknown skill '{kref}'"),
+                        format!("toolset '{pname}' references unknown skill '{kref}'"),
                     )
                     .with_fix(format!(
                         "define it (agentstack add skill <source> --name {kref}) or remove '{kref}' from [profiles.{pname}] skills"

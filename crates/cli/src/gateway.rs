@@ -655,12 +655,12 @@ impl Gateway {
                     };
                     if matches!(fence, Fence::Lease(_)) {
                         eprintln!(
-                            "gateway: MCP profile lease active — proxying only this profile's {} server(s)",
+                            "gateway: MCP toolset lease active — proxying only this toolset's {} server(s)",
                             raw.len()
                         );
                     } else if profile.is_some() {
                         eprintln!(
-                            "gateway: session active — proxying only this profile's {} server(s)",
+                            "gateway: session active — proxying only this toolset's {} server(s)",
                             raw.len()
                         );
                     }

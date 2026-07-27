@@ -109,7 +109,7 @@ pub enum Command {
     /// Resolve each toolset's skill + server refs and pin `agentstack.lock`.
     ///
     /// Library-aware resolution; no configs rendered, no skills
-    /// materialized — the lock-only counterpart of `use <profile> --write`,
+    /// materialized — the lock-only counterpart of `use <toolset> --write`,
     /// for clean-at-rest repos that keep no generated files. `--update`
     /// re-resolves git skills to their latest first; `--upgrade` re-resolves
     /// an installed vendor pack and applies its changes.
@@ -139,6 +139,15 @@ pub enum Command {
     Adopt(AdoptArgs),
 
     // ── Activate & run ───────────────────────────────────────────────────
+    /// Work with toolsets: name one that bundles what you already have.
+    ///
+    /// A toolset is a named subset of this project's servers and skills — one
+    /// for backend work, one for incident response — so you switch context
+    /// without editing five config files. `agentstack use <name>` activates
+    /// one; `agentstack use --list` shows them all.
+    #[command(subcommand)]
+    Toolset(ToolsetCmd),
+
     /// Activate a toolset: render its servers + materialize its skills.
     Use(UseArgs),
 
@@ -148,7 +157,7 @@ pub enum Command {
 
     /// Launch an agent CLI as a tracked run.
     ///
-    /// Optionally apply a profile for its lifetime, then observe/kill it
+    /// Optionally apply a toolset for its lifetime, then observe/kill it
     /// here or through an integrated supervisor such as t3code.
     Run(RunArgs),
 
@@ -342,27 +351,18 @@ added to those files are left alone. Every file edit is captured first, so
     )]
     Uninstall(UninstallArgs),
 
-    /// Name a toolset: bundle some of what you already have. Does not activate it.
+    /// Fixed-argv alias of `agentstack toolset create` (panel action).
+    ///
+    /// Same code path, same consent digest — kept under its original name
+    /// because t3code emits it as fixed argv. People should reach for
+    /// `agentstack toolset create`.
     #[command(
         name = "create-profile",
         hide = true,
         after_help = "\
-A toolset is a named subset of this project's servers and skills — one for
-backend work, one for incident response — so you switch context without
-editing five config files.
-
-Naming one does not switch to it: this writes the manifest entry and re-locks,
-and renders nothing.
-
-  agentstack create-profile --name backend --server github
-      at a terminal: shows what it will create, asks, then writes and re-locks
-
-  agentstack session start backend      use it for now
-  agentstack session end                put every native file back
-
-Scripts and graphical clients get the two-step contract instead: --preview
-emits the plan plus a consent digest, and applying needs
-`--yes --consented <digest>`. A bare non-interactive call refuses and says so."
+Machine surface. `agentstack toolset create` is the same action under the name
+a person reads; this name is frozen because the t3code panel emits it as fixed
+argv. Both run one authority path and produce the same consent digest."
     )]
     CreateProfile(PanelCreateProfileArgs),
 
@@ -379,6 +379,34 @@ emits the plan plus a consent digest, and applying needs
     /// `agentstack lib trash --restore <id> --write`.
     #[command(name = "remove-from-library", hide = true)]
     RemoveFromLibrary(PanelRemoveFromLibraryArgs),
+}
+
+/// The `toolset` group: the human-named entry point to the toolset verbs.
+///
+/// `create` shares its args type and its implementation with the hidden
+/// `create-profile` fixed argv the t3code panel drives — one authority path
+/// (`commands::panel_edit::create_profile`), one consent digest, two spellings.
+#[derive(Subcommand, Debug)]
+pub enum ToolsetCmd {
+    /// Name a toolset: bundle some of what you already have. Does not activate it.
+    #[command(after_help = "\
+A toolset is a named subset of this project's servers and skills — one for
+backend work, one for incident response — so you switch context without
+editing five config files.
+
+Naming one does not switch to it: this writes the manifest entry and re-locks,
+and renders nothing.
+
+  agentstack toolset create --name backend --server github
+      at a terminal: shows what it will create, asks, then writes and re-locks
+
+  agentstack use backend                 switch to it
+  agentstack use --list                  see every toolset here
+
+Scripts and graphical clients get the two-step contract instead: --preview
+emits the plan plus a consent digest, and applying needs
+`--yes --consented <digest>`. A bare non-interactive call refuses and says so.")]
+    Create(PanelCreateProfileArgs),
 }
 
 #[derive(Args, Debug)]
@@ -555,7 +583,7 @@ pub enum ReportCmd {
     /// decisions, and tool calls) by run id.
     Run(ReportArgs),
 
-    /// List live tracked runs (CLI, pid, profile, uptime).
+    /// List live tracked runs (CLI, pid, toolset, uptime).
     Runs(RunsArgs),
 
     /// Show local usage analytics (activation counts + footprint + context
@@ -581,9 +609,9 @@ pub enum ReportCmd {
 #[derive(Subcommand, Debug)]
 pub enum WorkflowCmd {
     /// Run a pinned `[workflows.<name>]` entry: admission first (trust,
-    /// strict lock verify, roles resolved to profiles, ceilings intersected),
+    /// strict lock verify, roles resolved to toolsets, ceilings intersected),
     /// then the governed drive loop — each `agent()` call spawns a locked
-    /// child run under its role profile's fence, with per-child MCP config
+    /// child run under its role toolset's fence, with per-child MCP config
     /// injection where the harness supports it.
     Run(WorkflowRunArgs),
 
@@ -627,7 +655,7 @@ pub enum WorkflowCmd {
     /// exactly as it was.
     ///
     /// This exists because authoring a workflow by hand is six separate writes
-    /// (script, manifest entry, role profiles, lock, trust, run), and a
+    /// (script, manifest entry, role toolsets, lock, trust, run), and a
     /// failure at step four used to leave a half-written manifest behind a
     /// button labelled "Approve" (review finding F14). One command, one
     /// rollback, one `agentstack restore` entry.
@@ -809,17 +837,20 @@ pub struct RunArgs {
     #[arg(long, value_name = "TEXT")]
     pub prompt: Option<String>,
 
-    /// Apply this profile's servers + skills for the life of the run.
-    #[arg(long, value_name = "NAME")]
+    /// Apply this toolset's servers + skills for the life of the run.
+    // `--profile` stays as an alias: it is the spelling every existing script
+    // and the t3code panel already type, and dropping it would break them for
+    // a vocabulary fix. The field keeps its name — no user reads it.
+    #[arg(long = "toolset", alias = "profile", value_name = "NAME")]
     pub profile: Option<String>,
 
-    /// Scope to apply the profile in (only meaningful with --profile).
+    /// Scope to apply the toolset in (only meaningful with --toolset).
     /// Defaults to the manifest home: global for the machine manifest,
     /// project for a repository manifest.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
 
-    /// Leave the applied profile in place after the run exits (default: revert).
+    /// Leave the applied toolset in place after the run exits (default: revert).
     #[arg(long)]
     pub keep: bool,
 
@@ -940,7 +971,7 @@ pub struct TryArgs {
 
 #[derive(Args, Debug, Default)]
 pub struct LockArgs {
-    /// Only pin this profile's refs (default: every profile in the manifest).
+    /// Only pin this toolset's refs (default: every toolset in the manifest).
     #[arg(long, value_name = "NAME")]
     pub profile: Option<String>,
 
@@ -1010,14 +1041,14 @@ pub struct StatusArgs {}
 
 /// `setup` is the interactive newcomer wizard; it deliberately has no `--write`
 /// (it confirms in a terminal and stays dry-run everywhere else). Scripts use
-/// `init` + `apply --write` + `use <profile> --write`.
+/// `init` + `apply --write` + `use <toolset> --write`.
 #[derive(Args, Debug)]
 pub struct SetupArgs {
     /// Only configure these CLIs (repeatable). Defaults to [targets].default.
     #[arg(long = "target", value_name = "CLI")]
     pub targets: Vec<String>,
 
-    /// Configure only the servers in this profile.
+    /// Configure only the servers in this toolset.
     #[arg(long, value_name = "NAME")]
     pub profile: Option<String>,
 
@@ -1068,8 +1099,8 @@ Examples:
 pub struct AddFromArgs {
     /// Catalog name or registry id (e.g. `github`, `io.github.x/server`).
     pub id: String,
-    /// Also add to this profile's server list.
-    #[arg(long)]
+    /// Also add to this toolset's server list.
+    #[arg(long = "toolset", alias = "profile", value_name = "NAME")]
     pub profile: Option<String>,
     /// For packs: also install the vendor's house-rule instructions (opt-in —
     /// they steer your daily-driver agent). Off by default.
@@ -1104,8 +1135,8 @@ pub struct AddServerArgs {
     /// Env `Key=Value` (repeatable).
     #[arg(long = "env", value_name = "K=V")]
     pub env: Vec<String>,
-    /// Also add to this profile's server list.
-    #[arg(long)]
+    /// Also add to this toolset's server list.
+    #[arg(long = "toolset", alias = "profile", value_name = "NAME")]
     pub profile: Option<String>,
     /// Render only into this CLI (repeatable, e.g. --target claude-code).
     /// Default: every CLI in [targets]. Unknown adapter ids are an error.
@@ -1139,8 +1170,8 @@ pub struct AddSkillArgs {
     /// directory name doesn't fit the name contract.
     #[arg(long)]
     pub name: Option<String>,
-    /// Also add to this profile's skill list.
-    #[arg(long)]
+    /// Also add to this toolset's skill list.
+    #[arg(long = "toolset", alias = "profile", value_name = "NAME")]
     pub profile: Option<String>,
     /// Admit content the scan flagged high-severity.
     #[arg(long)]
@@ -1269,8 +1300,8 @@ pub struct ApplyArgs {
     #[arg(long = "target", value_name = "CLI")]
     pub targets: Vec<String>,
 
-    /// Render only the servers in this profile.
-    #[arg(long, value_name = "NAME")]
+    /// Render only the servers in this toolset.
+    #[arg(long = "toolset", alias = "profile", value_name = "NAME")]
     pub profile: Option<String>,
 
     /// Show what would change without writing, and skip the interactive prompt.
@@ -1331,9 +1362,10 @@ pub struct DiffArgs {
 
 #[derive(Args, Debug)]
 pub struct UseArgs {
-    /// Profile to activate. Optional: with one profile declared it is chosen
+    /// Toolset to activate. Optional: with one toolset declared it is chosen
     /// automatically, and with none declared the implicit default — every
-    /// inline skill and server — activates. Several profiles need a name.
+    /// inline skill and server — activates. Several toolsets need a name.
+    #[arg(value_name = "TOOLSET")]
     pub profile: Option<String>,
 
     /// Only act on these CLIs (repeatable). Defaults to [targets].default.
@@ -1363,10 +1395,10 @@ pub struct UseArgs {
     #[arg(long)]
     pub no_gitignore: bool,
 
-    /// List declared profiles instead of activating: each profile's resolved
+    /// List declared toolsets instead of activating: each toolset's resolved
     /// skills/servers/harness plus a readiness flag — is everything it
     /// references pinned in agentstack.lock and matching? The read primitive
-    /// behind external profile pickers (UI control-plane §5).
+    /// behind external toolset pickers (UI control-plane §5).
     #[arg(long)]
     pub list: bool,
 
@@ -1591,9 +1623,10 @@ pub struct SessionArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCmd {
-    /// Start a session: load a profile for now.
+    /// Start a session: load a toolset for now.
     Start {
-        /// Profile to load.
+        /// Toolset to load.
+        #[arg(value_name = "TOOLSET")]
         profile: String,
         /// Where writes land: global (each CLI user-level config) or project
         /// (repo-local). Defaults to the manifest home.
@@ -1608,10 +1641,10 @@ pub enum SessionCmd {
     },
     /// List active sessions.
     List,
-    /// Freeze the active session's resolved set (profile servers + the skills
-    /// actually loaded) into a new profile, so CI can replay it deterministically.
+    /// Freeze the active session's resolved set (toolset servers + the skills
+    /// actually loaded) into a new toolset, so CI can replay it deterministically.
     Freeze {
-        /// Name for the frozen profile (default: <profile>-frozen).
+        /// Name for the frozen toolset (default: <toolset>-frozen).
         #[arg(long)]
         name: Option<String>,
     },
@@ -2175,11 +2208,13 @@ pub fn full_command_inventory() -> String {
     /// Fixed argv the t3code panel drives; not commands a person runs. They
     /// stay listed (the inventory is complete by definition) but under their
     /// own heading, so the human map is not padded with machine surface.
-    /// `create-profile` is deliberately absent — it is genuinely useful by
-    /// hand and lives in the `Edit` group of the default help.
+    /// `create-profile` belongs here now that `toolset create` is its visible
+    /// spelling: the by-hand path a person reads about is the `toolset` group,
+    /// and this name survives only because t3code emits it as fixed argv.
     const PANEL_ONLY: &[&str] = &[
         "add-skill-to-profile",
         "add-server-to-profile",
+        "create-profile",
         "use-profile",
         "library-index",
         "remove-from-library",
@@ -2213,7 +2248,7 @@ pub fn full_command_inventory() -> String {
          The map, grouped by task:\n\
          \n  \
          Set up      init · status · adapters · settings · self\n  \
-         Edit        add · set · search · remove · install · lib · create-profile · adopt · export · import\n  \
+         Edit        add · set · search · remove · install · lib · toolset · adopt · export · import\n  \
          Render      apply · use · instructions · lock · session · diff · restore · uninstall\n  \
          Protect     trust · explain · secret · guard · sign · verify\n  \
          Run         run · kill · shim · workflow · gateway · mcp · try\n  \

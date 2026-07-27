@@ -1276,7 +1276,7 @@ fn choose_profile(a: &AddSkillArgs, manifest: &Manifest) -> Result<Option<String
             return Ok(Some(p.clone()));
         }
         anyhow::bail!(
-            "no profile '{}' in the manifest — declared: {}",
+            "no toolset '{}' in the manifest — declared: {}",
             p,
             if declared.is_empty() {
                 "(none)".to_string()
@@ -1292,14 +1292,14 @@ fn choose_profile(a: &AddSkillArgs, manifest: &Manifest) -> Result<Option<String
             if crate::util::confirm::is_interactive() {
                 let idx =
                     dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                        .with_prompt("Add to which profile?")
+                        .with_prompt("Add to which toolset?")
                         .items(&declared)
                         .default(0)
                         .interact()?;
                 Ok(Some(declared[idx].clone()))
             } else {
                 anyhow::bail!(
-                    "several profiles declared — pass --profile <name>: {}",
+                    "several toolsets declared — pass --toolset <name>: {}",
                     declared.join(", ")
                 )
             }
@@ -1380,7 +1380,7 @@ fn preview_and_commit(
     toml::from_str::<Manifest>(&text).context("resulting manifest would be invalid")?;
 
     if let Some(p) = profile {
-        println!("{} add to profile '{p}'", "→".cyan());
+        println!("{} add to toolset '{p}'", "→".cyan());
     }
     let names = planned
         .iter()
@@ -1512,7 +1512,7 @@ fn print_activation_footer(act: &ActivationCtx, profile: Option<&str>) {
             act.target_ids.len()
         ),
         Mode::Static => println!(
-            "{} several profiles declared — activate with `agentstack use{profile_word} --write`",
+            "{} several toolsets declared — activate with `agentstack use{profile_word} --write`",
             "·".dimmed()
         ),
         Mode::CleanAtRest => {
@@ -1521,7 +1521,7 @@ fn print_activation_footer(act: &ActivationCtx, profile: Option<&str>) {
                 "·".dimmed(),
                 profile
                     .map(|p| format!(" {p}"))
-                    .unwrap_or(" <profile>".into())
+                    .unwrap_or(" <toolset>".into())
             );
             if act.session_active {
                 println!(
@@ -1796,7 +1796,7 @@ pub fn add_profile_json(manifest_dir: Option<&Path>, args: &Value) -> Result<Str
         .get("name")
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
-        .context("profile name is required")?;
+        .context("toolset name is required")?;
     let names = |key: &str| -> Vec<String> {
         args.get(key)
             .and_then(Value::as_array)
@@ -1810,7 +1810,7 @@ pub fn add_profile_json(manifest_dir: Option<&Path>, args: &Value) -> Result<Str
     let servers = names("servers");
     let skills = names("skills");
     if servers.is_empty() && skills.is_empty() {
-        anyhow::bail!("pick at least one skill or server for the profile");
+        anyhow::bail!("pick at least one skill or server for the toolset");
     }
 
     let base = crate::commands::project_base(manifest_dir)?;
@@ -1820,7 +1820,7 @@ pub fn add_profile_json(manifest_dir: Option<&Path>, args: &Value) -> Result<Str
         .with_context(|| format!("reading {}", manifest_path.display()))?;
     let parsed: Manifest = toml::from_str(&original).context("parsing manifest")?;
     if parsed.profiles.contains_key(name) {
-        anyhow::bail!("profile '{name}' already exists");
+        anyhow::bail!("toolset '{name}' already exists");
     }
 
     // Build the profile table by appending each member; the first append

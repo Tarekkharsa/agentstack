@@ -245,7 +245,7 @@
 <div class="tblwrap"><table>
 <thead><tr><th>You have</th><th>Use</th></tr></thead><tbody>
 <tr><td>Any skills repo (GitHub shorthand, git URL) or a local dir</td><td><code>agentstack add skill &lt;source&gt;</code></td></tr>
-<tr><td>A skill you want reusable across projects by name</td><td><code>agentstack lib add &lt;source&gt;</code> + reference it from a <a href="../concepts.html">profile</a></td></tr>
+<tr><td>A skill you want reusable across projects by name</td><td><code>agentstack lib add &lt;source&gt;</code> + reference it from a <a href="../concepts.html">toolset</a></td></tr>
 <tr><td>Nothing yet — you're writing one</td><td><code>agentstack lib new &lt;name&gt;</code> scaffolds the template</td></tr>
 <tr><td>Curiosity — run it once, install nothing</td><td>`agentstack try &lt;source&gt; \</td><td>&lt;your agent CLI&gt;`</td></tr>
 </tbody></table></div>
@@ -258,7 +258,7 @@ agentstack add skill anthropics/skills --skill pdf --write
 agentstack add skill https://github.com/o/r/tree/main/skills/pdf --write
 agentstack add skill ./my-skill --write
 
-# 2. Reusable across projects: into the central library, then name it in a profile
+# 2. Reusable across projects: into the central library, then name it in a toolset
 agentstack lib add anthropics/skills --skill pdf --write
 #   then in any manifest:  [profiles.backend]  skills = ["pdf"]
 
@@ -268,10 +268,10 @@ agentstack lib new code-review        # scaffolds ./code-review/SKILL.md
 
 # 4. Try before anything: ephemeral, manifest-free
 agentstack try anthropics/skills --skill pdf | claude</code></pre>
-<p>Every source is content-scanned (hidden-unicode / prompt-injection) before anything is offered, and a dry run fetches into transient staging — the <a href="../concepts.html">manifest</a>, <a href="../concepts.html">lockfile</a>, and content store stay untouched until <code>--write</code>. The write records the exact commit and content checksum in the lockfile, and — in the static delivery mode, when the active profile is unambiguous — materializes the skill into your CLIs' skills directories immediately. Other modes get the honest next step printed: <code>session start</code> for clean-at-rest; <code>agentstack trust .</code> for <a href="../howto/trust-a-repo.html">zero-files</a>, because the manifest edit re-gates trust.</p>
+<p>Every source is content-scanned (hidden-unicode / prompt-injection) before anything is offered, and a dry run fetches into transient staging — the <a href="../concepts.html">manifest</a>, <a href="../concepts.html">lockfile</a>, and content store stay untouched until <code>--write</code>. The write records the exact commit and content checksum in the lockfile, and — in the static delivery mode, when the active toolset is unambiguous — materializes the skill into your CLIs' skills directories immediately. Other modes get the honest next step printed: <code>session start</code> for clean-at-rest; <code>agentstack trust .</code> for <a href="../howto/trust-a-repo.html">zero-files</a>, because the manifest edit re-gates trust.</p>
 <p><strong>Limits.</strong> Adding a skill never runs it, and a scan finding that blocks is a decision for you, not a flag to reach for reflexively (<code>--allow-flagged</code> admits it with the warnings on record). Skill names obey one contract — lowercase <code>[a-z0-9._-]</code>, 64 chars — and a source directory that doesn't fit gets <code>--name</code> to choose. Update later with <code>agentstack lock --update</code> (branch and rev-less pins re-track their upstream; a vanished repo errors instead of pretending).</p>
 <ul>
-<li><a href="../concepts.html">Concepts</a> — skill, profile, library, lockfile</li>
+<li><a href="../concepts.html">Concepts</a> — skill, toolset, library, lockfile</li>
 <li><a href="../reference.html#add-skill-source--install-from-any-skills-repo">Reference: <code>add skill &lt;source&gt;</code></a></li>
 <li><a href="../reference.html#the-central-library">Reference: the central library</a></li>
 </ul>

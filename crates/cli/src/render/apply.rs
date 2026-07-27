@@ -463,7 +463,7 @@ fn selected_servers(manifest: &Manifest, selection: &Selection) -> Result<Vec<St
             let profile = manifest
                 .profiles
                 .get(p)
-                .with_context(|| format!("no profile named '{p}' in manifest"))?;
+                .with_context(|| format!("no toolset named '{p}' in manifest"))?;
             Ok(profile
                 .servers
                 .iter()
@@ -488,7 +488,7 @@ fn selection_names(manifest: &Manifest, selection: &Selection) -> Result<Vec<Str
             let profile = manifest
                 .profiles
                 .get(p)
-                .with_context(|| format!("no profile named '{p}' in manifest"))?;
+                .with_context(|| format!("no toolset named '{p}' in manifest"))?;
             Ok(profile.servers.clone())
         }
         Selection::Explicit(names) => Ok(names.clone()),

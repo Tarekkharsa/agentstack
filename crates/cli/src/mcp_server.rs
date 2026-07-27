@@ -1255,7 +1255,7 @@ fn lease_open(
         .manifest
         .profiles
         .get(profile)
-        .with_context(|| format!("no profile '{profile}' in manifest"))?;
+        .with_context(|| format!("no toolset '{profile}' in manifest"))?;
 
     *store.lock().unwrap_or_else(|e| e.into_inner()) = Some(McpLease {
         profile: profile.to_string(),
@@ -1267,7 +1267,7 @@ fn lease_open(
         "delivery": "mcp",
         "lifetime": "this MCP process",
         "native_files_written": false,
-        "note": "Server discovery/calls and skill loading are now fenced to this profile. Closing the MCP connection drops the lease automatically."
+        "note": "Server discovery/calls and skill loading are now fenced to this toolset. Closing the MCP connection drops the lease automatically."
     }))?)
 }
 
@@ -1275,7 +1275,7 @@ fn lease_status(store: &LeaseStore) -> Result<String> {
     let Some(lease) = lease_snapshot(store) else {
         return Ok(serde_json::to_string_pretty(&json!({
             "active": false,
-            "note": "No MCP profile lease. Skill loading is development-open unless a native session supplies a profile fence."
+            "note": "No MCP toolset lease. Skill loading is development-open unless a native session supplies a toolset fence."
         }))?);
     };
     let loads: Vec<Value> = lease
@@ -1297,7 +1297,7 @@ fn lease_close(store: &LeaseStore) -> Result<String> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take()
-        .context("no active MCP profile lease")?;
+        .context("no active MCP toolset lease")?;
     Ok(serde_json::to_string_pretty(&json!({
         "closed": closed.profile,
         "loaded_skills": closed.loads.iter().map(|entry| entry.name.clone()).collect::<Vec<_>>(),
@@ -1306,14 +1306,14 @@ fn lease_close(store: &LeaseStore) -> Result<String> {
 }
 
 fn lease_freeze(args: &Value, dir: Option<&Path>, store: &LeaseStore) -> Result<String> {
-    let lease = lease_snapshot(store).context("no active MCP profile lease to freeze")?;
+    let lease = lease_snapshot(store).context("no active MCP toolset lease to freeze")?;
     let ctx = crate::commands::load(dir)?;
     let profile = ctx
         .loaded
         .manifest
         .profiles
         .get(&lease.profile)
-        .with_context(|| format!("profile '{}' is gone from the manifest", lease.profile))?;
+        .with_context(|| format!("toolset '{}' is gone from the manifest", lease.profile))?;
     // The embedded manual is control-plane help, not a resolvable project or
     // library skill. Never write it into a replay profile.
     let observed: Vec<String> = lease
@@ -2077,7 +2077,7 @@ fn list_loadable_with_lease(
 
 fn record_lease_load(store: &LeaseStore, name: &str, reason: &str) -> Result<bool> {
     let mut slot = store.lock().unwrap_or_else(|e| e.into_inner());
-    let lease = slot.as_mut().context("no active MCP profile lease")?;
+    let lease = slot.as_mut().context("no active MCP toolset lease")?;
     if lease.loads.iter().any(|entry| entry.name == name) {
         return Ok(false);
     }
@@ -2197,7 +2197,7 @@ fn load_capability_with_lease(
             .any(|n| n == name)
         {
             anyhow::bail!(
-                "'{name}' is not loadable in profile '{profile}' — add it to the profile to allow it"
+                "'{name}' is not loadable in toolset '{profile}' — add it to the toolset to allow it"
             );
         }
     }
@@ -3093,7 +3093,7 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(denied.contains("not loadable in profile 'backend'"));
+        assert!(denied.contains("not loadable in toolset 'backend'"));
 
         let loaded = load_capability_with_lease(
             &json!({ "name": "helper", "reason": "review backend code" }),

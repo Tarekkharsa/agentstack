@@ -53,7 +53,7 @@ pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
     let scope = args.scope.unwrap_or_else(|| plan.default_scope());
     if let Some(p) = &args.profile {
         println!(
-            "{} launching {} with profile '{}' ({})…",
+            "{} launching {} with toolset '{}' ({})…",
             "▶".green(),
             args.harness.bold(),
             p,
@@ -103,7 +103,7 @@ pub fn list(args: &RunsArgs) -> Result<()> {
         let profile = r
             .profile
             .as_ref()
-            .map(|p| format!(" · profile {p}"))
+            .map(|p| format!(" · toolset {p}"))
             .unwrap_or_default();
         println!(
             "{}  {} pid={} up={}{}  {}",

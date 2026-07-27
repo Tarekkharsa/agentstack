@@ -1758,10 +1758,10 @@ impl GrantBuilder {
             ProfileEffect::Temporary { name, .. } | ProfileEffect::Kept { name, .. }
                 if name.trim().is_empty() =>
             {
-                bail!("profile name must be non-empty")
+                bail!("toolset name must be non-empty")
             }
             ProfileEffect::Fenced { name } if name.trim().is_empty() => {
-                bail!("profile name must be non-empty")
+                bail!("toolset name must be non-empty")
             }
             _ => {}
         }

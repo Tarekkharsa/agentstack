@@ -316,7 +316,7 @@ pub fn launch(
             );
         }
         crate::session::start(manifest_dir, p, scope)
-            .with_context(|| format!("applying profile '{p}' for this run"))?;
+            .with_context(|| format!("applying toolset '{p}' for this run"))?;
         started_session = true;
     }
 

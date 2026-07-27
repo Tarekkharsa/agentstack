@@ -86,7 +86,7 @@ fn several_profiles_without_a_name_is_an_error_naming_them() {
     let err = use_profile::run(&use_args(None), Some(&proj))
         .unwrap_err()
         .to_string();
-    assert!(err.contains("several profiles"), "{err}");
+    assert!(err.contains("several toolsets"), "{err}");
     assert!(
         err.contains('a') && err.contains('b'),
         "names listed: {err}"

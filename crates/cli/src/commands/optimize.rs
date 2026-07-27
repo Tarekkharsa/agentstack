@@ -300,7 +300,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
             );
         }
         if !profiles.is_empty() {
-            evidence.push(format!("referenced by profile(s): {}", profiles.join(", ")));
+            evidence.push(format!("referenced by toolset(s): {}", profiles.join(", ")));
         }
 
         // Unused server: no gateway calls AND never rendered by agentstack.
@@ -327,7 +327,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 safe_auto: safe,
                 safety: if safe {
                     format!(
-                        "safe: not rendered in any config, in no profile, never activated, 0 gateway calls over {span}d — provably inert; removal is a commit-safe manifest edit"
+                        "safe: not rendered in any config, in no toolset, never activated, 0 gateway calls over {span}d — provably inert; removal is a commit-safe manifest edit"
                     )
                 } else if !enough_history {
                     format!(
@@ -337,7 +337,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                     "manual: it is live in a native config, where the harness calls it directly — the audit log can't see those calls".into()
                 } else {
                     format!(
-                        "manual: profile(s) {} reference it — removing it changes what those profiles load",
+                        "manual: toolset(s) {} reference it — removing it changes what those toolsets load",
                         profiles.join(", ")
                     )
                 },
@@ -518,10 +518,10 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 kind: "unused-skill",
                 target: name.clone(),
                 impact: "low",
-                title: format!("skill '{name}' was never materialized and no profile loads it"),
+                title: format!("skill '{name}' was never materialized and no toolset loads it"),
                 evidence: vec![
                     format!("0 activation(s) since tracking began (usage.json, {span}d of runtime history)"),
-                    "in no profile's skill list".into(),
+                    "in no toolset's skill list".into(),
                 ],
                 action: format!("agentstack remove {name} --write   # or keep it in the central library only"),
                 safe_auto: false,
@@ -743,7 +743,7 @@ mod tests {
             .find(|r| r.kind == "unused-server" && r.target == "inprofile")
             .expect("profile-referenced server flagged");
         assert!(!inp.safe_auto, "profile membership blocks auto-removal");
-        assert!(inp.safety.contains("profile"));
+        assert!(inp.safety.contains("toolset"));
     }
 
     #[test]

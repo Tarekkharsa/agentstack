@@ -16,7 +16,7 @@ Four verbs add a server. Pick by what you already have:
 | The server's config details (URL or command) | `agentstack add server` — or `set server` to overwrite one that exists |
 | Just a name — find it in the catalog or registry | `agentstack search` → `agentstack add from <id>` |
 | Already hand-added it to one CLI's config | `agentstack adopt --write` |
-| Want it reusable across projects by name | `agentstack lib add-server` + reference it from a [profile](../concepts.md) |
+| Want it reusable across projects by name | `agentstack lib add-server` + reference it from a [toolset](../concepts.md) |
 
 ```bash
 # 1. Have the details: add (or set, to overwrite) the server
@@ -31,7 +31,7 @@ agentstack add from github --write
 # 3. Hand-added it to one CLI already: pull it back into the manifest
 agentstack adopt --write
 
-# 4. Reusable across projects: store it in the library, then name it in a profile
+# 4. Reusable across projects: store it in the library, then name it in a toolset
 agentstack lib add-server kibana --file ./kibana.toml --write
 #   then in the manifest:  [profiles.backend]  servers = ["kibana"]
 
@@ -45,7 +45,7 @@ Verbs 1–4 write only the [manifest](../concepts.md) (verb 4 also writes the
 `${REF}` placeholders. Nothing reaches a CLI until `apply --write` renders it.
 Hand-edit `[servers.<name>]` in the manifest directly only when you need fields
 the flags don't cover — native per-adapter keys under `extra.<adapter>`, a
-launch `cwd`, `targets` scoping, or `owner`. Whenever you change a profile's
+launch `cwd`, `targets` scoping, or `owner`. Whenever you change a toolset's
 server list, re-lock with `agentstack lock` so the [lockfile](../concepts.md)
 pins the new set, then `apply --write` to render.
 
@@ -55,6 +55,6 @@ manifest). In the [zero-files delivery mode](trust-a-repo.md), a new server also
 stays inert until you re-run `agentstack trust .`, because the edit changes the
 [manifest digest](../concepts.md#trust-and-the-consent-digest).
 
-- [Concepts](../concepts.md) — server, profile, library, secrets
+- [Concepts](../concepts.md) — server, toolset, library, secrets
 - [Reference: `adopt` and `add`](../reference.md#adopt-and-add)
 - [Reference: the central library](../reference.md#the-central-library)

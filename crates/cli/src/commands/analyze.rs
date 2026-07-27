@@ -339,7 +339,7 @@ fn print_human(report: &Value) {
     }
     println!(
         "\n  {}",
-        "Prune with `agentstack lib remove <name>` (or drop it from a profile).".dimmed()
+        "Prune with `agentstack lib remove <name>` (or drop it from a toolset).".dimmed()
     );
 }
 

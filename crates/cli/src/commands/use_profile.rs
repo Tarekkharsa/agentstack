@@ -118,7 +118,7 @@ pub(crate) fn selected_profile(
                 .profiles
                 .get(p)
                 .with_context(|| {
-                    format!("no profile '{p}' in manifest — check the `[profiles.*]` tables there for the exact name")
+                    format!("no toolset '{p}' in manifest — check the `[profiles.*]` tables there for the exact name")
                 })?;
             Ok(Some(p.to_string()))
         }
@@ -169,7 +169,7 @@ pub(crate) fn profile_disambiguation(manifest: &Manifest) -> String {
         .max()
         .unwrap_or(0);
 
-    let mut out = String::from("several profiles declared — name one:");
+    let mut out = String::from("several toolsets declared — name one:");
     for (name, counts) in &rows {
         out.push_str(&format!(
             "\n  {name:<name_w$}   {counts:<counts_w$}   agentstack use {name}"
@@ -357,7 +357,7 @@ fn print_profile_listing(out: &serde_json::Value) {
         println!(
             "No toolsets yet — the implicit default (every inline skill and server) is what activates."
         );
-        println!("  Name one:  agentstack create-profile --name <name> --server <server>");
+        println!("  Name one:  agentstack toolset create --name <name> --server <server>");
         return;
     }
     println!("Declared toolsets (project trust: {trust_state}):");
@@ -582,7 +582,7 @@ pub fn activate(
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
     let ruleset = crate::render::ruleset_for(manifest)?;
     println!(
-        "Activating profile '{}' (scope: {scope}) — {} server(s), {} skill(s)",
+        "Activating toolset '{}' (scope: {scope}) — {} server(s), {} skill(s)",
         label.bold(),
         server_map.len(),
         active_skills.len()
@@ -1056,10 +1056,10 @@ fn resolve_active_skills_with_pins(
         let resolved = crate::resolve::resolve_skill_with_pin(
             manifest, dir, library, lib_home, store, &name, mode, pinned_rev,
         )
-        .with_context(|| format!("resolving skill '{name}' for profile '{plabel}'"))?;
+        .with_context(|| format!("resolving skill '{name}' for toolset '{plabel}'"))?;
         if !resolved.path.exists() {
             anyhow::bail!(
-                "skill '{name}' (profile '{plabel}') resolved to {} but it is not present on disk — run `agentstack install`",
+                "skill '{name}' (toolset '{plabel}') resolved to {} but it is not present on disk — run `agentstack install`",
                 resolved.path.display()
             );
         }
@@ -1185,7 +1185,7 @@ mod tests {
         assert!(listing.contains("0 servers · 1 skill"), "{listing}");
         // The listing IS the error header, so both are one message.
         assert!(
-            listing.starts_with("several profiles declared"),
+            listing.starts_with("several toolsets declared"),
             "{listing}"
         );
     }

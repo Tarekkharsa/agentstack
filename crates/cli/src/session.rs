@@ -166,7 +166,7 @@ pub fn freeze(manifest_dir: Option<&Path>, name: Option<&str>) -> Result<String>
         .manifest
         .profiles
         .get(&sess.profile)
-        .with_context(|| format!("profile '{}' is gone from the manifest", sess.profile))?;
+        .with_context(|| format!("toolset '{}' is gone from the manifest", sess.profile))?;
 
     let servers = profile.servers.clone();
     // The resolved set is what was actually pulled; fall back to the full
@@ -250,7 +250,7 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
     manifest
         .profiles
         .get(profile)
-        .with_context(|| format!("no profile '{profile}' in the manifest"))?;
+        .with_context(|| format!("no toolset '{profile}' in the manifest"))?;
 
     // Untrusted means inert: a session materializes skill content into agent
     // context and server configs the harness will spawn, so the project must
@@ -309,7 +309,7 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
             })
             .collect();
         crate::verify::ensure_session_startable(
-            &format!("profile '{profile}'"),
+            &format!("toolset '{profile}'"),
             &skill_statuses,
             &server_statuses,
         )?;

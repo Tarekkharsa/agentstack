@@ -140,7 +140,7 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
         SessionCmd::Freeze { name } => {
             let created = crate::session::freeze(dir, name.as_deref())?;
             println!(
-                "{} froze the session into profile '{}' — replay it deterministically with `agentstack session start {}`",
+                "{} froze the session into toolset '{}' — replay it deterministically with `agentstack session start {}`",
                 "✓".green(),
                 created.bold(),
                 created

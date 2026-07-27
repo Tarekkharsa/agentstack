@@ -180,8 +180,8 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     let from = match &profiles {
-        Some(p) => format!("{} profile(s)", p.len()),
-        None => "the implicit default (no profiles declared)".to_string(),
+        Some(p) => format!("{} toolset(s)", p.len()),
+        None => "the implicit default (no toolsets declared)".to_string(),
     };
     println!(
         "{} pinned {} skill(s) + {} server(s) from {from} + {} instruction(s) + {} executable pin(s) + {} extension(s) + {} workflow(s) in {}",
@@ -212,9 +212,9 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
                     .keys()
                     .next()
                     .map(String::as_str)
-                    .unwrap_or("<profile>")
+                    .unwrap_or("<toolset>")
             } else {
-                "<profile>"
+                "<toolset>"
             };
             println!("\nNext: `agentstack session start {profile}` to load it for this session.");
         }

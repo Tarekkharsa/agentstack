@@ -29,7 +29,7 @@ by their own verb, because they are not file writes:
 | a [gateway](../concepts.md) registration | `agentstack gateway disconnect <cli> --write` | removes the gateway entry from that CLI's global config (`--all` for every CLI) |
 | the destructive-command [guard](../concepts.md) | `agentstack guard uninstall` | removes every hook it installed and sets `[guard] enabled = false` |
 | [trust](../concepts.md) for a repo | `agentstack trust --revoke` | withdraws consent — the repo goes inert again |
-| an active [session](../concepts.md) | `agentstack session end` | reverts this directory's ephemeral profile (`--all` for every session) |
+| an active [session](../concepts.md) | `agentstack session end` | reverts this directory's ephemeral toolset (`--all` for every session) |
 | a server or skill in the manifest | `agentstack remove <name> --write` | drops it from the manifest and the lockfile |
 
 **Limits.** `restore` reverts agentstack's own recorded config writes, not side

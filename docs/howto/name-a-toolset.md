@@ -6,8 +6,9 @@
 
 A **toolset** is a named subset of the setup you already have — "backend",
 "incident", "design" — that you activate together. In the manifest it is a
-`[profiles.<name>]` block; the CLI and the JSON contracts call it a *profile*,
-graphical integrations call it a *Toolset*. Same object. It names *which* of your
+`[profiles.<name>]` block — the manifest key kept its original spelling so
+existing manifests keep working, but everything you read and type says
+*toolset*. It names *which* of your
 servers and skills come along for a task; it is **not** a policy, a permission
 level, or a workflow role. A manifest with no toolset named activates its whole
 inline set, so you only name one once you want more than one.
@@ -21,7 +22,7 @@ The capabilities are already in your manifest. A toolset just *names a subset*
 of them — no re-import, no copying. The shortest path is one command:
 
 ```bash
-agentstack create-profile --name backend --server postgres --server github --skill sql-review
+agentstack toolset create --name backend --server postgres --server github --skill sql-review
 ```
 
 At a terminal it shows what it will create, asks, and on yes writes the
@@ -69,7 +70,7 @@ agentstack use backend --write        # or apply it on disk (stable/offline)
 
 Prefer to **capture what you actually used** instead of writing the list by
 hand? During a session, `agentstack session freeze --name backend` pins the
-resolved set — the profile's servers plus exactly the skills the agent loaded —
+resolved set — the toolset's servers plus exactly the skills the agent loaded —
 into a new toolset you can replay deterministically.
 
 ## Two toolsets, two tasks
@@ -129,7 +130,7 @@ selects from capabilities that already passed review.
 Both are reversible: a session reverts on `end`, and an applied toolset is
 undone with [`agentstack restore`](undo.md).
 
-- [Concepts](../concepts.md) — profile (toolset), manifest, delivery modes
-- [Reference: selective skills via profiles](../reference.md#selective-skills-via-profiles)
+- [Concepts](../concepts.md) — toolset, manifest, delivery modes
+- [Reference: selective skills via toolsets](../reference.md#selective-skills-via-toolsets)
 - [Reference: ephemeral sessions](../reference.md#ephemeral-sessions-agentstack-session)
 - [Team setup](team-setup.md) — project vs. machine manifests

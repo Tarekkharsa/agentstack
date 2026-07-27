@@ -20,6 +20,11 @@
 //!    only when Clap declares a positional argument; this catches shapes such
 //!    as the retired `proxy start`, not just nonexistent top-level verbs. The
 //!    generator check above only concerns the inventory region, not free prose.
+//! 3. `visible_help_says_toolset` / `docs_prose_say_toolset` — the vocabulary
+//!    gate. One concept, one word: the product calls a named subset of your
+//!    setup a **toolset** everywhere a person reads it. "Profile" survives only
+//!    as file format and wire contract (`[profiles.<name>]`, the JSON fields,
+//!    the frozen panel argv), which stay spelled that way on purpose.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -637,6 +642,196 @@ fn every_dynamic_command_parses() {
         checked >= 30,
         "dynamic-command extraction found only {checked} commands — the \
          extractor patterns no longer match the site markup"
+    );
+}
+
+// ── Vocabulary gate: one concept, one word ─────────────────────────────────
+//
+// The product name for "a named subset of your setup" is **toolset**. It used
+// to be three names for one thing — "profile" in the CLI, "toolset" on the
+// site, `[profiles.*]` in the file — and a reader had to learn all three. These
+// two tests hold the line on the two surfaces a person actually reads: the
+// `--help` of a command they can see, and the docs prose.
+//
+// What deliberately keeps the old spelling, and is therefore NOT a violation:
+//   * the manifest key `[profiles.<name>]` — the file format; renaming it would
+//     break every manifest on every machine for no user benefit;
+//   * the JSON contract fields and feature names (`profiles`, `profile`,
+//     `profiles-v1`, `profiles-edit-v1`) — versioned wire, consumed by t3code;
+//   * the hidden panel verbs (`create-profile`, `use-profile`,
+//     `add-*-to-profile`) and their `--profile` flags — fixed argv, not prose;
+//   * internal Rust identifiers — no user reads them.
+// The first three are all spelled inside backticks in the docs, so the code-span
+// rule below exempts them structurally rather than by allowlist.
+
+/// The one-line fix every failure message ends with, so a contributor does not
+/// have to go find this file to learn the rule.
+const VOCAB_FIX: &str = "say \"toolset\" — \"profile\" is kept only for the manifest key \
+     `[profiles.<name>]`, the JSON/wire contract, and the frozen panel argv";
+
+/// Walk the visible clap tree, collecting `(path, what, text)` for every piece
+/// of help a person can reach without already knowing a hidden command's name.
+/// Hidden subcommands are not descended into: their help is machine surface,
+/// and the panel verbs there are *named* `…-profile` on purpose.
+fn visible_help_texts(
+    cmd: &clap::Command,
+    path: &str,
+    out: &mut Vec<(String, &'static str, String)>,
+) {
+    let mut push = |what: &'static str, text: Option<String>| {
+        if let Some(t) = text {
+            out.push((path.to_string(), what, t));
+        }
+    };
+    push("about", cmd.get_about().map(ToString::to_string));
+    push("long_about", cmd.get_long_about().map(ToString::to_string));
+    push("after_help", cmd.get_after_help().map(ToString::to_string));
+    push(
+        "before_help",
+        cmd.get_before_help().map(ToString::to_string),
+    );
+    for arg in cmd.get_arguments() {
+        if arg.is_hide_set() {
+            continue;
+        }
+        let id = arg.get_id().to_string();
+        // The long name and its *visible* aliases are read off the help screen
+        // too; a hidden `alias = "profile"` is back-compat plumbing, not prose.
+        if let Some(long) = arg.get_long() {
+            out.push((path.to_string(), "flag name", format!("--{long}")));
+        }
+        if let Some(vn) = arg.get_value_names() {
+            for name in vn {
+                out.push((path.to_string(), "value name", name.to_string()));
+            }
+        }
+        let arg_path = format!("{path} {id}");
+        if let Some(h) = arg.get_help() {
+            out.push((arg_path.clone(), "arg help", h.to_string()));
+        }
+        if let Some(h) = arg.get_long_help() {
+            out.push((arg_path, "arg long help", h.to_string()));
+        }
+    }
+    for sub in cmd.get_subcommands() {
+        if sub.is_hide_set() || sub.get_name() == "help" {
+            continue;
+        }
+        visible_help_texts(sub, &format!("{path} {}", sub.get_name()), out);
+    }
+}
+
+#[test]
+fn visible_help_says_toolset() {
+    let mut texts = Vec::new();
+    visible_help_texts(&cli_command(), "agentstack", &mut texts);
+    // Floor: if a refactor empties the walk, fail loudly instead of passing.
+    assert!(
+        texts.len() > 50,
+        "the visible-help walk found only {} strings — it stopped descending the clap tree",
+        texts.len()
+    );
+
+    let offenders: Vec<String> = texts
+        .iter()
+        .filter(|(_, _, text)| text.to_ascii_lowercase().contains("profile"))
+        .map(|(path, what, text)| format!("  `{path}` {what}: {text}"))
+        .collect();
+
+    assert!(
+        offenders.is_empty(),
+        "visible command help says \"profile\" — {VOCAB_FIX}:\n{}",
+        offenders.join("\n")
+    );
+}
+
+/// Legitimate "profile" spellings in docs prose (outside every code span).
+/// Each entry is a full line substring the scan may skip, with why. Keep this
+/// list tiny: a growing allowlist is this lint failing silently, and the right
+/// fix for a new entry is almost always to put the identifier in backticks —
+/// which exempts it structurally, because it is then code, not prose.
+const VOCAB_ALLOWLIST: &[&str] = &[
+    // docs/reference.md — the link target of the runnable lease example. It is
+    // a real directory on disk (`examples/mcp-profile-lease/`), so the path
+    // cannot be reworded without moving the example.
+    "examples/mcp-profile-lease",
+];
+
+/// README + every Markdown page under `docs/`, recursively.
+///
+/// `docs/design/` is excluded: those files document the wire contract and the
+/// storage format by their real names (`profiles-edit-v1`, `UseArgs.profile`),
+/// they are internal engineering records rather than reader-facing prose, and
+/// the sibling `every_prose_command_is_real` scan skips them for the same
+/// reason. Anything a reader reaches from the docs site is in scope.
+fn vocab_doc_files(root: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries {
+            let path = entry.expect("readable dir entry").path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n == "design") {
+                    continue;
+                }
+                walk(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = vec![root.join("README.md")];
+    walk(&root.join("docs"), &mut files);
+    files.sort();
+    files
+}
+
+#[test]
+fn docs_prose_say_toolset() {
+    let root = repo_root();
+    let files = vocab_doc_files(&root);
+    // Floor: the scan set must not silently collapse to nothing.
+    assert!(
+        files.len() >= 10,
+        "the docs vocabulary scan found only {} file(s)",
+        files.len()
+    );
+
+    let mut violations = Vec::new();
+    for path in files {
+        let content = std::fs::read_to_string(&path).expect("readable docs page");
+        let spans = markdown_code_spans(&content);
+        let display_path = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+        let lower = content.to_ascii_lowercase();
+        for (pos, _) in lower.match_indices("profile") {
+            if in_any_span(pos, &spans) {
+                continue; // an identifier, a manifest key, a flag, a command
+            }
+            let snippet = snippet_for_line(&content, pos);
+            if VOCAB_ALLOWLIST.iter().any(|a| snippet.contains(a)) {
+                continue;
+            }
+            violations.push(Violation {
+                file: display_path.clone(),
+                line: line_number(&content, pos),
+                snippet,
+            });
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "docs prose says \"profile\" outside a code span — {VOCAB_FIX}:\n{}",
+        violations
+            .iter()
+            .map(|v| format!("  {}:{}: {}", v.file, v.line, v.snippet))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 

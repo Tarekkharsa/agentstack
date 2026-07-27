@@ -1647,7 +1647,7 @@ fn check_reproducibility(
         }
     }
     if emitted == 0 {
-        report.line(Level::Ok, "no library-backed profile skills to verify");
+        report.line(Level::Ok, "no library-backed toolset skills to verify");
     }
 }
 

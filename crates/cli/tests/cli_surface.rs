@@ -32,9 +32,11 @@ fn status_parses_and_help_maps_every_command() {
         .collect();
     assert_eq!(
         visible,
-        ["init", "status", "add", "search", "apply", "doctor", "use", "run", "trust"],
+        ["init", "status", "add", "search", "apply", "doctor", "toolset", "use", "run", "trust"],
         "the visible list is the beginner loop, in task order — `workflow` stays \
-         reachable but out of it until the repeated-use gate closes"
+         reachable but out of it until the repeated-use gate closes. `toolset` is \
+         visible because naming one is a step a person takes by hand (H2); the \
+         `create-profile` argv behind it stays hidden for t3code."
     );
 
     // Review finding H5: the default help used to print all ~40 command names two

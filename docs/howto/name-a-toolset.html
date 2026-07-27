@@ -240,11 +240,11 @@
   <main>
 <p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.15.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
 <h1 id="name-a-toolset">Name a toolset</h1>
-<p>A <strong>toolset</strong> is a named subset of the setup you already have — "backend", "incident", "design" — that you activate together. In the manifest it is a <code>[profiles.&lt;name&gt;]</code> block; the CLI and the JSON contracts call it a <em>profile</em>, graphical integrations call it a <em>Toolset</em>. Same object. It names <em>which</em> of your servers and skills come along for a task; it is <strong>not</strong> a policy, a permission level, or a workflow role. A manifest with no toolset named activates its whole inline set, so you only name one once you want more than one.</p>
+<p>A <strong>toolset</strong> is a named subset of the setup you already have — "backend", "incident", "design" — that you activate together. In the manifest it is a <code>[profiles.&lt;name&gt;]</code> block — the manifest key kept its original spelling so existing manifests keep working, but everything you read and type says <em>toolset</em>. It names <em>which</em> of your servers and skills come along for a task; it is <strong>not</strong> a policy, a permission level, or a workflow role. A manifest with no toolset named activates its whole inline set, so you only name one once you want more than one.</p>
 <p>Prerequisite: a project with an <code>.agentstack/agentstack.toml</code> <a href="../concepts.html">manifest</a> (run <code>agentstack init</code> if you don't have one).</p>
 <h2 id="the-one-command-way">The one-command way<a class="hlink" href="#the-one-command-way" aria-label="Link to this section">#</a></h2>
 <p>The capabilities are already in your manifest. A toolset just <em>names a subset</em> of them — no re-import, no copying. The shortest path is one command:</p>
-<pre class="block"><code>agentstack create-profile --name backend --server postgres --server github --skill sql-review</code></pre>
+<pre class="block"><code>agentstack toolset create --name backend --server postgres --server github --skill sql-review</code></pre>
 <p>At a terminal it shows what it will create, asks, and on yes writes the <code>[profiles.backend]</code> block and re-locks. <code>--skill '*'</code> means every inline skill.</p>
 <p><strong>Naming a toolset does not switch to it.</strong> Nothing is rendered and none of your CLIs change — you have defined a subset, not chosen it. Activate it when you want it, with <code>agentstack session start backend</code> (see <a href="#which-activation-session-or-apply">below</a>). To undo the creation itself, delete the <code>[profiles.backend]</code> block from the manifest.</p>
 <p>Scripts and graphical clients get a two-step contract instead — <code>--preview</code> emits the plan plus a consent digest, and applying needs <code>--yes --consented &lt;digest&gt;</code>, so nothing writes without something having reviewed exactly that plan against exactly those manifest bytes. A bare non-interactive call refuses and says which flag it wants, rather than printing a digest at a person who did not ask for one.</p>
@@ -264,7 +264,7 @@ skills  = ["sql-review"]</code></pre>
 <pre class="block"><code>agentstack use --list                 # see every toolset and its readiness
 agentstack session start backend      # use it for now; `session end` reverts
 agentstack use backend --write        # or apply it on disk (stable/offline)</code></pre>
-<p>Prefer to <strong>capture what you actually used</strong> instead of writing the list by hand? During a session, <code>agentstack session freeze --name backend</code> pins the resolved set — the profile's servers plus exactly the skills the agent loaded — into a new toolset you can replay deterministically.</p>
+<p>Prefer to <strong>capture what you actually used</strong> instead of writing the list by hand? During a session, <code>agentstack session freeze --name backend</code> pins the resolved set — the toolset's servers plus exactly the skills the agent loaded — into a new toolset you can replay deterministically.</p>
 <h2 id="two-toolsets-two-tasks">Two toolsets, two tasks<a class="hlink" href="#two-toolsets-two-tasks" aria-label="Link to this section">#</a></h2>
 <p><strong>Backend development vs. incident response.</strong> Everyday coding wants your database and code servers and the review skills; a 2 a.m. page wants read-only observability and the runbook, and nothing that can write:</p>
 <pre class="block"><code>[profiles.backend]
@@ -292,8 +292,8 @@ skills  = ["sql-review", "pdf", "notes"]</code></pre>
 </ul>
 <p>Both are reversible: a session reverts on <code>end</code>, and an applied toolset is undone with <a href="../howto/undo.html"><code>agentstack restore</code></a>.</p>
 <ul>
-<li><a href="../concepts.html">Concepts</a> — profile (toolset), manifest, delivery modes</li>
-<li><a href="../reference.html#selective-skills-via-profiles">Reference: selective skills via profiles</a></li>
+<li><a href="../concepts.html">Concepts</a> — toolset, manifest, delivery modes</li>
+<li><a href="../reference.html#selective-skills-via-toolsets">Reference: selective skills via toolsets</a></li>
 <li><a href="../reference.html#ephemeral-sessions-agentstack-session">Reference: ephemeral sessions</a></li>
 <li><a href="../howto/team-setup.html">Team setup</a> — project vs. machine manifests</li>
 </ul>

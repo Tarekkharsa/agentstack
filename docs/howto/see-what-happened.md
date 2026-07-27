@@ -43,7 +43,7 @@ agentstack explain <name>             # provenance, effective policy, and contex
 run's [flight recorder](../concepts.md) — its full lifecycle, egress, tool-call,
 and secret-ref record — plus the run's [posture](../concepts.md) label. A run
 that's still going and shouldn't be: `agentstack kill <id>` stops it and
-reverts any profile it owned.
+reverts any toolset it owned.
 `report calls` summarizes the global [call audit log](../concepts.md) across all
 runs (argument *digests* only, never values). The two context lenses differ:
 `report usage --live` estimates a server's `tools/list` footprint, `report wire`
@@ -60,7 +60,7 @@ its pin, its [effective policy](../reference.md#mcp-firewall-policytools) (the
 tool, egress, and secret-access rules that will actually apply), and its
 per-session context cost. Run it before `agentstack trust .` (see
 [trust a cloned repo](trust-a-repo.md)) or before adding a capability to a
-profile.
+toolset.
 
 **Limits.** `report calls`, `report usage`, and `optimize` only see
 gateway-brokered calls — a server rendered into a native config is called by the

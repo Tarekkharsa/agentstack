@@ -248,7 +248,7 @@
 <ul>
 <li><strong>Pinned, re-gated on change.</strong> Workflow source is pinned in the lockfile by a strict content digest (a symlink anywhere is a hard error). Change one byte and trust re-gates — you review again before it can run.</li>
 <li><strong>Untrusted means inert.</strong> Until the bundle is trusted, a workflow never parses as script and its name is not even invocable. No dev-mode exception.</li>
-<li><strong>Roles can only narrow.</strong> Each <code>agent()</code> call names a <strong>role</strong> — a profile with its own tools, servers, folders, secrets, and egress. A workflow <em>requests</em> a closed set of roles; it can never grant or widen authority. A child step's grant is always within the workflow's, which is within your machine policy.</li>
+<li><strong>Roles can only narrow.</strong> Each <code>agent()</code> call names a <strong>role</strong> — a toolset with its own tools, servers, folders, secrets, and egress. A workflow <em>requests</em> a closed set of roles; it can never grant or widen authority. A child step's grant is always within the workflow's, which is within your machine policy.</li>
 <li><strong>Every step is a locked run.</strong> Each agent step goes through the full protected-run path — trust gate, lock verification, policy admission, a frozen grant, its own scoped MCP config, and a recorded outcome.</li>
 <li><strong>Per-child isolation.</strong> Concurrent steps in one project each get their own launch-scoped tool config; they never touch your project's <code>.mcp.json</code> or each other's.</li>
 <li><strong>A complete evidence tree.</strong> The run records which orchestration bytes ran, what authority every step had, and the full spawn tree — so you can audit exactly what happened.</li>
@@ -263,7 +263,7 @@
 </tbody></table></div>
 <p>Step outputs are model output — untrusted data. One step's result can flow into a later step's <em>prompt</em> by design, so a prompt-injected step can mislead its successors; it cannot widen any grant. The built-in <strong>validation step</strong> (an independent verifier under a narrower role) is the mitigation, and the report labels each step's posture rather than implying uniform containment.</p>
 <h2 id="writing-one">Writing one<a class="hlink" href="#writing-one" aria-label="Link to this section">#</a></h2>
-<p>A workflow is one JavaScript file with a small, familiar API — the same <code>agent()</code> / <code>parallel()</code> / <code>pipeline()</code> vocabulary as Claude Code, with one change: <code>agent()</code> takes a <strong>role</strong>, not a model, because the harness and model are properties of the role's profile, not something a script may choose.</p>
+<p>A workflow is one JavaScript file with a small, familiar API — the same <code>agent()</code> / <code>parallel()</code> / <code>pipeline()</code> vocabulary as Claude Code, with one change: <code>agent()</code> takes a <strong>role</strong>, not a model, because the harness and model are properties of the role's toolset, not something a script may choose.</p>
 <pre class="block"><code>export const meta = {
   name: 'nightly-review',
   description: "Review the day's diff, then verify the findings",

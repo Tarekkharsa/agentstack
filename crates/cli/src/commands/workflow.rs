@@ -1083,7 +1083,7 @@ fn resolve_bindings(
     for role in &wf.roles {
         let profile = ctx.loaded.manifest.profiles.get(role).with_context(|| {
             format!(
-                "role '{role}' names no declared profile — admission should have refused this \
+                "role '{role}' names no declared toolset — admission should have refused this \
                  (validation drift?)"
             )
         })?;

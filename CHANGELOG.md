@@ -256,6 +256,21 @@ findings and two interpreter findings. All are closed:
   to undo) in content you cannot meaningfully check. Each target now reads
   `~ +28 / -0 lines (new content)`; `apply --verbose` prints the bodies. In one
   real two-target project the dry run went from 48 lines to 11.
+- **One concept, one word: it is a toolset everywhere you read it.** The product
+  said "profile" in every command and error, the docs said "toolset", and the
+  manifest said `[profiles.*]` — three names for the same thing, so you read one
+  word on the site and had to type another in the terminal. The CLI's output,
+  help text, and docs prose now say **toolset** throughout, and naming one is a
+  visible command: `agentstack toolset create --name backend --server github`.
+  On the commands you can see, `--toolset` is the flag (`apply`, `run`, `add
+  server`, `add skill`); the old `--profile` spelling keeps working as an alias,
+  so nothing you already typed or scripted breaks. Deliberately unchanged: the
+  manifest key stays `[profiles.<name>]` so every existing manifest keeps
+  working, the JSON contract fields and `profiles-v1` / `profiles-edit-v1`
+  feature names stay put, and the fixed panel argv (`create-profile`,
+  `use-profile`, `add-*-to-profile`) still runs — `create-profile` is now a
+  hidden alias of `toolset create` on the same authority path, producing the
+  same consent digest. A CI lint holds the line on both surfaces.
 - **Naming a toolset no longer switches to it.** `create-profile` used to write
   the manifest entry, re-lock, *and* render the new toolset into every CLI as a
   side effect of being named — so defining a subset silently changed your setup,

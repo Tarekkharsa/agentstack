@@ -66,7 +66,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             println!("  For scripts/CI, use:");
             println!("    agentstack init");
             println!("    agentstack apply --write");
-            println!("    agentstack use <profile> --write   # if the manifest has skills");
+            println!("    agentstack use <toolset> --write   # if the manifest has skills");
             return Ok(());
         }
         println!("\nNo manifest here yet — importing the setup already on this machine.");
@@ -316,7 +316,7 @@ fn run_static(args: &SetupArgs, scope: Scope, manifest_dir: Option<&Path>) -> Re
             // and the exact recovery command instead of failing the whole setup
             // on its last step.
             println!(
-                "  {} could not activate profile '{label}' ({err:#})",
+                "  {} could not activate toolset '{label}' ({err:#})",
                 "⚠".yellow()
             );
             println!("  Fix the issue, then run: {}", cmd.bold());
@@ -614,7 +614,7 @@ fn select_profile(ctx: &super::Context, args: &SetupArgs) -> Result<Option<Strin
         [only] => Ok(Some((*only).clone())),
         [first, ..] => {
             println!(
-                "\nThis manifest declares {} profiles: {}.",
+                "\nThis manifest declares {} toolsets: {}.",
                 names.len(),
                 names
                     .iter()
@@ -623,14 +623,14 @@ fn select_profile(ctx: &super::Context, args: &SetupArgs) -> Result<Option<Strin
                     .join(", ")
             );
             if crate::util::confirm::confirm(&format!(
-                "Activate '{first}' now? (switch later with `agentstack use <profile> --write`)"
+                "Activate '{first}' now? (switch later with `agentstack use <toolset> --write`)"
             ))? {
                 Ok(Some((*first).clone()))
             } else {
                 println!(
                     "  {} skipped — activate one later with {}",
                     "·".dimmed(),
-                    "agentstack use <profile> --write".bold()
+                    "agentstack use <toolset> --write".bold()
                 );
                 Ok(None)
             }
@@ -798,7 +798,7 @@ fn mode_switch_plan(
     profile: Option<&str>,
 ) -> (Vec<String>, &'static str) {
     use super::overview::Mode;
-    let p = profile.unwrap_or("<profile>");
+    let p = profile.unwrap_or("<toolset>");
     match mode {
         Mode::Static => (
             vec!["agentstack apply --write".into()],
@@ -809,7 +809,7 @@ fn mode_switch_plan(
                 format!("agentstack session start {p}"),
                 "agentstack session end".into(),
             ],
-            "Materialize your profile for a session, then revert it so the repo stays clean.",
+            "Materialize your toolset for a session, then revert it so the repo stays clean.",
         ),
         Mode::ZeroFiles => (
             vec![
@@ -1402,7 +1402,7 @@ mod tests {
 
         // No profile declared → a visible placeholder, not a panic.
         let (cmds, _) = mode_switch_plan(Mode::CleanAtRest, None);
-        assert_eq!(cmds[0], "agentstack session start <profile>");
+        assert_eq!(cmds[0], "agentstack session start <toolset>");
 
         let (cmds, _) = mode_switch_plan(Mode::ZeroFiles, None);
         assert_eq!(cmds[0], "agentstack gateway connect --all");

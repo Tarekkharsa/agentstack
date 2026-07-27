@@ -823,7 +823,7 @@ fn explain_lock(
     }
     let msg = match &r.status {
         S::Matches => "matches lock".to_string(),
-        S::MissingLockEntry => "not locked ↳ agentstack use <profile> --write".to_string(),
+        S::MissingLockEntry => "not locked ↳ agentstack use <toolset> --write".to_string(),
         S::ChecksumDrift { .. } => "⚠ content drifted from lock".to_string(),
         S::RevDrift { locked, current } => format!("⚠ rev drifted: locked {locked}, now {current}"),
         S::NotAvailableOffline { .. } => {
@@ -938,7 +938,7 @@ fn explain_server_lock(
     }
     let msg = match &r.status {
         S::Matches => "matches lock".to_string(),
-        S::MissingLockEntry => "not locked ↳ agentstack use <profile> --write".to_string(),
+        S::MissingLockEntry => "not locked ↳ agentstack use <toolset> --write".to_string(),
         S::ChecksumDrift { .. } => "⚠ definition drifted from lock".to_string(),
         S::ResolveFailed { error } => format!("⚠ unresolved — {error}"),
     };

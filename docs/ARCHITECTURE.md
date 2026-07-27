@@ -85,7 +85,7 @@ egress, brokered tool-call, and secret-reference events enter the per-run log.
 ## Operating model — choose the boundary you need
 
 Three orthogonal questions keep the rest of the system easy to reason about. A
-**profile** answers *which capabilities does this task select?* The **delivery
+**toolset** answers *which capabilities does this task select?* The **delivery
 mode** answers *how does it reach the agent?* The **lifetime** answers *when
 does it go away?* Selection is not delivery, and delivery is not isolation.
 
@@ -95,9 +95,9 @@ trust, trust is not policy, policy is not a sandbox, audit is not enforcement):
 
 | Primitive | The question it answers | What it does not do |
 |---|---|---|
-| Bundle | What intent is declared? `agentstack.toml` names servers, skills, profiles, and requested policy. | Does not certify the referenced code as safe. |
+| Bundle | What intent is declared? `agentstack.toml` names servers, skills, toolsets, and requested policy. | Does not certify the referenced code as safe. |
 | Integrity | Which capability bytes were reviewed? `agentstack.lock` pins resolved inputs; signatures can attest to the lock bytes. | Does not grant local consent to execute. |
-| Selection | What does this task need? A profile names the intended server and skill set. | Does not decide how the harness receives it. |
+| Selection | What does this task need? A toolset names the intended server and skill set. | Does not decide how the harness receives it. |
 | Delivery | How does selection reach the harness? Static render, native session, or MCP lease. | Does not confine the agent process. |
 | Consent | May this repo auto-activate here? `agentstack trust` binds local approval to manifest + overlay + lock. | Does not mean "safe to run unsandboxed." |
 | Authority | Which tools, hosts, secrets, and paths are allowed? Machine and project policy intersect, deny wins. | Does not create process isolation by itself. |
@@ -108,7 +108,7 @@ The recommended default and its exceptions:
 
 | Situation | Use | Why |
 |---|---|---|
-| MCP-capable interactive work | Profile lease | Smallest live surface, no project-native cleanup; policy and audit stay on the path. |
+| MCP-capable interactive work | Toolset lease | Smallest live surface, no project-native cleanup; policy and audit stay on the path. |
 | Native skills or instruction files | `use --write` | The harness reads those files itself; MCP cannot inject native files. |
 | Native, but clean between sessions | `session start`/`end` | Temporary compatibility with an explicit restore contract. |
 | Stable offline launches | Static render | No live gateway dependency; native config is ready at startup. |
@@ -118,7 +118,7 @@ The recommended default and its exceptions:
 
 Those three delivery mechanisms are what the user-facing docs call **delivery
 modes**: a **static render** = *static*, a **native session** (`session
-start`/`end`) = *clean-at-rest*, an **MCP or profile lease** = *zero-files*.
+start`/`end`) = *clean-at-rest*, an **MCP or toolset lease** = *zero-files*.
 [concepts.md](concepts.md#delivery-modes) defines each mode and
 [which mode do I need?](choose.md) is the decision page; this section is the
 architect's version of the same choice.

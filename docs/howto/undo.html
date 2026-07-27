@@ -252,7 +252,7 @@ agentstack restore claude-code     # fallback: restore one adapter's config from
 <tr><td>a <a href="../concepts.html">gateway</a> registration</td><td><code>agentstack gateway disconnect &lt;cli&gt; --write</code></td><td>removes the gateway entry from that CLI's global config (<code>--all</code> for every CLI)</td></tr>
 <tr><td>the destructive-command <a href="../concepts.html">guard</a></td><td><code>agentstack guard uninstall</code></td><td>removes every hook it installed and sets <code>[guard] enabled = false</code></td></tr>
 <tr><td><a href="../concepts.html">trust</a> for a repo</td><td><code>agentstack trust --revoke</code></td><td>withdraws consent — the repo goes inert again</td></tr>
-<tr><td>an active <a href="../concepts.html">session</a></td><td><code>agentstack session end</code></td><td>reverts this directory's ephemeral profile (<code>--all</code> for every session)</td></tr>
+<tr><td>an active <a href="../concepts.html">session</a></td><td><code>agentstack session end</code></td><td>reverts this directory's ephemeral toolset (<code>--all</code> for every session)</td></tr>
 <tr><td>a server or skill in the manifest</td><td><code>agentstack remove &lt;name&gt; --write</code></td><td>drops it from the manifest and the lockfile</td></tr>
 </tbody></table></div>
 <p><strong>Limits.</strong> <code>restore</code> reverts agentstack's own recorded config writes, not side effects a tool already had — a file a server deleted is not brought back. Nothing here permanently deletes your data; each verb reverses one agentstack change. One edge case: replacing an already-managed skill with the same name is not snapshotted byte-exact, so its restore is not promised exact.</p>

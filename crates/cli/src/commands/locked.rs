@@ -1286,7 +1286,7 @@ fn live(
         banner!(
             quiet,
             headless,
-            "  {} profile fence: '{}' — the gates, grant, and bridge see only this profile's \
+            "  {} toolset fence: '{}' — the gates, grant, and bridge see only this toolset's \
              servers; no native session state is applied under --locked",
             "✓".green(),
             p
@@ -1753,7 +1753,7 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     print_posture_and_limits(desc, base, false);
     if let Some(p) = args.profile.as_deref() {
         println!(
-            "  {} profile fence: '{}' — evaluation runs against this profile's server subset",
+            "  {} toolset fence: '{}' — evaluation runs against this toolset's server subset",
             "✓".green(),
             p
         );

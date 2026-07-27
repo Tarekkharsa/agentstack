@@ -54,7 +54,7 @@ fn sync(
     }
     if manifest.skills.is_empty() {
         println!(
-            "Manifest defines no inline skills; {} profile-referenced skill(s) resolve \
+            "Manifest defines no inline skills; {} toolset-referenced skill(s) resolve \
              from the central library — pin them with `agentstack lock`.",
             profile_names.len()
         );

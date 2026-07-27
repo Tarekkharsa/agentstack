@@ -28,7 +28,7 @@ implementation internals — live in
 - [Drift: adopt or apply?](#drift-adopt-or-apply)
   - [`adopt` and `add`](#adopt-and-add)
   - [Search across providers](#search-across-providers)
-  - [Selective skills via profiles](#selective-skills-via-profiles)
+  - [Selective skills via toolsets](#selective-skills-via-toolsets)
 - [Live runs (`agentstack run`)](#live-runs-agentstack-run)
 
 **[Part II — The power surface](#part-ii--the-power-surface)**
@@ -44,7 +44,7 @@ implementation internals — live in
 - [Agent-operable (`agentstack mcp`)](#agent-operable-agentstack-mcp)
   - [Transparent mode (`--transparent`)](#transparent-mode---transparent)
   - [The zero-files gateway (`--auto-project` + `trust`)](#the-zero-files-gateway---auto-project--trust)
-  - [MCP profile leases](#mcp-profile-leases-one-connection-one-capability-fence)
+  - [MCP toolset leases](#mcp-toolset-leases-one-connection-one-capability-fence)
   - [Compact proxied surface + code mode](#compact-proxied-surface--code-mode)
   - [Experimental `tools_execute`](#experimental-tools_execute)
 - [Governance (`[policy]`)](#governance-policy)
@@ -85,7 +85,7 @@ implementation internals — live in
 
 ## Part I — The everyday loop
 
-This part is everything `agentstack --help` shows by default: the nine everyday commands — `init`, `status`, `add`, `search`, `apply`, `doctor`, `use`, `run`, `trust` — and the machinery directly behind them. Read only what is here and you can reach a working setup: one manifest rendered into every CLI's native config, credentials kept out of that config, hand-edits caught, and a profile activated. The power surface in Part II is entirely opt-in — nothing in the everyday loop requires it.
+This part is everything `agentstack --help` shows by default: the nine everyday commands — `init`, `status`, `add`, `search`, `apply`, `doctor`, `use`, `run`, `trust` — and the machinery directly behind them. Read only what is here and you can reach a working setup: one manifest rendered into every CLI's native config, credentials kept out of that config, hand-edits caught, and a toolset activated. The power surface in Part II is entirely opt-in — nothing in the everyday loop requires it.
 
 ## Secrets and trust
 
@@ -249,7 +249,7 @@ target configs back into the manifest, lifting inline secrets and preserving
 comments. It takes no positional name: it sweeps the drifted targets, scoped
 with `--target <id>` if you want just one CLI's config. `add` is the
 flag-driven (scriptable / agent-operable) way to add a server or skill,
-optionally into a profile.
+optionally into a toolset.
 
 ```text
 agentstack adopt --write                  # import hand-added server drift into the manifest
@@ -272,22 +272,22 @@ agentstack add from <id>
 agentstack is the cross-CLI *client* over the registry + marketplaces, not
 another registry.
 
-### Selective skills via profiles
+### Selective skills via toolsets
 
-`use <profile>` materializes only that profile's skills, pruning the rest it
+`use <toolset>` materializes only that toolset's skills, pruning the rest it
 owns and never clobbering hand-made skill dirs.
 
 ```text
-agentstack use <profile> --write   # materialize only that profile's skills
+agentstack use <toolset> --write   # materialize only that toolset's skills
 ```
 
-The profile is optional: one declared profile is chosen automatically, and a
-manifest with **no** profiles activates its full inline set — `agentstack use
---write` just works; several profiles need a name. Materialization is
+The toolset is optional: one declared toolset is chosen automatically, and a
+manifest with **no** toolsets activates its full inline set — `agentstack use
+--write` just works; several toolsets need a name. Materialization is
 symlink-with-copy-fallback; when a prune empties the managed skills dir
 (deactivation, `session end`) the dir is removed too, but rmdir semantics spare
 any dir holding user content. Interactive `init` activates through this exact
-`use` code path; plain `apply` never touches skills, it only names which profile
+`use` code path; plain `apply` never touches skills, it only names which toolset
 activates them.
 
 ## Live runs (`agentstack run`)
@@ -299,11 +299,11 @@ process group (so a kill takes down the whole tree), recorded in
 integrated supervisor.
 
 ```bash
-# Launch a harness, attached to your terminal, with a profile applied for the
+# Launch a harness, attached to your terminal, with a toolset applied for the
 # life of the run (its servers + skills are reverted automatically on exit).
-agentstack run claude-code --profile design
-agentstack run codex --profile backend --scope project
-agentstack run claude-code --keep        # leave the profile applied after exit
+agentstack run claude-code --toolset design
+agentstack run codex --toolset backend --scope project
+agentstack run claude-code --keep        # leave the toolset applied after exit
 
 # See runs and stop them here.
 agentstack report runs         # table; add --json for scripting
@@ -313,7 +313,7 @@ agentstack kill <id> --force   # SIGKILL immediately
 
 Launching is a terminal act (the CLIs are interactive TUIs). The registry is
 self-healing: a run
-whose wrapper died is pruned on the next `report runs`. A profile-bound run uses
+whose wrapper died is pruned on the next `report runs`. A toolset-bound run uses
 the session engine, so one is allowed per directory at a time. Every tracked run
 records a minimal lifecycle and prints `agentstack report run <id>` when it exits;
 gateway-brokered tool calls join that report without recording argument values.
@@ -393,7 +393,7 @@ error.
 `~/.agentstack/state.json` records what agentstack manages per target, so
 `apply` prunes entries we own that left the manifest and `doctor`/`diff`
 detect hand-edits — see [drift: adopt or apply?](#drift-adopt-or-apply) for
-which fix to run. `diff --json` emits the selected scope, profile, per-CLI
+which fix to run. `diff --json` emits the selected scope, toolset, per-CLI
 change/diff records, kept foreign entries, owner refreshes, and warnings for CI
 or agent consumers.
 
@@ -421,13 +421,13 @@ rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled
 - **static** (default) — artifacts on disk, kept out of git by a managed
   `.gitignore` block; pass `--no-gitignore` to commit them instead.
 - **clean-at-rest** — `agentstack lock` pins name refs *without rendering*, so
-  `git status` stays silent; a profile arrives via
+  `git status` stays silent; a toolset arrives via
   [`session start`](#ephemeral-sessions-agentstack-session) /
   [`run`](#live-runs-agentstack-run) and reverts on exit.
 - **zero-files** — `agentstack gateway connect` registers the gateway once per
   CLI (one write to each CLI's global config) and every **trusted** repo serves
   its own stack live; `agentstack_lease_open(profile)` fences one MCP connection
-  to a profile without rendering native files. A machine-local
+  to a toolset without rendering native files. A machine-local
   `codemode/endpoint.json` coordinate may exist for the connection's duration —
   see [the zero-files gateway](#the-zero-files-gateway---auto-project--trust).
 
@@ -495,9 +495,9 @@ executed — the agent proposes, a human runs `apply`):
 | `agentstack_add_from` | *propose:* add a catalog/registry server | [search](#search-across-providers) |
 | `agentstack_add_server` | *propose:* add a server | [`adopt`/`add`](#adopt-and-add) |
 | `agentstack_add_skill` | *propose:* add a skill | [`add skill`](#add-skill-source--install-from-any-skills-repo) |
-| `agentstack_create_profile` | *propose:* create a profile | [profiles](#selective-skills-via-profiles) |
+| `agentstack_create_profile` | *propose:* create a toolset | [toolsets](#selective-skills-via-toolsets) |
 | `agentstack_list_loadable`, `agentstack_load` | the two-step skill loader (below) | this section |
-| `agentstack_lease_open` / `_status` / `_close` / `_freeze` | MCP profile lease lifecycle (below) | [leases](#mcp-profile-leases-one-connection-one-capability-fence) |
+| `agentstack_lease_open` / `_status` / `_close` / `_freeze` | MCP toolset lease lifecycle (below) | [leases](#mcp-toolset-leases-one-connection-one-capability-fence) |
 | `agentstack_session_start` / `_end` / `_list` / `_freeze` | render/revert a native session (`start` takes a `profile`) | [sessions](#ephemeral-sessions-agentstack-session) |
 | `tools_search`, `tools_bindings` | the compact proxied tool surface + code mode (below) | [code mode](#compact-proxied-surface--code-mode) |
 | `tools_execute` | *experimental, sandbox builds only* — host the code-mode program | [below](#experimental-tools_execute) |
@@ -591,9 +591,9 @@ instruction files (`CLAUDE.md`/`AGENTS.md`) are read from disk by the CLIs
 themselves and still need render mode (`apply`/`use`) — `gateway connect` prints
 this per CLI.
 
-### MCP profile leases: one connection, one capability fence
+### MCP toolset leases: one connection, one capability fence
 
-An MCP profile lease is process-local state owned by one `agentstack mcp`
+An MCP toolset lease is process-local state owned by one `agentstack mcp`
 process — the zero-file counterpart of a native `session start`, but with no
 cleanup contract: a lease never renders harness config, creates a native skill
 folder, or writes `sessions.json`, so close/process exit has nothing to restore.
@@ -608,19 +608,19 @@ agentstack_lease_close({})
 ```
 
 While the lease is active: the live gateway exposes only servers from the
-selected profile; `agentstack_list_loadable`/`agentstack_load` expose only that
-profile's skills (plus the embedded `using-agentstack` manual), with an optional
+selected toolset; `agentstack_list_loadable`/`agentstack_load` expose only that
+toolset's skills (plus the embedded `using-agentstack` manual), with an optional
 case-insensitive `query` that filters **within** the fence; the first load of
 each skill is recorded with its reason; and trust, lock/digest verification,
 machine and project policy, and call auditing all continue to apply.
 `agentstack_lease_freeze({ "name": "backend-observed" })` converts the leased
-server list plus the skills actually loaded into a new manifest profile — a
+server list plus the skills actually loaded into a new manifest toolset — a
 manifest-only proposal; review the edit, then `agentstack lock`.
 
 The control plane refuses to place a lease over an active native session, or a
 native session over an active lease. A lease is deliberately invisible to
 separate processes — read `agentstack_lease_status` from the same connection;
-opening a different valid profile replaces the current lease. See
+opening a different valid toolset replaces the current lease. See
 [`examples/mcp-profile-lease`](../examples/mcp-profile-lease/) for a runnable
 lifecycle, and
 [field notes](design/reference-field-notes.md#lease-survival-across-a-mid-connection-change)
@@ -825,22 +825,22 @@ closing doctor step, but only when the project actually has skills.
 
 ## Ephemeral sessions (`agentstack session`)
 
-A session loads a profile **for now** and reverts it on exit — the clean-at-rest
+A session loads a toolset **for now** and reverts it on exit — the clean-at-rest
 mode's native primitive, so nothing generated persists between sessions.
 
 ```bash
-agentstack session start backend          # render backend's profile (project scope)
+agentstack session start backend          # render backend's toolset (project scope)
 agentstack session start backend --scope global
 agentstack session list                   # active sessions on this machine
 agentstack session end                    # revert this directory's session
 agentstack session end --all              # revert every active session
-agentstack session freeze --name backend-ci   # pin the resolved set into a new profile
+agentstack session freeze --name backend-ci   # pin the resolved set into a new toolset
 ```
 
-`start` renders the profile's servers, skills, instructions, settings, and
+`start` renders the toolset's servers, skills, instructions, settings, and
 hooks, records the write, and reverts it on `end` (or `end --all`). `freeze`
-captures the session's resolved set — the profile's servers plus the skills
-actually loaded — into a new profile (default `<profile>-frozen`) so CI can
+captures the session's resolved set — the toolset's servers plus the skills
+actually loaded — into a new toolset (default `<toolset>-frozen`) so CI can
 replay it deterministically; review the manifest edit, then `agentstack lock`.
 The same start/end lifecycle backs the MCP `agentstack_session_*` tools and
 external toolset pickers.
@@ -889,7 +889,7 @@ capability surface** — every decision recorded, nothing re-derived mid-run:
    refuses because it *cannot* be checked).
 2. **Grant freeze.** The run's entire authority — compiled machine ∩ project
    ruleset, the resolved `${REF}`-only server set, project root + consent
-   digest, the fencing profile — is frozen into an `AuthorityGrant` whose
+   digest, the fencing toolset — is frozen into an `AuthorityGrant` whose
    canonical digest is printed and recorded (`grant_frozen`).
 3. **Bridge handoff.** A reviewed projection of the grant (never argv, never
    secret values) is sealed under a machine-local HMAC key into the run's
@@ -904,8 +904,8 @@ capability surface** — every decision recorded, nothing re-derived mid-run:
    `session_start`, `session_end`/`freeze`, `add_skill`/`add_server`/`add_from`,
    `create_profile` — are refused for the run's duration. Read-only
    discovery and trust-gated skill loading still answer.
-5. **`--profile <name>` is a fence**, not a session: gates, grant, artifact,
-   and bridge all see only that profile's server subset; no native session
+5. **`--toolset <name>` is a fence**, not a session: gates, grant, artifact,
+   and bridge all see only that toolset's server subset; no native session
    state is applied or reverted.
 6. **Hygiene.** The original project MCP config is parked in the run's
    private dir (never left in the repo) and restored byte-identical; a
@@ -929,7 +929,7 @@ instead of copying files between repos.
 ### Layout and name resolution
 
 Skill dirs (`lib/skills/`) and MCP server definitions (`lib/servers/*.toml`)
-are indexed in `library.toml`. A profile's `skills = ["sql-review"]` /
+are indexed in `library.toml`. A toolset's `skills = ["sql-review"]` /
 `servers = ["kibana"]` resolve from there; an inline `[skills.*]` /
 `[servers.*]` table always overrides the library. Provider folders are never
 owned — only their skills and MCP entries are managed. The runtime gateway
@@ -946,10 +946,10 @@ differently: a `[[extension]]` entry records `name`, `target`, and a `checksum`
 from the **strict** integrity-root digest over the whole source tree, so
 retargeting a byte-identical extension is drift and a one-byte source edit
 re-gates trust (see [Native extensions](#native-extensions)). `doctor`/`explain`
-flag drift and show each item's origin. Profile resolution is offline by default
+flag drift and show each item's origin. Toolset resolution is offline by default
 (dry-run `use`, `doctor`, `explain` never fetch); `use --write` fetches
 git-backed skills when activation needs them. `agentstack lock [--profile <name>]`
-pins every profile's name refs **without** rendering — the lock-only path for
+pins every toolset's name refs **without** rendering — the lock-only path for
 clean-at-rest repos. The lockfile is part of a project's consent surface, so when
 a currently-trusted project's pins change, `lock` warns that its trust is now
 stale and must be re-granted with `agentstack trust .` — new pins are new consent.
@@ -1035,7 +1035,7 @@ a no-op pull scans nothing, a real pull scans only the skills it changed.
 
 ### The two mental models
 
-Three ways a skill or server reaches a profile; the manifest syntax alone picks
+Three ways a skill or server reaches a toolset; the manifest syntax alone picks
 which:
 
 - **By-name library reference** — `skills = ["greet"]` / `servers = ["kibana"]`
@@ -1060,7 +1060,7 @@ each capability's model on its `Model` line.
 
 ## Capabilities
 
-The kinds of thing a profile can carry — skills, servers, instructions,
+The kinds of thing a toolset can carry — skills, servers, instructions,
 settings, hooks, extensions, packs — and the commands that add, search, and
 account for them. It is a menu; jump to the capability you need.
 
@@ -1077,7 +1077,7 @@ agentstack lock --update      # re-resolve git skills
 agentstack remove <name>      # drop a capability from manifest + lock
 ```
 
-Profile-aware: skills a profile references by name (library-resolved, no inline
+Toolset-aware: skills a toolset references by name (library-resolved, no inline
 `[skills.*]`) keep their lock pins through the reconcile pass — pin or refresh
 with `agentstack lock`. Content digests always hash current bytes; see
 [field notes](design/reference-field-notes.md#orphaned-digest-cache) for the
@@ -1135,14 +1135,14 @@ disk state:
 
 | Mode | `--write` does |
 |---|---|
-| static, unambiguous profile (none declared, or exactly one) | manifest + lock + **materialize** into the default targets (project scope for a project manifest), per-target `✓`/`⚠`/`✗` reporting |
-| static, several profiles | manifest + lock; activate with `agentstack use <profile> --write` (profile fencing wins — which is live is unknowable) |
-| clean-at-rest | manifest + lock; the next `agentstack session start <profile>` picks it up (an active session won't) |
+| static, unambiguous toolset (none declared, or exactly one) | manifest + lock + **materialize** into the default targets (project scope for a project manifest), per-target `✓`/`⚠`/`✗` reporting |
+| static, several toolsets | manifest + lock; activate with `agentstack use <toolset> --write` (toolset fencing wins — which is live is unknowable) |
+| clean-at-rest | manifest + lock; the next `agentstack session start <toolset>` picks it up (an active session won't) |
 | zero-files | manifest + lock, the current lease untouched; **trust re-gates on the edit** — run `agentstack trust .`, or the gateway serves control-plane-only next connection |
 
-Profile membership: no declared profiles → the implicit default; exactly one →
-added automatically; several → `--profile` (or an interactive pick). Naming a
-nonexistent profile is an error, never a silent create.
+Toolset membership: no declared toolsets → the implicit default; exactly one →
+added automatically; several → `--toolset` (or an interactive pick). Naming a
+nonexistent toolset is an error, never a silent create.
 
 ### `try` — run a skill without installing anything
 
@@ -1303,7 +1303,7 @@ token estimates, the model id, best-effort usage numbers — never prompt/messag
 bodies, tool arguments, secrets, or header values. `report wire` aggregates the
 log into a ranked, per-capability table — `tools` (typical per-turn count),
 `avg tokens/turn`, `calls`, and a loaded-vs-called `hint` (`keep` / `drop / lazy`
-/ `watch`) — over the same servers and profiles agentstack manages, closing the
+/ `watch`) — over the same servers and toolsets agentstack manages, closing the
 loop with the static `footprint` / `report usage` / `doctor` lenses. Bucketing
 and SSE internals: [field notes](design/reference-field-notes.md#wire-proxy-internals).
 
@@ -1330,7 +1330,7 @@ agentstack optimize --json       # machine-readable
 agentstack optimize --since 30   # only the last 30 days of runtime evidence
 agentstack optimize --write      # apply ONLY the safe class: provably-inert
                                  # manifest entries (no calls, no activations,
-                                 # no profile, not rendered anywhere, ≥14d of
+                                 # no toolset, not rendered anywhere, ≥14d of
                                  # history) and trust grants for deleted dirs
 ```
 
@@ -1368,7 +1368,7 @@ you need the exact verb, flag, or subcommand.
 - **`add`** — Add a server or skill to the manifest — subcommands `from/server/skill`
 - **`set`** _(hidden)_ — Create or update a manifest entry in place (idempotent `add`) — subcommands `server`
 - **`search`** — Search the capability catalog (and mark what's already added)
-- **`apply`** — Render the manifest into each target's native config — flags `--target/--profile/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore/--verbose`
+- **`apply`** — Render the manifest into each target's native config — flags `--target/--toolset/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore/--verbose`
 - **`instructions`** _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags `--target/--scope/--write`
 - **`doctor`** — Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details — flags `--ci/--live/--fix/--deep/--all/--json`
 - **`remove`** _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags `--write`
@@ -1377,9 +1377,10 @@ you need the exact verb, flag, or subcommand.
 - **`try`** _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags `--skill/--rev/--subpath/--allow-flagged`
 - **`lib`** _(hidden)_ — Manage the central capability library — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init`
 - **`adopt`** _(hidden)_ — Keep a hand-edit: pull drifted native config back into the manifest — flags `--target/--scope/--write/--no-keychain`
+- **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create`
 - **`use`** — Activate a toolset: render its servers + materialize its skills — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
 - **`session`** _(hidden)_ — Use a toolset temporarily: load it for now, then put every file back — subcommands `start/end/list/freeze`
-- **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--prompt/--profile/--scope/--keep/--sandbox/--lockdown/--plan`
+- **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--prompt/--toolset/--scope/--keep/--sandbox/--lockdown/--plan`
 - **`kill`** _(hidden)_ — Kill a tracked run by id (and revert its toolset if it owned one) — flags `--force`
 - **`shim`** _(hidden)_ — Exec-through launcher shim for external supervisors (e.g. t3code) — subcommands `make/exec*`
 - **`workflow`** _(hidden)_ — Run a reviewed multi-agent task using toolsets you already approved — subcommands `run/report/list/runs/explain/declare`
@@ -1404,7 +1405,7 @@ you need the exact verb, flag, or subcommand.
 - **`add-skill-to-profile`** _(hidden)_ — Add a skill to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--git/--rev/--subpath/--path/--preview/--yes/--consented/--allow-unresolved`
 - **`add-server-to-profile`** _(hidden)_ — Add a server to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--type/--url/--header/--command/--arg/--cwd/--env/--preview/--yes/--consented/--allow-unresolved`
 - **`uninstall`** _(hidden)_ — Remove everything AgentStack manages, previewing first — flags `--scope/--write/--verbose/--keep-home`
-- **`create-profile`** _(hidden)_ — Name a toolset: bundle some of what you already have. Does not activate it — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
+- **`create-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset create` (panel action) — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
 - **`use-profile`** _(hidden)_ — Activate an existing toolset (panel action; digest-bound) — flags `--profile/--preview/--yes/--consented/--allow-unresolved`
 - **`library-index`** _(hidden)_ — The central-library catalog (skills + servers) for the panel browser
 - **`remove-from-library`** _(hidden)_ — Remove a skill or server from the central library (panel action; digest-bound). Moves it to the library trash — recoverable with `agentstack lib trash --restore <id> --write` — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`

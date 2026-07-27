@@ -59,8 +59,8 @@ The native t3code panel implements the first launch slice end to end:
    the detail layer.
 3. **Undo** — the panel shows this project's most recent AgentStack-managed
    write and can revert it, by identity, without touching other projects.
-4. **Toolset** — choosing a named profile and using it temporarily is the next
-   slice; today profiles remain a CLI flow (`agentstack use --list --json` is
+4. **Toolset** — choosing a named toolset and using it temporarily is the next
+   slice; today toolsets remain a CLI flow (`agentstack use --list --json` is
    already stable for external pickers).
 
 Reads and actions are version-negotiated: each CLI response names its schema
