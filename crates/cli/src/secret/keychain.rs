@@ -195,16 +195,36 @@ mod tests {
         assert_eq!(calls.get(), 2, "exactly one retry");
     }
 
-    /// A miss must come back as `Ok(false)`, not an error — this is the arm
-    /// `SecretSources` reads as "not in the keychain". It also exercises the
-    /// real platform query: a malformed one fails with `errSecParam` (-50)
-    /// rather than `errSecItemNotFound`, and would surface here as `Err`.
-    /// Safe to run anywhere — reading attributes of an item that doesn't exist
-    /// touches no ACL and prompts for nothing.
+    /// A miss must never probe as a hit. On macOS that is the stronger
+    /// `Ok(false)`: the attribute-only query is the arm `SecretSources` reads
+    /// as "not in the keychain", and it exercises the real platform call — a
+    /// malformed one fails with `errSecParam` (-50) instead of
+    /// `errSecItemNotFound` and would surface as `Err` here.
+    ///
+    /// Elsewhere the probe falls through to `get`, so a machine with no secret
+    /// service at all (a Linux CI runner, a container, a headless server: no
+    /// `org.freedesktop.secrets` on the bus) answers `Err` rather than
+    /// `Ok(false)` — it genuinely cannot tell whether the secret is there. That
+    /// is not a failure of this invariant, and asserting `Ok(false)`
+    /// unconditionally made CI red on every commit for a week.
+    ///
+    /// `Err` is safe for callers: [`KeychainProbe::contains`] maps it to
+    /// `false`, so provenance reads "not in the keychain" rather than breaking
+    /// `doctor` on a machine without one. What must never happen — on any
+    /// platform — is a miss reported as a hit, which is what this asserts.
     #[test]
     fn absent_secret_probes_as_not_found() {
         let out = exists("AGENTSTACK_TEST_SECRET_THAT_DOES_NOT_EXIST");
-        assert!(matches!(out, Ok(false)), "{out:?}");
+        assert!(
+            !matches!(out, Ok(true)),
+            "an absent secret must never probe as present: {out:?}"
+        );
+        // Where a keychain backend is actually reachable, hold the stronger line.
+        if cfg!(target_os = "macos") {
+            assert!(matches!(out, Ok(false)), "{out:?}");
+        }
+        // And the value callers actually consume is `false` either way.
+        assert!(!KeychainProbe.contains("AGENTSTACK_TEST_SECRET_THAT_DOES_NOT_EXIST"));
     }
 
     /// The end-to-end witness: an item written through `set` (i.e. by the same
