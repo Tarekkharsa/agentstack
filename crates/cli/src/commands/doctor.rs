@@ -601,9 +601,16 @@ fn run_checks(
             }
         }
     }
-    // Relevant once the bridge is in play on either side: a harness registered
-    // it, or this project entered the trust lifecycle.
-    if connected == 0 && trust_state == crate::trust::TrustState::Untrusted {
+    // Relevant once the bridge is actually in play: a harness registered it.
+    //
+    // Trust used to also count, on the reasoning that a project which had
+    // "entered the trust lifecycle" had a user who went looking. That proxy
+    // died with review finding H1: a consented `init` now records trust for the
+    // manifest it wrote, so every ordinary first run is trusted and this
+    // section — gateway, auto mode, control-plane tools — surfaced to exactly
+    // the newcomer the progressive-disclosure rule says must not meet it.
+    // `doctor --all` still prints it, and connecting a CLI still brings it back.
+    if connected == 0 {
         report.mark_irrelevant();
     }
 

@@ -219,6 +219,27 @@ findings and two interpreter findings. All are closed:
 
 ### Changed
 
+- **A consented `init` records trust for the manifest it just wrote.** The trust
+  gate used to first meet a user as a hard stop in their own repo, on the
+  command the docs call the beginner way to switch toolsets, with no wrongdoing
+  on their part. It is safe to grant here because of what `init` actually does:
+  it imports only from your machine-global CLI configs (`~/.claude.json`,
+  `~/.codex/config.toml`, …) — never a repo-supplied project file — it imports
+  servers and settings and no skills, workflows, extensions, or instructions,
+  and it refuses outright when a manifest already exists. So the manifest is
+  built from configuration you already had, and the import review you consented
+  to is its whole surface. The gate still fires for the case it exists for: a
+  cloned repo carrying a manifest agentstack did not write. The grant binds the
+  bytes `init` wrote, never a disk re-read, and it is declined entirely when an
+  `agentstack.lock` or `agentstack.local.toml` was already present — content the
+  import never showed you. Nothing is printed about it: the ordinary journey
+  stays free of trust vocabulary until you reach for it. `agentstack doctor`
+  reports the state and `agentstack trust --revoke` withdraws it.
+- **`doctor` stops showing the zero-files gateway section to first-timers.**
+  That section appeared once a project "entered the trust lifecycle", which was
+  a fair proxy for an advanced user back when trust was always granted by hand.
+  With `init` now granting it, the proxy pointed at every newcomer. It appears
+  when a CLI is actually connected, and under `--all`.
 - **`init` targets the CLIs that actually gave it something.** Every detected
   binary used to become a target, so `apply --write` created a
   `.gemini/settings.json` and an `opencode.json` in the repo of someone who has

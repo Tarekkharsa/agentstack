@@ -1404,6 +1404,30 @@ version = 1
             .context("recording initialization history failed; writes were rolled back");
     }
 
+    // H1: a consented import also records trust for the manifest it just wrote,
+    // so a newcomer never meets the trust gate as an error in their own repo.
+    //
+    // Why this is not a hole. `detect_import` reads ONLY machine-global CLI
+    // configs (`~/.claude.json`, `~/.codex/config.toml`, …) — never a
+    // repo-supplied project file — and it imports servers and settings only: no
+    // skills, workflows, extensions, or instructions. `init` also refuses
+    // outright when a manifest already exists. So the manifest here is built
+    // from the user's own machine configuration, and the import review they
+    // just consented to IS its whole surface. The gate still fires for exactly
+    // the case it exists for: a cloned repo carrying a manifest we did not
+    // write.
+    //
+    // Best-effort by construction: a failure to record trust must not undo a
+    // good import. The cost of not granting is one `agentstack trust` prompt.
+    //
+    // Deliberately silent. Stage 1.4's witness (`ordinary_journey_vocab`) holds
+    // the ordinary journey to no trust vocabulary at all until the user reaches
+    // for it, and a "Trusted:" line in the success summary teaches the concept
+    // to precisely the newcomer who has not met the gate — the disclosure rule
+    // inverted. The state stays discoverable where it becomes relevant:
+    // `doctor` reports it, and `agentstack trust --revoke` withdraws it.
+    let _trusted = grant_trust_for_import(&base, &toml_text, &manifest);
+
     if let Some(notice) = secret_notice {
         println!("{notice}");
     }
@@ -1438,6 +1462,79 @@ version = 1
         );
     }
     Ok(true)
+}
+
+/// Record trust for the manifest `init` just wrote (review finding H1).
+///
+/// Digested from the bytes we wrote, never a disk re-read — the rule `apply`'s
+/// re-pin already follows. If anything edits the manifest between that write
+/// and this grant, the store holds OUR digest, the project immediately reads
+/// `Changed`, and every use site fails closed, rather than silently blessing
+/// bytes nobody reviewed.
+///
+/// Fails closed on the two files `init` does NOT write. An
+/// `agentstack.local.toml` overlay or an `agentstack.lock` that was already on
+/// disk (reachable under `--force`) is content this import never showed anyone,
+/// and both are part of the consent digest — so when either exists we grant
+/// nothing and leave the project to the normal `agentstack trust` review.
+///
+/// Goes through [`trust::trust_reviewed`], the existing constructor for "record
+/// trust at the digest of the snapshot whose review the caller just rendered".
+/// No second grant constructor is introduced (workspace invariant 6), and
+/// `trust_unreviewed` — the deliberately greppable test-only path — is not used.
+///
+/// Returns whether trust was actually recorded, so the closing summary can say
+/// so honestly instead of the user discovering it later.
+fn grant_trust_for_import(base: &Path, manifest_bytes: &str, manifest: &Manifest) -> bool {
+    let dir = crate::manifest::resolve_manifest_dir(base);
+    let local = dir.join(crate::manifest::load::LOCAL_FILE);
+    let lock = dir.join(agentstack_core::lock::LOCK_FILE);
+    if local.exists() || lock.exists() {
+        return false;
+    }
+
+    // The snapshot this grant binds to: our bytes, and the explicit absence of
+    // the other two — which is what `ConsentSnapshot::read` would observe a
+    // moment from now, so `digest_for` agrees and the project reads `Trusted`.
+    let snapshot = crate::trust::ConsentSnapshot {
+        manifest: manifest_bytes.as_bytes().to_vec(),
+        local: None,
+        lock: None,
+    };
+
+    // The reviewed surface, in the same shape `trust`'s own review records, so
+    // a later re-trust diffs against it instead of seeing an unrecognized
+    // baseline: per-server identity is the command line for stdio (what
+    // actually runs) or the URL for http, plus one aggregate line for the
+    // secret refs.
+    let mut surface: Vec<crate::trust::SurfaceItem> = manifest
+        .servers
+        .iter()
+        .map(|(name, server)| crate::trust::SurfaceItem {
+            kind: "server".to_string(),
+            name: name.clone(),
+            identity: match server.server_type {
+                crate::manifest::ServerType::Stdio => format!(
+                    "{} {}",
+                    server.command.as_deref().unwrap_or("?"),
+                    server.args.join(" ")
+                ),
+                crate::manifest::ServerType::Http => {
+                    server.url.as_deref().unwrap_or("?").to_string()
+                }
+            },
+        })
+        .collect();
+    let refs = manifest.referenced_secrets();
+    if !refs.is_empty() {
+        surface.push(crate::trust::SurfaceItem {
+            kind: "secrets".to_string(),
+            name: String::new(),
+            identity: refs.join(", "),
+        });
+    }
+
+    crate::trust::trust_reviewed(base, snapshot.digest(), surface).is_ok()
 }
 
 /// Pure formatter for the scripted-import success summary, so its shape is
