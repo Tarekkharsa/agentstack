@@ -158,21 +158,24 @@ fn zsh(nodes: &[Node]) -> String {
          }\n\
          \n\
          _agentstack() {\n    \
-             local path next word raw\n    \
+             # NOT named `path`: in zsh that is a special array tied to $PATH,\n    \
+             # and declaring it `local` keeps the tie, so assigning a command\n    \
+             # path to it would blank $PATH for the whole completion call.\n    \
+             local cmdpath next word raw\n    \
              local -a candidates\n    \
              integer i\n    \
-             path=\"agentstack\"\n    \
+             cmdpath=\"agentstack\"\n    \
              for (( i = 2; i < CURRENT; i++ )); do\n        \
                  word=\"${words[i]}\"\n        \
                  [[ \"$word\" == -* ]] && continue\n        \
-                 next=\"$path $word\"\n        \
+                 next=\"$cmdpath $word\"\n        \
                  if [[ -n \"$(_agentstack_words \"$next\")\" ]]; then\n            \
-                     path=\"$next\"\n        \
+                     cmdpath=\"$next\"\n        \
                  else\n            \
                      break\n        \
                  fi\n    \
              done\n    \
-             raw=\"$(_agentstack_words \"$path\")\"\n    \
+             raw=\"$(_agentstack_words \"$cmdpath\")\"\n    \
              candidates=( ${=raw} )\n    \
              compadd -a candidates\n\
          }\n\
@@ -273,6 +276,10 @@ mod tests {
         let z = zsh(&nodes);
         assert!(z.starts_with("#compdef agentstack"));
         assert!(z.contains("compadd -a candidates"));
+        // `path` is special in zsh — tied to $PATH, and `local` keeps the tie.
+        // Using it as the walk variable blanks $PATH for the whole completion
+        // call, so the script must not declare one.
+        assert!(!z.contains("local path"));
 
         let f = fish(&nodes);
         assert!(f.contains("complete -c agentstack -f -a '(__agentstack_complete)'"));
