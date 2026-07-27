@@ -46,6 +46,15 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   (`agentstack_home()/runs`), not the project — run evidence is not
 ///   project-scoped. Both are read-only observation; running/resuming re-gates
 ///   independently.
+/// - `workflow-serial-roles-v1`: each `workflow list --json` row carries
+///   `serial_roles` — the subset of that workflow's roles whose harness takes
+///   no per-child MCP config, so its children launch ONE AT A TIME whatever
+///   the concurrency cap says. A separate name rather than a wider reading of
+///   `workflow-observe-v1`, because a binary predating this field legitimately
+///   advertises that contract without it: folding the field into the older
+///   name would make it over-promise, and a UI reading `serial_roles` on the
+///   strength of `workflow-observe-v1` would be sniffing a field — the exact
+///   thing these names exist to replace.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -58,6 +67,7 @@ pub const FEATURES: &[&str] = &[
     "sessions-v1",
     "profiles-edit-v1",
     "workflow-observe-v1",
+    "workflow-serial-roles-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -103,7 +113,7 @@ mod tests {
         assert!(features.contains(&"workflow-observe-v1"));
         assert_eq!(
             *features.last().unwrap(),
-            "workflow-observe-v1",
+            "workflow-serial-roles-v1",
             "FEATURES is append-only: new contracts land at the end"
         );
     }

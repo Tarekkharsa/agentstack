@@ -544,12 +544,32 @@ fn panel_workflow_observe_reads_carry_envelope() {
             .any(|f| f == "workflow-observe-v1"),
         "features advertises the observe contract: {list}"
     );
+    // workflow-serial-roles-v1: the field AND the name that lets a UI gate on
+    // it. Pinned together on purpose — advertising the feature without the
+    // field would over-promise, and shipping the field without the feature
+    // would leave a panel sniffing for it, which is what these names replace.
+    assert!(
+        list["features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "workflow-serial-roles-v1"),
+        "features advertises the serial-roles contract: {list}"
+    );
     let workflows = list["workflows"]
         .as_array()
         .expect("workflows body key intact");
     assert!(
         workflows.iter().any(|w| w["name"] == "demo"),
         "declared workflow surfaced: {list}"
+    );
+    let demo = workflows
+        .iter()
+        .find(|w| w["name"] == "demo")
+        .expect("demo row");
+    assert!(
+        demo["serial_roles"].is_array(),
+        "every row carries serial_roles (empty when no role is serial): {list}"
     );
 
     // Seed one recorded run under the isolated machine-global runs dir, then
