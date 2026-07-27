@@ -8,6 +8,14 @@ binaries, checksums, and provenance attestations for each entry.
 
 ### Security
 
+- **`doctor --live` no longer contacts a repository's servers before you have
+  trusted it.** The flag performs live MCP handshakes against every HTTP server
+  the manifest declares — resolving that server's `${REF}` headers to do it. On
+  a repository you had cloned but not reviewed, that meant the repo chose the
+  destination and AgentStack supplied the credentials. It now refuses on an
+  untrusted or drifted project, exactly as `session start`, the gateway and
+  `doctor --probe` already do. A trusted project probes as before.
+
 An independent line-by-line review (2026-07-23) of the consent/grant path and
 the workflow interpreter's ambient capabilities produced nine consent-path
 findings and two interpreter findings. All are closed:

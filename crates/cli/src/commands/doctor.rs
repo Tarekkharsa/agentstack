@@ -1587,12 +1587,43 @@ fn run_checks(
 
     if args.live {
         report.section("MCP connectivity (--live)");
-        let http: Vec<_> = manifest
-            .servers
-            .iter()
-            .filter(|(_, s)| s.server_type == ServerType::Http)
-            .collect();
-        if http.is_empty() {
+        // `--live` is the HTTP sibling of `--probe`, and it needs the same gate
+        // for a sharper reason. It contacts a URL THE REPOSITORY DECLARES and
+        // resolves that server's `${REF}` headers to do it — so on an untrusted
+        // clone, the repo chooses the destination and we supply the
+        // credentials. That is the exfiltration shape workspace invariant 3
+        // exists to prevent ("untrusted repository content … cannot contact
+        // servers or resolve secrets before the trust gate succeeds"), and the
+        // check was simply missing here while `session start`, the gateway, and
+        // now `--probe` all enforce it.
+        //
+        // Costs a trusted project nothing: `--live` is already opt-in, and a
+        // project you have reviewed still probes exactly as before.
+        let base = crate::manifest::project_root_of(&ctx.dir);
+        let live_refusal = match crate::trust::check(&base) {
+            crate::trust::TrustState::Trusted => None,
+            crate::trust::TrustState::Changed => Some(
+                "refusing to contact servers: the manifest or lockfile changed since this \
+                 project was trusted ↳ agentstack trust",
+            ),
+            crate::trust::TrustState::Untrusted => Some(
+                "refusing to contact servers: this project is not trusted — probing would \
+                 reach URLs it declares, with its secrets resolved into the request \
+                 ↳ agentstack trust",
+            ),
+        };
+        let http: Vec<_> = if live_refusal.is_some() {
+            Vec::new()
+        } else {
+            manifest
+                .servers
+                .iter()
+                .filter(|(_, s)| s.server_type == ServerType::Http)
+                .collect()
+        };
+        if let Some(msg) = live_refusal {
+            report.line(Level::Warn, msg);
+        } else if http.is_empty() {
             report.line(Level::Ok, "no HTTP servers to probe");
         }
         for (name, server) in http {
