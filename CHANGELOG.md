@@ -45,6 +45,12 @@ findings and two interpreter findings. All are closed:
 
 ### Added
 
+- **`doctor-advisories-v1`** joins the negotiated `features` list: `doctor
+  --json` carries an `advisories` count and section lines can carry
+  `level: "advisory"`. A panel that does not know the name renders advisories
+  as `ok` — safe, but silent — so the name is what lets it show the count
+  instead of dropping it. t3code surfaces them as a muted "· 2 notes" beside
+  the status chip.
 - **`agentstack uninstall` — the whole way out.** Reverts every managed region
   agentstack rendered (servers, settings, hooks, instruction blocks) in every
   CLI's own config, then removes `~/.agentstack`. Previews by default;
@@ -133,6 +139,21 @@ findings and two interpreter findings. All are closed:
   invalid manifest used to reach a consent prompt for a bundle that could never
   be admitted — the refusal only surfaced later at `workflow run`. Same issue
   set, messages, and fixes `doctor` and `apply` already produce.
+- **A Codex config the user will never open is a note, not a warning.** Codex
+  is detected by binary-on-PATH and lands in `targets.default`, so AgentStack
+  renders `.codex/config.toml` for projects that never mentioned Codex — and
+  the "Codex will ignore this until you open it once" warning then pinned every
+  such project at `needs_attention` on any machine with Codex installed. It
+  stays a warning when the user has accepted Codex's own trust prompt for some
+  project (they really run it); otherwise it is an advisory.
+- **`uninstall` removes the `.gitignore` managed block** it wrote, instead of
+  leaving a block naming generated files it just deleted. The separate
+  `# agentstack: local secrets` rule stays, because the `.env` it protects
+  stays.
+- **`uninstall` names what it kept.** `agentstack.toml` and its `.env` survive
+  by design — this removes rendered output, not your setup — but "AgentStack is
+  uninstalled" reads as "nothing of mine is left", so the summary now says so
+  and reports how many secret values the kept `.env` holds.
 - **A prefix-less consent digest is diagnosed as a format problem, not as
   changed content.** `trust --yes --consented-digest <bare hex>` still refuses
   — the acceptance rule is unchanged — but it no longer claims the manifest or

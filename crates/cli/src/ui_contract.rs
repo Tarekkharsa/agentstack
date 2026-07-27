@@ -55,6 +55,14 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   name would make it over-promise, and a UI reading `serial_roles` on the
 ///   strength of `workflow-observe-v1` would be sniffing a field — the exact
 ///   thing these names exist to replace.
+/// - `doctor-advisories-v1`: `doctor --json` carries a top-level `advisories`
+///   count, and section lines can carry `level: "advisory"` — findings that are
+///   true and worth stating but are NOT something this project must repair, so
+///   they are excluded from `warnings`, from `state`, and from `next_action`.
+///   A UI that does not know the name renders advisories as `ok` (its level
+///   match falls through), which is safe but silent: the CLI says "1 note" and
+///   the panel says nothing. Gating on this name is what lets a panel show the
+///   count instead of dropping it (review finding N4).
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -68,6 +76,7 @@ pub const FEATURES: &[&str] = &[
     "profiles-edit-v1",
     "workflow-observe-v1",
     "workflow-serial-roles-v1",
+    "doctor-advisories-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -111,10 +120,31 @@ mod tests {
         // external UIs gate the workflow observation affordance on this slug,
         // and the list is grow-at-the-end so decoders can index stably.
         assert!(features.contains(&"workflow-observe-v1"));
-        assert_eq!(
-            *features.last().unwrap(),
+        // Append-only, checked as an ORDERING rather than by naming whatever
+        // happens to be last — every name added so far must still appear in
+        // the order it was added, so a future entry can only extend the tail.
+        // Naming the tail meant each new contract edited the assertion into
+        // testing itself; this way adding one at the end passes untouched and
+        // reordering or removing one fails.
+        let expected_prefix = [
+            "init-plan",
+            "apply-setup",
+            "trust-preview",
+            "trust-consent",
+            "status-v1",
+            "profiles-v1",
+            "diff-v1",
+            "restore-last",
+            "sessions-v1",
+            "profiles-edit-v1",
+            "workflow-observe-v1",
             "workflow-serial-roles-v1",
-            "FEATURES is append-only: new contracts land at the end"
+            "doctor-advisories-v1",
+        ];
+        assert_eq!(
+            features[..expected_prefix.len()],
+            expected_prefix,
+            "FEATURES is append-only: existing names keep their order, new ones land at the end"
         );
     }
 }

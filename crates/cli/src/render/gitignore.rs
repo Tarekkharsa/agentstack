@@ -118,6 +118,43 @@ pub fn ensure_block(project_root: &Path, entries: &[String], write: bool) -> Res
     Ok(true)
 }
 
+/// Take the managed block back out entirely, for `uninstall` (review finding
+/// N3). Returns the new file content when a block was present, `None` when
+/// there was nothing to remove.
+///
+/// This is deliberately NOT `ensure_block(&[])`: [`splice`] treats an empty
+/// entry set as "leave the block alone", because *deactivation* must not strip
+/// a block a team may have committed — the entries stay correct for the next
+/// activation. Uninstall is the one case where that reasoning inverts. The
+/// block names generated files that no longer exist, so leaving it means a repo
+/// carries dead AgentStack config after being told AgentStack was uninstalled.
+pub fn remove_block(existing: &str) -> Option<String> {
+    let lines: Vec<&str> = existing.lines().collect();
+    let begin = lines.iter().position(|l| l.trim() == BEGIN)?;
+    let end = lines.iter().position(|l| l.trim() == END)?;
+    if begin > end {
+        return None;
+    }
+    // Drop the block and any blank line that only existed to separate it, so
+    // removing it leaves the file as it would have been had we never written.
+    let mut head: Vec<&str> = lines[..begin].to_vec();
+    while head.last().is_some_and(|l| l.trim().is_empty()) {
+        head.pop();
+    }
+    let tail = &lines[end + 1..];
+    let mut out: Vec<&str> = head;
+    out.extend_from_slice(tail);
+    let mut s = out.join("\n");
+    if !s.trim().is_empty() {
+        s.push('\n');
+    } else {
+        // Only our block was in there — hand back an empty file so the caller
+        // can prune it rather than leave a whitespace husk.
+        s.clear();
+    }
+    Some(s)
+}
+
 /// Replace (or insert) the managed block in `existing`, leaving every other
 /// byte untouched. An empty entry set changes nothing: deactivation must not
 /// strip a block a team may have committed (the stable entries stay correct

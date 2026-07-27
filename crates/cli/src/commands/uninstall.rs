@@ -169,6 +169,35 @@ pub fn run(args: &UninstallArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     let root = crate::manifest::project_root_of(&ctx.dir);
+
+    // N3: the `.gitignore` managed block is a managed region like any other,
+    // and it names generated files the removals above just deleted. Leaving it
+    // would mean the repo carries dead AgentStack config after being told
+    // AgentStack was uninstalled. Project scope only — the block is a
+    // project-root artifact.
+    if scopes.contains(&Scope::Project) {
+        let path = root.join(".gitignore");
+        if let Ok(existing) = std::fs::read_to_string(&path) {
+            if let Some(updated) = crate::render::gitignore::remove_block(&existing) {
+                removals.push(Removal {
+                    label: "Generated-artifact ignores (this project)".to_string(),
+                    path: path.clone(),
+                    diff: crate::util::diff::render(&existing, &updated),
+                    write: Box::new(move || {
+                        if updated.is_empty() {
+                            // Our block was the whole file: take the file too
+                            // rather than leave an empty `.gitignore` behind.
+                            let _ = std::fs::remove_file(&path);
+                        } else {
+                            crate::util::atomic::write(&path, &updated)?;
+                        }
+                        Ok(())
+                    }),
+                });
+            }
+        }
+    }
+
     let home = crate::util::paths::agentstack_home();
     let remove_home = home.exists() && !args.keep_home;
 
@@ -205,6 +234,9 @@ pub fn run(args: &UninstallArgs, manifest_dir: Option<&Path>) -> Result<()> {
             "Its own state is still under ~/.agentstack (undo with `agentstack restore`).".dimmed()
         );
     }
+    for line in kept_notes(&ctx.dir) {
+        println!("  {}", line.dimmed());
+    }
     println!(
         "  {}",
         "The binary itself is still on PATH — remove it the way you installed it \
@@ -212,6 +244,47 @@ pub fn run(args: &UninstallArgs, manifest_dir: Option<&Path>) -> Result<()> {
             .dimmed()
     );
     Ok(())
+}
+
+/// N2: name what uninstall deliberately KEPT, and say when one of those files
+/// holds secret values.
+///
+/// Keeping `agentstack.toml` and its `.env` is the documented rule — this
+/// removes rendered output, not your setup, so you can re-`apply` — but
+/// "AgentStack is uninstalled" reads as "nothing of mine is left", and a
+/// plaintext credential is precisely the leftover someone uninstalling a
+/// security-adjacent tool would want named. Counts the `.env` assignments
+/// rather than showing them: the point is that values are there, never what
+/// they are.
+fn kept_notes(manifest_dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let manifest = manifest_dir.join("agentstack.toml");
+    if !manifest.exists() {
+        return out;
+    }
+    out.push(format!(
+        "Kept: {} — your setup, so `agentstack apply --write` can rebuild it.",
+        crate::commands::init::display_path(&manifest, manifest_dir)
+    ));
+    let env = manifest_dir.join(".env");
+    let secrets = std::fs::read_to_string(&env)
+        .map(|s| {
+            s.lines()
+                .filter(|l| {
+                    let l = l.trim();
+                    !l.is_empty() && !l.starts_with('#') && l.contains('=')
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    if secrets > 0 {
+        out.push(format!(
+            "Kept: {} — holds {secrets} secret value(s) in plaintext. Delete it yourself \
+             to fully reset.",
+            crate::commands::init::display_path(&env, manifest_dir)
+        ));
+    }
+    out
 }
 
 fn print_plan(args: &UninstallArgs, root: &Path, removals: &[Removal], home: Option<&Path>) {

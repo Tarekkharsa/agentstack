@@ -1070,9 +1070,24 @@ fn run_checks(
         }
         // Project-scope render exists but Codex won't read it until trusted —
         // a healthy-looking render that silently does nothing.
+        //
+        // N1: severity depends on whether Codex is actually IN USE here. Codex
+        // is detected by binary-on-PATH and lands in `targets.default`, so we
+        // render `.codex/config.toml` for projects that never mentioned Codex
+        // and whose owner may never open it — and as a warning this pinned the
+        // whole product at `needs_attention` on any machine with Codex
+        // installed, which is the primary persona. `codex_in_use` reads
+        // whether the user has ever trusted ANY project in Codex: if they
+        // have, the render silently doing nothing is a real problem worth a
+        // warning; if they never have, it is a note about a tool they are not
+        // using, and it must not gate readiness.
         if root.join(".codex/config.toml").exists() && !codex_project_trusted(&root) {
             report.line(
-                Level::Warn,
+                if codex_in_use() {
+                    Level::Warn
+                } else {
+                    Level::Advisory
+                },
                 format!(
                     "Codex will IGNORE {}/.codex/config.toml — the project is not trusted in ~/.codex/config.toml (projects.\"{}\".trust_level) ↳ open Codex in this folder once and accept the trust prompt",
                     tidy_path(&root),
@@ -2387,6 +2402,25 @@ fn codex_instruction_chain(root: &Path) -> (u64, Vec<String>) {
 /// "trusted"` in the global ~/.codex/config.toml. Codex ignores a project's
 /// .codex/ layer entirely until this is set (its gate, recorded when the user
 /// accepts the first-run prompt in that folder).
+/// Whether Codex is actually used on this machine, as opposed to merely
+/// installed (N1). The signal is "has the user ever accepted Codex's own trust
+/// prompt for any project" — that is a deliberate act inside Codex, so a
+/// non-empty `projects` table means they really run it. Detection by
+/// binary-on-PATH cannot tell the difference, and treating "installed" as
+/// "used" is what made an unusable-config note gate every project's readiness.
+fn codex_in_use() -> bool {
+    let Ok(text) = std::fs::read_to_string(paths::expand_tilde("~/.codex/config.toml")) else {
+        return false;
+    };
+    let Ok(value) = toml::from_str::<toml::Value>(&text) else {
+        return false;
+    };
+    value
+        .get("projects")
+        .and_then(|p| p.as_table())
+        .is_some_and(|t| !t.is_empty())
+}
+
 fn codex_project_trusted(root: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(paths::expand_tilde("~/.codex/config.toml")) else {
         return false;
@@ -3518,6 +3552,66 @@ mod tests {
         );
         assert_eq!(report.state(), "needs_attention");
         assert_eq!(report.first_fix(), Some("open Codex once"));
+    }
+
+    /// N1: Codex is detected by binary-on-PATH and lands in `targets.default`,
+    /// so a `.codex/config.toml` gets rendered for projects that never
+    /// mentioned Codex. As a warning that pinned every such project at
+    /// `needs_attention` on any machine with Codex installed — the primary
+    /// persona. `codex_in_use` is the discriminator: having accepted Codex's
+    /// own trust prompt for ANY project is a deliberate act, so it separates
+    /// "really uses this tool" from "has the binary".
+    #[test]
+    fn codex_in_use_reads_a_deliberate_act_not_mere_installation() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let orig_home = std::env::var_os("HOME");
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        let cfg = home.path().join(".codex/config.toml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+
+        // Each case is (config contents or None, expected). Collected before
+        // asserting so a failure still restores HOME for every other test.
+        let cases: Vec<(Option<&str>, bool)> = vec![
+            // No config at all → not in use.
+            (None, false),
+            // Config, but no project ever trusted → installed, not used. This
+            // is the case that must NOT gate readiness.
+            (Some("[mcp_servers.x]\ncommand = \"true\"\n"), false),
+            // An empty `projects` table is still "never accepted a prompt".
+            (Some("[projects]\n"), false),
+            // One accepted project anywhere → the user really runs Codex, so
+            // a render it will silently ignore is a real warning again.
+            (
+                Some("[projects.\"/some/repo\"]\ntrust_level = \"trusted\"\n"),
+                true,
+            ),
+            // Unparseable config resolves to "not in use" — the quieter side,
+            // so a broken file can never manufacture a warning.
+            (Some("{{{ not toml"), false),
+        ];
+        let got: Vec<bool> = cases
+            .iter()
+            .map(|(contents, _)| {
+                match contents {
+                    Some(c) => std::fs::write(&cfg, c).unwrap(),
+                    None => {
+                        let _ = std::fs::remove_file(&cfg);
+                    }
+                }
+                codex_in_use()
+            })
+            .collect();
+
+        match orig_home {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
+
+        let want: Vec<bool> = cases.iter().map(|(_, w)| *w).collect();
+        assert_eq!(got, want, "codex_in_use must key off an accepted prompt");
     }
 
     /// F03: the recommended action used to be whichever warning happened to
