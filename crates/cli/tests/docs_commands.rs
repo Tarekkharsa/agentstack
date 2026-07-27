@@ -78,6 +78,11 @@ fn all_commands_region_matches_generator() {
 /// entries, the code-context extraction above is too loose — tighten that
 /// instead of allowlisting more.
 const ALLOWLIST: &[&str] = &[
+    // docs/troubleshooting.md — doctor's drift finding reads "no longer matches
+    // what agentstack last wrote". A troubleshooting page is worth exactly what
+    // its strings are searchable for, so it must quote that verbatim; "last" is
+    // an adverb in captured output, not an `agentstack last` subcommand.
+    "last",
     // docs/examples.html:864 — "# agent → agentstack control plane", a
     // comment inside a fenced MCP-tool-call example labeling the diagram,
     // not a claim that `agentstack control` is a command.
