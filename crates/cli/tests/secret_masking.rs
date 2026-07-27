@@ -81,10 +81,31 @@ fn apply_dry_run_masks_secret_but_write_persists_it() {
         !dry.contains(SECRET),
         "resolved secret leaked into the apply preview:\n{dry}"
     );
-    // …and the masked `${REF}` form must appear in its place.
+
+    // …and where the file's contents ARE printed, the masked `${REF}` form
+    // appears in its place. Since M5 the body is behind `--verbose` (the
+    // default is a `+n / -n lines` summary), so the mask is witnessed on the
+    // path that actually prints content — the default path printing less can
+    // only leak less, and the assertion above already pins that.
+    let verbose = run(
+        &proj,
+        &home,
+        &[
+            "apply",
+            "--dry-run",
+            "--verbose",
+            "--no-gitignore",
+            "--scope",
+            "global",
+        ],
+    );
     assert!(
-        dry.contains(&format!("Bearer ${{{REF_NAME}}}")),
-        "expected the ${{REF}} mask in the preview:\n{dry}"
+        !verbose.contains(SECRET),
+        "resolved secret leaked into the verbose apply preview:\n{verbose}"
+    );
+    assert!(
+        verbose.contains(&format!("Bearer ${{{REF_NAME}}}")),
+        "expected the ${{REF}} mask in the verbose preview:\n{verbose}"
     );
 
     // Nothing written on a dry-run.

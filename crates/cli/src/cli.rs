@@ -1303,6 +1303,11 @@ pub struct ApplyArgs {
     /// pass this when your team commits the rendered files.
     #[arg(long)]
     pub no_gitignore: bool,
+
+    /// Show the full contents of every rendered file, not just a per-target
+    /// summary line.
+    #[arg(long, short)]
+    pub verbose: bool,
 }
 
 #[derive(Args, Debug)]

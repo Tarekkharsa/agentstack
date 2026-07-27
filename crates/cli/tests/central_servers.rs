@@ -21,6 +21,7 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn apply_args(profile: &str) -> ApplyArgs {
     ApplyArgs {
+        verbose: false,
         targets: vec!["claude-code".into()],
         profile: Some(profile.into()),
         dry_run: false,

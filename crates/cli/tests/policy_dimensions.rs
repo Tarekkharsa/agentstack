@@ -42,6 +42,7 @@ fn write_machine_policy(home: &Path, policy: &str) {
 
 fn apply_args() -> ApplyArgs {
     ApplyArgs {
+        verbose: false,
         targets: vec!["claude-code".into()],
         profile: None,
         dry_run: false,

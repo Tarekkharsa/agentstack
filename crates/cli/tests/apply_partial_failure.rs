@@ -68,6 +68,7 @@ default = ["claude-code", "codex"]
 
     let err = apply::run(
         &ApplyArgs {
+            verbose: false,
             targets: Vec::new(),
             profile: None,
             dry_run: false,

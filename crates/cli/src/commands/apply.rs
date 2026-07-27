@@ -406,7 +406,7 @@ fn render(
                 changed_count += 1;
                 changed_targets.insert(desc.display.clone());
                 if !quiet {
-                    crate::out!("{}", indent(&plan.diff()));
+                    print_body_or_summary(args, &plan.diff());
                 }
                 if will_write && blocked {
                     blocked_targets.insert(desc.display.clone());
@@ -493,7 +493,7 @@ fn render(
                         sp.settings_path.display()
                     );
                     if !quiet {
-                        crate::out!("{}", indent(&sp.diff()));
+                        print_body_or_summary(args, &sp.diff());
                     }
                     if will_write && sblocked {
                         blocked_targets.insert(desc.display.clone());
@@ -555,7 +555,7 @@ fn render(
                     changed_targets.insert(desc.display.clone());
                     crate::outln!("  {} hooks → {}", "·".dimmed(), hp.path.display());
                     if !quiet {
-                        crate::out!("{}", indent(&hp.diff()));
+                        print_body_or_summary(args, &hp.diff());
                     }
                     if will_write && hblocked {
                         blocked_targets.insert(desc.display.clone());
@@ -605,7 +605,7 @@ fn render(
                         changed_targets.insert(desc.display.clone());
                         crate::outln!("  {} instructions → {}", "·".dimmed(), ip.path.display());
                         if !quiet {
-                            crate::out!("{}", indent(&ip.diff()));
+                            print_body_or_summary(args, &ip.diff());
                         }
                         if will_write && iblocked {
                             blocked_targets.insert(desc.display.clone());
@@ -1024,8 +1024,56 @@ fn print_validation(
     has_error
 }
 
+/// M5: the rendered file's body when `--verbose`, otherwise one summary line.
+/// Kept next to [`diff_summary`] so the two halves of the same decision live
+/// together — the caller only decides WHETHER to describe a change, never how.
+fn print_body_or_summary(args: &ApplyArgs, diff: &str) {
+    if args.verbose {
+        crate::out!("{}", indent(diff));
+    } else {
+        crate::outln!("  {} {}", "~".cyan(), diff_summary(diff).dimmed());
+    }
+}
+
 fn indent(s: &str) -> String {
     s.lines().map(|l| format!("  {l}\n")).collect::<String>()
+}
+
+/// M5: one line standing in for a rendered file's full contents — `+18 / -0
+/// lines (new file)`. Apply used to print every rendered file in full on both
+/// the dry run AND the write, which for four targets is ~100 lines of JSON and
+/// TOML the user did not ask to read and cannot meaningfully check; the facts
+/// they DO need (which file, how much moved, how to undo) were buried in it.
+/// `--verbose` still prints the bodies.
+///
+/// Counted from the diff text rather than from a new plan API, because the diff
+/// is already the authoritative rendering of "what changes" — a second
+/// computation could disagree with the thing `--verbose` shows.
+fn diff_summary(diff: &str) -> String {
+    let mut added = 0usize;
+    let mut removed = 0usize;
+    // The diff arrives colorized, so a line starts with an ANSI escape rather
+    // than its `+`/`-` marker. `sanitize_block` is the crate's one
+    // escape-stripping path — reuse it instead of hand-rolling a second CSI
+    // parser here (counting the raw text silently reported +0 / -0).
+    let plain = crate::text::sanitize_block(diff);
+    for line in plain.lines() {
+        match line.trim_start().chars().next() {
+            Some('+') => added += 1,
+            Some('-') => removed += 1,
+            _ => {}
+        }
+    }
+    // Nothing removed and something added means the whole file is new content:
+    // either a file that did not exist, or one whose managed region is being
+    // written for the first time. Both read the same way to a user deciding
+    // whether to look closer.
+    let shape = if removed == 0 && added > 0 {
+        " (new content)"
+    } else {
+        ""
+    };
+    format!("+{added} / -{removed} lines{shape}")
 }
 
 /// Dry-run summary suffix when a write would delete server entries — the

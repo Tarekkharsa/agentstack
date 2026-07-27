@@ -193,6 +193,22 @@ findings and two interpreter findings. All are closed:
 
 ### Changed
 
+- **`init` targets the CLIs that actually gave it something.** Every detected
+  binary used to become a target, so `apply --write` created a
+  `.gemini/settings.json` and an `opencode.json` in the repo of someone who has
+  never opened either tool — unexplained files in your project, and diff noise
+  for every operation after. `[targets] default` is now the CLIs that
+  contributed configuration; the rest are named in the summary as "also seen",
+  with why they were left out and how to add one. A machine with agent CLIs but
+  no config anywhere still targets everything detected, because an empty target
+  list would render nothing and read as a broken import.
+- **`apply` shows a summary, not a wall of file content.** A dry run dumped
+  every rendered file in full and `--write` reprinted the identical text with
+  `✓ wrote` swapped for `→ to apply` — roughly 100 lines of JSON and TOML for
+  four targets, burying the facts that matter (which file, how much moved, how
+  to undo) in content you cannot meaningfully check. Each target now reads
+  `~ +28 / -0 lines (new content)`; `apply --verbose` prints the bodies. In one
+  real two-target project the dry run went from 48 lines to 11.
 - **Naming a toolset no longer switches to it.** `create-profile` used to write
   the manifest entry, re-lock, *and* render the new toolset into every CLI as a
   side effect of being named — so defining a subset silently changed your setup,

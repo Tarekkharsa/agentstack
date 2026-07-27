@@ -30,6 +30,7 @@ fn write_unresolved_manifest(proj: &std::path::Path) {
 
 fn args(write: bool, allow_unresolved: bool) -> ApplyArgs {
     ApplyArgs {
+        verbose: false,
         targets: vec!["claude-code".into()],
         profile: None,
         dry_run: false,

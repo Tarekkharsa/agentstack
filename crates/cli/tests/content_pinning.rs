@@ -240,6 +240,7 @@ fn trust_grant_surfaces_requested_policy() {
 
 fn apply_args() -> ApplyArgs {
     ApplyArgs {
+        verbose: false,
         targets: vec!["claude-code".into()],
         profile: None,
         dry_run: false,

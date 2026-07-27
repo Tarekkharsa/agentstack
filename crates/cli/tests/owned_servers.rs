@@ -29,6 +29,7 @@ fn setup(home: &Path) {
 
 fn apply_write() -> ApplyArgs {
     ApplyArgs {
+        verbose: false,
         targets: vec![],
         profile: None,
         dry_run: false,

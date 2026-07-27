@@ -26,6 +26,7 @@ fn set_home(home: &std::path::Path) {
 
 fn args(write: bool) -> ApplyArgs {
     ApplyArgs {
+        verbose: false,
         targets: vec!["claude-code".into()],
         profile: None,
         dry_run: !write,

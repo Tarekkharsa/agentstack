@@ -29,6 +29,7 @@ fn setup(home: &std::path::Path) {
 
 fn apply_args(prune_foreign: bool) -> ApplyArgs {
     ApplyArgs {
+        verbose: false,
         targets: vec![],
         profile: None,
         dry_run: false,

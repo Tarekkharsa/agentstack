@@ -20,6 +20,7 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn apply_write() -> ApplyArgs {
     ApplyArgs {
+        verbose: false,
         targets: vec![],
         profile: None,
         dry_run: false,

@@ -484,9 +484,11 @@ struct PlanDestination {
 /// (independent review, 2026-07-23).
 struct DetectedImport {
     detected: Vec<DetectedCli>,
-    /// Display names of the CLIs that actually contributed servers or
-    /// settings — the honest "imported from" list (a detected CLI with an
-    /// empty config is not a source).
+    /// Adapter IDS of the CLIs that actually contributed servers or settings —
+    /// the honest "imported from" list (a detected CLI with an empty config is
+    /// not a source). Ids rather than display names because this list is also
+    /// the manifest's default targets (M4); display names are derived with
+    /// [`det_display`] wherever a human reads it.
     contributing: Vec<String>,
     /// Post-lift: inline token values already rewritten to `${REF}`.
     servers: IndexMap<String, Server>,
@@ -571,7 +573,7 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
             }
         }
         if contributed {
-            contributing.push(desc.display.clone());
+            contributing.push(desc.id.clone());
         }
     }
     // Lifting rewrites the in-memory servers to `${REF}` placeholders and
@@ -1046,6 +1048,30 @@ fn run_impl(
     } = det;
     let detected_ids: Vec<String> = detected.iter().map(|c| c.id.clone()).collect();
     let display_names: Vec<String> = detected.iter().map(|c| c.display.clone()).collect();
+
+    // M4: target only the CLIs that actually contributed configuration. Every
+    // detected binary used to become a target, so `apply --write` created a
+    // `.gemini/settings.json` and an `opencode.json` in the repo of someone who
+    // has never opened either tool — unexplained files in a user's project, and
+    // diff noise for every operation afterwards. The import summary already
+    // draws exactly this distinction ("contributed content" vs "binary on PATH
+    // — no config files found"); this makes the manifest agree with it.
+    //
+    // The fallback matters: a machine with agent CLIs installed but no config
+    // anywhere contributes nothing, and an empty `[targets] default` would
+    // render to nothing at all and read as a broken import. There, every
+    // detected CLI is the best available guess.
+    let target_defaults: Vec<String> = if contributing.is_empty() {
+        detected_ids.clone()
+    } else {
+        contributing.clone()
+    };
+    // The detected-but-silent CLIs, for the summary's "also detected" line.
+    let also_detected: Vec<String> = detected
+        .iter()
+        .filter(|c| !target_defaults.contains(&c.id))
+        .map(|c| c.display.clone())
+        .collect();
     for (name, extra) in &conflict_counts {
         println!(
             "{} server '{name}' is defined differently by {} other CLI(s) — kept the first \
@@ -1222,7 +1248,7 @@ version = 1
         workflows: IndexMap::new(),
         packs: IndexMap::new(),
         targets: Targets {
-            default: detected_ids.clone(),
+            default: target_defaults.clone(),
         },
         policy: Default::default(),
         guard: Default::default(),
@@ -1380,20 +1406,26 @@ version = 1
         // CLIs, what was imported, which secrets still need values, and the
         // exact next commands. The wizard has its own richer close, so this
         // prints only on the scripted primitive.
+        // The honest source list: only CLIs that contributed content, by
+        // display name. A run that imported nothing falls back to what was
+        // detected — the same fallback `target_defaults` makes.
+        let sources: Vec<String> = if contributing.is_empty() {
+            display_names.clone()
+        } else {
+            contributing
+                .iter()
+                .map(|id| det_display(&detected, id))
+                .collect()
+        };
         print!(
             "{}",
             render_import_summary(
                 &manifest_path.display().to_string(),
-                // The honest source list: only CLIs that contributed content.
-                // A run that imported nothing falls back to what was detected.
-                if contributing.is_empty() {
-                    &display_names
-                } else {
-                    &contributing
-                },
+                &sources,
                 server_count,
                 settings_count,
                 &refs_needing_values,
+                &also_detected,
             )
         );
     }
@@ -1410,6 +1442,7 @@ fn render_import_summary(
     server_count: usize,
     settings_count: usize,
     needing_values: &[String],
+    also_detected: &[String],
 ) -> String {
     let mut out = String::new();
     out.push_str("\nImport complete.\n");
@@ -1422,6 +1455,19 @@ fn render_import_summary(
         imported.push_str(&format!(" · settings from {settings_count} CLI(s)"));
     }
     out.push_str(&format!("  Imported:  {imported}\n"));
+    // M4: the CLIs deliberately left out of `[targets] default`. Naming them —
+    // and why — is what keeps "we only targeted two of your six tools" from
+    // looking like a detection failure. There is no command that edits
+    // `[targets] default` today, so the honest instruction is the manifest key
+    // plus the one-off render flag, not an invented verb.
+    if !also_detected.is_empty() {
+        out.push_str(&format!(
+            "  Also seen: {} — installed, but no config to import, so not\n\
+             \x20            targeted yet. Add one to [targets].default in the manifest, or\n\
+             \x20            render to it once: agentstack apply --target <id> --write\n",
+            also_detected.join(" · ")
+        ));
+    }
     if !needing_values.is_empty() {
         out.push_str(&format!(
             "  Secrets:   {} still need a value before this setup can run:\n",
@@ -1732,6 +1778,7 @@ mod tests {
             8,
             2,
             &["GITHUB_TOKEN".to_string()],
+            &["Gemini CLI".to_string(), "OpenCode".to_string()],
         );
         assert!(out.contains("Manifest:  /tmp/proj/.agentstack/agentstack.toml"));
         assert!(out.contains("From:      Claude Code · Codex CLI"));
@@ -1755,21 +1802,33 @@ mod tests {
         assert!(!out.contains("[profiles."));
         assert!(!out.contains("session start"));
 
+        // M4: the detected-but-silent CLIs are named, with why they were left
+        // out and how to add one. An unexplained two-of-six looks like a
+        // detection failure.
+        assert!(out.contains("Also seen: Gemini CLI · OpenCode"));
+        assert!(out.contains("no config to import"));
+        assert!(out.contains("agentstack apply --target <id> --write"));
+
+        // Nothing left out → no "also seen" line at all, not an empty one.
+        let all_contributed =
+            render_import_summary("/m", &["Claude Code".to_string()], 2, 0, &[], &[]);
+        assert!(!all_contributed.contains("Also seen:"));
+
         // Nothing pending → no secrets section at all, not an empty one.
-        let clean = render_import_summary("/m", &["Claude Code".to_string()], 1, 0, &[]);
+        let clean = render_import_summary("/m", &["Claude Code".to_string()], 1, 0, &[], &[]);
         assert!(!clean.contains("Secrets:"));
         assert!(!clean.contains("settings from"));
         assert!(clean.contains("agentstack doctor"));
         assert!(!clean.contains("create-profile"));
 
         // No servers at all → nothing was copied, so no duplication note.
-        let empty = render_import_summary("/m", &["Claude Code".to_string()], 0, 1, &[]);
+        let empty = render_import_summary("/m", &["Claude Code".to_string()], 0, 1, &[], &[]);
         assert!(!empty.contains("the CLI configs above are unchanged"));
         assert!(!empty.contains("create-profile"));
 
         // Server count and whether a name was available used to gate the
         // toolset offer; now no input produces one.
-        let unnamed = render_import_summary("/m", &["Claude Code".to_string()], 4, 0, &[]);
+        let unnamed = render_import_summary("/m", &["Claude Code".to_string()], 4, 0, &[], &[]);
         assert!(!unnamed.contains("create-profile"));
     }
 

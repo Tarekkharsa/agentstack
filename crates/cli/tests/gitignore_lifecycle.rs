@@ -39,6 +39,7 @@ fn use_args(profile: &str) -> UseArgs {
 
 fn apply_args() -> ApplyArgs {
     ApplyArgs {
+        verbose: false,
         targets: vec!["claude-code".into(), "cursor".into()],
         profile: None,
         dry_run: false,
@@ -257,6 +258,7 @@ fn blocked_write_emits_no_managed_block() {
     .unwrap();
 
     let args = ApplyArgs {
+        verbose: false,
         targets: vec!["claude-code".into()],
         profile: None,
         dry_run: false,

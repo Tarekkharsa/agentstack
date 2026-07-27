@@ -243,6 +243,7 @@ fn kept_foreign_stays_reported_after_guarded_apply() {
     .unwrap();
     agentstack::commands::apply::run(
         &agentstack::cli::ApplyArgs {
+            verbose: false,
             targets: vec![],
             profile: None,
             dry_run: false,
@@ -352,6 +353,7 @@ fn unmanaged_churn_is_not_edited_on_disk() {
     // hash both reflect the real render — no exact-match guessing.
     agentstack::commands::apply::run(
         &agentstack::cli::ApplyArgs {
+            verbose: false,
             targets: vec![],
             profile: None,
             dry_run: false,

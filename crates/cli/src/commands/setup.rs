@@ -674,6 +674,9 @@ fn apply_args(args: &SetupArgs, scope: Scope, write: bool) -> ApplyArgs {
         allow_unresolved: false,
         prune_foreign: false,
         no_gitignore: false,
+        // The newcomer wizard is the last place to dump 100 lines of rendered
+        // JSON: it shows the managed-file list and its own review instead.
+        verbose: false,
     }
 }
 
