@@ -160,12 +160,20 @@ impl Resolver for ScopedResolver<'_> {
 }
 
 /// Like [`Chain::default_for_dir`], but keeps each layer separate so it can
-/// report *where* a `${REF}` resolves — shared by `secret list`, `explain`, and
-/// t3code. Priority matches the chain: env → varlock → keychain → `.env`.
+/// report *where* a `${REF}` resolves — shared by `secret list`, `explain`,
+/// `doctor`, and the snapshot t3code polls. Priority matches the chain: env →
+/// varlock → keychain → `.env`.
+///
+/// This answers *where*, never *what*: the keychain layer is a
+/// [`KeychainProbe`], which can only test presence. Reading values here is what
+/// made every status refresh raise the macOS keychain consent prompt (once per
+/// referenced secret, again after every rebuild of the ad-hoc-signed binary) —
+/// see [`keychain::exists`]. The other layers are plain in-process reads with
+/// no such cost, so they stay as they are.
 pub struct SecretSources {
     env: EnvResolver,
     varlock: Option<VarlockResolver>,
-    keychain: KeychainResolver,
+    keychain: keychain::KeychainProbe,
     dotenv: Option<DotEnvResolver>,
 }
 
@@ -174,7 +182,7 @@ impl SecretSources {
         SecretSources {
             env: EnvResolver,
             varlock: VarlockResolver::detect(dir),
-            keychain: KeychainResolver,
+            keychain: keychain::KeychainProbe,
             dotenv: DotEnvResolver::from_dir(dir),
         }
     }
@@ -190,7 +198,7 @@ impl SecretSources {
             .is_some()
         {
             Some("varlock")
-        } else if self.keychain.resolve(name).is_some() {
+        } else if self.keychain.contains(name) {
             Some("keychain")
         } else if self.dotenv.as_ref().and_then(|d| d.resolve(name)).is_some() {
             Some(".env")

@@ -69,6 +69,13 @@ owo-colors = "4"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Attribute-only keychain existence probe (see `secret::keychain::exists`).
+# Not a new supply-chain edge: `keyring` already builds on this exact crate;
+# naming it directly is what lets a status path ask "is this ref stored?"
+# without decrypting the item and tripping the keychain consent prompt.
+security-framework = "2"
+
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
 assert_fs = "1"

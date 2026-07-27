@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use crate::lock::Lock;
 use crate::manifest::{ServerType, SkillSource};
 use crate::scope::Scope;
-use crate::secret::{DotEnvResolver, EnvResolver, KeychainResolver, Resolver, VarlockResolver};
+use crate::secret::SecretSources;
 use crate::state::{target_key, State};
 use crate::store::{local_source_dir, Store};
 use crate::usage::Usage;
@@ -276,25 +276,16 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         .collect();
 
     // Secrets: resolved status + which source resolved it (never the value).
-    let env = EnvResolver;
-    let varlock = VarlockResolver::detect(&ctx.dir);
-    let keychain = KeychainResolver;
-    let dotenv = DotEnvResolver::from_dir(&ctx.dir);
+    // Via the shared `SecretSources` rather than a second hand-rolled chain —
+    // this snapshot is what the t3code panel polls, so a divergent copy here
+    // both drifts from `doctor`/`secret list` and (before this) read keychain
+    // *values* on every refresh, raising the macOS consent prompt.
+    let sources = SecretSources::detect(&ctx.dir);
     let secrets: Vec<Value> = manifest
         .referenced_secrets()
         .into_iter()
         .map(|name| {
-            let source = if env.resolve(&name).is_some() {
-                Some("env")
-            } else if varlock.as_ref().and_then(|v| v.resolve(&name)).is_some() {
-                Some("varlock")
-            } else if keychain.resolve(&name).is_some() {
-                Some("keychain")
-            } else if dotenv.as_ref().and_then(|d| d.resolve(&name)).is_some() {
-                Some(".env")
-            } else {
-                None
-            };
+            let source = sources.source_of(&name);
             json!({ "name": name, "resolved": source.is_some(), "source": source })
         })
         .collect();
@@ -728,10 +719,15 @@ fn health_checks(
         }
     }
 
+    // Presence, not values: this summary says how many refs resolve, which
+    // `SecretSources` answers without decrypting anything. `ctx.resolver` is
+    // the real chain and would read every value — right for render/apply,
+    // wrong for a health line the panel refreshes on a timer.
     let refs = manifest.referenced_secrets();
+    let sources = SecretSources::detect(&ctx.dir);
     let unresolved: Vec<&String> = refs
         .iter()
-        .filter(|n| ctx.resolver.resolve(n).is_none())
+        .filter(|n| sources.source_of(n).is_none())
         .collect();
     if unresolved.is_empty() {
         push(

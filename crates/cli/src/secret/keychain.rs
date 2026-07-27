@@ -75,6 +75,82 @@ pub fn get(name: &str) -> Result<Option<String>> {
     }
 }
 
+/// Whether a secret is stored, **without reading its value**.
+///
+/// macOS gates the *data* of a keychain item behind a per-application ACL —
+/// that is the "agentstack wants to use your confidential information" dialog.
+/// Item *attributes* are not gated, so an attribute-only query answers
+/// "is it there?" without ever prompting.
+///
+/// This matters because an ACL grant ("Always Allow") is bound to the calling
+/// binary's code identity, and a locally built `agentstack` is ad-hoc signed:
+/// its cdhash changes on every `cargo build`, which silently invalidates every
+/// previous grant. A status path that read *values* therefore re-prompted, once
+/// per referenced secret, after every rebuild.
+///
+/// Status/provenance callers (doctor, `secret list`, `explain`, the panel
+/// snapshot) only ever need existence and must come through here —
+/// [`KeychainProbe`] is the type that enforces it. [`get`] stays for the
+/// callers that genuinely need the value (render / apply / run), where the
+/// prompt is the honest cost of using the secret.
+pub fn exists(name: &str) -> Result<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        use security_framework::item::{ItemClass, ItemSearchOptions};
+
+        /// `errSecItemNotFound` — a clean miss, not a failure.
+        const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+
+        let found = ItemSearchOptions::new()
+            .class(ItemClass::generic_password())
+            .service(SERVICE)
+            .account(name)
+            // Required, and deliberately *attributes*, not data:
+            // `SecItemCopyMatching` returns NULL when no `kSecReturn*` is
+            // requested, which the binding reports as an empty result — a hit
+            // would be indistinguishable from a miss. Attributes are the
+            // cheapest non-empty return and stay clear of `kSecReturnData`,
+            // the one that triggers the ACL prompt.
+            .load_attributes(true)
+            .limit(1)
+            .search();
+        match found {
+            Ok(hits) => Ok(!hits.is_empty()),
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(false),
+            // Same root-cause-only shape as `get`: keyring/security-framework
+            // errors already fold their platform sentence into Display.
+            Err(e) => Err(anyhow::anyhow!(e.to_string())
+                .context(format!("checking secret '{name}' in keychain"))),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Windows Credential Manager and the Linux Secret Service don't gate
+        // reads behind a per-application consent prompt, so the ordinary read
+        // is free of the problem this function exists to avoid. One backend
+        // keeps existence semantics identical across platforms.
+        get(name).map(|v| v.is_some())
+    }
+}
+
+/// Presence-only view of the keychain, for paths that report *where* a `${REF}`
+/// resolves rather than resolving it.
+///
+/// The type is the witness: it exposes no way to obtain a value, so a status
+/// path that holds one of these cannot trigger the keychain consent prompt,
+/// however it is later edited. Swapping this for [`KeychainResolver`] in
+/// [`crate::secret::SecretSources`] is what would reintroduce the bug.
+pub struct KeychainProbe;
+
+impl KeychainProbe {
+    /// `true` when the keychain holds this ref. A read error reports as absent
+    /// here — provenance is advisory, and the resolving path (`Chain`) is where
+    /// a failed read is surfaced as `Failed` rather than `Missing`.
+    pub fn contains(&self, name: &str) -> bool {
+        exists(name).unwrap_or(false)
+    }
+}
+
 /// Delete a secret. Returns `true` if something was removed, `false` if it was
 /// already absent.
 pub fn delete(name: &str) -> Result<bool> {
@@ -117,6 +193,39 @@ mod tests {
         assert!(msg.contains("keychain read failed"), "{msg}");
         assert!(msg.contains("security daemon timed out"), "{msg}");
         assert_eq!(calls.get(), 2, "exactly one retry");
+    }
+
+    /// A miss must come back as `Ok(false)`, not an error — this is the arm
+    /// `SecretSources` reads as "not in the keychain". It also exercises the
+    /// real platform query: a malformed one fails with `errSecParam` (-50)
+    /// rather than `errSecItemNotFound`, and would surface here as `Err`.
+    /// Safe to run anywhere — reading attributes of an item that doesn't exist
+    /// touches no ACL and prompts for nothing.
+    #[test]
+    fn absent_secret_probes_as_not_found() {
+        let out = exists("AGENTSTACK_TEST_SECRET_THAT_DOES_NOT_EXIST");
+        assert!(matches!(out, Ok(false)), "{out:?}");
+    }
+
+    /// The end-to-end witness: an item written through `set` (i.e. by the same
+    /// `keyring` backend `agentstack secret set` uses) is visible to the
+    /// attribute-only probe. Ignored by default because it writes to and
+    /// deletes from the developer's real login keychain — run explicitly with
+    /// `cargo test -p agentstack keychain_roundtrip -- --ignored`.
+    #[test]
+    #[ignore = "touches the real OS keychain"]
+    fn set_secret_is_visible_to_the_probe_keychain_roundtrip() {
+        const NAME: &str = "AGENTSTACK_PROBE_SELFTEST";
+        set(NAME, "value").expect("set");
+        assert!(
+            exists(NAME).expect("probe"),
+            "written secret must probe true"
+        );
+        delete(NAME).expect("delete");
+        assert!(
+            !exists(NAME).expect("probe after delete"),
+            "deleted secret must probe false"
+        );
     }
 
     #[test]

@@ -12,7 +12,6 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::manifest::load::MANIFEST_FILE;
-use crate::secret::Resolver;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
@@ -1627,9 +1626,12 @@ fn doctor_summary(dir: Option<&Path>) -> Result<String> {
     let m = &ctx.loaded.manifest;
     let installed = ctx.registry.iter().filter(|d| d.is_installed()).count();
     let refs = m.referenced_secrets();
+    // Counting, not using — presence via `SecretSources` so an agent polling
+    // this tool never raises the macOS keychain consent prompt.
+    let sources = crate::secret::SecretSources::detect(&ctx.dir);
     let resolved = refs
         .iter()
-        .filter(|n| ctx.resolver.resolve(n).is_some())
+        .filter(|n| sources.source_of(n).is_some())
         .count();
     // The trust gate decides whether this project's servers are proxied at all
     // in auto mode — without this line an agent can't tell a healthy-but-empty
