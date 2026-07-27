@@ -35,7 +35,11 @@ opsbox = ["get_*", "list_*", "delete_everything"]
 # `explain`. They are not exercised at runtime here (egress enforcement is the
 # separate `run --sandbox` primitive; no secret actually resolves in this demo).
 [policy.egress]
-opsbox = ["https://ops.internal.example/*"]
+# Destinations are hosts, not URLs: `host`, `host:port`, `host:*`, or a
+# bracketed IPv6 form. A scheme-and-path pattern is refused at authoring time
+# (a rule that reads like a URL filter but only ever matches a host is the kind
+# of claim that outruns its enforcement).
+opsbox = ["ops.internal.example:443"]
 
 [policy.secrets]
 opsbox = ["OPSBOX_TOKEN"]
