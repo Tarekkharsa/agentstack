@@ -67,6 +67,26 @@ findings and two interpreter findings. All are closed:
   rather than per-pull-request, and that a descriptor dropped into
   `~/.agentstack/adapters/` is tier 3 by definition. Same claim discipline the
   enforcement matrix applies to security, applied to compatibility.
+- **`--json` on the last four reads that lacked it, and one page that lists
+  every one of them.** `agentstack status`, `search`, `adapters list`, and
+  `session list` now speak JSON, so driving the CLI from an agent or a script
+  no longer needs a screen-scraping fallback for part of the surface. Each body
+  carries the same versioned envelope every other machine-readable read does
+  (`schema_version` + `features`), and each is the same reading the human screen
+  renders — nothing writes, renders, spawns, or resolves a secret because the
+  flag is present. The new contract name is `json-reads-v1`: check for it in
+  `features` rather than probing, because a binary that predates it refuses
+  `--json` outright instead of degrading. `status --json` is the biggest of the
+  four — detected CLIs, manifest state, toolsets, active session, lock, trust,
+  delivery mode, unresolved secret *names*, and the single `next_action` — and
+  it distinguishes "no manifest" from "manifest that will not load" with a
+  `project: null` plus a reason, rather than making a caller guess.
+
+  The new [Automation contract](https://tarekkharsa.github.io/agentstack/automation.html)
+  page is the single place an integrator looks: every JSON-capable command, its
+  contract name, its payload shape, how errors are reported (empty stdout,
+  non-zero exit), and which JSON output is deliberately *not* part of the
+  contract.
 
 - **`agentstack doctor --probe` — proof your servers actually run.** Until now
   `doctor` could tell you your config parses, your secrets resolve, and your

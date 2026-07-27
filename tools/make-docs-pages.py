@@ -43,6 +43,7 @@ PAGES = [
     ("reference.md", "reference.html", "reference"),
     ("integrations.md", "integrations.html", "integrations"),
     ("adapters.md", "adapters.html", "adapters"),
+    ("automation.md", "automation.html", "automation"),
     ("ARCHITECTURE.md", "architecture.html", "how-it-works"),
     ("workflows.md", "workflows.html", "workflows"),
     ("ENFORCEMENT.md", "enforcement.html", "matrix"),

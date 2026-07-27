@@ -28,3 +28,10 @@ __pycache__/
 
 # workflow scaling bench output — regenerated on every run, not evidence
 examples/workflow-scale/results.jsonl
+
+# >>> agentstack — generated project artifacts (machine-local) >>>
+/.agents/skills/
+/.claude/skills/
+/.gemini/skills/
+/.pi/skills/
+# <<< agentstack >>>

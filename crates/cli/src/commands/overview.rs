@@ -302,39 +302,203 @@ pub(crate) fn session_status_line(
     }
 }
 
+/// Everything the orientation screen observes, gathered in one pass so the
+/// human screen and `status --json` are provably the same reading. Before
+/// this, the screen computed each fact inline as it printed it; a JSON body
+/// built alongside would have been a second implementation of the same
+/// questions, free to answer them differently.
+pub(crate) struct Orientation {
+    /// Display names of the CLIs detected on this machine.
+    detected_clis: Vec<String>,
+    /// Where the manifest is (or would be).
+    manifest_path: std::path::PathBuf,
+    manifest: ManifestState,
+    /// The single next step: (command, why).
+    next: (String, &'static str),
+}
+
+/// Which of the three shapes the manifest reading took. A caller branches on
+/// this rather than probing for fields: only `Loaded` has project facts, and
+/// only `Broken` has a reason.
+pub(crate) enum ManifestState {
+    /// No manifest in this directory.
+    Missing,
+    /// A manifest file exists but does not load. Carries the reason, already
+    /// formatted for display.
+    Broken(String),
+    /// It loaded, so every project fact below is real.
+    Loaded(Box<ProjectFacts>),
+}
+
+pub(crate) struct ProjectFacts {
+    servers: usize,
+    skills: usize,
+    /// `[targets].default`, empty when nothing is pinned.
+    pinned_targets: Vec<String>,
+    /// How many detected CLIs the commands would fan out to when nothing is
+    /// pinned — the honest number behind "no [targets] pinned".
+    fanout_targets: usize,
+    toolsets: Vec<String>,
+    session: Option<SessionFacts>,
+    locked: bool,
+    trust: crate::trust::TrustState,
+    /// Whether trusting this project would change what it can do here (a
+    /// bridge is registered, or the mode depends on the gate). Drives both the
+    /// "inert servers" note and whether trust is the headline next step.
+    trust_relevant: bool,
+    mode: Mode,
+    gateway_connected: bool,
+    rendered: bool,
+    /// `None` when the caller did not ask for the secrets reading — bare
+    /// `agentstack` never does, and asking is not free (it consults every
+    /// resolver).
+    secrets: Option<SecretFacts>,
+}
+
+pub(crate) struct SessionFacts {
+    profile: String,
+    started_unix: u64,
+    age_secs: u64,
+    abandoned: bool,
+}
+
+pub(crate) struct SecretFacts {
+    referenced: usize,
+    /// The `${REF}` names that resolve from no layer here. NAMES only — a
+    /// value never reaches this struct, let alone a serializer (invariant 5).
+    unresolved: Vec<String>,
+}
+
 /// `agentstack status` — the orientation screen by name, plus the cheap health
 /// signals a glance wants (secrets resolving?) and the pointer to the deep
 /// check. Everything expensive (drift rendering, content scans) stays in
 /// `doctor`; status must feel instant.
-pub fn run_status(manifest_dir: Option<&Path>) -> Result<()> {
-    render(manifest_dir, true)
+pub fn run_status(manifest_dir: Option<&Path>, json: bool) -> Result<()> {
+    // `--json` changes only the rendering: the same collect, with the same
+    // `with_secrets` the named `status` screen already asks for.
+    let orientation = collect(manifest_dir, true)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&crate::ui_contract::envelope(status_json(&orientation)))?
+        );
+        return Ok(());
+    }
+    print_orientation(&orientation, true);
+    Ok(())
 }
 
 pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
-    render(manifest_dir, false)
+    let orientation = collect(manifest_dir, false)?;
+    print_orientation(&orientation, false);
+    Ok(())
+}
+
+/// The `status --json` body without the envelope (its caller wraps it) — the
+/// testable seam, same shape as `workflow_list_json`.
+///
+/// `project` is `null` unless the manifest loaded: a consumer branches on that
+/// one field instead of finding a dozen nulls, and `manifest.error` says why
+/// when it is null for the second reason. `next_action` reuses the key
+/// `doctor --json` already established for the same idea, because it IS the
+/// same idea — one command, and why.
+pub(crate) fn status_json(o: &Orientation) -> serde_json::Value {
+    let (present, error, project) = match &o.manifest {
+        ManifestState::Missing => (false, None, serde_json::Value::Null),
+        ManifestState::Broken(err) => (
+            true,
+            Some(crate::text::sanitize_line(err)),
+            serde_json::Value::Null,
+        ),
+        ManifestState::Loaded(f) => (true, None, project_json(f)),
+    };
+    serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        // Display names, not ids — the same list the screen prints. Adapter
+        // ids live in `adapters list --json`, which is the read for that.
+        "clis_detected": o.detected_clis,
+        "manifest": {
+            "path": o.manifest_path.display().to_string(),
+            "present": present,
+            "loaded": matches!(o.manifest, ManifestState::Loaded(_)),
+            "error": error,
+        },
+        "project": project,
+        "next_action": { "command": o.next.0, "why": o.next.1 },
+    })
+}
+
+fn project_json(f: &ProjectFacts) -> serde_json::Value {
+    serde_json::json!({
+        "servers": f.servers,
+        "skills": f.skills,
+        // Pinned targets and the fan-out count are different questions, so
+        // they are different fields: an empty `pinned` with `fanout` = 6 is
+        // "no [targets] pinned, six detected CLIs", which one number cannot say.
+        "targets": {
+            "pinned": f.pinned_targets.iter().map(|t| crate::text::sanitize_line(t)).collect::<Vec<_>>(),
+            "fanout": f.fanout_targets,
+        },
+        "toolsets": f.toolsets.iter().map(|t| crate::text::sanitize_line(t)).collect::<Vec<_>>(),
+        "session": f.session.as_ref().map(|s| serde_json::json!({
+            "profile": crate::text::sanitize_line(&s.profile),
+            "started_unix": s.started_unix,
+            "age_seconds": s.age_secs,
+            "abandoned": s.abandoned,
+        })),
+        "locked": f.locked,
+        // Same vocabulary `use --list --json` uses, so a UI holding both reads
+        // does not need two trust lookup tables.
+        "trust": match f.trust {
+            crate::trust::TrustState::Trusted => "trusted",
+            crate::trust::TrustState::Changed => "drifted",
+            crate::trust::TrustState::Untrusted => "untrusted",
+        },
+        "trust_relevant": f.trust_relevant,
+        "mode": f.mode.label(),
+        "gateway_connected": f.gateway_connected,
+        "rendered": f.rendered,
+        // Names of unresolved refs, never values (invariant 5). `null` when
+        // the caller did not ask for the reading at all — distinct from an
+        // empty list, which means "asked, everything resolves".
+        "secrets": f.secrets.as_ref().map(|s| serde_json::json!({
+            "referenced": s.referenced,
+            "unresolved": s.unresolved,
+        })),
+    })
 }
 
 /// Secrets at a glance for `status`: the single most common thing broken after
-/// setup. One aligned line when everything resolves; one line per missing
-/// secret, each carrying its exact fix command.
-fn print_secrets_line(ctx: &super::Context) {
+/// setup. Only the NAMES that fail to resolve are kept — `source_of` answers a
+/// presence question, and nothing it learns beyond that leaves this function.
+fn secret_facts(ctx: &super::Context) -> Option<SecretFacts> {
     let refs = ctx.loaded.manifest.referenced_secrets();
     if refs.is_empty() {
-        return;
+        return None;
     }
     let sources = crate::secret::SecretSources::detect(&ctx.dir);
-    let missing: Vec<&String> = refs
+    let unresolved: Vec<String> = refs
         .iter()
         .filter(|n| sources.source_of(n).is_none())
+        .cloned()
         .collect();
-    if missing.is_empty() {
+    Some(SecretFacts {
+        referenced: refs.len(),
+        unresolved,
+    })
+}
+
+/// One aligned line when everything resolves; one line per missing secret,
+/// each carrying its exact fix command.
+fn print_secrets_line(facts: &SecretFacts) {
+    if facts.unresolved.is_empty() {
         println!(
             "  {}  {} referenced, all resolve",
             "Secrets ".bold(),
-            refs.len()
+            facts.referenced
         );
     } else {
-        for name in missing {
+        for name in &facts.unresolved {
             println!(
                 "  {}  {} {name} not set   {}",
                 "Secrets ".bold(),
@@ -345,29 +509,16 @@ fn print_secrets_line(ctx: &super::Context) {
     }
 }
 
-fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
-    println!(
-        "{} {} — one portable manifest, every agent CLI\n",
-        "agentstack".bold(),
-        env!("CARGO_PKG_VERSION")
-    );
-
+/// Read every fact the orientation screen states. `with_secrets` is the one
+/// knob: bare `agentstack` has never consulted the resolvers, and gathering
+/// unconditionally would make it slower for a line it does not print.
+fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientation> {
     let registry = Registry::load()?;
-    let detected: Vec<&str> = registry
+    let detected_clis: Vec<String> = registry
         .iter()
         .filter(|d| d.detected())
-        .map(|d| d.display.as_str())
+        .map(|d| d.display.clone())
         .collect();
-    if detected.is_empty() {
-        println!("  {}  none detected on this machine", "CLIs    ".bold());
-    } else {
-        println!(
-            "  {}  {} detected: {}",
-            "CLIs    ".bold(),
-            detected.len(),
-            detected.join(" · ")
-        );
-    }
 
     // Walk up to the project root so `agentstack` from `src/deep` describes
     // the ROOT manifest instead of steering toward a nested `init`.
@@ -375,178 +526,235 @@ fn render(manifest_dir: Option<&Path>, status: bool) -> Result<()> {
     let dir = crate::manifest::resolve_manifest_dir(&base);
     let manifest_path = dir.join(MANIFEST_FILE);
 
-    let next = if !manifest_path.exists() {
-        println!("  {}  none in this directory", "Manifest".bold());
-        (
-            "agentstack init".to_string(),
-            "guided one-command setup — import, preview, apply",
-        )
-    } else {
-        match super::load(manifest_dir) {
-            Ok(ctx) => {
-                let m = &ctx.loaded.manifest;
-                let mut parts = vec![format!("{} server(s)", m.servers.len())];
-                if !m.skills.is_empty() {
-                    parts.push(format!("{} skill(s)", m.skills.len()));
-                }
-                // No [targets] pinned → commands fan out to the detected CLIs
-                // (see render::resolve_targets); "0 target(s)" would be false.
-                let targets_note = if m.targets.default.is_empty() {
-                    let n = crate::render::resolve_targets(m, &ctx.registry, &[])
-                        .map(|t| t.len())
-                        .unwrap_or_default();
-                    format!("{n} detected CLI(s), no [targets] pinned")
-                } else {
-                    format!("{} target(s)", m.targets.default.len())
-                };
-                println!(
-                    "  {}  {} — {} → {}",
-                    "Manifest".bold(),
-                    manifest_path.display(),
-                    parts.join(" · "),
-                    targets_note
-                );
+    if !manifest_path.exists() {
+        return Ok(Orientation {
+            detected_clis,
+            manifest_path,
+            manifest: ManifestState::Missing,
+            next: (
+                "agentstack init".to_string(),
+                "guided one-command setup — import, preview, apply",
+            ),
+        });
+    }
 
-                // Profiles get their own line, named rather than counted (P18):
-                // "which profiles do I have" stops being archaeology through the
-                // manifest or a triggered disambiguation error. The active one is
-                // marked only when a live session pins it — the one signal that
-                // *reliably* says which profile is loaded right now.
-                let active_session = crate::session::active(&ctx.dir);
-                if !m.profiles.is_empty() {
-                    let names: Vec<String> = m.profiles.keys().cloned().collect();
-                    println!(
-                        "  {}  {}",
-                        "Toolsets".bold(),
-                        profiles_line(&names, active_session.as_ref().map(|s| s.profile.as_str()))
-                    );
-                }
-
-                // Stage 2.2: an active temporary session is a first-class fact
-                // of the default status surface — its own line, not just the
-                // (active) marker inside the profiles list, with the one
-                // command that reverts it.
-                if let Some(sess) = &active_session {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-                    let (headline, hint) = session_status_line(
-                        &sess.profile,
-                        now.saturating_sub(sess.started_unix),
-                        sess.is_abandoned(now),
-                    );
-                    println!("  {}  {} — {}", "Session ".bold(), headline, hint.dimmed());
-                }
-
-                // Where this project actually stands, from cheap signals:
-                // lockfile (was it ever activated/pinned?) and trust state.
-                let base = crate::manifest::project_root_of(&ctx.dir);
-                let trust = crate::trust::check(&base);
-                let locked = crate::lock::Lock::path(&ctx.dir).exists();
-                println!(
-                    "  {}  {}{}",
-                    "Status  ".bold(),
-                    if locked {
-                        "locked"
-                    } else {
-                        "not locked (never activated)"
-                    },
-                    match trust {
-                        crate::trust::TrustState::Trusted => " · trusted",
-                        crate::trust::TrustState::Changed => " · trust stale (content changed)",
-                        crate::trust::TrustState::Untrusted => " · untrusted",
-                    }
-                );
-
-                // Delivery mode and gateway state, derived from what's on disk
-                // (P4) — computed here (before the trust note) because whether
-                // trust is even *relevant* depends on them. Trust genuinely
-                // gates capability delivery only through the bridge (zero-files)
-                // or the trust-gated run/session paths (clean-at-rest); a
-                // static, no-gateway project renders through `apply`/`use`
-                // regardless. So trust is the headline next-step, and the
-                // "inert servers" note is shown, only when a bridge is
-                // registered or the mode depends on the gate.
-                let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
-                let gateway = gateway_connected(&ctx, &target_ids);
-                let mode = detect_mode(&ctx, &target_ids);
-                let trust_relevant = gateway || matches!(mode, Mode::ZeroFiles | Mode::CleanAtRest);
-
-                // Untrusted (or trust-stale) teaches the human what that state
-                // *means*, not just the label (P16): an untrusted manifest's
-                // servers stay inert — the gateway serves control-plane tools
-                // only until the digest is reviewed and pinned. One line,
-                // aligned under the Status content it explains. Only shown when
-                // trust is relevant — for a static, no-gateway project the note
-                // would be false (its servers are not inert), so the honest
-                // `· untrusted` Status label stands alone.
-                if trust_relevant {
-                    if let Some(note) = orientation_trust_note(trust) {
-                        println!("            {}", note.dimmed());
-                    }
-                }
-
-                // Which delivery mode this project is in — a glance, not a guess.
-                println!(
-                    "  {}  {} {}",
-                    "Mode    ".bold(),
-                    mode.label(),
-                    format!("— {}", mode.short()).dimmed()
-                );
-
-                if status {
-                    print_secrets_line(&ctx);
-                }
-
-                let has_capabilities = !m.skills.is_empty() || !m.servers.is_empty();
-                // "Is anything on disk for these targets?" — the signal that
-                // actually distinguishes "imported but not applied" from
-                // "set up and resting". `locked` does not: a static project
-                // stays unlocked until `use`/`lock` runs.
-                let rendered = has_rendered_artifacts(&ctx, &target_ids);
-                let fallback = next_step(trust, rendered, has_capabilities, trust_relevant);
-                let profile = if m.profiles.len() == 1 {
-                    m.profiles
-                        .keys()
-                        .next()
-                        .map(String::as_str)
-                        .unwrap_or("<toolset>")
-                } else {
-                    "<toolset>"
-                };
-                clean_at_rest_next_step(mode, trust, locked, active_session.is_some(), profile)
-                    .unwrap_or_else(|| (fallback.0.to_string(), fallback.1))
-            }
-            Err(err) => {
-                println!(
-                    "  {}  {} — {}",
-                    "Manifest".bold(),
-                    manifest_path.display(),
-                    format!("failed to load: {err:#}").red()
-                );
-                ("agentstack doctor".to_string(), "diagnose the manifest")
-            }
+    let ctx = match super::load(manifest_dir) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            return Ok(Orientation {
+                detected_clis,
+                manifest_path,
+                manifest: ManifestState::Broken(format!("{err:#}")),
+                next: ("agentstack doctor".to_string(), "diagnose the manifest"),
+            })
         }
     };
+
+    let m = &ctx.loaded.manifest;
+    // No [targets] pinned → commands fan out to the detected CLIs (see
+    // render::resolve_targets); "0 target(s)" would be false.
+    let fanout_targets = crate::render::resolve_targets(m, &ctx.registry, &[])
+        .map(|t| t.len())
+        .unwrap_or_default();
+
+    // The active profile is marked only when a live session pins it — the one
+    // signal that *reliably* says which profile is loaded right now.
+    let active_session = crate::session::active(&ctx.dir);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let session = active_session.as_ref().map(|s| SessionFacts {
+        profile: s.profile.clone(),
+        started_unix: s.started_unix,
+        age_secs: now.saturating_sub(s.started_unix),
+        abandoned: s.is_abandoned(now),
+    });
+
+    // Where this project actually stands, from cheap signals: lockfile (was it
+    // ever activated/pinned?) and trust state.
+    let project_root = crate::manifest::project_root_of(&ctx.dir);
+    let trust = crate::trust::check(&project_root);
+    let locked = crate::lock::Lock::path(&ctx.dir).exists();
+
+    // Trust genuinely gates capability delivery only through the bridge
+    // (zero-files) or the trust-gated run/session paths (clean-at-rest); a
+    // static, no-gateway project renders through `apply`/`use` regardless. So
+    // trust is the headline next-step, and the "inert servers" note is shown,
+    // only when a bridge is registered or the mode depends on the gate.
+    let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
+    let gateway = gateway_connected(&ctx, &target_ids);
+    let mode = detect_mode(&ctx, &target_ids);
+    let trust_relevant = gateway || matches!(mode, Mode::ZeroFiles | Mode::CleanAtRest);
+
+    let has_capabilities = !m.skills.is_empty() || !m.servers.is_empty();
+    // "Is anything on disk for these targets?" — the signal that actually
+    // distinguishes "imported but not applied" from "set up and resting".
+    // `locked` does not: a static project stays unlocked until `use`/`lock` runs.
+    let rendered = has_rendered_artifacts(&ctx, &target_ids);
+    let fallback = next_step(trust, rendered, has_capabilities, trust_relevant);
+    let profile = if m.profiles.len() == 1 {
+        m.profiles
+            .keys()
+            .next()
+            .map(String::as_str)
+            .unwrap_or("<toolset>")
+    } else {
+        "<toolset>"
+    };
+    let next = clean_at_rest_next_step(mode, trust, locked, active_session.is_some(), profile)
+        .unwrap_or_else(|| (fallback.0.to_string(), fallback.1));
+
+    Ok(Orientation {
+        detected_clis,
+        manifest_path,
+        manifest: ManifestState::Loaded(Box::new(ProjectFacts {
+            servers: m.servers.len(),
+            skills: m.skills.len(),
+            pinned_targets: m.targets.default.clone(),
+            fanout_targets,
+            toolsets: m.profiles.keys().cloned().collect(),
+            session,
+            locked,
+            trust,
+            trust_relevant,
+            mode,
+            gateway_connected: gateway,
+            rendered,
+            secrets: if with_secrets {
+                secret_facts(&ctx)
+            } else {
+                None
+            },
+        })),
+        next,
+    })
+}
+
+/// The human screen. `status` distinguishes `agentstack status` (which adds
+/// the secrets line and the deep-check pointer) from bare `agentstack`.
+fn print_orientation(o: &Orientation, status: bool) {
+    println!(
+        "{} {} — one portable manifest, every agent CLI\n",
+        "agentstack".bold(),
+        env!("CARGO_PKG_VERSION")
+    );
+
+    if o.detected_clis.is_empty() {
+        println!("  {}  none detected on this machine", "CLIs    ".bold());
+    } else {
+        println!(
+            "  {}  {} detected: {}",
+            "CLIs    ".bold(),
+            o.detected_clis.len(),
+            o.detected_clis.join(" · ")
+        );
+    }
+
+    match &o.manifest {
+        ManifestState::Missing => println!("  {}  none in this directory", "Manifest".bold()),
+        ManifestState::Broken(err) => println!(
+            "  {}  {} — {}",
+            "Manifest".bold(),
+            o.manifest_path.display(),
+            format!("failed to load: {err}").red()
+        ),
+        ManifestState::Loaded(f) => {
+            let mut parts = vec![format!("{} server(s)", f.servers)];
+            if f.skills > 0 {
+                parts.push(format!("{} skill(s)", f.skills));
+            }
+            let targets_note = if f.pinned_targets.is_empty() {
+                format!("{} detected CLI(s), no [targets] pinned", f.fanout_targets)
+            } else {
+                format!("{} target(s)", f.pinned_targets.len())
+            };
+            println!(
+                "  {}  {} — {} → {}",
+                "Manifest".bold(),
+                o.manifest_path.display(),
+                parts.join(" · "),
+                targets_note
+            );
+
+            // Profiles get their own line, named rather than counted (P18):
+            // "which profiles do I have" stops being archaeology through the
+            // manifest or a triggered disambiguation error.
+            if !f.toolsets.is_empty() {
+                println!(
+                    "  {}  {}",
+                    "Toolsets".bold(),
+                    profiles_line(&f.toolsets, f.session.as_ref().map(|s| s.profile.as_str()))
+                );
+            }
+
+            // Stage 2.2: an active temporary session is a first-class fact of
+            // the default status surface — its own line, not just the (active)
+            // marker inside the profiles list, with the command that reverts it.
+            if let Some(sess) = &f.session {
+                let (headline, hint) =
+                    session_status_line(&sess.profile, sess.age_secs, sess.abandoned);
+                println!("  {}  {} — {}", "Session ".bold(), headline, hint.dimmed());
+            }
+
+            println!(
+                "  {}  {}{}",
+                "Status  ".bold(),
+                if f.locked {
+                    "locked"
+                } else {
+                    "not locked (never activated)"
+                },
+                match f.trust {
+                    crate::trust::TrustState::Trusted => " · trusted",
+                    crate::trust::TrustState::Changed => " · trust stale (content changed)",
+                    crate::trust::TrustState::Untrusted => " · untrusted",
+                }
+            );
+
+            // Untrusted (or trust-stale) teaches the human what that state
+            // *means*, not just the label (P16). Only shown when trust is
+            // relevant — for a static, no-gateway project the note would be
+            // false (its servers are not inert), so the honest `· untrusted`
+            // Status label stands alone.
+            if f.trust_relevant {
+                if let Some(note) = orientation_trust_note(f.trust) {
+                    println!("            {}", note.dimmed());
+                }
+            }
+
+            // Which delivery mode this project is in — a glance, not a guess.
+            println!(
+                "  {}  {} {}",
+                "Mode    ".bold(),
+                f.mode.label(),
+                format!("— {}", f.mode.short()).dimmed()
+            );
+
+            if status {
+                if let Some(secrets) = &f.secrets {
+                    print_secrets_line(secrets);
+                }
+            }
+        }
+    }
 
     println!(
         "\n  {}  {}   {}",
         "Next:".bold(),
-        next.0.green(),
-        next.1.dimmed()
+        o.next.0.green(),
+        o.next.1.dimmed()
     );
     println!("  {}", "All commands: agentstack --help".dimmed());
     // The deep-check pointer is redundant when `doctor` is already the one next
     // step: printing the same command twice, described two different ways, made
     // it look like two different things and undercut the single-next-step rule.
-    if status && !next.0.starts_with("agentstack doctor") {
+    if status && !o.next.0.starts_with("agentstack doctor") {
         println!(
             "  {}",
             "Deep check (drift, quirks, supply chain): agentstack doctor".dimmed()
         );
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -750,6 +958,116 @@ mod tests {
         assert_eq!(session_age(5), "started just now");
         assert_eq!(session_age(240), "started 4m ago");
         assert_eq!(session_age(3900), "started 1h 5m ago");
+    }
+
+    fn loaded_orientation(secrets: Option<SecretFacts>) -> Orientation {
+        Orientation {
+            detected_clis: vec!["Claude Code".into()],
+            manifest_path: std::path::PathBuf::from("/repo/.agentstack/agentstack.toml"),
+            manifest: ManifestState::Loaded(Box::new(ProjectFacts {
+                servers: 2,
+                skills: 1,
+                pinned_targets: vec!["claude-code".into()],
+                fanout_targets: 1,
+                toolsets: vec!["dev".into(), "prod".into()],
+                session: Some(SessionFacts {
+                    profile: "dev".into(),
+                    started_unix: 1_700_000_000,
+                    age_secs: 240,
+                    abandoned: false,
+                }),
+                locked: true,
+                trust: crate::trust::TrustState::Changed,
+                trust_relevant: true,
+                mode: Mode::CleanAtRest,
+                gateway_connected: false,
+                rendered: false,
+                secrets,
+            })),
+            next: ("agentstack trust .".into(), "review and re-trust"),
+        }
+    }
+
+    /// `json-reads-v1`: `status --json` is the orientation screen's own
+    /// reading, keyed. `project` carries the per-project facts; `trust` uses
+    /// the same vocabulary `use --list --json` does, so a UI holding both
+    /// reads needs one lookup table, not two.
+    #[test]
+    fn status_json_carries_the_orientation_reading() {
+        let out = status_json(&loaded_orientation(Some(SecretFacts {
+            referenced: 2,
+            unresolved: vec!["NOTION_TOKEN".into()],
+        })));
+        assert_eq!(out["manifest"]["present"], true);
+        assert_eq!(out["manifest"]["loaded"], true);
+        assert_eq!(out["manifest"]["error"], serde_json::Value::Null);
+        let p = &out["project"];
+        assert_eq!(p["servers"], 2);
+        assert_eq!(p["skills"], 1);
+        assert_eq!(p["targets"]["pinned"][0], "claude-code");
+        assert_eq!(p["targets"]["fanout"], 1);
+        assert_eq!(p["toolsets"][1], "prod");
+        assert_eq!(p["session"]["profile"], "dev");
+        assert_eq!(p["session"]["abandoned"], false);
+        assert_eq!(p["locked"], true);
+        assert_eq!(p["trust"], "drifted");
+        assert_eq!(p["trust_relevant"], true);
+        assert_eq!(p["mode"], "clean-at-rest");
+        assert_eq!(p["secrets"]["referenced"], 2);
+        assert_eq!(p["secrets"]["unresolved"][0], "NOTION_TOKEN");
+        assert_eq!(out["next_action"]["command"], "agentstack trust .");
+    }
+
+    /// The two readings that have no project: `project` is `null`, and a
+    /// manifest that exists but will not load says why. A consumer branches on
+    /// one field instead of probing a dozen for null.
+    #[test]
+    fn status_json_distinguishes_missing_from_broken() {
+        let missing = status_json(&Orientation {
+            detected_clis: Vec::new(),
+            manifest_path: std::path::PathBuf::from("/repo/.agentstack/agentstack.toml"),
+            manifest: ManifestState::Missing,
+            next: ("agentstack init".into(), "guided one-command setup"),
+        });
+        assert_eq!(missing["manifest"]["present"], false);
+        assert_eq!(missing["manifest"]["error"], serde_json::Value::Null);
+        assert_eq!(missing["project"], serde_json::Value::Null);
+
+        let broken = status_json(&Orientation {
+            detected_clis: Vec::new(),
+            manifest_path: std::path::PathBuf::from("/repo/.agentstack/agentstack.toml"),
+            manifest: ManifestState::Broken("missing field `type`\nin `servers.a`".into()),
+            next: ("agentstack doctor".into(), "diagnose the manifest"),
+        });
+        assert_eq!(broken["manifest"]["present"], true);
+        assert_eq!(broken["manifest"]["loaded"], false);
+        // Sanitized to one line — the screen may wrap, a JSON string may not
+        // smuggle control bytes into a consumer's UI (rule 7).
+        assert_eq!(
+            broken["manifest"]["error"],
+            "missing field `type` in `servers.a`"
+        );
+        assert_eq!(broken["project"], serde_json::Value::Null);
+    }
+
+    /// Invariant 5 witness for this payload: the secrets reading carries
+    /// COUNTS and unresolved NAMES. A resolved secret contributes to the count
+    /// and nothing else — its name is not even listed, let alone its value.
+    #[test]
+    fn status_json_secrets_never_carry_a_value() {
+        let all_resolve = status_json(&loaded_orientation(Some(SecretFacts {
+            referenced: 2,
+            unresolved: Vec::new(),
+        })));
+        let secrets = &all_resolve["project"]["secrets"];
+        assert_eq!(secrets["referenced"], 2);
+        assert_eq!(secrets["unresolved"].as_array().unwrap().len(), 0);
+        assert_eq!(secrets.as_object().unwrap().len(), 2, "two keys, no value");
+
+        // Not asked for (bare `agentstack`) is a third state, distinct from
+        // "asked, everything resolves".
+        let unasked = status_json(&loaded_orientation(None));
+        assert_eq!(unasked["project"]["secrets"], serde_json::Value::Null);
     }
 
     // Stage 2.2: a live session reads as active; an abandoned one is flagged

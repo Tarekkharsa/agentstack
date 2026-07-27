@@ -62,6 +62,7 @@ TREE = [
     ], "open"),
     ("Integrations", None, [
         ("t3code", "integrations.html", "integrations"),
+        ("Automation contract", "automation.html", "automation"),
     ], "open"),
     ("Configure deeper", "$ agentstack use · session", [
         ("How it works", "architecture.html", "how-it-works"),

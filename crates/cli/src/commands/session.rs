@@ -77,8 +77,42 @@ struct SessionRow<'a> {
     dir: &'a str,
     profile: &'a str,
     scope: &'a str,
+    /// When the session started, as the store recorded it. The text renders
+    /// only the derived age; the JSON body ships both (see below).
+    started_unix: u64,
     age_secs: u64,
     abandoned: bool,
+}
+
+/// The enveloped `session list --json` body — the same rows the text renders,
+/// as named fields (contract `json-reads-v1`). `age_seconds` is derived from
+/// `started_unix` and the read's own clock; both ship, because a UI polling
+/// this wants the stable start time and a one-shot caller wants the age
+/// without recomputing it. `abandoned` is the CLI's judgment
+/// ([`crate::session::is_abandoned`]), not a threshold the caller re-invents.
+///
+/// This is READ-ONLY, and deliberately so: an abandoned session is exactly the
+/// state a supervising UI died in, and listing it must never be the thing that
+/// reverts it. `session end` is the verb that does that.
+fn session_list_json(rows: &[SessionRow]) -> serde_json::Value {
+    let sessions: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            // The session store records a directory and a toolset name that
+            // originated in a manifest — repository content (rule 7). Sanitize
+            // both before they reach a consumer's UI, exactly as
+            // `use --list --json` does for its `session` object.
+            serde_json::json!({
+                "dir": crate::text::sanitize_line(r.dir),
+                "profile": crate::text::sanitize_line(r.profile),
+                "scope": r.scope,
+                "started_unix": r.started_unix,
+                "age_seconds": r.age_secs,
+                "abandoned": r.abandoned,
+            })
+        })
+        .collect();
+    crate::ui_contract::envelope(serde_json::json!({ "sessions": sessions }))
 }
 
 /// Stage 2.2: `session list` names every active session with its age, flags
@@ -146,7 +180,7 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
                 created
             );
         }
-        SessionCmd::List => {
+        SessionCmd::List { json } => {
             let list = crate::session::list_all();
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -158,11 +192,19 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
                     dir: &s.dir,
                     profile: &s.profile,
                     scope: &s.scope,
+                    started_unix: s.started_unix,
                     age_secs: now.saturating_sub(s.started_unix),
                     abandoned: s.is_abandoned(now),
                 })
                 .collect();
-            print!("{}", render_session_list(&rows));
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&session_list_json(&rows))?
+                );
+            } else {
+                print!("{}", render_session_list(&rows));
+            }
         }
     }
     Ok(())
@@ -228,22 +270,7 @@ mod tests {
     fn session_list_flags_abandoned_and_offers_recovery() {
         assert_eq!(render_session_list(&[]), "No active sessions.\n");
 
-        let rows = [
-            SessionRow {
-                dir: "/repo/a",
-                profile: "dev",
-                scope: "project",
-                age_secs: 240,
-                abandoned: false,
-            },
-            SessionRow {
-                dir: "/repo/b",
-                profile: "ops",
-                scope: "project",
-                age_secs: 14 * 3600,
-                abandoned: true,
-            },
-        ];
+        let rows = sample_rows();
         let out = render_session_list(&rows);
         assert!(out.contains("'dev' (project) · started 4m ago"));
         assert!(out.contains("/repo/a"));
@@ -252,5 +279,75 @@ mod tests {
         assert!(out.contains("recover: run `agentstack session end`"));
         let recover_lines = out.matches("recover:").count();
         assert_eq!(recover_lines, 1, "only the abandoned row offers recovery");
+    }
+
+    /// One live session and one that reads as abandoned — the two shapes both
+    /// renderings have to handle, built once so the text and JSON witnesses
+    /// are demonstrably reading the same rows.
+    fn sample_rows() -> [SessionRow<'static>; 2] {
+        [
+            SessionRow {
+                dir: "/repo/a",
+                profile: "dev",
+                scope: "project",
+                started_unix: 1_700_000_000,
+                age_secs: 240,
+                abandoned: false,
+            },
+            SessionRow {
+                dir: "/repo/b",
+                profile: "ops",
+                scope: "project",
+                started_unix: 1_699_000_000,
+                age_secs: 14 * 3600,
+                abandoned: true,
+            },
+        ]
+    }
+
+    /// `json-reads-v1`: `session list --json` carries every row the text
+    /// renders, in named fields — including the `abandoned` judgment, which is
+    /// the whole reason a supervising UI polls this listing.
+    #[test]
+    fn session_list_json_names_every_row_the_text_renders() {
+        let empty = session_list_json(&[]);
+        assert_eq!(empty["schema_version"], crate::ui_contract::SCHEMA_VERSION);
+        assert_eq!(empty["sessions"].as_array().unwrap().len(), 0);
+
+        let out = session_list_json(&sample_rows());
+        let sessions = out["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0]["profile"], "dev");
+        assert_eq!(sessions[0]["dir"], "/repo/a");
+        assert_eq!(sessions[0]["scope"], "project");
+        assert_eq!(sessions[0]["started_unix"], 1_700_000_000u64);
+        assert_eq!(sessions[0]["age_seconds"], 240);
+        assert_eq!(sessions[0]["abandoned"], false);
+        assert_eq!(sessions[1]["abandoned"], true);
+        // No ANSI, no padding, no prose: the text listing's recovery sentence
+        // belongs to the human screen, not to a machine consumer that already
+        // knows `abandoned`.
+        let raw = out.to_string();
+        assert!(!raw.contains('\u{1b}'), "no escape sequences: {raw}");
+        assert!(!raw.contains("recover"), "no human prose: {raw}");
+    }
+
+    /// Rule 7: a toolset name and directory reach this listing from a
+    /// manifest, so an escape sequence smuggled through one must not survive
+    /// into a consumer's UI.
+    #[test]
+    fn session_list_json_sanitizes_store_supplied_strings() {
+        let rows = [SessionRow {
+            dir: "/repo/\u{1b}[31mred",
+            profile: "dev\u{1b}]0;title\u{7}",
+            scope: "project",
+            started_unix: 1,
+            age_secs: 1,
+            abandoned: false,
+        }];
+        let out = session_list_json(&rows);
+        let raw = out.to_string();
+        assert!(!raw.contains('\u{1b}'), "escapes stripped: {raw}");
+        assert_eq!(out["sessions"][0]["profile"], "dev");
     }
 }

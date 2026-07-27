@@ -111,6 +111,23 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   answer, not an error: the CLI refuses to spawn anything for a project that
 ///   is not trusted at its current bytes, and a UI that treats that as a
 ///   failure would push the user to retry instead of to the trust review.
+/// - `json-reads-v1`: the four orientation reads that had no machine form now
+///   accept `--json` and emit an enveloped body — `status`, `search`,
+///   `adapters list`, and `session list`. Each is the SAME reading the human
+///   screen renders, in named fields instead of scraped text: nothing writes,
+///   renders, spawns, or is computed differently because the flag is present.
+///   A separate name rather than a wider reading of `status-v1` (which names
+///   `doctor --json`) or `sessions-v1` (which names `use --list --json` and the
+///   start/end pair), because those contracts are about different payloads —
+///   folding these in would make an older binary advertising them a liar about
+///   four commands it cannot serve. And the failure mode here is harsher than a
+///   missing field: a binary predating this does not emit `null`, it REFUSES
+///   the call with a clap usage error, so a caller that guessed wrong gets a
+///   broken integration rather than a degraded one. Gating on this name is what
+///   lets an integrator choose the JSON path up front instead of discovering
+///   the refusal at runtime — and lets it fall back to `--help`-driven
+///   screen-scraping deliberately, on a binary that genuinely predates the
+///   contract.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -129,6 +146,7 @@ pub const FEATURES: &[&str] = &[
     "workflow-serial-roles-v1",
     "doctor-advisories-v1",
     "doctor-probe-v1",
+    "json-reads-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected

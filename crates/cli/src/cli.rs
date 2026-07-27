@@ -1110,10 +1110,14 @@ pub struct UpgradeArgs {
     pub write: bool,
 }
 
-/// `status` takes no flags of its own — `--manifest-dir` is global, and the
-/// deep flags all belong to `doctor`.
+/// `status` takes no flags of its own beyond `--json` — `--manifest-dir` is
+/// global, and the deep flags all belong to `doctor`.
 #[derive(Args, Debug)]
-pub struct StatusArgs {}
+pub struct StatusArgs {
+    /// Emit the same reading as JSON (contract `json-reads-v1`).
+    #[arg(long)]
+    pub json: bool,
+}
 
 /// `setup` is the interactive newcomer wizard; it deliberately has no `--write`
 /// (it confirms in a terminal and stays dry-run everywhere else). Scripts use
@@ -1716,7 +1720,11 @@ pub enum SessionCmd {
         all: bool,
     },
     /// List active sessions.
-    List,
+    List {
+        /// Emit the same listing as JSON (contract `json-reads-v1`).
+        #[arg(long)]
+        json: bool,
+    },
     /// Freeze the active session's resolved set (toolset servers + the skills
     /// actually loaded) into a new toolset, so CI can replay it deterministically.
     Freeze {
@@ -2227,6 +2235,10 @@ pub struct ImportArgs {
 pub struct SearchArgs {
     /// Free-text query over name, description, and tags (lists all if omitted).
     pub query: Option<String>,
+
+    /// Emit the same results as JSON (contract `json-reads-v1`).
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -2238,7 +2250,11 @@ pub struct AdaptersArgs {
 #[derive(Subcommand, Debug)]
 pub enum AdaptersCommand {
     /// List known adapters and whether each CLI looks installed.
-    List,
+    List {
+        /// Emit the same listing as JSON (contract `json-reads-v1`).
+        #[arg(long)]
+        json: bool,
+    },
     /// Print one adapter descriptor.
     Show {
         /// Adapter id, e.g. `claude-code`.
