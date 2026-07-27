@@ -351,7 +351,9 @@ descriptor each, embedded in the binary, with user overrides and additions
 loaded from `~/.agentstack/adapters/`. Each CLI's quirks are encoded in data,
 not code (Claude's `type:"http"`, Codex's `http_headers` subtable, Gemini's
 `httpUrl`, VS Code's `servers` key, Copilot CLI's `type:"local"` stdio tag, …),
-and per-OS config paths (`{config}/…`) resolve on macOS/Linux/Windows.
+and per-OS config paths (`{config}/…`) resolve per platform. macOS and Linux are the
+supported platforms; the published Windows binary is not exercised by CI, so treat
+Windows paths as untested rather than supported.
 `agentstack adapters list` shows their ids.
 
 ### Rendering and merging

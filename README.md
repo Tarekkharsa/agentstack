@@ -89,6 +89,15 @@ cargo build --release                  # add --features sandbox for `run --sandb
 Release binaries ship with sandbox support compiled in; a bare `cargo build` does not — pass
 `--features sandbox` to get `run --sandbox` / `--lockdown`.
 
+Once installed, `agentstack self update` moves you to the latest release (it verifies the
+download against the release's published checksum before replacing anything, and defers to
+`brew upgrade` if Homebrew owns the binary).
+
+**Supported platforms: macOS and Linux.** A Windows binary is published, but it is not
+exercised by CI and the codebase carries almost no Windows-specific handling — treat it as
+untested rather than supported. If you use it and it works, say so in an issue; that is the
+evidence that would move it.
+
 ### Upgrading
 
 ```sh

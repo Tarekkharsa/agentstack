@@ -118,6 +118,14 @@ manifest entry and re-locks, and renders nothing at all — activation is always
 a separate, explicit step. More:
 [name a toolset](howto/name-a-toolset.md).
 
+## Does it work on Windows?
+
+Not as a supported platform. A Windows binary is published with each release,
+but CI never runs on Windows and the codebase carries almost no
+Windows-specific handling, so it is untested rather than supported. macOS and
+Linux are the platforms the project stands behind. WSL works, because that is
+Linux.
+
 ## Does it work offline?
 
 Mostly. `doctor`, `diff`, `apply`, `use`, `restore` and toolset resolution are
