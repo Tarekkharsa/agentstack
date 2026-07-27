@@ -1338,7 +1338,7 @@ fn lease_freeze(args: &Value, dir: Option<&Path>, store: &LeaseStore) -> Result<
         &json!({ "name": name, "servers": profile.servers, "skills": skills }),
     )?;
     Ok(format!(
-        "Froze MCP lease '{}' into profile '{created}'. The manifest changed; nothing was applied. Review it, then run `agentstack lock` to refresh agentstack.lock.",
+        "Froze MCP lease '{}' into toolset '{created}'. The manifest changed; nothing was applied. Review it, then run `agentstack lock` to refresh agentstack.lock.",
         lease.profile
     ))
 }
@@ -1402,7 +1402,7 @@ fn run_tool_with_lease(
         "agentstack_create_profile" => {
             let name = crate::commands::add::add_profile_json(dir, args)?;
             Ok(format!(
-                "Created profile '{name}'. Load it for a session with agentstack_session_start."
+                "Created toolset '{name}'. Load it for a session with agentstack_session_start."
             ))
         }
         "agentstack_session_start" => {
@@ -1418,7 +1418,7 @@ fn run_tool_with_lease(
             }
             if lease_snapshot(lease).is_some() {
                 anyhow::bail!(
-                    "an MCP profile lease is active — close it before starting a native-file session"
+                    "an MCP toolset lease is active — close it before starting a native-file session"
                 );
             }
             let profile = args
@@ -1457,7 +1457,7 @@ fn run_tool_with_lease(
                 .filter(|s| !s.is_empty());
             let created = crate::session::freeze(dir, name)?;
             Ok(format!(
-                "Froze the session into profile '{created}'. Replay it with agentstack_session_start profile={created}."
+                "Froze the session into toolset '{created}'. Replay it with agentstack_session_start profile={created}."
             ))
         }
         other => anyhow::bail!("unknown tool '{other}'"),
@@ -3070,7 +3070,7 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(overlap.contains("MCP profile lease is active"));
+        assert!(overlap.contains("MCP toolset lease is active"));
 
         let catalog = list_loadable_with_lease(Some(proj.path()), None, &lease, None).unwrap();
         let catalog: Value = serde_json::from_str(&catalog).unwrap();

@@ -642,7 +642,7 @@ impl Gateway {
                     let library = crate::library::Library::load_default_or_warn();
                     let raw = if invalid_lease {
                         eprintln!(
-                            "gateway: MCP lease profile does not exist — serving no upstream servers"
+                            "gateway: the leased toolset does not exist — serving no upstream servers"
                         );
                         Vec::new()
                     } else {

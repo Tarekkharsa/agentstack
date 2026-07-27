@@ -312,7 +312,7 @@ pub fn launch(
     if let Some(p) = profile {
         if crate::session::active(&dir).is_some() {
             anyhow::bail!(
-                "a session is already active here — end it (`agentstack session end`) or run without --profile"
+                "a session is already active here — end it (`agentstack session end`) or run without --toolset"
             );
         }
         crate::session::start(manifest_dir, p, scope)

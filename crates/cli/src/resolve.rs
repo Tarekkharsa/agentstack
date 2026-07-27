@@ -388,8 +388,8 @@ pub fn frozen_runtime_servers(
     if let Some(p) = profile {
         if !manifest.profiles.contains_key(p) {
             anyhow::bail!(
-                "profile '{p}' is not defined in the manifest — refusing to serve any \
-                 servers (a missing pinned profile must never broaden to all servers)"
+                "toolset '{p}' is not defined in the manifest — refusing to serve any \
+                 servers (a missing pinned toolset must never broaden to all servers)"
             );
         }
     }
