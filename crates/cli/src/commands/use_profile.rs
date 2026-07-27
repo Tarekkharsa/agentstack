@@ -895,7 +895,12 @@ pub fn activate(
         // wrote. Best-effort, like apply: never fail a successful use over it.
         if !backups.is_empty() {
             history_targets.dedup();
-            let _ = crate::history::record(scope.as_str(), history_targets.clone(), backups);
+            let _ = crate::history::record(
+                scope.as_str(),
+                format!("use '{label}'"),
+                history_targets.clone(),
+                backups,
+            );
         }
         if !total_failure {
             // Record each activated skill + server's resolved digest so a fresh

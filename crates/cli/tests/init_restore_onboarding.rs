@@ -83,6 +83,7 @@ fn restore_undoes_manifest_env_and_gitignore_from_one_init() {
         &RestoreArgs {
             adapter: None,
             last: true,
+            list: false,
             scope: None,
             write: true,
             json: false,

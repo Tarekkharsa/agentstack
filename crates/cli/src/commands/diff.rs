@@ -7,9 +7,11 @@ use anyhow::Result;
 use owo_colors::OwoColorize;
 
 use crate::cli::DiffArgs;
-use crate::render::{effective_servers, plan_target_with_servers, resolve_targets, Selection};
+use crate::render::{
+    effective_servers, plan_target_with_servers, resolve_targets, section_keys, Selection,
+};
 use crate::scope::Scope;
-use crate::state::{target_key, State};
+use crate::state::{self, target_key, State};
 
 /// What the diff pass found — beyond the printed report, so callers/tests can
 /// assert on it.
@@ -19,8 +21,10 @@ pub struct Outcome {
     pub profile: Option<String>,
     /// Targets whose on-disk config differs from the render.
     pub drifted: usize,
-    /// Per-target foreign entries the apply guard would keep — surfaced here
-    /// instead of being previewed as pending deletions: `(display, names)`.
+    /// Per-target foreign entries agentstack keeps but does not own —
+    /// another manifest's servers, or an entry nobody declared to
+    /// agentstack at all — surfaced here instead of being previewed as
+    /// pending deletions: `(display, names)`.
     pub kept: Vec<(String, Vec<String>)>,
     pub targets: Vec<TargetOutcome>,
     pub owner_refreshes: Vec<OwnerRefresh>,
@@ -34,7 +38,20 @@ pub struct TargetOutcome {
     pub path: String,
     pub changed: bool,
     pub diff: String,
+    /// Foreign entries present in the live config that agentstack keeps but
+    /// does not own: another manifest's servers (adopt-or-`--prune-foreign`
+    /// eligible) AND entries nobody ever declared to agentstack at all — a
+    /// hand-added server, for instance. Both are "kept" in the same sense —
+    /// `apply`'s merge never deletes either — this list is what H8 asked
+    /// `diff` to actually say out loud instead of leaving as unlabeled
+    /// context in the raw diff.
     pub kept: Vec<String>,
+    /// Server names this target renders from the manifest right now.
+    pub managed: Vec<String>,
+    /// Whether this target's file changed on disk, in the region we manage,
+    /// since our last recorded write — the same signal `doctor` calls
+    /// "edited on disk since last apply".
+    pub hand_edited: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -98,6 +115,9 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
     let mut kept_all: Vec<(String, Vec<String>)> = Vec::new();
     let mut target_outcomes = Vec::new();
     let mut warnings = Vec::new();
+    // Whether this run printed any ownership annotation at all — the legend
+    // only earns its line when there was something to explain.
+    let mut any_ownership_notes = false;
 
     let ruleset = crate::render::ruleset_for(manifest)?;
     for id in &target_ids {
@@ -135,21 +155,100 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
         else {
             continue;
         };
-        if print_text {
-            println!("\n{} ({})", plan.display.bold(), plan.config_path.display());
+
+        // H8: names physically present in the live config's managed section
+        // right now. Anything here that isn't in `plan.managed` (ours, going
+        // forward) or `plan.removed` (ours, being pruned) was never written
+        // by this apply — a hand-added entry, or one left by another
+        // manifest. `merge_json`/`merge_toml` already preserve those bytes
+        // untouched; this is only naming what was always true so `diff`
+        // stops showing them as unlabeled context (review finding H8).
+        let on_disk = match desc.config_for(scope, &ctx.dir) {
+            Some((_, format)) => desc
+                .mcp
+                .as_ref()
+                .map(|mcp| section_keys(&plan.existing, &mcp.location, format))
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let mut foreign = kept.clone();
+        for name in &on_disk {
+            if !plan.managed.contains(name)
+                && !plan.removed.contains(name)
+                && !foreign.contains(name)
+            {
+                foreign.push(name.clone());
+            }
         }
-        let target_kept = kept.clone();
+        // Split out the ones with no state-tracked provenance purely for the
+        // hint text: `adopt`/`--prune-foreign` only reach entries the guard
+        // above recorded as another manifest's — a name we never owned at
+        // all has no such command, so promising one would be a lie.
+        let untracked: Vec<String> = foreign
+            .iter()
+            .filter(|n| !kept.contains(n))
+            .cloned()
+            .collect();
+
+        // Same file-level "touched since our last write" signal `doctor`
+        // reports as "edited on disk since last apply", gated the same way
+        // (only when the touch reached the region we actually manage) so the
+        // two commands never disagree.
+        let hand_edited = state.targets.get(&key).is_some_and(|ts| {
+            !ts.last_hash.is_empty() && state::hash(&plan.existing) != ts.last_hash
+        }) && plan.changed();
+
+        if print_text {
+            let managed_suffix = if plan.managed.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " {}",
+                    format!("· managed: {}", plan.managed.join(", ")).dimmed()
+                )
+            };
+            println!(
+                "\n{} ({}){managed_suffix}",
+                plan.display.bold(),
+                plan.config_path.display()
+            );
+            if hand_edited {
+                any_ownership_notes = true;
+                println!(
+                    "  {} hand-edited: this file no longer matches what agentstack last wrote",
+                    "⚠".yellow()
+                );
+            }
+        }
         if !kept.is_empty() {
+            any_ownership_notes = true;
             if print_text {
                 println!(
-                    "  {} keeping {} — applied by another manifest ↳ keep: agentstack adopt · \
-                     prune: agentstack apply --prune-foreign",
+                    "  {} foreign (kept), applied by another manifest: {} ↳ keep: agentstack \
+                     adopt · prune: agentstack apply --prune-foreign",
                     "⚠".yellow(),
                     kept.join(", ")
                 );
             }
-            kept_all.push((plan.display.clone(), kept));
         }
+        if !untracked.is_empty() {
+            any_ownership_notes = true;
+            if print_text {
+                println!(
+                    "  {} foreign (kept), not agentstack's: {} — never added by us, never \
+                     removed by us",
+                    "⚠".yellow(),
+                    untracked.join(", ")
+                );
+            }
+        }
+        // One structured "foreign" list per target — the union of both kinds
+        // above. Text mode splits them (different next steps: one has an
+        // adopt/prune command, the other doesn't); JSON just needs the names.
+        if !foreign.is_empty() {
+            kept_all.push((plan.display.clone(), foreign.clone()));
+        }
+        let target_kept = foreign;
         let changed = plan.changed();
         // Structured consumers always get a plain diff. Terminal coloring is
         // a presentation concern and would leave ANSI escape bytes in JSON.
@@ -175,10 +274,20 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
             changed,
             diff: rendered_diff,
             kept: target_kept,
+            managed: plan.managed.clone(),
+            hand_edited,
         });
     }
 
     if print_text {
+        if any_ownership_notes {
+            println!(
+                "\n{} managed = rendered by agentstack from the manifest · foreign (kept) = \
+                 present on disk but not ours, left alone · hand-edited = this file changed \
+                 outside agentstack since the last write",
+                "Legend:".dimmed()
+            );
+        }
         println!();
         if drift == 0 {
             println!("{} all targets in sync with the manifest.", "✓".green());

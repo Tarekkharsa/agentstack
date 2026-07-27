@@ -1127,7 +1127,7 @@ version = 1
             let _ = crate::history::rollback(std::slice::from_ref(&cap));
             return Err(err);
         }
-        if let Err(err) = crate::history::record("project", Vec::new(), vec![cap.clone()]) {
+        if let Err(err) = crate::history::record("project", "init", Vec::new(), vec![cap.clone()]) {
             crate::history::rollback(&[cap]).context(
                 "history recording failed and the starter manifest could not be rolled back",
             )?;
@@ -1384,7 +1384,15 @@ version = 1
     // The history record is part of the commit contract. If it cannot be made,
     // restore the files and temporary keychain changes instead of claiming an
     // undo that does not exist.
-    if let Err(err) = crate::history::record("project", detected_ids.clone(), backups.clone()) {
+    //
+    // `display_names`, not `detected_ids`: the ledger's `targets` feed
+    // straight into the recorded summary `restore` prints, and an adapter id
+    // like `claude-code` there (instead of "Claude Code") was review finding
+    // H7's second bug — undo history naming internal ids on some rows and
+    // display names on others.
+    if let Err(err) =
+        crate::history::record("project", "init", display_names.clone(), backups.clone())
+    {
         let file_rollback = crate::history::rollback(&backups);
         let keychain_rollback = rollback_keychain(&keychain_changes);
         if let Err(rollback_err) = file_rollback.and(keychain_rollback) {

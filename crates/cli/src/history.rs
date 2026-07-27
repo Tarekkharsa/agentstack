@@ -66,8 +66,28 @@ pub struct Entry {
     /// one undo even though each phase keeps its own history entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub batch: Option<String>,
+    /// The command that produced this entry, e.g. `session start 'backend'` or
+    /// `apply`. Without this, `restore`'s bare listing showed rows that were
+    /// textually identical apart from age — nothing said whether a row was an
+    /// `init`, an `apply`, or a `session start` (review finding H7). Every
+    /// [`record`] call site now names its own operation.
+    ///
+    /// `#[serde(default = "legacy_operation")]` because entries written before
+    /// this field existed have no `operation` key in their JSON — an old
+    /// ledger must keep loading (and rendering something other than a blank
+    /// or a panic), not just newly recorded ones.
+    #[serde(default = "legacy_operation")]
+    pub operation: String,
     #[serde(default)]
     pub undone: bool,
+}
+
+/// What a pre-H7 entry renders as: it genuinely doesn't know which command
+/// wrote it, so this says that plainly instead of guessing or leaving the
+/// column blank (an empty string there would read as a rendering bug, not a
+/// fact about old data).
+fn legacy_operation() -> String {
+    "unlabeled change (recorded before undo entries named their operation)".to_string()
 }
 
 thread_local! {
@@ -119,9 +139,18 @@ pub fn capture(path: &Path, label: impl Into<String>) -> FileChange {
     }
 }
 
-/// Persist one apply event. Returns the new entry id (or `None` if nothing was
-/// captured). Best-effort: history must never break an otherwise-good apply.
-pub fn record(scope: &str, targets: Vec<String>, files: Vec<FileChange>) -> Result<Option<String>> {
+/// Persist one apply event. `operation` names the command that produced it
+/// (e.g. `"apply"`, `"session start 'backend'"`) — it is what `restore`'s
+/// listing renders so undo history reads as an audit trail instead of rows
+/// distinguishable only by timestamp. Returns the new entry id (or `None` if
+/// nothing was captured). Best-effort: history must never break an
+/// otherwise-good apply.
+pub fn record(
+    scope: &str,
+    operation: impl Into<String>,
+    targets: Vec<String>,
+    files: Vec<FileChange>,
+) -> Result<Option<String>> {
     if files.is_empty() {
         return Ok(None);
     }
@@ -152,6 +181,7 @@ pub fn record(scope: &str, targets: Vec<String>, files: Vec<FileChange>) -> Resu
         targets,
         files,
         batch: active_batch(),
+        operation: operation.into(),
         undone: false,
     };
     let d = dir();
@@ -257,7 +287,7 @@ mod tests {
         let cap = capture(&file, "Test · servers");
         // Simulate the apply overwriting the file.
         fs::write(&file, "after").unwrap();
-        let id = record("global", vec!["Test".into()], vec![cap])
+        let id = record("global", "apply", vec!["Test".into()], vec![cap])
             .unwrap()
             .unwrap();
 
@@ -279,7 +309,7 @@ mod tests {
 
         let cap = capture(&file, "Test · servers"); // file absent → before = None
         fs::write(&file, "created by apply").unwrap();
-        let id = record("global", vec!["Test".into()], vec![cap])
+        let id = record("global", "apply", vec!["Test".into()], vec![cap])
             .unwrap()
             .unwrap();
 
@@ -301,7 +331,7 @@ mod tests {
                 let file = work.path().join(name);
                 let cap = capture(&file, name);
                 fs::write(&file, "after").unwrap();
-                record("project", Vec::new(), vec![cap]).unwrap();
+                record("project", "setup", Vec::new(), vec![cap]).unwrap();
             }
         }
 
@@ -314,8 +344,26 @@ mod tests {
         let file = work.path().join("outside");
         let cap = capture(&file, "outside");
         fs::write(&file, "after").unwrap();
-        record("project", Vec::new(), vec![cap]).unwrap();
+        record("project", "apply", Vec::new(), vec![cap]).unwrap();
         assert!(list()[0].batch.is_none(), "batch context ended with guard");
         std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// An entry written before `operation` existed (no key in its JSON at
+    /// all) must still deserialize — and render something that says plainly
+    /// it predates labeling, not an empty string.
+    #[test]
+    fn entry_without_operation_field_loads_with_a_legacy_label() {
+        let json = r#"{
+            "id": "18c61936",
+            "time_unix": 1,
+            "scope": "project",
+            "summary": "2 files · Claude Code, Codex CLI",
+            "targets": ["Claude Code", "Codex CLI"],
+            "files": []
+        }"#;
+        let entry: Entry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.operation, legacy_operation());
+        assert!(!entry.operation.is_empty());
     }
 }

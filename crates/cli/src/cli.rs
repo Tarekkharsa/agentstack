@@ -1628,6 +1628,12 @@ pub struct RestoreArgs {
     #[arg(long, conflicts_with = "adapter")]
     pub last: bool,
 
+    /// List everything undoable — the same listing a bare `agentstack
+    /// restore` prints. Spelled out for the common case of typing the verb
+    /// and reaching for a flag out of habit.
+    #[arg(long, conflicts_with_all = ["adapter", "last"])]
+    pub list: bool,
+
     /// Where writes land: global (each CLI user-level config) or project
     /// (repo-local). Defaults to the manifest home.
     #[arg(long, value_enum)]

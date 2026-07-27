@@ -803,14 +803,19 @@ fn run_checks(
                     let touched =
                         !ts.last_hash.is_empty() && state::hash(&plan.existing) != ts.last_hash;
                     if touched && plan.changed() {
-                        // The managed region on disk differs from what we'd render —
-                        // a real hand-edit to our keys. (A pure manifest change
-                        // leaves the file untouched, so `touched` is false and this
-                        // stays quiet; the pending-changes branch below reports that
-                        // case instead.) When the last write came from a DIFFERENT
-                        // manifest, "since last apply" isn't this project's story —
-                        // demote to Info so machine-wide state doesn't drown a
-                        // fresh project's report.
+                        // The managed region on disk differs from what we'd render.
+                        // A hand-edit is the common cause, but not the only one — a
+                        // session ending onto a stale baseline reaches this same
+                        // state with no hand-edit involved (review finding H8's
+                        // fold-in). So the report states the observed fact, not a
+                        // diagnosis: the file no longer matches what we last wrote.
+                        // (A pure manifest change leaves the file untouched, so
+                        // `touched` is false and this stays quiet; the
+                        // pending-changes branch below reports that case instead.)
+                        // When the last write came from a DIFFERENT manifest,
+                        // "since last apply" isn't this project's story — demote to
+                        // Info so machine-wide state doesn't drown a fresh project's
+                        // report.
                         any_drift = true;
                         report.line(
                             if foreign_key {
@@ -819,8 +824,8 @@ fn run_checks(
                                 Level::Warn
                             },
                             format!(
-                                "{:<14} edited on disk since last apply ↳ review: agentstack \
-                             diff{scope_flag} · keep the hand-edit: agentstack \
+                                "{:<14} no longer matches what agentstack last wrote ↳ review: \
+                             agentstack diff{scope_flag} · adopt the on-disk version: agentstack \
                              adopt{scope_flag}",
                                 desc.display
                             ),

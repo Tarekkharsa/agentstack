@@ -762,7 +762,20 @@ fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Resul
     // The initial captures include files that may already have existed and
     // stayed byte-identical. Keep only actual writes in history and the summary.
     backups.retain(file_change_differs_now);
-    if let Err(err) = crate::history::record("global", target_ids.to_vec(), backups.clone()) {
+    // Display names, not raw adapter ids (`claude-code`) — the ledger's
+    // `targets` feed the summary `restore` prints, and an id there was
+    // review finding H7's second bug (undo history mixing ids and names).
+    let target_display_names: Vec<String> = target_ids
+        .iter()
+        .filter_map(|id| ctx.registry.get(id))
+        .map(|d| d.display.clone())
+        .collect();
+    if let Err(err) = crate::history::record(
+        "global",
+        "setup (house rules)",
+        target_display_names,
+        backups.clone(),
+    ) {
         crate::history::rollback(&backups)
             .context("house-rules history failed and rollback also failed")?;
         return Err(err).context("recording house-rules writes failed; writes were rolled back");

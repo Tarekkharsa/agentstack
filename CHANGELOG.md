@@ -190,6 +190,32 @@ findings and two interpreter findings. All are closed:
   whether an entry *exists* rather than decrypting it. Read-only status stopped
   triggering a system authorization prompt on every check after a local
   rebuild.
+- **`restore`'s listing says what each undo entry actually was.** Three
+  recorded changes with the same scope and file count used to print as
+  identical rows — nothing distinguished an `init` from a `session start` from
+  a plain `apply`. Every entry now records the command that produced it
+  (`session start 'backend'`, `apply (profile 'x')`, `workflow declare
+  'name'`, …) and the listing renders it. Two `init`/setup call sites were
+  also feeding the ledger raw adapter ids (`claude-code`) instead of display
+  names (`Claude Code`) — the same rows now read consistently. Entries
+  recorded by a build before this change render as `unlabeled change
+  (recorded before undo entries named their operation)` rather than a blank
+  column or a panic. `agentstack restore --list` is now an explicit alias for
+  the bare listing.
+- **`agentstack diff` labels foreign and hand-edited entries instead of
+  showing them as unlabeled context.** A hand-added server (or one left by
+  another agentstack manifest) sat in the printed diff with no indication
+  AgentStack doesn't own it and won't remove it. Each target's report now
+  tags `· managed: <names>` for what it renders from the manifest, `foreign
+  (kept)` for entries it preserves but does not own — split into "applied by
+  another manifest" (adopt/`--prune-foreign` eligible) and "not agentstack's"
+  (never added by us, so no prune path exists for it) — and `hand-edited`
+  when the file changed outside agentstack since the last write, with a
+  one-line legend. `doctor`'s matching drift line no longer asserts a
+  hand-edit as the cause (the same state can arise from a session ending onto
+  a stale baseline); it now states the observed fact — "no longer matches
+  what agentstack last wrote" — and offers `diff` to review and `adopt` to
+  accept the on-disk version.
 
 ### Changed
 

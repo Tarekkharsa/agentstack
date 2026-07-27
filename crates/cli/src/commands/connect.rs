@@ -96,7 +96,7 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
         print_limits(desc);
     }
 
-    finish(args.write, changed, touched, backups)?;
+    finish("gateway connect", args.write, changed, touched, backups)?;
     // P17: the trust-unlock teaching prints in the DRY-RUN too, not only after
     // `--write`. Deciding whether to register the bridge is exactly when the
     // user needs to know trust is the per-repo gate — so it belongs in the
@@ -173,7 +173,7 @@ pub fn run_disconnect(args: &DisconnectArgs) -> Result<()> {
         }
     }
 
-    finish(args.write, changed, touched, backups)
+    finish("gateway disconnect", args.write, changed, touched, backups)
 }
 
 /// Which adapters to act on. Explicit ids must exist and support MCP; naming
@@ -347,6 +347,7 @@ fn print_limits(desc: &AdapterDescriptor) {
 }
 
 fn finish(
+    operation: &str,
     write: bool,
     changed: usize,
     touched: Vec<String>,
@@ -354,7 +355,7 @@ fn finish(
 ) -> Result<()> {
     if write && !backups.is_empty() {
         // One undoable history entry for everything this run wrote.
-        let _ = crate::history::record("global", touched, backups);
+        let _ = crate::history::record("global", operation, touched, backups);
     }
     println!();
     if write {

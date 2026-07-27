@@ -352,8 +352,13 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
     crate::commands::use_profile::activate(&ctx, &libctx, &use_args, &prepared)?;
 
     // Record the server snapshots as one undoable history entry.
-    let history_id = crate::history::record(scope.as_str(), touched.into_iter().collect(), backups)
-        .unwrap_or(None);
+    let history_id = crate::history::record(
+        scope.as_str(),
+        format!("session start '{profile}'"),
+        touched.into_iter().collect(),
+        backups,
+    )
+    .unwrap_or(None);
 
     // Which skills did activation add? (so end removes exactly those)
     let mut skill_adds = Vec::new();

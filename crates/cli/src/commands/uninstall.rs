@@ -360,7 +360,7 @@ fn apply_removals(root: &Path, removals: Vec<Removal>) -> Result<()> {
         labels.push(r.label);
     }
     let n = backups.len();
-    crate::history::record("uninstall", labels, backups)?;
+    crate::history::record("uninstall", "uninstall", labels, backups)?;
     println!("\n{n} file(s) reverted.");
     Ok(())
 }

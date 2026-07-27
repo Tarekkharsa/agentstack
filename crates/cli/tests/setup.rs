@@ -147,6 +147,7 @@ fn init_records_its_manifest_and_restore_last_removes_it() {
         &RestoreArgs {
             adapter: None,
             last: true,
+            list: false,
             scope: None,
             write: true,
             json: false,

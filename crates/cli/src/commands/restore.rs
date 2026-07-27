@@ -30,6 +30,17 @@ pub fn run(args: &RestoreArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return undo_selection(entry, &entries, args.write, args.json);
     }
 
+    // `--list` is spelled-out sugar for the bare form — `clap`'s
+    // `conflicts_with_all` already refuses it alongside `--adapter`/`--last`,
+    // so reaching here it just means "ignore any positional and list".
+    if args.list {
+        return if args.json {
+            list_json(&registry, &dir)
+        } else {
+            list(&registry, &dir)
+        };
+    }
+
     match &args.adapter {
         None if args.json => list_json(&registry, &dir),
         None => list(&registry, &dir),
@@ -96,6 +107,10 @@ pub fn list_json_value(registry: &Registry, dir: &Path) -> serde_json::Value {
                 "short_id": short_id(&e.id, &entries),
                 "time_unix": e.time_unix,
                 "scope": e.scope,
+                // Sanitized like `summary`: pre-H7 entries aside, this still
+                // ultimately comes from a manifest-derived label (a profile or
+                // workflow name), so treat it as untrusted the same way.
+                "operation": crate::text::sanitize_line(&e.operation),
                 "summary": crate::text::sanitize_line(&e.summary),
                 "undone": e.undone,
                 "touches_project": touches_project,
@@ -176,11 +191,17 @@ fn list(registry: &Registry, dir: &Path) -> Result<()> {
             } else {
                 String::new()
             };
+            // H7: three otherwise-identical rows (same scope, same "N files ·
+            // targets" summary) used to be indistinguishable — nothing said
+            // one was `init` and the other two were `session start`. The
+            // operation column is what a command actually was; `summary`
+            // stays alongside it for "which files".
             println!(
-                "  {}  {:<8} {:<8} {} {mark}",
+                "  {}  {:<8} {:<8} {:<26} {} {mark}",
                 format!("{:<8}", short_id(&e.id, &entries)).bold(),
                 fmt_age(e.time_unix),
                 e.scope,
+                e.operation,
                 e.summary
             );
         }
@@ -263,6 +284,7 @@ fn undo_selection(
                     "id": e.id,
                     "short_id": short_id(&e.id, entries),
                     "scope": e.scope,
+                    "operation": crate::text::sanitize_line(&e.operation),
                     "summary": crate::text::sanitize_line(&e.summary),
                     "files": e.files.iter().map(|f| {
                         let current = std::fs::read_to_string(&f.path).unwrap_or_default();
@@ -314,11 +336,12 @@ fn undo_selection(
 
 fn preview_entry(entry: &history::Entry, entries: &[history::Entry]) {
     println!(
-        "  {} {} ({}, {}): {}",
+        "  {} {} ({}, {}) {}: {}",
         "↩".cyan(),
         short_id(&entry.id, entries),
         entry.scope,
         fmt_age(entry.time_unix),
+        entry.operation,
         entry.summary
     );
     for f in &entry.files {
@@ -403,7 +426,7 @@ mod tests {
         for content in ["one", "two"] {
             let cap = history::capture(&file, "Test · servers");
             std::fs::write(&file, content).unwrap();
-            history::record("global", vec!["Test".into()], vec![cap]).unwrap();
+            history::record("global", "apply", vec!["Test".into()], vec![cap]).unwrap();
         }
 
         let entries = history::list();

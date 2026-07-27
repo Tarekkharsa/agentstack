@@ -316,7 +316,7 @@ fn hand_edit_hints_diff_and_adopt() {
     let report = doctor::collect(Some(&proj)).unwrap();
     let drift = section_msgs(&report, "Drift").join("\n");
     assert!(
-        drift.contains("edited on disk since last apply"),
+        drift.contains("no longer matches what agentstack last wrote"),
         "hand-edit to the managed region must be detected, got: {drift}"
     );
     assert!(
@@ -399,7 +399,7 @@ fn unmanaged_churn_is_not_edited_on_disk() {
     let report = doctor::collect(Some(&proj)).unwrap();
     let drift = section_msgs(&report, "Drift").join("\n");
     assert!(
-        drift.contains("edited on disk since last apply"),
+        drift.contains("no longer matches what agentstack last wrote"),
         "a change to the managed region must warn, got: {drift}"
     );
 }

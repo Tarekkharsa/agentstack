@@ -254,18 +254,21 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
     //
     // Note the ordering: this happens before `create_dir_all`, so a refusal
     // here does not even leave an empty `workflows/` behind.
-    let recorded = crate::history::record("workflow-declare", vec![name.to_string()], undo.clone())
-        .and_then(|id| {
-            id.context("the undo ledger reported nothing recorded, but files were staged")
-        })
-        .with_context(|| {
-            format!(
-                "refusing to declare '{name}': the undo entry could not be written to {}, and \
+    let recorded = crate::history::record(
+        "workflow-declare",
+        format!("workflow declare '{name}'"),
+        vec![name.to_string()],
+        undo.clone(),
+    )
+    .and_then(|id| id.context("the undo ledger reported nothing recorded, but files were staged"))
+    .with_context(|| {
+        format!(
+            "refusing to declare '{name}': the undo entry could not be written to {}, and \
                  declaring without one would leave no way back. Fix the permissions on that \
                  directory (or AGENTSTACK_HOME) and re-run — nothing has been changed.",
-                crate::history::dir().display()
-            )
-        })?;
+            crate::history::dir().display()
+        )
+    })?;
 
     let created_dest_dir = !dest_dir.exists();
 

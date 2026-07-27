@@ -164,6 +164,49 @@ fn is_empty_shell(content: &str, location: &str, format: Format) -> bool {
     cur.as_object().is_some_and(|o| o.is_empty())
 }
 
+/// The key names present in `content`'s managed section at (dotted)
+/// `location` — e.g. every MCP server name a target's config already has,
+/// before this render touches it.
+///
+/// `diff` uses this to tell "ours" from "someone else's": a name here that
+/// isn't in [`TargetPlan::managed`] or [`TargetPlan::removed`] was never
+/// written by us — hand-added directly in the file, or left by another
+/// agentstack manifest — either way, `merge_json`/`merge_toml` silently
+/// preserve it today (review finding H8: that preservation was real but
+/// unlabeled). Best-effort like [`is_empty_shell`]: unparsable content or an
+/// absent section returns empty rather than erroring, since a foreign or
+/// malformed file must never fail a read-only `diff`.
+pub fn section_keys(content: &str, location: &str, format: Format) -> Vec<String> {
+    let value: Value = match format {
+        Format::Json => match serde_json::from_str(content) {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        },
+        Format::Toml => {
+            let Ok(t) = content.parse::<toml::Value>() else {
+                return Vec::new();
+            };
+            match serde_json::to_value(t) {
+                Ok(v) => v,
+                Err(_) => return Vec::new(),
+            }
+        }
+    };
+    let mut cur = &value;
+    for key in location.split('.') {
+        let Some(obj) = cur.as_object() else {
+            return Vec::new();
+        };
+        match obj.get(key) {
+            Some(v) => cur = v,
+            None => return Vec::new(),
+        }
+    }
+    cur.as_object()
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
 /// Which servers a run targets.
 pub enum Selection {
     /// Every server in the manifest.
@@ -1135,5 +1178,29 @@ startup_timeout_sec = 20
         ));
         // Unparseable → never delete.
         assert!(!is_empty_shell("not json", "mcpServers", Format::Json));
+    }
+
+    #[test]
+    fn section_keys_lists_json_and_toml_entries() {
+        let mut keys = section_keys(
+            "{\"mcpServers\": {\"postgres\": {}, \"handadded\": {}}}",
+            "mcpServers",
+            Format::Json,
+        );
+        keys.sort();
+        assert_eq!(keys, vec!["handadded".to_string(), "postgres".to_string()]);
+
+        let toml_keys = section_keys(
+            "[mcp_servers.postgres]\ncommand = \"npx\"\n",
+            "mcp_servers",
+            Format::Toml,
+        );
+        assert_eq!(toml_keys, vec!["postgres".to_string()]);
+    }
+
+    #[test]
+    fn section_keys_is_empty_for_absent_section_or_unparseable_content() {
+        assert!(section_keys("{}", "mcpServers", Format::Json).is_empty());
+        assert!(section_keys("not json", "mcpServers", Format::Json).is_empty());
     }
 }

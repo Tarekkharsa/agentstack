@@ -20,6 +20,7 @@ fn restore_args(target: Option<&str>, last: bool, write: bool) -> RestoreArgs {
     RestoreArgs {
         adapter: target.map(str::to_string),
         last,
+        list: false,
         scope: None,
         write,
         json: false,
@@ -40,7 +41,7 @@ fn restore_undoes_a_history_entry_by_prefix_and_last() {
     // Simulate what apply does: capture, overwrite, record.
     let cap = history::capture(&file, "Claude Code · settings");
     fs::write(&file, "after").unwrap();
-    let id = history::record("global", vec!["Claude Code".into()], vec![cap])
+    let id = history::record("global", "apply", vec!["Claude Code".into()], vec![cap])
         .unwrap()
         .unwrap();
 
@@ -55,7 +56,7 @@ fn restore_undoes_a_history_entry_by_prefix_and_last() {
     // A second event, undone via --last.
     let cap = history::capture(&file, "Claude Code · settings");
     fs::write(&file, "after-2").unwrap();
-    history::record("global", vec!["Claude Code".into()], vec![cap]).unwrap();
+    history::record("global", "apply", vec!["Claude Code".into()], vec![cap]).unwrap();
     restore::run(&restore_args(None, true, true), None).unwrap();
     assert_eq!(fs::read_to_string(&file).unwrap(), "before");
 
@@ -76,11 +77,17 @@ fn restore_last_undoes_every_phase_in_one_batch() {
         let _batch = history::begin_batch("setup");
         let manifest_cap = history::capture(&manifest, "manifest · import");
         fs::write(&manifest, "version = 1\n").unwrap();
-        history::record("project", Vec::new(), vec![manifest_cap]).unwrap();
+        history::record("project", "init", Vec::new(), vec![manifest_cap]).unwrap();
 
         let rendered_cap = history::capture(&rendered, "Claude Code · servers");
         fs::write(&rendered, "{}\n").unwrap();
-        history::record("project", vec!["Claude Code".into()], vec![rendered_cap]).unwrap();
+        history::record(
+            "project",
+            "apply",
+            vec!["Claude Code".into()],
+            vec![rendered_cap],
+        )
+        .unwrap();
     }
 
     restore::run(&restore_args(None, true, true), None).unwrap();

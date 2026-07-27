@@ -129,6 +129,13 @@ fn render(
         Some(p) => Selection::Profile(p.clone()),
         None => Selection::All,
     };
+    // Named once for the history ledger below — `restore`'s listing renders
+    // this so an `apply --profile backend` entry reads differently from a
+    // plain `apply` (both otherwise touch the same files).
+    let operation = match &args.profile {
+        Some(p) => format!("apply (profile '{p}')"),
+        None => "apply".to_string(),
+    };
 
     // Library-aware validation + the effective server set (inline-first, then
     // central library), shared across targets.
@@ -834,7 +841,12 @@ fn render(
             Err(err) => {
                 // Config writes happened before the managed-block update. Keep
                 // them recoverable even when this final ancillary write fails.
-                let _ = crate::history::record(scope.as_str(), history_targets.clone(), backups);
+                let _ = crate::history::record(
+                    scope.as_str(),
+                    operation.clone(),
+                    history_targets.clone(),
+                    backups,
+                );
                 return Err(err);
             }
         }
@@ -844,7 +856,7 @@ fn render(
         // Record one undoable history entry for every file this apply wrote,
         // including the project-scope managed gitignore block above.
         // Best-effort: never fail an otherwise-successful apply over history.
-        let _ = crate::history::record(scope.as_str(), history_targets, backups);
+        let _ = crate::history::record(scope.as_str(), operation, history_targets, backups);
     }
 
     // `apply` renders servers/instructions/hooks/settings — never skills.
