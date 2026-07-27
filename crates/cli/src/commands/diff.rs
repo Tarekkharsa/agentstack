@@ -21,10 +21,11 @@ pub struct Outcome {
     pub profile: Option<String>,
     /// Targets whose on-disk config differs from the render.
     pub drifted: usize,
-    /// Per-target foreign entries agentstack keeps but does not own —
-    /// another manifest's servers, or an entry nobody declared to
-    /// agentstack at all — surfaced here instead of being previewed as
-    /// pending deletions: `(display, names)`.
+    /// Per-target foreign entries ANOTHER agentstack manifest applied, which
+    /// the apply guard keeps — surfaced here instead of being previewed as
+    /// pending deletions: `(display, names)`. Unchanged `diff-v1` meaning;
+    /// undeclared hand-added entries live on each target's
+    /// `foreign_untracked`.
     pub kept: Vec<(String, Vec<String>)>,
     pub targets: Vec<TargetOutcome>,
     pub owner_refreshes: Vec<OwnerRefresh>,
@@ -38,14 +39,21 @@ pub struct TargetOutcome {
     pub path: String,
     pub changed: bool,
     pub diff: String,
-    /// Foreign entries present in the live config that agentstack keeps but
-    /// does not own: another manifest's servers (adopt-or-`--prune-foreign`
-    /// eligible) AND entries nobody ever declared to agentstack at all — a
-    /// hand-added server, for instance. Both are "kept" in the same sense —
-    /// `apply`'s merge never deletes either — this list is what H8 asked
-    /// `diff` to actually say out loud instead of leaving as unlabeled
-    /// context in the raw diff.
+    /// Foreign entries **another agentstack manifest** applied here, which
+    /// this one keeps: `adopt` pulls them in, `apply --prune-foreign` removes
+    /// them. This is exactly what `diff-v1` has always meant by `kept`, and it
+    /// stays that narrow on purpose — a panel gated on `diff-v1` offers Adopt
+    /// for these, and those two commands only reach entries the guard recorded
+    /// as another manifest's.
     pub kept: Vec<String>,
+    /// Foreign entries **nobody ever declared to agentstack** — hand-added
+    /// straight into the file. `apply`'s merge preserves them exactly like
+    /// `kept`, which is why H8 wanted them named; but no `adopt`/`--prune-foreign`
+    /// command acts on them, so they are a SEPARATE field rather than swelling
+    /// `kept`. Folding them together would have a `diff-v1` panel offering an
+    /// Adopt button the CLI cannot honor — the same mistake `library-remove-v1`
+    /// exists to prevent. Read this only when `diff-ownership-v1` is advertised.
+    pub foreign_untracked: Vec<String>,
     /// Server names this target renders from the manifest right now.
     pub managed: Vec<String>,
     /// Whether this target's file changed on disk, in the region we manage,
@@ -242,13 +250,17 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
                 );
             }
         }
-        // One structured "foreign" list per target — the union of both kinds
-        // above. Text mode splits them (different next steps: one has an
-        // adopt/prune command, the other doesn't); JSON just needs the names.
-        if !foreign.is_empty() {
-            kept_all.push((plan.display.clone(), foreign.clone()));
+        // Text mode above splits the two kinds because their next steps
+        // differ. The STRUCTURED output keeps them split for a stronger
+        // reason: `kept` is a `diff-v1` field whose consumers offer Adopt, and
+        // `adopt`/`--prune-foreign` cannot act on an entry agentstack never
+        // recorded. So `kept` keeps its original narrow meaning and the
+        // undeclared names ride on their own field, behind their own feature
+        // name (`diff-ownership-v1`).
+        if !kept.is_empty() {
+            kept_all.push((plan.display.clone(), kept.clone()));
         }
-        let target_kept = foreign;
+        let target_kept = kept.clone();
         let changed = plan.changed();
         // Structured consumers always get a plain diff. Terminal coloring is
         // a presentation concern and would leave ANSI escape bytes in JSON.
@@ -274,6 +286,7 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
             changed,
             diff: rendered_diff,
             kept: target_kept,
+            foreign_untracked: untracked,
             managed: plan.managed.clone(),
             hand_edited,
         });

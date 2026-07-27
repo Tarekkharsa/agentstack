@@ -214,17 +214,20 @@ provides the complete machine-readable view for external tools and automation.
 
 ```text
 agentstack diff            # review the drift
-agentstack adopt           # keep the hand-edit (pull it into the manifest)
-agentstack apply --write   # keep the manifest (re-render over the edit)
+agentstack adopt           # keep the on-disk version (pull it into the manifest)
+agentstack apply --write   # keep the manifest (re-render over the change)
 ```
 
 `doctor` flags drift in both directions, and the fixes are opposites — pick
 by which side holds the truth:
 
-- **"edited on disk since last apply"** — the live config changed after our
-  last write. Review with `agentstack diff`; if the hand-edit should stay,
-  `agentstack adopt` pulls it into the manifest. If the manifest is right,
-  `agentstack apply --write` re-renders over the edit.
+- **"no longer matches what agentstack last wrote"** — the live config changed
+  after our last write. `doctor` states the fact without guessing the cause: a
+  hand-edit is the common one, but a session that ended onto a stale baseline
+  reaches the same state. Review with `agentstack diff`, which now labels each
+  entry `managed`, `foreign (kept)`, or `hand-edited`; if the on-disk version
+  should stay, `agentstack adopt` pulls it into the manifest. If the manifest is
+  right, `agentstack apply --write` re-renders over it.
 - **"would REMOVE \<names\>"** — the manifest no longer selects entries we
   manage, so the next `apply --write` deletes them from the live config.
   `agentstack adopt` first if any of them should survive; apply only when

@@ -42,6 +42,15 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   `toolset-create-v2`, which is the name to gate on for that. This paragraph
 ///   still describes what a binary advertising ONLY `profiles-edit-v1` does,
 ///   which is what the name has to keep meaning.
+/// - `diff-ownership-v1`: each `diff --json` target carries `managed` (the
+///   names this render owns), `hand_edited` (the file no longer matches what we
+///   last wrote), and `foreign_untracked` — foreign entries nobody ever declared
+///   to agentstack, which `apply` preserves exactly like `kept` but which
+///   `adopt` and `apply --prune-foreign` cannot act on. `kept` keeps its
+///   `diff-v1` meaning (another MANIFEST's entries, adopt-eligible) precisely so
+///   a panel on the older name never offers Adopt for something the CLI cannot
+///   honor — the same reasoning as `library-remove-v1`. A UI that does not know
+///   this name simply shows one fewer category, which is safe.
 /// - `toolset-create-v2`: `create-profile` writes the manifest entry and
 ///   re-locks, and renders NOTHING — naming a toolset is no longer switching to
 ///   it (review finding H3). Activation is a separate verb (`use-profile`, or
@@ -99,6 +108,7 @@ pub const FEATURES: &[&str] = &[
     "restore-last",
     "sessions-v1",
     "profiles-edit-v1",
+    "diff-ownership-v1",
     "toolset-create-v2",
     "library-remove-v1",
     "workflow-observe-v1",
