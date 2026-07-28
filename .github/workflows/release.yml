@@ -177,7 +177,17 @@ jobs:
             exit 1
           }
           owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
-          notes="Egress proxy image: \`ghcr.io/${owner_lc}/agentstack-egress-proxy@${IMAGE_DIGEST}\`"
+          image_note="Egress proxy image: \`ghcr.io/${owner_lc}/agentstack-egress-proxy@${IMAGE_DIGEST}\`"
+          release_notes="$(awk -v tag="$RELEASE_TAG" '
+            index($0, "## " tag " ") == 1 { found=1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md)"
+          [ -n "$release_notes" ] || {
+            echo "::error::CHANGELOG.md has no section for $RELEASE_TAG" >&2
+            exit 1
+          }
+          body="${release_notes}"$'\n\n'"${image_note}"
           rid="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
             --jq "[.[] | select(.draft and .tag_name == \"${RELEASE_TAG}\")][0].id")"
           if [ -z "$rid" ] || [ "$rid" = "null" ]; then
@@ -185,8 +195,7 @@ jobs:
               -f tag_name="${RELEASE_TAG}" \
               -f target_commitish="${tag_commit}" \
               -f name="${RELEASE_TAG}" \
-              -f body="${notes}" \
-              -F generate_release_notes=true \
+              -f body="${body}" \
               -F draft=true \
               -F prerelease=false \
               --jq '.id')"
