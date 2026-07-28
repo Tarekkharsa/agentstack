@@ -121,6 +121,10 @@ jobs:
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          # The image job also emits a BuildKit `.dockerbuild` record. It is
+          # provenance evidence, not a release archive, and cannot be merged
+          # into the binary asset directory.
+          pattern: agentstack-*
           path: assets
           merge-multiple: true
 
