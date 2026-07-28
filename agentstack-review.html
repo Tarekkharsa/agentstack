@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AgentStack in t3code — interactive review</title>
+<title>The AgentStack panel — interactive review</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Newsreader:opsz,wght@6..72,300;6..72,400&display=swap" rel="stylesheet">
@@ -79,6 +79,30 @@ code{font-family:var(--mono);font-size:.92em}
 .colhead .v{font-size:11px;color:var(--dimmer)}
 .colhead .c{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--dimmer)}
 .uicol{flex:none;border-right:1px solid var(--line-soft);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+
+/* ── guide bar: the thing that makes a step a step ────── */
+.guide{flex:none;border-bottom:1px solid rgba(233,231,226,.07);background:rgba(240,151,90,.045)}
+.guide.done{background:rgba(52,211,153,.05)}
+.guide .prog{height:2px;background:rgba(233,231,226,.07)}
+.guide .prog i{display:block;height:2px;background:var(--orange);transition:width .25s ease}
+.guide.done .prog i{background:var(--green)}
+.guide .r{display:flex;align-items:center;gap:11px;padding:9px 20px}
+.guide .n{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:99px;flex:none;
+  background:rgba(240,151,90,.18);color:var(--orange);font-family:var(--mono);font-size:10.5px;font-weight:700}
+.guide.done .n{background:rgba(52,211,153,.18);color:var(--green)}
+.guide .txt{font-size:12.5px;line-height:1.45;color:#D6DAE0;flex:1;min-width:0}
+.guide .txt b{color:var(--text);font-weight:600}
+.guide .txt code{background:rgba(233,231,226,.07);border-radius:4px;padding:1px 4px}
+.guide .of{font-family:var(--mono);font-size:10.5px;color:var(--dim);flex:none}
+.guide .replay{font-size:11px;font-weight:600;color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:3px 8px;flex:none}
+.guide .replay:hover{color:var(--text);background:rgba(233,231,226,.06)}
+.guide .changed{display:flex;align-items:flex-start;gap:8px;padding:0 20px 9px;font-size:12px;line-height:1.5;color:var(--green)}
+.guide .changed span{color:#A9C9BC}
+
+/* the aim ring on the control that advances the step */
+@keyframes aim{0%{box-shadow:0 0 0 0 rgba(240,151,90,.5)}70%{box-shadow:0 0 0 7px rgba(240,151,90,0)}100%{box-shadow:0 0 0 0 rgba(240,151,90,0)}}
+.aim{position:relative;outline:1.5px solid var(--orange);outline-offset:2px;border-radius:7px;animation:aim 1.8s infinite}
+.aim::after{content:"";position:absolute;top:-4px;right:-4px;width:7px;height:7px;border-radius:99px;background:var(--orange)}
 .uistage{flex:1;overflow:auto;padding:22px 20px 30px;display:flex;justify-content:center;
   background:repeating-linear-gradient(45deg,transparent,transparent 9px,rgba(125,135,150,.035) 9px,rgba(125,135,150,.035) 10px)}
 .clicol{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
@@ -225,8 +249,8 @@ details[open]>summary::before{content:"▾ "}
 <div class="app">
   <aside class="rail">
     <div class="rail-top">
-      <div class="brandrow"><span class="mark"></span><span class="title">AgentStack in t3code</span></div>
-      <span class="sub">Every scenario, with the panel and the command side by side. The panel is live — clicking it changes real state.</span>
+      <div class="brandrow"><span class="mark"></span><span class="title">The AgentStack panel</span></div>
+      <span class="sub">Every scenario, with the panel and the command side by side. The panel is live — do the step and the state really changes. The graphical panel is one host integration today; the CLI is the authority in every one.</span>
       <div class="modes">
         <button data-mode="guided" aria-pressed="true">Guided</button>
         <button data-mode="sheet" aria-pressed="false">All frames</button>
@@ -273,6 +297,8 @@ const base = () => ({
 });
 let S = base();
 let CUR = {scenario:'ready', step:0, view:'both', mode:'guided'};
+let LASTCHANGE = null;   // what the step you just completed actually changed
+const DID = new Set();   // steps whose own action you have actually performed
 
 const LIB = {
   skills:[
@@ -416,7 +442,7 @@ function tabSetup(s){
   const findings=[
     ['Claude Desktop config present but binary not on PATH','—'],
     ['Codex CLI would REMOVE 10 server(s) that came from another setup','agentstack adopt --scope global'],
-    ['guard not enabled — t3code sessions run with no pre-tool-use gate','agentstack guard install'],
+    ['guard not enabled — agent sessions run with no pre-tool-use gate','agentstack guard install'],
   ];
   return `<div style="padding:14px 16px 16px" class="col g10">
     <div class="row g8"><span class="badge ${c?'a':'g'}">${chipLabel}</span><span class="xs dimt">deriveAgentstackStatusChip</span></div>
@@ -914,7 +940,7 @@ Undo one with: agentstack restore &lt;id&gt; --write (or --last for the newest)
 Adapter config backups (content before our last write):
   Claude Code    global ~/.claude.json
   Codex CLI      global ~/.codex/config.toml`},
- setup:{cmd:'agentstack init', cwd:'~/Documents/GitHub/t3code', recon:true,
+ setup:{cmd:'agentstack init', cwd:'~/Projects/acme-checkout', recon:true,
   out:`Scanning for agent CLIs…
   Detected CLIs: Claude Code · Codex CLI · Gemini CLI
 
@@ -938,7 +964,7 @@ Where should these token values live?
   3) skip — write only the ${REF} placeholder; you provide the value later.
 
 Proceed with this plan? [y/N]`},
- notinstalled:{cmd:'agentstack --version', cwd:'~/Documents/GitHub/t3code',
+ notinstalled:{cmd:'agentstack --version', cwd:'~/Projects/acme-checkout',
   out:`<span class="er">zsh: command not found: agentstack</span>
 
 <span class="ps">$</span> <b>which agentstack</b>
@@ -1100,12 +1126,12 @@ const SCEN = [
  summary:"The panel is present but the CLI isn't reachable on the machine running this project. It says so plainly instead of hiding the icon — a hidden icon would read as “no governance available”, which is a different claim.",
  steps:[{name:'Not reachable', component:'NotInstalled', ui:'popover', cli:'notinstalled',
    setup:s=>{s.installed=false},
-   how:[H('Why it can still be “installed”',"If agentstack is a shell function or an alias, the t3code server can't see it — it resolves a real binary on PATH. The env var points the server straight at it."),
+   how:[H('Why it can still be “installed”',"If agentstack is a shell function or an alias, the host app's server process can't see it — it resolves a real binary on PATH. The env var points the server straight at it."),
         H('Why not hide the panel','Absence of the icon and absence of governance are different facts. The panel stays and names the reason.','rgba(91,124,250,.5)')],
    gtee:[Y('No config is read or written while the CLI is missing — the panel is inert, not partially applied.'),
          N('Agent sessions in this project are ungoverned right now: no guard, no gateway, no audit.')],
    contract:'no contracts negotiated — the status probe never answered',
-   open:'The only way out is a code block. t3code already knows how to update and configure itself; neither path is wired to a button here.'}]},
+   open:'The only way out is a code block. The host app already has its own settings and update paths; neither is wired to a button here.'}]},
 
 {id:'first-setup', group:'Getting started', name:'Set up a project, first time', tag:'2 STEPS', tone:'g',
  summary:'Import the coding tools already on this machine into one manifest every CLI renders from. The plan screen carries the digest, so there is no second confirm restating it.',
@@ -1152,7 +1178,7 @@ const SCEN = [
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.session={profile:'backend',ago:'just now'}},
    how:[H('One session, named in two places','The rail row and the glance both read from the same session record, so they can never disagree about what is active.','rgba(52,211,153,.5)')],
    gtee:[Y('session end restores each adapter config from the snapshot taken at start.'),
-         N('Killing t3code mid-session does not revert automatically — agentstack session end --all cleans up.')],
+         N('Killing the host app mid-session does not revert automatically — agentstack session end --all cleans up.')],
    contract:'sessions-v1'}]},
 
 {id:'add-skill', group:'Everyday', name:'Add a skill', tag:'2 STEPS', tone:'g',
@@ -1181,7 +1207,7 @@ const SCEN = [
  summary:'Composing happens in the rail, beside the library it draws from, instead of listing the whole library a second time in a screen of its own.',
  steps:[
   {name:'Compose', component:'ToolsetRail · draft', ui:'manage:toolsets', cli:'toolset',
-   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.draft={name:'',picked:[]}},
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.draft={name:'web',picked:['figma']}},
    how:[H('Create is disabled until it can succeed','A name that matches the allowed pattern and at least one member. The rule is stated as text, not discovered by clicking.'),
         H('Empty rail explains itself','With no toolsets, every library Add is disabled and the empty card says why — rather than leaving you to infer it from greyed-out buttons.','rgba(91,124,250,.5)')],
    gtee:[Y('Composing writes nothing: the draft lives in the panel until you press Create.')],
@@ -1258,7 +1284,7 @@ const SCEN = [
    open:'The diff renders verbatim, capped at 6,000 characters but not redacted. A hand-edited config can contain an inline token, so value positions should be masked before display.'}]},
 
 {id:'guard', group:'Trust & safety', name:'Turn the guard on', tag:'THE ONE WRITE', tone:'a',
- summary:'The only write the glance popover itself can start. t3code’s Full-access mode disables the provider’s own approval prompts; the guard puts one back, machine-wide.',
+ summary:'The only write the glance popover itself can start. A host that runs agents with approvals turned off leaves no pre-check at all; the guard puts one back, machine-wide.',
  steps:[
   {name:'The concern', component:'ConcernCard · guard-install', ui:'popover', cli:'guard',
    setup:s=>{s.trust='trusted';s.drift=false},
@@ -1335,23 +1361,69 @@ const SCEN = [
    open:'“Why did GitHub fail in Codex?” needs the failure reason and the run the call belonged to. Both exist in report calls; neither is surfaced. This is the one tab I would hold back from general release.'}]},
 
 {id:'degraded', group:'Degraded', name:'Version mismatch, and an unreadable read', tag:'FAILS CLOSED', tone:'g',
- summary:'When the CLI speaks a newer schema, or a status read lands mid-write, the panel disables actions rather than guessing — and names exactly what it cannot do.',
+ summary:'When the CLI speaks a newer schema, or a status read lands mid-write, the panel disables actions rather than guessing — and names exactly what it cannot do. These are also the only frames where the panel says a host product name out loud: three strings in all, listed below.',
  steps:[
   {name:'Update needed', component:'UpdateNeeded', ui:'popover', cli:'degraded', setup:s=>{s.incompatible=true},
    how:[H('Negotiated, not assumed','The panel asks which contracts the CLI supports and disables only the affected actions. A newer CLI never causes a wrong write.','rgba(52,211,153,.5)')],
    gtee:[Y('An unsupported contract disables the action — it is never approximated with an older one.')],
-   contract:'schema compare · reads still work, actions do not',
-   open:'It correctly refuses to act but offers no way out. t3code already knows how to update itself via the sidebar update pill — that path should be wired in.'},
+   contract:'schema compare · also one of the 3 strings that hardcode a host name',
+   open:'It correctly refuses to act but offers no way out — and it is one of only three surfaces that hardcode a host name (see the contract line). Both problems have the same fix: the host supplies its own name and its own update path.'},
   {name:'Unreadable status', component:'DoctorUnreadable', ui:'popover', cli:'doctor', setup:s=>{s.doctorNull=true},
    how:[H('The reassurance sentence matters','“Any change you just made has still been applied” is the difference between a scary error and a momentary read failure.','rgba(91,124,250,.5)')],
    gtee:[Y('A failed read never rolls anything back — the last write stands.')],
    contract:'status read returned no parseable doctor report'},
   {name:'Server silent', component:'unreachable', ui:'popover', cli:'notinstalled', setup:s=>{s.reachable=false},
-   how:[H('A different failure, a different sentence','This is the t3code server not answering, not the CLI failing. Naming them separately is why you can tell which one to look at.')],
+   how:[H('A different failure, a different sentence',"This is the host app's own server process not answering, not the CLI failing. Naming them separately is why you can tell which one to look at.")],
    gtee:[Y('Distinct from a CLI failure, so the two are never confused for each other.'),
          N('Unlike the other two failures, this one renders no Check again — recovery waits on the background poll.')],
    contract:'the status RPC itself failed'}]},
 ];
+
+/* ── the guide layer ────────────────────────────────────────────────
+   Per step: what to do, which control does it, and what changed once
+   you did. `target` is the data-act of the control that advances the
+   step — it gets the aim ring, so there is never a hunt for the verb. */
+const GUIDE = {
+ 'not-installed':[["Nothing here resolves it — read what the panel offers instead. **Check again** just re-polls.", 'recheck', "Re-checked, and still nothing: this state has no in-panel way out."]],
+ 'first-setup':[
+   ["Click **Review setup** to see the plan.", 'open:setup', "The plan opened. Still nothing written — this is a preview."],
+   ["Pick where token values live, then **Set up this project**.", 'setup:apply', "The manifest was written. Your CLIs' own configs are still untouched."]],
+ 'ready':[["Nothing needs you. Try **Switch** to see where the toolset list lives.", 'manage:toolsets', "That is the whole glance: one region, and a door to everything else."]],
+ 'switch':[
+   ["Click **Use** on `backend` to start a temporary session.", 'use:backend', "The session is open. The rail row and the glance now both say so."],
+   ["**Stop** ends it and puts every file back.", 'stop', "Session ended — the configs were restored from the start snapshot."]],
+ 'add-skill':[
+   ["Pick a toolset for `rust-testing`, then **Confirm** the digest.", 'add:skill:rust-testing:rust', "Applied: re-locked and re-rendered. Now try adding the **github** server instead."],
+   ["This is where an unresolved secret lands. **Back to library** to leave it.", 'flow:close', "Closed. The manifest keeps the change; only the render was withheld."]],
+ 'create':[
+   ["A name and one tool are already picked — click **Create**. (Clear the name to see the rule it enforces.)", 'draft:create', "Created — and not activated. Naming a toolset and using it are separate verbs."],
+   ["The new toolset appears with a **Use** button, not in use.", null, null]],
+ 'remove':[["Read the blast radius, then **Remove** — or **Cancel**.", 'flow:confirm', "Moved to the library trash. The row is gone from every project that referenced it by name."]],
+ 'undo':[["**Undo this change** arms it; a second click runs it.", 'undo:ask', "Armed. Nothing is reverted until you confirm — that is the second click."]],
+ 'trust':[
+   ["Click **Review this project** — the repo is inert until you do.", 'concern', "The review opened. Nothing has been granted yet."],
+   ["Read what it would run and contact, then **Trust this repo**.", 'trust:grant', "Trusted, pinned to these exact bytes. Editing any of them re-gates it."],
+   ["**Revoke trust** is offered in the same place — granting is reversible.", 'trust:revoke', "Revoked — the repo is inert again, and the glance concern is back."]],
+ 'drift':[
+   ["Click **Review** — the panel won't pick a side for you.", 'concern', "The diff opened, with both outcomes stated."],
+   ["**Keep edits** adopts the hand-edit; **Re-render** overwrites it.", 'drift:adopt', "Adopted into the manifest. The concern cleared and the footer went healthy."]],
+ 'guard':[
+   ["Click **Enable guard** — this one confirms inline instead of opening a dialog.", 'concern', "The confirm appeared, naming its own undo."],
+   ["**Run enable guard** writes the hook into every detected CLI.", 'act:run', "Guard on. The glance has no concern left — that was the last one."]],
+ 'denial':[["Nothing to click: the second button is disabled on purpose.", null, null]],
+ 'protection':[["Read down the rows — each states its cost and where it stops.", null, null]],
+ 'workflow':[
+   ["Approving sends a plain-text reply; it runs nothing.", null, null],
+   ["Click **View agents →** on the live strip.", 'open:monitor', "The monitor opened — one click, no Workflows nav row."],
+   ["Read-only. Starting and killing a run stay in the terminal.", null, null]],
+ 'activity':[["Every row is a digest, never a value — and never a reason.", null, null]],
+ 'degraded':[
+   ["No verb at all — and the copy names the host app rather than asking it for its name. Both are the gap.", null, null],
+   ["**Check again** re-polls; the copy already told you nothing was lost.", 'recheck', "Read succeeded. The write you made before it was never at risk."],
+   ["No **Check again** here — recovery waits on the background poll.", null, null]],
+};
+SCEN.forEach(sc=>{ const g=GUIDE[sc.id]||[];
+  sc.steps.forEach((st,i)=>{ const [instr,target,changed]=g[i]||[]; st.instr=instr||null; st.target=target||null; st.changed=changed||null; }); });
 
 /* flat frame list, for the sheet */
 const FLAT = SCEN.flatMap(sc => sc.steps.map((st,i)=>({sc,st,i})));
@@ -1387,6 +1459,36 @@ function uiFor(s){
   return viewGlance(s);
 }
 
+/* Markdown-lite for instruction text: **bold** and `code`. */
+const md = t => esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`(.+?)`/g,'<code>$1</code>');
+
+/* A step is "done" once you have actually performed it: either you moved
+   past it, or it is the last one and its own advance predicate is true. */
+function stepDone(sc,i){
+  if(i<CUR.step) return true;                       // you moved past it
+  if(DID.has(sc.id+':'+i)) return true;             // you performed its own action
+  const st=sc.steps[i];
+  if(!st.target && !st.advance) return true;        // a read step: nothing to perform
+  return !!(st.advance && st.advance(S));
+}
+function guideBar(sc,st){
+  const i=CUR.step, total=sc.steps.length, done=stepDone(sc,i);
+  const pct=Math.round(((done?i+1:i)/total)*100);
+  const prev = i>0 ? sc.steps[i-1] : null;
+  const instr = st.instr || 'Read this state — nothing here advances it.';
+  return `<div class="guide ${done?'done':''}">
+    <div class="prog"><i style="width:${pct}%"></i></div>
+    <div class="r">
+      <span class="n">${done?'✓':i+1}</span>
+      <span class="txt">${done ? (st.changed ? md(st.changed) : md(instr)) : md(instr)}</span>
+      <span class="of">step ${i+1} of ${total}</span>
+      <button class="replay" data-replay="1">${done&&i+1<total?'Next step →':'Replay'}</button>
+    </div>
+    ${(!done&&prev&&prev.changed&&LASTCHANGE===prev.changed)?
+      `<div class="changed">✓ <span>${md(prev.changed)}</span></div>`:''}
+  </div>`;
+}
+
 function renderGuided(){
   const sc=scenario(), st=step(), c=CLI[st.cli]||CLI.status;
   const showUi = CUR.view!=='cli', showCli = CUR.view!=='ui';
@@ -1408,6 +1510,7 @@ function renderGuided(){
   </header>
   <div class="body">
     ${showUi?`<div class="uicol" style="width:${uiWidth}">
+      ${guideBar(sc,st)}
       <div class="colhead"><span class="k">WHAT YOU SEE</span><span class="v">${st.ui.startsWith('manage')?'Manage · dialog':st.ui==='popover'?'popover · 400px':'dialog'}</span>
         <span class="c">${esc(st.component)}</span></div>
       <div class="uistage" id="uistage">${uiFor(S)}</div></div>`:''}
@@ -1474,6 +1577,16 @@ function render(){
   else if(CUR.mode==='sheet') renderSheet();
   else renderRef();
   document.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed', b.dataset.mode===CUR.mode));
+  aim();
+}
+/* Ring the one control that advances the current step, so the verb is never
+   something you have to hunt for among four look-alike buttons. */
+function aim(){
+  if(CUR.mode!=='guided') return;
+  const sc=scenario(), st=step();
+  if(!st.target || stepDone(sc,CUR.step)) return;
+  const el=document.querySelector(`.uistage [data-act="${st.target}"]`);
+  if(el) el.classList.add('aim');
 }
 
 /* ══ actions — the live state machine ═══════════════════════════════ */
@@ -1546,12 +1659,16 @@ function act(a){
   }
   // a step advances by having actually been performed, not by switching a slide
   const sc=scenario(), i=CUR.step, st=sc.steps[i];
-  if(st && st.advance && st.advance(S) && i+1<sc.steps.length) CUR.step=i+1;
+  if(st && st.target===a) DID.add(sc.id+':'+i);
+  if(st && st.advance && st.advance(S) && i+1<sc.steps.length){ LASTCHANGE=st.changed; CUR.step=i+1; }
   render();
 }
 
 function gotoStep(scenarioId, i){
-  CUR.scenario=scenarioId; CUR.step=i;
+  CUR.scenario=scenarioId; CUR.step=i; LASTCHANGE=null;
+  // Entering a step un-does it and everything after it: the state was just
+  // rebuilt from setup(), so anything you performed earlier no longer holds.
+  [...DID].forEach(k=>{ const [id,n]=k.split(':'); if(id===scenarioId && +n>=i) DID.delete(k); });
   S = stateFor(scenario(), i);
   render();
 }
@@ -1562,6 +1679,11 @@ document.addEventListener('click', e=>{
   const sc=e.target.closest('[data-scen]');  if(sc){ gotoStep(sc.dataset.scen,0); return; }
   const stp=e.target.closest('[data-step]'); if(stp){ gotoStep(CUR.scenario, +stp.dataset.step); return; }
   const v=e.target.closest('[data-view]');   if(v){ CUR.view=v.dataset.view; render(); return; }
+  if(e.target.closest('[data-replay]')){
+    const sc=scenario(), i=CUR.step;
+    gotoStep(sc.id, (stepDone(sc,i)&&i+1<sc.steps.length) ? i+1 : i);
+    return;
+  }
   const a=e.target.closest('[data-act]');
   if(a && !a.closest('.frozen') && !a.hasAttribute('disabled')) act(a.dataset.act);
 });
