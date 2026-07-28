@@ -177,6 +177,11 @@ pre.diff .add{color:var(--green)}pre.diff .del{color:var(--red)}
 .inp::placeholder{color:var(--dim)}
 .itemrow{display:flex;align-items:flex-start;gap:9px;padding:7px 0}
 .itemrow+.itemrow{border-top:1px solid rgba(233,231,226,.05)}
+.tick{width:15px;height:15px;flex:none;margin-top:2px;border:1.5px solid rgba(233,231,226,.3);border-radius:4px;
+  display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:1;color:transparent}
+.tick:hover{border-color:rgba(233,231,226,.6)}
+.tick.on{background:var(--green);border-color:var(--green);color:#0E1013;font-weight:700}
+.tick[disabled]{opacity:.3;cursor:not-allowed}
 details>summary{cursor:pointer;font-size:11px;color:var(--dim);list-style:none}
 details>summary::-webkit-details-marker{display:none}
 details>summary::before{content:"▸ "}
@@ -296,7 +301,7 @@ const base = () => ({
   secretChoice:1, libRemoved:[], created:false, popover:true,
   // proposal only: the rail carries a selection, so the library always has a
   // destination and never needs a mode
-  proposed:false, sel:'backend', menu:null, newRow:null,
+  proposed:false, sel:'backend', menu:null, newRow:null, pending:{add:[],rem:[]},
 });
 let S = base();
 let CUR = {scenario:'ready', step:0, view:'both', mode:'guided'};
@@ -541,7 +546,11 @@ function flowCard(s){
   else if(f.phase==='unsupported') body=`<span class="xs warnt">This agentstack CLI's preview has no digest to confirm against, so this change can't be applied from here. Update agentstack, or make the change in a terminal.</span>
     <div><button class="link" data-act="flow:close">← Back to library</button></div>`;
   else if(f.phase==='confirm'||f.phase==='running'){
-    body = f.kind==='unadd'
+    body = f.kind==='batch'
+      ? `<span class="xs">${f.add.length?`Adds <b style="color:var(--text)">${f.add.map(esc).join(', ')}</b>. `:''}${f.rem.length?`Takes out <b style="color:var(--text)">${f.rem.map(esc).join(', ')}</b>. `:''}One re-lock and one render for the whole change — items taken out stay in your library.</span>
+         <details><summary>Details</summary><span class="srcline">change sha256:a71f0c93…4d80</span></details>
+         <div class="row g8">${btn(f.phase==='running'?'Applying…':'Confirm','flow:confirm','ok')}${btn('Cancel','flow:close','ghost')}</div>`
+      : f.kind==='unadd'
       ? `<span class="xs">Takes it out of this toolset, in this project. It stays in your library and in every other toolset that uses it.</span>
          <details><summary>Details</summary><span class="srcline">change sha256:c41b09aa…7e12</span></details>
          <div class="row g8">${btn('Remove','flow:confirm','ok')}${btn('Cancel','flow:close','ghost')}</div>`
@@ -571,42 +580,48 @@ function flowCard(s){
    Membership becomes state on the row, so one verb per row is enough, and
    the machine-wide delete moves out of the row into an overflow. */
 function tabToolsetsProposed(s){
-  const selName = s.newRow ? s.newRow.name : s.sel;
-  const sel = s.newRow || s.toolsets.find(t=>t.name===s.sel);
-  const members = sel ? sel.members : [];
+  const target = s.newRow || s.toolsets.find(t=>t.name===s.sel);
+  const name   = target ? target.name : null;
+  const base   = target ? target.members : [];
+  const pend   = s.pending || {add:[],rem:[]};
+  const inSet  = n => (base.includes(n) && !pend.rem.includes(n)) || pend.add.includes(n);
+  const count  = pend.add.length + pend.rem.length;
 
   const railRow = t => {
     const on = !s.newRow && s.sel===t.name;
-    const inSession = s.session && s.session.profile===t.name;
+    const held = s.session && s.session.profile===t.name;
     return `<button class="box col g4" data-act="sel:${t.name}" style="width:100%;text-align:left;${on?'border-color:rgba(91,124,250,.45);background:rgba(91,124,250,.08)':''}">
-      <div class="row g8">${dot(inSession?'':(t.ready?'g6':'a'))}
+      <div class="row g8">${dot(held?'':(t.ready?'g6':'a'))}
         <span class="xs" style="color:var(--text);font-weight:600;flex:1">${esc(t.name)}</span>
-        ${inSession?`<span class="badge g">in use</span>`:''}
+        ${held?`<span class="badge g">in use</span>`:''}
         ${on?`<span class="badge" style="background:rgba(91,124,250,.18);color:var(--blueSoft)">editing</span>`:''}</div>
       <span class="srcline">${esc(t.summary)}</span>
       ${t.blocked?`<span class="xs warnt">${esc(t.blocked)}</span>`:''}</button>`;
   };
 
   const newRow = s.newRow ? `<div class="box col g6" style="border-color:rgba(91,124,250,.45);background:rgba(91,124,250,.08)">
+      <span class="cap">NEW TOOLSET</span>
       <input class="inp" placeholder="Name it, e.g. web" value="${esc(s.newRow.name)}" data-input="newname">
-      <span class="xs">${s.newRow.members.length===0?'Add tools from the library — it is already pointed here.':`${s.newRow.members.length} tool(s) added.`}</span>
-      <div class="row g8">${btn('Create','p:create','ok',(!/^[A-Za-z0-9._-]+$/.test(s.newRow.name.trim())||s.newRow.members.length===0)?'disabled':'')}
-        <button class="link" data-act="p:cancel">Cancel</button></div></div>` : '';
+      <button class="link" data-act="p:cancel">Cancel</button></div>` : '';
 
+  // The row states membership; it does not offer a verb. Ticking is the edit.
   const libItem = (i,kind) => {
-    const has = members.includes(i.name);
+    const on   = inSet(i.name);
+    const chg  = pend.add.includes(i.name) || pend.rem.includes(i.name);
     const open = s.menu===i.name;
-    return `<div class="itemrow">${dot(has?'':'m')}
+    return `<div class="itemrow" style="${chg?'background:rgba(91,124,250,.06);border-radius:7px':''}">
+      <button class="tick ${on?'on':''}" data-act="p:tog:${kind}:${i.name}" role="checkbox" aria-checked="${on}"
+        aria-label="${on?'Remove':'Include'} ${esc(i.name)} ${on?'from':'in'} ${esc(name||'the toolset')}" ${name?'':'disabled'}>${on?'✓':''}</button>
       <div class="col" style="flex:1;min-width:0">
         <span class="xs" style="color:var(--text);font-weight:600">${esc(i.name)}
-          ${has?'<span class="badge g" style="margin-left:6px">in '+esc(selName||'')+'</span>':''}</span>
+          <span class="dimt" style="font-weight:400">${i.origin==='library'?'your library':'declared by this project'}</span>
+          ${chg?`<span class="badge" style="background:rgba(91,124,250,.18);color:var(--blueSoft);margin-left:6px">${pend.add.includes(i.name)?'will be added':'will be removed'}</span>`:''}</span>
         ${i.detail?`<span class="srcline">${esc(i.detail)}</span>`:''}
-        ${open?`<div class="box bad col g4 mt6"><span class="xs">Delete <b>${esc(i.name)}</b> from your library — every project that uses it by name is affected. It moves to the library trash.</span>
+        ${open?`<div class="box bad col g4 mt6">
+          <span class="xs"><b>Delete ${esc(i.name)} from your library?</b> This is your machine-wide library, not this toolset — every project that names it is affected. It moves to the library trash.</span>
           <div class="row g8">${btn('Delete from library…','remove:'+kind+':'+i.name,'dgr')}${btn('Cancel','p:menu:','ghost')}</div></div>`:''}
       </div>
-      ${has?btn('Remove','p:rem:'+kind+':'+i.name,'', 'title="Remove from this toolset — this project only"')
-           :btn('Add','p:add:'+kind+':'+i.name,'', selName?'title="Add to '+esc(selName)+'"':'disabled title="Pick a toolset on the left first"')}
-      ${i.origin==='library'?`<button class="link dimt" data-act="p:menu:${i.name}" title="More — machine-wide actions" style="text-decoration:none">⋯</button>`:''}</div>`;
+      ${i.origin==='library'?`<button class="link dimt" data-act="p:menu:${i.name}" title="Machine-wide actions for this item" style="text-decoration:none">⋯</button>`:''}</div>`;
   };
 
   const q=s.query.toLowerCase();
@@ -617,20 +632,31 @@ function tabToolsetsProposed(s){
       ${list.length===0?`<span class="xs dimt">No ${kind}s match.</span>`:list.map(i=>libItem(i,kind)).join('')}</div>`;
   };
 
+  const canCreate = s.newRow && /^[A-Za-z0-9._-]+$/.test(s.newRow.name.trim()) && pend.add.length>0;
+  const bar = s.flow ? flowCard(s) : (count>0 || s.newRow) ? `
+    <div style="border-top:1px solid var(--line);padding:10px 14px" class="row g10">
+      <span class="xs" style="flex:1">${count===0?'Tick what this toolset should contain.':
+        `<b style="color:var(--text)">${pend.add.length?'+'+pend.add.length:''}${pend.add.length&&pend.rem.length?' ':''}${pend.rem.length?'−'+pend.rem.length:''}</b> pending in <b style="color:var(--text)">${esc(name||'')}</b> · one lock, one render`}</span>
+      ${s.newRow ? btn(`Create ${esc(s.newRow.name.trim()||'toolset')}`,'p:create','ok',canCreate?'':'disabled')
+                 : btn(`Apply ${count} change${count>1?'s':''} to ${esc(name||'')}`,'p:apply','ok')}
+      ${count>0?`<button class="link" data-act="p:reset">Reset</button>`:''}
+    </div>` : '';
+
   return `<div class="pane-l">
       <div class="row g8" style="padding:12px 12px 6px"><span class="cap">TOOLSETS</span>
         ${!s.newRow?`<span style="margin-left:auto">${btn('+ New','p:new')}</span>`:''}</div>
       <div class="col g6" style="padding:0 8px 12px">${newRow}${s.toolsets.map(railRow).join('')}</div>
-      <div style="padding:0 12px 12px"><span class="srcline">Pick one — the library adds to whichever is selected.</span></div>
+      <div style="padding:0 12px 12px"><span class="srcline">Pick one — the list on the right is its contents.</span></div>
     </div>
     <div class="pane-r">
-      <div class="row g8" style="padding:12px 14px 8px">
-        <span class="cap">LIBRARY</span>
-        ${selName?`<span class="badge" style="background:rgba(91,124,250,.18);color:var(--blueSoft)">→ ${esc(selName)}</span>`
-                 :`<span class="badge a">no toolset selected</span>`}
-        <span style="margin-left:auto;width:180px"><input class="inp" placeholder="Filter…" value="${esc(s.query)}" data-input="query"></span></div>
+      <div class="col g4" style="padding:12px 14px 8px">
+        <div class="row g8">
+          <span class="cap">${name?`WHAT’S IN ${esc(name).toUpperCase()}`:'PICK A TOOLSET'}</span>
+          <span style="margin-left:auto;width:170px"><input class="inp" placeholder="Filter…" value="${esc(s.query)}" data-input="query"></span></div>
+        <span class="srcline">Ticked means it is in this toolset. Untick to take it out. Nothing is written until you apply.</span>
+      </div>
       <div style="padding:0 14px 12px">${group('Skills',LIB.skills,'skill')}${group('Servers',LIB.servers,'server')}</div>
-      ${s.flow?flowCard(s):''}
+      ${bar}
     </div>`;
 }
 
@@ -1268,7 +1294,7 @@ const SCEN = [
         H('The digest is the load-bearing step','If the CLI’s preview has no digest, the card says so and disables Confirm rather than applying something it cannot bind to.','rgba(52,211,153,.5)')],
    gtee:[Y('Nothing is written until you confirm — the preview is computed from a staged copy.'),
          Y('The lockfile records the exact commit and content checksum, so the same skill resolves identically on a teammate’s machine.')],
-   open:'<b>“Add” means three different things in the same place.</b> With no toolsets it is disabled; with toolsets it opens an inline “Add to …” picker and relabels itself Cancel; while composing a draft it toggles membership immediately. The only clue to which mode you are in is a pill in the pane header. The destination is also chosen <em>after</em> the verb, and a row never says whether it is already in the toolset — so the first honest feedback is the confirm. See the Proposed scenario.',
+   open:'<b>“Add” means three different things in the same place.</b> With no toolsets it is disabled; with toolsets it opens an inline “Add to …” picker and relabels itself Cancel; while composing a draft it toggles membership immediately. The only clue to which mode you are in is a pill in the pane header. Underneath the mode problem is a labelling one: <b>a button reading “Add” cannot say what it adds to</b>, and the destination is chosen <em>after</em> the verb — so the word is asked to carry a meaning it does not have. The row never says whether it is already in the toolset either, so the first honest feedback is the confirm. Next to it, <b>“Remove” cannot say which of the two scopes it means</b>: this one is machine-wide, and the project-scope one people expect does not exist. See the Proposed scenario.',
    contract:'add-skill-to-profile · digest-bound · gated on canEditProfiles',
    // adding a *skill* just succeeds here; adding a *server* is what reaches step 2
    advance:s=>!!(s.flow&&s.flow.phase==='done'&&s.flow.secretBlocked)},
@@ -1433,24 +1459,30 @@ const SCEN = [
 {id:'proposed', group:'Proposed', name:'One destination, one verb', tag:'PROPOSAL', tone:'b',
  summary:'The same three jobs — add, remove, create — with the rail carrying a selection. Because the library always has a destination, the mode disappears, the deferred picker disappears, and one verb per row is enough. This is a proposal, not shipped code.',
  steps:[
-  {name:'Add to the selected toolset', component:'proposed · ToolsetsTab', ui:'manage:toolsets', cli:'add',
+  {name:'Edit what is in a toolset', component:'proposed · ToolsetsTab', ui:'manage:toolsets', cli:'add',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.proposed=true;s.sel='backend'},
-   how:[H('The destination is picked first, and stays visible','Selecting a toolset in the rail is what the rail was always for. The library header reads “→ backend” the whole time, so no row has to ask you where afterwards.'),
-        H('One verb, and it is the membership','A row is either in the selected toolset or not: <b>Add</b> or <b>Remove</b>, never both, never a third meaning. That also gives back the missing verb — you can now take a skill out of a toolset from the place you put it in.','rgba(52,211,153,.5)'),
-        H('The machine-wide delete leaves the row','It moves into the row’s ⋯ overflow and is called <b>Delete from library</b> — a different place and a different word from the project-scope Remove beside it, instead of the same word hidden on hover.','rgba(248,113,113,.5)')],
-   gtee:[Y('Every state a row can be in is legible without hovering it.'),
-         Y('The project-scope verb and the machine-scope verb never occupy the same position.'),
-         N('This is a sketch of a proposal — no contract exists for it, and removing from a toolset would need one.')],
-   contract:'would reuse add-skill-to-profile · needs a matching remove-from-profile',
+   how:[H('No verb has to carry the destination','“Add” cannot say where it adds, so it was asked to mean something it could not. The pane is titled <b>WHAT’S IN BACKEND</b> and each row is ticked or not — the tick <em>is</em> the membership, and it reads the same in both directions.'),
+        H('Un-ticking is the missing verb','Today you can put a skill into a toolset from this list but never take it out again. Un-ticking does it, and it is obviously the inverse of what you just did — no second word to learn, and no second word to confuse with the library one.','rgba(52,211,153,.5)'),
+        H('One apply, one lock, one render','Today every add is its own write, re-lock and re-render. Ticking is free; the bar collects the change and applies it once, under one digest. Fewer writes, one consent, and Reset costs nothing because nothing has happened yet.','rgba(91,124,250,.5)'),
+        H('The machine-wide delete is not a peer of the tick','It leaves the row entirely — into ⋯, under <b>Delete from library</b>, and it names the scope in the confirm: “This is your machine-wide library, not this toolset.” The two scopes no longer share a word, a place, or a shape.','rgba(248,113,113,.5)')],
+   gtee:[Y('Every row states which set it belongs to and where it came from, without hovering.'),
+         Y('The project-scope edit and the machine-wide delete share no word, no position and no control shape.'),
+         Y('Ticking writes nothing — the digest is taken once, over the whole batch.'),
+         N('This is a proposal. Batch edit and remove-from-toolset have no CLI contract today; both would need one.')],
+   contract:'would need profiles-edit to accept a batch (adds + removes) under one digest',
+   target:s=>((s.pending.add.length||s.pending.rem.length)?'p:apply':'p:tog:skill:rust-testing'),
    advance:s=>!!(s.flow&&s.flow.phase==='done')},
-  {name:'Create one the same way', component:'proposed · unsaved rail row', ui:'manage:toolsets', cli:'toolset',
+  {name:'Create one, identically', component:'proposed · unsaved rail row', ui:'manage:toolsets', cli:'toolset',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.proposed=true;
              s.newRow={name:'web',members:[],summary:'new toolset',ready:true,blocked:null}},
-   how:[H('Creating is not a mode','A new toolset is a rail row that is not saved yet. It is selected like any other, so the library behaves identically — no “composing” state that silently rewrites what every button does.'),
-        H('Adding to an unsaved toolset writes nothing','So it needs no digest and no confirm. The single write happens at <b>Create</b>, which is also the only place the name is validated.','rgba(52,211,153,.5)')],
-   gtee:[Y('Nothing is written until Create — the row is panel state, exactly as the draft was.'),
-         N('It does not solve rename or delete for a toolset; those verbs still do not exist anywhere.')],
-   contract:'would reuse create-profile'}]},
+   how:[H('Creating stops being a mode','A new toolset is a rail row that is not saved yet, selected like any other. The list to its right behaves exactly as it just did — so nothing silently rewrites what the controls mean, and there is no state you have to notice you are in.'),
+        H('Which is why the ticks made sense here first','Your instinct was right: ticking obviously means “put this in the thing I am building”. The proposal is to make the saved case work the same way, rather than have one gesture for new toolsets and another for existing ones.','rgba(52,211,153,.5)'),
+        H('Create is the same button as Apply','One bar, one write, in the same place. For a new toolset it is also the only moment the name is validated.','rgba(91,124,250,.5)')],
+   gtee:[Y('Nothing is written until Create — the row and its ticks are panel state.'),
+         N('Rename and delete for a toolset still do not exist anywhere, in either design.')],
+   contract:'would reuse create-profile, with the ticked set as its members',
+   target:s=>(s.pending.add.length?'p:create':'p:tog:skill:rust-testing'),
+   advance:s=>s.created}]},
 
 {id:'activity', group:'Evidence', name:'See what your agents did', tag:'WEAKEST TAB', tone:'r',
  summary:'The CLI has a flight recorder, per-capability context costs and evidence-backed fixes. The panel shows server__tool, a dot and an age — the widest gap between the two surfaces.',
@@ -1521,15 +1553,15 @@ const GUIDE = {
    ["Read-only. Starting and killing a run stay in the terminal.", null, null]],
  'activity':[["Every row is a digest, never a value — and never a reason.", null, null]],
  'proposed':[
-   ["`rust-testing` is not in **backend** — click **Add**. Then try **Remove** on one that is, and ⋯ for the machine-wide delete.", 'p:add:skill:rust-testing', "Added, with the same digest confirm as today — but you never had to say where."],
-   ["The unsaved row is selected, so the library points at it. Add a tool, then **Create**.", 'p:add:skill:rust-testing', "Added to the unsaved toolset — no digest, because nothing was written."]],
+   ["Tick **rust-testing** to put it in `backend` — then un-tick something that is already in, and press **Apply**. (⋯ holds the machine-wide delete.)", null, "Applied as one change: one re-lock, one render, one digest — and nothing asked you where."],
+   ["The unsaved row is selected, so the list is its contents. Tick a tool, then **Create**.", null, "Created from the ticked set. Identical gesture to the saved case — that is the whole point."]],
  'degraded':[
    ["No verb at all — and the copy names the host app rather than asking it for its name. Both are the gap.", null, null],
    ["**Check again** re-polls; the copy already told you nothing was lost.", 'recheck', "Read succeeded. The write you made before it was never at risk."],
    ["No **Check again** here — recovery waits on the background poll.", null, null]],
 };
 SCEN.forEach(sc=>{ const g=GUIDE[sc.id]||[];
-  sc.steps.forEach((st,i)=>{ const [instr,target,changed]=g[i]||[]; st.instr=instr||null; st.target=target||null; st.changed=changed||null; }); });
+  sc.steps.forEach((st,i)=>{ const [instr,target,changed]=g[i]||[]; st.instr=instr||null; st.target=target||st.target||null; st.changed=changed||null; }); });
 
 /* flat frame list, for the sheet */
 const FLAT = SCEN.flatMap(sc => sc.steps.map((st,i)=>({sc,st,i})));
@@ -1701,7 +1733,9 @@ function aim(){
   if(CUR.mode!=='guided') return;
   const sc=scenario(), st=step();
   if(!st.target || stepDone(sc,CUR.step)) return;
-  const el=document.querySelector(`.uistage [data-act="${st.target}"]`);
+  const t = typeof st.target==='function' ? st.target(S) : st.target;
+  if(!t) return;
+  const el=document.querySelector(`.uistage [data-act="${t}"]`);
   if(el) el.classList.add('aim');
 }
 
@@ -1753,25 +1787,31 @@ function act(a){
         S.draft=null; S.created=true;
       }
       break;
-    case 'sel': S.sel=rest[0]; S.newRow=null; S.menu=null; break;
+    case 'sel': S.sel=rest[0]; S.newRow=null; S.menu=null; S.pending={add:[],rem:[]}; break;
     case 'p':{
       const [op,...r]=rest;
-      if(op==='new'){ S.newRow={name:'',members:[],summary:'new toolset',ready:true,blocked:null}; S.menu=null; }
-      if(op==='cancel') S.newRow=null;
-      if(op==='menu') S.menu = r[0]||null;
-      if(op==='create'){ S.toolsets=S.toolsets.concat([{...S.newRow,summary:`${S.newRow.members.length} tool(s)`}]);
-        S.sel=S.newRow.name; S.newRow=null; S.created=true; }
-      if(op==='add'){
-        const [kind,name]=r; S.menu=null;
-        const target = S.newRow || S.toolsets.find(t=>t.name===S.sel);
-        if(S.newRow){ S.newRow.members=S.newRow.members.concat(name); }         // unsaved: no write, no confirm
-        else S.flow={kind:'add',title:`Add ${kind} "${name}" to toolset "${target.name}"`,phase:'confirm',secret:kind==='server',member:name};
+      const reset=()=>{S.pending={add:[],rem:[]}};
+      if(op==='new'){ S.newRow={name:'',members:[],summary:'new toolset',ready:true,blocked:null}; S.menu=null; reset(); }
+      if(op==='cancel'){ S.newRow=null; reset(); }
+      if(op==='menu')  S.menu = r[0]||null;
+      if(op==='reset') reset();
+      if(op==='tog'){
+        const [,n]=r; S.menu=null;
+        const t = S.newRow || S.toolsets.find(x=>x.name===S.sel); if(!t) break;
+        const P=S.pending, inBase=t.members.includes(n);
+        if(inBase) P.rem = P.rem.includes(n) ? P.rem.filter(x=>x!==n) : P.rem.concat(n);
+        else       P.add = P.add.includes(n) ? P.add.filter(x=>x!==n) : P.add.concat(n);
       }
-      if(op==='rem'){
-        const [kind,name]=r; S.menu=null;
-        if(S.newRow) S.newRow.members=S.newRow.members.filter(x=>x!==name);
-        else { const t=S.toolsets.find(x=>x.name===S.sel);
-          S.flow={kind:'unadd',title:`Remove ${kind} "${name}" from toolset "${t.name}"`,phase:'confirm',member:name}; }
+      if(op==='apply'){
+        const t=S.toolsets.find(x=>x.name===S.sel), P=S.pending;
+        const bits=[]; if(P.add.length) bits.push('+'+P.add.length); if(P.rem.length) bits.push('−'+P.rem.length);
+        S.flow={kind:'batch',title:`Update toolset "${t.name}" — ${bits.join(' ')}`,phase:'confirm',
+                secret:P.add.includes('github')||P.add.includes('postgres'), add:P.add.slice(), rem:P.rem.slice()};
+      }
+      if(op==='create'){
+        const m=S.pending.add.slice();
+        S.toolsets=S.toolsets.concat([{...S.newRow,members:m,summary:`${m.length} tool(s)`}]);
+        S.sel=S.newRow.name; S.newRow=null; S.created=true; reset();
       }
       break;}
     case 'picker': S.picker = rest[0]==='close'?null:rest[0]; break;
@@ -1782,7 +1822,16 @@ function act(a){
       if(rest[0]==='close') S.flow=null;
       if(rest[0]==='confirm'){
         const f=S.flow, t=S.toolsets.find(x=>x.name===S.sel);
-        if(f.kind==='remove'){ S.libRemoved.push(f.name); S.flow={...f,phase:'done',ok:true,message:`moved "${f.name}" to the library trash`}; }
+        if(f.kind==='batch'){
+          if(f.secret) S.flow={...f,phase:'done',ok:false,secretBlocked:true};
+          else {
+            t.members = t.members.filter(x=>!f.rem.includes(x)).concat(f.add);
+            t.summary = `${t.members.length} tool(s)`;
+            S.pending={add:[],rem:[]};
+            S.flow={...f,phase:'done',ok:true,message:`re-locked once and re-rendered ${t.name} across 4 target(s)`};
+          }
+        }
+        else if(f.kind==='remove'){ S.libRemoved.push(f.name); S.flow={...f,phase:'done',ok:true,message:`moved "${f.name}" to the library trash`}; }
         else if(f.kind==='unadd'){ t.members=t.members.filter(x=>x!==f.member);
           S.flow={...f,phase:'done',ok:true,message:`re-locked and re-rendered ${t.name}`}; }
         else if(f.secret) S.flow={...f,phase:'done',ok:false,secretBlocked:true};
@@ -1799,7 +1848,8 @@ function act(a){
   }
   // a step advances by having actually been performed, not by switching a slide
   const sc=scenario(), i=CUR.step, st=sc.steps[i];
-  if(st && st.target===a) DID.add(sc.id+':'+i);
+  const tgt = st && (typeof st.target==='function' ? st.target(S) : st.target);
+  if(tgt===a) DID.add(sc.id+':'+i);
   if(st && st.advance && st.advance(S) && i+1<sc.steps.length){ LASTCHANGE=st.changed; CUR.step=i+1; }
   render();
 }
